@@ -7,7 +7,7 @@ The fix has two halves.
 Every session starts read-only and an operator opts briefly into a higher mode that expires on its own, so the interface is safe by default even for the most privileged operator.
 Alongside that, a new permission tier reserves the genuinely destructive actions for the personnel trusted with them, enforced on the server rather than in the client.
 
-## Make administrative identity testable end to end
+## Make administrative identity testable end to end · S2
 
 Both tailnet auth extractors short-circuit under `cfg!(debug_assertions)` and return a fixed `admin@localhost` identity, so every debug build is unconditionally an administrator.
 Nothing in the suite currently exercises a denial: the admin-gating Playwright specs intercept the status probe in the browser to fake a failure, and the server underneath always answers yes.
@@ -18,7 +18,7 @@ The opt-in should switch on trusting the real `Tailscale-User-*` request headers
 Each test then chooses its own login per request, and administrative status resolves through the real allowlist and policy path rather than a stub.
 With the variable unset the behaviour is exactly as it is today, so the existing integration tests are untouched and this lands as pure addition.
 
-## Gate the administrative surface behind safety modes
+## Gate the administrative surface behind safety modes · T2
 
 An operator's session is read-only until they raise it to write or to danger, and it returns to read-only ten minutes later on its own.
 Raising to danger asks for confirmation; raising to write does not.
@@ -31,7 +31,7 @@ The existing administrator boundary is a poor guide to it, since creating a back
 
 The concept is borrowed from seedling's safety modes, but none of the implementation is: this is designed for canopy against canopy's own components and naming.
 
-## Record an audit log of administrative actions
+## Record an audit log of administrative actions · U2
 
 Canopy has no systematic record of who did what.
 What exists is per-feature provenance on a handful of handlers that happen to bind the calling administrator, plus a cached user table so resolutions and notes can show an avatar.
