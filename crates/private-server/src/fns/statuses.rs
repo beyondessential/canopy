@@ -681,7 +681,7 @@ pub struct StatusSnapshotData {
 	/// Reported system timezone.
 	pub timezone: Option<String>,
 	/// Version the server's reporting schema was built for. Absent until a
-	/// server runs a schema that stamps one (spec: RPT#currency).
+	/// server runs a schema that stamps one (spec: RPT#the-offering-contract).
 	pub reporting_schema: Option<String>,
 	/// Additional unstructured data reported alongside the snapshot, keyed
 	/// by source (`{ [source]: { …fields } }`) so a multi-source snapshot's

@@ -98,6 +98,10 @@ The recognised semantics are:
 - **migrate** — the intent applies a Tamanu version's schema migrations to the replica it restores.
   Canopy names a target version on each of the intent's worklist entries and withholds an entry where no application on the machine has a candidate version.
   `once` for such an intent is keyed to the snapshot and the target version together (see [Pre-upgrade migration testing](#pre-upgrade-migration-testing)).
+- **reporting-schema** — the intent builds a Tamanu reporting schema from the replica it restores and registers it as an artifact (see [RPT](reporting-schemas.md)).
+  It carries `migrate` alongside, and its entries name the version of the pair of group and Tamanu version being built for, on a central server of the group, rather than the server's candidate.
+  `once` for such an intent is keyed to the group and the version rather than the snapshot, so a newer snapshot does not rebuild a schema the pair already has, and a failed build settles the pair.
+  A settled pair is reinstated when the version's artifacts change or an operator asks for the build (see [RPT](reporting-schemas.md)).
 - **redact** — the intent can de-identify the restored data before serving it.
   Canopy offers redaction as an option on each of the intent's replicas, supplies the masking manifest for the product being restored, and holds a redacting replica to the outcome of its redaction (see [Redaction](#redaction)).
 
@@ -185,6 +189,7 @@ Canopy verifies the caller has an enabled declaration covering that `(group, typ
 - the repo password.
 
 The credentials permit reading the repo and nothing else; they cannot write, overwrite, or delete.
+A consumer that publishes what it produces does so through Canopy over the connection it already holds, and is issued no storage credential for it (see [RPT](reporting-schemas.md)), so the only object storage a consumer is ever given reach into is a repo it may read.
 Each issuance is audited.
 A consumer may include an optional run correlation identifier with a credential request; Canopy records it on the issuance so the run is tied to its later health report.
 Absence of a covering declaration is a definitive refusal, not a transient error, and a consumer surfaces it as a clear failure for the operator to diagnose by inspecting the declaration in Canopy.
@@ -245,7 +250,7 @@ One candidate, not one per version along the path.
 Migrations are applied to the restored snapshot in sequence, so a run targeting the planned version applies every migration between the snapshot's version and that one, and exercises the whole chain an upgrade would.
 Where a chain does break, the failing migration named in the report identifies the step without a second run.
 
-Only a published version is a candidate, because a version's migrations reach a consumer as its published artefacts, and an unpublished version has none to fetch.
+Only a published version is a candidate, because a version's migrations reach a consumer as its published artifacts, and an unpublished version has none to fetch.
 Publication is what makes a version testable and what makes it reachable by an application, so the two arrive together.
 
 Only an application running Tamanu has candidates, because the migrations under test are Tamanu's and no other type has an upgrade path through them.
@@ -256,8 +261,7 @@ That window is where the answer is still cheap: the fleet is not moving yet, and
 
 ### Dispatching a migration test
 
-`migrate` is a semantic an intent opts into, and an intent carrying it carries no other purpose.
-It carries `check` alongside, so a single restore reports the replica's health and the migrations' outcome as two signals from one report.
+An intent carrying `migrate` carries `check` alongside, so a single restore reports the replica's health and the migrations' outcome as two signals from one report.
 
 An intent carrying `migrate` is withheld where no application has a candidate version.
 An intent that verifies backups therefore does not also migrate: it would go undispatched for every machine without a candidate, leaving the backups of any non-Tamanu application, and of every group with no plan open, unverified.
@@ -268,7 +272,7 @@ A verifying intent restores once per snapshot, and a migrating intent's `once` i
 
 An entry for a `migrate` intent names the target version alongside the snapshot, and the application whose candidate it is.
 A report echoes that application back, so the finding lands on the workload the version belongs to rather than being re-derived; a consumer that does not send it has it resolved from the machine and the version.
-A consumer obtains that version's migrations from its published artefacts, the same way an application being upgraded does, so naming the version is the whole reference it needs.
+A consumer obtains that version's migrations from its published artifacts, the same way an application being upgraded does, so naming the version is the whole reference it needs.
 
 A machine none of whose applications has a candidate version contributes no entry, whatever its declaration says.
 There is nothing to migrate to, and an entry naming no version would ask a consumer to restore a database for no reason.
@@ -343,7 +347,7 @@ The consumer resolves the version against the data it restored — the version o
 A redacting declaration contributes no worklist entry for a machine none of whose applications has a type with a manifest, and each such application surfaces as a gap on the declaration.
 A replica that cannot be redacted is not restored at all: an unredacted replica standing in for a redacted one is worse than no replica.
 
-Canopy corroborates a product's manifest template against the published artefacts it already holds per version.
+Canopy corroborates a product's manifest template against the published artifacts it already holds per version.
 A redacting declaration covering an application whose version has no published manifest is a gap, surfaced before a restore is attempted rather than discovered when one fails.
 The manifest is resolved through the applications on the machine being restored, since what to mask is a property of the product in the snapshot rather than of the box that took it.
 
@@ -413,7 +417,7 @@ That is for whoever gave out the replica to act on, not for whoever is on call f
 
 - How a consumer provisions, runs, names, or tears down a replica, or how it applies migrations or a masking manifest to one.
 - A consumer's runtime placement, storage sizing, or scheduling.
-- Producing reporting schemas, or any other artefact, from a migrated replica.
+- Producing reporting schemas, or any other artifact, from a migrated replica (see [RPT](reporting-schemas.md)).
 - The contents of a masking manifest, and what each masking it names does to a value.
 - Deciding or scheduling when a group upgrades: verdicts inform that decision without making it.
 - Scoping object-storage credentials below the granularity of a group's repo: one repo holds all of a group's machines' snapshots, so credentials are necessarily group-wide while targeting and reporting are per-machine.

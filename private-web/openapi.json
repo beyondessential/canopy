@@ -17270,7 +17270,7 @@
               "string",
               "null"
             ],
-            "description": "Version the server's reporting schema was built for. Absent until a\nserver runs a schema that stamps one (spec: RPT#currency)."
+            "description": "Version the server's reporting schema was built for. Absent until a\nserver runs a schema that stamps one (spec: RPT#the-offering-contract)."
           },
           "server_id": {
             "type": "string",

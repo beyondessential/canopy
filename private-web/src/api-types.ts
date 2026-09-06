@@ -10058,7 +10058,7 @@ export interface components {
             postgres?: string | null;
             /**
              * @description Version the server's reporting schema was built for. Absent until a
-             *     server runs a schema that stamps one (spec: RPT#currency).
+             *     server runs a schema that stamps one (spec: RPT#the-offering-contract).
              */
             reporting_schema?: string | null;
             /**
