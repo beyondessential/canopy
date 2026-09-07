@@ -476,7 +476,22 @@ function ArtifactRow({
 				{artifact.platform}
 			</TableCell>
 			<TableCell sx={{ wordBreak: "break-all" }}>
-				{artifact.download_url.startsWith("https://") ? (
+				{artifact.canopy_holds_bytes ? (
+					<Stack spacing={0.25}>
+						<Typography variant="body2">
+							Held by Canopy for {artifact.group_name ?? "a group"}
+						</Typography>
+						{artifact.digest && (
+							<Typography
+								variant="caption"
+								color="text.secondary"
+								sx={{ fontFamily: "monospace" }}
+							>
+								{artifact.digest}
+							</Typography>
+						)}
+					</Stack>
+				) : artifact.download_url?.startsWith("https://") ? (
 					<a
 						href={artifact.download_url}
 						target="_blank"
@@ -553,7 +568,7 @@ function EditArtifactRow({
 				artifact_id: artifact.id,
 				artifact_type: type,
 				platform,
-				download_url: url,
+				download_url: artifact.canopy_holds_bytes ? null : url,
 			});
 			onClose(true);
 		} catch {
@@ -582,14 +597,21 @@ function EditArtifactRow({
 				/>
 			</TableCell>
 			<TableCell>
-				<TextField
-					size="small"
-					fullWidth
-					value={url}
-					onChange={(e) => setUrl(e.target.value)}
-					disabled={action.pending}
-					required
-				/>
+				{artifact.canopy_holds_bytes ? (
+					<Typography variant="body2" color="text.secondary">
+						Held by Canopy for {artifact.group_name ?? "a group"}. Register
+						it again to replace the bytes.
+					</Typography>
+				) : (
+					<TextField
+						size="small"
+						fullWidth
+						value={url ?? ""}
+						onChange={(e) => setUrl(e.target.value)}
+						disabled={action.pending}
+						required
+					/>
+				)}
 			</TableCell>
 			<TableCell align="right">
 				<Stack direction="row" spacing={0.5} sx={{ justifyContent: "flex-end" }}>
@@ -615,6 +637,15 @@ function EditArtifactRow({
 	);
 }
 
+/// Canopy holds a group-scoped artifact's bytes, and the API takes them in the
+/// JSON body, so the file is read here rather than posted as a multipart form.
+async function encodeFile(file: File): Promise<string> {
+	const buffer = new Uint8Array(await file.arrayBuffer());
+	let binary = "";
+	for (const byte of buffer) binary += String.fromCharCode(byte);
+	return btoa(binary);
+}
+
 function CreateArtifactForm({
 	versionId,
 	onCreated,
@@ -625,7 +656,12 @@ function CreateArtifactForm({
 	const [type, setType] = useState("");
 	const [platform, setPlatform] = useState("");
 	const [url, setUrl] = useState("");
+	const [groupId, setGroupId] = useState("");
+	const [file, setFile] = useState<File | null>(null);
 	const action = useApiAction("versions", "create_artifact");
+	const groups = useApi("fleet/groups", "list", {}, []);
+
+	const scoped = groupId !== "";
 
 	const submit = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -634,11 +670,16 @@ function CreateArtifactForm({
 				version_id: versionId,
 				artifact_type: type,
 				platform,
-				download_url: url,
+				download_url: scoped ? null : url,
+				group_id: scoped ? groupId : null,
+				content_base64: file ? await encodeFile(file) : null,
+				content_type: file ? file.type || null : null,
 			});
 			setType("");
 			setPlatform("");
 			setUrl("");
+			setGroupId("");
+			setFile(null);
 			onCreated();
 		} catch {
 			/* surfaced via action.error */
@@ -671,17 +712,49 @@ function CreateArtifactForm({
 					/>
 					<TextField
 						size="small"
-						label="Download URL"
-						value={url}
-						onChange={(e) => setUrl(e.target.value)}
+						select
+						label="Group"
+						value={groupId}
+						onChange={(e) => setGroupId(e.target.value)}
 						disabled={action.pending}
-						fullWidth
-						required
-					/>
+						sx={{ minWidth: 160 }}
+					>
+						<MenuItem value="">Every group</MenuItem>
+						{(groups.status === "ok" ? groups.data : []).map((g) => (
+							<MenuItem key={g.id} value={g.id}>
+								{g.name}
+							</MenuItem>
+						))}
+					</TextField>
+					{scoped ? (
+						<Button
+							component="label"
+							variant="outlined"
+							disabled={action.pending}
+							sx={{ flexGrow: 1, justifyContent: "flex-start" }}
+						>
+							{file ? file.name : "Choose file…"}
+							<input
+								type="file"
+								hidden
+								onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+							/>
+						</Button>
+					) : (
+						<TextField
+							size="small"
+							label="Download URL"
+							value={url}
+							onChange={(e) => setUrl(e.target.value)}
+							disabled={action.pending}
+							fullWidth
+							required
+						/>
+					)}
 					<Button
 						type="submit"
 						variant="contained"
-						disabled={action.pending}
+						disabled={action.pending || (scoped && !file)}
 					>
 						{action.pending ? "Creating…" : "Create"}
 					</Button>

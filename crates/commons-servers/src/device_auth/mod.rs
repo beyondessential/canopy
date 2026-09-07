@@ -88,6 +88,31 @@ device_role_struct!(ServerDevice, DeviceRole::Machine);
 device_role_struct!(ReleaserDevice, DeviceRole::Releaser);
 device_role_struct!(BackupRestoreDevice, DeviceRole::BackupRestore);
 
+/// A read that is open to everyone but answers a device for its own group
+/// takes `Option<AuthDevice>`: absent identity is not a refusal, it just
+/// narrows what the caller is offered.
+impl<S> axum::extract::OptionalFromRequestParts<S> for AuthDevice
+where
+	Db: FromRef<S>,
+	Option<TailnetDirectory>: FromRef<S>,
+	mtls::ClientCertHeader: FromRef<S>,
+	S: Send + Sync,
+{
+	type Rejection = AppError;
+
+	async fn from_request_parts(
+		parts: &mut axum::http::request::Parts,
+		state: &S,
+	) -> Result<Option<Self>, Self::Rejection> {
+		match <Self as axum::extract::FromRequestParts<S>>::from_request_parts(parts, state).await {
+			Ok(device) => Ok(Some(device)),
+			// A credential Canopy cannot place is anonymous, not refused: a
+			// stale certificate must not fail a path that serves everyone.
+			Err(_) => Ok(None),
+		}
+	}
+}
+
 impl<S> axum::extract::FromRequestParts<S> for AuthDevice
 where
 	Db: FromRef<S>,

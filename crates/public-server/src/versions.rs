@@ -8,17 +8,17 @@ use axum::{
 	Json,
 	body::{Body, Bytes},
 	extract::{Path, State},
-	http::header,
+	http::{StatusCode, header},
 	response::IntoResponse,
 	routing::{Router, get},
 };
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::device_auth::{AdminDevice, ReleaserDevice};
+use commons_servers::device_auth::{AdminDevice, AuthDevice, ReleaserDevice};
 use commons_types::version::{VersionRange, VersionStr};
 use database::{
 	Db,
-	artifacts::Artifact,
+	artifacts::{Artifact as ArtifactRow, Scope},
 	version_known_issues::VersionKnownIssue,
 	versions::{NewVersion, Version, ViewVersion},
 };
@@ -36,7 +36,10 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "ui")]
 use tera::{Context, Tera};
 
-use crate::state::AppState;
+use crate::{
+	artifacts::{Artifact, caller_scope},
+	state::AppState,
+};
 
 /// Drop versions that any known issue's range still covers. The public
 /// site never serves these — the admin UI shows them, but clients only
@@ -170,12 +173,11 @@ async fn list(State(db): State<Db>) -> Result<Json<Vec<Version>>> {
 	Ok(Json(versions))
 }
 
-/// Base URL for absolute links in the feed. Prefers the configured
-/// `PUBLIC_URL`; otherwise reconstructs the origin from the request's
-/// forwarded scheme and `Host` header so local and test runs still emit
-/// well-formed links.
-#[cfg(feature = "ui")]
-fn feed_base_url(headers: &axum::http::HeaderMap) -> String {
+/// Base URL for absolute links Canopy emits about itself. Prefers the
+/// configured `PUBLIC_URL`; otherwise reconstructs the origin from the
+/// request's forwarded scheme and `Host` header so local and test runs still
+/// emit well-formed links.
+pub(crate) fn public_base_url(headers: &axum::http::HeaderMap) -> String {
 	if let Ok(url) = std::env::var("PUBLIC_URL") {
 		let trimmed = url.trim_end_matches('/');
 		if !trimmed.is_empty() {
@@ -211,7 +213,7 @@ async fn releases_rss(
 	let versions = Version::get_all(&mut db).await?;
 	let versions = filter_ready(&mut db, versions).await?;
 
-	let base = feed_base_url(&headers);
+	let base = public_base_url(&headers);
 
 	let items: Vec<rss::Item> = versions
 		.into_iter()
@@ -379,6 +381,7 @@ async fn view_artifacts(
 	Path(version): Path<String>,
 	State(db): State<Db>,
 	State(tera): State<Arc<Tera>>,
+	headers: axum::http::HeaderMap,
 ) -> Result<Html<String>> {
 	use commons_types::version::VersionStatus;
 	use diesel::QueryDsl;
@@ -405,7 +408,7 @@ async fn view_artifacts(
 	let version = VersionRange::from_str(&version)?;
 	let mut version = latest_matching_ready(&mut db, version.0).await?;
 	version.changelog = parse_markdown(&version.changelog);
-	let artifacts = Artifact::get_for_version(&mut db, version.id).await?;
+	let artifacts = offered_artifacts(&mut db, &version, Scope::Unscoped, &headers).await?;
 
 	// The latest *ready* version in this minor. The page's own version came
 	// through `latest_matching_ready`, so the banner has to use the same set:
@@ -504,15 +507,36 @@ async fn view_artifacts(
 	),
 )]
 async fn list_artifacts(
+	device: Option<AuthDevice>,
 	Path(version): Path<String>,
 	State(db): State<Db>,
+	headers: axum::http::HeaderMap,
 ) -> Result<Json<Vec<Artifact>>> {
 	let mut db = db.get().await?;
 	let version = VersionRange::from_str(&version)?;
 	let version = latest_matching_ready(&mut db, version.0).await?;
-	let artifacts = Artifact::get_for_version(&mut db, version.id).await?;
+	let scope = caller_scope(&mut db, device).await?;
 
-	Ok(Json(artifacts))
+	Ok(Json(
+		offered_artifacts(&mut db, &version, scope, &headers).await?,
+	))
+}
+
+/// The artifacts of a version as `scope` is offered them.
+async fn offered_artifacts(
+	db: &mut AsyncPgConnection,
+	version: &Version,
+	scope: Scope,
+	headers: &axum::http::HeaderMap,
+) -> Result<Vec<Artifact>> {
+	let base = public_base_url(headers);
+	let shown = version.as_semver().to_string();
+
+	Ok(ArtifactRow::get_for_version(db, version.id, scope)
+		.await?
+		.into_iter()
+		.map(|row| Artifact::offered(row, &base, &shown))
+		.collect())
 }
 
 #[cfg(feature = "ui")]
@@ -520,11 +544,12 @@ async fn view_mobile_install(
 	Path(version): Path<String>,
 	State(db): State<Db>,
 	State(tera): State<Arc<Tera>>,
+	headers: axum::http::HeaderMap,
 ) -> Result<Html<String>> {
 	let mut db = db.get().await?;
 	let version = VersionRange::from_str(&version)?;
 	let version = latest_matching_ready(&mut db, version.0).await?;
-	let artifacts = Artifact::get_for_version(&mut db, version.id)
+	let artifacts = offered_artifacts(&mut db, &version, Scope::Unscoped, &headers)
 		.await?
 		.into_iter()
 		.filter(|a| a.artifact_type == "mobile")
@@ -614,6 +639,7 @@ async fn update_for(
 }
 
 async fn download_artifact(
+	device: Option<AuthDevice>,
 	State(db): State<Db>,
 	Path((version, artifact_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse> {
@@ -622,21 +648,52 @@ async fn download_artifact(
 	let mut db = db.get().await?;
 	let version = VersionRange::from_str(&version)?;
 	let version = latest_matching_ready(&mut db, version.0).await?;
+	let scope = caller_scope(&mut db, device).await?;
 
-	let artifact_uuid =
-		Uuid::parse_str(&artifact_id).map_err(|_| AppError::custom("Invalid artifact ID"))?;
+	let artifact_uuid = Uuid::parse_str(&artifact_id)
+		.map_err(|_| AppError::BadRequest("Invalid artifact ID".into()))?;
 
-	let artifacts = Artifact::get_for_version(&mut db, version.id).await?;
+	// Resolution is what enforces the boundary: an artifact scoped to a group
+	// this caller is not offered is simply not in the set, so it is missing in
+	// exactly the way an artifact that never existed is.
+	// spec: ART#who-is-offered-a-group-scoped-artifact
+	let artifacts = ArtifactRow::get_for_version(&mut db, version.id, scope).await?;
 	let artifact = artifacts
 		.into_iter()
 		.find(|a| a.id == artifact_uuid)
-		.ok_or_else(|| AppError::custom("Artifact not found for this version"))?;
+		.ok_or(AppError::ArtifactNotFound)?;
+
+	if let Some(held) = ArtifactRow::content_for(&mut db, artifact.id).await? {
+		let recomputed = database::artifacts::digest_of(&held.bytes);
+		if recomputed != held.digest {
+			tracing::error!(
+				artifact = %artifact.id,
+				"held artifact does not match its digest; refusing to serve"
+			);
+			return Err(AppError::ArtifactDigestMismatch);
+		}
+
+		let content_type = held
+			.content_type
+			.unwrap_or_else(|| "application/octet-stream".to_owned());
+
+		return Ok((
+			StatusCode::OK,
+			[(header::CONTENT_TYPE, content_type)],
+			Body::from(held.bytes),
+		)
+			.into_response());
+	}
+
+	let Some(download_url) = artifact.download_url else {
+		return Err(AppError::ArtifactNotFound);
+	};
 
 	let client = reqwest::Client::builder()
 		.build()
 		.map_err(|err| AppError::custom(format!("failed to build HTTP client: {err}")))?;
 	let response = client
-		.get(&artifact.download_url)
+		.get(&download_url)
 		.send()
 		.await
 		.map_err(|err| AppError::custom(format!("Failed to download artifact: {err}")))?;

@@ -526,10 +526,14 @@ pub async fn redaction_gap_for(
 		)));
 	};
 
-	let published = crate::artifacts::Artifact::get_for_version(db, version.id)
-		.await?
-		.into_iter()
-		.any(|a| a.artifact_type == manifest.artifact_type);
+	let published = crate::artifacts::Artifact::get_for_version(
+		db,
+		version.id,
+		crate::artifacts::Scope::for_caller(server.group_id),
+	)
+	.await?
+	.into_iter()
+	.any(|a| a.artifact_type == manifest.artifact_type);
 
 	Ok((!published).then_some((RedactionGapReason::VersionHasNoManifest, Some(shown))))
 }

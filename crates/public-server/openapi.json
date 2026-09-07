@@ -138,6 +138,16 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "description": "Group the artifact is for. A releaser credential carries no authorisation for any group, so naming one here is refused.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "requestBody": {
@@ -1667,7 +1677,7 @@
       },
       "Artifact": {
         "type": "object",
-        "description": "A downloadable artifact belonging to a release version: an installer,\npackage, or other file published for a given type and platform.",
+        "description": "An artifact as it is offered to a caller.",
         "required": [
           "id",
           "artifact_type",
@@ -1687,9 +1697,24 @@
             "format": "uuid",
             "description": "The device that registered this artifact, if it was registered by a\nreleaser device rather than created by an operator."
           },
+          "digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Algorithm-prefixed digest of the artifact's bytes, e.g.\n`sha256:2cf24dba…`, where one was recorded."
+          },
           "download_url": {
             "type": "string",
-            "description": "URL the artifact can be downloaded from."
+            "description": "URL the artifact can be downloaded from. For an artifact whose bytes\nCanopy holds, this is Canopy's own download endpoint for it."
+          },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The group this artifact is for. `null` for an artifact that is for\nevery group."
           },
           "id": {
             "type": "string",

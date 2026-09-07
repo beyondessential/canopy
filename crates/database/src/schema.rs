@@ -95,9 +95,14 @@ diesel::table! {
 		version_id -> Nullable<Uuid>,
 		artifact_type -> Text,
 		platform -> Text,
-		download_url -> Text,
+		download_url -> Nullable<Text>,
 		device_id -> Nullable<Uuid>,
 		version_range_pattern -> Nullable<Text>,
+		group_id -> Nullable<Uuid>,
+		content -> Nullable<Bytea>,
+		content_type -> Nullable<Text>,
+		digest -> Nullable<Text>,
+		run_id -> Nullable<Uuid>,
 	}
 }
 
@@ -832,6 +837,7 @@ diesel::joinable!(application_names -> applications (application_id));
 diesel::joinable!(application_reported_detail -> applications (application_id));
 diesel::joinable!(applications -> machines (machine_id));
 diesel::joinable!(artifacts -> devices (device_id));
+diesel::joinable!(artifacts -> server_groups (group_id));
 diesel::joinable!(artifacts -> versions (version_id));
 diesel::joinable!(backup_credential_issuances -> devices (device_id));
 diesel::joinable!(backup_credential_issuances -> server_groups (group_id));

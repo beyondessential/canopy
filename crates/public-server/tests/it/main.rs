@@ -4,6 +4,7 @@
 // Nextest still runs every #[tokio::test] in parallel as usual.
 
 mod application_aliases;
+mod artifact_scopes;
 mod auth_requirements;
 mod backup;
 mod backup_secrets;

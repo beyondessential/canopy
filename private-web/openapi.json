@@ -8641,7 +8641,7 @@
           "id",
           "artifact_type",
           "platform",
-          "download_url",
+          "canopy_holds_bytes",
           "is_exact",
           "has_range_override",
           "is_used_in_public_api"
@@ -8651,9 +8651,38 @@
             "type": "string",
             "description": "Kind of artifact (for example, an installer or update package)."
           },
+          "canopy_holds_bytes": {
+            "type": "boolean",
+            "description": "`true` when Canopy holds this artifact's bytes rather than a location."
+          },
+          "digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Algorithm-prefixed digest recorded for the artifact, where there is one."
+          },
           "download_url": {
-            "type": "string",
-            "description": "URL clients use to download this artifact."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "URL clients use to download this artifact. `null` when Canopy holds\nthe bytes itself."
+          },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The group this artifact is for, when it is for one alone."
+          },
+          "group_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name of that group, for display."
           },
           "has_range_override": {
             "type": "boolean",
@@ -9953,17 +9982,41 @@
         "required": [
           "version_id",
           "artifact_type",
-          "platform",
-          "download_url"
+          "platform"
         ],
         "properties": {
           "artifact_type": {
             "type": "string",
             "description": "Artifact type."
           },
+          "content_base64": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The artifact's bytes, base64-encoded. Required when a group is named."
+          },
+          "content_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Media type of those bytes."
+          },
           "download_url": {
-            "type": "string",
-            "description": "Download URL for the artifact."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Download URL, for an artifact Canopy records a location for."
+          },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The group this artifact is for. Naming one makes Canopy hold the bytes."
           },
           "platform": {
             "type": "string",
@@ -17575,8 +17628,7 @@
         "required": [
           "artifact_id",
           "artifact_type",
-          "platform",
-          "download_url"
+          "platform"
         ],
         "properties": {
           "artifact_id": {
@@ -17589,8 +17641,11 @@
             "description": "New artifact type."
           },
           "download_url": {
-            "type": "string",
-            "description": "New download URL."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New download URL. Leave unset for an artifact whose bytes Canopy holds."
           },
           "platform": {
             "type": "string",

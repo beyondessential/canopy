@@ -4465,8 +4465,22 @@ export interface components {
         ArtifactData: {
             /** @description Kind of artifact (for example, an installer or update package). */
             artifact_type: string;
-            /** @description URL clients use to download this artifact. */
-            download_url: string;
+            /** @description `true` when Canopy holds this artifact's bytes rather than a location. */
+            canopy_holds_bytes: boolean;
+            /** @description Algorithm-prefixed digest recorded for the artifact, where there is one. */
+            digest?: string | null;
+            /**
+             * @description URL clients use to download this artifact. `null` when Canopy holds
+             *     the bytes itself.
+             */
+            download_url?: string | null;
+            /**
+             * Format: uuid
+             * @description The group this artifact is for, when it is for one alone.
+             */
+            group_id?: string | null;
+            /** @description Name of that group, for display. */
+            group_name?: string | null;
             /**
              * @description Only meaningful when `is_exact` is `true`: `true` when a
              *     range-matched artifact of the same type and platform also matches
@@ -5358,8 +5372,17 @@ export interface components {
         CreateArtifactArgs: {
             /** @description Artifact type. */
             artifact_type: string;
-            /** @description Download URL for the artifact. */
-            download_url: string;
+            /** @description The artifact's bytes, base64-encoded. Required when a group is named. */
+            content_base64?: string | null;
+            /** @description Media type of those bytes. */
+            content_type?: string | null;
+            /** @description Download URL, for an artifact Canopy records a location for. */
+            download_url?: string | null;
+            /**
+             * Format: uuid
+             * @description The group this artifact is for. Naming one makes Canopy hold the bytes.
+             */
+            group_id?: string | null;
             /** @description Target platform. */
             platform: string;
             /**
@@ -10236,8 +10259,8 @@ export interface components {
             artifact_id: string;
             /** @description New artifact type. */
             artifact_type: string;
-            /** @description New download URL. */
-            download_url: string;
+            /** @description New download URL. Leave unset for an artifact whose bytes Canopy holds. */
+            download_url?: string | null;
             /** @description New target platform. */
             platform: string;
         };
