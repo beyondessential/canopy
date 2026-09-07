@@ -498,6 +498,31 @@ impl Machine {
 			.map_err(AppError::from)
 	}
 
+	/// The environment this machine serves: the highest rank among the live
+	/// applications on it, and none where they are all unranked.
+	///
+	/// A box is not given a production workload and a demo one, so deriving
+	/// the rank leaves a mixed box well-defined without anyone keeping a
+	/// machine's rank in step with what runs on it.
+	// spec: FLT#environments
+	pub async fn rank(
+		db: &mut AsyncPgConnection,
+		machine: Uuid,
+	) -> Result<Option<commons_types::server::rank::ServerRank>> {
+		use crate::schema::applications::dsl;
+		let ranks: Vec<Option<commons_types::server::rank::ServerRank>> = dsl::applications
+			.select(dsl::rank)
+			.filter(dsl::machine_id.eq(machine))
+			.filter(dsl::deleted_at.is_null())
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(ranks
+			.into_iter()
+			.flatten()
+			.min_by_key(|rank| crate::server_groups::rank_priority(Some(*rank))))
+	}
+
 	/// This machine's tags over its group's, so a check filed against a
 	/// machine is graded by policy against the tags of its own target rather
 	/// than against some application that happens to run on it.

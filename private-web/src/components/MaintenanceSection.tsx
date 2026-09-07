@@ -13,8 +13,9 @@ import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
-import type { MaintenanceWindow } from "../types";
+import type { MaintenanceWindow, ServerRank } from "../types";
 import DeclareMaintenanceDialog from "./DeclareMaintenanceDialog";
+import ServerRankChip from "./ServerRankChip";
 import TimeAgo from "./TimeAgo";
 
 const HISTORY_SHOWN = 5;
@@ -29,6 +30,7 @@ export default function MaintenanceSection({
 	targetLabel,
 	groupId,
 	groupName,
+	rank,
 	onChanged,
 	anchor,
 }: {
@@ -42,6 +44,9 @@ export default function MaintenanceSection({
 	 * Its own surface has to say so. */
 	groupId?: string | null;
 	groupName?: string | null;
+	/** For a machine, the environment it serves: a window over its group's
+	 * environment at that rank covers it too. */
+	rank?: ServerRank | null;
 	/** Called after declaring or lifting, so the page can refresh the
 	 * health and checks that the window changes. */
 	onChanged?: () => void;
@@ -88,14 +93,25 @@ export default function MaintenanceSection({
 	}
 
 	const windows: MaintenanceWindow[] = result.data;
-	const open = windows.find((w) => w.ended_at === null) ?? null;
+	// A group's own window, not one of its environments'.
+	const open = windows.find((w) => w.ended_at === null && !w.rank) ?? null;
+	const environments = windows.filter((w) => w.ended_at === null && w.rank);
 	const fromGroup =
 		covering.status === "ok"
-			? ((covering.data as MaintenanceWindow[]).find((w) => w.ended_at === null) ?? null)
+			? ((covering.data as MaintenanceWindow[]).find(
+					(w) => w.ended_at === null && (!w.rank || w.rank === rank),
+				) ?? null)
 			: null;
 	const history = windows.filter((w) => w.ended_at !== null).slice(0, HISTORY_SHOWN);
 
-	if (!open && !fromGroup && history.length === 0 && !isAdmin) return null;
+	if (
+		!open &&
+		environments.length === 0 &&
+		!fromGroup &&
+		history.length === 0 &&
+		!isAdmin
+	)
+		return null;
 
 	return (
 		<Paper id={anchor} variant="outlined" sx={{ p: 2 }} data-testid="maintenance-section">
@@ -178,6 +194,48 @@ export default function MaintenanceSection({
 					</Button>
 				)
 			)}
+			{environments.map((window) => (
+				<Alert
+					key={window.id}
+					severity="info"
+					icon={<BuildOutlinedIcon fontSize="inherit" />}
+					sx={{ mt: 1 }}
+					data-testid="environment-window"
+					action={
+						isAdmin ? (
+							<Button
+								size="small"
+								color="info"
+								variant="outlined"
+								disabled={lift.pending}
+								onClick={async () => {
+									try {
+										await lift.call({ id: window.id });
+										reload();
+									} catch {
+										/* surfaced below */
+									}
+								}}
+							>
+								Lift
+							</Button>
+						) : undefined
+					}
+				>
+					<Typography variant="body2">
+						<Box component="span" sx={{ textTransform: "capitalize" }}>
+							{window.rank}
+						</Box>{" "}
+						under maintenance, ending <TimeAgo timestamp={window.expected_end} />.
+						The rest of the group stays watched.
+					</Typography>
+					{window.note && (
+						<Typography variant="body2" sx={{ mt: 0.5, fontStyle: "italic" }}>
+							{window.note}
+						</Typography>
+					)}
+				</Alert>
+			))}
 			{lift.error && (
 				<Alert severity="error" sx={{ mt: 1 }}>
 					{lift.error.message}
@@ -199,6 +257,7 @@ export default function MaintenanceSection({
 								<Typography variant="body2">
 									{window.note ?? "Maintenance"}
 								</Typography>
+								{window.rank && <ServerRankChip rank={window.rank} />}
 								<Box sx={{ flex: 1 }} />
 								<Typography variant="caption" color="text.secondary">
 									ended <TimeAgo timestamp={window.ended_at as string} />

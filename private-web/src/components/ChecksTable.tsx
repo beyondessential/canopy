@@ -19,7 +19,6 @@ import {
 	Typography,
 } from "@mui/material";
 import BuildCircleIcon from "@mui/icons-material/BuildCircle";
-import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import CancelIcon from "@mui/icons-material/Cancel";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import NotificationsActiveOutlinedIcon from "@mui/icons-material/NotificationsActiveOutlined";
@@ -129,7 +128,6 @@ export function ChecksTable(props: {
 	 * unset on a machine's own table, where the target is already the box. */
 	machineId?: string | null;
 	groupId: string | null;
-	maintained: boolean;
 	refreshTick: number;
 	onSilenced: () => void;
 }) {
@@ -183,7 +181,6 @@ function ChecksTableGrouped(props: {
 	target: CheckTarget;
 	machineId?: string | null;
 	groupId: string;
-	maintained: boolean;
 	refreshTick: number;
 	onSilenced: () => void;
 	ownSilences: Silence[];
@@ -205,7 +202,6 @@ function ChecksTableBody({
 	target,
 	machineId,
 	groupId,
-	maintained,
 	onSilenced,
 	ownSilences,
 	machineSilences,
@@ -216,7 +212,6 @@ function ChecksTableBody({
 	target: CheckTarget;
 	machineId?: string | null;
 	groupId: string | null;
-	maintained: boolean;
 	onSilenced: () => void;
 	ownSilences: Silence[];
 	machineSilences: Silence[];
@@ -275,7 +270,6 @@ function ChecksTableBody({
 							target={rowTarget}
 							fromMachine={fromMachine}
 							groupId={groupId}
-							maintained={maintained}
 							onSilenced={onSilenced}
 							ownSilence={ownSilence}
 							groupSilence={groupSilence}
@@ -311,7 +305,6 @@ function CheckRow({
 	target,
 	fromMachine,
 	groupId,
-	maintained,
 	onSilenced,
 	ownSilence,
 	groupSilence,
@@ -322,7 +315,6 @@ function CheckRow({
 	/** True when this row is the box's check shown on an application. */
 	fromMachine: boolean;
 	groupId: string | null;
-	maintained: boolean;
 	onSilenced: () => void;
 	ownSilence: Silence | null;
 	groupSilence: ServerGroupSilencedRef | null;
@@ -392,9 +384,6 @@ function CheckRow({
 						ownSilence={ownSilence}
 						groupSilence={groupSilence}
 					/>
-					{maintained && effective === "skipped" && (
-						<MaintenanceSkipChip />
-					)}
 				</Stack>
 				{sessions !== null && (
 					<ExternalUsersDetails
@@ -493,22 +482,6 @@ function CheckResultIcon({
  * is already in the silence list at one or both scopes. Shown for all
  * viewers (silences are listable without admin); the row's silence
  * button still gates the manage actions on admin. */
-/** Why a check under a window graded to skipped. Without it the row reads
- * as a precondition the check itself did not meet.
- * spec: MNT#presentation */
-function MaintenanceSkipChip() {
-	return (
-		<Tooltip title="A maintenance window holds here, so every check on this server grades to skipped and raises nothing.">
-			<Chip
-				size="small"
-				variant="outlined"
-				icon={<BuildOutlinedIcon />}
-				label="skipped: under maintenance"
-				data-testid="check-maintenance-skip"
-			/>
-		</Tooltip>
-	);
-}
 
 /** Marks a row as the box's rather than the workload's. An application's list
  * carries both, and which grain a check speaks for decides where it is

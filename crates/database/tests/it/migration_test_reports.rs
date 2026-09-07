@@ -38,7 +38,7 @@ async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> (Uuid, U
 		.await
 		.expect("machine");
 	let row: RowId = sql_query(
-		"INSERT INTO applications (type, host, group_id, machine_id) VALUES ('tamanu-central', $1, $2, $3) RETURNING id",
+		"INSERT INTO applications (type, host, rank, group_id, machine_id) VALUES ('tamanu-central', $1, 'production', $2, $3) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>("https://central.kamaka.example")
 	.bind::<sql_types::Uuid, _>(group_id)
@@ -487,11 +487,12 @@ async fn record_snapshot(
 	.expect("record backup run");
 }
 
-/// The group's open plan, which is what names the version to migrate to.
+/// The production environment's open plan, which is what names the version to
+/// migrate to.
 async fn plan_upgrade(conn: &mut AsyncPgConnection, group: Uuid, target: &Version) {
 	sql_query(
-		"INSERT INTO upgrade_plans (group_id, target_version_id, created_by)
-		 VALUES ($1, $2, 'test@example.com')",
+		"INSERT INTO upgrade_plans (group_id, rank, target_version_id, created_by)
+		 VALUES ($1, 'production', $2, 'test@example.com')",
 	)
 	.bind::<sql_types::Uuid, _>(group)
 	.bind::<sql_types::Uuid, _>(target.id)

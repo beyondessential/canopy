@@ -345,7 +345,7 @@ pub(super) async fn decorate_with_status(
 	// coincide for anything that predates the split, which is why reading the
 	// wrong one still looked right.
 	// spec: MNT#presentation
-	let (maintained_machines, maintained_groups) =
+	let suspended =
 		database::maintenance_windows::MaintenanceWindow::suspended_targets(conn).await?;
 	for info in infos.iter_mut() {
 		let st = by_server.get(&info.id).copied();
@@ -358,12 +358,7 @@ pub(super) async fn decorate_with_status(
 			.max(st.map(|s| s.created_at));
 		info.up = Some(ShortStatus::grade(last_reported_at, down_after));
 		info.health = Some(health.get(&info.id).copied().unwrap_or_default());
-		info.maintained = Some(
-			maintained_machines.contains(&info.machine_id)
-				|| info
-					.group_id
-					.is_some_and(|gid| maintained_groups.contains(&gid)),
-		);
+		info.maintained = Some(suspended.suspends(info.machine_id, info.group_id));
 	}
 	Ok(())
 }
@@ -767,13 +762,23 @@ pub async fn get_detail(
 	let maintenance_settling = maintained && {
 		use database::issues::Scope;
 		use database::maintenance_windows::MaintenanceWindow;
-		let mut open = MaintenanceWindow::open_for(&mut conn, Scope::Machine(server.machine_id))
-			.await?
-			.is_some();
-		if !open && let Some(gid) = server.group_id {
-			open = MaintenanceWindow::open_for(&mut conn, Scope::Group(gid))
+		let mut open =
+			MaintenanceWindow::open_for(&mut conn, Scope::Machine(server.machine_id), None)
 				.await?
 				.is_some();
+		if !open && let Some(gid) = server.group_id {
+			open = MaintenanceWindow::open_for(&mut conn, Scope::Group(gid), None)
+				.await?
+				.is_some();
+		}
+		if !open && let Some(gid) = server.group_id {
+			// A window covers the box, so the rank is the machine's rather than this application's.
+			let rank = database::machines::Machine::rank(&mut conn, server.machine_id).await?;
+			if let Some(rank) = rank {
+				open = MaintenanceWindow::open_for(&mut conn, Scope::Group(gid), Some(rank))
+					.await?
+					.is_some();
+			}
 		}
 		!open
 	};
@@ -807,10 +812,11 @@ pub struct ServerUpdateArgs {
 /// Update a server's fields.
 ///
 /// Applies a partial update — only the fields present in `data` are
-/// changed. Moving a previously-ungrouped server into a group, or toggling
-/// `is_monitored`, re-evaluates the server's open issues so incidents catch
-/// up with the new state. Returns 400 if the update is rejected (e.g. an
-/// invalid host value, or a role the target product doesn't define).
+/// changed. Moving a previously-ungrouped server into a group, toggling
+/// `is_monitored`, or changing the rank re-evaluates the server's open issues
+/// so incidents catch up with the new state. Returns 400 if the update is
+/// rejected (e.g. an invalid host value, or a role the target product doesn't
+/// define).
 #[utoipa::path(
 	post,
 	path = "/update",
@@ -830,12 +836,15 @@ pub async fn update(
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
 
-	// Capture the server's pre-update state when this request touches either
-	// of the two fields whose transitions warrant an incident catch-up:
-	// `group_id` (ungrouped → grouped opens pending issues into incidents)
-	// and `is_monitored` (un/monitored toggles incident eligibility
-	// symmetrically — on enrols open issues, off cascades them out).
-	let touches_catchup_field = args.data.group_id.is_some() || args.data.is_monitored.is_some();
+	// Capture the server's pre-update state when this request touches one of
+	// the fields whose transitions warrant an incident catch-up: `group_id`
+	// (ungrouped → grouped opens pending issues into incidents),
+	// `is_monitored` (un/monitored toggles incident eligibility symmetrically:
+	// on enrols open issues, off cascades them out), and `rank` (which
+	// environment the issues belong to).
+	let touches_catchup_field = args.data.group_id.is_some()
+		|| args.data.is_monitored.is_some()
+		|| args.data.rank.is_some();
 	let before = if touches_catchup_field {
 		Some(Application::get_by_id(&mut conn, args.server_id).await?)
 	} else {
@@ -900,8 +909,26 @@ pub async fn update(
 		(Some(b), Some(new_value)) => b.is_monitored != new_value,
 		_ => false,
 	};
+	let rank_changed = match (before.as_ref(), args.data.rank) {
+		(Some(b), Some(new_value)) => b.rank != Some(new_value),
+		_ => false,
+	};
 	if group_just_set || monitored_toggled {
 		database::issues::reevaluate_open_issues_for_server(&mut conn, args.server_id).await?;
+	}
+	if rank_changed {
+		// A box's environment is the highest rank among the workloads on it,
+		// so a rank change moves the machine's own issues too.
+		// spec: INC#targets
+		let machine_id = Application::get_by_id(&mut conn, args.server_id)
+			.await?
+			.machine_id;
+		database::issues::reevaluate_open_issues_for_scope(
+			&mut conn,
+			database::issues::Scope::Machine(machine_id),
+			None,
+		)
+		.await?;
 	}
 	Ok(Json(()))
 }

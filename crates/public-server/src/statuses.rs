@@ -1059,7 +1059,6 @@ async fn file_health_events(
 				group_id,
 				// Both grains are covered by the window over the box: taking
 				// it down stops its machine checks and its workloads alike.
-				covering_machine: Some(machine_id),
 			},
 		)
 		.await?;

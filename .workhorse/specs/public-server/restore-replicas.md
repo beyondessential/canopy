@@ -234,12 +234,13 @@ A migration test therefore restores the snapshot of the machine an application r
 
 Canopy decides which versions are tested against which applications, rather than an operator naming each pair.
 
-An application's candidate is the version its group's open plan moves it to (see [UPG](../private-server/upgrade-plans.md)).
-A group with no open plan has no candidate, so none of its applications are tested.
+An application's candidate is the version its own environment's open plan moves it to: the plan for its group at its rank (see [UPG](../private-server/upgrade-plans.md)).
+An environment with no open plan has no candidate, so none of its applications are tested, and an application with no rank follows its group's headline environment (see [GRP](../servers/groups.md), "Environments").
+A site's clone is often planned ahead of its production, so the two are tested against different versions at once.
 
 Recording a plan is what asks for the testing.
-A run costs hours of a consumer's capacity per replica, and which minor a group moves to is not something Canopy can derive, so aiming at whatever is newest would spend that capacity on versions nobody has decided to take.
-A group that wants its data tested says where it is going, and gets an answer about the version it will actually apply.
+A run costs hours of a consumer's capacity per replica, and which minor an environment moves to is not something Canopy can derive, so aiming at whatever is newest would spend that capacity on versions nobody has decided to take.
+An environment that wants its data tested says where it is going, and gets an answer about the version it will actually apply.
 
 One candidate, not one per version along the path.
 Migrations are applied to the restored snapshot in sequence, so a run targeting the planned version applies every migration between the snapshot's version and that one, and exercises the whole chain an upgrade would.
@@ -260,7 +261,7 @@ That window is where the answer is still cheap: the fleet is not moving yet, and
 It carries `check` alongside, so a single restore reports the replica's health and the migrations' outcome as two signals from one report.
 
 An intent carrying `migrate` is withheld where no application has a candidate version.
-An intent that verifies backups therefore does not also migrate: it would go undispatched for every machine without a candidate, leaving the backups of any non-Tamanu application, and of every group with no plan open, unverified.
+An intent that verifies backups therefore does not also migrate: it would go undispatched for every machine without a candidate, leaving the backups of any non-Tamanu application, and of every environment with no plan open, unverified.
 An intent that keeps a replica queryable does not migrate either: a migrated replica sits at a version its group is not running, so a declaration promoted to it would give an operator a schema that does not match production.
 
 A verifying intent and a migrating intent restore the same snapshot separately.

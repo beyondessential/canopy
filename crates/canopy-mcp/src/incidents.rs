@@ -1,6 +1,6 @@
 //! `find_incidents` / `get_incident` / `find_issues` / `get_issue` tools.
 
-use commons_types::{Uuid, status::CheckResult};
+use commons_types::{Uuid, server::rank::ServerRank, status::CheckResult};
 use database::{
 	applications::Application,
 	diesel_async::AsyncPgConnection,
@@ -149,10 +149,14 @@ struct CheckStabilityOut {
 #[derive(Serialize)]
 struct IncidentSummary {
 	id: Uuid,
-	/// The server group the incident targets, or `null` for a canopy-wide
+	/// The group the incident targets, or `null` for a canopy-wide
 	/// incident (aggregating canopy's self-alerts).
 	group_id: Option<Uuid>,
 	group_name: Option<String>,
+	/// Which of the group's environments the incident targets. `null` with a
+	/// group is the group itself: its own checks, and the members of a group
+	/// with no ranked application.
+	rank: Option<ServerRank>,
 	/// `open` (not closed), `resolved` (operator-resolved), or `closed`.
 	status: &'static str,
 	opened_at: Timestamp,
@@ -292,10 +296,14 @@ struct IncidentIssueOut {
 #[derive(Serialize)]
 struct IncidentDetail {
 	id: Uuid,
-	/// The server group the incident targets, or `null` for a canopy-wide
+	/// The group the incident targets, or `null` for a canopy-wide
 	/// incident (aggregating canopy's self-alerts).
 	group_id: Option<Uuid>,
 	group_name: Option<String>,
+	/// Which of the group's environments the incident targets. `null` with a
+	/// group is the group itself: its own checks, and the members of a group
+	/// with no ranked application.
+	rank: Option<ServerRank>,
 	status: &'static str,
 	opened_at: Timestamp,
 	closed_at: Option<Timestamp>,
@@ -421,6 +429,7 @@ impl CanopyMcp {
 				IncidentSummary {
 					id: i.id,
 					group_id: i.server_group_id,
+					rank: i.rank,
 					group_name: i
 						.server_group_id
 						.and_then(|gid| group_names.get(&gid).cloned()),
@@ -493,6 +502,7 @@ impl CanopyMcp {
 		ok_json(&IncidentDetail {
 			id: incident.id,
 			group_id: incident.server_group_id,
+			rank: incident.rank,
 			group_name: group.as_ref().map(|g| g.name.clone()),
 			status: incident_status(&incident),
 			opened_at: incident.opened_at,

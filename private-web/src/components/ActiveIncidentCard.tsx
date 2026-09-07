@@ -15,12 +15,13 @@ import { isIncidentLingering, type IncidentData } from "../types";
 /// spec: INC
 export default function ActiveIncidentCard({
 	incident,
-	groupName,
+	targetName,
 }: {
 	incident: IncidentData;
-	/// Named when the page is not the group's own, so the card says whose
-	/// incident it is rather than implying it belongs to what is on screen.
-	groupName?: string | null;
+	/// Named when what is on screen is not the incident's target, so the card
+	/// says whose incident it is rather than implying it belongs to what is
+	/// being read.
+	targetName?: string | null;
 }) {
 	const held = useIsNotificationHeld(incident.notification_held_until);
 	const lingering = isIncidentLingering(incident);
@@ -40,7 +41,9 @@ export default function ActiveIncidentCard({
 					<WarningAmberIcon color={tone} />
 					<Box>
 						<Typography variant="h6" component="h2">
-							{groupName ? `Active incident in ${groupName}` : "Active incident"}
+							{targetName
+								? `Active incident in ${targetName}`
+								: "Active incident"}
 							<Box
 								component="span"
 								sx={{

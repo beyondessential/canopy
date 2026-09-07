@@ -29,9 +29,10 @@ pub struct Candidate {
 
 /// The version `server` should be tested against, if any.
 ///
-/// Its group's open plan names it (see [`crate::upgrade_plans`]), and a group
-/// with no plan has no candidate: a restore costs hours, and it is only worth
-/// spending on a version a group has said it intends to apply.
+/// Its own environment's open plan names it (see [`crate::upgrade_plans`]), and
+/// an environment with no plan has no candidate: a restore costs hours, and it
+/// is only worth spending on a version an environment has said it intends to
+/// apply. An application with no rank follows its group's headline environment.
 ///
 /// Tamanu applications only: the migrations under test are Tamanu's, so no other
 /// product's server has an upgrade path through them.
@@ -50,8 +51,11 @@ pub async fn candidate_for(
 	let Some(group_id) = server.group_id else {
 		return Ok(None);
 	};
+	let Some(rank) = crate::server_groups::ServerGroup::environment_of(db, server).await? else {
+		return Ok(None);
+	};
 
-	crate::upgrade_plans::planned_target(db, group_id).await
+	crate::upgrade_plans::planned_target(db, group_id, rank).await
 }
 
 /// Every candidate across the fleet, at most one per server.
@@ -506,9 +510,20 @@ pub async fn verdicts_for_group(
 	db: &mut AsyncPgConnection,
 	group_id: Uuid,
 ) -> Result<Vec<GroupVerdict>> {
+	let applications = Application::list_live_in_group(db, group_id).await?;
+	verdicts(db, applications).await
+}
+
+/// Where each of `applications` stands against the version it would take next,
+/// for a caller that has already picked out an environment's applications.
+// spec: RST#verdicts
+pub async fn verdicts(
+	db: &mut AsyncPgConnection,
+	applications: Vec<Application>,
+) -> Result<Vec<GroupVerdict>> {
 	let mut out = Vec::new();
 
-	for server in Application::list_live_in_group(db, group_id).await? {
+	for server in applications {
 		let Some(version) = candidate_for(db, &server).await? else {
 			continue;
 		};

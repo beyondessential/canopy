@@ -2,7 +2,10 @@
 //! The version its group's open plan names, and only for Tamanu applications.
 
 use commons_tests::db::TestDb;
-use commons_types::{server::app_type::ApplicationType, version::VersionStatus};
+use commons_types::{
+	server::{app_type::ApplicationType, rank::ServerRank},
+	version::VersionStatus,
+};
 use database::{
 	migration_tests::{Candidate, candidates},
 	upgrade_plans::{PlannedWhen, UpgradePlan},
@@ -60,7 +63,7 @@ async fn insert_server(
 		.await
 		.expect("machine");
 	let server: RowId = sql_query(
-		"INSERT INTO applications (host, group_id, type, machine_id) VALUES ($1, $2, $3, $4) RETURNING id",
+		"INSERT INTO applications (host, rank, group_id, type, machine_id) VALUES ($1, 'production', $2, $3, $4) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Uuid, _>(group)
@@ -76,6 +79,7 @@ async fn plan(conn: &mut diesel_async::AsyncPgConnection, group: Uuid, target: &
 	UpgradePlan::record(
 		conn,
 		group,
+		ServerRank::Production,
 		target.id,
 		PlannedWhen::default(),
 		None,
@@ -160,7 +164,7 @@ async fn a_withdrawn_plan_stops_the_testing() {
 		.await;
 		plan(&mut conn, group, &target).await;
 
-		let open = UpgradePlan::open_for_group(&mut conn, group)
+		let open = UpgradePlan::open_for_environment(&mut conn, group, ServerRank::Production)
 			.await
 			.expect("open plan")
 			.expect("a plan is open");

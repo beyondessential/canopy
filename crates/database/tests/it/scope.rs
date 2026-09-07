@@ -288,11 +288,22 @@ async fn insert_application_on(
 	group: Option<Uuid>,
 	host: &str,
 ) -> Uuid {
+	insert_ranked_application_on(conn, machine, group, None, host).await
+}
+
+async fn insert_ranked_application_on(
+	conn: &mut diesel_async::AsyncPgConnection,
+	machine: Uuid,
+	group: Option<Uuid>,
+	rank: Option<&str>,
+	host: &str,
+) -> Uuid {
 	let row: RowId = sql_query(
-		"INSERT INTO applications (type, host, group_id, machine_id) VALUES ('tamanu-central', $1, $2, $3) RETURNING id",
+		"INSERT INTO applications (type, host, group_id, rank, machine_id) VALUES ('tamanu-central', $1, $2, $3, $4) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group)
+	.bind::<sql_types::Nullable<sql_types::Text>, _>(rank)
 	.bind::<sql_types::Uuid, _>(machine)
 	.get_result(conn)
 	.await
@@ -316,17 +327,23 @@ struct Count {
 	n: i64,
 }
 
-/// An incident is keyed on its target, and both grains resolve to the same
-/// group, so a failing box and a failing workload on it are one incident for
-/// operators to work rather than two pages for one outage.
-// spec: INC
+/// An incident is keyed on its target, and both grains of one environment
+/// resolve to it, so a failing box and a failing workload on it are one
+/// incident for operators to work rather than two pages for one outage.
+// spec: INC#targets
 #[tokio::test(flavor = "multi_thread")]
-async fn both_grains_in_one_group_join_the_same_incident() {
+async fn both_grains_in_one_environment_join_the_same_incident() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group = insert_group(&mut conn).await;
 		let machine = insert_machine(&mut conn, Some(group), true).await;
-		let application =
-			insert_application_on(&mut conn, machine, Some(group), "http://both.invalid/").await;
+		let application = insert_ranked_application_on(
+			&mut conn,
+			machine,
+			Some(group),
+			Some("production"),
+			"http://both.invalid/",
+		)
+		.await;
 
 		database::issues::raise_machine_event_with_state(
 			&mut conn,
@@ -368,7 +385,7 @@ async fn both_grains_in_one_group_join_the_same_incident() {
 				.expect("count incidents");
 		assert_eq!(
 			incidents.n, 1,
-			"one incident for the group, not one per grain"
+			"one incident for the environment, not one per grain"
 		);
 
 		let links: Count = sql_query(

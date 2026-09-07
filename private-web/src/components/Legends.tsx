@@ -40,6 +40,7 @@ const MACHINE_ENTRIES: Array<{
 	up: ShortStatus;
 	health: HealthState;
 	maintained?: boolean;
+	settling?: boolean;
 	dots?: number;
 	label: string;
 }> = [
@@ -55,7 +56,14 @@ const MACHINE_ENTRIES: Array<{
 		up: "up",
 		health: "healthy",
 		maintained: true,
-		label: "Hatched: under maintenance (being worked on)",
+		label: "Blue: under maintenance (being worked on)",
+	},
+	{
+		up: "up",
+		health: "healthy",
+		maintained: true,
+		settling: true,
+		label: "Blue striped: maintenance just ended, watching resumes shortly",
 	},
 	{
 		up: "up",
@@ -130,23 +138,30 @@ export function OperatorLegend() {
 export function HealthLegend() {
 	return (
 		<Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap" }}>
-			{MACHINE_ENTRIES.map(({ up, health, maintained, dots = 1, label }) => (
-				<Stack
-					key={label}
-					direction="row"
-					spacing={0.5}
-					sx={{ alignItems: "center" }}
-				>
-					<MachineEnclosure up={up} health={health} maintained={maintained}>
-						{Array.from({ length: dots }, (_, i) => (
-							<StatusDot key={i} up="up" health="healthy" />
-						))}
-					</MachineEnclosure>
-					<Typography variant="body2" color="text.secondary">
-						{label}
-					</Typography>
-				</Stack>
-			))}
+			{MACHINE_ENTRIES.map(
+				({ up, health, maintained, settling, dots = 1, label }) => (
+					<Stack
+						key={label}
+						direction="row"
+						spacing={0.5}
+						sx={{ alignItems: "center" }}
+					>
+						<MachineEnclosure
+							up={up}
+							health={health}
+							maintained={maintained}
+							settling={settling}
+						>
+							{Array.from({ length: dots }, (_, i) => (
+								<StatusDot key={i} up="up" health="healthy" />
+							))}
+						</MachineEnclosure>
+						<Typography variant="body2" color="text.secondary">
+							{label}
+						</Typography>
+					</Stack>
+				),
+			)}
 		</Stack>
 	);
 }

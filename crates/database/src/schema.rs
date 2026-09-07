@@ -53,6 +53,7 @@ diesel::table! {
 		extra -> Jsonb,
 		version -> Nullable<Text>,
 		reported_at -> Timestamptz,
+		version_reported_at -> Nullable<Timestamptz>,
 	}
 }
 
@@ -431,6 +432,7 @@ diesel::table! {
 		server_group_id -> Nullable<Uuid>,
 		escalated_at -> Nullable<Timestamptz>,
 		closing_at -> Nullable<Timestamptz>,
+		rank -> Nullable<Text>,
 	}
 }
 
@@ -555,6 +557,7 @@ diesel::table! {
 		settled_at -> Nullable<Timestamptz>,
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
+		rank -> Nullable<Text>,
 	}
 }
 
@@ -791,6 +794,7 @@ diesel::table! {
 		planned_time -> Nullable<Time>,
 		planned_zone -> Nullable<Text>,
 		planned_end_time -> Nullable<Time>,
+		rank -> Text,
 	}
 }
 

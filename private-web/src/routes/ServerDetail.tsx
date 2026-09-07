@@ -47,6 +47,7 @@ import TargetName from "../components/TargetName";
 import {
 	applicationName,
 	type ConsolidatedChecks,
+	incidentTargetName,
 	type HealthState,
 	type ServerDetailData,
 	type ServerGroup,
@@ -119,7 +120,7 @@ export default function ServerDetail() {
 			{openIncident && (
 				<ActiveIncidentCard
 					incident={openIncident}
-					groupName={data.group?.name ?? null}
+					targetName={incidentTargetName(openIncident)}
 				/>
 			)}
 			{archived ? (
@@ -184,6 +185,7 @@ export default function ServerDetail() {
 				targetLabel={applicationName(data.server)}
 				groupId={data.group?.id ?? null}
 				groupName={data.group?.name ?? null}
+				rank={data.server.rank ?? null}
 				onChanged={() => detail.reload()}
 			/>
 			<SilencedRefsSection
@@ -525,7 +527,6 @@ function InfoSection({
 				target={{ kind: "application", id: server.id }}
 				machineId={server.machine_id}
 				groupId={server.group_id}
-				maintained={maintained}
 				refreshTick={refreshTick}
 				onSilenced={onSilenced}
 			/>

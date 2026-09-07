@@ -245,18 +245,20 @@ test.describe("status page", () => {
 			.getByTestId("dot-strip");
 		await expect(strip).toBeVisible();
 
-		// The hatch is a background on the pill, so assert on computed style:
-		// at this size nothing else carries the distinction. Both boxes are
+		// The wash is the pill's background, so assert on computed style: at
+		// this size nothing else carries the distinction. Both boxes are
 		// production and sort by their applications' names, so the worked-on
 		// box is first.
 		const fills = await strip
 			.locator("[data-testid='rank-row'] > span")
 			.evaluateAll((els) =>
-				els.map((el) => getComputedStyle(el).backgroundImage),
+				els.map((el) => getComputedStyle(el).backgroundColor),
 			);
 		expect(fills).toHaveLength(2);
-		expect(fills[0]).not.toBe("none");
-		expect(fills[1]).toBe("none");
+		// An unmarked pill is not transparent, it carries its own state's wash,
+		// so the mark is what differs between the two rather than what is
+		// present on one.
+		expect(fills[0]).not.toBe(fills[1]);
 		void untouched;
 
 		// And the pill says why.
@@ -264,6 +266,105 @@ test.describe("status page", () => {
 		await expect(
 			page.getByRole("tooltip", { name: /under maintenance/ }),
 		).toBeVisible();
+	});
+
+	/// Suspension outlasts the window by the settle period, so a box stays
+	/// marked after its window is lifted. The mark says which of the two it is,
+	/// or a lift that has taken reads as one that has not.
+	///
+	/// spec: MNT#presentation
+	test("a box settling is marked apart from one still being worked on", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "settle-group" });
+		const holding = await seedServer(sql, {
+			name: "aaa-still-working",
+			rank: "production",
+			groupId: group.id,
+		});
+		const settling = await seedServer(sql, {
+			name: "bbb-just-lifted",
+			rank: "production",
+			groupId: group.id,
+		});
+		await seedMaintenanceWindow(sql, {
+			machineId: holding.machineId,
+			endsInHours: 2,
+		});
+		await seedMaintenanceWindow(sql, {
+			machineId: settling.machineId,
+			endedMinutesAgo: 2,
+		});
+
+		await page.goto("/status");
+
+		const pills = page
+			.locator(`a[href="/fleet/groups/${group.id}"]`)
+			.first()
+			.getByTestId("dot-strip")
+			.locator("[data-testid='rank-row'] > span");
+		await expect(pills).toHaveCount(2);
+		await expect(pills.nth(0)).toHaveAttribute("data-maintenance", "holding");
+		await expect(pills.nth(1)).toHaveAttribute("data-maintenance", "settling");
+
+		await pills.nth(1).hover();
+		await expect(
+			page.getByRole("tooltip", { name: /maintenance just ended/ }),
+		).toBeVisible();
+		// Scoped by the box's name: a tooltip from the previous hover can still
+		// be on the page, so a bare tooltip role matches several.
+		await pills.nth(0).hover();
+		await expect(
+			page.getByRole("tooltip", {
+				name: /aaa-still-working .* under maintenance/,
+			}),
+		).toBeVisible();
+
+		// Both stages share the wash, since both are one state, and settling is
+		// that wash struck through. Identical stripes would leave the attribute
+		// correct and the page unreadable.
+		const marks = await pills.evaluateAll((els) =>
+			els.map((el) => {
+				const style = getComputedStyle(el);
+				return { wash: style.backgroundColor, stripes: style.backgroundImage };
+			}),
+		);
+		const [holdingMark, settlingMark] = marks;
+		expect(holdingMark!.wash).not.toBe("rgba(0, 0, 0, 0)");
+		expect(
+			settlingMark!.wash,
+			"one window, one wash, whichever stage it is at",
+		).toBe(holdingMark!.wash);
+		expect(holdingMark!.stripes).toBe("none");
+		expect(
+			settlingMark!.stripes,
+			"settling is the wash struck through",
+		).not.toBe("none");
+
+
+		// The legend names both, and its swatches are the same component, so a
+		// reader can match what they are looking at to a name.
+		await expect(
+			page.getByText("Blue: under maintenance (being worked on)"),
+		).toBeVisible();
+		await expect(
+			page.getByText(
+				"Blue striped: maintenance just ended, watching resumes shortly",
+			),
+		).toBeVisible();
+		const swatches = await page
+			.locator("[data-maintenance]")
+			.evaluateAll((els) =>
+				els.map((el) => [
+					el.getAttribute("data-maintenance"),
+					getComputedStyle(el).backgroundImage,
+				]),
+			);
+		const legendHolding = swatches.find(([state]) => state === "holding");
+		const legendSettling = swatches.find(([state]) => state === "settling");
+		expect(legendHolding?.[1]).toBe(holdingMark!.stripes);
+		expect(legendSettling?.[1]).toBe(settlingMark!.stripes);
 	});
 
 	/// A group's window covers every box in it, so every pill on the card is
@@ -293,10 +394,47 @@ test.describe("status page", () => {
 		const fills = await strip
 			.locator("[data-testid='rank-row'] > span")
 			.evaluateAll((els) =>
-				els.map((el) => getComputedStyle(el).backgroundImage),
+				els.map((el) => getComputedStyle(el).backgroundColor),
 			);
 		expect(fills).toHaveLength(2);
-		expect(fills.every((f) => f !== "none")).toBe(true);
+		expect(fills.every((f) => f !== "rgba(0, 0, 0, 0)")).toBe(true);
+	});
+
+	/// An environment's window covers the machines serving that rank and no
+	/// others, so the settle period has to land on those same boxes. Nothing
+	/// else exercises a window scoped to a rank reaching a machine.
+	///
+	/// spec: MNT#settling
+	test("a settling environment window marks only that rank's boxes", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "rank-settle" });
+		await seedServer(sql, { name: "aaa-clone", rank: "clone", groupId: group.id });
+		await seedServer(sql, {
+			name: "bbb-production",
+			rank: "production",
+			groupId: group.id,
+		});
+		await seedMaintenanceWindow(sql, {
+			serverGroupId: group.id,
+			rank: "clone",
+			endedMinutesAgo: 2,
+		});
+
+		await page.goto("/status");
+
+		const card = page.locator(`a[href="/fleet/groups/${group.id}"]`).first();
+		await expect(
+			card
+				.locator("[data-testid='rank-row'][data-rank='clone'] > span")
+				.first(),
+		).toHaveAttribute("data-maintenance", "settling");
+		await expect(
+			card
+				.locator("[data-testid='rank-row'][data-rank='production'] > span")
+				.first(),
+		).not.toHaveAttribute("data-maintenance");
 	});
 
 	/// A quiet card is two bands. The third says what is happening to the

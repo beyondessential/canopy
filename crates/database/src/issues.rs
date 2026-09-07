@@ -2,6 +2,7 @@
 
 use commons_errors::{AppError, Result};
 use commons_types::namespace::Namespace;
+use commons_types::server::rank::ServerRank;
 use commons_types::status::CheckResult;
 use commons_types::subject::CheckSubject;
 use diesel::prelude::*;
@@ -180,9 +181,14 @@ pub struct Incident {
 	pub created_at: Timestamp,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub updated_at: Timestamp,
-	/// The server group this incident targets, or `None` for a canopy-wide
+	/// The group this incident targets, or `None` for a canopy-wide
 	/// incident (aggregating canopy-wide issues — self-alerts).
 	pub server_group_id: Option<Uuid>,
+	/// Which of the group's environments this incident targets. `None` with a
+	/// group is the group itself: its own checks, and the members of a group
+	/// with no ranked application.
+	// spec: INC#targets
+	pub rank: Option<ServerRank>,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub opened_at: Timestamp,
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
@@ -408,6 +414,7 @@ impl NewEvent {
 		// but no incident contribution.
 		let server = Application::get_by_id(db, application_id).await?;
 		let server_group_id = server.group_id;
+		let server_rank = server.rank;
 		let monitored = server.is_monitored;
 
 		db.transaction::<_, AppError, _>(async |conn| {
@@ -512,10 +519,11 @@ impl NewEvent {
 			if let Some(gid) = server_group_id
 				&& !defer_incident_eval
 			{
+				let target = IncidentTarget::of_member(gid, server_rank);
 				re_evaluate_incident_membership(
 					conn,
 					&issue,
-					IncidentTarget::Group(gid),
+					target,
 					monitored,
 					effective_time,
 					None,
@@ -990,13 +998,14 @@ impl Scope {
 
 	/// Resolve this scope to the incident target it contributes to and
 	/// whether that contribution is monitored. An application or a machine
-	/// maps to its group, carrying that target's own `is_monitored`; a group
-	/// targets itself and a canopy-wide scope the global target, both always
-	/// monitored. An ungrouped application or machine has no target and no
-	/// incident path.
+	/// maps to the environment it is in, carrying that target's own
+	/// `is_monitored`; a group targets itself and a canopy-wide scope the
+	/// global target, both always monitored. An ungrouped application or
+	/// machine has no target and no incident path.
 	///
 	/// A machine carries its own monitoring switch, so excusing a box from
 	/// monitoring does not quiet the applications on it, and vice versa.
+	// spec: INC#targets
 	pub async fn resolve_incident_target(
 		self,
 		conn: &mut AsyncPgConnection,
@@ -1005,15 +1014,22 @@ impl Scope {
 			Scope::Group(gid) => Ok(Some((IncidentTarget::Group(gid), true))),
 			Scope::Application(sid) => {
 				let server = Application::get_by_id(conn, sid).await?;
-				Ok(server
-					.group_id
-					.map(|gid| (IncidentTarget::Group(gid), server.is_monitored)))
+				let Some(gid) = server.group_id else {
+					return Ok(None);
+				};
+				let target = IncidentTarget::of_member(gid, server.rank);
+				Ok(Some((target, server.is_monitored)))
 			}
 			Scope::Machine(mid) => {
 				let machine = crate::machines::Machine::get_by_id(conn, mid).await?;
-				Ok(machine
-					.group_id
-					.map(|gid| (IncidentTarget::Group(gid), machine.is_monitored)))
+				let Some(gid) = machine.group_id else {
+					return Ok(None);
+				};
+				// A box's rank is the highest of the workloads on it: a check
+				// on the box is trouble for the most important thing it runs.
+				let rank = crate::machines::Machine::rank(conn, mid).await?;
+				let target = IncidentTarget::of_member(gid, rank);
+				Ok(Some((target, machine.is_monitored)))
 			}
 			Scope::Global => Ok(Some((IncidentTarget::Global, true))),
 		}
@@ -1201,7 +1217,6 @@ pub async fn file_check_instances(
 					application_id: Some(application_id),
 					group_id,
 					// An application is covered by the window over its box.
-					covering_machine: Some(server.machine_id),
 					..Default::default()
 				},
 			)
@@ -1223,7 +1238,6 @@ pub async fn file_check_instances(
 				FilingScope {
 					machine_id: Some(machine_id),
 					group_id,
-					covering_machine: Some(machine_id),
 					..Default::default()
 				},
 			)
@@ -2362,6 +2376,9 @@ pub async fn get_global_issue(conn: &mut AsyncPgConnection, r#ref: &str) -> Resu
 ///   stop counting. The same applies if the check is silenced at server
 ///   or group scope — see [`crate::silenced_refs`] — or if a maintenance
 ///   window suspends the target, see [`crate::maintenance_windows`].
+///   An issue holding a live membership on another target's incident also
+///   leaves that one, whatever else it does: a rank or group change moves
+///   which target it answers to, and it cannot be in two.
 /// - **Join**: not leaving, AND one of:
 ///   - the state opens incidents on its own — an effective failure (see
 ///     [`Issue::opens_incident`]); or
@@ -2407,7 +2424,7 @@ async fn re_evaluate_incident_membership(
 ) -> Result<()> {
 	use crate::schema::{incident_issues, incidents};
 
-	let was_in = is_issue_in_open_incident(conn, issue.id).await?;
+	let held = open_incident_holding(conn, issue.id).await?;
 	let snoozed = issue.snoozed_until.is_some_and(|t| t > Timestamp::now());
 	// An event is silenced at its own scope or at its group's, and its own
 	// scope is whichever grain it was filed against. Reading the application
@@ -2447,6 +2464,18 @@ async fn re_evaluate_incident_membership(
 	// would turn "join the open incident" into "open a new one" — a Slack page
 	// for a Warning.
 	lock_target(conn, target).await?;
+	// An issue whose target changed (a rank set, or a move between groups) is
+	// still a live member of the incident on the target it has left, and comes
+	// out of that one before it can join the one it now belongs to.
+	// spec: INC#membership
+	let mut was_in = held.is_some();
+	if let Some(held) = held.as_ref().map(IncidentTarget::of_incident)
+		&& held != target
+	{
+		lock_target(conn, held).await?;
+		leave_open_incident(conn, issue, transition_time, by, false).await?;
+		was_in = false;
+	}
 	let target_open = target_has_open_incident(conn, target).await?;
 
 	let should_leave = !issue.active
@@ -2519,124 +2548,15 @@ async fn re_evaluate_incident_membership(
 			}
 		}
 		(true, _, true) => {
-			// Must match `is_issue_in_open_incident`'s definition of live
-			// membership, incident `closed_at` included: an issue can hold an
-			// unstamped row on a *closed* incident (a close doesn't stamp the
-			// members that never left) at the same time as a live row on an
-			// open one. Filtering on `left_at` alone lets this pick the
-			// stranded row, and the leave then stamps the wrong membership and
-			// weighs `remaining_open` against a long-closed incident —
-			// abandoning the open one with no live members and no Slack
-			// resolve.
-			let open_link: IncidentIssue = incident_issues::table
-				.inner_join(incidents::table.on(incidents::id.eq(incident_issues::incident_id)))
-				.select(IncidentIssue::as_select())
-				.filter(
-					incident_issues::issue_id
-						.eq(issue.id)
-						.and(incident_issues::left_at.is_null())
-						.and(incidents::closed_at.is_null()),
-				)
-				.for_update()
-				.first(conn)
-				.await?;
-
-			// Serialize against concurrent leaves of *other* issues on
-			// the same incident. Without this incident-row lock, two
-			// transactions each removing one of the last two live
-			// issues can each observe remaining_open >= 1 (each sees
-			// its own in-flight left_at update but not the other's)
-			// and skip the close, leaving the incident in "no live
-			// issues but closed_at IS NULL" with no Slack fired.
-			let _incident_lock: Uuid = incidents::table
-				.select(incidents::id)
-				.filter(incidents::id.eq(open_link.incident_id))
-				.for_update()
-				.first(conn)
-				.await?;
-
-			diesel::update(
-				incident_issues::table.filter(
-					incident_issues::incident_id
-						.eq(open_link.incident_id)
-						.and(incident_issues::issue_id.eq(open_link.issue_id))
-						.and(
-							incident_issues::joined_at
-								.eq(jiff_diesel::Timestamp::from(open_link.joined_at)),
-						),
-				),
-			)
-			.set(incident_issues::left_at.eq(jiff_diesel::Timestamp::from(transition_time)))
-			.execute(conn)
-			.await?;
-
-			// Only count contributors that *currently* open an incident
-			// (effective failures). Lesser contributors stay attached for
-			// context but don't hold the incident open on their own; see
-			// the function doc-comment for the rationale.
-			use crate::schema::issues;
-			let remaining_open: i64 = incident_issues::table
-				.inner_join(issues::table.on(issues::id.eq(incident_issues::issue_id)))
-				.filter(
-					incident_issues::incident_id
-						.eq(open_link.incident_id)
-						.and(incident_issues::left_at.is_null())
-						.and(issues::effective_result.eq("failed")),
-				)
-				.count()
-				.get_result(conn)
-				.await?;
-			if remaining_open == 0 {
-				// Linger damps *reporter* flapping: only a leave caused by
-				// the check actually recovering (inactive, with no operator
-				// suppression in play) waits out the window. Resolution,
-				// snooze, silence, and monitoring-off are explicit operator
-				// actions — not flaps — and close immediately, Slack resolve
-				// attributed where `by` is known. A zero window is the
-				// operator opting out of lingering.
-				let check_recovery = !issue.active
-					&& issue.resolved_at.is_none()
-					&& !snoozed && !silenced
-					&& monitored;
-				let window = linger_window(conn, target).await?;
-				if by.is_some() || !check_recovery || window.is_zero() {
-					//
-					// Filter on `closed_at IS NULL` so that when a stranded
-					// lesser contributor eventually leaves an already-closed
-					// incident (because the failure-filter close above already
-					// retired it), we skip both the no-op update and the
-					// double Slack resolve.
-					let closed: Option<Incident> = diesel::update(
-						incidents::table
-							.filter(incidents::id.eq(open_link.incident_id))
-							.filter(incidents::closed_at.is_null()),
-					)
-					.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(transition_time)))
-					.returning(Incident::as_select())
-					.get_result(conn)
-					.await
-					.optional()?;
-					if let Some(closed) = closed {
-						release_remaining_members(conn, closed.id, transition_time).await?;
-						enqueue_slack_resolve_inner(conn, &closed, by).await?;
-					}
-				} else {
-					// Start lingering: record when the last effective failure
-					// left. Stamped once — a lesser contributor leaving an
-					// already-lingering incident doesn't move the mark — and
-					// the linger sweep closes the incident when the stamp
-					// outlives the window (see `sweep_lingering_incidents`).
-					diesel::update(
-						incidents::table
-							.filter(incidents::id.eq(open_link.incident_id))
-							.filter(incidents::closed_at.is_null())
-							.filter(incidents::closing_at.is_null()),
-					)
-					.set(incidents::closing_at.eq(jiff_diesel::Timestamp::from(transition_time)))
-					.execute(conn)
-					.await?;
-				}
-			}
+			// Linger damps *reporter* flapping: only a leave caused by the
+			// check actually recovering (inactive, with no operator
+			// suppression in play) waits out the window. Resolution, snooze,
+			// silence, and monitoring-off are explicit operator actions — not
+			// flaps — and close immediately, Slack resolve attributed where
+			// `by` is known.
+			let check_recovery =
+				!issue.active && issue.resolved_at.is_none() && !snoozed && !silenced && monitored;
+			leave_open_incident(conn, issue, transition_time, by, check_recovery).await?;
 		}
 		_ => {
 			// A member issue re-filing as an effective failure while its
@@ -2661,6 +2581,130 @@ async fn re_evaluate_incident_membership(
 				.execute(conn)
 				.await?;
 			}
+		}
+	}
+	Ok(())
+}
+
+/// Stamp this issue out of whatever open incident holds it, and close or
+/// linger that incident once its last effective failure has left.
+///
+/// `check_recovery` is true only where the leave is the check itself
+/// recovering with no operator suppression in play, which is the one case
+/// lingering damps. Resolution, snooze, silence, monitoring off, and the
+/// target moving are operator actions, so they close immediately.
+async fn leave_open_incident(
+	conn: &mut AsyncPgConnection,
+	issue: &Issue,
+	transition_time: Timestamp,
+	by: Option<&str>,
+	check_recovery: bool,
+) -> Result<()> {
+	use crate::schema::{incident_issues, incidents, issues};
+
+	// Must match `open_incident_holding`'s definition of live
+	// membership, incident `closed_at` included: an issue can hold an
+	// unstamped row on a *closed* incident (a close doesn't stamp the
+	// members that never left) at the same time as a live row on an
+	// open one. Filtering on `left_at` alone lets this pick the
+	// stranded row, and the leave then stamps the wrong membership and
+	// weighs `remaining_open` against a long-closed incident —
+	// abandoning the open one with no live members and no Slack
+	// resolve.
+	let open_link: IncidentIssue = incident_issues::table
+		.inner_join(incidents::table.on(incidents::id.eq(incident_issues::incident_id)))
+		.select(IncidentIssue::as_select())
+		.filter(
+			incident_issues::issue_id
+				.eq(issue.id)
+				.and(incident_issues::left_at.is_null())
+				.and(incidents::closed_at.is_null()),
+		)
+		.for_update()
+		.first(conn)
+		.await?;
+
+	// Serialize against concurrent leaves of *other* issues on
+	// the same incident. Without this incident-row lock, two
+	// transactions each removing one of the last two live
+	// issues can each observe remaining_open >= 1 (each sees
+	// its own in-flight left_at update but not the other's)
+	// and skip the close, leaving the incident in "no live
+	// issues but closed_at IS NULL" with no Slack fired.
+	let incident: Incident = incidents::table
+		.select(Incident::as_select())
+		.filter(incidents::id.eq(open_link.incident_id))
+		.for_update()
+		.first(conn)
+		.await?;
+
+	diesel::update(
+		incident_issues::table.filter(
+			incident_issues::incident_id
+				.eq(open_link.incident_id)
+				.and(incident_issues::issue_id.eq(open_link.issue_id))
+				.and(
+					incident_issues::joined_at
+						.eq(jiff_diesel::Timestamp::from(open_link.joined_at)),
+				),
+		),
+	)
+	.set(incident_issues::left_at.eq(jiff_diesel::Timestamp::from(transition_time)))
+	.execute(conn)
+	.await?;
+
+	// Only count contributors that *currently* open an incident
+	// (effective failures). Lesser contributors stay attached for
+	// context but don't hold the incident open on their own.
+	let remaining_open: i64 = incident_issues::table
+		.inner_join(issues::table.on(issues::id.eq(incident_issues::issue_id)))
+		.filter(
+			incident_issues::incident_id
+				.eq(open_link.incident_id)
+				.and(incident_issues::left_at.is_null())
+				.and(issues::effective_result.eq("failed")),
+		)
+		.count()
+		.get_result(conn)
+		.await?;
+	if remaining_open == 0 {
+		// A zero linger window is the operator opting out of lingering.
+		let window = linger_window(conn, IncidentTarget::of_incident(&incident)).await?;
+		if by.is_some() || !check_recovery || window.is_zero() {
+			// Filter on `closed_at IS NULL` so that when a stranded
+			// lesser contributor eventually leaves an already-closed
+			// incident (because the failure-filter close above already
+			// retired it), we skip both the no-op update and the
+			// double Slack resolve.
+			let closed: Option<Incident> = diesel::update(
+				incidents::table
+					.filter(incidents::id.eq(open_link.incident_id))
+					.filter(incidents::closed_at.is_null()),
+			)
+			.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(transition_time)))
+			.returning(Incident::as_select())
+			.get_result(conn)
+			.await
+			.optional()?;
+			if let Some(closed) = closed {
+				release_remaining_members(conn, closed.id, transition_time).await?;
+				enqueue_slack_resolve_inner(conn, &closed, by).await?;
+			}
+		} else {
+			// Start lingering: record when the last effective failure
+			// left. Stamped once — a lesser contributor leaving an
+			// already-lingering incident doesn't move the mark — and
+			// the linger sweep closes the incident when the stamp
+			// outlives the window (see `sweep_lingering_incidents`).
+			diesel::update(
+				incidents::table
+					.filter(incidents::id.eq(open_link.incident_id))
+					.filter(incidents::closed_at.is_null())
+					.filter(incidents::closing_at.is_null()),
+			)
+			.set(incidents::closing_at.eq(jiff_diesel::Timestamp::from(transition_time)))
+			.execute(conn)
+			.await?;
 		}
 	}
 	Ok(())
@@ -2708,6 +2752,7 @@ pub async fn reevaluate_open_issues_for_server(
 		return Ok(());
 	};
 	let monitored = server.is_monitored;
+	let target = IncidentTarget::of_member(gid, server.rank);
 
 	let open_issues: Vec<Issue> = dsl::issues
 		.select(Issue::as_select())
@@ -2719,15 +2764,7 @@ pub async fn reevaluate_open_issues_for_server(
 
 	let now = Timestamp::now();
 	for issue in open_issues {
-		re_evaluate_incident_membership(
-			db,
-			&issue,
-			IncidentTarget::Group(gid),
-			monitored,
-			now,
-			None,
-		)
-		.await?;
+		re_evaluate_incident_membership(db, &issue, target, monitored, now, None).await?;
 	}
 	Ok(())
 }
@@ -2782,6 +2819,7 @@ pub async fn reevaluate_incidents_for_server(
 		return Ok(());
 	};
 	let monitored = server.is_monitored;
+	let target = IncidentTarget::of_member(gid, server.rank);
 
 	let mut candidates: Vec<Issue> = issues::table
 		.select(Issue::as_select())
@@ -2808,15 +2846,7 @@ pub async fn reevaluate_incidents_for_server(
 
 	let now = Timestamp::now();
 	for issue in candidates {
-		re_evaluate_incident_membership(
-			conn,
-			&issue,
-			IncidentTarget::Group(gid),
-			monitored,
-			now,
-			None,
-		)
-		.await?;
+		re_evaluate_incident_membership(conn, &issue, target, monitored, now, None).await?;
 	}
 	Ok(())
 }
@@ -2884,6 +2914,7 @@ pub async fn reevaluate_open_issues_for_server_ref(
 		return Ok(());
 	};
 	let monitored = server.is_monitored;
+	let target = IncidentTarget::of_member(gid, server.rank);
 
 	let open_issues: Vec<Issue> = dsl::issues
 		.select(Issue::as_select())
@@ -2897,15 +2928,7 @@ pub async fn reevaluate_open_issues_for_server_ref(
 
 	let now = Timestamp::now();
 	for issue in open_issues {
-		re_evaluate_incident_membership(
-			db,
-			&issue,
-			IncidentTarget::Group(gid),
-			monitored,
-			now,
-			None,
-		)
-		.await?;
+		re_evaluate_incident_membership(db, &issue, target, monitored, now, None).await?;
 	}
 	Ok(())
 }
@@ -2930,6 +2953,8 @@ pub async fn reevaluate_open_issues_for_machine_ref(
 		return Ok(());
 	};
 	let monitored = machine.is_monitored;
+	let rank = crate::machines::Machine::rank(db, machine_id).await?;
+	let target = IncidentTarget::of_member(gid, rank);
 
 	let open_issues: Vec<Issue> = dsl::issues
 		.select(Issue::as_select())
@@ -2943,15 +2968,7 @@ pub async fn reevaluate_open_issues_for_machine_ref(
 
 	let now = Timestamp::now();
 	for issue in open_issues {
-		re_evaluate_incident_membership(
-			db,
-			&issue,
-			IncidentTarget::Group(gid),
-			monitored,
-			now,
-			None,
-		)
-		.await?;
+		re_evaluate_incident_membership(db, &issue, target, monitored, now, None).await?;
 	}
 	Ok(())
 }
@@ -2989,29 +3006,11 @@ pub async fn reevaluate_open_issues_for_group_ref(
 		.await?;
 
 	let now = Timestamp::now();
-	// Servers in the same group all share the same `monitored` only by
-	// coincidence; look each up so the re-evaluation sees current state.
-	let mut monitored_by_server: std::collections::HashMap<Uuid, bool> =
-		std::collections::HashMap::new();
-	for sid in &server_ids {
-		let s = Application::get_by_id(db, *sid).await?;
-		monitored_by_server.insert(*sid, s.is_monitored);
-	}
 	for issue in open_issues {
-		// Group-scoped issues bypass the per-server monitored gate.
-		let monitored = match issue.application_id {
-			Some(sid) => monitored_by_server.get(&sid).copied().unwrap_or(true),
-			None => true,
+		let Some((target, monitored)) = issue_target_and_monitored(db, &issue).await? else {
+			continue;
 		};
-		re_evaluate_incident_membership(
-			db,
-			&issue,
-			IncidentTarget::Group(server_group_id),
-			monitored,
-			now,
-			None,
-		)
-		.await?;
+		re_evaluate_incident_membership(db, &issue, target, monitored, now, None).await?;
 	}
 	Ok(())
 }
@@ -3019,8 +3018,9 @@ pub async fn reevaluate_open_issues_for_group_ref(
 /// Re-evaluate every currently-open issue on a scope against incident
 /// membership: one server's, or a whole group's plus the group's own. Used
 /// when something about the target changes what counts, rather than
-/// something about one check — currently a maintenance window being
-/// declared over it (see [`crate::maintenance_windows`]).
+/// something about one check: a maintenance window declared over it (see
+/// [`crate::maintenance_windows`]), or a rank change moving which
+/// environment its issues belong to.
 ///
 /// `by` attributes an incident that closes as a result, so the notice says
 /// what happened instead of reading as the trouble having passed.
@@ -3086,32 +3086,18 @@ pub async fn reevaluate_open_issues_for_scope(
 	};
 	let open_issues: Vec<Issue> = query.load(db).await?;
 
-	let mut monitored: std::collections::HashMap<Uuid, bool> = std::collections::HashMap::new();
-	for aid in &application_ids {
-		let application = Application::get_by_id(db, *aid).await?;
-		monitored.insert(*aid, application.is_monitored);
-	}
-	for mid in &machine_ids {
-		let machine = crate::machines::Machine::get_by_id(db, *mid).await?;
-		monitored.insert(*mid, machine.is_monitored);
-	}
-
 	let now = Timestamp::now();
 	for issue in open_issues {
-		// A group-scoped issue answers to no target's monitoring gate.
-		let monitored = match (issue.application_id, issue.machine_id) {
-			(Some(aid), _) => monitored.get(&aid).copied().unwrap_or(true),
-			(None, Some(mid)) => monitored.get(&mid).copied().unwrap_or(true),
-			(None, None) => true,
+		let Some((target, monitored)) = issue_target_and_monitored(db, &issue).await? else {
+			continue;
 		};
-		re_evaluate_incident_membership(db, &issue, IncidentTarget::Group(gid), monitored, now, by)
-			.await?;
+		re_evaluate_incident_membership(db, &issue, target, monitored, now, by).await?;
 	}
 	Ok(())
 }
 
-/// Re-evaluate every currently-open issue across every server in the
-/// database against incident membership. Intended as a startup pass for
+/// Re-evaluate every currently-open issue in the database against incident
+/// membership. Intended as a startup pass for
 /// background workers: if the rules around incident eligibility change
 /// in code (or a migration silently bumped state the running code now
 /// reads differently — see PR #170), this drives the actual incident
@@ -3127,8 +3113,8 @@ pub async fn reevaluate_open_issues_for_scope(
 /// transaction's lifetime — fine at canopy's scale (hundreds of open
 /// issues at most) but worth keeping in mind if the corpus grows.
 ///
-/// Returns `(servers_walked, issues_evaluated)` for the caller to log.
-pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usize, usize)> {
+/// Returns the number of issues evaluated, for the caller to log.
+pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<usize> {
 	use crate::schema::issues::dsl;
 
 	db.transaction::<_, AppError, _>(async |conn| {
@@ -3139,116 +3125,18 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 			.load(conn)
 			.await?;
 
-		if open_issues.is_empty() {
-			return Ok((0, 0));
-		}
-
-		let server_ids: Vec<Uuid> = {
-			let mut s: std::collections::HashSet<Uuid> = open_issues
-				.iter()
-				.filter_map(|i| i.application_id)
-				.collect();
-			s.drain().collect()
-		};
-		let applications = Application::get_by_ids(conn, &server_ids).await?;
-		let by_id: std::collections::HashMap<Uuid, Application> =
-			applications.into_iter().map(|s| (s.id, s)).collect();
-
-		let machine_ids: Vec<Uuid> = {
-			let mut s: std::collections::HashSet<Uuid> =
-				open_issues.iter().filter_map(|i| i.machine_id).collect();
-			s.drain().collect()
-		};
-		let machines_by_id: std::collections::HashMap<Uuid, crate::machines::Machine> =
-			crate::machines::Machine::get_by_ids(conn, &machine_ids)
-				.await?
-				.into_iter()
-				.map(|m| (m.id, m))
-				.collect();
-
 		let now = Timestamp::now();
 		let mut evaluated = 0usize;
 		for issue in open_issues {
-			// Classify via the shared scope vocabulary, but resolve the
-			// server case from the batched `by_id` map (rather than
-			// `Scope::resolve_incident_target`, which queries per issue) to
-			// keep this startup sweep to a single server fetch.
-			match Scope::from_columns(
-				issue.application_id,
-				issue.machine_id,
-				issue.server_group_id,
-			) {
-				// Group-scoped issue: resolve its group directly, bypass the
-				// per-server is_monitored gate (monitored = true).
-				Scope::Group(gid) => {
-					re_evaluate_incident_membership(
-						conn,
-						&issue,
-						IncidentTarget::Group(gid),
-						true,
-						now,
-						None,
-					)
-					.await?;
-					evaluated += 1;
-				}
-				// Application-scoped issue: look up the server and its group.
-				Scope::Application(sid) => {
-					let Some(server) = by_id.get(&sid) else {
-						continue;
-					};
-					let Some(gid) = server.group_id else {
-						// Ungrouped applications can't have incidents; nothing to reconcile.
-						continue;
-					};
-					re_evaluate_incident_membership(
-						conn,
-						&issue,
-						IncidentTarget::Group(gid),
-						server.is_monitored,
-						now,
-						None,
-					)
-					.await?;
-					evaluated += 1;
-				}
-				// Machine-scoped issue: look up the machine and its group,
-				// carrying the machine's own monitoring switch.
-				Scope::Machine(mid) => {
-					let Some(machine) = machines_by_id.get(&mid) else {
-						continue;
-					};
-					let Some(gid) = machine.group_id else {
-						// Ungrouped machines can't have incidents either.
-						continue;
-					};
-					re_evaluate_incident_membership(
-						conn,
-						&issue,
-						IncidentTarget::Group(gid),
-						machine.is_monitored,
-						now,
-						None,
-					)
-					.await?;
-					evaluated += 1;
-				}
-				// Canopy-wide issue: the global target, always monitored.
-				Scope::Global => {
-					re_evaluate_incident_membership(
-						conn,
-						&issue,
-						IncidentTarget::Global,
-						true,
-						now,
-						None,
-					)
-					.await?;
-					evaluated += 1;
-				}
-			}
+			// An ungrouped application or machine has no target, so there is
+			// nothing to reconcile for it.
+			let Some((target, monitored)) = issue_target_and_monitored(conn, &issue).await? else {
+				continue;
+			};
+			re_evaluate_incident_membership(conn, &issue, target, monitored, now, None).await?;
+			evaluated += 1;
 		}
-		Ok((by_id.len(), evaluated))
+		Ok(evaluated)
 	})
 	.await
 }
@@ -3374,40 +3262,47 @@ async fn release_remaining_members(
 	Ok(())
 }
 
-/// Is this issue currently a live member of an incident that is still open?
+/// The still-open incident this issue is currently a live member of, if any.
 ///
-/// Both halves matter. `left_at IS NULL` alone is not membership in an *open*
-/// incident: closing an incident doesn't stamp `left_at` on the members that
-/// never left (a sub-failure contributor is held attached for context, and
-/// the close paths only touch the `incidents` row), so those rows outlive
-/// their incident. Counting them made a stranded issue look permanently
-/// attached, and `re_evaluate_incident_membership` then read `was_in = true`
-/// for an issue with nothing open — landing every subsequent effective
-/// failure in the no-op arm instead of opening an incident. The server went
-/// red with nothing paging, permanently, since no later event could clear the
-/// stale row.
-async fn is_issue_in_open_incident(db: &mut AsyncPgConnection, issue_id: Uuid) -> Result<bool> {
+/// Both halves of the filter matter. `left_at IS NULL` alone is not membership
+/// in an *open* incident: closing an incident doesn't stamp `left_at` on the
+/// members that never left (a sub-failure contributor is held attached for
+/// context, and the close paths only touch the `incidents` row), so those rows
+/// outlive their incident. Counting them made a stranded issue look
+/// permanently attached, and `re_evaluate_incident_membership` then read it as
+/// a member with nothing open — landing every subsequent effective failure in
+/// the no-op arm instead of opening an incident. The server went red with
+/// nothing paging, permanently, since no later event could clear the stale
+/// row.
+async fn open_incident_holding(
+	db: &mut AsyncPgConnection,
+	issue_id: Uuid,
+) -> Result<Option<Incident>> {
 	use crate::schema::{incident_issues, incidents};
 
-	let count: i64 = incident_issues::table
+	incident_issues::table
 		.inner_join(incidents::table.on(incidents::id.eq(incident_issues::incident_id)))
+		.select(Incident::as_select())
 		.filter(
 			incident_issues::issue_id
 				.eq(issue_id)
 				.and(incident_issues::left_at.is_null())
 				.and(incidents::closed_at.is_null()),
 		)
-		.count()
-		.get_result(db)
-		.await?;
-	Ok(count > 0)
+		.first(db)
+		.await
+		.optional()
+		.map_err(AppError::from)
 }
 
-/// What an issue's incident contribution attaches to: its server's group,
-/// or canopy as a whole for canopy-wide issues (self-alerts). Issues on
-/// ungrouped applications have no target and no incident path.
+/// What an issue's incident contribution attaches to: one of a group's
+/// environments, the group itself, or canopy as a whole for canopy-wide
+/// issues (self-alerts). Issues on ungrouped applications and machines have
+/// no target and no incident path.
+// spec: INC#targets
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IncidentTarget {
+	Environment(Uuid, ServerRank),
 	Group(Uuid),
 	Global,
 }
@@ -3416,16 +3311,36 @@ impl IncidentTarget {
 	/// The `incidents.server_group_id` value for this target.
 	fn group_id(self) -> Option<Uuid> {
 		match self {
-			Self::Group(gid) => Some(gid),
+			Self::Environment(gid, _) | Self::Group(gid) => Some(gid),
 			Self::Global => None,
+		}
+	}
+
+	/// The `incidents.rank` value for this target.
+	fn rank(self) -> Option<ServerRank> {
+		match self {
+			Self::Environment(_, rank) => Some(rank),
+			Self::Group(_) | Self::Global => None,
 		}
 	}
 
 	/// The target an existing incident row belongs to.
 	pub fn of_incident(incident: &Incident) -> Self {
-		match incident.server_group_id {
-			Some(gid) => Self::Group(gid),
-			None => Self::Global,
+		match (incident.server_group_id, incident.rank) {
+			(Some(gid), Some(rank)) => Self::Environment(gid, rank),
+			(Some(gid), None) => Self::Group(gid),
+			(None, _) => Self::Global,
+		}
+	}
+
+	/// The target a member of `group_id` carrying `rank` contributes to: the
+	/// environment its rank names, and the group itself where it carries none,
+	/// there being no environment for it to be in.
+	// spec: INC#targets
+	pub fn of_member(group_id: Uuid, rank: Option<ServerRank>) -> Self {
+		match rank {
+			Some(rank) => Self::Environment(group_id, rank),
+			None => Self::Group(group_id),
 		}
 	}
 }
@@ -3438,7 +3353,12 @@ async fn target_has_open_incident(
 
 	let mut q = dsl::incidents.filter(dsl::closed_at.is_null()).into_boxed();
 	q = match target {
-		IncidentTarget::Group(gid) => q.filter(dsl::server_group_id.eq(gid)),
+		IncidentTarget::Environment(gid, rank) => q
+			.filter(dsl::server_group_id.eq(gid))
+			.filter(dsl::rank.eq(rank)),
+		IncidentTarget::Group(gid) => q
+			.filter(dsl::server_group_id.eq(gid))
+			.filter(dsl::rank.is_null()),
 		IncidentTarget::Global => q.filter(dsl::server_group_id.is_null()),
 	};
 	let count: i64 = q.count().get_result(db).await?;
@@ -3471,7 +3391,9 @@ async fn target_has_open_incident(
 async fn lock_target(db: &mut AsyncPgConnection, target: IncidentTarget) -> Result<()> {
 	use crate::schema::server_groups;
 	match target {
-		IncidentTarget::Group(gid) => {
+		// One lock per group, so a group's own target and its environments'
+		// serialise against each other as well as against themselves.
+		IncidentTarget::Environment(gid, _) | IncidentTarget::Group(gid) => {
 			let _group_lock: Uuid = server_groups::table
 				.select(server_groups::id)
 				.filter(server_groups::id.eq(gid))
@@ -3504,7 +3426,12 @@ async fn find_or_open_incident(
 		.filter(incidents::closed_at.is_null())
 		.into_boxed();
 	q = match target {
-		IncidentTarget::Group(gid) => q.filter(incidents::server_group_id.eq(gid)),
+		IncidentTarget::Environment(gid, rank) => q
+			.filter(incidents::server_group_id.eq(gid))
+			.filter(incidents::rank.eq(rank)),
+		IncidentTarget::Group(gid) => q
+			.filter(incidents::server_group_id.eq(gid))
+			.filter(incidents::rank.is_null()),
 		IncidentTarget::Global => q.filter(incidents::server_group_id.is_null()),
 	};
 	let open: Option<Incident> = q
@@ -3519,6 +3446,7 @@ async fn find_or_open_incident(
 	let new_incident: Incident = diesel::insert_into(incidents::table)
 		.values((
 			incidents::server_group_id.eq(target.group_id()),
+			incidents::rank.eq(target.rank()),
 			incidents::opened_at.eq(jiff_diesel::Timestamp::from(opened_at)),
 		))
 		.returning(Incident::as_select())
@@ -3542,7 +3470,9 @@ async fn linger_window(
 	target: IncidentTarget,
 ) -> Result<SignedDuration> {
 	Ok(match target {
-		IncidentTarget::Group(gid) => ServerGroup::get_by_id(conn, gid).await?.slack_close_delay.0,
+		IncidentTarget::Environment(gid, _) | IncidentTarget::Group(gid) => {
+			ServerGroup::get_by_id(conn, gid).await?.slack_close_delay.0
+		}
 		IncidentTarget::Global => GLOBAL_CLOSE_GRACE,
 	})
 }
@@ -3554,14 +3484,14 @@ async fn enqueue_slack_open(
 	issue: &Issue,
 ) -> Result<()> {
 	let (label, open_delay) = match target {
-		IncidentTarget::Group(gid) => {
+		IncidentTarget::Environment(gid, _) | IncidentTarget::Group(gid) => {
 			let group = ServerGroup::get_by_id(conn, gid).await?;
 			let server = match issue.application_id {
 				Some(sid) => Some(Application::get_by_id(conn, sid).await?),
 				None => None,
 			};
 			(
-				format_group_label(&group, server.as_ref()),
+				format_group_label(&group, target.rank(), server.as_ref()),
 				group.slack_open_delay.0,
 			)
 		}
@@ -3676,7 +3606,7 @@ async fn enqueue_slack_resolve_inner(
 	let label = match incident.server_group_id {
 		Some(gid) => {
 			let group = ServerGroup::get_by_id(conn, gid).await?;
-			format_group_label(&group, None)
+			format_group_label(&group, incident.rank, None)
 		}
 		None => "Canopy".to_string(),
 	};
@@ -3694,7 +3624,18 @@ async fn enqueue_slack_resolve_inner(
 	Ok(())
 }
 
-pub(crate) fn format_group_label(group: &ServerGroup, server: Option<&Application>) -> String {
+/// How an incident's target reads in a notification: the environment it is on,
+/// and the application the issue was filed against where there is one.
+// spec: INC#notification
+pub(crate) fn format_group_label(
+	group: &ServerGroup,
+	rank: Option<ServerRank>,
+	server: Option<&Application>,
+) -> String {
+	let group_name = match rank {
+		Some(rank) => crate::server_groups::environment_name(&group.name, rank),
+		None => group.name.clone(),
+	};
 	if let Some(server) = server {
 		let host = server.host.as_ref().map(|h| h.0.to_string());
 		let server_part = match (&server.name, host) {
@@ -3703,9 +3644,9 @@ pub(crate) fn format_group_label(group: &ServerGroup, server: Option<&Applicatio
 			(_, Some(h)) => h,
 			(_, None) => server.id.to_string(),
 		};
-		format!("{} · {}", group.name, server_part)
+		format!("{group_name} · {server_part}")
 	} else {
-		group.name.clone()
+		group_name
 	}
 }
 
@@ -4408,10 +4349,11 @@ impl Incident {
 }
 
 impl Incident {
-	/// Incidents are owned by the server's group, so a caller asking for a
-	/// specific server's incidents really wants the group's. Look up the
-	/// server's `group_id` and list incidents on that group; ungrouped
-	/// applications return an empty Vec.
+	/// An incident is owned by the environment an application is in, so a
+	/// caller asking for one application's incidents wants that
+	/// environment's, and the group's own where the application belongs to no
+	/// environment. Ungrouped applications return an empty Vec.
+	// spec: INC#targets
 	pub async fn list_for_server(
 		db: &mut AsyncPgConnection,
 		application_id: Uuid,
@@ -4420,12 +4362,14 @@ impl Incident {
 	) -> Result<Vec<Self>> {
 		use crate::schema::incidents::dsl;
 
-		let Some(gid) = Application::get_by_id(db, application_id).await?.group_id else {
+		let application = Application::get_by_id(db, application_id).await?;
+		let Some(gid) = application.group_id else {
 			return Ok(Vec::new());
 		};
 		let mut q = dsl::incidents
 			.select(Self::as_select())
 			.filter(dsl::server_group_id.eq(gid))
+			.filter(dsl::rank.is_not_distinct_from(application.rank))
 			.into_boxed();
 		if !include_closed {
 			q = q.filter(dsl::closed_at.is_null());

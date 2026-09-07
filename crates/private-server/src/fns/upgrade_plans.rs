@@ -5,7 +5,11 @@ use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
-use database::upgrade_plans::{PlanOutcome, PlannedWhen, UpgradePlan};
+use commons_types::server::rank::ServerRank;
+use database::{
+	server_groups::ServerGroup,
+	upgrade_plans::{PlanOutcome, PlannedWhen, UpgradePlan},
+};
 use jiff::{Timestamp, Zoned, civil::Date, civil::Time};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -28,25 +32,36 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(withdraw))
 }
 
-/// One row of the planned-upgrades view.
+/// One row of the planned-upgrades view: one of a group's environments.
 #[derive(Serialize, ToSchema)]
 pub struct PlannedUpgrade {
 	/// The group this concerns.
 	pub group_id: Uuid,
 	/// Its name, so the view reads without a second lookup.
 	pub group_name: String,
-	/// The version the group runs now, where it has reported one.
+	/// The rank of the environment this concerns: the group's applications at
+	/// that rank.
+	pub rank: ServerRank,
+	/// Whether this is the group's highest-ranked environment, the one the
+	/// group's own version is read from.
+	pub headline: bool,
+	/// The version the environment runs now, where it has reported one.
 	pub current_version: Option<String>,
-	/// The plan, absent for a group with none.
+	/// How far that is behind the newest published version, as majors times a
+	/// thousand plus minors. Zero where it is current; `null` where it has
+	/// reported no version.
+	pub behind: Option<u64>,
+	/// The plan, absent for an environment with none.
 	pub plan: Option<UpgradePlan>,
 	/// The plan's target as semver.
 	pub target_version: Option<String>,
 	/// Whether the planned date has passed without the upgrade happening.
 	/// Presentational: a slipping upgrade is normal operational reality.
 	pub late: bool,
-	/// Where the group's data stands against the planned version, rolled up from
-	/// its applications: any failure makes the group a failure, since one server
-	/// whose data breaks is enough to stop the upgrade. `null` without a plan.
+	/// Where the environment's data stands against the planned version, rolled
+	/// up from its applications: any failure makes the environment a failure,
+	/// since one application whose data breaks is enough to stop the upgrade.
+	/// `null` without a plan.
 	pub verdict: Option<String>,
 	/// Whether a restore attempt is under way, carried beside the verdict rather
 	/// than folded into it: a restore takes hours, so a group mid-test would
@@ -61,9 +76,9 @@ pub struct PlannedUpgrade {
 
 /// Planned upgrades across the fleet.
 ///
-/// Every live group, whether or not it has a plan. A group several minors
-/// behind with no plan is the thing this view exists to surface, so it is listed
-/// rather than omitted.
+/// Every environment of every live group, whether or not it has a plan. A
+/// group several minors behind with no plan is the thing this view exists to
+/// surface, so its environments are listed rather than omitted.
 // spec: UPG#the-dashboard
 #[utoipa::path(
 	post,
@@ -72,7 +87,7 @@ pub struct PlannedUpgrade {
 	tag = "upgrade_plans",
 	security(("tailscale-admin" = [])),
 	responses(
-		(status = 200, description = "One row per live group.", body = Vec<PlannedUpgrade>),
+		(status = 200, description = "One row per environment of each live group.", body = Vec<PlannedUpgrade>),
 		(status = 401, body = ProblemDetailsSchema),
 		(status = 403, body = ProblemDetailsSchema),
 	),
@@ -87,51 +102,131 @@ pub async fn fleet(
 	let today = Zoned::now().date();
 	let now_ts = jiff::Timestamp::now();
 
+	let groups = ServerGroup::list_all(&mut conn).await?;
+	let ids: Vec<Uuid> = groups.iter().map(|group| group.id).collect();
+	let names: HashMap<Uuid, String> = groups
+		.into_iter()
+		.map(|group| (group.id, group.name))
+		.collect();
+	let mut open: HashMap<(Uuid, ServerRank), UpgradePlan> = UpgradePlan::all_open(&mut conn)
+		.await?
+		.into_iter()
+		.map(|plan| ((plan.group_id, plan.rank), plan))
+		.collect();
+	let mut attempts: HashMap<Uuid, Option<crate::fns::migration_tests::AttemptState>> =
+		HashMap::new();
+	let mut members: HashMap<Uuid, Vec<database::applications::Application>> = HashMap::new();
+	let newest = database::versions::Version::get_all(&mut conn)
+		.await?
+		.into_iter()
+		.next()
+		.map(|version| version.as_semver());
+	let headline = ServerGroup::highest_member_ranks(&mut conn, &ids).await?;
+	// Including drafts: a target yanked since the plan was recorded still has to
+	// render as the version the environment is going to.
+	let versions: HashMap<Uuid, String> =
+		database::versions::Version::get_all_including_drafts(&mut conn)
+			.await?
+			.into_iter()
+			.map(|version| (version.id, version.as_semver().to_string()))
+			.collect();
+
+	let mut environments = ServerGroup::environments(&mut conn, &ids).await?;
+	// A plan whose environment has no live application any more still says
+	// where the group was going, and this view is the only place it can be
+	// withdrawn.
+	for ((group_id, rank), _) in open.iter() {
+		if names.contains_key(group_id)
+			&& !environments
+				.iter()
+				.any(|env| env.group_id == *group_id && env.rank == *rank)
+		{
+			environments.push(database::server_groups::Environment {
+				group_id: *group_id,
+				rank: *rank,
+				headline: false,
+				version: None,
+			});
+		}
+	}
+
 	let mut out = Vec::new();
-	for group in database::server_groups::ServerGroup::list_all(&mut conn).await? {
-		let plan = UpgradePlan::open_for_group(&mut conn, group.id).await?;
-		let target = match &plan {
-			Some(plan) => Some(
-				database::upgrade_plans::target_version_str(&mut conn, plan)
-					.await?
-					.to_string(),
-			),
-			None => None,
-		};
+	for env in environments {
+		let plan = open.remove(&(env.group_id, env.rank));
+		let target = plan
+			.as_ref()
+			.and_then(|plan| versions.get(&plan.target_version_id).cloned());
 		let late = plan
 			.as_ref()
 			.is_some_and(|plan| database::upgrade_plans::is_late(plan, today));
 
-		// The plan says where the group is going; the verdict says whether its
-		// data survives getting there. Pairing them is what makes this view
+		// The plan says where the environment is going; the verdict says whether
+		// its data survives getting there. Pairing them is what makes this view
 		// worth reading.
 		let verdict = match &plan {
 			None => None,
 			Some(_) => {
+				if !members.contains_key(&env.group_id) {
+					let live = database::applications::Application::list_live_in_group(
+						&mut conn,
+						env.group_id,
+					)
+					.await?;
+					members.insert(env.group_id, live);
+				}
+				// An unranked member belongs to the group's headline environment.
+				let applications: Vec<_> = members[&env.group_id]
+					.iter()
+					.filter(|application| {
+						application
+							.rank
+							.or_else(|| headline.get(&env.group_id).copied())
+							== Some(env.rank)
+					})
+					.cloned()
+					.collect();
 				let per_server =
-					database::migration_tests::verdicts_for_group(&mut conn, group.id).await?;
+					database::migration_tests::verdicts(&mut conn, applications).await?;
 				Some(roll_up(&per_server).to_owned())
 			}
 		};
 
 		let testable = match &plan {
 			None => None,
-			Some(_) => Some(database::restore::group_migrates(&mut conn, group.id).await?),
+			Some(_) => Some(
+				database::restore::environment_migrates(&mut conn, env.group_id, env.rank).await?,
+			),
 		};
 
 		// Issuances carry no intent, so another intent's restore traffic would
-		// read as a test under way.
+		// read as a test under way. They carry no rank either, so an attempt is
+		// the group's.
 		let attempt = match testable {
-			Some(true) => {
-				crate::fns::migration_tests::attempt_state(&mut conn, group.id, now_ts).await?
-			}
+			Some(true) => match attempts.get(&env.group_id) {
+				Some(attempt) => *attempt,
+				None => {
+					let attempt =
+						crate::fns::migration_tests::attempt_state(&mut conn, env.group_id, now_ts)
+							.await?;
+					attempts.insert(env.group_id, attempt);
+					attempt
+				}
+			},
 			_ => None,
 		};
 
+		let behind = env
+			.version
+			.as_ref()
+			.zip(newest.as_ref())
+			.map(|(current, latest)| database::statuses::version_distance(&current.0, latest));
 		out.push(PlannedUpgrade {
-			group_id: group.id,
-			group_name: group.name,
-			current_version: group.effective_version.map(|v| v.to_string()),
+			group_id: env.group_id,
+			group_name: names.get(&env.group_id).cloned().unwrap_or_default(),
+			rank: env.rank,
+			headline: env.headline,
+			current_version: env.version.map(|v| v.to_string()),
+			behind,
 			plan,
 			target_version: target,
 			late,
@@ -288,8 +383,17 @@ pub struct PlannableVersion {
 	pub ready: bool,
 }
 
-/// The versions a group could be planned onto: published, and ahead of what it
-/// runs.
+/// Request body for the versions an environment could be planned onto.
+#[derive(Deserialize, ToSchema)]
+pub struct TargetsArgs {
+	/// The group.
+	pub group_id: Uuid,
+	/// The rank of the environment within it.
+	pub rank: ServerRank,
+}
+
+/// The versions an environment could be planned onto: published, and ahead of
+/// what it runs.
 ///
 /// Offering only valid targets is what keeps the operator from picking one
 /// `record` would refuse.
@@ -300,7 +404,7 @@ pub struct PlannableVersion {
 	operation_id = "upgrade_plans_targets",
 	tag = "upgrade_plans",
 	security(("tailscale-admin" = [])),
-	request_body = PlansForGroupArgs,
+	request_body = TargetsArgs,
 	responses(
 		(status = 200, description = "Plannable versions, newest first.", body = Vec<PlannableVersion>),
 		(status = 401, body = ProblemDetailsSchema),
@@ -310,12 +414,18 @@ pub struct PlannableVersion {
 pub async fn targets(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
-	Json(args): Json<PlansForGroupArgs>,
+	Json(args): Json<TargetsArgs>,
 ) -> Result<Json<Vec<PlannableVersion>>> {
 	let mut conn = state.db.get().await?;
-	let running = database::server_groups::ServerGroup::get_by_id(&mut conn, args.group_id)
-		.await?
-		.effective_version;
+	let group = ServerGroup::get_by_id(&mut conn, args.group_id).await?;
+	let Some(environment) = ServerGroup::environment(&mut conn, args.group_id, args.rank).await?
+	else {
+		return Err(commons_errors::AppError::BadRequest(format!(
+			"{} has no {} environment",
+			group.name, args.rank
+		)));
+	};
+	let running = environment.version;
 
 	// get_all is already newest-first; keep that for the picker.
 	let ahead: Vec<database::versions::Version> = database::versions::Version::get_all(&mut conn)
@@ -348,8 +458,10 @@ pub async fn targets(
 /// Request body for recording where a group is going.
 #[derive(Deserialize, ToSchema)]
 pub struct RecordArgs {
-	/// The group that intends to move.
+	/// The group whose environment intends to move.
 	pub group_id: Uuid,
+	/// The rank of the environment within it that intends to move.
+	pub rank: ServerRank,
 	/// The published version it intends to move to.
 	pub target_version_id: Uuid,
 	/// The day it is expected to happen, as `YYYY-MM-DD`. Optional.
@@ -370,10 +482,10 @@ pub struct RecordArgs {
 	pub note: Option<String>,
 }
 
-/// Record where a group is going, retiring any plan it already had.
+/// Record where an environment is going, retiring any plan it already had.
 ///
-/// A group goes one place next, so this replaces rather than queues. The target
-/// must be published and ahead of what the group runs.
+/// An environment goes one place next, so this replaces rather than queues. The
+/// target must be published and ahead of what the environment runs.
 // spec: UPG#a-plan
 #[utoipa::path(
 	post,
@@ -384,7 +496,7 @@ pub struct RecordArgs {
 	request_body = RecordArgs,
 	responses(
 		(status = 200, description = "The recorded plan.", body = UpgradePlan),
-		(status = 400, description = "The target is unpublished, or not ahead of the group.", body = ProblemDetailsSchema),
+		(status = 400, description = "The target is unpublished, or not ahead of the environment.", body = ProblemDetailsSchema),
 		(status = 401, body = ProblemDetailsSchema),
 		(status = 403, body = ProblemDetailsSchema),
 	),
@@ -403,6 +515,7 @@ pub async fn record(
 	let plan = UpgradePlan::record(
 		&mut conn,
 		args.group_id,
+		args.rank,
 		args.target_version_id,
 		PlannedWhen {
 			date: args.planned_for,

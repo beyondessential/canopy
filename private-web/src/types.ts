@@ -172,6 +172,19 @@ export function isIncidentLingering(
 ): boolean {
 	return incident.closed_at == null && incident.lingering_since != null;
 }
+/// How an incident's target reads: the group's name for a production
+/// environment and for the group itself, and the group's name with the rank
+/// after it for every other environment.
+/// spec: INC#notification
+export function incidentTargetName(
+	incident: Pick<IncidentData, "server_group_name" | "rank">,
+): string {
+	if (incident.rank == null || incident.rank === "production") {
+		return incident.server_group_name;
+	}
+	return `${incident.server_group_name} ${incident.rank}`;
+}
+
 export type IncidentIssueData = Solidify<Schemas["IncidentIssueData"]>;
 export type IncidentWithIssues = Solidify<Schemas["IncidentWithIssues"]>;
 export type IssueNoteData = Solidify<Schemas["IssueNoteData"]>;

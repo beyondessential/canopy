@@ -9,7 +9,10 @@ import {
 	Stack,
 	Tooltip,
 	Typography,
+	useTheme,
+	type Theme,
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import BarChartIcon from "@mui/icons-material/BarChart";
 import PersonIcon from "@mui/icons-material/Person";
 import { useMemo } from "react";
@@ -31,6 +34,8 @@ import {
 	type AggregatedOperator,
 	type FacilityServerStatus,
 	type ServerGroupCard,
+	type ServerRank,
+	SERVER_RANK_ORDER,
 	aggregateOperators,
 	compareServersByRankThenType,
 	groupServersByRank,
@@ -46,6 +51,40 @@ import {
 /// Drives the error/warning/info colouring on the Status page and elsewhere.
 export type IncidentLoudness = "held" | "loud" | "lingering";
 
+/// Loudest first, for rolling several of a group's incidents into one mark.
+const LOUDNESS_ORDER: IncidentLoudness[] = ["loud", "held", "lingering"];
+
+/// A group's open incidents by target: one entry per environment in trouble,
+/// and `null` for the group's own.
+type GroupIncidents = Map<ServerRank | null, IncidentLoudness>;
+
+function loudest(incidents: GroupIncidents | null): IncidentLoudness | null {
+	let worst: IncidentLoudness | null = null;
+	for (const loudness of incidents?.values() ?? []) {
+		if (
+			worst == null ||
+			LOUDNESS_ORDER.indexOf(loudness) < LOUDNESS_ORDER.indexOf(worst)
+		) {
+			worst = loudness;
+		}
+	}
+	return worst;
+}
+
+/// A group's incidents in reading order: its environments highest rank first,
+/// the group's own last.
+function incidentTargets(
+	incidents: GroupIncidents | null,
+): Array<[ServerRank | null, IncidentLoudness]> {
+	const order: Array<ServerRank | null> = [...SERVER_RANK_ORDER, null];
+	const targets: Array<[ServerRank | null, IncidentLoudness]> = [];
+	for (const rank of order) {
+		const loudness = incidents?.get(rank);
+		if (loudness) targets.push([rank, loudness]);
+	}
+	return targets;
+}
+
 export default function Status() {
 	usePageTitle("Status");
 	const tick = useReloadInterval(60_000, "canopy-reload-status");
@@ -56,25 +95,31 @@ export default function Status() {
 	// rather than asserting a held state we can't verify. The 60s tick
 	// re-evaluates this naturally.
 	const now = Date.now();
-	const openIncidentGroups = new Map<string, IncidentLoudness>(
-		incidents.status === "ok"
-			? incidents.data
-					// Canopy-wide incidents (no group) surface via the
-					// self-alerts banner, not the group cards.
-					.filter((i) => i.server_group_id != null)
-					.map((i): [string, IncidentLoudness] => [
-						i.server_group_id as string,
-						// Lingering wins: the group is currently green, so
-						// painting it red/yellow would overstate the trouble.
-						isIncidentLingering(i)
-							? "lingering"
-							: i.notification_held_until &&
-									Date.parse(i.notification_held_until) > now
-								? "held"
-								: "loud",
-					])
-			: [],
-	);
+	const openIncidentGroups = new Map<string, GroupIncidents>();
+	if (incidents.status === "ok") {
+		for (const i of incidents.data) {
+			// Canopy-wide incidents (no group) surface via the self-alerts
+			// banner, not the group cards.
+			if (i.server_group_id == null) continue;
+			// Lingering wins over held and loud for one incident: it is
+			// currently green, so painting it red/yellow would overstate the
+			// trouble.
+			const loudness: IncidentLoudness = isIncidentLingering(i)
+				? "lingering"
+				: i.notification_held_until &&
+						Date.parse(i.notification_held_until) > now
+					? "held"
+					: "loud";
+			// A group holds one open incident per environment plus its own, and
+			// the card marks each of them on the row it belongs to.
+			let byRank = openIncidentGroups.get(i.server_group_id);
+			if (byRank == null) {
+				byRank = new Map();
+				openIncidentGroups.set(i.server_group_id, byRank);
+			}
+			byRank.set(i.rank ?? null, loudness);
+		}
+	}
 	return (
 		<Stack spacing={3}>
 			<ReleaseSummary tick={tick} />
@@ -151,7 +196,7 @@ function GroupCards({
 	openIncidentGroups,
 }: {
 	tick: number;
-	openIncidentGroups: Map<string, IncidentLoudness>;
+	openIncidentGroups: Map<string, GroupIncidents>;
 }) {
 	const groups = useApi("statuses", "group_ids", {}, [tick]);
 
@@ -196,7 +241,7 @@ function GroupCards({
 					key={id}
 					groupId={id}
 					tick={tick}
-					openIncident={openIncidentGroups.get(id) ?? null}
+					incidents={openIncidentGroups.get(id) ?? null}
 				/>
 			))}
 		</Box>
@@ -206,11 +251,11 @@ function GroupCards({
 function GroupCardLoader({
 	groupId,
 	tick,
-	openIncident,
+	incidents,
 }: {
 	groupId: string;
 	tick: number;
-	openIncident: IncidentLoudness | null;
+	incidents: GroupIncidents | null;
 }) {
 	const result = useApi(
 		"statuses",
@@ -219,19 +264,16 @@ function GroupCardLoader({
 		[groupId, tick],
 	);
 
+	// The border takes the loudest of the group's environments: a card has to
+	// catch the eye across the grid before its rank rows can say which one.
+	//
 	// Held incidents tone the border down to warning so an operator can see
 	// at a glance "yes there's a thing, but Slack hasn't been told yet — it
 	// might still self-resolve". Lingering incidents tone down further to
 	// info: everything has recovered and the incident is just waiting out
 	// its linger window. Loud incidents stay full red.
-	const borderColor =
-		openIncident === "loud"
-			? "error.main"
-			: openIncident === "held"
-				? "warning.main"
-				: openIncident === "lingering"
-					? "info.main"
-					: undefined;
+	const worst = loudest(incidents);
+	const borderColor = worst ? `${TONE[worst]}.main` : undefined;
 
 	// Active operator presence anywhere in the group tints the card, so
 	// "someone is already on it" reads at a glance — especially useful
@@ -279,7 +321,7 @@ function GroupCardLoader({
 					<GroupCard
 						group={result.data}
 						operators={operators}
-						openIncident={openIncident}
+						incidents={incidents}
 					/>
 				)}
 			</Card>
@@ -297,11 +339,11 @@ function GroupCardLoader({
 function GroupCard({
 	group,
 	operators,
-	openIncident,
+	incidents,
 }: {
 	group: ServerGroupCard;
 	operators: AggregatedOperator[];
-	openIncident: IncidentLoudness | null;
+	incidents: GroupIncidents | null;
 }) {
 	// The headline version comes from whichever member speaks for the group, so
 	// how to present it follows from the types its members actually have: a
@@ -310,7 +352,7 @@ function GroupCard({
 	const tracking = useVersionTrackingAcross(
 		useMemo(() => group.members.map((m) => m.type), [group.members]),
 	);
-	const hasStatusBand = operators.length > 0 || openIncident !== null;
+	const hasStatusBand = operators.length > 0 || loudest(incidents) !== null;
 	return (
 		<Box>
 			<Box
@@ -348,7 +390,7 @@ function GroupCard({
 				</Box>
 			</Box>
 
-			<RankedDotStrip members={group.members} />
+			<RankedDotStrip members={group.members} incidents={incidents} />
 
 			{hasStatusBand && (
 				<Box
@@ -368,7 +410,7 @@ function GroupCard({
 					    incident segment is what fills the band to the card's
 					    edge, and a segment that came and went would leave the
 					    operator count floating on some cards and not others. */}
-					<IncidentSegment loudness={openIncident} />
+					<IncidentSegment incidents={incidents} />
 				</Box>
 			)}
 		</Box>
@@ -385,8 +427,13 @@ function GroupCard({
 /// What it says is not how loud the incident is: a held one is not yet in
 /// Slack, and a recovering one has had its failures clear and is waiting out
 /// the linger window.
+///
+/// Its colour is the loudest of the group's environments, since the rank rows
+/// above it say which is in trouble. The tooltip names every target, and is
+/// where a group's own incident is told apart from an environment's.
 /// spec: CHK#presentation
-function IncidentSegment({ loudness }: { loudness: IncidentLoudness | null }) {
+function IncidentSegment({ incidents }: { incidents: GroupIncidents | null }) {
+	const loudness = loudest(incidents);
 	const segment = (
 		<Box
 			data-testid="incident-segment"
@@ -406,7 +453,21 @@ function IncidentSegment({ loudness }: { loudness: IncidentLoudness | null }) {
 		</Box>
 	);
 	if (!loudness) return segment;
-	return <Tooltip title={EXPLANATION[loudness]}>{segment}</Tooltip>;
+	return (
+		<Tooltip
+			title={
+				<Box>
+					{incidentTargets(incidents).map(([rank, state]) => (
+						<Box key={rank ?? "_group"}>
+							{rank ?? "the group itself"}: {EXPLANATION[state]}
+						</Box>
+					))}
+				</Box>
+			}
+		>
+			{segment}
+		</Tooltip>
+	);
 }
 
 const TONE: Record<IncidentLoudness, "error" | "warning" | "info"> = {
@@ -486,12 +547,25 @@ function OperatorSegment({
 // same column grid wherever the line breaks fall. Spacing comes from the
 // container's `gap`, not per-dot margins (StatusDot's inline right-margin is
 // neutralised).
-const DIVIDER_LIGHT = "rgba(0, 0, 0, 0.06)";
+/// Lighter than the card's own border, so a rank break reads as subordinate to
+/// the card structure. Taken from the text colour rather than from black, so it
+/// survives a dark ground.
+const dividerLight = (theme: Theme) => alpha(theme.palette.text.primary, 0.08);
+
+/// The rank spelled out behind its own row, faint enough to read only when
+/// looked for. Dark mode needs more of it to reach the same faintness, since it
+/// is lifting off a dark card rather than sinking into a light one.
+const rankLabel = (theme: Theme) =>
+	alpha(theme.palette.text.primary, theme.palette.mode === "dark" ? 0.20 : 0.11);
+
+/// The dot is sized to its cell, since a flex item wider than the cell holding
+/// it is squeezed on one axis only and draws as an oval.
+const DOT_SIZE = "0.9em";
 
 const dotCellSx = {
 	display: "inline-flex",
-	width: "0.85em",
-	height: "0.85em",
+	width: DOT_SIZE,
+	height: DOT_SIZE,
 	alignItems: "center",
 	justifyContent: "center",
 	flex: "none",
@@ -521,74 +595,90 @@ function machineRows(members: FacilityServerStatus[]) {
 	);
 }
 
-export function RankedDotStrip({ members }: { members: FacilityServerStatus[] }) {
+export function RankedDotStrip({
+	members,
+	incidents,
+}: {
+	members: FacilityServerStatus[];
+	incidents?: GroupIncidents | null;
+}) {
+	const theme = useTheme();
 	const rows = machineRows(members);
 	return (
 		<Stack data-testid="dot-strip" spacing={0.5} sx={{ minWidth: 0 }}>
-			{rows.map(([rank, boxes], index) => (
-				<Box
-					key={rank ?? "_unranked"}
-					data-testid="rank-row"
-					data-rank={rank ?? "unranked"}
-					sx={{
-						position: "relative",
-						display: "flex",
-						flexWrap: "wrap",
-						alignItems: "center",
-						gap: "0.4em",
-						px: "0.625em",
-						py: "0.4375em",
-						// Lighter than the card's own borders, so the rank break
-						// reads as subordinate to the card structure. `divider`
-						// is the card's border, so it cannot also be the rule
-						// inside it.
-						...(index > 0
-							? { borderTop: 1, borderColor: DIVIDER_LIGHT }
-							: {}),
-						// The rank spelled out behind its own row, faint enough to
-						// read only when looked for. It replaces the triangle that
-						// used to mark the break without naming it, and needs no
-						// space of its own.
-						"&::after": {
-							content: "attr(data-rank)",
-							position: "absolute",
-							right: "0.5em",
-							top: "50%",
-							transform: "translateY(-50%)",
-							fontSize: "0.9375em",
-							fontWeight: 500,
-							letterSpacing: "0.06em",
-							textTransform: "uppercase",
-							color: "rgba(0, 0, 0, 0.09)",
-							pointerEvents: "none",
-							zIndex: 0,
-						},
-					}}
-				>
-					{boxes.map((box) => (
-						<MachineEnclosure
-							key={box.lead.machine_id}
-							up={box.lead.machine_up}
-							health={box.lead.machine_health}
-							name={box.lead.machine_name}
-							maintained={box.lead.machine_maintained}
-						>
-							{box.applications.map((m) => (
-								<Box key={m.id} component="span" sx={dotCellSx}>
-									<StatusDot
-										up={m.up}
-										health={m.health}
-										monitored={m.is_monitored}
-										title={`${m.name}${
-											m.rank ? ` · ${m.rank}` : ""
-										} · ${m.type}`}
-									/>
-								</Box>
-							))}
-						</MachineEnclosure>
-					))}
-				</Box>
-			))}
+			{rows.map(([rank, boxes], index) => {
+				// Only an environment's row takes a mark: a group's own incident
+				// can come from a check with no machine behind it at all.
+				const incident = rank ? (incidents?.get(rank) ?? null) : null;
+				const tone = incident ? theme.palette[TONE[incident]].main : null;
+				return (
+					<Box
+						key={rank ?? "_unranked"}
+						data-testid="rank-row"
+						data-rank={rank ?? "unranked"}
+						data-incident={incident ?? undefined}
+						sx={{
+							position: "relative",
+							display: "flex",
+							flexWrap: "wrap",
+							alignItems: "center",
+							gap: "0.4em",
+							px: "0.625em",
+							py: "0.4375em",
+							...(tone ? { bgcolor: alpha(tone, 0.16) } : {}),
+							// Lighter than the card's own borders, so the rank break
+							// reads as subordinate to the card structure. `divider`
+							// is the card's border, so it cannot also be the rule
+							// inside it.
+							...(index > 0
+								? { borderTop: 1, borderColor: dividerLight }
+								: {}),
+							// The rank named behind its own row rather than taking
+							// space of its own.
+							"&::after": {
+								content: "attr(data-rank)",
+								position: "absolute",
+								right: "0.5em",
+								top: "50%",
+								transform: "translateY(-50%)",
+								fontSize: "0.9375em",
+								fontWeight: 500,
+								letterSpacing: "0.06em",
+								textTransform: "uppercase",
+								color: tone ? alpha(tone, 0.55) : rankLabel,
+								pointerEvents: "none",
+								zIndex: 0,
+							},
+						}}
+					>
+						{boxes.map((box) => (
+							<MachineEnclosure
+								key={box.lead.machine_id}
+								up={box.lead.machine_up}
+								health={box.lead.machine_health}
+								name={box.lead.machine_name}
+								maintained={box.lead.machine_maintained}
+								settling={box.lead.machine_maintenance_settling}
+								describes={box.applications.map(
+									(m) =>
+										`${m.name}${m.rank ? ` · ${m.rank}` : ""} · ${m.type}`,
+								)}
+							>
+								{box.applications.map((m) => (
+									<Box key={m.id} component="span" sx={dotCellSx}>
+										<StatusDot
+											up={m.up}
+											health={m.health}
+											monitored={m.is_monitored}
+											size={DOT_SIZE}
+										/>
+									</Box>
+								))}
+							</MachineEnclosure>
+						))}
+					</Box>
+				);
+			})}
 		</Stack>
 	);
 }

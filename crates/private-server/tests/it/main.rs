@@ -20,6 +20,7 @@ mod group_card_version;
 mod health;
 mod healthchecks;
 mod issues;
+mod maintenance;
 mod maintenance_targets;
 mod mcp;
 mod migration_tests;

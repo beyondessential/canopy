@@ -57,6 +57,11 @@ pub struct FacilityServerStatus {
 	/// suspended by it rather than carrying one of their own.
 	// spec: MNT#presentation
 	pub machine_maintained: bool,
+	/// Whether every window over the box has ended and it is serving out the
+	/// settle period, so a lift reads as taken effect rather than as a window
+	/// that is still holding.
+	// spec: MNT#presentation
+	pub machine_maintenance_settling: bool,
 }
 
 /// A status-dashboard card summarising one group of equivalent servers, with

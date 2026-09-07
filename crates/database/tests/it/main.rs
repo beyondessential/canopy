@@ -25,6 +25,8 @@ mod fleet_check_detail;
 mod health_rollup;
 mod helpers;
 mod incident_close_result;
+mod incident_environment;
+mod incident_environment_migration;
 mod incident_get_with_issues;
 mod incident_linger;
 mod incident_list_status;

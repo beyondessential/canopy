@@ -1,12 +1,12 @@
-//! Where each group is going: the version it intends to move to, and
-//! optionally when.
+//! Where each environment is going: the version a group's applications at one
+//! rank intend to move to, and optionally when.
 //!
 //! A plan is a statement of intent. Nothing here performs or schedules an
 //! upgrade; the date is presentational and Canopy decides a plan is met by
-//! watching what the group reports running.
+//! watching what the environment reports running.
 
 use commons_errors::{AppError, Result};
-use commons_types::version::VersionStr;
+use commons_types::{server::rank::ServerRank, version::VersionStr};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::{Timestamp, civil::Date, civil::Time, tz::TimeZone};
@@ -15,15 +15,18 @@ use uuid::Uuid;
 
 use crate::{server_groups::ServerGroup, versions::Version};
 
-/// A group's recorded intention to move to a version.
+/// An environment's recorded intention to move to a version.
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::upgrade_plans)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpgradePlan {
 	/// Unique identifier for this plan.
 	pub id: Uuid,
-	/// The group that intends to move.
+	/// The group whose environment intends to move.
 	pub group_id: Uuid,
+	/// The rank of the environment that intends to move: the group's
+	/// applications at that rank.
+	pub rank: ServerRank,
 	/// The version it intends to move to.
 	pub target_version_id: Uuid,
 	/// The day the upgrade is expected, where one is known.
@@ -49,7 +52,7 @@ pub struct UpgradePlan {
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	#[schema(value_type = String)]
 	pub created_at: Timestamp,
-	/// When the group's reported version reached the target.
+	/// When the environment's reported version reached the target.
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	#[schema(value_type = Option<String>)]
 	pub met_at: Option<Timestamp>,
@@ -116,14 +119,16 @@ impl PlannedWhen {
 }
 
 impl UpgradePlan {
-	/// Record where a group is going, retiring any plan it already had.
+	/// Record where an environment is going, retiring any plan it already had.
 	///
-	/// The target must be published and ahead of what the group runs: a plan to
-	/// move somewhere the group has already been is not a plan.
+	/// The environment must exist, and the target must be published and ahead
+	/// of what the environment runs: a plan to move somewhere it has already
+	/// been is not a plan.
 	// spec: UPG#a-plan
 	pub async fn record(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
+		rank: ServerRank,
 		target_version_id: Uuid,
 		when: PlannedWhen,
 		note: Option<&str>,
@@ -138,19 +143,25 @@ impl UpgradePlan {
 				"an unpublished version cannot be planned for".into(),
 			));
 		}
-		if let Some(running) = ServerGroup::get_by_id(db, group_id)
-			.await?
-			.effective_version
-			.clone() && target.as_semver() <= running.0
+		let group = ServerGroup::get_by_id(db, group_id).await?;
+		let Some(environment) = ServerGroup::environment(db, group_id, rank).await? else {
+			return Err(AppError::BadRequest(format!(
+				"{} has no {rank} environment",
+				group.name
+			)));
+		};
+		if let Some(running) = environment.version
+			&& target.as_semver() <= running.0
 		{
 			return Err(AppError::BadRequest(format!(
-				"this group already runs {running}, which is not behind {}",
+				"this environment already runs {running}, which is not behind {}",
 				target.as_semver()
 			)));
 		}
 
 		diesel::update(dsl::upgrade_plans)
 			.filter(dsl::group_id.eq(group_id))
+			.filter(dsl::rank.eq(rank))
 			.filter(dsl::met_at.is_null())
 			.filter(dsl::superseded_at.is_null())
 			.filter(dsl::withdrawn_at.is_null())
@@ -161,6 +172,7 @@ impl UpgradePlan {
 		diesel::insert_into(dsl::upgrade_plans)
 			.values((
 				dsl::group_id.eq(group_id),
+				dsl::rank.eq(rank),
 				dsl::target_version_id.eq(target_version_id),
 				dsl::planned_for.eq(when.date.map(jiff_diesel::Date::from)),
 				dsl::planned_time.eq(when.time.map(jiff_diesel::Time::from)),
@@ -177,23 +189,25 @@ impl UpgradePlan {
 					diesel::result::DatabaseErrorKind::UniqueViolation,
 					_,
 				) => AppError::Conflict(
-					"another plan was recorded for this group at the same time".into(),
+					"another plan was recorded for this environment at the same time".into(),
 				),
 				e => AppError::from(e),
 			})
 	}
 
-	/// The group's open plan, if it has one.
+	/// The environment's open plan, if it has one.
 	// spec: UPG#a-plan
-	pub async fn open_for_group(
+	pub async fn open_for_environment(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
+		rank: ServerRank,
 	) -> Result<Option<Self>> {
 		use crate::schema::upgrade_plans::dsl;
 
 		dsl::upgrade_plans
 			.select(Self::as_select())
 			.filter(dsl::group_id.eq(group_id))
+			.filter(dsl::rank.eq(rank))
 			.filter(dsl::met_at.is_null())
 			.filter(dsl::superseded_at.is_null())
 			.filter(dsl::withdrawn_at.is_null())
@@ -203,7 +217,7 @@ impl UpgradePlan {
 			.map_err(AppError::from)
 	}
 
-	/// Every plan a group has had, newest first.
+	/// Every plan a group's environments have had, newest first.
 	// spec: UPG#when-a-plan-is-met
 	pub async fn history_for_group(
 		db: &mut AsyncPgConnection,
@@ -345,23 +359,24 @@ impl UpgradePlan {
 	}
 }
 
-/// How a plan stands: still where the group is going, or the way it closed.
+/// How a plan stands: still where the environment is going, or the way it
+/// closed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum PlanOutcome {
-	/// Where the group is going.
+	/// Where the environment is going.
 	Open,
-	/// The group's reported version reached the target.
+	/// The environment's reported version reached the target.
 	Met,
 	/// A later plan took its place.
 	Replaced,
-	/// An operator said the group is no longer going there.
+	/// An operator said the environment is no longer going there.
 	Withdrawn,
 }
 
 /// How a plan stands.
 ///
-/// Met wins over the rest: a plan the group reached is met however it was
+/// Met wins over the rest: a plan the environment reached is met however it was
 /// stamped afterwards.
 // spec: UPG#a-plan
 pub fn outcome(plan: &UpgradePlan) -> PlanOutcome {
@@ -384,23 +399,28 @@ pub fn ended_at(plan: &UpgradePlan) -> Option<Timestamp> {
 		.max()
 }
 
-/// Close every open plan whose group has reached its target, returning how many
-/// were closed.
+/// Close every open plan whose environment has reached its target, returning
+/// how many were closed.
 ///
-/// Reaching a version past the target closes the plan too: a group that
+/// Reaching a version past the target closes the plan too: an environment that
 /// jumped further has done the upgrade and then some, and holding the plan open
 /// would report it as outstanding.
 // spec: UPG#when-a-plan-is-met
 pub async fn close_met_plans(db: &mut AsyncPgConnection) -> Result<usize> {
 	use crate::schema::upgrade_plans::dsl;
 
-	let mut closed = 0;
-	for plan in UpgradePlan::all_open(db).await? {
-		let Some(running) = ServerGroup::get_by_id(db, plan.group_id)
+	let open = UpgradePlan::all_open(db).await?;
+	let group_ids: Vec<Uuid> = open.iter().map(|plan| plan.group_id).collect();
+	let running: std::collections::HashMap<(Uuid, ServerRank), VersionStr> =
+		ServerGroup::environments(db, &group_ids)
 			.await?
-			.effective_version
-			.clone()
-		else {
+			.into_iter()
+			.filter_map(|env| env.version.map(|v| ((env.group_id, env.rank), v)))
+			.collect();
+
+	let mut closed = 0;
+	for plan in open {
+		let Some(running) = running.get(&(plan.group_id, plan.rank)) else {
 			continue;
 		};
 		let target = Version::get_by_id(db, plan.target_version_id).await?;
@@ -419,14 +439,18 @@ pub async fn close_met_plans(db: &mut AsyncPgConnection) -> Result<usize> {
 	Ok(closed)
 }
 
-/// The version `group` plans to move to, if it has an open plan.
+/// The version the environment plans to move to, if it has an open plan.
 ///
 /// This is what pre-upgrade testing targets in preference to the newest
-/// published version, so a group deliberately moving to an older minor is
+/// published version, so an environment deliberately moving to an older minor is
 /// held against that minor instead.
 // spec: UPG#what-reads-a-plan
-pub async fn planned_target(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<Option<Version>> {
-	let Some(plan) = UpgradePlan::open_for_group(db, group_id).await? else {
+pub async fn planned_target(
+	db: &mut AsyncPgConnection,
+	group_id: Uuid,
+	rank: ServerRank,
+) -> Result<Option<Version>> {
+	let Some(plan) = UpgradePlan::open_for_environment(db, group_id, rank).await? else {
 		return Ok(None);
 	};
 	let target = Version::get_by_id(db, plan.target_version_id).await?;
@@ -450,7 +474,8 @@ pub fn is_late(plan: &UpgradePlan, today: Date) -> bool {
 		&& plan.planned_for.is_some_and(|date| date < today)
 }
 
-/// A plan's target rendered as semver, for display beside what the group runs.
+/// A plan's target rendered as semver, for display beside what the environment
+/// runs.
 pub async fn target_version_str(
 	db: &mut AsyncPgConnection,
 	plan: &UpgradePlan,
