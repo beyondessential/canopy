@@ -14,8 +14,10 @@ import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
 import BackupIcon from "@mui/icons-material/Backup";
 import EditIcon from "@mui/icons-material/Edit";
 import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
+import { useState } from "react";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import GroupDomainsSection from "../components/GroupDomainsSection";
+import GroupInventorySection from "../components/GroupInventorySection";
 import MigrationTestsSection from "../components/MigrationTestsSection";
 import { OperatorAvatar, connectedFor } from "../components/OperatorAvatars";
 import ActiveIncidentCard from "../components/ActiveIncidentCard";
@@ -39,6 +41,9 @@ export default function GroupDetail() {
 	const detail = useApi("fleet/groups", "get", { server_group_id: id }, [id]);
 	const admin = useIsAdmin() === true;
 	const archive = useApiAction("fleet/groups", "delete");
+	// A window declared or lifted below changes what a run on this group's
+	// inventory would be served, so the two sections read the same state.
+	const [maintenanceTick, setMaintenanceTick] = useState(0);
 	// Only the currently-open incident matters for the active-incident
 	// section; closed ones live behind the /incidents filter route.
 	const activeIncidents = useApi(
@@ -242,6 +247,13 @@ export default function GroupDetail() {
 
 			<MigrationTestsSection groupId={group.id} servers={applications} />
 
+			<GroupInventorySection
+				groupId={group.id}
+				applications={applications}
+				maintenanceTick={maintenanceTick}
+				onMaintenanceChange={() => setMaintenanceTick((n) => n + 1)}
+			/>
+
 			<GroupDomainsSection groupId={group.id} />
 
 			<MaintenanceSection
@@ -249,6 +261,8 @@ export default function GroupDetail() {
 				anchor="maintenance"
 				id={group.id}
 				targetLabel={group.name}
+				reloadKey={maintenanceTick}
+				onChanged={() => setMaintenanceTick((n) => n + 1)}
 			/>
 			<SilencedRefsSection scope="group" id={group.id} />
 		</Stack>

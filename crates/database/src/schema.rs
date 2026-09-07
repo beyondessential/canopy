@@ -445,6 +445,19 @@ diesel::table! {
 }
 
 diesel::table! {
+	inventory_secret_variables (id) {
+		id -> Uuid,
+		server_group_id -> Nullable<Uuid>,
+		rank -> Nullable<Text>,
+		application_id -> Nullable<Uuid>,
+		name -> Text,
+		set_by -> Nullable<Text>,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	issues (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -860,6 +873,8 @@ diesel::joinable!(incident_issues -> issues (issue_id));
 diesel::joinable!(incident_notes -> incidents (incident_id));
 diesel::joinable!(incident_reeval_queue -> applications (application_id));
 diesel::joinable!(incidents -> server_groups (server_group_id));
+diesel::joinable!(inventory_secret_variables -> applications (application_id));
+diesel::joinable!(inventory_secret_variables -> server_groups (server_group_id));
 diesel::joinable!(issue_notes -> issues (issue_id));
 diesel::joinable!(issues -> applications (application_id));
 diesel::joinable!(issues -> devices (device_id));
@@ -929,6 +944,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	incident_notes,
 	incident_reeval_queue,
 	incidents,
+	inventory_secret_variables,
 	issue_notes,
 	issues,
 	machine_backup_capabilities,

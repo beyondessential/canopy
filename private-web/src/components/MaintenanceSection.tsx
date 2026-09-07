@@ -30,6 +30,7 @@ export default function MaintenanceSection({
 	groupId,
 	groupName,
 	onChanged,
+	reloadKey = 0,
 	anchor,
 }: {
 	/** DOM id, so a banner elsewhere on the page can link here. */
@@ -45,6 +46,9 @@ export default function MaintenanceSection({
 	/** Called after declaring or lifting, so the page can refresh the
 	 * health and checks that the window changes. */
 	onChanged?: () => void;
+	/** Bumped when something else on the page declares or lifts a window over
+	 * this target. */
+	reloadKey?: number;
 }) {
 	const isAdmin = useIsAdmin() === true;
 	const [tick, setTick] = useState(0);
@@ -55,13 +59,13 @@ export default function MaintenanceSection({
 		"maintenance",
 		"for_target",
 		scope === "machine" ? { machine_id: id } : { server_group_id: id },
-		[id, tick],
+		[id, tick, reloadKey],
 	);
 	const covering = useApi(
 		"maintenance",
 		"for_target",
 		{ server_group_id: groupId ?? "" },
-		[groupId, tick],
+		[groupId, tick, reloadKey],
 		{ skip: !groupId },
 	);
 

@@ -2,8 +2,8 @@
 //!
 //! Canopy owns every repo passphrase with no human copy, so it periodically
 //! snapshots its recovery-critical state — server groups, backup configs with their
-//! per-group passphrase keysets + repo coordinates, schedules, capabilities, and
-//! the server list — and writes it, **`age`-encrypted to recipient public keys
+//! per-group passphrase keysets + repo coordinates, schedules, capabilities, the
+//! server list, and the inventory secret variables — and writes it, **`age`-encrypted to recipient public keys
 //! Canopy never holds the private half of** ([`commons_servers::recovery_vault`]), to a
 //! **versioned, object-locked** S3 bucket. Canopy can write the vault but cannot
 //! read it back: a full Canopy compromise can't disclose the historical secrets,
@@ -13,13 +13,18 @@
 //! refuses to start without them (see the `backups` bin). The blob is written to
 //! the same key each tick; bucket versioning keeps the history.
 
-use std::{collections::BTreeMap, time::Duration};
+use std::{
+	collections::{BTreeMap, BTreeSet},
+	time::Duration,
+};
 
 use anyhow::{Context, Result};
 use commons_servers::{backup_secrets::BackupSecrets, recovery_vault::Recipients};
 use database::{
 	MachineBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
-	applications::Application, server_groups::ServerGroup,
+	applications::Application,
+	inventory_secret_variables::{InventorySecretVariable, SecretScope},
+	server_groups::ServerGroup,
 };
 use jiff::Timestamp;
 use serde::Serialize;
@@ -35,7 +40,7 @@ use super::worker::Worker;
 /// ever one recovery-state object per bucket; bucket versioning keeps the history.
 const VAULT_OBJECT_KEY: &str = "canopy-recovery/state.age";
 const DEFAULT_SNAPSHOT_HOURS: u64 = 24;
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 
 /// Where + how the recovery vault is written. Recipients are mandatory; the rest
 /// comes from `CANOPY_RECOVERY_VAULT_*`.
@@ -91,6 +96,17 @@ struct RecoverySnapshot {
 	groups: Vec<RecoveryGroup>,
 	applications: Vec<Application>,
 	enabled_capabilities: Vec<MachineBackupCapability>,
+	inventory_secrets: Vec<RecoveryInventorySecrets>,
+}
+
+/// One scope's secret variables: the Secret they live under and its keyset,
+/// name to value. Empty (logged) if the Secret can't be read.
+#[derive(Serialize)]
+struct RecoveryInventorySecrets {
+	#[serde(flatten)]
+	scope: SecretScope,
+	secret: String,
+	keys: BTreeMap<String, String>,
 }
 
 #[derive(Serialize)]
@@ -111,8 +127,9 @@ struct RecoveryConfig {
 }
 
 /// Gather the recovery-critical state and serialise it to JSON bytes (plaintext, before
-/// encryption). Reads the passphrase keyset per group; a missing/unreadable
-/// Secret is logged and left empty rather than failing the whole snapshot.
+/// encryption). Reads the passphrase keyset per group and the secret variables
+/// per scope; a missing/unreadable Secret is logged and left empty rather than
+/// failing the whole snapshot.
 pub async fn build_snapshot_json(
 	db: &mut database::diesel_async::AsyncPgConnection,
 	secrets: &BackupSecrets,
@@ -164,6 +181,29 @@ pub async fn build_snapshot_json(
 			.context("list ungrouped applications")?,
 	);
 
+	let scopes: BTreeSet<SecretScope> = InventorySecretVariable::list_all(db)
+		.await
+		.context("list secret variables")?
+		.iter()
+		.map(InventorySecretVariable::scope)
+		.collect();
+	let mut inventory_secrets = Vec::with_capacity(scopes.len());
+	for scope in scopes {
+		let secret = scope.secret_name();
+		let keys = match secrets.read_keys(&secret).await {
+			Ok(keys) => keys,
+			Err(e) => {
+				warn!(%secret, "recovery-snapshot: secret variables unreadable ({e}); storing empty");
+				BTreeMap::new()
+			}
+		};
+		inventory_secrets.push(RecoveryInventorySecrets {
+			scope,
+			secret,
+			keys,
+		});
+	}
+
 	let snapshot = RecoverySnapshot {
 		schema_version: SCHEMA_VERSION,
 		taken_at: now.to_string(),
@@ -172,6 +212,7 @@ pub async fn build_snapshot_json(
 		enabled_capabilities: MachineBackupCapability::list_enabled(db)
 			.await
 			.context("list capabilities")?,
+		inventory_secrets,
 	};
 	serde_json::to_vec(&snapshot).context("serialise snapshot")
 }
@@ -298,6 +339,42 @@ mod tests {
 			assert_eq!(group["config"]["maintenance_role_arn"], "arn:maint");
 			// The passphrase keyset is the whole point — it must be present.
 			assert_eq!(group["config"]["keys"]["password"], "sekret");
+		})
+		.await;
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn snapshot_includes_inventory_secrets() {
+		TestDb::run(|mut conn, _url| async move {
+			let group_id = uuid::Uuid::new_v4();
+			conn.batch_execute(&format!(
+				"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
+				 INSERT INTO inventory_secret_variables (server_group_id, rank, name)
+				 VALUES ('{group_id}', 'production', 'salt');"
+			))
+			.await
+			.unwrap();
+
+			let secrets = BackupSecrets::memory();
+			let secret = format!("inventory-vars-{group_id}-production");
+			secrets
+				.put_keys(
+					&secret,
+					&BTreeMap::from([("salt".to_string(), "pepper".to_string())]),
+				)
+				.await
+				.unwrap();
+
+			let json = build_snapshot_json(&mut conn, &secrets, Timestamp::now())
+				.await
+				.unwrap();
+			let value: serde_json::Value = serde_json::from_slice(&json).unwrap();
+
+			let entry = &value["inventory_secrets"][0];
+			assert_eq!(entry["group_id"], group_id.to_string());
+			assert_eq!(entry["rank"], "production");
+			assert_eq!(entry["secret"], secret);
+			assert_eq!(entry["keys"]["salt"], "pepper");
 		})
 		.await;
 	}

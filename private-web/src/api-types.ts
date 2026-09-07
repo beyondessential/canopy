@@ -2673,6 +2673,99 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/inventory/for_group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Serve one environment's inventory.
+         * @description Refuses a group Canopy does not have, one that has been archived, one
+         *     holding several environments with no rank named, a rank with no live
+         *     application to configure, an environment someone else has work under way on
+         *     (a maintenance window they declared, or a secret variable they set moments
+         *     ago), an upgrade of production with no plan recorded, and a secret variable
+         *     whose value cannot be read, saying which it was: a refusal is a decision to
+         *     respect, and a caller has to be able to tell it from Canopy being
+         *     unreachable.
+         *
+         *     Requires admin access, the inventory carrying the secret variables' values.
+         */
+        post: operations["inventory_for_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory_secrets/for_group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The names a group carries, at every scope under it.
+         * @description Names only: a value is served solely as part of an inventory, and only to an
+         *     administrator. Available to any operator, so the group page can show which
+         *     variables are set without one.
+         */
+        post: operations["inventory_secrets_for_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory_secrets/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Forget a secret variable, value and all.
+         * @description The declaration goes first, so a value the secret store will not let go of
+         *     leaves nothing behind that would refuse every later read of the inventory.
+         */
+        post: operations["inventory_secrets_remove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory_secrets/set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set or replace a secret variable.
+         * @description Refuses a name already set as a tag in the same scope, and a name the secret
+         *     store cannot key a value under.
+         */
+        post: operations["inventory_secrets_set"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/issues/add_note": {
         parameters: {
             query?: never;
@@ -6490,6 +6583,127 @@ export interface components {
              */
             semantics?: string[];
         };
+        /**
+         * @description Which environment to serve the inventory for: exactly one of the group's
+         *     identifier or its name, and the rank where the group holds more than one
+         *     environment.
+         */
+        InventoryArgs: {
+            /** @description Name of the server group, matched exactly. */
+            group?: string | null;
+            /** @description What the run is doing to the environment. Configuring where not named. */
+            intent?: components["schemas"]["RunIntent"];
+            rank?: null | components["schemas"]["ServerRank"];
+            /**
+             * Format: uuid
+             * @description Identifier of the server group.
+             */
+            server_group_id?: string | null;
+        };
+        /** @description One application in an environment. */
+        InventoryHost: {
+            /**
+             * @description The address to reach the application at: the tailnet name of the device
+             *     bound to its machine, or its own recorded host where no device is bound.
+             *     Null when Canopy holds neither, in which case a variable has to supply
+             *     it.
+             */
+            address?: string | null;
+            /**
+             * Format: uuid
+             * @description Identifier of the application.
+             */
+            id: string;
+            /**
+             * Format: uuid
+             * @description Identifier of the machine the application runs on.
+             */
+            machine_id: string;
+            /**
+             * @description The application's name within its group, falling back to its host and
+             *     then its identifier, so a member always has something to be addressed
+             *     as.
+             */
+            name: string;
+            /**
+             * @description The variables the application sets itself, so a value inherited from the
+             *     group can be told from one set here even where the two agree.
+             */
+            own_vars: components["schemas"]["VarMap"];
+            /**
+             * @description Which of `vars` are secret, so a caller can keep them out of anything it
+             *     writes down.
+             */
+            secret_vars: string[];
+            /** @description What the application is: the software and the role it plays together. */
+            type: components["schemas"]["ApplicationType"];
+            /**
+             * @description The application's effective variables: its own tags over its group's,
+             *     with the reserved read-only tags left out. This is what a run acts on.
+             */
+            vars: components["schemas"]["VarMap"];
+        };
+        /**
+         * @description A declared secret variable: its name, the scope it is set at, and who last
+         *     set it.
+         */
+        InventorySecretVariable: {
+            /**
+             * Format: uuid
+             * @description Set for a variable belonging to one application.
+             */
+            application_id?: string | null;
+            /**
+             * Format: date-time
+             * @description When the name was first set here.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Unique identifier of this declaration.
+             */
+            id: string;
+            /** @description The variable's name, and the key its value is stored under. */
+            name: string;
+            rank?: null | components["schemas"]["ServerRank"];
+            /**
+             * Format: uuid
+             * @description Set with `rank` for a variable belonging to one environment.
+             */
+            server_group_id?: string | null;
+            /** @description The login that last set the value. */
+            set_by?: string | null;
+            /**
+             * Format: date-time
+             * @description When its value was last replaced.
+             */
+            updated_at: string;
+        };
+        /**
+         * @description An environment's inventory: its applications and the variables that
+         *     configure them.
+         */
+        InventoryView: {
+            /** @description Name of the server group. */
+            group: string;
+            /**
+             * Format: uuid
+             * @description Identifier of the server group the inventory covers.
+             */
+            group_id: string;
+            /** @description The environment's applications, ordered by name. */
+            hosts: components["schemas"]["InventoryHost"][];
+            /** @description Rank of the environment served. */
+            rank: components["schemas"]["ServerRank"];
+            /** @description Which of `vars` are secret. */
+            secret_vars: string[];
+            /**
+             * @description Variables belonging to the environment rather than to any one
+             *     application. Every application carries these too, under its own
+             *     overrides.
+             */
+            vars: components["schemas"]["VarMap"];
+        };
         /** @description A note to add to an issue. */
         IssueAddNoteArgs: {
             /** @description Text of the note. Must not be empty or whitespace-only. */
@@ -8441,6 +8655,11 @@ export interface components {
              */
             patch: number;
         };
+        /** @description Name one secret variable to forget. */
+        RemoveArgs: components["schemas"]["ScopeArgs"] & {
+            /** @description The variable's name. */
+            name: string;
+        };
         /** @description Identifies a one-off backup or restore request for a server. */
         RequestArgs: {
             /**
@@ -8931,6 +9150,12 @@ export interface components {
             id: string;
         };
         /**
+         * @description What a run intends to do to the environment it reads. An upgrade of a
+         *     production environment needs the group's open upgrade plan behind it.
+         * @enum {string}
+         */
+        RunIntent: "configure" | "upgrade";
+        /**
          * @description Outcome of a reported backup or restore run.
          * @enum {string}
          */
@@ -9060,6 +9285,30 @@ export interface components {
             retention?: null | components["schemas"]["RetentionPolicy"];
             /** @description Backup type this override applies to. */
             type: string;
+        };
+        /** @description Which scope a request addresses: an environment, or one application. */
+        ScopeArgs: {
+            /** @description Rank of the environment within it. */
+            rank: components["schemas"]["ServerRank"];
+            /**
+             * Format: uuid
+             * @description Identifier of the server group.
+             */
+            server_group_id: string;
+        } | {
+            /**
+             * Format: uuid
+             * @description Identifier of the application.
+             */
+            application_id: string;
+        };
+        /** @description Which group's declarations to list. */
+        SecretsForGroupArgs: {
+            /**
+             * Format: uuid
+             * @description Identifier of the server group.
+             */
+            server_group_id: string;
         };
         /**
          * @description A self-alert: a problem with canopy's own operation, such as an
@@ -9649,6 +9898,16 @@ export interface components {
              * @description The server to update.
              */
             server_id: string;
+        };
+        /** @description Set or replace one secret variable's value. */
+        SetArgs: components["schemas"]["ScopeArgs"] & {
+            /** @description The variable's name. */
+            name: string;
+            /**
+             * @description The value. Decoded on the way out the same way a tag is, so `true`,
+             *     `false`, and a JSON array or object arrive as themselves.
+             */
+            value: string;
         };
         /** @description Request to enable or disable a server's backup capability for one type. */
         SetCapabilityArgs: {
@@ -10418,6 +10677,10 @@ export interface components {
          */
         UrlField: string;
         Value: unknown;
+        /** @description Variables as a JSON object. */
+        VarMap: {
+            [key: string]: unknown;
+        };
         /**
          * @description Where a (server, version) pair stands.
          * @enum {string}
@@ -14211,6 +14474,189 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IncidentData"];
+                };
+            };
+        };
+    };
+    inventory_for_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InventoryArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryView"];
+                };
+            };
+            /** @description Neither or both of the group arguments */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description No such server group */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description Archived, empty, ambiguously named, spanning environments, under someone else's work, or an unplanned upgrade of production */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description A secret variable could not be read */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    inventory_secrets_for_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecretsForGroupArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventorySecretVariable"][];
+                };
+            };
+            /** @description No such server group */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    inventory_secrets_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemoveArgs"];
+            };
+        };
+        responses: {
+            /** @description Removed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description No variable of that name in that scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The secret store is unavailable */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    inventory_secrets_set: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventorySecretVariable"];
+                };
+            };
+            /** @description Bad name, or a tag of that name */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description No such server group or application */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The secret store is unavailable */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
         };

@@ -194,6 +194,12 @@ impl Machine {
 
 		let before = Self::get_by_id(db, machine_id).await?;
 
+		if let Some(group_id) = updates.group_id
+			&& group_id != before.group_id
+		{
+			reject_secret_names_in_group(db, &before, group_id).await?;
+		}
+
 		diesel::update(dsl::machines.filter(dsl::id.eq(machine_id)))
 			.set(updates)
 			.execute(db)
@@ -553,4 +559,36 @@ impl Machine {
 		})
 		.await
 	}
+}
+
+/// The applications on a machine take its group, so moving the box carries
+/// each of them into the destination group's tags and environment. A name a
+/// workload already holds as a secret variable cannot arrive as a tag too.
+// spec: INV#secret-variables
+async fn reject_secret_names_in_group(
+	db: &mut AsyncPgConnection,
+	machine: &Machine,
+	group_id: Option<Uuid>,
+) -> Result<()> {
+	let group_tags = match group_id {
+		Some(group_id) => {
+			crate::server_groups::ServerGroup::get_by_id(db, group_id)
+				.await?
+				.tags
+		}
+		None => TagMap::default(),
+	};
+	for application in machine.applications(db).await? {
+		crate::inventory_secret_variables::reject_secret_names(
+			db,
+			crate::inventory_secret_variables::TagScope::Application {
+				application_id: application.id,
+				group_id,
+				rank: application.rank.unwrap_or_default(),
+			},
+			&application.tags.merged_with(&group_tags),
+		)
+		.await?;
+	}
+	Ok(())
 }

@@ -46,6 +46,8 @@ Where that close is notified, the notice says maintenance was declared, so a rea
 
 Canopy-wide checks are Canopy monitoring its own operation, and are never suspended by a window over a machine or a group (see [SELF](../private-server/self-alerts.md)).
 
+A window also holds off configuration runs by others: while it holds, the inventory of every environment it covers is refused to anyone but the operator who declared it (see [INV](../private-server/inventory.md), "Work under way").
+
 ## Ending
 
 A window ends when an operator lifts it or when its expected end passes, and Canopy records which, with the operator and the time.

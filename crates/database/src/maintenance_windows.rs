@@ -264,6 +264,29 @@ impl MaintenanceWindow {
 			.map_err(AppError::from)
 	}
 
+	/// The open windows over an environment: the group's own and any over the
+	/// given machines. A window past its expected end stays open until the
+	/// sweep stamps it, so pair with [`Self::holds_at`].
+	pub async fn open_over(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		machine_ids: &[Uuid],
+	) -> Result<Vec<Self>> {
+		use crate::schema::maintenance_windows::dsl;
+		dsl::maintenance_windows
+			.select(Self::as_select())
+			.filter(dsl::ended_at.is_null())
+			.filter(
+				dsl::server_group_id
+					.eq(group_id)
+					.or(dsl::machine_id.eq_any(machine_ids)),
+			)
+			.order(dsl::declared_at.asc())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Every window still holding, most recently declared first.
 	pub async fn list_open(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::schema::maintenance_windows::dsl;

@@ -220,6 +220,41 @@ impl BackupSecrets {
 		}
 	}
 
+	/// Read all string keys, answering `None` for a Secret that does not exist.
+	/// A caller that reads-modifies-writes needs an absent Secret told apart
+	/// from an API failure: treating a failure as empty would have the write
+	/// back drop every key already there.
+	pub async fn try_read_keys(
+		&self,
+		secret_name: &str,
+	) -> Result<Option<BTreeMap<String, String>>> {
+		match self {
+			Self::Kube { .. } => match self.read_keys(secret_name).await {
+				Ok(keys) => Ok(Some(keys)),
+				Err(_) if !self.exists(secret_name).await? => Ok(None),
+				Err(err) => Err(err),
+			},
+			Self::Memory(store) => Ok(store.lock().unwrap().get(secret_name).cloned()),
+		}
+	}
+
+	/// Whether the named Secret exists.
+	async fn exists(&self, secret_name: &str) -> Result<bool> {
+		match self {
+			Self::Kube { client, namespace } => {
+				use k8s_openapi::api::core::v1::Secret;
+				use kube::Api;
+
+				let api: Api<Secret> = Api::namespaced(client.clone(), namespace);
+				match api.get_opt(secret_name).await {
+					Ok(found) => Ok(found.is_some()),
+					Err(e) => Err(AppError::Upstream(format!("secret get failed: {e}"))),
+				}
+			}
+			Self::Memory(store) => Ok(store.lock().unwrap().contains_key(secret_name)),
+		}
+	}
+
 	/// Create-or-replace the named Secret to hold **exactly** `keys` (server-side
 	/// apply with force). Keys this manager owns but that are omitted from `keys`
 	/// are removed — so a rotation "promote" that writes only `{password}` cleans

@@ -31,7 +31,7 @@ Like maintenance, rotation is Canopy's to do; operators never run it.
 
 ## Recovery escrow
 
-Because Canopy holds the only copy of every passphrase, it continuously escrows the state needed to recover access without it: the per-group passphrases and repo coordinates, and the group, machine, configuration, schedule, and capability records that frame them.
+Because Canopy holds the only copy of every passphrase, it continuously escrows the state needed to recover access without it: the per-group passphrases and repo coordinates, the group, machine, configuration, schedule, and capability records that frame them, and the secret variables of every inventory (see [INV](../private-server/inventory.md)), which have no copy anywhere else either.
 The escrow is encrypted to a set of offline recipient keys whose private halves Canopy never holds, and written to versioned, object-locked storage.
 So Canopy can write the escrow but never read it back — a full Canopy compromise cannot disclose the escrowed secrets, and object-lock keeps past versions undeletable until they expire.
 Recipients are mandatory: Canopy refuses to run without them, so there is never a silent recovery gap.

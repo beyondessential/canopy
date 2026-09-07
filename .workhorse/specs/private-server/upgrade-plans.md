@@ -55,7 +55,7 @@ Withdrawing a plan says the group is no longer going there; it does not say the 
 A withdrawn plan is retained and records who withdrew it and when: a group that was going somewhere and stopped is part of the same history as one that arrived, and it frees the group to be planned somewhere else.
 
 A planned date is a plan, not a deadline.
-Canopy neither schedules nor blocks anything on it, and a date that passes changes only how the plan is presented.
+Canopy schedules nothing on it, and a date that passes changes only how the plan is presented.
 
 ## When a plan is met
 
@@ -71,6 +71,9 @@ The record of what a group planned, when it planned it for, and when it actually
 
 Pre-upgrade migration testing takes its target from the open plan, and a group with no plan is not tested at all.
 Recording a plan is what asks for the testing, and no restore is spent on a version nobody intends to apply.
+
+An upgrade run on a production environment reads the open plan as its permission and is refused without one (see [INV](inventory.md), "Planned upgrades").
+It reads that a plan exists and not its day, so recording the plan is what permits the run, whichever night the deployment moves.
 
 A plan changes what is tested, so changing one invalidates nothing already recorded: earlier verdicts stand against the versions they named, and the new target simply becomes the one that has not been tested yet.
 

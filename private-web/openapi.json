@@ -5337,6 +5337,257 @@
         ]
       }
     },
+    "/api/inventory/for_group": {
+      "post": {
+        "tags": [
+          "inventory"
+        ],
+        "summary": "Serve one environment's inventory.",
+        "description": "Refuses a group Canopy does not have, one that has been archived, one\nholding several environments with no rank named, a rank with no live\napplication to configure, an environment someone else has work under way on\n(a maintenance window they declared, or a secret variable they set moments\nago), an upgrade of production with no plan recorded, and a secret variable\nwhose value cannot be read, saying which it was: a refusal is a decision to\nrespect, and a caller has to be able to tell it from Canopy being\nunreachable.\n\nRequires admin access, the inventory carrying the secret variables' values.",
+        "operationId": "inventory_for_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventoryArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Neither or both of the group arguments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such server group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Archived, empty, ambiguously named, spanning environments, under someone else's work, or an unplanned upgrade of production",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "A secret variable could not be read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/inventory_secrets/for_group": {
+      "post": {
+        "tags": [
+          "inventory"
+        ],
+        "summary": "The names a group carries, at every scope under it.",
+        "description": "Names only: a value is served solely as part of an inventory, and only to an\nadministrator. Available to any operator, so the group page can show which\nvariables are set without one.",
+        "operationId": "inventory_secrets_for_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecretsForGroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InventorySecretVariable"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such server group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/inventory_secrets/remove": {
+      "post": {
+        "tags": [
+          "inventory"
+        ],
+        "summary": "Forget a secret variable, value and all.",
+        "description": "The declaration goes first, so a value the secret store will not let go of\nleaves nothing behind that would refuse every later read of the inventory.",
+        "operationId": "inventory_secrets_remove",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "default": null
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No variable of that name in that scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The secret store is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/inventory_secrets/set": {
+      "post": {
+        "tags": [
+          "inventory"
+        ],
+        "summary": "Set or replace a secret variable.",
+        "description": "Refuses a name already set as a tag in the same scope, and a name the secret\nstore cannot key a value under.",
+        "operationId": "inventory_secrets_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventorySecretVariable"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad name, or a tag of that name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such server group or application",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The secret store is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/issues/add_note": {
       "post": {
         "tags": [
@@ -11705,6 +11956,207 @@
           }
         }
       },
+      "InventoryArgs": {
+        "type": "object",
+        "description": "Which environment to serve the inventory for: exactly one of the group's\nidentifier or its name, and the rank where the group holds more than one\nenvironment.",
+        "properties": {
+          "group": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name of the server group, matched exactly."
+          },
+          "intent": {
+            "$ref": "#/components/schemas/RunIntent",
+            "description": "What the run is doing to the environment. Configuring where not named."
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "Rank of the environment within the group. Required only where the\ngroup's live applications span more than one rank."
+              }
+            ]
+          },
+          "server_group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Identifier of the server group."
+          }
+        }
+      },
+      "InventoryHost": {
+        "type": "object",
+        "description": "One application in an environment.",
+        "required": [
+          "id",
+          "name",
+          "type",
+          "machine_id",
+          "vars",
+          "own_vars",
+          "secret_vars"
+        ],
+        "properties": {
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The address to reach the application at: the tailnet name of the device\nbound to its machine, or its own recorded host where no device is bound.\nNull when Canopy holds neither, in which case a variable has to supply\nit."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifier of the application."
+          },
+          "machine_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifier of the machine the application runs on."
+          },
+          "name": {
+            "type": "string",
+            "description": "The application's name within its group, falling back to its host and\nthen its identifier, so a member always has something to be addressed\nas."
+          },
+          "own_vars": {
+            "$ref": "#/components/schemas/VarMap",
+            "description": "The variables the application sets itself, so a value inherited from the\ngroup can be told from one set here even where the two agree."
+          },
+          "secret_vars": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Which of `vars` are secret, so a caller can keep them out of anything it\nwrites down."
+          },
+          "type": {
+            "$ref": "#/components/schemas/ApplicationType",
+            "description": "What the application is: the software and the role it plays together."
+          },
+          "vars": {
+            "$ref": "#/components/schemas/VarMap",
+            "description": "The application's effective variables: its own tags over its group's,\nwith the reserved read-only tags left out. This is what a run acts on."
+          }
+        }
+      },
+      "InventorySecretVariable": {
+        "type": "object",
+        "description": "A declared secret variable: its name, the scope it is set at, and who last\nset it.",
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "application_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Set for a variable belonging to one application."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the name was first set here."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier of this declaration."
+          },
+          "name": {
+            "type": "string",
+            "description": "The variable's name, and the key its value is stored under."
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "The rank of the environment, set alongside `server_group_id`."
+              }
+            ]
+          },
+          "server_group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Set with `rank` for a variable belonging to one environment."
+          },
+          "set_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The login that last set the value."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When its value was last replaced."
+          }
+        }
+      },
+      "InventoryView": {
+        "type": "object",
+        "description": "An environment's inventory: its applications and the variables that\nconfigure them.",
+        "required": [
+          "group_id",
+          "group",
+          "rank",
+          "vars",
+          "secret_vars",
+          "hosts"
+        ],
+        "properties": {
+          "group": {
+            "type": "string",
+            "description": "Name of the server group."
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifier of the server group the inventory covers."
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InventoryHost"
+            },
+            "description": "The environment's applications, ordered by name."
+          },
+          "rank": {
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "Rank of the environment served."
+          },
+          "secret_vars": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Which of `vars` are secret."
+          },
+          "vars": {
+            "$ref": "#/components/schemas/VarMap",
+            "description": "Variables belonging to the environment rather than to any one\napplication. Every application carries these too, under its own\noverrides."
+          }
+        }
+      },
       "IssueAddNoteArgs": {
         "type": "object",
         "description": "A note to add to an issue.",
@@ -14813,6 +15265,26 @@
           }
         }
       },
+      "RemoveArgs": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ScopeArgs"
+          },
+          {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "The variable's name."
+              }
+            }
+          }
+        ],
+        "description": "Name one secret variable to forget."
+      },
       "RequestArgs": {
         "type": "object",
         "description": "Identifies a one-off backup or restore request for a server.",
@@ -15496,6 +15968,14 @@
           }
         }
       },
+      "RunIntent": {
+        "type": "string",
+        "description": "What a run intends to do to the environment it reads. An upgrade of a\nproduction environment needs the group's open upgrade plan behind it.",
+        "enum": [
+          "configure",
+          "upgrade"
+        ]
+      },
       "RunOutcome": {
         "type": "string",
         "description": "Outcome of a reported backup or restore run.",
@@ -15702,6 +16182,58 @@
           "type": {
             "type": "string",
             "description": "Backup type this override applies to."
+          }
+        }
+      },
+      "ScopeArgs": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "An environment: a server group at one rank.",
+            "required": [
+              "server_group_id",
+              "rank"
+            ],
+            "properties": {
+              "rank": {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "Rank of the environment within it."
+              },
+              "server_group_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Identifier of the server group."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "One application.",
+            "required": [
+              "application_id"
+            ],
+            "properties": {
+              "application_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Identifier of the application."
+              }
+            }
+          }
+        ],
+        "description": "Which scope a request addresses: an environment, or one application."
+      },
+      "SecretsForGroupArgs": {
+        "type": "object",
+        "description": "Which group's declarations to list.",
+        "required": [
+          "server_group_id"
+        ],
+        "properties": {
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifier of the server group."
           }
         }
       },
@@ -16681,6 +17213,31 @@
             "description": "The server to update."
           }
         }
+      },
+      "SetArgs": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ScopeArgs"
+          },
+          {
+            "type": "object",
+            "required": [
+              "name",
+              "value"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "The variable's name."
+              },
+              "value": {
+                "type": "string",
+                "description": "The value. Decoded on the way out the same way a tag is, so `true`,\n`false`, and a JSON array or object arrive as themselves."
+              }
+            }
+          }
+        ],
+        "description": "Set or replace one secret variable's value."
       },
       "SetCapabilityArgs": {
         "type": "object",
@@ -17891,6 +18448,11 @@
         "description": "A URL, given as a plain string. Any trailing slash is stripped when the\nvalue is returned."
       },
       "Value": {},
+      "VarMap": {
+        "type": "object",
+        "description": "Variables as a JSON object.",
+        "additionalProperties": true
+      },
       "Verdict": {
         "type": "string",
         "description": "Where a (server, version) pair stands.",
@@ -18147,6 +18709,10 @@
     {
       "name": "incidents",
       "description": "Operational incidents (groups of issues against a server)."
+    },
+    {
+      "name": "inventory",
+      "description": "An environment's applications and the variables that configure them, for the tooling that configures them."
     },
     {
       "name": "issues",

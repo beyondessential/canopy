@@ -324,6 +324,16 @@ impl Application {
 		use crate::schema::applications;
 
 		crate::tags::reject_reserved_keys(&server.tags)?;
+		crate::inventory_secret_variables::reject_secret_names(
+			db,
+			crate::inventory_secret_variables::TagScope::Application {
+				application_id: server.id,
+				group_id: server.group_id,
+				rank: server.rank.unwrap_or_default(),
+			},
+			&server.tags,
+		)
+		.await?;
 
 		let created = diesel::insert_into(applications::table)
 			.values(server)
@@ -547,6 +557,18 @@ impl Application {
 	/// which archiving the application did not touch.
 	pub async fn restore(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Self> {
 		use crate::schema::applications::dsl;
+
+		let server = Self::get_by_id(db, server_id).await?;
+		crate::inventory_secret_variables::reject_secret_names(
+			db,
+			crate::inventory_secret_variables::TagScope::Application {
+				application_id: server_id,
+				group_id: server.group_id,
+				rank: server.rank.unwrap_or_default(),
+			},
+			&server.tags,
+		)
+		.await?;
 
 		diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
 			.set(dsl::deleted_at.eq(None::<jiff_diesel::Timestamp>))
@@ -810,6 +832,7 @@ impl Application {
 		applications
 			.select(Self::as_select())
 			.filter(group_id.eq(group_id_))
+			.filter(id.ne(Uuid::nil()))
 			.filter(deleted_at.is_null())
 			.order(name.asc())
 			.load(db)
@@ -955,19 +978,55 @@ impl Application {
 	) -> Result<Self> {
 		use crate::schema::applications::dsl;
 
-		if let Some(tags) = &updates.tags {
-			crate::tags::reject_reserved_keys(tags)?;
-		}
-
-		// Capture the old group before the update: rank/kind/group_id may all
+		// Capture the old server before the update: rank/kind/group_id may all
 		// change, so both the old and new group's canonical member can shift.
 		// Non-fatal: a missing server (or read error) just means "no old group
 		// to recompute" and leaves the update's own error handling — e.g. the
 		// empty-changeset path — to set the response, unchanged by us.
-		let old_group_id = Self::get_by_id(db, server_id)
-			.await
-			.ok()
-			.and_then(|s| s.group_id);
+		let old = Self::get_by_id(db, server_id).await.ok();
+
+		if let Some(tags) = &updates.tags {
+			crate::tags::reject_reserved_keys(tags)?;
+		}
+
+		// The tags and the scope they land in, either of which the update may
+		// be changing.
+		let moving = updates.group_id.is_some() || updates.rank.is_some();
+		let tags = match (&updates.tags, &old) {
+			(Some(tags), _) => Some(tags),
+			(None, Some(old)) if moving => Some(&old.tags),
+			_ => None,
+		};
+		if let Some(tags) = tags {
+			let group_id = match updates.group_id {
+				Some(group_id) => group_id,
+				None => old.as_ref().and_then(|server| server.group_id),
+			};
+			let rank = updates
+				.rank
+				.or_else(|| old.as_ref().and_then(|server| server.rank))
+				.unwrap_or_default();
+			let tags = match group_id {
+				Some(group_id) => tags.merged_with(
+					&crate::server_groups::ServerGroup::get_by_id(db, group_id)
+						.await?
+						.tags,
+				),
+				None => tags.clone(),
+			};
+			crate::inventory_secret_variables::reject_secret_names(
+				db,
+				crate::inventory_secret_variables::TagScope::Application {
+					application_id: server_id,
+					group_id,
+					rank,
+				},
+				&tags,
+			)
+			.await?;
+		}
+
+		let old_group_id = old.and_then(|server| server.group_id);
 
 		// An empty changeset is a no-op, not an error. It became reachable when
 		// the group moved to the machine: an edit that changes only the group

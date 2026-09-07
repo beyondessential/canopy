@@ -1,0 +1,1 @@
+DROP TABLE inventory_secret_variables;
