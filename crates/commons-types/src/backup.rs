@@ -418,6 +418,13 @@ pub mod semantics {
 	/// worklist entry, withholds an entry from a server whose product has no
 	/// manifest, and holds the replica to the redaction outcome reported back.
 	pub const REDACT: &str = "redact";
+	/// The intent builds a Tamanu reporting schema from the replica it restores
+	/// and registers it as a group-scoped artifact: Canopy names the pair's
+	/// version on the worklist entry, restores a machine of the group running a
+	/// central Tamanu application, and keys `once` to the group and the version
+	/// rather than the snapshot.
+	// spec: RPT
+	pub const REPORTING_SCHEMA: &str = "reporting-schema";
 }
 
 /// The parameters Canopy owns on behalf of the `redact` semantic.
@@ -496,11 +503,9 @@ pub struct IntentDescriptor {
 	/// Human-readable description of the intent, if provided.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub description: Option<String>,
-	/// Behaviours this intent opts into. Recognised values are `check` (a
-	/// health report is expected for each replica), `once` (a given snapshot
-	/// is only ever dispatched to a replica once, rather than repeatedly
-	/// until overdue), and `url` (a replica's health report includes a link
-	/// to it). Unrecognised values are stored but have no effect.
+	/// Behaviours this intent opts into; see [`semantics`] for what each one
+	/// grants. Unrecognised values are stored but have no effect, so a consumer
+	/// may advertise ahead of Canopy support.
 	#[serde(default)]
 	pub semantics: Vec<String>,
 	/// Configurable parameters this intent accepts per replica, keyed by

@@ -4,12 +4,16 @@ use axum::{
 };
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::device_auth::{AuthDevice, ReleaserDevice};
-use commons_types::version::{VersionStatus, VersionStr};
+use commons_servers::device_auth::AuthDevice;
+use commons_types::{
+	device::DeviceRole,
+	version::{VersionStatus, VersionStr},
+};
 use database::{
 	Db,
-	artifacts::{Artifact as ArtifactRow, NewArtifact, Scope},
+	artifacts::{Artifact as ArtifactRow, NewArtifact, Scope, digest_of},
 	machines::Machine,
+	restore::RestoreReplica,
 	versions::{NewVersion, Version},
 };
 use diesel::SelectableHelper as _;
@@ -99,9 +103,12 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new().routes(routes!(create))
 }
 
-/// Register a downloadable artifact for a version or version range.
+/// Register an artifact for a version or version range.
 ///
-/// Requires a device certificate with the releaser role (or admin). The
+/// A releaser registers an artifact that rests elsewhere, naming its location.
+/// A component that produces a group's artifacts registers one for that group,
+/// sending the bytes on this connection; Canopy holds them and is issued no
+/// credential to any store. The
 /// path identifies the version the artifact belongs to — either an exact
 /// version (e.g. `2.10.5`) or a semver range pattern (e.g. `2.10.x`,
 /// `^2.10.0`) — followed by the artifact's type and target platform. The
@@ -122,14 +129,18 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	path = "/{version}/{artifact_type}/{platform}",
 	operation_id = "register_artifact",
 	tag = "artifacts",
-	security(("releaser-device" = [])),
+	security(
+		("releaser-device" = []),
+		("backup-restore-device" = []),
+	),
 	params(
 		("version" = String, Path, description = "Exact semver (e.g. `2.10.5`) or range pattern (e.g. `2.10.x`, `^2.10.0`)."),
 		("artifact_type" = String, Path),
 		("platform" = String, Path),
-		("group" = Option<Uuid>, Query, description = "Group the artifact is for. A releaser credential carries no authorisation for any group, so naming one here is refused."),
+		("group" = Option<Uuid>, Query, description = "Group the artifact is for. A releaser credential carries no authorisation for any group; a component that produces a group's artifacts is authorised for that group alone."),
+		("run" = Option<Uuid>, Query, description = "The run that produced the artifact, where one produced it."),
 	),
-	request_body(content = String, description = "Download URL for the artifact, as a plain-text body."),
+	request_body(content = String, description = "For an unscoped artifact, its download URL as a plain-text body. For a group-scoped one, the artifact's bytes, which Canopy holds and verifies against the digest it takes of them."),
 	responses(
 		(status = 200, body = Artifact),
 		(status = 400, body = ProblemDetailsSchema),
@@ -139,27 +150,58 @@ pub fn routes() -> OpenApiRouter<AppState> {
 )]
 #[axum::debug_handler]
 async fn create(
-	device: ReleaserDevice,
+	device: AuthDevice,
 	State(db): State<Db>,
 	Path((version, artifact_type, platform)): Path<(String, String, String)>,
 	Query(scope): Query<RegisterScope>,
 	headers: axum::http::HeaderMap,
-	url: String,
+	body: axum::body::Bytes,
 ) -> Result<Json<Artifact>> {
 	use node_semver::{Range, Version as SemverVersion};
 
-	// A releaser registers unscoped artifacts and carries no authorisation for
-	// any group, so the group-scoped path is not reachable from this endpoint
-	// at all rather than being refused per group.
-	// spec: ART#registration
-	if scope.group.is_some() {
-		return Err(AppError::AuthInsufficientPermissions {
-			required: "authorisation for the named group".into(),
-		});
-	}
-
 	let mut db = db.get().await?;
-	let device_id = device.0.0.id;
+	let device_id = device.0.id;
+	let role = device.0.role;
+
+	// Who may register what. A releaser registers unscoped artifacts and
+	// carries no authorisation for any group. A component that produces a
+	// group's artifacts registers for that group under an authorisation
+	// defined with those artifacts, and for no other.
+	// spec: ART#registration
+	let held = match scope.group {
+		None => {
+			if !matches!(role, DeviceRole::Releaser | DeviceRole::Admin) {
+				return Err(AppError::AuthInsufficientPermissions {
+					required: "releaser or admin".into(),
+				});
+			}
+			None
+		}
+		Some(group) => {
+			let authorised = role == DeviceRole::Admin
+				|| RestoreReplica::authorizes_schema_artifacts(&mut db, device_id, group).await?;
+			if !authorised {
+				// Refused the same way whether the group exists or not, so the
+				// endpoint is not a directory of which groups have a builder.
+				return Err(AppError::AuthInsufficientPermissions {
+					required: "an enabled declaration building this group's artifacts".into(),
+				});
+			}
+
+			if body.len() > MAX_HELD_ARTIFACT_BYTES {
+				return Err(AppError::BadRequest(format!(
+					"artifact is larger than the {MAX_HELD_ARTIFACT_BYTES} byte limit"
+				)));
+			}
+			if body.is_empty() {
+				return Err(AppError::BadRequest(
+					"a group-scoped artifact carries its bytes".into(),
+				));
+			}
+
+			Some(group)
+		}
+	};
 
 	let (version_id, version_range_pattern) = if let Ok(semver) = SemverVersion::parse(&version) {
 		let version_str = VersionStr(semver);
@@ -195,30 +237,50 @@ async fn create(
 		(None, Some(version.clone()))
 	};
 
-	let row = ArtifactRow::register(
-		&mut db,
-		NewArtifact {
-			version_id,
-			platform,
-			artifact_type,
-			download_url: Some(url),
-			device_id: Some(device_id),
-			version_range_pattern,
-			group_id: None,
-			content: None,
-			content_type: None,
-			digest: None,
-			run_id: None,
-		},
-	)
-	.await?;
+	let content_type = headers
+		.get(axum::http::header::CONTENT_TYPE)
+		.and_then(|v| v.to_str().ok())
+		.map(str::to_owned);
+
+	let row =
+		ArtifactRow::register(
+			&mut db,
+			NewArtifact {
+				version_id,
+				platform,
+				artifact_type,
+				download_url: match held {
+					None => Some(String::from_utf8(body.to_vec()).map_err(|_| {
+						AppError::BadRequest("download URL is not valid UTF-8".into())
+					})?),
+					Some(_) => None,
+				},
+				device_id: Some(device_id),
+				version_range_pattern,
+				group_id: held,
+				// Canopy verifies the bytes against the digest as they arrive, so it
+				// records the digest of what it actually took in.
+				// spec: ART#digests
+				digest: held.map(|_| digest_of(&body)),
+				content: held.map(|_| body.to_vec()),
+				content_type: held.and(content_type),
+				run_id: scope.run,
+			},
+		)
+		.await?;
 
 	let base = crate::versions::public_base_url(&headers);
 	Ok(Json(Artifact::offered(row, &base, &version)))
 }
 
-/// The group a registration names, where it names one.
+/// What a registration names beyond the path: the group an artifact is for,
+/// and the run that produced it.
 #[derive(Debug, serde::Deserialize)]
 struct RegisterScope {
 	group: Option<Uuid>,
+	run: Option<Uuid>,
 }
+
+/// Cap on the bytes Canopy will hold for one artifact, matching the operator
+/// path. A reporting schema is a SQL file; anything approaching this is not one.
+const MAX_HELD_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;

@@ -110,8 +110,8 @@
         "tags": [
           "artifacts"
         ],
-        "summary": "Register a downloadable artifact for a version or version range.",
-        "description": "Requires a device certificate with the releaser role (or admin). The\npath identifies the version the artifact belongs to — either an exact\nversion (e.g. `2.10.5`) or a semver range pattern (e.g. `2.10.x`,\n`^2.10.0`) — followed by the artifact's type and target platform. The\nrequest body is the plain-text URL clients should download the\nartifact from.\n\nWhen an exact version is given and it doesn't exist yet, it is created\nautomatically as an unpublished draft so the artifact has a version to\nattach to; publishing that version later (via the version-creation\nendpoint) is a separate step. When a range pattern is given instead,\nthe artifact isn't tied to one version — it matches whichever\npublished version currently satisfies the range at lookup time.\n\nReturns the created artifact record. Returns 400 if the version or\nrange syntax can't be parsed.",
+        "summary": "Register an artifact for a version or version range.",
+        "description": "A releaser registers an artifact that rests elsewhere, naming its location.\nA component that produces a group's artifacts registers one for that group,\nsending the bytes on this connection; Canopy holds them and is issued no\ncredential to any store. The\npath identifies the version the artifact belongs to — either an exact\nversion (e.g. `2.10.5`) or a semver range pattern (e.g. `2.10.x`,\n`^2.10.0`) — followed by the artifact's type and target platform. The\nrequest body is the plain-text URL clients should download the\nartifact from.\n\nWhen an exact version is given and it doesn't exist yet, it is created\nautomatically as an unpublished draft so the artifact has a version to\nattach to; publishing that version later (via the version-creation\nendpoint) is a separate step. When a range pattern is given instead,\nthe artifact isn't tied to one version — it matches whichever\npublished version currently satisfies the range at lookup time.\n\nReturns the created artifact record. Returns 400 if the version or\nrange syntax can't be parsed.",
         "operationId": "register_artifact",
         "parameters": [
           {
@@ -142,7 +142,17 @@
           {
             "name": "group",
             "in": "query",
-            "description": "Group the artifact is for. A releaser credential carries no authorisation for any group, so naming one here is refused.",
+            "description": "Group the artifact is for. A releaser credential carries no authorisation for any group; a component that produces a group's artifacts is authorised for that group alone.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "run",
+            "in": "query",
+            "description": "The run that produced the artifact, where one produced it.",
             "required": false,
             "schema": {
               "type": "string",
@@ -151,7 +161,7 @@
           }
         ],
         "requestBody": {
-          "description": "Download URL for the artifact, as a plain-text body.",
+          "description": "For an unscoped artifact, its download URL as a plain-text body. For a group-scoped one, the artifact's bytes, which Canopy holds and verifies against the digest it takes of them.",
           "content": {
             "text/plain": {
               "schema": {
@@ -206,6 +216,9 @@
         "security": [
           {
             "releaser-device": []
+          },
+          {
+            "backup-restore-device": []
           }
         ]
       }
@@ -2225,7 +2238,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Behaviours this intent opts into. Recognised values are `check` (a\nhealth report is expected for each replica), `once` (a given snapshot\nis only ever dispatched to a replica once, rather than repeatedly\nuntil overdue), and `url` (a replica's health report includes a link\nto it). Unrecognised values are stored but have no effect."
+            "description": "Behaviours this intent opts into; see [`semantics`] for what each one\ngrants. Unrecognised values are stored but have no effect, so a consumer\nmay advertise ahead of Canopy support."
           }
         }
       },
@@ -2756,6 +2769,49 @@
           }
         }
       },
+      "ReportingSchemaArgs": {
+        "type": "object",
+        "description": "What a reporting-schema build reports beyond its replica's restore health.",
+        "required": [
+          "built"
+        ],
+        "properties": {
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The artifacts the build registered, of which the schema is one."
+          },
+          "built": {
+            "type": "boolean",
+            "description": "Whether a schema came out of the build."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What went wrong, where the build failed."
+          },
+          "target_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The version the schema was built for, as semver, echoed from the\nworklist entry's `target_version`."
+          },
+          "target_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The same version as the identifier, echoed from `target_version_id`.\nAccepted for a consumer that reports the identifier; omit it when\n`target_version` is sent."
+          }
+        }
+      },
       "RequestCertificateArgs": {
         "type": "object",
         "description": "A request to certify a key for a name.",
@@ -3161,6 +3217,17 @@
             "type": "string",
             "format": "uuid",
             "description": "The declaration this report concerns, taken from the worklist entry's\n`replica_id`. Required: several replicas can share one group, machine,\ntype, and intent, so a report that named no declaration could not be\nattributed to one of them."
+          },
+          "reporting_schema": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ReportingSchemaArgs",
+                "description": "What a reporting-schema build produced, where the replica was restored\nfor one. Absent on any other report."
+              }
+            ]
           },
           "run_id": {
             "type": [

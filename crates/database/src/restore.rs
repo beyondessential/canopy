@@ -314,6 +314,45 @@ impl RestoreReplica {
 	/// Whether an enabled declaration covers `(consumer, group, type)` — the
 	/// authorization check for issuing restore credentials. A server-scoped or
 	/// a group-wide declaration both satisfy it.
+	/// Whether a consumer may register group-scoped artifacts for this group:
+	/// it has an enabled declaration covering the group whose intent it
+	/// advertises as building reporting schemas, and no other group.
+	///
+	/// The authorisation is defined with the artifact rather than granted to
+	/// restore consumers at large, so a consumer that restores for a group but
+	/// builds nothing publishes nothing.
+	// spec: ART#registration, RPT#the-build-contract
+	pub async fn authorizes_schema_artifacts(
+		db: &mut AsyncPgConnection,
+		consumer_device_id: Uuid,
+		group_id: Uuid,
+	) -> Result<bool> {
+		let building: Vec<RestoreIntent> =
+			RestoreConsumerCapability::list_for_consumer(db, consumer_device_id)
+				.await?
+				.into_iter()
+				.filter(|d| d.has_semantic(semantics::REPORTING_SCHEMA))
+				.map(|d| d.intent)
+				.collect();
+
+		if building.is_empty() {
+			return Ok(false);
+		}
+
+		use crate::schema::restore_replicas::dsl;
+		let n: i64 = dsl::restore_replicas
+			.filter(dsl::consumer_device_id.eq(consumer_device_id))
+			.filter(dsl::group_id.eq(group_id))
+			.filter(dsl::intent.eq_any(building.iter().map(|i| i.0.clone()).collect::<Vec<_>>()))
+			.filter(dsl::enabled.eq(true))
+			.count()
+			.get_result(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(n > 0)
+	}
+
 	pub async fn authorizes(
 		db: &mut AsyncPgConnection,
 		consumer_device_id: Uuid,

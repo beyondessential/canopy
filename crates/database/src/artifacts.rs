@@ -70,6 +70,9 @@ pub struct Artifact {
 	pub digest: Option<String>,
 	/// The run that produced this artifact, where the registration named one.
 	pub run_id: Option<Uuid>,
+	/// When this artifact was last registered.
+	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
+	pub updated_at: jiff::Timestamp,
 }
 
 #[derive(Debug, Deserialize, Insertable)]
@@ -265,6 +268,27 @@ impl Artifact {
 		}
 
 		pattern_rank(pattern_b).cmp(&pattern_rank(pattern_a))
+	}
+
+	/// When any artifact of this version was last registered.
+	///
+	/// A schema built from a superseded release of a version is not the schema
+	/// that version describes, so this is what a build is held against.
+	// spec: RPT#pairs
+	pub async fn newest_change_for_version(
+		db: &mut AsyncPgConnection,
+		version: Uuid,
+	) -> Result<Option<jiff::Timestamp>> {
+		use crate::schema::artifacts::dsl;
+
+		let newest: Option<jiff_diesel::Timestamp> = dsl::artifacts
+			.filter(dsl::version_id.eq(version))
+			.select(diesel::dsl::max(dsl::updated_at))
+			.first(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(newest.map(Into::into))
 	}
 
 	/// The bytes Canopy holds for an artifact, where it holds any.

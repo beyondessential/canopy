@@ -31,6 +31,7 @@ use utoipa::{
 		(name = "mcp_tokens", description = "Bearer tokens for the public MCP mount."),
 		(name = "upgrade_plans", description = "Where each group is going: the version it intends to move to, and when."),
 		(name = "migration_tests", description = "Where each server stands against the version it would take next."),
+		(name = "reporting_schemas", description = "Which of a group's versions have a reporting schema built for them."),
 		(name = "restore_replicas", description = "Managed restore replicas: capabilities, worklist, and health."),
 		(name = "self_alerts", description = "Canopy's alerts about its own operation."),
 		(name = "server_groups", description = "Application group management and group-level configuration."),

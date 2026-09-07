@@ -184,6 +184,22 @@ impl ServerGroup {
 			.collect())
 	}
 
+	/// The group's canonical central application: the highest-ranked one, and
+	/// the lowest id among equals so the choice is stable.
+	///
+	/// There is no fallback. A group with no central has none, because a
+	/// group's version, and the database a reporting schema is built from, are
+	/// things its central has and nothing else stands in for.
+	// spec: APP#capabilities
+	pub fn canonical_central(
+		members: &[crate::applications::Application],
+	) -> Option<&crate::applications::Application> {
+		members
+			.iter()
+			.filter(|s| s.r#type == ApplicationType::TamanuCentral)
+			.min_by_key(|s| (rank_priority(s.rank), s.id))
+	}
+
 	pub async fn list_all(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::schema::server_groups::dsl;
 		dsl::server_groups
@@ -511,11 +527,7 @@ impl ServerGroup {
 		// version, because a group's version is a thing its central has
 		// and nothing else stands in for it.
 		// spec: APP#capabilities
-		let canonical = members
-			.iter()
-			.filter(|s| s.r#type == ApplicationType::TamanuCentral)
-			.min_by_key(|s| (rank_priority(s.rank), s.id))
-			.map(|s| s.id);
+		let canonical = Self::canonical_central(&members).map(|s| s.id);
 
 		let (version_application_id, effective_version) = match canonical {
 			None => (None, None),

@@ -3091,6 +3091,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/reporting_schemas/build": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask for a pair's schema to be built.
+         * @description This is how a schema is refreshed after the group's configuration changes,
+         *     and how a settled pair is put back on the worklist: a build against a fixed
+         *     version and configuration fails the same way every time, so a failed pair
+         *     waits for this rather than retrying on its own.
+         */
+        post: operations["reporting_schemas_build"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reporting_schemas/for_group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Where each of a group's pairs of group and Tamanu version stands.
+         * @description One entry per published version the group's Tamanu applications report
+         *     running, plus the version its open plan moves it to, so whether a group's
+         *     applications can be offered the schema for the version they run or are
+         *     moving to is answered in one place.
+         */
+        post: operations["reporting_schemas_for_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/restore_replicas/checks": {
         parameters: {
             query?: never;
@@ -4902,6 +4948,19 @@ export interface components {
             /** @description Label value. */
             value: string;
         };
+        /** @description Which pair to build. */
+        BuildPairArgs: {
+            /**
+             * Format: uuid
+             * @description The group whose schema to build.
+             */
+            group_id: string;
+            /**
+             * Format: uuid
+             * @description The Tamanu version to build it for.
+             */
+            version_id: string;
+        };
         /**
          * @description What Canopy does for an application of a given type.
          *
@@ -6505,11 +6564,9 @@ export interface components {
              */
             params?: components["schemas"]["BTreeMap"];
             /**
-             * @description Behaviours this intent opts into. Recognised values are `check` (a
-             *     health report is expected for each replica), `once` (a given snapshot
-             *     is only ever dispatched to a replica once, rather than repeatedly
-             *     until overdue), and `url` (a replica's health report includes a link
-             *     to it). Unrecognised values are stored but have no effect.
+             * @description Behaviours this intent opts into; see [`semantics`] for what each one
+             *     grants. Unrecognised values are stored but have no effect, so a consumer
+             *     may advertise ahead of Canopy support.
              */
             semantics?: string[];
         };
@@ -7898,6 +7955,40 @@ export interface components {
              * @description Number of items to skip from the start of the result set.
              */
             offset: number;
+        };
+        /** @description One pair of group and Tamanu version, and where it stands. */
+        Pair: {
+            /** @description What went wrong, where a build failed. */
+            error?: string | null;
+            /**
+             * Format: uuid
+             * @description The group this pair is for.
+             */
+            group_id: string;
+            /** @description Whether an operator has asked for this pair to be built again. */
+            requested: boolean;
+            /** @description Whether the pair has a schema, failed to build one, or is awaiting one. */
+            state: components["schemas"]["PairState"];
+            /** @description That version as semver, for display. */
+            version: string;
+            /**
+             * Format: uuid
+             * @description The Tamanu version this pair is for.
+             */
+            version_id: string;
+        };
+        /**
+         * @description Where a pair stands, for the operator view.
+         * @enum {string}
+         */
+        PairState: "awaiting" | "built" | "failed";
+        /** @description Request body for reading a group's pairs. */
+        PairsForGroupArgs: {
+            /**
+             * Format: uuid
+             * @description The group to report on.
+             */
+            group_id: string;
         };
         /**
          * @description The data type of a restore-replica configuration parameter, which
@@ -14771,6 +14862,83 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GroupVerdict"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    reporting_schemas_build: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BuildPairArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    reporting_schemas_for_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PairsForGroupArgs"];
+            };
+        };
+        responses: {
+            /** @description Pairs, one per version the group runs or is moving to. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pair"][];
                 };
             };
             401: {

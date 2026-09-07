@@ -28,6 +28,7 @@ use database::{
 	backups::{BackupRun, NewBackupCredentialIssuance, ServerGroupBackupConfig},
 	migration_tests::{self, MigrationTest, NewMigrationTest},
 	pg_duration::PgDuration,
+	reporting_schemas::{NewReportingSchemaBuild, ReportingSchemaBuild},
 	restore::{
 		BackupRestoreCheck, NewBackupRestoreCheck, RestoreConsumerCapability, RestoreReplica,
 	},
@@ -290,11 +291,76 @@ async fn worklist(
 		let once = descriptor.has_semantic(semantics::ONCE);
 		let migrates = descriptor.has_semantic(semantics::MIGRATE);
 		let owns_masking = descriptor.has_semantic(semantics::REDACT);
+		let builds_schema = descriptor.has_semantic(semantics::REPORTING_SCHEMA);
 		let replica_values: ParamValues =
 			serde_json::from_value(d.params.clone()).unwrap_or_default();
 		let params = resolve_params(&descriptor.params, &replica_values);
 
 		let region = cfg.region.clone().unwrap_or_else(instance_default_region);
+
+		// A build is dispatched per pair rather than per machine. The
+		// configuration a schema follows from is held centrally, so every pair
+		// of a group restores the same central's snapshot and differs only in
+		// the version it is migrated to.
+		// spec: RPT#the-build-contract
+		if builds_schema {
+			// Masking alters the configuration a schema follows from, so a
+			// redacting declaration builds nothing rather than building from a
+			// database that is no longer the group's.
+			if d.redacts {
+				continue;
+			}
+
+			let members =
+				database::applications::Application::list_live_in_group(&mut conn, d.group_id)
+					.await?;
+			let Some(central) = database::server_groups::ServerGroup::canonical_central(&members)
+			else {
+				continue;
+			};
+			let central_type = central.r#type.clone();
+			let machine =
+				database::machines::Machine::get_by_id(&mut conn, central.machine_id).await?;
+			let latest = snapshots.get(&(machine.id, d.r#type.clone()));
+
+			for version in
+				database::reporting_schemas::versions_for_group(&mut conn, d.group_id).await?
+			{
+				if once
+					&& database::reporting_schemas::ReportingSchemaBuild::is_settled(
+						&mut conn, d.group_id, version.id,
+					)
+					.await?
+				{
+					continue;
+				}
+
+				#[expect(deprecated, reason = "emitted for consumers on the earlier shape")]
+				out.push(WorklistEntry {
+					replica_id: d.id,
+					group_id: d.group_id,
+					machine_id: machine.id,
+					server_id: machine.id,
+					application_type: Some(central_type.clone()),
+					r#type: d.r#type.clone(),
+					intent: d.intent.clone(),
+					name: d.name.clone(),
+					overdue_after_seconds: d.overdue_after.map(|f| f.0.as_secs()),
+					params: params.clone(),
+					snapshot_id: latest.and_then(|r| r.snapshot_id.clone()),
+					snapshot_at: latest.map(|r| r.reported_at.to_string()),
+					storage: "s3".into(),
+					bucket: cfg.bucket.clone(),
+					prefix: cfg.prefix.clone(),
+					region: region.clone(),
+					target_version: Some(version.as_semver().to_string()),
+					target_version_id: Some(version.id),
+				});
+			}
+
+			continue;
+		}
+
 		for machine in machines {
 			let key = (machine.id, d.name.clone());
 			if !seen.insert(key) {
@@ -659,6 +725,10 @@ pub struct VerificationArgs {
 	/// What the migrations did, for a report under a `migrate` intent. Omit for
 	/// every other intent.
 	pub migration: Option<MigrationArgs>,
+	/// What a reporting-schema build produced, where the replica was restored
+	/// for one. Absent on any other report.
+	// spec: RPT#what-a-build-reports
+	pub reporting_schema: Option<ReportingSchemaArgs>,
 	/// What the masking manifest did, for a replica that redacts. Omit for a
 	/// replica that doesn't.
 	pub redaction: Option<RedactionArgs>,
@@ -745,6 +815,26 @@ pub struct MigrationArgs {
 	pub data_bytes_after: i64,
 	/// One entry per migration that ran, in the order they ran.
 	pub timings: Vec<MigrationTimingArgs>,
+}
+
+/// What a reporting-schema build reports beyond its replica's restore health.
+// spec: RPT#what-a-build-reports
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ReportingSchemaArgs {
+	/// The version the schema was built for, as semver, echoed from the
+	/// worklist entry's `target_version`.
+	pub target_version: Option<String>,
+	/// The same version as the identifier, echoed from `target_version_id`.
+	/// Accepted for a consumer that reports the identifier; omit it when
+	/// `target_version` is sent.
+	pub target_version_id: Option<Uuid>,
+	/// Whether a schema came out of the build.
+	pub built: bool,
+	/// What went wrong, where the build failed.
+	pub error: Option<String>,
+	/// The artifacts the build registered, of which the schema is one.
+	#[serde(default)]
+	pub artifacts: Vec<Uuid>,
 }
 
 /// How long one migration took.
@@ -864,8 +954,35 @@ async fn verification(
 		redaction_error: args.redaction.as_ref().and_then(|r| r.error.clone()),
 	};
 
-	match args.migration {
-		Some(migration) => {
+	match (args.migration, args.reporting_schema) {
+		// A build rides the migrate pathway, so a report may carry both; the
+		// build is the one that settles the pair.
+		(_, Some(build)) => {
+			let version_id = resolve_build_target(&mut conn, &build).await?;
+			// The build is held against the group's central application, which is
+			// the one whose database the schema followed from and the one the
+			// entry named.
+			// spec: RPT#alerting
+			let members =
+				database::applications::Application::list_live_in_group(&mut conn, args.group)
+					.await?;
+			let application_id =
+				database::server_groups::ServerGroup::canonical_central(&members).map(|a| a.id);
+			ReportingSchemaBuild::record(
+				&mut conn,
+				report,
+				NewReportingSchemaBuild {
+					group_id: args.group,
+					version_id,
+					application_id,
+					built: build.built,
+					error: build.error,
+					artifact_ids: build.artifacts,
+				},
+			)
+			.await?;
+		}
+		(Some(migration), None) => {
 			let target_version_id = resolve_migration_target(&mut conn, &migration).await?;
 			let application_id =
 				resolve_migration_application(&mut conn, &migration, machine_id, target_version_id)
@@ -877,7 +994,7 @@ async fn verification(
 			)
 			.await?;
 		}
-		None => {
+		(None, None) => {
 			BackupRestoreCheck::record_report(&mut conn, report).await?;
 		}
 	}
@@ -906,6 +1023,26 @@ async fn resolve_migration_target(
 	migration
 		.target_version_id
 		.ok_or_else(|| AppError::BadRequest("migration report names no target version".into()))
+}
+
+/// Resolve the version a reporting-schema build is about.
+///
+/// The semver is preferred, matching a migration report: it is what the entry
+/// carried and what the builder actually built for.
+async fn resolve_build_target(
+	conn: &mut AsyncPgConnection,
+	build: &ReportingSchemaArgs,
+) -> Result<Uuid> {
+	if let Some(semver) = &build.target_version {
+		return Ok(
+			database::versions::Version::get_by_version(conn, semver.parse()?)
+				.await?
+				.id,
+		);
+	}
+	build
+		.target_version_id
+		.ok_or_else(|| AppError::BadRequest("build report names no version".into()))
 }
 
 /// Resolve the application a migration report is about.

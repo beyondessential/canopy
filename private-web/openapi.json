@@ -6188,6 +6188,116 @@
         ]
       }
     },
+    "/api/reporting_schemas/build": {
+      "post": {
+        "tags": [
+          "reporting_schemas"
+        ],
+        "summary": "Ask for a pair's schema to be built.",
+        "description": "This is how a schema is refreshed after the group's configuration changes,\nand how a settled pair is put back on the worklist: a build against a fixed\nversion and configuration fails the same way every time, so a failed pair\nwaits for this rather than retrying on its own.",
+        "operationId": "reporting_schemas_build",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildPairArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/reporting_schemas/for_group": {
+      "post": {
+        "tags": [
+          "reporting_schemas"
+        ],
+        "summary": "Where each of a group's pairs of group and Tamanu version stands.",
+        "description": "One entry per published version the group's Tamanu applications report\nrunning, plus the version its open plan moves it to, so whether a group's\napplications can be offered the schema for the version they run or are\nmoving to is answered in one place.",
+        "operationId": "reporting_schemas_for_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PairsForGroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Pairs, one per version the group runs or is moving to.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Pair"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/restore_replicas/checks": {
       "post": {
         "tags": [
@@ -9287,6 +9397,26 @@
           }
         }
       },
+      "BuildPairArgs": {
+        "type": "object",
+        "description": "Which pair to build.",
+        "required": [
+          "group_id",
+          "version_id"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group whose schema to build."
+          },
+          "version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Tamanu version to build it for."
+          }
+        }
+      },
       "Caps": {
         "type": "object",
         "description": "What Canopy does for an application of a given type.\n\nReachability, health checks and backups are deliberately absent: checks are\ngraded by the source that reports them, and backup types are advertised per\nmachine by the agent, so both already work for any type.",
@@ -11754,7 +11884,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Behaviours this intent opts into. Recognised values are `check` (a\nhealth report is expected for each replica), `once` (a given snapshot\nis only ever dispatched to a replica once, rather than repeatedly\nuntil overdue), and `url` (a replica's health report includes a link\nto it). Unrecognised values are stored but have no effect."
+            "description": "Behaviours this intent opts into; see [`semantics`] for what each one\ngrants. Unrecognised values are stored but have no effect, so a consumer\nmay advertise ahead of Canopy support."
           }
         }
       },
@@ -13972,6 +14102,71 @@
             "format": "int64",
             "description": "Number of items to skip from the start of the result set.",
             "minimum": 0
+          }
+        }
+      },
+      "Pair": {
+        "type": "object",
+        "description": "One pair of group and Tamanu version, and where it stands.",
+        "required": [
+          "group_id",
+          "version_id",
+          "version",
+          "state",
+          "requested"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What went wrong, where a build failed."
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group this pair is for."
+          },
+          "requested": {
+            "type": "boolean",
+            "description": "Whether an operator has asked for this pair to be built again."
+          },
+          "state": {
+            "$ref": "#/components/schemas/PairState",
+            "description": "Whether the pair has a schema, failed to build one, or is awaiting one."
+          },
+          "version": {
+            "type": "string",
+            "description": "That version as semver, for display."
+          },
+          "version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Tamanu version this pair is for."
+          }
+        }
+      },
+      "PairState": {
+        "type": "string",
+        "description": "Where a pair stands, for the operator view.",
+        "enum": [
+          "awaiting",
+          "built",
+          "failed"
+        ]
+      },
+      "PairsForGroupArgs": {
+        "type": "object",
+        "description": "Request body for reading a group's pairs.",
+        "required": [
+          "group_id"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group to report on."
           }
         }
       },
@@ -18226,6 +18421,10 @@
     {
       "name": "migration_tests",
       "description": "Where each server stands against the version it would take next."
+    },
+    {
+      "name": "reporting_schemas",
+      "description": "Which of a group's versions have a reporting schema built for them."
     },
     {
       "name": "restore_replicas",
