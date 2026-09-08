@@ -2717,28 +2717,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/inventory/lease_for_group": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * The lease held over an environment, so the group page can say a run would
-         *     be refused and by whom.
-         * @description Null where none holds, an expired lease included. Available to any operator:
-         *     it names who is running and until when, and carries nothing a run receives.
-         */
-        post: operations["inventory_lease_for_group"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/inventory/release_lease": {
         parameters: {
             query?: never;
@@ -2754,6 +2732,29 @@ export interface paths {
          *     taking work over rather than the holder finishing.
          */
         post: operations["inventory_release_lease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory/run_state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What a run on this environment would meet: the lease holding it and the
+         *     maintenance window over it, read the way taking a lease reads them so the
+         *     group page and the refusal agree.
+         * @description Available to any operator: it names who is running and until when, and
+         *     carries nothing a run receives.
+         */
+        post: operations["inventory_run_state"];
         delete?: never;
         options?: never;
         head?: never;
@@ -9365,6 +9366,13 @@ export interface components {
              */
             s3_sent_raw_bytes?: number | null;
         };
+        /** @description The lease and the maintenance window a run on an environment would meet. */
+        RunState: {
+            lease?: null | components["schemas"]["InventoryLease"];
+            /** @description Whether that window is someone else's, which is what refuses a take. */
+            refuses: boolean;
+            window?: null | components["schemas"]["MaintenanceWindow"];
+        };
         /**
          * @description State of an activity row: a device-reported run, or a run inferred from a
          *     credential issuance that never matched a report.
@@ -14719,47 +14727,6 @@ export interface operations {
             };
         };
     };
-    inventory_lease_for_group: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EnvironmentArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": null | components["schemas"]["InventoryLease"];
-                };
-            };
-            /** @description No such server group */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-            /** @description Archived, empty, or ambiguously named */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
     inventory_release_lease: {
         parameters: {
             query?: never;
@@ -14784,6 +14751,47 @@ export interface operations {
             };
             /** @description No such lease, or it was already released */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    inventory_run_state: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnvironmentArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunState"];
+                };
+            };
+            /** @description No such server group */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description Archived, empty, or ambiguously named */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -587,22 +587,86 @@ async fn reports_the_lease_holding_an_environment() {
 		let group = insert_group(&mut conn, "kamaka").await;
 		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
 
-		let before = private
-			.post("/api/inventory/lease_for_group")
-			.json(&json!({ "server_group_id": group, "rank": "dev" }))
-			.await;
-		before.assert_status_ok();
-		assert_eq!(before.json::<Value>(), Value::Null);
+		let before = read_run_state(&private, group).await;
+		assert_eq!(before["lease"], Value::Null);
+		assert_eq!(before["window"], Value::Null);
+		assert_eq!(before["refuses"], false);
 
 		take_lease(&private, json!({ "server_group_id": group })).await;
-		let after = private
-			.post("/api/inventory/lease_for_group")
-			.json(&json!({ "server_group_id": group, "rank": "dev" }))
-			.await;
-		after.assert_status_ok();
-		assert_eq!(after.json::<Value>()["held_by"], ME);
+		let after = read_run_state(&private, group).await;
+		assert_eq!(after["lease"]["held_by"], ME);
 	})
 	.await
+}
+
+/// The page reads the windows canopy refuses a lease for, which are those over
+/// the environment's machines as well as those over the group.
+#[tokio::test(flavor = "multi_thread")]
+async fn reports_a_window_over_a_machine_in_the_environment() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		let central =
+			insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		declare_machine_window(
+			&mut conn,
+			central,
+			"someone.else@bes.au",
+			"NOW() + INTERVAL '2 hours'",
+		)
+		.await;
+
+		let state = read_run_state(&private, group).await;
+		assert_eq!(state["window"]["declared_by"], "someone.else@bes.au");
+		assert_eq!(state["refuses"], true);
+	})
+	.await
+}
+
+/// A window the reader declared themselves holds the page's answer without
+/// refusing them, since taking the lease under it is the point of declaring it.
+#[tokio::test(flavor = "multi_thread")]
+async fn reads_the_readers_own_window_as_no_refusal() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		declare_group_window(&mut conn, group, ME, "NOW() + INTERVAL '2 hours'").await;
+
+		let state = read_run_state(&private, group).await;
+		assert_eq!(state["window"]["declared_by"], ME);
+		assert_eq!(state["refuses"], false);
+	})
+	.await
+}
+
+/// A window past its expected end holds nothing, the same reading `take_lease`
+/// takes, so the page offers the run rather than reporting work under way.
+#[tokio::test(flavor = "multi_thread")]
+async fn reads_a_window_past_its_end_as_over() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		declare_group_window(
+			&mut conn,
+			group,
+			"someone.else@bes.au",
+			"NOW() - INTERVAL '1 minute'",
+		)
+		.await;
+
+		let state = read_run_state(&private, group).await;
+		assert_eq!(state["window"], Value::Null);
+		assert_eq!(state["refuses"], false);
+	})
+	.await
+}
+
+async fn read_run_state(private: &commons_tests::axum_test::TestServer, group: Uuid) -> Value {
+	let response = private
+		.post("/api/inventory/run_state")
+		.json(&json!({ "server_group_id": group, "rank": "dev" }))
+		.await;
+	response.assert_status_ok();
+	response.json()
 }
 
 // --- work under way ---

@@ -159,6 +159,35 @@ test.describe("group inventory", () => {
 		await expect(production.getByTestId("declare-work")).toHaveCount(0);
 	});
 
+	test("says so when the work is declared over a machine in the environment", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
+		const central = await seedServer(sql, {
+			name: "kamaka-prod-central",
+			type: "tamanu-central",
+			rank: "production",
+			groupId: group.id,
+			tags: {},
+		});
+		await seedMaintenanceWindow(sql, {
+			machineId: central.machineId,
+			declaredBy: "someone@else.invalid",
+			note: "replacing a disk",
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		const production = page
+			.getByTestId("group-inventory")
+			.getByTestId("environment-production");
+
+		await expect(production.getByTestId("run-declared")).toContainText(
+			"someone@else.invalid",
+		);
+		await expect(production.getByTestId("declare-work")).toHaveCount(0);
+	});
+
 	test("gives the line a run on the environment is started with", async ({
 		page,
 		sql,

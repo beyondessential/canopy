@@ -51,7 +51,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(take_lease))
 		.routes(routes!(extend_lease))
 		.routes(routes!(release_lease))
-		.routes(routes!(lease_for_group))
+		.routes(routes!(run_state))
 }
 
 /// Which environment to act on: exactly one of the group's identifier or its
@@ -133,6 +133,18 @@ pub struct InventoryHost {
 	pub own_vars: VarMap,
 	/// Which of `vars` are secret.
 	pub secret_vars: Vec<String>,
+}
+
+/// The lease and the maintenance window a run on an environment would meet.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct RunState {
+	/// The lease holding the environment, where one holds.
+	pub lease: Option<InventoryLease>,
+	/// The window holding over the environment or over a machine in it,
+	/// whoever declared it.
+	pub window: Option<MaintenanceWindow>,
+	/// Whether that window is someone else's, which is what refuses a take.
+	pub refuses: bool,
 }
 
 /// An environment's inventory.
@@ -441,36 +453,59 @@ pub async fn release_lease(
 	Ok(Json(()))
 }
 
-/// The lease held over an environment, so the group page can say a run would
-/// be refused and by whom.
+/// What a run on this environment would meet: the lease holding it and the
+/// maintenance window over it, read the way taking a lease reads them so the
+/// group page and the refusal agree.
 ///
-/// Null where none holds, an expired lease included. Available to any operator:
-/// it names who is running and until when, and carries nothing a run receives.
+/// Available to any operator: it names who is running and until when, and
+/// carries nothing a run receives.
 #[utoipa::path(
 	post,
-	path = "/lease_for_group",
-	operation_id = "inventory_lease_for_group",
+	path = "/run_state",
+	operation_id = "inventory_run_state",
 	tag = "inventory",
 	security(("tailscale-user" = [])),
 	request_body = EnvironmentArgs,
 	responses(
-		(status = 200, body = Option<InventoryLease>),
+		(status = 200, body = RunState),
 		(status = 404, description = "No such server group", body = ProblemDetailsSchema),
 		(status = 409, description = "Archived, empty, or ambiguously named", body = ProblemDetailsSchema),
 	),
 )]
-pub async fn lease_for_group(
+pub async fn run_state(
 	State(state): State<AppState>,
-	_user: TailscaleUser,
+	user: TailscaleUser,
 	Json(args): Json<EnvironmentArgs>,
-) -> Result<Json<Option<InventoryLease>>> {
+) -> Result<Json<RunState>> {
 	let mut conn = state.db.get().await?;
 	let environment = resolve_environment(&mut conn, &args).await?;
-	Ok(Json(
-		InventoryLease::open_for(&mut conn, environment.group.id, environment.rank)
-			.await?
-			.filter(|lease| lease.holds_at(Timestamp::now())),
-	))
+	let now = Timestamp::now();
+	let login = user.login.as_str();
+
+	let lease = InventoryLease::open_for(&mut conn, environment.group.id, environment.rank)
+		.await?
+		.filter(|lease| lease.holds_at(now));
+
+	let machine_ids: Vec<Uuid> = environment
+		.machines
+		.iter()
+		.map(|machine| machine.id)
+		.collect();
+	let window = MaintenanceWindow::open_over(&mut conn, environment.group.id, &machine_ids)
+		.await?
+		.into_iter()
+		.find(|window| window.holds_at(now));
+
+	Ok(Json(RunState {
+		refuses: window.as_ref().is_some_and(|window| {
+			window
+				.declared_by
+				.as_deref()
+				.is_some_and(|who| who != login)
+		}),
+		lease,
+		window,
+	}))
 }
 
 /// Serve the inventory of the environment the caller holds the lease on.

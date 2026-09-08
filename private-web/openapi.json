@@ -5461,70 +5461,6 @@
         ]
       }
     },
-    "/api/inventory/lease_for_group": {
-      "post": {
-        "tags": [
-          "inventory"
-        ],
-        "summary": "The lease held over an environment, so the group page can say a run would\nbe refused and by whom.",
-        "description": "Null where none holds, an expired lease included. Available to any operator:\nit names who is running and until when, and carries nothing a run receives.",
-        "operationId": "inventory_lease_for_group",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EnvironmentArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "type": "null"
-                    },
-                    {
-                      "$ref": "#/components/schemas/InventoryLease"
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "No such server group",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Archived, empty, or ambiguously named",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-user": []
-          }
-        ]
-      }
-    },
     "/api/inventory/release_lease": {
       "post": {
         "tags": [
@@ -5568,6 +5504,63 @@
         "security": [
           {
             "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/inventory/run_state": {
+      "post": {
+        "tags": [
+          "inventory"
+        ],
+        "summary": "What a run on this environment would meet: the lease holding it and the\nmaintenance window over it, read the way taking a lease reads them so the\ngroup page and the refusal agree.",
+        "description": "Available to any operator: it names who is running and until when, and\ncarries nothing a run receives.",
+        "operationId": "inventory_run_state",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnvironmentArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunState"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such server group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Archived, empty, or ambiguously named",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
           }
         ]
       }
@@ -16440,6 +16433,41 @@
             ],
             "format": "int64",
             "description": "Cumulative raw bytes sent to object storage at this point."
+          }
+        }
+      },
+      "RunState": {
+        "type": "object",
+        "description": "The lease and the maintenance window a run on an environment would meet.",
+        "required": [
+          "refuses"
+        ],
+        "properties": {
+          "lease": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/InventoryLease",
+                "description": "The lease holding the environment, where one holds."
+              }
+            ]
+          },
+          "refuses": {
+            "type": "boolean",
+            "description": "Whether that window is someone else's, which is what refuses a take."
+          },
+          "window": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MaintenanceWindow",
+                "description": "The window holding over the environment or over a machine in it,\nwhoever declared it."
+              }
+            ]
           }
         }
       },
