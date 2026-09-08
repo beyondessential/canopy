@@ -239,25 +239,10 @@ impl BackupSecrets {
 		}
 	}
 
-	/// Read all string keys, answering `None` for a Secret that does not exist.
-	/// A caller that reads-modifies-writes needs an absent Secret told apart
-	/// from an API failure: treating a failure as empty would have the write
-	/// back drop every key already there.
-	///
-	/// The values arrive as plain `String`s; see [`Self::read_keys`].
-	pub async fn try_read_keys(
-		&self,
-		secret_name: &str,
-	) -> Result<Option<BTreeMap<String, String>>> {
-		Ok(self.try_read_secret_keys(secret_name).await?.map(|keys| {
-			keys.into_iter()
-				.map(|(k, v)| (k, v.expose_secret().to_owned()))
-				.collect()
-		}))
-	}
-
 	/// [`Self::read_secret_keys`], answering `None` for a Secret that does not
-	/// exist rather than an error.
+	/// exist rather than an error. A caller that reads-modifies-writes needs an
+	/// absent Secret told apart from an API failure: treating a failure as empty
+	/// would have the write back drop every key already there.
 	pub async fn try_read_secret_keys(
 		&self,
 		secret_name: &str,
