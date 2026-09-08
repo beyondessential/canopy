@@ -171,6 +171,7 @@ function EnvironmentInventory({
 					</Typography>
 					<Vars
 						items={[...groupVars, ...environmentVars]}
+						inherited={groupVars}
 						scopeOf={(variable) =>
 							variable.rank
 								? { server_group_id: groupId, rank }
@@ -360,7 +361,6 @@ function Vars({
 	empty?: string;
 }) {
 	const remove = useApiAction("inventory_variables", "remove");
-	const wider = new Set(inherited.map((variable) => variable.name));
 
 	if (items.length === 0) {
 		return (
@@ -381,7 +381,10 @@ function Vars({
 				{[...items]
 					.sort((a, b) => a.name.localeCompare(b.name))
 					.map((variable) => {
-						const overriding = wider.has(variable.name);
+						const overriding = inherited.some(
+							(other) =>
+								other.name === variable.name && other.id !== variable.id,
+						);
 						const chip = (
 							<Chip
 								size="small"
