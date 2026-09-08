@@ -576,19 +576,20 @@ pub async fn for_group(
 		group_id: group.id,
 		rank,
 	};
-	let mut wide = Scoped::default();
-	wide.add(
+	let mut wide = Scoped::read(
 		&state,
 		group_scope,
 		&InventoryVariable::list_at(&mut conn, group_scope).await?,
 	)
 	.await?;
-	wide.add(
-		&state,
-		environment_scope,
-		&InventoryVariable::list_at(&mut conn, environment_scope).await?,
-	)
-	.await?;
+	wide.overlay(
+		&Scoped::read(
+			&state,
+			environment_scope,
+			&InventoryVariable::list_at(&mut conn, environment_scope).await?,
+		)
+		.await?,
+	);
 
 	let mut by_machine: BTreeMap<Uuid, Vec<InventoryVariable>> = BTreeMap::new();
 	for variable in InventoryVariable::list_for_machines(&mut conn, &machine_ids).await? {
@@ -599,13 +600,11 @@ pub async fn for_group(
 
 	let mut hosts = Vec::with_capacity(machines.len());
 	for machine in &machines {
-		let mut own = Scoped::default();
-		let scope = VariableScope::Machine {
-			machine_id: machine.id,
-		};
-		own.add(
+		let own = Scoped::read(
 			&state,
-			scope,
+			VariableScope::Machine {
+				machine_id: machine.id,
+			},
 			by_machine.get(&machine.id).map_or(&[][..], Vec::as_slice),
 		)
 		.await?;
@@ -655,7 +654,7 @@ pub async fn for_group(
 				.collect(),
 			vars: effective.vars,
 			own_vars: own.vars,
-			secret_vars: effective.secret,
+			secret_vars: effective.secret.into_iter().collect(),
 		});
 	}
 	hosts.sort_by(|a, b| a.name.cmp(&b.name));
@@ -675,7 +674,7 @@ pub async fn for_group(
 		group: group.name,
 		rank,
 		vars: wide.vars,
-		secret_vars: wide.secret,
+		secret_vars: wide.secret.into_iter().collect(),
 		hosts,
 	}))
 }
@@ -704,18 +703,16 @@ fn reject_shared_address(hosts: &[InventoryHost]) -> Result<()> {
 #[derive(Debug, Clone, Default)]
 struct Scoped {
 	vars: VarMap,
-	secret: Vec<String>,
+	secret: BTreeSet<String>,
 }
 
 impl Scoped {
-	/// Fold one scope's variables in, over anything already gathered. Reads the
-	/// scope's Secret only where it holds a secret variable.
-	async fn add(
-		&mut self,
+	/// One scope's variables, its Secret read only where it holds one.
+	async fn read(
 		state: &AppState,
 		scope: VariableScope,
 		variables: &[InventoryVariable],
-	) -> Result<()> {
+	) -> Result<Self> {
 		let secrets: BTreeMap<String, SecretString> =
 			if variables.iter().any(|variable| variable.is_secret) {
 				super::inventory_variables::secret_store(state)?
@@ -726,6 +723,7 @@ impl Scoped {
 				BTreeMap::new()
 			};
 
+		let mut scoped = Self::default();
 		for variable in variables {
 			let value = match &variable.value {
 				Some(value) => value.clone(),
@@ -742,32 +740,25 @@ impl Scoped {
 					serde_json::from_str(held).unwrap_or_else(|_| Value::String(held.to_owned()))
 				}
 			};
-			self.vars.0.insert(variable.name.clone(), value);
-			if !variable.is_secret {
-				self.secret.retain(|name| name != &variable.name);
-			} else if !self.secret.contains(&variable.name) {
-				self.secret.push(variable.name.clone());
+			scoped.vars.0.insert(variable.name.clone(), value);
+			if variable.is_secret {
+				scoped.secret.insert(variable.name.clone());
 			}
 		}
-		self.secret.sort();
-		Ok(())
+		Ok(scoped)
 	}
 
-	/// Lay a narrower scope's variables over these.
+	/// Lay a narrower scope's variables over these: its value wins, and its
+	/// secrecy with it, so a name it sets in the clear stops being secret.
 	fn overlay(&mut self, narrower: &Self) {
-		self.vars
-			.0
-			.extend(narrower.vars.0.iter().map(|(k, v)| (k.clone(), v.clone())));
-		for name in &narrower.secret {
-			if !self.secret.contains(name) {
-				self.secret.push(name.clone());
+		for (name, value) in &narrower.vars.0 {
+			self.vars.0.insert(name.clone(), value.clone());
+			if narrower.secret.contains(name) {
+				self.secret.insert(name.clone());
+			} else {
+				self.secret.remove(name);
 			}
 		}
-		// A name that stops being secret at the narrower scope stops being
-		// secret in the merge, the value a run receives being that one.
-		self.secret
-			.retain(|name| narrower.secret.contains(name) || !narrower.vars.0.contains_key(name));
-		self.secret.sort();
 	}
 }
 
