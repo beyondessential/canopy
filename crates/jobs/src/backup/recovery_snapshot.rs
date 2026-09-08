@@ -15,7 +15,10 @@
 //! the same key each tick; bucket versioning keeps the history.
 // spec: ESC
 
-use std::{collections::BTreeMap, time::Duration};
+use std::{
+	collections::{BTreeMap, BTreeSet},
+	time::Duration,
+};
 
 use anyhow::{Context, Result};
 use commons_servers::{backup_secrets::BackupSecrets, recovery_vault::Recipients};
@@ -196,16 +199,26 @@ pub async fn build_snapshot_json(
 	let mut inventory_variables = Vec::with_capacity(by_scope.len());
 	for (scope, variables) in by_scope {
 		let secret = scope.secret_name();
-		let keys = if variables.values().any(Option::is_none) {
+		let held: BTreeSet<&str> = variables
+			.iter()
+			.filter(|(_, value)| value.is_none())
+			.map(|(name, _)| name.as_str())
+			.collect();
+		// Only the names a variable still carries: a Secret can hold a key whose
+		// row is gone, and the vault it is written to is object-locked.
+		let keys = if held.is_empty() {
+			BTreeMap::new()
+		} else {
 			match secrets.read_keys(&secret).await {
-				Ok(keys) => keys,
+				Ok(keys) => keys
+					.into_iter()
+					.filter(|(name, _)| held.contains(name.as_str()))
+					.collect(),
 				Err(e) => {
 					warn!(%secret, "recovery-snapshot: secret variables unreadable ({e}); storing empty");
 					BTreeMap::new()
 				}
 			}
-		} else {
-			BTreeMap::new()
 		};
 		inventory_variables.push(RecoveryInventoryVariables {
 			scope,
