@@ -501,37 +501,38 @@ impl ServerGroup {
 		group_ids: &[Uuid],
 	) -> Result<Vec<Environment>> {
 		use crate::schema::applications::dsl;
-		use std::collections::{HashMap, HashSet};
+		use std::collections::{BTreeSet, HashMap};
 
 		if group_ids.is_empty() {
 			return Ok(Vec::new());
 		}
-		let members: Vec<Application> = dsl::applications
-			.select(Application::as_select())
+		let members: Vec<(Uuid, Option<Uuid>, Option<ServerRank>, String)> = dsl::applications
+			.select((dsl::id, dsl::group_id, dsl::rank, dsl::type_))
 			.filter(dsl::group_id.eq_any(group_ids))
 			.filter(dsl::deleted_at.is_null())
 			.filter(dsl::rank.is_not_null())
 			.load(db)
 			.await?;
 
-		let mut present: HashSet<(Uuid, ServerRank)> = HashSet::new();
+		let tamanu_central = ApplicationType::TamanuCentral.to_string();
+		let mut present: HashMap<Uuid, BTreeSet<ServerRank>> = HashMap::new();
 		let mut central: HashMap<(Uuid, ServerRank), Uuid> = HashMap::new();
-		for application in members {
-			let (Some(group_id), Some(rank)) = (application.group_id, application.rank) else {
+		for (id, group_id, rank, r#type) in members {
+			let (Some(group_id), Some(rank)) = (group_id, rank) else {
 				continue;
 			};
-			present.insert((group_id, rank));
-			if application.r#type != ApplicationType::TamanuCentral {
+			present.entry(group_id).or_default().insert(rank);
+			if !r#type.eq_ignore_ascii_case(&tamanu_central) {
 				continue;
 			}
 			central
 				.entry((group_id, rank))
 				.and_modify(|held| {
-					if application.id < *held {
-						*held = application.id;
+					if id < *held {
+						*held = id;
 					}
 				})
-				.or_insert(application.id);
+				.or_insert(id);
 		}
 
 		let ids: Vec<Uuid> = central.values().copied().collect();
@@ -540,10 +541,9 @@ impl ServerGroup {
 		let mut out = Vec::new();
 		for group_id in group_ids {
 			let mut ranks: Vec<ServerRank> = present
-				.iter()
-				.filter(|(group, _)| group == group_id)
-				.map(|(_, rank)| *rank)
-				.collect();
+				.get(group_id)
+				.map(|ranks| ranks.iter().copied().collect())
+				.unwrap_or_default();
 			ranks.sort_by_key(|rank| rank_priority(Some(*rank)));
 			for (position, rank) in ranks.into_iter().enumerate() {
 				out.push(Environment {
