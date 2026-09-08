@@ -294,7 +294,11 @@ function Run({
 					{held.note ? `: ${held.note}` : ""}
 				</Typography>
 			)}
-			{declared ? (
+			{state.status === "error" ? (
+				<Alert severity="warning" sx={{ mt: 1 }}>
+					{state.error.message}
+				</Alert>
+			) : declared ? (
 				<Typography
 					variant="caption"
 					color="text.secondary"
