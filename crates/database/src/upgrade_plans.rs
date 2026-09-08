@@ -217,6 +217,32 @@ impl UpgradePlan {
 			.map_err(AppError::from)
 	}
 
+	/// The group's open plan when it has exactly one, whatever rank it names.
+	///
+	/// For a group with no ranked member there is no environment to look up by,
+	/// and its one plan is the only environment it has. Several open plans
+	/// leave the environment ambiguous, so none is returned.
+	// spec: UPG#a-plan
+	pub async fn sole_open_for_group(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+	) -> Result<Option<Self>> {
+		use crate::schema::upgrade_plans::dsl;
+
+		let mut open: Vec<Self> = dsl::upgrade_plans
+			.select(Self::as_select())
+			.filter(dsl::group_id.eq(group_id))
+			.filter(dsl::met_at.is_null())
+			.filter(dsl::superseded_at.is_null())
+			.filter(dsl::withdrawn_at.is_null())
+			.limit(2)
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(if open.len() == 1 { open.pop() } else { None })
+	}
+
 	/// Every plan a group's environments have had, newest first.
 	// spec: UPG#when-a-plan-is-met
 	pub async fn history_for_group(

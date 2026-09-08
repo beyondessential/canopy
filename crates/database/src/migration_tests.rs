@@ -51,8 +51,15 @@ pub async fn candidate_for(
 	let Some(group_id) = server.group_id else {
 		return Ok(None);
 	};
-	let Some(rank) = crate::server_groups::ServerGroup::environment_of(db, server).await? else {
-		return Ok(None);
+	// A group with no ranked member has one environment, the one its plan
+	// names. Without this its plan stays open against no candidate at all, and
+	// the verdict sits at not-tested-yet for good.
+	let rank = match crate::server_groups::ServerGroup::environment_of(db, server).await? {
+		Some(rank) => rank,
+		None => match crate::upgrade_plans::UpgradePlan::sole_open_for_group(db, group_id).await? {
+			Some(plan) => plan.rank,
+			None => return Ok(None),
+		},
 	};
 
 	crate::upgrade_plans::planned_target(db, group_id, rank).await
