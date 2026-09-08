@@ -696,7 +696,9 @@ impl Scoped {
 				}
 			};
 			self.vars.0.insert(variable.name.clone(), value);
-			if variable.is_secret && !self.secret.contains(&variable.name) {
+			if !variable.is_secret {
+				self.secret.retain(|name| name != &variable.name);
+			} else if !self.secret.contains(&variable.name) {
 				self.secret.push(variable.name.clone());
 			}
 		}
