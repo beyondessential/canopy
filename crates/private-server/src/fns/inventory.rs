@@ -456,6 +456,7 @@ pub async fn release_lease(
 	responses(
 		(status = 200, body = Option<InventoryLease>),
 		(status = 404, description = "No such server group", body = ProblemDetailsSchema),
+		(status = 409, description = "Archived, empty, or ambiguously named", body = ProblemDetailsSchema),
 	),
 )]
 pub async fn lease_for_group(
@@ -464,10 +465,9 @@ pub async fn lease_for_group(
 	Json(args): Json<EnvironmentArgs>,
 ) -> Result<Json<Option<InventoryLease>>> {
 	let mut conn = state.db.get().await?;
-	let group = resolve_group(&mut conn, &args).await?;
-	let rank = args.rank.unwrap_or_default();
+	let environment = resolve_environment(&mut conn, &args).await?;
 	Ok(Json(
-		InventoryLease::open_for(&mut conn, group.id, rank)
+		InventoryLease::open_for(&mut conn, environment.group.id, environment.rank)
 			.await?
 			.filter(|lease| lease.holds_at(Timestamp::now())),
 	))
