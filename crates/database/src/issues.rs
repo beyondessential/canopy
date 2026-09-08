@@ -1014,26 +1014,33 @@ impl Scope {
 			Scope::Group(gid) => Ok(Some((IncidentTarget::Group(gid), true))),
 			Scope::Application(sid) => {
 				let server = Application::get_by_id(conn, sid).await?;
-				let Some(gid) = server.group_id else {
-					return Ok(None);
-				};
-				let target = IncidentTarget::of_member(gid, server.rank);
-				Ok(Some((target, server.is_monitored)))
+				Ok(member_target(
+					server.group_id,
+					server.rank,
+					server.is_monitored,
+				))
 			}
 			Scope::Machine(mid) => {
 				let machine = crate::machines::Machine::get_by_id(conn, mid).await?;
-				let Some(gid) = machine.group_id else {
-					return Ok(None);
-				};
 				// A box's rank is the highest of the workloads on it: a check
 				// on the box is trouble for the most important thing it runs.
 				let rank = crate::machines::Machine::rank(conn, mid).await?;
-				let target = IncidentTarget::of_member(gid, rank);
-				Ok(Some((target, machine.is_monitored)))
+				Ok(member_target(machine.group_id, rank, machine.is_monitored))
 			}
 			Scope::Global => Ok(Some((IncidentTarget::Global, true))),
 		}
 	}
+}
+
+/// The target and monitoring switch a grouped member contributes to. An
+/// ungrouped one has neither, and no incident path.
+// spec: INC#targets
+fn member_target(
+	group_id: Option<Uuid>,
+	rank: Option<ServerRank>,
+	monitored: bool,
+) -> Option<(IncidentTarget, bool)> {
+	Some((IncidentTarget::of_member(group_id?, rank), monitored))
 }
 
 /// The source operator-raised manual conditions file under.
@@ -2468,16 +2475,20 @@ async fn re_evaluate_incident_membership(
 	// a concurrent close landing between here and `find_or_open_incident`
 	// would turn "join the open incident" into "open a new one" — a Slack page
 	// for a Warning.
-	lock_target(conn, target).await?;
+	//
+	// Both the target and the one being left are taken here, in group order:
+	// taken as they come, two moves between the same pair of groups take the
+	// two locks in opposite orders and deadlock.
+	let leaving = held.as_ref().map(IncidentTarget::of_incident);
+	lock_targets(conn, target, leaving).await?;
 	// An issue whose target changed (a rank set, or a move between groups) is
 	// still a live member of the incident on the target it has left, and comes
 	// out of that one before it can join the one it now belongs to.
 	// spec: INC#membership
 	let mut was_in = held.is_some();
-	if let Some(held) = held.as_ref().map(IncidentTarget::of_incident)
+	if let Some(held) = leaving
 		&& held != target
 	{
-		lock_target(conn, held).await?;
 		leave_open_incident(conn, issue, transition_time, by, false).await?;
 		was_in = false;
 	}
@@ -3130,12 +3141,14 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<usiz
 			.load(conn)
 			.await?;
 
+		let targets = issue_targets_and_monitored(conn, &open_issues).await?;
+
 		let now = Timestamp::now();
 		let mut evaluated = 0usize;
 		for issue in open_issues {
 			// An ungrouped application or machine has no target, so there is
 			// nothing to reconcile for it.
-			let Some((target, monitored)) = issue_target_and_monitored(conn, &issue).await? else {
+			let Some(&(target, monitored)) = targets.get(&issue.id) else {
 				continue;
 			};
 			re_evaluate_incident_membership(conn, &issue, target, monitored, now, None).await?;
@@ -3144,6 +3157,91 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<usiz
 		Ok(evaluated)
 	})
 	.await
+}
+
+/// Targets and monitoring switches for `issues`, keyed by issue id, resolving
+/// every application and machine they name in one query each.
+///
+/// The startup sweep walks the whole open set inside one transaction that
+/// already holds row locks, so the per-issue lookups
+/// [`issue_target_and_monitored`] does are gathered up here instead. An issue
+/// whose target does not resolve is absent from the map, as is an ungrouped
+/// one.
+async fn issue_targets_and_monitored(
+	conn: &mut AsyncPgConnection,
+	issues: &[Issue],
+) -> Result<std::collections::HashMap<Uuid, (IncidentTarget, bool)>> {
+	use std::collections::HashMap;
+
+	let scopes: Vec<(Uuid, Scope)> = issues
+		.iter()
+		.map(|issue| {
+			(
+				issue.id,
+				Scope::from_columns(
+					issue.application_id,
+					issue.machine_id,
+					issue.server_group_id,
+				),
+			)
+		})
+		.collect();
+
+	let application_ids: Vec<Uuid> = scopes
+		.iter()
+		.filter_map(|(_, scope)| match scope {
+			Scope::Application(sid) => Some(*sid),
+			_ => None,
+		})
+		.collect();
+	let machine_ids: Vec<Uuid> = scopes
+		.iter()
+		.filter_map(|(_, scope)| match scope {
+			Scope::Machine(mid) => Some(*mid),
+			_ => None,
+		})
+		.collect();
+
+	let applications: HashMap<Uuid, Application> = Application::get_by_ids(conn, &application_ids)
+		.await?
+		.into_iter()
+		.map(|application| (application.id, application))
+		.collect();
+	let machines: HashMap<Uuid, crate::machines::Machine> =
+		crate::machines::Machine::get_by_ids(conn, &machine_ids)
+			.await?
+			.into_iter()
+			.map(|machine| (machine.id, machine))
+			.collect();
+	let ranks = crate::machines::Machine::ranks(conn, &machine_ids).await?;
+
+	let mut out = HashMap::new();
+	for (issue_id, scope) in scopes {
+		let resolved = match scope {
+			Scope::Group(gid) => Some((IncidentTarget::Group(gid), true)),
+			Scope::Global => Some((IncidentTarget::Global, true)),
+			Scope::Application(sid) => match applications.get(&sid) {
+				Some(application) => member_target(
+					application.group_id,
+					application.rank,
+					application.is_monitored,
+				),
+				None => scope.resolve_incident_target(conn).await?,
+			},
+			Scope::Machine(mid) => match machines.get(&mid) {
+				Some(machine) => member_target(
+					machine.group_id,
+					ranks.get(&mid).copied(),
+					machine.is_monitored,
+				),
+				None => scope.resolve_incident_target(conn).await?,
+			},
+		};
+		if let Some(resolved) = resolved {
+			out.insert(issue_id, resolved);
+		}
+	}
+	Ok(out)
 }
 /// Close incidents whose linger window has expired: `closing_at` (when the
 /// last effective failure left) has outlived the target's window without a
@@ -3393,6 +3491,27 @@ async fn target_has_open_incident(
 ///
 /// Always taken *before* any `incidents` row lock, so the two lock orders
 /// can't deadlock against each other.
+/// Lock `target` and, where it is a different one, `other`, in a stable order.
+///
+/// Ordering by group is what makes two concurrent moves between the same pair
+/// of groups safe; the same group's own target and its environments' share one
+/// lock, so their relative order does not matter.
+async fn lock_targets(
+	db: &mut AsyncPgConnection,
+	target: IncidentTarget,
+	other: Option<IncidentTarget>,
+) -> Result<()> {
+	let mut targets = vec![target];
+	if let Some(other) = other.filter(|other| *other != target) {
+		targets.push(other);
+	}
+	targets.sort_by_key(|target| target.group_id());
+	for target in targets {
+		lock_target(db, target).await?;
+	}
+	Ok(())
+}
+
 async fn lock_target(db: &mut AsyncPgConnection, target: IncidentTarget) -> Result<()> {
 	use crate::schema::server_groups;
 	match target {

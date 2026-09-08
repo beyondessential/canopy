@@ -509,18 +509,48 @@ impl Machine {
 		db: &mut AsyncPgConnection,
 		machine: Uuid,
 	) -> Result<Option<commons_types::server::rank::ServerRank>> {
+		Ok(Self::ranks(db, &[machine]).await?.get(&machine).copied())
+	}
+
+	/// The rank each of `machines` serves, by the same rule as [`Self::rank`].
+	///
+	/// A box carrying nothing ranked is absent from the map rather than
+	/// present with a default: it serves no environment.
+	// spec: FLT#environments
+	pub async fn ranks(
+		db: &mut AsyncPgConnection,
+		machines: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, commons_types::server::rank::ServerRank>> {
 		use crate::schema::applications::dsl;
-		let ranks: Vec<Option<commons_types::server::rank::ServerRank>> = dsl::applications
-			.select(dsl::rank)
-			.filter(dsl::machine_id.eq(machine))
+		use std::collections::HashMap;
+
+		if machines.is_empty() {
+			return Ok(HashMap::new());
+		}
+		let rows: Vec<(Uuid, Option<commons_types::server::rank::ServerRank>)> = dsl::applications
+			.select((dsl::machine_id, dsl::rank))
+			.filter(dsl::machine_id.eq_any(machines))
 			.filter(dsl::deleted_at.is_null())
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
-		Ok(ranks
-			.into_iter()
-			.flatten()
-			.min_by_key(|rank| crate::server_groups::rank_priority(Some(*rank))))
+
+		let mut out = HashMap::new();
+		for (machine, rank) in rows {
+			let Some(rank) = rank else {
+				continue;
+			};
+			out.entry(machine)
+				.and_modify(|held: &mut commons_types::server::rank::ServerRank| {
+					if crate::server_groups::rank_priority(Some(rank))
+						< crate::server_groups::rank_priority(Some(*held))
+					{
+						*held = rank;
+					}
+				})
+				.or_insert(rank);
+		}
+		Ok(out)
 	}
 
 	/// This machine's tags over its group's, so a check filed against a
