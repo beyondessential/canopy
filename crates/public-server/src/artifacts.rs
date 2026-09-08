@@ -1,6 +1,6 @@
 use axum::{
 	Json,
-	extract::{Path, Query, State},
+	extract::{DefaultBodyLimit, Path, Query, State},
 };
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
@@ -11,7 +11,7 @@ use commons_types::{
 };
 use database::{
 	Db,
-	artifacts::{Artifact as ArtifactRow, NewArtifact, Scope, digest_of},
+	artifacts::{Artifact as ArtifactRow, MAX_HELD_ARTIFACT_BYTES, NewArtifact, Scope, digest_of},
 	machines::Machine,
 	restore::RestoreReplica,
 	versions::{NewVersion, Version},
@@ -100,7 +100,12 @@ pub(crate) async fn caller_scope(
 }
 
 pub fn routes() -> OpenApiRouter<AppState> {
-	OpenApiRouter::new().routes(routes!(create))
+	// Sized from the held-bytes cap so an over-limit upload is the handler's
+	// structured refusal naming the limit, rather than axum's plain-text 413
+	// from a default an order of magnitude below it.
+	OpenApiRouter::new()
+		.routes(routes!(create))
+		.layer(DefaultBodyLimit::max(MAX_HELD_ARTIFACT_BYTES))
 }
 
 /// Register an artifact for a version or version range.
@@ -179,6 +184,17 @@ async fn create(
 			None
 		}
 		Some(group) => {
+			// What a schema builder is authorised for is the artifact its
+			// declaration names. Any other type registered under it would
+			// displace the releaser's own for every machine in the group, and
+			// those machines fetch and run what they are offered.
+			// spec: ART#registration
+			if artifact_type != REPORTING_SCHEMA_TYPE {
+				return Err(AppError::AuthInsufficientPermissions {
+					required: format!("a group-scoped artifact to be a {REPORTING_SCHEMA_TYPE}"),
+				});
+			}
+
 			let authorised = role == DeviceRole::Admin
 				|| RestoreReplica::authorizes_schema_artifacts(&mut db, device_id, group).await?;
 			if !authorised {
@@ -197,6 +213,17 @@ async fn create(
 			if body.is_empty() {
 				return Err(AppError::BadRequest(
 					"a group-scoped artifact carries its bytes".into(),
+				));
+			}
+
+			// Provenance is what an operator reads to answer what produced the
+			// bytes, so a run already recorded for somebody else is not one
+			// this registration may name.
+			if let Some(run) = named.run
+				&& RestoreReplica::run_claimed_elsewhere(&mut db, run, device_id, group).await?
+			{
+				return Err(AppError::BadRequest(
+					"the named run belongs to another consumer or group".into(),
 				));
 			}
 
@@ -319,10 +346,6 @@ struct RegisterQuery {
 	// spec: ART#digests
 	digest: Option<String>,
 }
-
-/// Cap on the bytes Canopy will hold for one artifact, matching the operator
-/// path. A reporting schema is a SQL file; anything approaching this is not one.
-const MAX_HELD_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
 
 /// The artifact type a reporting-schema build publishes.
 const REPORTING_SCHEMA_TYPE: &str = "reporting-schema";

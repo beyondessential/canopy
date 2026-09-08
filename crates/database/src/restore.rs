@@ -350,6 +350,52 @@ impl RestoreReplica {
 		Ok(n > 0)
 	}
 
+	/// Whether a run id is already recorded against a different consumer or
+	/// group.
+	///
+	/// A run id is minted by the device performing the run, so one Canopy has
+	/// not seen is ordinary: an artifact is registered mid-restore, before the
+	/// report of that restore lands. One already recorded for somebody else is
+	/// a claim on their run, and provenance a party can forge for itself is
+	/// worth nothing to the operator reading it.
+	pub async fn run_claimed_elsewhere(
+		db: &mut AsyncPgConnection,
+		run: Uuid,
+		consumer_device_id: Uuid,
+		group_id: Uuid,
+	) -> Result<bool> {
+		use crate::schema::{backup_restore_checks, backup_runs};
+
+		let checks: i64 = backup_restore_checks::table
+			.filter(backup_restore_checks::run_id.eq(Some(run)))
+			.filter(
+				backup_restore_checks::consumer_device_id
+					.ne(consumer_device_id)
+					.or(backup_restore_checks::group_id.ne(group_id)),
+			)
+			.count()
+			.get_result(db)
+			.await
+			.map_err(AppError::from)?;
+		if checks > 0 {
+			return Ok(true);
+		}
+
+		let runs: i64 = backup_runs::table
+			.filter(backup_runs::id.eq(run))
+			.filter(
+				backup_runs::device_id
+					.ne(consumer_device_id)
+					.or(backup_runs::group_id.ne(group_id)),
+			)
+			.count()
+			.get_result(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(runs > 0)
+	}
+
 	/// Whether an enabled declaration covers `(consumer, group, type)` — the
 	/// authorization check for issuing restore credentials. A server-scoped or
 	/// a group-wide declaration both satisfy it.
@@ -1694,11 +1740,11 @@ async fn file_migration(
 /// The fixed parts of one restore check: what it is called, the documentation it
 /// ships with, its headline when degraded, and what it says once a server has no
 /// instances of it left.
-struct RestoreCheck<'a> {
-	r#ref: &'a str,
-	documentation: &'a str,
-	title: &'a str,
-	gone: &'a str,
+pub(crate) struct RestoreCheck<'a> {
+	pub(crate) r#ref: &'a str,
+	pub(crate) documentation: &'a str,
+	pub(crate) title: &'a str,
+	pub(crate) gone: &'a str,
 }
 
 /// File one of a server's restore checks from its instances, and say whether it
@@ -1710,7 +1756,7 @@ struct RestoreCheck<'a> {
 /// instances is recovered on its own — with no instances there is nothing left
 /// to grade, so it is filed as the plain passing check it has become rather
 /// than left open with nothing that could ever clear it.
-async fn file_restore_check(
+pub(crate) async fn file_restore_check(
 	db: &mut AsyncPgConnection,
 	scope: Scope,
 	check: RestoreCheck<'_>,

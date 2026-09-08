@@ -239,6 +239,13 @@ async fn worklist(
 	// keys on. A group-wide and a machine-scoped declaration with different names
 	// are two replicas of that machine, and both are dispatched.
 	let mut seen: HashSet<(Uuid, String)> = HashSet::new();
+	// A schema build is keyed on the pair, not the machine, so two declarations
+	// covering one group with schema-building intents would each emit the whole
+	// pair list: a restore and a migrate paid for twice per build.
+	let mut pairs: HashSet<(Uuid, Uuid)> = HashSet::new();
+	// Resolving a group's pairs walks its applications and their reported
+	// versions, so a group covered by several declarations is resolved once.
+	let mut version_cache: HashMap<Uuid, Vec<database::versions::Version>> = HashMap::new();
 	// Per-group caches so a group referenced by several declarations is resolved
 	// once: the latest produced snapshot per (machine, type), and the latest
 	// healthy-verified snapshot per (machine, type, intent) for `once` suppression.
@@ -311,6 +318,18 @@ async fn worklist(
 				continue;
 			}
 
+			// A build restores the group's canonical central, so a declaration
+			// pinned to a machine names something this dispatch cannot honour.
+			// Retargeting it silently would build against a box the operator
+			// did not declare.
+			if d.machine_id.is_some() {
+				tracing::warn!(
+					replica = %d.id,
+					"a machine-scoped declaration builds no reporting schema; a build is per group"
+				);
+				continue;
+			}
+
 			// Sending the masking parameters unset is what tells a consumer not
 			// to redact, so an intent advertising both has to be told here as
 			// well rather than inheriting the defaults declared with it.
@@ -333,9 +352,17 @@ async fn worklist(
 				database::machines::Machine::get_by_id(&mut conn, central.machine_id).await?;
 			let latest = snapshots.get(&(machine.id, d.r#type.clone()));
 
-			for version in
-				database::reporting_schemas::versions_for_group(&mut conn, d.group_id).await?
-			{
+			if let std::collections::hash_map::Entry::Vacant(e) = version_cache.entry(d.group_id) {
+				e.insert(
+					database::reporting_schemas::versions_for_group(&mut conn, d.group_id).await?,
+				);
+			}
+
+			for version in version_cache[&d.group_id].clone() {
+				if !pairs.insert((d.group_id, version.id)) {
+					continue;
+				}
+
 				if once
 					&& database::reporting_schemas::ReportingSchemaBuild::is_settled(
 						&mut conn, d.group_id, version.id,
@@ -968,6 +995,23 @@ async fn verification(
 		// A build rides the migrate pathway, so a report may carry both; the
 		// build is the one that settles the pair.
 		(_, Some(build)) => {
+			// A build report settles the pair: it stops the pair being
+			// dispatched again and clears an operator's ask. Nothing but a
+			// consumer authorised to publish the group's schema may say so, or
+			// a plain verify consumer settles a pair no schema was built for.
+			// spec: RPT#the-build-contract
+			if !RestoreReplica::authorizes_schema_artifacts(
+				&mut conn,
+				consumer_device_id,
+				args.group,
+			)
+			.await?
+			{
+				return Err(AppError::AuthInsufficientPermissions {
+					required: "an enabled declaration building this group's schemas".into(),
+				});
+			}
+
 			let version_id = resolve_build_target(&mut conn, &build).await?;
 			// The build is held against the group's central application, which is
 			// the one whose database the schema followed from and the one the

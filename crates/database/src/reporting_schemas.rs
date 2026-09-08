@@ -120,6 +120,32 @@ impl ReportingSchemaBuild {
 			.map_err(AppError::from)
 	}
 
+	/// The most recent build of each of a group's pairs, by version.
+	///
+	/// One query rather than one per version: this backs both the operator page
+	/// and the sweep, which walk every version a group runs.
+	pub async fn latest_by_version_for_group(
+		db: &mut AsyncPgConnection,
+		group: Uuid,
+	) -> Result<std::collections::HashMap<Uuid, Self>> {
+		use crate::schema::{backup_restore_checks, reporting_schema_builds};
+
+		let builds: Vec<Self> = reporting_schema_builds::table
+			.inner_join(
+				backup_restore_checks::table
+					.on(backup_restore_checks::id.eq(reporting_schema_builds::check_id)),
+			)
+			.filter(reporting_schema_builds::group_id.eq(group))
+			.order_by(backup_restore_checks::reported_at.asc())
+			.select(Self::as_select())
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		// Ascending, so the last write per version is the newest.
+		Ok(builds.into_iter().map(|b| (b.version_id, b)).collect())
+	}
+
 	/// Whether a pair is settled: it has been built or has failed, and either
 	/// way is not dispatched again until the version's artifacts change or an
 	/// operator asks.
@@ -204,6 +230,23 @@ impl ReportingSchemaRequest {
 			.is_some())
 	}
 
+	/// Which of a group's versions have an ask pending, in one query.
+	pub async fn pending_for_group(
+		db: &mut AsyncPgConnection,
+		group: Uuid,
+	) -> Result<std::collections::HashSet<Uuid>> {
+		use crate::schema::reporting_schema_requests::dsl;
+
+		let versions: Vec<Uuid> = dsl::reporting_schema_requests
+			.filter(dsl::group_id.eq(group))
+			.select(dsl::version_id)
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(versions.into_iter().collect())
+	}
+
 	async fn clear(db: &mut AsyncPgConnection, group: Uuid, version: Uuid) -> Result<()> {
 		use crate::schema::reporting_schema_requests::dsl;
 
@@ -265,69 +308,30 @@ pub async fn pairs_for_group(db: &mut AsyncPgConnection, group: Uuid) -> Result<
 		return Ok(Vec::new());
 	}
 
-	let versions = versions_for_group(db, group).await?;
-	let running = applications_by_version(db, group).await?;
+	let versions = versions_and_applications(db, group).await?;
+	let builds = ReportingSchemaBuild::latest_by_version_for_group(db, group).await?;
+	let requests = ReportingSchemaRequest::pending_for_group(db, group).await?;
 
 	let mut pairs = Vec::with_capacity(versions.len());
-	for version in versions {
-		let latest = ReportingSchemaBuild::latest_for_pair(db, group, version.id).await?;
-		let requested = ReportingSchemaRequest::pending(db, group, version.id).await?;
-
-		let (state, error) = match &latest {
+	for (version, applications) in versions {
+		let (state, error) = match builds.get(&version.id) {
 			None => (PairState::Awaiting, None),
 			Some(build) if build.built => (PairState::Built, None),
 			Some(build) => (PairState::Failed, build.error.clone()),
 		};
 
-		let version_str = version.as_semver().to_string();
 		pairs.push(Pair {
 			group_id: group,
 			version_id: version.id,
-			applications: running.get(&version_str).cloned().unwrap_or_default(),
-			version: version_str,
+			applications,
+			version: version.as_semver().to_string(),
 			state,
 			error,
-			requested,
+			requested: requests.contains(&version.id),
 		});
 	}
 
 	Ok(pairs)
-}
-
-/// Which of a group's Tamanu applications report each version, by name.
-///
-/// A pair is per version, so the row an operator reads covers every application
-/// on that version and names none of them without this.
-// spec: RPT#pairs
-async fn applications_by_version(
-	db: &mut AsyncPgConnection,
-	group: Uuid,
-) -> Result<std::collections::HashMap<String, Vec<String>>> {
-	let applications = crate::applications::Application::list_live_in_group(db, group).await?;
-	let tamanu: Vec<&crate::applications::Application> = applications
-		.iter()
-		.filter(|a| a.r#type.software() == "tamanu")
-		.collect();
-
-	let ids: Vec<Uuid> = tamanu.iter().map(|a| a.id).collect();
-	let reported = crate::reported_detail::ReportedDetail::last_versions(db, &ids).await?;
-
-	let mut by_version: std::collections::HashMap<String, Vec<String>> =
-		std::collections::HashMap::new();
-	for application in tamanu {
-		let Some(version) = reported.get(&application.id) else {
-			continue;
-		};
-		by_version
-			.entry(version.to_string())
-			.or_default()
-			.push(application.label());
-	}
-	for names in by_version.values_mut() {
-		names.sort();
-	}
-
-	Ok(by_version)
 }
 
 /// Every published version a group's Tamanu applications report running, plus
@@ -338,40 +342,73 @@ async fn applications_by_version(
 /// artifacts.
 // spec: RPT#pairs
 pub async fn versions_for_group(db: &mut AsyncPgConnection, group: Uuid) -> Result<Vec<Version>> {
+	Ok(versions_and_applications(db, group)
+		.await?
+		.into_iter()
+		.map(|(version, _)| version)
+		.collect())
+}
+
+/// A group's pairs, and which of its Tamanu applications report each one.
+///
+/// The applications are carried alongside the version rather than joined back
+/// on a stringified semver: a `Version` row holds major, minor and patch alone,
+/// so a reported `2.60.0-rc1` resolves to the 2.60.0 row and would never match
+/// its own key, and the pair would read as an upgrade plan while a server runs
+/// it.
+// spec: RPT#pairs
+async fn versions_and_applications(
+	db: &mut AsyncPgConnection,
+	group: Uuid,
+) -> Result<Vec<(Version, Vec<String>)>> {
 	use commons_types::version::VersionStatus;
 
 	let applications = crate::applications::Application::list_live_in_group(db, group).await?;
-	let tamanu: Vec<Uuid> = applications
+	let tamanu: Vec<&crate::applications::Application> = applications
 		.iter()
 		.filter(|a| a.r#type.software() == "tamanu")
-		.map(|a| a.id)
 		.collect();
 
-	let mut versions = Vec::new();
+	let ids: Vec<Uuid> = tamanu.iter().map(|a| a.id).collect();
+	let reported = crate::reported_detail::ReportedDetail::last_versions(db, &ids).await?;
 
-	let reported = crate::reported_detail::ReportedDetail::last_versions(db, &tamanu).await?;
-	for shown in reported.into_values() {
+	let mut pairs: Vec<(Version, Vec<String>)> = Vec::new();
+	for application in tamanu {
+		let Some(shown) = reported.get(&application.id) else {
+			continue;
+		};
 		// A version Canopy holds no release row for is not a pair: a build needs
 		// that version's migrations, which reach a builder as published artifacts.
-		if let Ok(version) = Version::get_by_version(db, shown).await
-			&& version.status == VersionStatus::Published
-		{
-			versions.push(version);
+		let Ok(version) = Version::get_by_version(db, shown.clone()).await else {
+			continue;
+		};
+		if version.status != VersionStatus::Published {
+			continue;
+		}
+
+		// A pair is unique per group and version, so two applications on one
+		// version are one pair carrying both names.
+		match pairs.iter_mut().find(|(v, _)| v.id == version.id) {
+			Some((_, names)) => names.push(application.label()),
+			None => pairs.push((version, vec![application.label()])),
 		}
 	}
 
-	if let Some(target) = crate::upgrade_plans::planned_target(db, group).await? {
-		versions.push(target);
+	// A plan moving a group to a version something already runs adds no pair.
+	// Dispatch counts a restore and a migrate per entry, so a duplicate here is
+	// paid for rather than merely untidy.
+	if let Some(target) = crate::upgrade_plans::planned_target(db, group).await?
+		&& !pairs.iter().any(|(v, _)| v.id == target.id)
+	{
+		pairs.push((target, Vec::new()));
 	}
 
-	// A pair is unique per group and version, so two applications on one
-	// version are one pair, and a plan moving a group to a version something
-	// already runs adds none. Dispatch counts a restore and a migrate per
-	// entry, so a duplicate here is paid for rather than merely untidy.
-	versions.sort_by_key(|v| (v.major, v.minor, v.patch));
-	versions.dedup_by_key(|v| v.id);
+	for (_, names) in &mut pairs {
+		names.sort();
+	}
+	pairs.sort_by_key(|(v, _)| (v.major, v.minor, v.patch));
 
-	Ok(versions)
+	Ok(pairs)
 }
 
 /// File the reporting-schema check for every group that has a builder.
@@ -384,9 +421,8 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 	use crate::{
 		applications::Application,
 		backup::refs,
-		issues::{
-			CheckInstance, GradedInstance, InstancedCheckFiling, Scope, file_check_instances,
-		},
+		issues::{CheckInstance, GradedInstance, Scope},
+		restore::{RestoreCheck, file_restore_check},
 		server_groups::ServerGroup,
 	};
 	use commons_types::status::CheckResult;
@@ -420,52 +456,18 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 			})
 			.collect();
 
-		// An empty set is not nothing to do: a check already open has to be
-		// closed, or it stays open forever once its last pair goes away.
-		if instances.is_empty() {
-			let open = crate::backup::staleness::open_server_issue_active(
-				db,
-				central,
-				refs::REPORTING_SCHEMA,
-			)
-			.await?;
-			if open {
-				crate::issues::file_check(
-					db,
-					crate::issues::CheckFiling {
-						source: crate::statuses::CANOPY_SOURCE,
-						scope: Scope::Application(central),
-						device_id: None,
-						check: refs::REPORTING_SCHEMA,
-						observed: CheckResult::Passed,
-						detail: None,
-						message: &format!("No reporting schema is owed for {}", group.name),
-						title: Some("reporting schema not built"),
-						default_ceiling: CheckResult::Warning,
-						default_escalates: false,
-						documentation: Some(refs::REPORTING_SCHEMA_DOC),
-					},
-				)
-				.await?;
-			}
-			continue;
-		}
-
 		let name = group.name.clone();
 		let total = instances.len();
-		file_check_instances(
+		file_restore_check(
 			db,
-			InstancedCheckFiling {
-				source: crate::statuses::CANOPY_SOURCE,
-				scope: Scope::Application(central),
-				device_id: None,
-				check: refs::REPORTING_SCHEMA,
-				title: Some("reporting schema not built"),
-				instances,
-				default_ceiling: CheckResult::Warning,
-				default_escalates: false,
-				documentation: Some(refs::REPORTING_SCHEMA_DOC),
+			Scope::Application(central),
+			RestoreCheck {
+				r#ref: refs::REPORTING_SCHEMA,
+				documentation: refs::REPORTING_SCHEMA_DOC,
+				title: "reporting schema not built",
+				gone: &format!("No reporting schema is owed for {}", group.name),
 			},
+			instances,
 			&move |degraded: &[GradedInstance]| match degraded {
 				[] => format!("Reporting schemas are built for every version {name} runs"),
 				[one] => format!(
@@ -494,22 +496,24 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 }
 
 /// Whether a group has an enabled declaration whose intent builds schemas.
+///
+/// The same predicate that authorises a builder to publish the group's schema,
+/// asked of each of its consumers: dispatching builds a group would then refuse
+/// to accept is the divergence worth not having.
 async fn group_builds_schemas(db: &mut AsyncPgConnection, group: Uuid) -> Result<bool> {
-	use crate::restore::{RestoreConsumerCapability, RestoreReplica};
-	use commons_types::backup::semantics;
+	use crate::restore::RestoreReplica;
 
-	for declaration in RestoreReplica::list_for_group(db, group).await? {
-		if !declaration.enabled {
-			continue;
-		}
-		let advertises =
-			RestoreConsumerCapability::list_for_consumer(db, declaration.consumer_device_id)
-				.await?
-				.into_iter()
-				.any(|d| {
-					d.intent == declaration.intent && d.has_semantic(semantics::REPORTING_SCHEMA)
-				});
-		if advertises {
+	let mut consumers: Vec<Uuid> = RestoreReplica::list_for_group(db, group)
+		.await?
+		.into_iter()
+		.filter(|d| d.enabled)
+		.map(|d| d.consumer_device_id)
+		.collect();
+	consumers.sort_unstable();
+	consumers.dedup();
+
+	for consumer in consumers {
+		if RestoreReplica::authorizes_schema_artifacts(db, consumer, group).await? {
 			return Ok(true);
 		}
 	}

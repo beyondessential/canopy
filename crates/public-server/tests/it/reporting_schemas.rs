@@ -83,6 +83,78 @@ async fn a_build_is_dispatched_per_pair_on_the_central() {
 	.await
 }
 
+/// A pair is dispatched once however many declarations cover its group. Each
+/// entry costs a restore and a migrate, so a second declaration doubling the
+/// list is paid for.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_second_declaration_dispatches_no_second_build() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+
+			conn.batch_execute(&format!(
+				"INSERT INTO restore_replicas
+					(consumer_device_id, group_id, type, intent, name, enabled)
+				 VALUES ('{device_id}', '{GROUP}', 'tamanu-postgres', 'schema-build',
+					'schemas-weekly', true)"
+			))
+			.await
+			.expect("a second schema declaration");
+
+			let response = public
+				.get("/restore-worklist")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			response.assert_status_ok();
+			let entries: Vec<serde_json::Value> = response.json();
+
+			assert_eq!(
+				entries
+					.iter()
+					.filter(|e| e["intent"] == "schema-build")
+					.count(),
+				1,
+				"one entry for the group's one pair"
+			);
+		},
+	)
+	.await
+}
+
+/// A build restores the group's canonical central, so a declaration pinned to a
+/// machine names something this dispatch cannot honour. Retargeting it silently
+/// would build against a box the operator did not declare.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_machine_scoped_declaration_builds_no_schema() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+
+			conn.batch_execute(&format!(
+				"UPDATE restore_replicas SET machine_id = '{MACHINE}'
+				 WHERE consumer_device_id = '{device_id}'"
+			))
+			.await
+			.expect("pin the declaration to a machine");
+
+			let response = public
+				.get("/restore-worklist")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			response.assert_status_ok();
+			let entries: Vec<serde_json::Value> = response.json();
+
+			assert!(
+				entries.iter().all(|e| e["intent"] != "schema-build"),
+				"a build is per group, not per machine"
+			);
+		},
+	)
+	.await
+}
+
 /// `once` is keyed to the pair rather than the snapshot, so a pair that has been
 /// built drops off the worklist and stays off while the snapshot moves on.
 #[tokio::test(flavor = "multi_thread")]
@@ -323,20 +395,6 @@ async fn a_schema_registered_against_a_range_is_refused() {
 				.text("CREATE VIEW ...")
 				.await;
 			assert_eq!(ranged.status_code(), StatusCode::BAD_REQUEST);
-
-			let other_type = public
-				.post(&format!(
-					"/artifacts/2.60.x/installer/windows?group={GROUP}"
-				))
-				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
-				.text("installer bytes")
-				.await;
-			other_type.assert_status_ok();
-			let registered: serde_json::Value = other_type.json();
-			assert_eq!(
-				registered["version_range_pattern"], "2.60.x",
-				"a range is still how any other artifact type covers a minor"
-			);
 		},
 	)
 	.await
@@ -402,6 +460,149 @@ async fn restoring_for_a_group_does_not_authorise_publishing_its_schema() {
 				.await;
 
 			assert_eq!(refused.status_code(), StatusCode::FORBIDDEN);
+		},
+	)
+	.await
+}
+
+/// A build report settles the pair: it stops the pair being dispatched again
+/// and clears an operator's ask. A plain verify or migrate consumer declared
+/// for the group can otherwise settle a pair no schema was ever built for, and
+/// inject its own error string into the group's check.
+#[tokio::test(flavor = "multi_thread")]
+async fn restoring_for_a_group_does_not_authorise_settling_its_pairs() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+			let replica = declaration_id(&mut conn).await;
+
+			conn.batch_execute(&format!(
+				"UPDATE restore_consumer_capabilities
+				 SET semantics = '[\"check\", \"once\", \"migrate\"]'::jsonb
+				 WHERE consumer_device_id = '{device_id}'"
+			))
+			.await
+			.expect("withdraw the semantic");
+
+			let refused = public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.json(&build_report(
+					replica,
+					serde_json::json!({ "target_version": "2.60.0", "built": true }),
+				))
+				.await;
+
+			assert_eq!(refused.status_code(), StatusCode::FORBIDDEN);
+		},
+	)
+	.await
+}
+
+/// The artifacts route carries a body limit sized from the held-bytes cap, so a
+/// schema past axum's 2 MiB default is taken in rather than answered with a
+/// plain-text 413 for a limit sixteen times below the documented one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_schema_over_axum_s_default_is_taken_in() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+
+			let sql = "-- ".to_owned() + &"x".repeat(3 * 1024 * 1024);
+			let response = public
+				.post(&format!(
+					"/artifacts/2.60.0/reporting-schema/any?group={GROUP}"
+				))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.add_header("content-type", "application/sql")
+				.text(sql)
+				.await;
+
+			response.assert_status_ok();
+		},
+	)
+	.await
+}
+
+/// A builder is authorised for the artifact its declaration names. Any other
+/// type registered under that authority outranks the releaser's own for every
+/// machine in the group, and those machines fetch and run what they are
+/// offered.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_builder_cannot_displace_the_group_s_installer() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+
+			let installer = public
+				.post(&format!(
+					"/artifacts/2.60.0/installer/windows?group={GROUP}"
+				))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.add_header("content-type", "application/octet-stream")
+				.text("MZ...")
+				.await;
+			assert_eq!(installer.status_code(), StatusCode::FORBIDDEN);
+
+			let schema = public
+				.post(&format!(
+					"/artifacts/2.60.0/reporting-schema/any?group={GROUP}"
+				))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.add_header("content-type", "application/sql")
+				.text("CREATE VIEW ...")
+				.await;
+			schema.assert_status_ok();
+		},
+	)
+	.await
+}
+
+/// Provenance a party can forge for itself answers nothing an operator asks of
+/// it, so a run already recorded for another consumer is not one this
+/// registration may name. A run Canopy has not seen is ordinary: the artifact
+/// lands mid-restore, before the report of that restore does.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_another_consumer_reported_cannot_be_claimed() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+
+			let run = "77777777-7777-7777-7777-777777777777";
+			let stranger = "88888888-8888-8888-8888-888888888888";
+			conn.batch_execute(&format!(
+				"INSERT INTO devices (id, role) VALUES ('{stranger}', 'backup-restore');
+				 INSERT INTO backup_runs
+					(id, device_id, group_id, machine_id, type, purpose, outcome, reported_at)
+				 VALUES ('{run}', '{stranger}', '{GROUP}', '{MACHINE}',
+					'tamanu-postgres', 'restore', 'success', now())"
+			))
+			.await
+			.expect("another consumer's run");
+
+			let claimed = public
+				.post(&format!(
+					"/artifacts/2.60.0/reporting-schema/any?group={GROUP}&run={run}"
+				))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.add_header("content-type", "application/sql")
+				.text("CREATE VIEW ...")
+				.await;
+			assert_eq!(claimed.status_code(), StatusCode::BAD_REQUEST);
+
+			let own = public
+				.post(&format!(
+					"/artifacts/2.60.0/reporting-schema/any?group={GROUP}&run=99999999-9999-9999-9999-999999999999"
+				))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.add_header("content-type", "application/sql")
+				.text("CREATE VIEW ...")
+				.await;
+			own.assert_status_ok();
 		},
 	)
 	.await

@@ -100,6 +100,11 @@ pub struct ArtifactContent {
 	pub digest: String,
 }
 
+/// Cap on the bytes Canopy will hold for one artifact. A reporting schema is a
+/// SQL file; anything approaching this is not one, and the rows live in Postgres
+/// alongside everything else.
+pub const MAX_HELD_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
+
 /// The digest Canopy records and verifies bytes against.
 pub fn digest_of(bytes: &[u8]) -> String {
 	format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
@@ -270,10 +275,13 @@ impl Artifact {
 		pattern_rank(pattern_b).cmp(&pattern_rank(pattern_a))
 	}
 
-	/// When any artifact of this version was last registered.
+	/// When any artifact a build reads was last registered for this version.
 	///
 	/// A schema built from a superseded release of a version is not the schema
-	/// that version describes, so this is what a build is held against.
+	/// that version describes, so this is what a build is held against. Only
+	/// the unscoped artifacts count: a group-scoped one is a build's own output,
+	/// and registering it would put every group's pair for the version back on
+	/// the worklist, including the pair that just produced it.
 	// spec: RPT#pairs
 	pub async fn newest_change_for_version(
 		db: &mut AsyncPgConnection,
@@ -283,6 +291,7 @@ impl Artifact {
 
 		let newest: Option<jiff_diesel::Timestamp> = dsl::artifacts
 			.filter(dsl::version_id.eq(version))
+			.filter(dsl::group_id.is_null())
 			.select(diesel::dsl::max(dsl::updated_at))
 			.first(db)
 			.await

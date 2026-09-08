@@ -325,6 +325,38 @@ async fn a_new_artifact_for_the_version_reinstates_the_pair() {
 	.await;
 }
 
+/// A build's own output is not a change a build reads. Counted, a second
+/// group's schema for the version unsettles the first group's pair, whose
+/// rebuild unsettles the second, and neither pair ever settles: a restore and a
+/// migrate per pass, forever.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_s_own_schema_does_not_reinstate_the_pair() {
+	TestDb::run(|mut conn, _url| async move {
+		let (_older, newer) = seed(&mut conn).await;
+		let other = "12121212-1212-1212-1212-121212121212";
+
+		record_build(&mut conn, newer, true).await;
+
+		conn.batch_execute(&format!(
+			"INSERT INTO server_groups (id, name) VALUES ('{other}', 'drifting');
+			 INSERT INTO artifacts
+				(version_id, artifact_type, platform, group_id, content, content_type, digest)
+			 VALUES ('{newer}', 'reporting-schema', 'any', '{other}',
+				convert_to('CREATE VIEW ...', 'UTF8'), 'application/sql', 'sha256:00')",
+		))
+		.await
+		.expect("another group registers its schema");
+
+		assert!(
+			ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+				.await
+				.unwrap(),
+			"a schema is another group's output, not a change to the version"
+		);
+	})
+	.await;
+}
+
 /// A build records the artifacts it registered, so an operator can see what came
 /// out of it rather than only that something did.
 #[tokio::test(flavor = "multi_thread")]
@@ -467,17 +499,22 @@ async fn the_reporting_schema_check_cannot_escalate() {
 	.await;
 }
 
-/// The check recovers when the pair is built.
+/// The check recovers when the pair that failed is built.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_built_pair_grades_the_check_passed() {
 	TestDb::run(|mut conn, _url| async move {
 		let (older, _newer) = seed(&mut conn).await;
 		declare_builder(&mut conn, true).await;
-		record_build(&mut conn, older, true).await;
 
+		record_build(&mut conn, older, false).await;
 		database::reporting_schemas::sweep(&mut conn)
 			.await
-			.expect("sweep");
+			.expect("sweep the failure");
+
+		record_build(&mut conn, older, true).await;
+		database::reporting_schemas::sweep(&mut conn)
+			.await
+			.expect("sweep the recovery");
 
 		let issues = schema_issues(&mut conn).await;
 		assert_eq!(issues.len(), 1);
@@ -486,6 +523,25 @@ async fn a_built_pair_grades_the_check_passed() {
 			Some(commons_types::status::CheckResult::Passed),
 			"a built pair is not a finding"
 		);
+	})
+	.await;
+}
+
+/// A group whose pairs are all built and has never had a finding gets no
+/// passing row: a check filed for it seeds a catalog entry nothing ever graded.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_that_never_failed_files_nothing() {
+	TestDb::run(|mut conn, _url| async move {
+		let (older, newer) = seed(&mut conn).await;
+		declare_builder(&mut conn, true).await;
+		record_build(&mut conn, older, true).await;
+		record_build(&mut conn, newer, true).await;
+
+		database::reporting_schemas::sweep(&mut conn)
+			.await
+			.expect("sweep");
+
+		assert!(schema_issues(&mut conn).await.is_empty());
 	})
 	.await;
 }
