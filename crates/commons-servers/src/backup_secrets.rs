@@ -278,15 +278,12 @@ impl BackupSecrets {
 							Ok(_) => Ok(()),
 							// Someone else created it in between, so the key
 							// still has to be merged into what they wrote.
-							Err(kube::Error::Api(e)) if e.code == 409 => merge()
-								.await
-								.map(drop)
-								.map_err(|e| {
+							Err(kube::Error::Api(e)) if e.code == 409 => {
+								merge().await.map(drop).map_err(|e| {
 									AppError::Upstream(format!("secret patch failed: {e}"))
-								}),
-							Err(e) => {
-								Err(AppError::Upstream(format!("secret create failed: {e}")))
+								})
 							}
+							Err(e) => Err(AppError::Upstream(format!("secret create failed: {e}"))),
 						}
 					}
 					Err(e) => Err(AppError::Upstream(format!("secret patch failed: {e}"))),

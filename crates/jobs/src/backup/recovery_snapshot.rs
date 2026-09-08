@@ -141,7 +141,10 @@ fn expose<S: serde::Serializer>(
 	keys: &BTreeMap<String, SecretString>,
 	serializer: S,
 ) -> std::result::Result<S::Ok, S::Error> {
-	serializer.collect_map(keys.iter().map(|(name, value)| (name, value.expose_secret())))
+	serializer.collect_map(
+		keys.iter()
+			.map(|(name, value)| (name, value.expose_secret())),
+	)
 }
 
 /// Gather the recovery-critical state and serialise it to JSON bytes (plaintext, before
