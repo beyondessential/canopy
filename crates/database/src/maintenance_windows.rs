@@ -494,6 +494,11 @@ impl MaintenanceWindow {
 		if ranks.iter().any(Option::is_none) {
 			return Ok(true);
 		}
+		// Nothing covers the target, so its box's rank cannot matter. Without
+		// this, every uncovered call still pays for the rank query below.
+		if ranks.is_empty() {
+			return Ok(false);
+		}
 		let Some(machine_id) = machine_id else {
 			return Ok(false);
 		};
