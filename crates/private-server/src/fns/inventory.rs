@@ -553,15 +553,6 @@ pub async fn for_group(
 		}
 	}
 
-	tracing::info!(
-		login = %admin.0.login,
-		group = %group.name,
-		%rank,
-		intent = %lease.intent,
-		lease = %lease.id,
-		"inventory served"
-	);
-
 	let mut hosts = Vec::with_capacity(machines.len());
 	for machine in &machines {
 		let mut own = Scoped::default();
@@ -625,6 +616,15 @@ pub async fn for_group(
 	}
 	hosts.sort_by(|a, b| a.name.cmp(&b.name));
 	reject_shared_address(&hosts)?;
+
+	tracing::info!(
+		login = %admin.0.login,
+		group = %group.name,
+		%rank,
+		intent = %lease.intent,
+		lease = %lease.id,
+		"inventory served"
+	);
 
 	Ok(Json(InventoryView {
 		group_id: group.id,
