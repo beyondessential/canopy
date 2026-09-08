@@ -9321,6 +9321,7 @@ export interface components {
              *     `group_machines`.
              */
             machine_name?: string | null;
+            machine_rank?: null | components["schemas"]["ServerRank"];
             /**
              * @description Whether a maintenance window suspends this server, its own or its
              *     group's: its checks are recorded and shown, and raise nothing.

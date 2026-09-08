@@ -73,6 +73,15 @@ pub struct ServerDetailData {
 	/// `group_machines`.
 	// spec: FLT#navigating-the-two-grains
 	pub machine_name: Option<String>,
+	/// The rank the box this application runs on serves: the highest among the
+	/// workloads on it.
+	///
+	/// Maintenance coverage is decided at the box's rank, not the
+	/// application's, so a page reading a window's reach needs this rather
+	/// than `server.rank`. They differ on a box carrying workloads at more
+	/// than one rank.
+	// spec: MNT#presentation
+	pub machine_rank: Option<commons_types::server::rank::ServerRank>,
 	/// The server's own effective `billing.*` labels
 	/// (product/deployment/stage) — the ones canopy hands the server's device,
 	/// carrying its own product and rank rather than its group's. Empty when
@@ -738,6 +747,7 @@ pub async fn get_detail(
 	let machine_name = database::machines::Machine::get_by_id(&mut conn, server.machine_id)
 		.await?
 		.name;
+	let machine_rank = database::machines::Machine::rank(&mut conn, server.machine_id).await?;
 
 	// This server's own attribution, not its group's: for a server whose
 	// product or rank differs from the group's, the page would otherwise show
@@ -779,6 +789,7 @@ pub async fn get_detail(
 		group_applications,
 		group_machines,
 		machine_name,
+		machine_rank,
 		billing_labels,
 	}))
 }

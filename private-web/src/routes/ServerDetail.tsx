@@ -187,7 +187,7 @@ export default function ServerDetail() {
 				machineName={data.machine_name ?? null}
 				groupId={data.group?.id ?? null}
 				groupName={data.group?.name ?? null}
-				rank={data.server.rank ?? null}
+				rank={data.machine_rank ?? null}
 				onChanged={() => detail.reload()}
 			/>
 			<SilencedRefsSection

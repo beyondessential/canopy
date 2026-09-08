@@ -16114,6 +16114,17 @@
             ],
             "description": "The name of the box this application runs on, where it has one.\n\nThe page names its machine in the heading, so it needs the name and not\nonly the id `server.machine_id` carries — and it needs it whether or\nnot the application is grouped, which is why it is not read out of\n`group_machines`."
           },
+          "machine_rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "The rank the box this application runs on serves: the highest among the\nworkloads on it.\n\nMaintenance coverage is decided at the box's rank, not the\napplication's, so a page reading a window's reach needs this rather\nthan `server.rank`. They differ on a box carrying workloads at more\nthan one rank."
+              }
+            ]
+          },
           "maintained": {
             "type": "boolean",
             "description": "Whether a maintenance window suspends this server, its own or its\ngroup's: its checks are recorded and shown, and raise nothing."
