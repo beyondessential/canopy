@@ -514,6 +514,71 @@ async fn a_secret_turned_plain_forgets_the_value_it_held() {
 	.await
 }
 
+/// A rank the deployment does not have is a mistake, and answering it at the
+/// whole group's scope would put a value meant for one environment in front of
+/// every one of them, production included.
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_a_rank_that_is_not_one() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+
+		let response = private
+			.post("/api/inventory_variables/set")
+			.json(&json!({
+				"server_group_id": group,
+				"rank": "prod",
+				"name": "salt",
+				"value": "pepper",
+				"secret": true,
+			}))
+			.await;
+		assert_ne!(response.status_code(), axum::http::StatusCode::OK);
+
+		let listed = private
+			.post("/api/inventory_variables/for_group")
+			.json(&json!({ "server_group_id": group }))
+			.await;
+		listed.assert_status_ok();
+		assert_eq!(listed.json::<Value>(), json!([]));
+	})
+	.await
+}
+
+/// A name a group holds as a secret and an environment sets in the open is
+/// served as the plain value it is, so nothing tells a run to withhold it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_secret_set_plain_at_the_environment_is_no_longer_one() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+
+		set_var(
+			&private,
+			json!({ "server_group_id": group }),
+			"salt",
+			json!("pepper"),
+			true,
+		)
+		.await;
+		set_var(
+			&private,
+			json!({ "server_group_id": group, "rank": "dev" }),
+			"salt",
+			json!("visible"),
+			false,
+		)
+		.await;
+
+		let body = read_inventory(&private, json!({ "server_group_id": group })).await;
+		assert_eq!(body["vars"]["salt"], "visible");
+		assert_eq!(body["secret_vars"], json!([]));
+		assert_eq!(body["hosts"][0]["vars"]["salt"], "visible");
+		assert_eq!(body["hosts"][0]["secret_vars"], json!([]));
+	})
+	.await
+}
+
 /// A machine's variables are its own, and reach no other box in the
 /// environment.
 #[tokio::test(flavor = "multi_thread")]

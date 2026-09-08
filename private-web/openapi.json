@@ -5506,6 +5506,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "Archived, empty, or ambiguously named",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -5708,6 +5718,16 @@
               }
             }
           },
+          "400": {
+            "description": "Not one scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No variable of that name in that scope",
             "content": {
@@ -5766,7 +5786,7 @@
             }
           },
           "400": {
-            "description": "Not a usable variable name, or `ansible_host` outside machine scope",
+            "description": "Not one scope, not a usable variable name, or `ansible_host` outside machine scope",
             "content": {
               "application/json": {
                 "schema": {
@@ -16525,56 +16545,37 @@
         }
       },
       "ScopeArgs": {
-        "oneOf": [
-          {
-            "type": "object",
-            "description": "One machine.",
-            "required": [
-              "machine_id"
+        "type": "object",
+        "description": "Which scope a request addresses: a group, one of its environments, or one\nmachine.",
+        "properties": {
+          "machine_id": {
+            "type": [
+              "string",
+              "null"
             ],
-            "properties": {
-              "machine_id": {
-                "type": "string",
-                "format": "uuid",
-                "description": "Identifier of the machine."
-              }
-            }
+            "format": "uuid",
+            "description": "Identifier of the machine, for a variable one machine carries."
           },
-          {
-            "type": "object",
-            "description": "An environment: a server group at one rank.",
-            "required": [
-              "server_group_id",
-              "rank"
-            ],
-            "properties": {
-              "rank": {
-                "$ref": "#/components/schemas/ServerRank",
-                "description": "Rank of the environment within it."
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
               },
-              "server_group_id": {
-                "type": "string",
-                "format": "uuid",
-                "description": "Identifier of the server group."
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "Rank of the environment within the group, for a variable one\nenvironment carries rather than the whole group."
               }
-            }
+            ]
           },
-          {
-            "type": "object",
-            "description": "A whole server group, at every rank.",
-            "required": [
-              "server_group_id"
+          "server_group_id": {
+            "type": [
+              "string",
+              "null"
             ],
-            "properties": {
-              "server_group_id": {
-                "type": "string",
-                "format": "uuid",
-                "description": "Identifier of the server group."
-              }
-            }
+            "format": "uuid",
+            "description": "Identifier of the server group, for a variable a whole group carries\nor one of its environments does."
           }
-        ],
-        "description": "Which scope a request addresses: a group, one of its environments, or one\nmachine."
+        }
       },
       "SelfAlertView": {
         "type": "object",

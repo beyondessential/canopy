@@ -9430,23 +9430,16 @@ export interface components {
         ScopeArgs: {
             /**
              * Format: uuid
-             * @description Identifier of the machine.
+             * @description Identifier of the machine, for a variable one machine carries.
              */
-            machine_id: string;
-        } | {
-            /** @description Rank of the environment within it. */
-            rank: components["schemas"]["ServerRank"];
+            machine_id?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: uuid
-             * @description Identifier of the server group.
+             * @description Identifier of the server group, for a variable a whole group carries
+             *     or one of its environments does.
              */
-            server_group_id: string;
-        } | {
-            /**
-             * Format: uuid
-             * @description Identifier of the server group.
-             */
-            server_group_id: string;
+            server_group_id?: string | null;
         };
         /**
          * @description A self-alert: a problem with canopy's own operation, such as an
@@ -14756,6 +14749,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
+            /** @description Archived, empty, or ambiguously named */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
         };
     };
     inventory_release_lease: {
@@ -14895,6 +14897,15 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description Not one scope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
             /** @description No variable of that name in that scope */
             404: {
                 headers: {
@@ -14936,7 +14947,7 @@ export interface operations {
                     "application/json": components["schemas"]["InventoryVariable"];
                 };
             };
-            /** @description Not a usable variable name, or `ansible_host` outside machine scope */
+            /** @description Not one scope, not a usable variable name, or `ansible_host` outside machine scope */
             400: {
                 headers: {
                     [name: string]: unknown;

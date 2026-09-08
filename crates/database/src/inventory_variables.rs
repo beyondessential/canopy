@@ -126,6 +126,43 @@ impl InventoryVariable {
 		.map_err(AppError::from)
 	}
 
+	/// The variable of that name at one scope, where there is one.
+	pub async fn at(
+		conn: &mut AsyncPgConnection,
+		scope: VariableScope,
+		name: &str,
+	) -> Result<Option<Self>> {
+		use crate::schema::inventory_variables::dsl;
+
+		let query = dsl::inventory_variables
+			.filter(dsl::name.eq(name))
+			.select(Self::as_select());
+		match scope {
+			VariableScope::Group { group_id } => {
+				query
+					.filter(dsl::server_group_id.eq(group_id))
+					.filter(dsl::rank.is_null())
+					.first(conn)
+					.await
+			}
+			VariableScope::Environment { group_id, rank } => {
+				query
+					.filter(dsl::server_group_id.eq(group_id))
+					.filter(dsl::rank.eq(rank.to_string()))
+					.first(conn)
+					.await
+			}
+			VariableScope::Machine { machine_id } => {
+				query
+					.filter(dsl::machine_id.eq(machine_id))
+					.first(conn)
+					.await
+			}
+		}
+		.optional()
+		.map_err(AppError::from)
+	}
+
 	/// The variables on the given machines, sorted by machine then name.
 	pub async fn list_for_machines(
 		conn: &mut AsyncPgConnection,
@@ -185,11 +222,7 @@ impl InventoryVariable {
 	) -> Result<Self> {
 		use crate::schema::inventory_variables::dsl;
 
-		let existing: Option<Uuid> = Self::list_at(conn, scope)
-			.await?
-			.into_iter()
-			.find(|var| var.name == name)
-			.map(|var| var.id);
+		let existing: Option<Uuid> = Self::at(conn, scope, name).await?.map(|var| var.id);
 
 		if let Some(id) = existing {
 			return diesel::update(dsl::inventory_variables.find(id))
@@ -222,15 +255,16 @@ impl InventoryVariable {
 			.map_err(AppError::from)
 	}
 
-	/// Forget a variable. Answers whether there was one.
+	/// Forget a variable. Answers with the row there was, so a caller knows
+	/// whether a value in the secret store went with it.
 	pub async fn remove(
 		conn: &mut AsyncPgConnection,
 		scope: VariableScope,
 		name: &str,
-	) -> Result<bool> {
+	) -> Result<Option<Self>> {
 		use crate::schema::inventory_variables::dsl;
 
-		let deleted = match scope {
+		match scope {
 			VariableScope::Group { group_id } => {
 				diesel::delete(
 					dsl::inventory_variables
@@ -238,7 +272,8 @@ impl InventoryVariable {
 						.filter(dsl::server_group_id.eq(group_id))
 						.filter(dsl::rank.is_null()),
 				)
-				.execute(conn)
+				.returning(Self::as_select())
+				.get_result(conn)
 				.await
 			}
 			VariableScope::Environment { group_id, rank } => {
@@ -248,7 +283,8 @@ impl InventoryVariable {
 						.filter(dsl::server_group_id.eq(group_id))
 						.filter(dsl::rank.eq(rank.to_string())),
 				)
-				.execute(conn)
+				.returning(Self::as_select())
+				.get_result(conn)
 				.await
 			}
 			VariableScope::Machine { machine_id } => {
@@ -257,12 +293,13 @@ impl InventoryVariable {
 						.filter(dsl::name.eq(name))
 						.filter(dsl::machine_id.eq(machine_id)),
 				)
-				.execute(conn)
+				.returning(Self::as_select())
+				.get_result(conn)
 				.await
 			}
 		}
-		.map_err(AppError::from)?;
-		Ok(deleted > 0)
+		.optional()
+		.map_err(AppError::from)
 	}
 }
 

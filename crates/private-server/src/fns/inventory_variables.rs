@@ -34,41 +34,30 @@ pub fn routes() -> OpenApiRouter<AppState> {
 /// Which scope a request addresses: a group, one of its environments, or one
 /// machine.
 #[derive(Debug, Clone, Copy, Deserialize, ToSchema)]
-#[serde(untagged)]
-pub enum ScopeArgs {
-	/// One machine.
-	Machine {
-		/// Identifier of the machine.
-		machine_id: Uuid,
-	},
-	/// An environment: a server group at one rank.
-	Environment {
-		/// Identifier of the server group.
-		server_group_id: Uuid,
-		/// Rank of the environment within it.
-		rank: ServerRank,
-	},
-	/// A whole server group, at every rank.
-	Group {
-		/// Identifier of the server group.
-		server_group_id: Uuid,
-	},
+pub struct ScopeArgs {
+	/// Identifier of the machine, for a variable one machine carries.
+	pub machine_id: Option<Uuid>,
+	/// Identifier of the server group, for a variable a whole group carries
+	/// or one of its environments does.
+	pub server_group_id: Option<Uuid>,
+	/// Rank of the environment within the group, for a variable one
+	/// environment carries rather than the whole group.
+	pub rank: Option<ServerRank>,
 }
 
-impl From<ScopeArgs> for VariableScope {
-	fn from(args: ScopeArgs) -> Self {
-		match args {
-			ScopeArgs::Group { server_group_id } => Self::Group {
-				group_id: server_group_id,
-			},
-			ScopeArgs::Environment {
-				server_group_id,
-				rank,
-			} => Self::Environment {
-				group_id: server_group_id,
-				rank,
-			},
-			ScopeArgs::Machine { machine_id } => Self::Machine { machine_id },
+impl TryFrom<ScopeArgs> for VariableScope {
+	type Error = AppError;
+
+	fn try_from(args: ScopeArgs) -> Result<Self> {
+		match (args.machine_id, args.server_group_id, args.rank) {
+			(Some(machine_id), None, None) => Ok(Self::Machine { machine_id }),
+			(None, Some(group_id), Some(rank)) => Ok(Self::Environment { group_id, rank }),
+			(None, Some(group_id), None) => Ok(Self::Group { group_id }),
+			_ => Err(AppError::BadRequest(
+				"a variable is set on one machine, on one environment (a group and a rank), \
+				 or on a whole group"
+					.into(),
+			)),
 		}
 	}
 }
@@ -148,7 +137,7 @@ pub async fn for_group(
 	request_body = SetArgs,
 	responses(
 		(status = 200, body = InventoryVariable),
-		(status = 400, description = "Not a usable variable name, or `ansible_host` outside machine scope", body = ProblemDetailsSchema),
+		(status = 400, description = "Not one scope, not a usable variable name, or `ansible_host` outside machine scope", body = ProblemDetailsSchema),
 		(status = 404, description = "No such server group or machine", body = ProblemDetailsSchema),
 		(status = 502, description = "The secret store is unavailable", body = ProblemDetailsSchema),
 	),
@@ -158,14 +147,28 @@ pub async fn set(
 	admin: TailscaleAdmin,
 	Json(args): Json<SetArgs>,
 ) -> Result<Json<InventoryVariable>> {
-	let scope = VariableScope::from(args.scope);
+	let scope = VariableScope::try_from(args.scope)?;
 	check_name(&args.name)?;
 	check_machine_scoped(scope, &args.name)?;
 
 	let mut conn = state.db.get().await?;
 	check_scope(&mut conn, scope).await?;
 
-	if !args.secret {
+	let set = if args.secret {
+		let kube = secret_store(&state)?;
+		let secret = scope.secret_name();
+		let mut keys = kube
+			.try_read_secret_keys(&secret)
+			.await?
+			.unwrap_or_default();
+		keys.insert(args.name.clone(), stored(&args.value));
+		kube.put_secret_keys(&secret, &keys).await?;
+
+		InventoryVariable::set(&mut conn, scope, &args.name, None, Some(&admin.0.login)).await?
+	} else {
+		let was_secret = InventoryVariable::at(&mut conn, scope, &args.name)
+			.await?
+			.is_some_and(|prior| prior.is_secret);
 		let set = InventoryVariable::set(
 			&mut conn,
 			scope,
@@ -174,22 +177,20 @@ pub async fn set(
 			Some(&admin.0.login),
 		)
 		.await?;
-		forget_secret_value(&state, scope, &args.name).await?;
-		return Ok(Json(set));
-	}
+		if was_secret {
+			forget_secret_value(&state, scope, &args.name).await?;
+		}
+		set
+	};
 
-	let kube = secret_store(&state)?;
-	let secret = scope.secret_name();
-	let mut keys = kube
-		.try_read_secret_keys(&secret)
-		.await?
-		.unwrap_or_default();
-	keys.insert(args.name.clone(), stored(&args.value));
-	kube.put_secret_keys(&secret, &keys).await?;
-
-	Ok(Json(
-		InventoryVariable::set(&mut conn, scope, &args.name, None, Some(&admin.0.login)).await?,
-	))
+	tracing::info!(
+		login = %admin.0.login,
+		scope = ?scope,
+		name = %args.name,
+		secret = args.secret,
+		"inventory variable set"
+	);
+	Ok(Json(set))
 }
 
 /// Forget a variable, value and all.
@@ -205,28 +206,38 @@ pub async fn set(
 	request_body = RemoveArgs,
 	responses(
 		(status = 200, description = "Removed", body = ()),
+		(status = 400, description = "Not one scope", body = ProblemDetailsSchema),
 		(status = 404, description = "No variable of that name in that scope", body = ProblemDetailsSchema),
 		(status = 502, description = "The secret store is unavailable", body = ProblemDetailsSchema),
 	),
 )]
 pub async fn remove(
 	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
+	admin: TailscaleAdmin,
 	Json(args): Json<RemoveArgs>,
 ) -> Result<Json<()>> {
-	let scope = VariableScope::from(args.scope);
+	let scope = VariableScope::try_from(args.scope)?;
 	let mut conn = state.db.get().await?;
 
-	if !InventoryVariable::remove(&mut conn, scope, &args.name).await? {
+	let Some(removed) = InventoryVariable::remove(&mut conn, scope, &args.name).await? else {
 		return Err(AppError::NotFound(format!(
 			"no variable {:?} in that scope",
 			args.name
 		)));
+	};
+
+	if removed.is_secret {
+		forget_secret_value(&state, scope, &args.name).await?;
 	}
 
-	forget_secret_value(&state, scope, &args.name)
-		.await
-		.map(Json)
+	tracing::info!(
+		login = %admin.0.login,
+		scope = ?scope,
+		name = %args.name,
+		secret = removed.is_secret,
+		"inventory variable removed"
+	);
+	Ok(Json(()))
 }
 
 /// A value for the secret store, which holds strings. Its JSON encoding, so a
