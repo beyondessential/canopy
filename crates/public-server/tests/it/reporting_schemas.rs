@@ -400,6 +400,39 @@ async fn a_schema_registered_against_a_range_is_refused() {
 	.await
 }
 
+/// A build is dispatched for a pair whose version Canopy already holds, so a
+/// registration naming one it does not is refused. Drafting a release row for
+/// it would put a builder's near-miss of a real version into the catalog every
+/// machine reads.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_schema_for_an_unknown_version_drafts_none() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+
+			let refused = public
+				.post(&format!(
+					"/artifacts/9999.0.0/reporting-schema/any?group={GROUP}"
+				))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.add_header("content-type", "application/sql")
+				.text("CREATE VIEW ...")
+				.await;
+			assert_eq!(refused.status_code(), StatusCode::BAD_REQUEST);
+
+			let catalog = database::versions::Version::get_all_including_drafts(&mut conn)
+				.await
+				.expect("the version catalog");
+			assert!(
+				!catalog.iter().any(|v| v.major == 9999),
+				"no release row is drafted for it"
+			);
+		},
+	)
+	.await
+}
+
 /// A declaration an operator has turned off does not authorise anything. It is
 /// the enabled declaration that covers a group, so a builder whose declaration
 /// is disabled is refused its own group's artifacts.

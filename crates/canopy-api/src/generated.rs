@@ -7,7 +7,7 @@ pub const OPENAPI_VERSION: &str = "1.0.0";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "537ffaf234f7e02ef068b3ec2c50e33fc2e42e58c65583195c687cf53e2fcf48";
+pub const OPENAPI_BLAKE3: &str = "93afb023ce550a4506e35edaf020d1807af8509b7bbb645b60505061237fc727";
 
 /// Error types.
 pub mod error {
@@ -4077,10 +4077,11 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
 	/// request body is the plain-text URL clients should download the
 	/// artifact from.
 	///
-	/// When an exact version is given and it doesn't exist yet, it is created
+	/// When a releaser gives an exact version that doesn't exist yet, it is created
 	/// automatically as an unpublished draft so the artifact has a version to
 	/// attach to; publishing that version later (via the version-creation
-	/// endpoint) is a separate step. When a range pattern is given instead,
+	/// endpoint) is a separate step. A group-scoped registration names a version
+	/// Canopy already holds and drafts none. When a range pattern is given instead,
 	/// the artifact isn't tied to one version — it matches whichever
 	/// published version currently satisfies the range at lookup time.
 	///

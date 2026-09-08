@@ -99,13 +99,15 @@ pub(crate) async fn caller_scope(
 	Ok(Scope::for_caller(machine.and_then(|m| m.group_id)))
 }
 
+/// Body budget for a registration. Sized above the held-bytes cap so an
+/// over-limit upload is the handler's structured refusal naming the limit,
+/// rather than axum's plain-text 413.
+const MAX_REGISTER_BODY_BYTES: usize = MAX_HELD_ARTIFACT_BYTES + 64 * 1024;
+
 pub fn routes() -> OpenApiRouter<AppState> {
-	// Sized from the held-bytes cap so an over-limit upload is the handler's
-	// structured refusal naming the limit, rather than axum's plain-text 413
-	// from a default an order of magnitude below it.
 	OpenApiRouter::new()
 		.routes(routes!(create))
-		.layer(DefaultBodyLimit::max(MAX_HELD_ARTIFACT_BYTES))
+		.layer(DefaultBodyLimit::max(MAX_REGISTER_BODY_BYTES))
 }
 
 /// Register an artifact for a version or version range.
@@ -120,10 +122,11 @@ pub fn routes() -> OpenApiRouter<AppState> {
 /// request body is the plain-text URL clients should download the
 /// artifact from.
 ///
-/// When an exact version is given and it doesn't exist yet, it is created
+/// When a releaser gives an exact version that doesn't exist yet, it is created
 /// automatically as an unpublished draft so the artifact has a version to
 /// attach to; publishing that version later (via the version-creation
-/// endpoint) is a separate step. When a range pattern is given instead,
+/// endpoint) is a separate step. A group-scoped registration names a version
+/// Canopy already holds and drafts none. When a range pattern is given instead,
 /// the artifact isn't tied to one version — it matches whichever
 /// published version currently satisfies the range at lookup time.
 ///
@@ -234,12 +237,27 @@ async fn create(
 	let (version_id, version_range_pattern) = if let Ok(semver) = SemverVersion::parse(&version) {
 		let version_str = VersionStr(semver);
 
-		// The version an artifact names may not exist yet: it is created as a
-		// draft so the artifact has something to attach to, and publishing it
-		// stays a separate step.
-		let version_id = match Version::get_by_version(&mut db, version_str.clone()).await {
-			Ok(version) => version.id,
-			Err(_) => {
+		let existing = match Version::get_by_version(&mut db, version_str.clone()).await {
+			Ok(version) => Some(version),
+			Err(AppError::DatabaseQuery(diesel::result::Error::NotFound)) => None,
+			Err(error) => return Err(error),
+		};
+
+		let version_id = match existing {
+			Some(version) => version.id,
+			// A build is dispatched for a pair whose version Canopy already
+			// holds, so a group-scoped registration names one rather than
+			// drafting a release nobody has cut.
+			// spec: RPT#pairs
+			None if held.is_some() => {
+				return Err(AppError::BadRequest(format!(
+					"no version {version} to register a group-scoped artifact against"
+				)));
+			}
+			// The version a releaser names may not exist yet: it is created as a
+			// draft so the artifact has something to attach to, and publishing it
+			// stays a separate step.
+			None => {
 				let new_version = NewVersion {
 					major: version_str.0.major as _,
 					minor: version_str.0.minor as _,
@@ -284,9 +302,13 @@ async fn create(
 	// spec: ART#digests
 	let named_digest = named.digest.filter(|d| !d.trim().is_empty());
 
-	let download_url = match held {
+	// Canopy holds a group-scoped artifact, so it records the digest of what it
+	// actually took in. An unscoped one is fetched from its location by the
+	// caller, so its digest is whatever that caller recorded.
+	// spec: ART#digests
+	let (download_url, digest, content) = match held {
 		None => {
-			let url = String::from_utf8(body.to_vec())
+			let url = String::from_utf8(body.into())
 				.map_err(|_| AppError::BadRequest("download URL is not valid UTF-8".into()))?;
 			// A blank body is no location at all. The constraint only tests for
 			// NULL, so an empty string would pass it and leave an artifact
@@ -297,9 +319,12 @@ async fn create(
 					"an artifact needs a download URL".into(),
 				));
 			}
-			Some(url)
+			(Some(url), named_digest, None)
 		}
-		Some(_) => None,
+		Some(_) => {
+			let digest = digest_of(&body);
+			(None, Some(digest), Some(Vec::from(body)))
+		}
 	};
 
 	let row = ArtifactRow::register(
@@ -312,16 +337,8 @@ async fn create(
 			device_id: Some(device_id),
 			version_range_pattern,
 			group_id: held,
-			// Canopy holds a group-scoped artifact, so it records the digest of
-			// what it actually took in. An unscoped one is fetched from its
-			// location by the caller, so its digest is whatever that caller
-			// recorded.
-			// spec: ART#digests
-			digest: match held {
-				Some(_) => Some(digest_of(&body)),
-				None => named_digest,
-			},
-			content: held.map(|_| body.to_vec()),
+			digest,
+			content,
 			content_type: held.and(content_type),
 			run_id: named.run,
 		},
