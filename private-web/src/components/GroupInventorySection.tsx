@@ -65,6 +65,11 @@ export default function GroupInventorySection({
 		{ server_group_id: groupId },
 		[groupId, tick],
 	);
+	const openWindows = useApi("maintenance", "list_open", {}, [maintenanceTick]);
+	const windows =
+		openWindows.status === "ok"
+			? openWindows.data.map((row) => row.window)
+			: [];
 
 	// Rank is an application's, so a group's environments are the ranks its
 	// applications sit at, and one carrying no rank sits at the default.
@@ -105,8 +110,8 @@ export default function GroupInventorySection({
 							variables={
 								variables.status === "ok" ? variables.data : []
 							}
+							windows={windows}
 							onChanged={reload}
-							maintenanceTick={maintenanceTick}
 							onMaintenanceChange={onMaintenanceChange}
 						/>
 					))}
@@ -122,8 +127,8 @@ function EnvironmentInventory({
 	rank,
 	machines,
 	variables,
+	windows,
 	onChanged,
-	maintenanceTick,
 	onMaintenanceChange,
 }: {
 	groupId: string;
@@ -131,8 +136,8 @@ function EnvironmentInventory({
 	rank: ServerRank;
 	machines: ReadonlyArray<Machine>;
 	variables: ReadonlyArray<InventoryVariable>;
+	windows: ReadonlyArray<MaintenanceWindow>;
 	onChanged: () => void;
-	maintenanceTick: number;
 	onMaintenanceChange: () => void;
 }) {
 	const isAdmin = useIsAdmin() === true;
@@ -161,7 +166,7 @@ function EnvironmentInventory({
 					groupId={groupId}
 					groupName={groupName}
 					rank={rank}
-					maintenanceTick={maintenanceTick}
+					declared={holdingHere(windows, groupId, machines)}
 					onDeclared={onMaintenanceChange}
 				/>
 
@@ -216,36 +221,24 @@ function Run({
 	groupId,
 	groupName,
 	rank,
-	maintenanceTick,
+	declared,
 	onDeclared,
 }: {
 	groupId: string;
 	groupName: string;
 	rank: ServerRank;
-	maintenanceTick: number;
+	declared: MaintenanceWindow | null;
 	onDeclared: () => void;
 }) {
 	const [copied, setCopied] = useState(false);
 	const [dialogOpen, setDialogOpen] = useState(false);
-	const windows = useApi(
-		"maintenance",
-		"for_target",
-		{ server_group_id: groupId },
-		[groupId, maintenanceTick],
-	);
 	const lease = useApi(
 		"inventory",
 		"lease_for_group",
 		{ server_group_id: groupId, rank },
-		[groupId, rank, maintenanceTick],
+		[groupId, rank],
 	);
 
-	const declared =
-		windows.status === "ok"
-			? ((windows.data as MaintenanceWindow[]).find(
-					(held) => held.ended_at === null,
-				) ?? null)
-			: null;
 	const held: InventoryLease | null =
 		lease.status === "ok" ? lease.data : null;
 
@@ -340,6 +333,26 @@ function Run({
 				onDone={onDeclared}
 			/>
 		</Box>
+	);
+}
+
+/// The window that would refuse a lease here. Canopy takes the group's windows
+/// and those of every machine in the environment, and a window holds until its
+/// expected end whether or not anything has swept it yet.
+function holdingHere(
+	windows: ReadonlyArray<MaintenanceWindow>,
+	groupId: string,
+	machines: ReadonlyArray<Machine>,
+): MaintenanceWindow | null {
+	const now = Date.now();
+	return (
+		windows.find(
+			(held) =>
+				held.ended_at === null &&
+				new Date(held.expected_end).getTime() > now &&
+				(held.server_group_id === groupId ||
+					machines.some((machine) => machine.id === held.machine_id)),
+		) ?? null
 	);
 }
 
