@@ -550,6 +550,36 @@ async fn extending_keeps_the_environment_and_releasing_gives_it_back() {
 	.await
 }
 
+/// An expired lease is over: reviving it would skip every gate taking one
+/// applies, so a run that has lapsed takes a new one.
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_to_extend_a_lease_that_has_expired() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
+		conn.batch_execute(&format!(
+			"UPDATE inventory_leases SET expires_at = NOW() - INTERVAL '1 minute'
+			 WHERE id = '{lease}'"
+		))
+		.await
+		.expect("expire the lease");
+
+		let response = private
+			.post("/api/inventory/extend_lease")
+			.json(&json!({ "lease_id": lease }))
+			.await;
+		response.assert_status(axum::http::StatusCode::CONFLICT);
+		assert!(
+			response.json::<Value>()["detail"]
+				.as_str()
+				.expect("detail")
+				.contains("expired"),
+		);
+	})
+	.await
+}
+
 /// The group page reads who holds an environment without taking it.
 #[tokio::test(flavor = "multi_thread")]
 async fn reports_the_lease_holding_an_environment() {

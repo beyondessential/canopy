@@ -398,6 +398,9 @@ pub async fn extend_lease(
 	let mut conn = state.db.get().await?;
 	let lease = InventoryLease::get(&mut conn, args.lease_id).await?;
 	held_by_caller(&lease, &admin.0.login)?;
+	if !lease.holds_at(Timestamp::now()) {
+		return Err(AppError::Conflict(no_longer_held(&lease, &admin.0.login)));
+	}
 	let extended = InventoryLease::extend(&mut conn, lease.id).await?;
 	tracing::info!(login = %admin.0.login, lease = %lease.id, "inventory lease extended");
 	Ok(Json(extended))
