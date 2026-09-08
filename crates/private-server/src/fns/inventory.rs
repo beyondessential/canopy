@@ -598,17 +598,19 @@ pub async fn for_group(
 		}
 	}
 
-	let mut hosts = Vec::with_capacity(machines.len());
-	for machine in &machines {
-		let own = Scoped::read(
+	let owned = futures::future::try_join_all(machines.iter().map(|machine| {
+		Scoped::read(
 			&state,
 			VariableScope::Machine {
 				machine_id: machine.id,
 			},
 			by_machine.get(&machine.id).map_or(&[][..], Vec::as_slice),
 		)
-		.await?;
+	}))
+	.await?;
 
+	let mut hosts = Vec::with_capacity(machines.len());
+	for (machine, own) in machines.iter().zip(owned) {
 		let mut effective = wide.clone();
 		effective.overlay(&own);
 
