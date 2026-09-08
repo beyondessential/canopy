@@ -16465,7 +16465,7 @@
               },
               {
                 "$ref": "#/components/schemas/MaintenanceWindow",
-                "description": "The window holding over the environment or over a machine in it,\nwhoever declared it."
+                "description": "The window holding over the environment or over a machine in it: the\none refusing a take where one does, and otherwise the caller's own."
               }
             ]
           }
