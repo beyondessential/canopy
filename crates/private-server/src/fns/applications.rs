@@ -825,7 +825,7 @@ pub struct ServerUpdateArgs {
 )]
 pub async fn update(
 	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
+	admin: TailscaleAdmin,
 	Json(args): Json<ServerUpdateArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
@@ -920,7 +920,7 @@ pub async fn update(
 		database::issues::reevaluate_open_issues_for_scope(
 			&mut conn,
 			database::issues::Scope::Machine(machine_id),
-			None,
+			Some(&format!("rank changed by {}", admin.0.login)),
 		)
 		.await?;
 	}
