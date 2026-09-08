@@ -347,10 +347,10 @@ pub async fn group_details(
 	// The environments of this group under a window of their own, so the card
 	// marks the rank's row rather than each box in it.
 	// spec: MNT#presentation
-	let ranks: Vec<ServerRank> = members.iter().filter_map(|m| m.rank).collect();
+	let ranks: std::collections::BTreeSet<ServerRank> =
+		members.iter().filter_map(|m| m.rank).collect();
 	let maintained_ranks: Vec<ServerRank> = ranks
-		.iter()
-		.copied()
+		.into_iter()
 		.filter(|rank| suspended.environment_window(group.id, *rank))
 		.collect();
 	let settling_ranks: Vec<ServerRank> = maintained_ranks
