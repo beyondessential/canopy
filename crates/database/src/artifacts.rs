@@ -331,17 +331,66 @@ impl Artifact {
 		db: &mut AsyncPgConnection,
 		version: Uuid,
 	) -> Result<Option<jiff::Timestamp>> {
+		let version = Version::get_by_id(db, version).await?;
+		let newest = Self::newest_change_for_versions(db, std::slice::from_ref(&version)).await?;
+		Ok(newest.get(&version.id).copied())
+	}
+
+	/// When any artifact a build reads was last registered for each of these
+	/// versions, in two queries however many versions are asked about.
+	///
+	/// A range artifact counts for every version it covers, since that is how
+	/// one is resolved for a build.
+	// spec: RPT#pairs
+	pub async fn newest_change_for_versions(
+		db: &mut AsyncPgConnection,
+		versions: &[Version],
+	) -> Result<std::collections::HashMap<Uuid, jiff::Timestamp>> {
 		use crate::schema::artifacts::dsl;
 
-		let newest: Option<jiff_diesel::Timestamp> = dsl::artifacts
-			.filter(dsl::version_id.eq(version))
+		let ids: Vec<Uuid> = versions.iter().map(|v| v.id).collect();
+		let exact: Vec<(Option<Uuid>, Option<jiff_diesel::Timestamp>)> = dsl::artifacts
+			.filter(dsl::version_id.eq_any(&ids))
 			.filter(dsl::group_id.is_null())
-			.select(diesel::dsl::max(dsl::updated_at))
-			.first(db)
+			.group_by(dsl::version_id)
+			.select((dsl::version_id, diesel::dsl::max(dsl::updated_at)))
+			.load(db)
 			.await
 			.map_err(AppError::from)?;
 
-		Ok(newest.map(Into::into))
+		let mut newest: std::collections::HashMap<Uuid, jiff::Timestamp> = exact
+			.into_iter()
+			.filter_map(|(id, at)| Some((id?, at?.into())))
+			.collect();
+
+		let ranges: Vec<(Option<String>, jiff_diesel::Timestamp)> = dsl::artifacts
+			.filter(dsl::version_id.is_null())
+			.filter(dsl::group_id.is_null())
+			.select((dsl::version_range_pattern, dsl::updated_at))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		for (pattern, at) in ranges {
+			// An unparseable pattern matches nothing rather than everything,
+			// as it does where the artifact is offered.
+			let Some(range) = pattern
+				.as_deref()
+				.and_then(|pattern| node_semver::Range::parse(pattern).ok())
+			else {
+				continue;
+			};
+			let at: jiff::Timestamp = at.into();
+
+			for version in versions.iter().filter(|v| range.satisfies(&v.as_semver())) {
+				newest
+					.entry(version.id)
+					.and_modify(|held| *held = (*held).max(at))
+					.or_insert(at);
+			}
+		}
+
+		Ok(newest)
 	}
 
 	/// The bytes Canopy holds for an artifact, where it holds any.

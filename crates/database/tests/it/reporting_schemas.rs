@@ -325,6 +325,34 @@ async fn a_new_artifact_for_the_version_reinstates_the_pair() {
 	.await;
 }
 
+/// Canopy resolves a range artifact for every version it covers, so one
+/// registered over the pair's version is a change the next build reads and
+/// reinstates the pair the same way an exact one does.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_range_artifact_covering_the_version_reinstates_the_pair() {
+	TestDb::run(|mut conn, _url| async move {
+		let (_older, newer) = seed(&mut conn).await;
+
+		record_build(&mut conn, newer, true).await;
+
+		conn.batch_execute(
+			"INSERT INTO artifacts
+				(version_range_pattern, artifact_type, platform, download_url)
+			 VALUES ('2.60.x', 'migrations', 'any', 'https://example.com/m.tar')",
+		)
+		.await
+		.expect("register a range artifact");
+
+		assert!(
+			!ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+				.await
+				.unwrap(),
+			"a range covering the version is one of its artifacts"
+		);
+	})
+	.await;
+}
+
 /// A build's own output is not a change a build reads. Counted, a second
 /// group's schema for the version unsettles the first group's pair, whose
 /// rebuild unsettles the second, and neither pair ever settles: a restore and a
