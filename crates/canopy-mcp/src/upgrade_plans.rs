@@ -121,12 +121,17 @@ impl CanopyMcp {
 			.map(|group| (group.id, group.name))
 			.collect();
 
-		let newest = Version::get_all(&mut conn)
+		let newest = Version::newest_published(&mut conn)
+			.await
+			.map_err(mcp_err)?
+			.map(|version| version.as_semver());
+
+		let mut open: HashMap<(Uuid, ServerRank), UpgradePlan> = UpgradePlan::all_open(&mut conn)
 			.await
 			.map_err(mcp_err)?
 			.into_iter()
-			.next()
-			.map(|version| version.as_semver());
+			.map(|plan| ((plan.group_id, plan.rank), plan))
+			.collect();
 
 		let mut plans = Vec::new();
 		let mut unplanned = Vec::new();
@@ -141,10 +146,7 @@ impl CanopyMcp {
 				.zip(newest.as_ref())
 				.map(|(current, latest)| database::statuses::version_distance(&current.0, latest));
 			let group_name = names.get(&env.group_id).cloned().unwrap_or_default();
-			let plan = UpgradePlan::open_for_environment(&mut conn, env.group_id, env.rank)
-				.await
-				.map_err(mcp_err)?;
-			match plan {
+			match open.remove(&(env.group_id, env.rank)) {
 				Some(plan) => plans.push(OpenPlan {
 					group_id: env.group_id,
 					group_name,
@@ -196,11 +198,9 @@ impl CanopyMcp {
 		};
 
 		let versions = version_names(&mut conn).await?;
-		let newest = Version::get_all(&mut conn)
+		let newest = Version::newest_published(&mut conn)
 			.await
 			.map_err(mcp_err)?
-			.into_iter()
-			.next()
 			.map(|version| version.as_semver());
 		let plans = UpgradePlan::history_for_group(&mut conn, id)
 			.await

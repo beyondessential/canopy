@@ -534,18 +534,58 @@ pub async fn verdicts(
 		let Some(version) = candidate_for(db, &server).await? else {
 			continue;
 		};
-		let latest = latest_test(db, server.machine_id, version.id).await?;
-
-		out.push(GroupVerdict {
-			server_id: server.id,
-			target_version_id: version.id,
-			target_version: version.as_semver().to_string(),
-			verdict: latest
-				.as_ref()
-				.map_or(Verdict::NotTested, |test| test.verdict),
-			latest,
-		});
+		out.push(verdict_row(db, &server, &version).await?);
 	}
 
 	Ok(out)
+}
+
+/// Where each of `applications` stands against `target`, for a caller that has
+/// already resolved the environment's plan and the version it names.
+///
+/// The same answer [`verdicts`] gives, without re-deriving that version once
+/// per application. A target that is not published steers no testing, so it
+/// leaves every application without a verdict, as having no plan at all does.
+// spec: RST#verdicts
+pub async fn verdicts_against(
+	db: &mut AsyncPgConnection,
+	applications: Vec<Application>,
+	target: Option<&Version>,
+) -> Result<Vec<GroupVerdict>> {
+	let Some(target) = target else {
+		return Ok(Vec::new());
+	};
+	if target.status != commons_types::version::VersionStatus::Published {
+		return Ok(Vec::new());
+	}
+
+	let mut out = Vec::new();
+	for server in applications {
+		// The migrations under test are Tamanu's, so only Tamanu has
+		// candidates.
+		// spec: RST#candidate-versions
+		if server.r#type.software() != "tamanu" {
+			continue;
+		}
+		out.push(verdict_row(db, &server, target).await?);
+	}
+
+	Ok(out)
+}
+
+async fn verdict_row(
+	db: &mut AsyncPgConnection,
+	server: &Application,
+	version: &Version,
+) -> Result<GroupVerdict> {
+	let latest = latest_test(db, server.machine_id, version.id).await?;
+	Ok(GroupVerdict {
+		server_id: server.id,
+		target_version_id: version.id,
+		target_version: version.as_semver().to_string(),
+		verdict: latest
+			.as_ref()
+			.map_or(Verdict::NotTested, |test| test.verdict),
+		latest,
+	})
 }

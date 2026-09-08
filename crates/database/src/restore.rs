@@ -471,35 +471,75 @@ pub async fn group_migrates(db: &mut AsyncPgConnection, group_id: Uuid) -> Resul
 	Ok(false)
 }
 
+/// Which of a group's environments an enabled declaration migrates what it
+/// restores of.
+// spec: RST#verdicts
+#[derive(Debug, Clone, Default)]
+pub struct MigratingEnvironments {
+	whole_group: bool,
+	ranks: HashSet<commons_types::server::rank::ServerRank>,
+}
+
+impl MigratingEnvironments {
+	/// A group-wide declaration covers every environment, one over a single
+	/// machine covers the environment that machine serves.
+	pub fn covers(&self, rank: commons_types::server::rank::ServerRank) -> bool {
+		self.whole_group || self.ranks.contains(&rank)
+	}
+}
+
+/// The environments on `group_id` whose restores are migrated, resolved in one
+/// pass for a caller judging several of them.
+// spec: RST#verdicts
+pub async fn migrating_environments(
+	db: &mut AsyncPgConnection,
+	group_id: Uuid,
+) -> Result<MigratingEnvironments> {
+	let replicas: Vec<RestoreReplica> = RestoreReplica::list_for_group(db, group_id)
+		.await?
+		.into_iter()
+		.filter(|replica| replica.enabled)
+		.collect();
+	let machine_ids: Vec<Uuid> = replicas.iter().filter_map(|r| r.machine_id).collect();
+	let ranks = crate::machines::Machine::ranks(db, &machine_ids).await?;
+
+	let mut out = MigratingEnvironments::default();
+	let mut advertised: HashMap<Uuid, Vec<IntentDescriptor>> = HashMap::new();
+	for replica in replicas {
+		let descriptors = match advertised.entry(replica.consumer_device_id) {
+			Entry::Occupied(held) => held.into_mut(),
+			Entry::Vacant(slot) => slot.insert(
+				RestoreConsumerCapability::list_for_consumer(db, replica.consumer_device_id)
+					.await?,
+			),
+		};
+		if !descriptors
+			.iter()
+			.any(|d| d.intent == replica.intent && d.has_semantic(semantics::MIGRATE))
+		{
+			continue;
+		}
+		match replica.machine_id {
+			None => out.whole_group = true,
+			Some(machine_id) => {
+				if let Some(rank) = ranks.get(&machine_id) {
+					out.ranks.insert(*rank);
+				}
+			}
+		}
+	}
+	Ok(out)
+}
+
 /// Whether any enabled declaration on `group_id` migrates what it restores of
-/// the environment at `rank`: a group-wide declaration covers every
-/// environment, one over a single machine covers the environment that machine
-/// serves.
+/// the environment at `rank`.
 // spec: RST#verdicts
 pub async fn environment_migrates(
 	db: &mut AsyncPgConnection,
 	group_id: Uuid,
 	rank: commons_types::server::rank::ServerRank,
 ) -> Result<bool> {
-	for replica in RestoreReplica::list_for_group(db, group_id).await? {
-		if !replica.enabled {
-			continue;
-		}
-		if let Some(machine_id) = replica.machine_id
-			&& crate::machines::Machine::rank(db, machine_id).await? != Some(rank)
-		{
-			continue;
-		}
-		let advertised =
-			RestoreConsumerCapability::list_for_consumer(db, replica.consumer_device_id).await?;
-		if advertised
-			.iter()
-			.any(|d| d.intent == replica.intent && d.has_semantic(semantics::MIGRATE))
-		{
-			return Ok(true);
-		}
-	}
-	Ok(false)
+	Ok(migrating_environments(db, group_id).await?.covers(rank))
 }
 
 /// Why a server a redacting declaration covers can't be redacted.

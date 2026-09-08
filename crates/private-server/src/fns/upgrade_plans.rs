@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::Entry};
 
 use axum::Json;
 use axum::extract::State;
@@ -116,19 +116,18 @@ pub async fn fleet(
 	let mut attempts: HashMap<Uuid, Option<crate::fns::migration_tests::AttemptState>> =
 		HashMap::new();
 	let mut members: HashMap<Uuid, Vec<database::applications::Application>> = HashMap::new();
-	let newest = database::versions::Version::get_all(&mut conn)
+	let mut migrating: HashMap<Uuid, database::restore::MigratingEnvironments> = HashMap::new();
+	let newest = database::versions::Version::newest_published(&mut conn)
 		.await?
-		.into_iter()
-		.next()
 		.map(|version| version.as_semver());
 	let headline = ServerGroup::highest_member_ranks(&mut conn, &ids).await?;
 	// Including drafts: a target yanked since the plan was recorded still has to
 	// render as the version the environment is going to.
-	let versions: HashMap<Uuid, String> =
+	let versions: HashMap<Uuid, database::versions::Version> =
 		database::versions::Version::get_all_including_drafts(&mut conn)
 			.await?
 			.into_iter()
-			.map(|version| (version.id, version.as_semver().to_string()))
+			.map(|version| (version.id, version))
 			.collect();
 
 	let mut environments = ServerGroup::environments(&mut conn, &ids).await?;
@@ -153,9 +152,10 @@ pub async fn fleet(
 	let mut out = Vec::new();
 	for env in environments {
 		let plan = open.remove(&(env.group_id, env.rank));
-		let target = plan
+		let planned = plan
 			.as_ref()
-			.and_then(|plan| versions.get(&plan.target_version_id).cloned());
+			.and_then(|plan| versions.get(&plan.target_version_id));
+		let target = planned.map(|version| version.as_semver().to_string());
 		let late = plan
 			.as_ref()
 			.is_some_and(|plan| database::upgrade_plans::is_late(plan, today));
@@ -186,16 +186,23 @@ pub async fn fleet(
 					.cloned()
 					.collect();
 				let per_server =
-					database::migration_tests::verdicts(&mut conn, applications).await?;
+					database::migration_tests::verdicts_against(&mut conn, applications, planned)
+						.await?;
 				Some(roll_up(&per_server).to_owned())
 			}
 		};
 
 		let testable = match &plan {
 			None => None,
-			Some(_) => Some(
-				database::restore::environment_migrates(&mut conn, env.group_id, env.rank).await?,
-			),
+			Some(_) => {
+				let declared = match migrating.entry(env.group_id) {
+					Entry::Occupied(held) => held.into_mut(),
+					Entry::Vacant(slot) => slot.insert(
+						database::restore::migrating_environments(&mut conn, env.group_id).await?,
+					),
+				};
+				Some(declared.covers(env.rank))
+			}
 		};
 
 		// Issuances carry no intent, so another intent's restore traffic would
