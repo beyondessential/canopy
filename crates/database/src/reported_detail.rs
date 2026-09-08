@@ -117,7 +117,12 @@ impl ReportedDetail {
 
 		let extra = object_body(extra);
 		let extra = extra.as_ref();
-		let carried_at = version.map(|_| jiff_diesel::Timestamp::from(Timestamp::now()));
+		// The database clock, as the conflict path and `reported_at` beside it
+		// use: `version_time` orders rows written by both paths against each
+		// other, so a host running ahead of Postgres would invert them.
+		let carried_at = diesel::dsl::sql::<
+			diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>,
+		>(if version.is_some() { "now()" } else { "NULL" });
 
 		diesel::insert_into(dsl::application_reported_detail)
 			.values((
