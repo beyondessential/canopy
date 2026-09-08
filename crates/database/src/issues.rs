@@ -1223,7 +1223,6 @@ pub async fn file_check_instances(
 				FilingScope {
 					application_id: Some(application_id),
 					group_id,
-					// An application is covered by the window over its box.
 					..Default::default()
 				},
 			)
