@@ -143,8 +143,11 @@ impl InventoryLease {
 			.map_err(AppError::from)
 	}
 
-	/// Take the environment's lease, releasing an expired one in the way. The
-	/// caller has already decided that no lease of someone else's holds.
+	/// Take the environment's lease, releasing an expired one in the way.
+	/// Refuses one another operator still holds unless `take_over`.
+	///
+	/// Takes the group's row so concurrent takes on one environment queue
+	/// rather than racing the open-lease index into a database error.
 	pub async fn take(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
@@ -152,27 +155,63 @@ impl InventoryLease {
 		intent: RunIntent,
 		held_by: Option<&str>,
 		note: Option<&str>,
+		take_over: bool,
 	) -> Result<Self> {
 		use crate::schema::inventory_leases::dsl;
+		use diesel_async::AsyncConnection;
 
-		if let Some(open) = Self::open_for(db, group_id, rank).await? {
-			Self::release(db, open.id, held_by).await?;
-		}
+		db.transaction::<_, AppError, _>(async |conn| {
+			let _group: Uuid = crate::schema::server_groups::table
+				.select(crate::schema::server_groups::id)
+				.find(group_id)
+				.for_update()
+				.first(conn)
+				.await
+				.map_err(AppError::from)?;
 
-		let expires: jiff_diesel::Timestamp = (Timestamp::now() + LEASE_DURATION).into();
-		diesel::insert_into(dsl::inventory_leases)
-			.values((
-				dsl::server_group_id.eq(group_id),
-				dsl::rank.eq(rank.to_string()),
-				dsl::intent.eq(intent.to_string()),
-				dsl::held_by.eq(held_by),
-				dsl::note.eq(note),
-				dsl::expires_at.eq(expires),
-			))
-			.returning(Self::as_select())
-			.get_result(db)
-			.await
-			.map_err(AppError::from)
+			if let Some(open) = Self::open_for(conn, group_id, rank).await? {
+				if !take_over
+					&& open.holds_at(Timestamp::now())
+					&& open
+						.held_by
+						.as_deref()
+						.is_some_and(|who| Some(who) != held_by)
+				{
+					return Err(AppError::Conflict(open.held_by_another()));
+				}
+				Self::release(conn, open.id, held_by).await?;
+			}
+
+			let expires: jiff_diesel::Timestamp = (Timestamp::now() + LEASE_DURATION).into();
+			diesel::insert_into(dsl::inventory_leases)
+				.values((
+					dsl::server_group_id.eq(group_id),
+					dsl::rank.eq(rank.to_string()),
+					dsl::intent.eq(intent.to_string()),
+					dsl::held_by.eq(held_by),
+					dsl::note.eq(note),
+					dsl::expires_at.eq(expires),
+				))
+				.returning(Self::as_select())
+				.get_result(conn)
+				.await
+				.map_err(AppError::from)
+		})
+		.await
+	}
+
+	/// Who holds this lease and until when, for a refusal that has to say who
+	/// to wait for.
+	pub fn held_by_another(&self) -> String {
+		format!(
+			"that environment's run lease is held by {} until {}{}",
+			self.held_by.as_deref().unwrap_or("an operator"),
+			self.expires_at.strftime("%Y-%m-%d %H:%M UTC"),
+			self.note
+				.as_deref()
+				.map(|note| format!("; {note}"))
+				.unwrap_or_default(),
+		)
 	}
 
 	/// Push an unreleased lease's expiry out, so a run still going keeps it.

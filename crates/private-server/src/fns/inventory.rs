@@ -328,7 +328,7 @@ pub async fn take_lease(
 		&& held.held_by.as_deref().is_some_and(|who| who != login)
 		&& !args.take_over
 	{
-		return Err(AppError::Conflict(held_by_another(&held)));
+		return Err(AppError::Conflict(held.held_by_another()));
 	}
 
 	let machine_ids: Vec<Uuid> = environment
@@ -370,6 +370,7 @@ pub async fn take_lease(
 		args.intent,
 		Some(login),
 		args.note.as_deref(),
+		args.take_over,
 	)
 	.await?;
 
@@ -780,7 +781,7 @@ fn host_of(application: &Application) -> Option<String> {
 fn held_by_caller(lease: &InventoryLease, login: &str) -> Result<()> {
 	match lease.held_by.as_deref() {
 		Some(who) if who == login => Ok(()),
-		_ => Err(AppError::Conflict(held_by_another(lease))),
+		_ => Err(AppError::Conflict(lease.held_by_another())),
 	}
 }
 
@@ -797,19 +798,6 @@ fn no_longer_held(lease: &InventoryLease, login: &str) -> String {
 		}
 		None => "that lease has expired; take one again before reading the inventory".into(),
 	}
-}
-
-fn held_by_another(lease: &InventoryLease) -> String {
-	format!(
-		"that environment's run lease is held by {} until {}{}",
-		lease.held_by.as_deref().unwrap_or("an operator"),
-		lease.expires_at.strftime("%Y-%m-%d %H:%M UTC"),
-		lease
-			.note
-			.as_deref()
-			.map(|note| format!("; {note}"))
-			.unwrap_or_default(),
-	)
 }
 
 fn under_maintenance(
