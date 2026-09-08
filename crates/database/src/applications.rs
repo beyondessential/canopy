@@ -800,8 +800,6 @@ impl Application {
 			.map_err(AppError::from)
 	}
 
-	/// All live (non-archived) applications in a group, ordered by name. Used to
-	/// expand a group-wide restore-replica declaration into per-server entries.
 	/// What to call this application to an operator: the name it was given,
 	/// else the host it answers on, else its id.
 	pub fn label(&self) -> String {
@@ -811,6 +809,8 @@ impl Application {
 			.unwrap_or_else(|| self.id.to_string())
 	}
 
+	/// All live (non-archived) applications in a group, ordered by name. Used to
+	/// expand a group-wide restore-replica declaration into per-server entries.
 	pub async fn list_live_in_group(
 		db: &mut AsyncPgConnection,
 		group_id_: Uuid,
