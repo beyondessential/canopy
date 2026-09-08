@@ -136,13 +136,16 @@ impl ReportingSchemaBuild {
 					.on(backup_restore_checks::id.eq(reporting_schema_builds::check_id)),
 			)
 			.filter(reporting_schema_builds::group_id.eq(group))
-			.order_by(backup_restore_checks::reported_at.asc())
+			.distinct_on(reporting_schema_builds::version_id)
+			.order_by((
+				reporting_schema_builds::version_id,
+				backup_restore_checks::reported_at.desc(),
+			))
 			.select(Self::as_select())
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
 
-		// Ascending, so the last write per version is the newest.
 		Ok(builds.into_iter().map(|b| (b.version_id, b)).collect())
 	}
 
@@ -155,22 +158,53 @@ impl ReportingSchemaBuild {
 		group: Uuid,
 		version: Uuid,
 	) -> Result<bool> {
-		if ReportingSchemaRequest::pending(db, group, version).await? {
-			return Ok(false);
+		let row = Version::get_by_id(db, version).await?;
+		let settlement = Settlement::for_group(db, group, std::slice::from_ref(&row)).await?;
+		Ok(settlement.settled(version))
+	}
+}
+
+/// Where every pair of a group stands, answered from memory.
+///
+/// The worklist asks this of each of a group's versions on every poll, and
+/// every restore consumer polls on a schedule, so the three lookups it takes
+/// are made once for the group rather than once per pair.
+// spec: RPT#pairs
+pub struct Settlement {
+	requested: std::collections::HashSet<Uuid>,
+	builds: std::collections::HashMap<Uuid, ReportingSchemaBuild>,
+	changed: std::collections::HashMap<Uuid, Timestamp>,
+}
+
+impl Settlement {
+	pub async fn for_group(
+		db: &mut AsyncPgConnection,
+		group: Uuid,
+		versions: &[Version],
+	) -> Result<Self> {
+		Ok(Self {
+			requested: ReportingSchemaRequest::pending_for_group(db, group).await?,
+			builds: ReportingSchemaBuild::latest_by_version_for_group(db, group).await?,
+			changed: crate::artifacts::Artifact::newest_change_for_versions(db, versions).await?,
+		})
+	}
+
+	pub fn settled(&self, version: Uuid) -> bool {
+		if self.requested.contains(&version) {
+			return false;
 		}
 
-		let Some(build) = Self::latest_for_pair(db, group, version).await? else {
-			return Ok(false);
+		let Some(build) = self.builds.get(&version) else {
+			return false;
 		};
 
 		// A schema built from a superseded release of the version is not the
 		// schema that version describes, so an artifact registered since the
 		// build puts the pair back on the worklist.
-		let changed = crate::artifacts::Artifact::newest_change_for_version(db, version).await?;
-		Ok(match changed {
-			Some(at) => at <= build.built_at,
+		match self.changed.get(&version) {
+			Some(at) => *at <= build.built_at,
 			None => true,
-		})
+		}
 	}
 }
 
@@ -214,20 +248,6 @@ impl ReportingSchemaRequest {
 			.map_err(AppError::from)?;
 
 		Ok(())
-	}
-
-	pub async fn pending(db: &mut AsyncPgConnection, group: Uuid, version: Uuid) -> Result<bool> {
-		use crate::schema::reporting_schema_requests::dsl;
-
-		Ok(dsl::reporting_schema_requests
-			.filter(dsl::group_id.eq(group))
-			.filter(dsl::version_id.eq(version))
-			.select(dsl::group_id)
-			.first::<Uuid>(db)
-			.await
-			.optional()
-			.map_err(AppError::from)?
-			.is_some())
 	}
 
 	/// Which of a group's versions have an ask pending, in one query.
@@ -308,7 +328,19 @@ pub async fn pairs_for_group(db: &mut AsyncPgConnection, group: Uuid) -> Result<
 		return Ok(Vec::new());
 	}
 
-	let versions = versions_and_applications(db, group).await?;
+	let members = crate::applications::Application::list_live_in_group(db, group).await?;
+	pairs_of_members(db, group, &members).await
+}
+
+/// The pairs of a group already known to have a builder, from members already
+/// in hand.
+// spec: RPT#pairs
+async fn pairs_of_members(
+	db: &mut AsyncPgConnection,
+	group: Uuid,
+	members: &[crate::applications::Application],
+) -> Result<Vec<Pair>> {
+	let versions = versions_and_applications(db, group, members).await?;
 	let builds = ReportingSchemaBuild::latest_by_version_for_group(db, group).await?;
 	let requests = ReportingSchemaRequest::pending_for_group(db, group).await?;
 
@@ -342,7 +374,9 @@ pub async fn pairs_for_group(db: &mut AsyncPgConnection, group: Uuid) -> Result<
 /// artifacts.
 // spec: RPT#pairs
 pub async fn versions_for_group(db: &mut AsyncPgConnection, group: Uuid) -> Result<Vec<Version>> {
-	Ok(versions_and_applications(db, group)
+	let members = crate::applications::Application::list_live_in_group(db, group).await?;
+
+	Ok(versions_and_applications(db, group, &members)
 		.await?
 		.into_iter()
 		.map(|(version, _)| version)
@@ -360,10 +394,10 @@ pub async fn versions_for_group(db: &mut AsyncPgConnection, group: Uuid) -> Resu
 async fn versions_and_applications(
 	db: &mut AsyncPgConnection,
 	group: Uuid,
+	applications: &[crate::applications::Application],
 ) -> Result<Vec<(Version, Vec<String>)>> {
 	use commons_types::version::VersionStatus;
 
-	let applications = crate::applications::Application::list_live_in_group(db, group).await?;
 	let tamanu: Vec<&crate::applications::Application> = applications
 		.iter()
 		.filter(|a| a.r#type.software() == "tamanu")
@@ -372,6 +406,11 @@ async fn versions_and_applications(
 	let ids: Vec<Uuid> = tamanu.iter().map(|a| a.id).collect();
 	let reported = crate::reported_detail::ReportedDetail::last_versions(db, &ids).await?;
 
+	let mut wanted: Vec<commons_types::version::VersionStr> = reported.values().cloned().collect();
+	wanted.sort_by(|a, b| a.0.cmp(&b.0));
+	wanted.dedup_by(|a, b| a.0 == b.0);
+	let released = Version::get_by_versions(db, &wanted).await?;
+
 	let mut pairs: Vec<(Version, Vec<String>)> = Vec::new();
 	for application in tamanu {
 		let Some(shown) = reported.get(&application.id) else {
@@ -379,7 +418,14 @@ async fn versions_and_applications(
 		};
 		// A version Canopy holds no release row for is not a pair: a build needs
 		// that version's migrations, which reach a builder as published artifacts.
-		let Ok(version) = Version::get_by_version(db, shown.clone()).await else {
+		let Some(version) = released.iter().find(|v| {
+			(v.major, v.minor, v.patch)
+				== (
+					shown.0.major as i32,
+					shown.0.minor as i32,
+					shown.0.patch as i32,
+				)
+		}) else {
 			continue;
 		};
 		if version.status != VersionStatus::Published {
@@ -390,7 +436,7 @@ async fn versions_and_applications(
 		// version are one pair carrying both names.
 		match pairs.iter_mut().find(|(v, _)| v.id == version.id) {
 			Some((_, names)) => names.push(application.label()),
-			None => pairs.push((version, vec![application.label()])),
+			None => pairs.push((version.clone(), vec![application.label()])),
 		}
 	}
 
@@ -437,22 +483,28 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 			continue;
 		};
 
-		let pairs = pairs_for_group(db, group.id).await?;
+		let pairs = pairs_of_members(db, group.id, &members).await?;
 		let instances: Vec<CheckInstance> = pairs
 			.iter()
 			.filter(|p| p.state != PairState::Awaiting)
-			.map(|pair| CheckInstance {
-				label: pair.version.clone(),
-				observed: match pair.state {
-					PairState::Built => CheckResult::Passed,
-					_ => CheckResult::Warning,
-				},
-				detail: Some(serde_json::json!({
-					"version": pair.version,
-					"why": pair.error.clone().unwrap_or_else(|| {
-						format!("no schema could be built for {}", pair.version)
-					}),
-				})),
+			.map(|pair| {
+				let mut detail = serde_json::json!({ "version": pair.version });
+				if pair.state != PairState::Built {
+					detail["why"] = pair
+						.error
+						.clone()
+						.unwrap_or_else(|| format!("no schema could be built for {}", pair.version))
+						.into();
+				}
+
+				CheckInstance {
+					label: pair.version.clone(),
+					observed: match pair.state {
+						PairState::Built => CheckResult::Passed,
+						_ => CheckResult::Warning,
+					},
+					detail: Some(detail),
+				}
 			})
 			.collect();
 

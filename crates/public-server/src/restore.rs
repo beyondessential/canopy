@@ -246,6 +246,10 @@ async fn worklist(
 	// Resolving a group's pairs walks its applications and their reported
 	// versions, so a group covered by several declarations is resolved once.
 	let mut version_cache: HashMap<Uuid, Vec<database::versions::Version>> = HashMap::new();
+	// Where each of a group's pairs stands, resolved once for the group rather
+	// than per pair: every restore consumer polls this on a schedule.
+	let mut settlement_cache: HashMap<Uuid, database::reporting_schemas::Settlement> =
+		HashMap::new();
 	// Per-group caches so a group referenced by several declarations is resolved
 	// once: the latest produced snapshot per (machine, type), and the latest
 	// healthy-verified snapshot per (machine, type, intent) for `once` suppression.
@@ -353,22 +357,25 @@ async fn worklist(
 			let latest = snapshots.get(&(machine.id, d.r#type.clone()));
 
 			if let std::collections::hash_map::Entry::Vacant(e) = version_cache.entry(d.group_id) {
-				e.insert(
-					database::reporting_schemas::versions_for_group(&mut conn, d.group_id).await?,
+				let versions =
+					database::reporting_schemas::versions_for_group(&mut conn, d.group_id).await?;
+				settlement_cache.insert(
+					d.group_id,
+					database::reporting_schemas::Settlement::for_group(
+						&mut conn, d.group_id, &versions,
+					)
+					.await?,
 				);
+				e.insert(versions);
 			}
+			let settlement = &settlement_cache[&d.group_id];
 
 			for version in version_cache[&d.group_id].clone() {
 				if !pairs.insert((d.group_id, version.id)) {
 					continue;
 				}
 
-				if once
-					&& database::reporting_schemas::ReportingSchemaBuild::is_settled(
-						&mut conn, d.group_id, version.id,
-					)
-					.await?
-				{
+				if once && settlement.settled(version.id) {
 					continue;
 				}
 

@@ -168,6 +168,48 @@ impl Version {
 			.map_err(AppError::from)
 	}
 
+	/// The release rows for these exact versions, in one query. A version with
+	/// no row is absent from the result rather than an error.
+	pub async fn get_by_versions(
+		db: &mut AsyncPgConnection,
+		wanted: &[VersionStr],
+	) -> Result<Vec<Self>> {
+		use crate::schema::versions::dsl::*;
+
+		type Predicate = Box<
+			dyn diesel::BoxableExpression<
+					crate::schema::versions::table,
+					diesel::pg::Pg,
+					SqlType = diesel::sql_types::Bool,
+				>,
+		>;
+
+		let mut wants: Option<Predicate> = None;
+		for want in wanted {
+			let one: Predicate = Box::new(
+				major
+					.eq(want.0.major as i32)
+					.and(minor.eq(want.0.minor as i32))
+					.and(patch.eq(want.0.patch as i32)),
+			);
+			wants = Some(match wants {
+				Some(so_far) => Box::new(so_far.or(one)),
+				None => one,
+			});
+		}
+
+		let Some(wants) = wants else {
+			return Ok(Vec::new());
+		};
+
+		versions
+			.filter(wants)
+			.select(Version::as_select())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn get_by_id(db: &mut AsyncPgConnection, version_id: Uuid) -> Result<Self> {
 		use crate::schema::versions::dsl::*;
 
