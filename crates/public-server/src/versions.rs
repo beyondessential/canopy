@@ -695,9 +695,22 @@ async fn download_artifact(
 			.content_type
 			.unwrap_or_else(|| "application/octet-stream".to_owned());
 
+		// Held bytes are served from the same origin as this server's own HTML
+		// pages, and the media type is whatever the registration named, so
+		// nothing here may be rendered by a browser.
 		return Ok((
 			StatusCode::OK,
-			[(header::CONTENT_TYPE, content_type)],
+			[
+				(header::CONTENT_TYPE, content_type),
+				(
+					header::CONTENT_DISPOSITION,
+					format!("attachment; filename=\"{}\"", artifact.id),
+				),
+				(
+					header::HeaderName::from_static("x-content-type-options"),
+					"nosniff".to_owned(),
+				),
+			],
 			Body::from(held.bytes),
 		)
 			.into_response());

@@ -251,7 +251,7 @@ impl AppError {
 	///
 	/// Note the arms are ordered, so a variant listed twice silently takes
 	/// the first match. Keep each one in exactly one arm.
-	pub fn to_http_status(&self) -> StatusCode {
+	fn to_http_status(&self) -> StatusCode {
 		match self {
 			Self::NotImplemented => StatusCode::NOT_IMPLEMENTED,
 			Self::NoMatchingVersions => StatusCode::NOT_FOUND,

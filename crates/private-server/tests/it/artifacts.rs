@@ -233,6 +233,74 @@ async fn an_operator_registers_a_group_scoped_artifact() {
 	.await
 }
 
+/// A media type describes bytes Canopy holds, and it holds none for an
+/// artifact that names no group. Passed through, it trips the check constraint,
+/// so operator input answers 500 instead of being refused.
+// spec: ART#where-an-artifact-rests
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unscoped_artifact_carries_no_media_type() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let version = "11111111-2222-0000-0000-111111111111";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status)
+			 VALUES ('{version}', 2, 60, 0, '', 'published')",
+		))
+		.await
+		.unwrap();
+
+		let created = private
+			.post("/api/versions/create_artifact")
+			.json(&serde_json::json!({
+				"version_id": version,
+				"artifact_type": "installer",
+				"platform": "windows",
+				"download_url": "https://example.com/x.exe",
+				"content_type": "text/html",
+			}))
+			.await;
+		assert_eq!(created.status_code(), axum::http::StatusCode::BAD_REQUEST);
+	})
+	.await
+}
+
+/// A digest against a location is what whoever fetches the artifact checks the
+/// bytes it got against. Dropped, a caller that supplied one gets no error and
+/// no digest, and the fetch is unchecked.
+// spec: ART#digests
+#[tokio::test(flavor = "multi_thread")]
+async fn a_digest_against_a_location_is_recorded() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let version = "11111111-3333-0000-0000-111111111111";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status)
+			 VALUES ('{version}', 2, 60, 0, '', 'published')",
+		))
+		.await
+		.unwrap();
+
+		let created = private
+			.post("/api/versions/create_artifact")
+			.json(&serde_json::json!({
+				"version_id": version,
+				"artifact_type": "installer",
+				"platform": "windows",
+				"download_url": "https://example.com/x.exe",
+				"digest": database::artifacts::digest_of(b"kamaka installer"),
+			}))
+			.await;
+		created.assert_status_ok();
+
+		let artifact: serde_json::Value = created.json();
+		assert_eq!(
+			artifact["digest"],
+			database::artifacts::digest_of(b"kamaka installer")
+		);
+	})
+	.await
+}
+
 /// A blank location is no location. The check constraint only tests for NULL,
 /// so an empty string would pass it and leave an artifact nothing can be
 /// fetched from.

@@ -561,6 +561,46 @@ async fn held_bytes_are_served_as_the_type_they_were_registered_with() {
 	.await
 }
 
+/// Held bytes come off the same origin as this server's own HTML pages, and
+/// the media type is whatever the registration named, so a schema registered
+/// as `text/html` would otherwise render as same-origin content.
+// spec: ART#where-an-artifact-rests
+#[tokio::test(flavor = "multi_thread")]
+async fn held_bytes_are_never_rendered_by_a_browser() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn).await;
+			enrol(&mut conn, device_id, GROUP_A).await;
+
+			conn.batch_execute(&format!(
+				"UPDATE artifacts SET content_type = 'text/html' WHERE id = '{THEIRS}'"
+			))
+			.await
+			.expect("set the media type");
+
+			let served = public
+				.get(&format!("/versions/2.60.0/artifacts/{THEIRS}/download"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+
+			assert_eq!(
+				served.header("x-content-type-options").to_str().unwrap(),
+				"nosniff"
+			);
+			assert!(
+				served
+					.header("content-disposition")
+					.to_str()
+					.unwrap()
+					.starts_with("attachment"),
+				"held bytes are downloaded, not displayed"
+			);
+		},
+	)
+	.await
+}
+
 /// An operator device registers either kind, and needs no declaration to name a
 /// group: the authorisation a builder holds is what a component has instead of
 /// being an operator, not a narrower form of it.

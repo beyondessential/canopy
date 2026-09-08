@@ -712,35 +712,38 @@ pub async fn create_artifact(
 				"only a group-scoped artifact carries bytes".into(),
 			));
 		}
-		(None, None) => (None, None),
+		(None, None) => {
+			// The media type describes bytes Canopy holds, and it holds none
+			// for an unscoped artifact.
+			// spec: ART#where-an-artifact-rests
+			if args.content_type.is_some() {
+				return Err(AppError::BadRequest(
+					"only a group-scoped artifact carries a media type".into(),
+				));
+			}
+			// A digest against a location is what whoever fetches the artifact
+			// checks the bytes it got against, so it is recorded rather than
+			// dropped.
+			// spec: ART#digests
+			let claimed = args
+				.digest
+				.as_deref()
+				.map(str::trim)
+				.filter(|d| !d.is_empty())
+				.map(str::to_owned);
+			(None, claimed)
+		}
 	};
 
-	// A blank URL is no location at all, and the constraint only tests for NULL.
-	let download_url = args.download_url.filter(|url| !url.trim().is_empty());
-
-	// An artifact rests in one place or the other, so a registration naming a
-	// group and a location together is refused rather than written and caught
-	// by the constraint.
-	// spec: ART#where-an-artifact-rests
-	if args.group_id.is_some() && download_url.is_some() {
-		return Err(AppError::BadRequest(
-			"an artifact Canopy holds has no download URL".into(),
-		));
-	}
-
-	if args.group_id.is_none() && download_url.is_none() {
-		return Err(AppError::BadRequest(
-			"an artifact needs a download URL or a group".into(),
-		));
-	}
-
+	// Where the artifact rests, and the refusal when it names neither place or
+	// both, is `Artifact::register`'s to settle.
 	let artifact = Artifact::register(
 		&mut conn,
 		NewArtifact {
 			version_id: Some(args.version_id),
 			artifact_type: args.artifact_type,
 			platform: args.platform,
-			download_url,
+			download_url: args.download_url,
 			device_id: None,
 			version_range_pattern: None,
 			group_id: args.group_id,

@@ -88,6 +88,28 @@ device_role_struct!(ServerDevice, DeviceRole::Machine);
 device_role_struct!(ReleaserDevice, DeviceRole::Releaser);
 device_role_struct!(BackupRestoreDevice, DeviceRole::BackupRestore);
 
+/// Whether Canopy could not place this credential, as against refusing it or
+/// failing on the way to the answer.
+///
+/// A credential it cannot place is anonymous: a stale certificate must not fail
+/// a path that serves everyone. A refusal or a fault propagates, since serving
+/// the unscoped set to a machine that has a group presents it as that machine's
+/// answer. The variants are named rather than tested by status, so which
+/// callers are served does not follow from an unrelated mapping and a new
+/// variant is a decision somebody makes.
+fn unplaceable(err: &AppError) -> bool {
+	matches!(
+		err,
+		AppError::AuthMissingHeader(_)
+			| AppError::AuthMissingCertificate
+			| AppError::AuthInvalidCertificate(_)
+			| AppError::AuthCertificateNotFound
+			| AppError::AuthFailed { .. }
+			| AppError::AuthTokenNotValid
+			| AppError::AuthTailnetIdentityMissing
+	)
+}
+
 /// A read that is open to everyone but answers a device for its own group
 /// takes `Option<AuthDevice>`: absent identity is not a refusal, it just
 /// narrows what the caller is offered.
@@ -106,12 +128,7 @@ where
 	) -> Result<Option<Self>, Self::Rejection> {
 		match <Self as axum::extract::FromRequestParts<S>>::from_request_parts(parts, state).await {
 			Ok(device) => Ok(Some(device)),
-			// A credential Canopy cannot place is anonymous, not refused: a
-			// stale certificate must not fail a path that serves everyone.
-			// A fault on the way to that answer places nothing either way, and
-			// answering it anonymously serves the unscoped set to a machine
-			// that has a group and calls it the truth.
-			Err(err) if err.to_http_status().is_client_error() => Ok(None),
+			Err(err) if unplaceable(&err) => Ok(None),
 			Err(err) => Err(err),
 		}
 	}
@@ -181,5 +198,27 @@ where
 		}
 
 		Ok(Self(device, method))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// A refusal is not an absent credential. Downgrading one to anonymous
+	/// hands a machine that has a group the unscoped set and presents it as
+	/// that machine's answer.
+	#[test]
+	fn a_refusal_is_not_an_unplaceable_credential() {
+		assert!(!unplaceable(&AppError::AuthInsufficientPermissions {
+			required: "releaser".into()
+		}));
+		assert!(!unplaceable(&AppError::AuthTailnetNodeNotPermitted));
+		assert!(!unplaceable(&AppError::AuthTailnetDirectoryUnavailable));
+		assert!(!unplaceable(&AppError::DeviceHasNoServer));
+
+		assert!(unplaceable(&AppError::AuthMissingCertificate));
+		assert!(unplaceable(&AppError::AuthCertificateNotFound));
+		assert!(unplaceable(&AppError::AuthTokenNotValid));
 	}
 }

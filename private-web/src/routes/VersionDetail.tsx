@@ -694,7 +694,7 @@ function CreateArtifactForm({
 	const submit = async (e: React.FormEvent) => {
 		e.preventDefault();
 		try {
-			const contents = file ? await readFile(file) : null;
+			const contents = scoped && file ? await readFile(file) : null;
 			await action.call({
 				version_id: versionId,
 				artifact_type: type,
@@ -702,7 +702,7 @@ function CreateArtifactForm({
 				download_url: scoped ? null : url,
 				group_id: scoped ? groupId : null,
 				content_base64: contents?.base64 ?? null,
-				content_type: file ? file.type || null : null,
+				content_type: contents ? file?.type || null : null,
 				digest: contents?.digest ?? null,
 			});
 			setType("");
@@ -746,7 +746,14 @@ function CreateArtifactForm({
 						select
 						label="Group"
 						value={groupId}
-						onChange={(e) => setGroupId(e.target.value)}
+						onChange={(e) => {
+							setGroupId(e.target.value);
+							// The file input is only rendered for a group, so
+							// an over-limit file left behind disables Create
+							// with nothing on screen to clear.
+							setFile(null);
+							setFileError(null);
+						}}
 						disabled={action.pending || groups.status === "error"}
 						// Falling back to an empty list silently offers only
 						// "Every group", which reads as a fleet with no groups
