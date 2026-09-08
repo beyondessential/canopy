@@ -638,6 +638,36 @@ async fn reads_the_readers_own_window_as_no_refusal() {
 	.await
 }
 
+/// Someone else's window refuses the take whatever else holds, so the page
+/// reports theirs rather than the reader's own and agrees with the refusal.
+#[tokio::test(flavor = "multi_thread")]
+async fn reports_the_window_that_refuses_over_the_readers_own() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		let central =
+			insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		declare_group_window(&mut conn, group, ME, "NOW() + INTERVAL '2 hours'").await;
+		declare_machine_window(
+			&mut conn,
+			central,
+			"someone.else@bes.au",
+			"NOW() + INTERVAL '2 hours'",
+		)
+		.await;
+
+		let state = read_run_state(&private, group).await;
+		assert_eq!(state["window"]["declared_by"], "someone.else@bes.au");
+		assert_eq!(state["refuses"], true);
+
+		let response = private
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "server_group_id": group }))
+			.await;
+		response.assert_status(axum::http::StatusCode::CONFLICT);
+	})
+	.await
+}
+
 /// A window past its expected end holds nothing, the same reading `take_lease`
 /// takes, so the page offers the run rather than reporting work under way.
 #[tokio::test(flavor = "multi_thread")]

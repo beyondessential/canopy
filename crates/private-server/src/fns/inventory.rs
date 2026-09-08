@@ -140,8 +140,8 @@ pub struct InventoryHost {
 pub struct RunState {
 	/// The lease holding the environment, where one holds.
 	pub lease: Option<InventoryLease>,
-	/// The window holding over the environment or over a machine in it,
-	/// whoever declared it.
+	/// The window holding over the environment or over a machine in it: the
+	/// one refusing a take where one does, and otherwise the caller's own.
 	pub window: Option<MaintenanceWindow>,
 	/// Whether that window is someone else's, which is what refuses a take.
 	pub refuses: bool,
@@ -491,18 +491,26 @@ pub async fn run_state(
 		.iter()
 		.map(|machine| machine.id)
 		.collect();
-	let window = MaintenanceWindow::open_over(&mut conn, environment.group.id, &machine_ids)
-		.await?
-		.into_iter()
-		.find(|window| window.holds_at(now));
+	let holding: Vec<MaintenanceWindow> =
+		MaintenanceWindow::open_over(&mut conn, environment.group.id, &machine_ids)
+			.await?
+			.into_iter()
+			.filter(|window| window.holds_at(now))
+			.collect();
+	let refusing = |window: &MaintenanceWindow| {
+		window
+			.declared_by
+			.as_deref()
+			.is_some_and(|who| who != login)
+	};
+	let window = holding
+		.iter()
+		.find(|window| refusing(window))
+		.or_else(|| holding.first())
+		.cloned();
 
 	Ok(Json(RunState {
-		refuses: window.as_ref().is_some_and(|window| {
-			window
-				.declared_by
-				.as_deref()
-				.is_some_and(|who| who != login)
-		}),
+		refuses: window.as_ref().is_some_and(refusing),
 		lease,
 		window,
 	}))
