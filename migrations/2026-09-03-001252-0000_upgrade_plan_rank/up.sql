@@ -7,15 +7,21 @@ ALTER TABLE upgrade_plans ADD COLUMN rank TEXT;
 -- from, which is the rank of its canonical member, falling back to the group's
 -- highest-ranked application where it has no canonical member at all.
 -- Applications still carry the older spellings of production and clone, which
--- the plan must not.
+-- the plan must not. `applications.rank` is unconstrained text, so only known
+-- spellings map: anything else falls to NULL and is swept to production below,
+-- rather than reaching the CHECK and failing the deploy.
 WITH ranked AS (
 	SELECT
 		g.id AS group_id,
 		CASE lower(COALESCE(canonical.rank, highest.rank))
+			WHEN 'production' THEN 'production'
 			WHEN 'live' THEN 'production'
 			WHEN 'prod' THEN 'production'
+			WHEN 'clone' THEN 'clone'
 			WHEN 'staging' THEN 'clone'
-			ELSE lower(COALESCE(canonical.rank, highest.rank))
+			WHEN 'demo' THEN 'demo'
+			WHEN 'test' THEN 'test'
+			WHEN 'dev' THEN 'dev'
 		END AS rank
 	FROM server_groups g
 	LEFT JOIN applications canonical ON canonical.id = g.version_application_id

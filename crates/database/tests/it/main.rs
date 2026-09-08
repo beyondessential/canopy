@@ -64,6 +64,7 @@ mod snippet_name_constraint;
 mod status_figures;
 mod statuses_device_fk;
 mod tag_reserved_prefix;
+mod upgrade_plan_rank_migration;
 mod upgrade_plans;
 mod version_known_issue_provenance;
 mod version_updates_view;
