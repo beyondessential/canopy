@@ -7,7 +7,7 @@
 
 use commons_errors::{AppError, Result};
 use commons_types::server::rank::ServerRank;
-use diesel::prelude::*;
+use diesel::{PgExpressionMethods, prelude::*};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
 use serde::Serialize;
@@ -98,32 +98,13 @@ impl InventoryVariable {
 	pub async fn list_at(conn: &mut AsyncPgConnection, scope: VariableScope) -> Result<Vec<Self>> {
 		use crate::schema::inventory_variables::dsl;
 
-		let query = dsl::inventory_variables
+		dsl::inventory_variables
+			.filter(at_scope(scope))
 			.order(dsl::name.asc())
-			.select(Self::as_select());
-		match scope {
-			VariableScope::Group { group_id } => {
-				query
-					.filter(dsl::server_group_id.eq(group_id))
-					.filter(dsl::rank.is_null())
-					.get_results(conn)
-					.await
-			}
-			VariableScope::Environment { group_id, rank } => {
-				query
-					.filter(dsl::server_group_id.eq(group_id))
-					.filter(dsl::rank.eq(rank.to_string()))
-					.get_results(conn)
-					.await
-			}
-			VariableScope::Machine { machine_id } => {
-				query
-					.filter(dsl::machine_id.eq(machine_id))
-					.get_results(conn)
-					.await
-			}
-		}
-		.map_err(AppError::from)
+			.select(Self::as_select())
+			.get_results(conn)
+			.await
+			.map_err(AppError::from)
 	}
 
 	/// The variable of that name at one scope, where there is one.
@@ -134,33 +115,14 @@ impl InventoryVariable {
 	) -> Result<Option<Self>> {
 		use crate::schema::inventory_variables::dsl;
 
-		let query = dsl::inventory_variables
+		dsl::inventory_variables
 			.filter(dsl::name.eq(name))
-			.select(Self::as_select());
-		match scope {
-			VariableScope::Group { group_id } => {
-				query
-					.filter(dsl::server_group_id.eq(group_id))
-					.filter(dsl::rank.is_null())
-					.first(conn)
-					.await
-			}
-			VariableScope::Environment { group_id, rank } => {
-				query
-					.filter(dsl::server_group_id.eq(group_id))
-					.filter(dsl::rank.eq(rank.to_string()))
-					.first(conn)
-					.await
-			}
-			VariableScope::Machine { machine_id } => {
-				query
-					.filter(dsl::machine_id.eq(machine_id))
-					.first(conn)
-					.await
-			}
-		}
-		.optional()
-		.map_err(AppError::from)
+			.filter(at_scope(scope))
+			.select(Self::as_select())
+			.first(conn)
+			.await
+			.optional()
+			.map_err(AppError::from)
 	}
 
 	/// The variables on the given machines, sorted by machine then name.
@@ -264,43 +226,39 @@ impl InventoryVariable {
 	) -> Result<Option<Self>> {
 		use crate::schema::inventory_variables::dsl;
 
-		match scope {
-			VariableScope::Group { group_id } => {
-				diesel::delete(
-					dsl::inventory_variables
-						.filter(dsl::name.eq(name))
-						.filter(dsl::server_group_id.eq(group_id))
-						.filter(dsl::rank.is_null()),
-				)
-				.returning(Self::as_select())
-				.get_result(conn)
-				.await
-			}
-			VariableScope::Environment { group_id, rank } => {
-				diesel::delete(
-					dsl::inventory_variables
-						.filter(dsl::name.eq(name))
-						.filter(dsl::server_group_id.eq(group_id))
-						.filter(dsl::rank.eq(rank.to_string())),
-				)
-				.returning(Self::as_select())
-				.get_result(conn)
-				.await
-			}
-			VariableScope::Machine { machine_id } => {
-				diesel::delete(
-					dsl::inventory_variables
-						.filter(dsl::name.eq(name))
-						.filter(dsl::machine_id.eq(machine_id)),
-				)
-				.returning(Self::as_select())
-				.get_result(conn)
-				.await
-			}
-		}
+		diesel::delete(
+			dsl::inventory_variables
+				.filter(dsl::name.eq(name))
+				.filter(at_scope(scope)),
+		)
+		.returning(Self::as_select())
+		.get_result(conn)
+		.await
 		.optional()
 		.map_err(AppError::from)
 	}
+}
+
+/// The rows at one scope: the three columns matched nulls and all, a group's
+/// variable being the one with no rank, which `= NULL` never finds.
+fn at_scope(
+	scope: VariableScope,
+) -> Box<
+	dyn diesel::BoxableExpression<
+			crate::schema::inventory_variables::table,
+			diesel::pg::Pg,
+			SqlType = diesel::sql_types::Bool,
+		>,
+> {
+	use crate::schema::inventory_variables::dsl;
+
+	let (group_id, rank, machine_id) = columns(scope);
+	Box::new(
+		dsl::server_group_id
+			.is_not_distinct_from(group_id)
+			.and(dsl::rank.is_not_distinct_from(rank))
+			.and(dsl::machine_id.is_not_distinct_from(machine_id)),
+	)
 }
 
 fn columns(scope: VariableScope) -> (Option<Uuid>, Option<String>, Option<Uuid>) {
