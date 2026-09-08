@@ -14,7 +14,8 @@ use std::{
 	sync::{Arc, Mutex},
 };
 
-use age::secrecy::{ExposeSecret, SecretString};
+pub use age::secrecy::{ExposeSecret, SecretString};
+
 use commons_errors::{AppError, Result};
 
 /// Env var that forces the in-memory secret store (no cluster needed). Set by the

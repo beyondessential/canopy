@@ -21,7 +21,10 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use commons_servers::{backup_secrets::BackupSecrets, recovery_vault::Recipients};
+use commons_servers::{
+	backup_secrets::{BackupSecrets, ExposeSecret, SecretString},
+	recovery_vault::Recipients,
+};
 use database::{
 	MachineBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
 	applications::Application,
@@ -110,7 +113,8 @@ struct RecoveryInventoryVariables {
 	scope: VariableScope,
 	secret: String,
 	values: BTreeMap<String, serde_json::Value>,
-	keys: BTreeMap<String, String>,
+	#[serde(serialize_with = "expose")]
+	keys: BTreeMap<String, SecretString>,
 }
 
 #[derive(Serialize)]
@@ -126,8 +130,18 @@ struct RecoveryConfig {
 	config: ServerGroupBackupConfig,
 	/// The Secret's keyset (`password`, and `password_next` mid-rotation) — the
 	/// whole point of the vault. Empty (logged) if the Secret can't be read.
-	keys: BTreeMap<String, String>,
+	#[serde(serialize_with = "expose")]
+	keys: BTreeMap<String, SecretString>,
 	schedules: Vec<ServerGroupBackupSchedule>,
+}
+
+/// Every passphrase and secret variable is held in a [`SecretString`] until
+/// here, so the only plain copy is the one going into the ciphertext.
+fn expose<S: serde::Serializer>(
+	keys: &BTreeMap<String, SecretString>,
+	serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+	serializer.collect_map(keys.iter().map(|(name, value)| (name, value.expose_secret())))
 }
 
 /// Gather the recovery-critical state and serialise it to JSON bytes (plaintext, before
@@ -159,7 +173,7 @@ pub async fn build_snapshot_json(
 
 		let config = match configs.get(&group.id) {
 			Some(config) => {
-				let keys = match secrets.read_keys(&config.repo_password_ref).await {
+				let keys = match secrets.read_secret_keys(&config.repo_password_ref).await {
 					Ok(keys) => keys,
 					Err(e) => {
 						warn!(group = %group.id, "recovery-snapshot: keyset unreadable ({e}); storing empty");
@@ -209,7 +223,7 @@ pub async fn build_snapshot_json(
 		let keys = if held.is_empty() {
 			BTreeMap::new()
 		} else {
-			match secrets.read_keys(&secret).await {
+			match secrets.read_secret_keys(&secret).await {
 				Ok(keys) => keys
 					.into_iter()
 					.filter(|(name, _)| held.contains(name.as_str()))
