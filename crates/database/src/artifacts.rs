@@ -28,6 +28,15 @@ impl Scope {
 			None => Self::Unscoped,
 		}
 	}
+
+	/// Whether an artifact of this group is in scope.
+	fn sees(self, group: Option<Uuid>) -> bool {
+		match self {
+			Self::Unscoped => group.is_none(),
+			Self::Group(caller) => group.is_none() || group == Some(caller),
+			Self::Fleet => true,
+		}
+	}
 }
 
 /// A downloadable artifact belonging to a release version: an installer,
@@ -102,6 +111,43 @@ pub fn digest_of(bytes: &[u8]) -> String {
 	format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
 }
 
+/// A blank URL is no location at all. The constraint only tests for NULL, so an
+/// empty string passes it and leaves an artifact nothing can be fetched from.
+// spec: ART#where-an-artifact-rests
+fn location(url: Option<String>) -> Option<String> {
+	url.filter(|url| !url.trim().is_empty())
+}
+
+impl NewArtifact {
+	/// Settle where this artifact rests, refusing a registration that names
+	/// neither place or both.
+	///
+	/// The database constrains the same shape, so a write that skips this
+	/// answers a caller with a 500 rather than a refusal.
+	// spec: ART#where-an-artifact-rests
+	fn resting(mut self) -> Result<Self> {
+		self.download_url = location(self.download_url);
+
+		match (self.group_id.is_some(), self.download_url.is_some()) {
+			(true, true) => Err(AppError::BadRequest(
+				"an artifact Canopy holds has no download URL".into(),
+			)),
+			(false, false) => Err(AppError::BadRequest(
+				"an artifact needs a download URL or a group".into(),
+			)),
+			(true, false) if self.content.is_none() || self.digest.is_none() => {
+				Err(AppError::BadRequest(
+					"a group-scoped artifact must carry its bytes and their digest".into(),
+				))
+			}
+			(false, true) if self.content_type.is_some() || self.content.is_some() => Err(
+				AppError::BadRequest("only a group-scoped artifact carries bytes".into()),
+			),
+			_ => Ok(self),
+		}
+	}
+}
+
 impl Artifact {
 	/// The artifacts of a version that `scope` may see, one per type and
 	/// platform, most specific first.
@@ -111,34 +157,32 @@ impl Artifact {
 		target_version_id: Uuid,
 		scope: Scope,
 	) -> Result<Vec<Self>> {
-		let mut artifacts = Self::matching(db, target_version_id, scope).await?;
-
-		// Keep the first (most specific) artifact per platform+artifact_type.
-		// Not `dedup_by_key`: that only drops *consecutive* duplicates, and the
-		// specificity sort has just destroyed the adjacency the SQL `ORDER BY`
-		// gave us — every exact artifact now precedes every range one, so two
-		// artifacts of the same type+platform are only neighbours when they
-		// happen to be equally specific.
-		let mut seen = std::collections::HashSet::new();
-		artifacts.retain(|a| seen.insert((a.artifact_type.clone(), a.platform.clone())));
-
-		Ok(artifacts)
+		let artifacts = Self::get_for_version_all_matches(db, target_version_id, scope).await?;
+		Ok(Self::offered(artifacts, scope))
 	}
 
-	/// Every artifact of a version that `scope` may see, including the ones
-	/// specificity passed over. For operator views.
+	/// The artifacts of a sorted match set that `scope` is actually served:
+	/// the most specific of each type and platform it can see.
+	///
+	/// Not `dedup_by_key`: that only drops *consecutive* duplicates, and the
+	/// specificity sort has destroyed the adjacency the SQL `ORDER BY` gave us
+	/// — every exact artifact now precedes every range one, so two artifacts of
+	/// the same type+platform are only neighbours when they happen to be
+	/// equally specific.
+	// spec: ART#what-a-version-offers
+	fn offered(artifacts: Vec<Self>, scope: Scope) -> Vec<Self> {
+		let mut seen = std::collections::HashSet::new();
+		artifacts
+			.into_iter()
+			.filter(|a| scope.sees(a.group_id))
+			.filter(|a| seen.insert((a.artifact_type.clone(), a.platform.clone())))
+			.collect()
+	}
+
+	/// Every artifact of a version that `scope` may see, sorted most specific
+	/// first and not deduplicated. For operator views.
 	// spec: ART#what-a-version-offers
 	pub async fn get_for_version_all_matches(
-		db: &mut AsyncPgConnection,
-		target_version_id: Uuid,
-		scope: Scope,
-	) -> Result<Vec<Self>> {
-		Self::matching(db, target_version_id, scope).await
-	}
-
-	/// Artifacts of a version visible to `scope`, sorted most specific first
-	/// and not deduplicated.
-	async fn matching(
 		db: &mut AsyncPgConnection,
 		target_version_id: Uuid,
 		scope: Scope,
@@ -298,6 +342,8 @@ impl Artifact {
 	pub async fn register(db: &mut AsyncPgConnection, input: NewArtifact) -> Result<Self> {
 		use crate::schema::artifacts::dsl::*;
 
+		let input = input.resting()?;
+
 		diesel::insert_into(artifacts)
 			.values(&input)
 			.on_conflict((
@@ -340,10 +386,7 @@ impl Artifact {
 			.first(db)
 			.await
 			.map_err(AppError::from)?;
-		// A blank URL is no location at all. The constraint only tests for NULL,
-		// so an empty string would pass it and leave an artifact nothing can be
-		// fetched from.
-		let new_url = new_url.filter(|url| !url.trim().is_empty());
+		let new_url = location(new_url);
 		match (scoped.is_some(), new_url.is_some()) {
 			(true, true) => {
 				return Err(AppError::Conflict(
@@ -426,13 +469,22 @@ impl Artifact {
 
 		let mut public_api_ids: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
 		for scope in scopes {
-			for offered in Self::get_for_version(db, target_version_id, scope).await? {
-				public_api_ids.insert(offered.id);
+			let mut seen = std::collections::HashSet::new();
+			for a in matching_artifacts.iter().filter(|a| scope.sees(a.group_id)) {
+				if seen.insert((a.artifact_type.as_str(), a.platform.as_str())) {
+					public_api_ids.insert(a.id);
+				}
 			}
 		}
 
+		// Only a range artifact can be the one an exact artifact displaces, so
+		// the rest of the table has no bearing on the answer.
 		use crate::schema::artifacts::*;
-		let all_artifacts: Vec<Self> = table.select(Self::as_select()).load(db).await?;
+		let ranges: Vec<Self> = table
+			.select(Self::as_select())
+			.filter(version_range_pattern.is_not_null())
+			.load(db)
+			.await?;
 
 		let semver = version.as_semver();
 
@@ -440,7 +492,7 @@ impl Artifact {
 			.into_iter()
 			.map(|a| {
 				let is_exact = a.version_id == Some(target_version_id);
-				let has_range_override = Self::overridden_range(&all_artifacts, &a, &semver);
+				let has_range_override = Self::overridden_range(&ranges, &a, &semver);
 				let is_used_in_public_api = public_api_ids.contains(&a.id);
 
 				(a, is_exact, has_range_override, is_used_in_public_api)
