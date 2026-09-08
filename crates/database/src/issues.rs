@@ -3021,9 +3021,11 @@ pub async fn reevaluate_open_issues_for_group_ref(
 		.load(db)
 		.await?;
 
+	let targets = issue_targets_and_monitored(db, &open_issues).await?;
+
 	let now = Timestamp::now();
 	for issue in open_issues {
-		let Some((target, monitored)) = issue_target_and_monitored(db, &issue).await? else {
+		let Some(&(target, monitored)) = targets.get(&issue.id) else {
 			continue;
 		};
 		re_evaluate_incident_membership(db, &issue, target, monitored, now, None).await?;
@@ -3102,9 +3104,11 @@ pub async fn reevaluate_open_issues_for_scope(
 	};
 	let open_issues: Vec<Issue> = query.load(db).await?;
 
+	let targets = issue_targets_and_monitored(db, &open_issues).await?;
+
 	let now = Timestamp::now();
 	for issue in open_issues {
-		let Some((target, monitored)) = issue_target_and_monitored(db, &issue).await? else {
+		let Some(&(target, monitored)) = targets.get(&issue.id) else {
 			continue;
 		};
 		re_evaluate_incident_membership(db, &issue, target, monitored, now, by).await?;
@@ -3220,22 +3224,20 @@ async fn issue_targets_and_monitored(
 		let resolved = match scope {
 			Scope::Group(gid) => Some((IncidentTarget::Group(gid), true)),
 			Scope::Global => Some((IncidentTarget::Global, true)),
-			Scope::Application(sid) => match applications.get(&sid) {
-				Some(application) => member_target(
+			Scope::Application(sid) => applications.get(&sid).and_then(|application| {
+				member_target(
 					application.group_id,
 					application.rank,
 					application.is_monitored,
-				),
-				None => scope.resolve_incident_target(conn).await?,
-			},
-			Scope::Machine(mid) => match machines.get(&mid) {
-				Some(machine) => member_target(
+				)
+			}),
+			Scope::Machine(mid) => machines.get(&mid).and_then(|machine| {
+				member_target(
 					machine.group_id,
 					ranks.get(&mid).copied(),
 					machine.is_monitored,
-				),
-				None => scope.resolve_incident_target(conn).await?,
-			},
+				)
+			}),
 		};
 		if let Some(resolved) = resolved {
 			out.insert(issue_id, resolved);
