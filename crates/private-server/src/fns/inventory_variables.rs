@@ -155,14 +155,9 @@ pub async fn set(
 	check_scope(&mut conn, scope).await?;
 
 	let set = if args.secret {
-		let kube = secret_store(&state)?;
-		let secret = scope.secret_name();
-		let mut keys = kube
-			.try_read_secret_keys(&secret)
-			.await?
-			.unwrap_or_default();
-		keys.insert(args.name.clone(), stored(&args.value));
-		kube.put_secret_keys(&secret, &keys).await?;
+		secret_store(&state)?
+			.put_secret_key(&scope.secret_name(), &args.name, &stored(&args.value))
+			.await?;
 
 		InventoryVariable::set(&mut conn, scope, &args.name, None, Some(&admin.0.login)).await?
 	} else {

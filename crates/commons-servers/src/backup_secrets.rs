@@ -240,6 +240,69 @@ impl BackupSecrets {
 		}
 	}
 
+	/// Set one key of the named Secret, leaving every other key as it is, and
+	/// create the Secret where there is none. Two writers setting different
+	/// keys at one scope keep both values, which a read-modify-write of the
+	/// whole keyset does not.
+	pub async fn put_secret_key(
+		&self,
+		secret_name: &str,
+		key: &str,
+		value: &SecretString,
+	) -> Result<()> {
+		match self {
+			Self::Kube { client, namespace } => {
+				use k8s_openapi::api::core::v1::Secret;
+				use kube::{
+					Api,
+					api::{Patch, PatchParams, PostParams},
+				};
+
+				let api: Api<Secret> = Api::namespaced(client.clone(), namespace);
+				let patch = serde_json::json!({ "stringData": { key: value.expose_secret() } });
+				let merge = async || {
+					api.patch(secret_name, &PatchParams::default(), &Patch::Merge(&patch))
+						.await
+				};
+				match merge().await {
+					Ok(_) => Ok(()),
+					Err(kube::Error::Api(e)) if e.code == 404 => {
+						match api
+							.create(
+								&PostParams::default(),
+								&secret_object(secret_name, key, value.expose_secret()),
+							)
+							.await
+						{
+							Ok(_) => Ok(()),
+							// Someone else created it in between, so the key
+							// still has to be merged into what they wrote.
+							Err(kube::Error::Api(e)) if e.code == 409 => merge()
+								.await
+								.map(drop)
+								.map_err(|e| {
+									AppError::Upstream(format!("secret patch failed: {e}"))
+								}),
+							Err(e) => {
+								Err(AppError::Upstream(format!("secret create failed: {e}")))
+							}
+						}
+					}
+					Err(e) => Err(AppError::Upstream(format!("secret patch failed: {e}"))),
+				}
+			}
+			Self::Memory(store) => {
+				store
+					.lock()
+					.unwrap()
+					.entry(secret_name.to_string())
+					.or_default()
+					.insert(key.to_string(), value.expose_secret().to_owned());
+				Ok(())
+			}
+		}
+	}
+
 	/// Create-or-replace the named Secret to hold **exactly** `keys` (server-side
 	/// apply with force). Keys this manager owns but that are omitted from `keys`
 	/// are removed — so a rotation "promote" that writes only `{password}` cleans
