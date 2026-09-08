@@ -509,7 +509,7 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 			.collect();
 
 		let name = group.name.clone();
-		let total = instances.len();
+		let total = pairs.len();
 		file_restore_check(
 			db,
 			Scope::Application(central),
