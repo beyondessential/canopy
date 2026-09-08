@@ -211,32 +211,9 @@ impl BackupSecrets {
 		&self,
 		secret_name: &str,
 	) -> Result<BTreeMap<String, SecretString>> {
-		match self {
-			Self::Kube { client, namespace } => {
-				use k8s_openapi::api::core::v1::Secret;
-				use kube::Api;
-
-				let api: Api<Secret> = Api::namespaced(client.clone(), namespace);
-				let secret = api
-					.get(secret_name)
-					.await
-					.map_err(|e| AppError::Upstream(format!("secret get failed: {e}")))?;
-				let mut out = BTreeMap::new();
-				for (k, v) in secret.data.unwrap_or_default() {
-					let s = String::from_utf8(v.0).map_err(|_| {
-						AppError::Upstream(format!("secret {secret_name} key {k} not utf-8"))
-					})?;
-					out.insert(k, SecretString::from(s));
-				}
-				Ok(out)
-			}
-			Self::Memory(store) => store
-				.lock()
-				.unwrap()
-				.get(secret_name)
-				.map(as_secrets)
-				.ok_or_else(|| AppError::Upstream(format!("secret get failed: {secret_name}"))),
-		}
+		self.try_read_secret_keys(secret_name)
+			.await?
+			.ok_or_else(|| AppError::Upstream(format!("secret get failed: {secret_name}")))
 	}
 
 	/// [`Self::read_secret_keys`], answering `None` for a Secret that does not
@@ -248,29 +225,18 @@ impl BackupSecrets {
 		secret_name: &str,
 	) -> Result<Option<BTreeMap<String, SecretString>>> {
 		match self {
-			Self::Kube { .. } => match self.read_secret_keys(secret_name).await {
-				Ok(keys) => Ok(Some(keys)),
-				Err(_) if !self.exists(secret_name).await? => Ok(None),
-				Err(err) => Err(err),
-			},
-			Self::Memory(store) => Ok(store.lock().unwrap().get(secret_name).map(as_secrets)),
-		}
-	}
-
-	/// Whether the named Secret exists.
-	async fn exists(&self, secret_name: &str) -> Result<bool> {
-		match self {
 			Self::Kube { client, namespace } => {
 				use k8s_openapi::api::core::v1::Secret;
 				use kube::Api;
 
 				let api: Api<Secret> = Api::namespaced(client.clone(), namespace);
 				match api.get_opt(secret_name).await {
-					Ok(found) => Ok(found.is_some()),
+					Ok(Some(secret)) => decode(secret_name, secret).map(Some),
+					Ok(None) => Ok(None),
 					Err(e) => Err(AppError::Upstream(format!("secret get failed: {e}"))),
 				}
 			}
-			Self::Memory(store) => Ok(store.lock().unwrap().contains_key(secret_name)),
+			Self::Memory(store) => Ok(store.lock().unwrap().get(secret_name).map(as_secrets)),
 		}
 	}
 
@@ -332,6 +298,19 @@ impl BackupSecrets {
 			.collect();
 		self.put_keys(secret_name, &plain).await
 	}
+}
+
+fn decode(
+	secret_name: &str,
+	secret: k8s_openapi::api::core::v1::Secret,
+) -> Result<BTreeMap<String, SecretString>> {
+	let mut out = BTreeMap::new();
+	for (k, v) in secret.data.unwrap_or_default() {
+		let s = String::from_utf8(v.0)
+			.map_err(|_| AppError::Upstream(format!("secret {secret_name} key {k} not utf-8")))?;
+		out.insert(k, SecretString::from(s));
+	}
+	Ok(out)
 }
 
 fn as_secrets(keys: &BTreeMap<String, String>) -> BTreeMap<String, SecretString> {
