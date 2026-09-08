@@ -272,16 +272,24 @@ pub(super) fn secret_store(state: &AppState) -> Result<&BackupSecrets> {
 		.ok_or_else(|| AppError::Upstream("secret store not configured".into()))
 }
 
+/// The longest key a kubernetes Secret takes.
+const NAME_LIMIT: usize = 253;
+
 /// The name is the key a secret's value is stored under, so every name is held
-/// to what a key may be.
+/// to what a key may be: `.` and `..` name a path rather than a key, and a key
+/// is bounded.
 fn check_name(name: &str) -> Result<()> {
 	if name.is_empty()
+		|| name == "."
+		|| name == ".."
+		|| name.len() > NAME_LIMIT
 		|| !name
 			.chars()
 			.all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_'))
 	{
 		return Err(AppError::BadRequest(format!(
-			"{name:?} is not a usable variable name: letters, digits, `-`, `.` and `_` only"
+			"{name:?} is not a usable variable name: letters, digits, `-`, `.` and `_`, \
+			 at most {NAME_LIMIT} of them, and not `.` or `..`"
 		)));
 	}
 	Ok(())

@@ -412,15 +412,17 @@ async fn removing_forgets_the_value() {
 async fn refuses_a_name_the_secret_store_cannot_key_a_value_under() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka").await;
-		private
-			.post("/api/inventory_variables/set")
-			.json(&json!({
-				"server_group_id": group,
-				"name": "not a name",
-				"value": "x",
-			}))
-			.await
-			.assert_status(axum::http::StatusCode::BAD_REQUEST);
+		for name in ["not a name", "..", "n".repeat(254).as_str()] {
+			private
+				.post("/api/inventory_variables/set")
+				.json(&json!({
+					"server_group_id": group,
+					"name": name,
+					"value": "x",
+				}))
+				.await
+				.assert_status(axum::http::StatusCode::BAD_REQUEST);
+		}
 	})
 	.await
 }
