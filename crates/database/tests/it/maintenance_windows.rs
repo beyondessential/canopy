@@ -1241,6 +1241,53 @@ async fn a_box_whose_group_window_still_holds_is_not_settling() {
 	.await
 }
 
+/// A box also carrying an application of another group, or of none, serves the
+/// highest rank on it, so a window over a lesser environment does not reach it.
+/// Reading the box two ways would mark it as handed over on the status page
+/// while its checks still page.
+// spec: MNT#declaring
+#[tokio::test(flavor = "multi_thread")]
+async fn a_box_serving_a_higher_rank_is_outside_a_lesser_environment_s_window() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let (machine_id, _) = insert_ranked_server(&mut conn, group_id, "test").await;
+		sql_query(
+			"INSERT INTO applications (type, host, rank, machine_id) \
+			 VALUES ('tamanu-central', 'http://neighbour.invalid/', 'production', $1)",
+		)
+		.bind::<sql_types::Uuid, _>(machine_id)
+		.execute(&mut conn)
+		.await
+		.expect("a production application of no group on the same box");
+
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			Some(ServerRank::Test),
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare over the test environment");
+
+		let targets = MaintenanceWindow::suspended_targets(&mut conn)
+			.await
+			.expect("suspended");
+		assert!(
+			!targets.suspends(machine_id, Some(group_id)),
+			"the box serves production, which no window is over"
+		);
+		assert!(
+			!MaintenanceWindow::suspends(&mut conn, None, Some(machine_id), Some(group_id))
+				.await
+				.expect("suspends"),
+			"and an incident reads the box the same way"
+		);
+	})
+	.await
+}
+
 /// Once the settle period elapses the box is no longer suspended at all, which
 /// is what takes the mark off it rather than leaving it marked for good.
 // spec: MNT#settling

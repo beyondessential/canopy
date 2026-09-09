@@ -506,9 +506,8 @@ impl ServerGroup {
 		if group_ids.is_empty() {
 			return Ok(Vec::new());
 		}
-		// `applications.rank` is unconstrained text, so a spelling the model
-		// does not know leaves that application in no environment rather than
-		// failing the read for the whole fleet.
+		// `applications.rank` is unconstrained text, so an unknown spelling
+		// leaves its application in no environment and the fleet still readable.
 		let members: Vec<(Uuid, Option<Uuid>, Option<String>, String)> = dsl::applications
 			.select((dsl::id, dsl::group_id, dsl::rank, dsl::type_))
 			.filter(dsl::group_id.eq_any(group_ids))

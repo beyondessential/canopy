@@ -698,10 +698,10 @@ fn fleet_columns(scope: Scope) -> Option<(Option<Uuid>, Option<Uuid>, Option<Uui
 }
 
 /// The environment each machine serves, for the machines in the groups these
-/// environments belong to. The group is the one whose work the box carries;
-/// the rank is [`Machine::ranks`], over everything live on the box, so a box
-/// also carrying another group's production is not read here as serving a
-/// lesser environment than [`MaintenanceWindow::suspends`] gives it.
+/// environments belong to. The group is the one whose work the box carries; the
+/// rank is [`Machine::ranks`], over everything live on the box, so this and
+/// [`MaintenanceWindow::suspends`] read a box carrying another group's work the
+/// same way.
 // spec: MNT#declaring
 async fn environment_of_machines(
 	db: &mut AsyncPgConnection,
@@ -713,8 +713,8 @@ async fn environment_of_machines(
 		return Ok(HashMap::new());
 	}
 	let group_ids: Vec<Uuid> = environments.iter().map(|(group, _)| *group).collect();
-	// `applications.rank` is unconstrained text, so a spelling the model does
-	// not know leaves that application out rather than failing the read.
+	// `applications.rank` is unconstrained text, so an unknown spelling leaves
+	// its application out and the rest of the read intact.
 	let members: Vec<(Uuid, Option<Uuid>, Option<String>)> = dsl::applications
 		.select((dsl::machine_id, dsl::group_id, dsl::rank))
 		.filter(dsl::group_id.eq_any(&group_ids))

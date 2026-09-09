@@ -527,9 +527,8 @@ impl Machine {
 		if machines.is_empty() {
 			return Ok(HashMap::new());
 		}
-		// `applications.rank` is unconstrained text, so a spelling the model
-		// does not know leaves that application unranked rather than failing
-		// every read that touches the box.
+		// `applications.rank` is unconstrained text, so an unknown spelling
+		// leaves its application unranked and the rest of the read intact.
 		let rows: Vec<(Uuid, Option<String>)> = dsl::applications
 			.select((dsl::machine_id, dsl::rank))
 			.filter(dsl::machine_id.eq_any(machines))
