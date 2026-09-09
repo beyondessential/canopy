@@ -7,7 +7,7 @@ pub const OPENAPI_VERSION: &str = "1.0.0";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "085b186daccc6f0157a99a3ff74a13e5fe4c486182d84395fb5b8926bf320117";
+pub const OPENAPI_BLAKE3: &str = "3cfc9a09c64793448410328da3f666a868f4ba77d17b0f6b9031e7c9b669be3b";
 
 /// Error types.
 pub mod error {
@@ -4060,23 +4060,38 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
 	pub async fn applications_self(&self) -> crate::Result<SelfResponse> {
 		self.call_json(::http::Method::GET, "/applications/self", None::<&()>).await
 	}
-	/// Register an artifact for a version or version range.
+	/// Register a reporting schema for one group, carrying its bytes.
 	///
-	/// A releaser registers an artifact that rests elsewhere, naming its location.
-	/// A component that produces a group's artifacts registers one for that group,
-	/// sending the bytes on this connection; Canopy holds them and is issued no
-	/// credential to any store. The
+	/// Requires a device certificate whose restore declaration for the named group
+	/// advertises that it builds reporting schemas. The bytes travel on this
+	/// connection and Canopy holds them, so the builder is issued no credential to
+	/// any store. The path names the group the artifact is for, the exact version
+	/// it was built against, and the artifact's type and target platform.
+	///
+	/// The version must be one Canopy already holds: a build is dispatched for a
+	/// group and version Canopy knows about, so a version that does not exist is
+	/// refused rather than drafted. A range pattern is refused for the same reason:
+	/// a schema follows the migrations one exact version applies.
+	///
+	/// Returns the created artifact record.
+	///
+	/// `POST /artifacts/groups/{group}/{version}/{artifact_type}/{platform}`
+	pub async fn artifacts_groups(&self, group: &str, version: &str, artifact_type: &str, platform: &str) -> crate::Result<Artifact> {
+		self.call_json(::http::Method::POST, &format!("/artifacts/groups/{}/{}/{}/{}", group, version, artifact_type, platform), None::<&()>).await
+	}
+	/// Register a downloadable artifact for a version or version range.
+	///
+	/// Requires a device certificate with the releaser role (or admin). The
 	/// path identifies the version the artifact belongs to — either an exact
 	/// version (e.g. `2.10.5`) or a semver range pattern (e.g. `2.10.x`,
 	/// `^2.10.0`) — followed by the artifact's type and target platform. The
 	/// request body is the plain-text URL clients should download the
 	/// artifact from.
 	///
-	/// When a releaser gives an exact version that doesn't exist yet, it is created
+	/// When an exact version is given and it doesn't exist yet, it is created
 	/// automatically as an unpublished draft so the artifact has a version to
 	/// attach to; publishing that version later (via the version-creation
-	/// endpoint) is a separate step. A group-scoped registration names a version
-	/// Canopy already holds and drafts none. When a range pattern is given instead,
+	/// endpoint) is a separate step. When a range pattern is given instead,
 	/// the artifact isn't tied to one version — it matches whichever
 	/// published version currently satisfies the range at lookup time.
 	///

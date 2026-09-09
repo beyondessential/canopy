@@ -342,7 +342,7 @@ async fn a_builder_publishes_only_for_its_own_group() {
 
 			let ours = public
 				.post(&format!(
-					"/artifacts/2.60.0/reporting-schema/any?group={GROUP}"
+					"/artifacts/groups/{GROUP}/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -352,7 +352,7 @@ async fn a_builder_publishes_only_for_its_own_group() {
 
 			let theirs = public
 				.post(&format!(
-					"/artifacts/2.60.0/reporting-schema/any?group={OTHER_GROUP}"
+					"/artifacts/groups/{OTHER_GROUP}/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.text("CREATE VIEW ...")
@@ -361,7 +361,7 @@ async fn a_builder_publishes_only_for_its_own_group() {
 
 			let nowhere = public
 				.post(
-					"/artifacts/2.60.0/reporting-schema/any?group=99999999-9999-9999-9999-999999999999",
+					"/artifacts/groups/99999999-9999-9999-9999-999999999999/2.60.0/reporting-schema/any",
 				)
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.text("CREATE VIEW ...")
@@ -388,7 +388,7 @@ async fn a_schema_registered_against_a_range_is_refused() {
 
 			let ranged = public
 				.post(&format!(
-					"/artifacts/2.60.x/reporting-schema/any?group={GROUP}"
+					"/artifacts/groups/{GROUP}/2.60.x/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -413,7 +413,7 @@ async fn a_schema_for_an_unknown_version_drafts_none() {
 
 			let refused = public
 				.post(&format!(
-					"/artifacts/9999.0.0/reporting-schema/any?group={GROUP}"
+					"/artifacts/groups/{GROUP}/9999.0.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -451,7 +451,7 @@ async fn a_disabled_declaration_authorises_nothing() {
 
 			let refused = public
 				.post(&format!(
-					"/artifacts/2.60.0/reporting-schema/any?group={GROUP}"
+					"/artifacts/groups/{GROUP}/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -485,7 +485,7 @@ async fn restoring_for_a_group_does_not_authorise_publishing_its_schema() {
 
 			let refused = public
 				.post(&format!(
-					"/artifacts/2.60.0/reporting-schema/any?group={GROUP}"
+					"/artifacts/groups/{GROUP}/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -540,7 +540,7 @@ async fn a_consumer_cannot_advertise_itself_into_publishing() {
 
 			let refused = public
 				.post(&format!(
-					"/artifacts/2.60.0/reporting-schema/any?group={GROUP}"
+					"/artifacts/groups/{GROUP}/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -640,7 +640,7 @@ async fn a_schema_over_axum_s_default_is_taken_in() {
 			let sql = "-- ".to_owned() + &"x".repeat(3 * 1024 * 1024);
 			let response = public
 				.post(&format!(
-					"/artifacts/2.60.0/reporting-schema/any?group={GROUP}"
+					"/artifacts/groups/{GROUP}/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -666,7 +666,7 @@ async fn a_builder_cannot_displace_the_group_s_installer() {
 
 			let installer = public
 				.post(&format!(
-					"/artifacts/2.60.0/installer/windows?group={GROUP}"
+					"/artifacts/groups/{GROUP}/2.60.0/installer/windows"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/octet-stream")
@@ -676,7 +676,7 @@ async fn a_builder_cannot_displace_the_group_s_installer() {
 
 			let schema = public
 				.post(&format!(
-					"/artifacts/2.60.0/reporting-schema/any?group={GROUP}"
+					"/artifacts/groups/{GROUP}/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -713,7 +713,7 @@ async fn a_run_another_consumer_reported_cannot_be_claimed() {
 
 			let claimed = public
 				.post(&format!(
-					"/artifacts/2.60.0/reporting-schema/any?group={GROUP}&run={run}"
+					"/artifacts/groups/{GROUP}/2.60.0/reporting-schema/any?run={run}"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -723,7 +723,7 @@ async fn a_run_another_consumer_reported_cannot_be_claimed() {
 
 			let own = public
 				.post(&format!(
-					"/artifacts/2.60.0/reporting-schema/any?group={GROUP}&run=99999999-9999-9999-9999-999999999999"
+					"/artifacts/groups/{GROUP}/2.60.0/reporting-schema/any?run=99999999-9999-9999-9999-999999999999"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -992,7 +992,7 @@ async fn a_registered_schema_is_offered_back_byte_for_byte() {
 
 			public
 				.post(&format!(
-					"/artifacts/2.60.0/reporting-schema/any?group={GROUP}"
+					"/artifacts/groups/{GROUP}/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")

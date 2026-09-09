@@ -105,13 +105,134 @@
         ]
       }
     },
+    "/artifacts/groups/{group}/{version}/{artifact_type}/{platform}": {
+      "post": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Register a reporting schema for one group, carrying its bytes.",
+        "description": "Requires a device certificate whose restore declaration for the named group\nadvertises that it builds reporting schemas. The bytes travel on this\nconnection and Canopy holds them, so the builder is issued no credential to\nany store. The path names the group the artifact is for, the exact version\nit was built against, and the artifact's type and target platform.\n\nThe version must be one Canopy already holds: a build is dispatched for a\ngroup and version Canopy knows about, so a version that does not exist is\nrefused rather than drafted. A range pattern is refused for the same reason:\na schema follows the migrations one exact version applies.\n\nReturns the created artifact record.",
+        "operationId": "register_group_artifact",
+        "parameters": [
+          {
+            "name": "group",
+            "in": "path",
+            "description": "Group the artifact is for.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "description": "Exact semver (e.g. `2.10.5`) the schema was built against.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "artifact_type",
+            "in": "path",
+            "description": "Must be `reporting-schema`: the authorisation is defined with that artifact.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "platform",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "run",
+            "in": "query",
+            "description": "The run that produced the artifact, where one produced it.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The artifact's bytes, which Canopy holds and records the digest of.",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Artifact"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "backup-restore-device": []
+          }
+        ]
+      }
+    },
     "/artifacts/{version}/{artifact_type}/{platform}": {
       "post": {
         "tags": [
           "artifacts"
         ],
-        "summary": "Register an artifact for a version or version range.",
-        "description": "A releaser registers an artifact that rests elsewhere, naming its location.\nA component that produces a group's artifacts registers one for that group,\nsending the bytes on this connection; Canopy holds them and is issued no\ncredential to any store. The\npath identifies the version the artifact belongs to — either an exact\nversion (e.g. `2.10.5`) or a semver range pattern (e.g. `2.10.x`,\n`^2.10.0`) — followed by the artifact's type and target platform. The\nrequest body is the plain-text URL clients should download the\nartifact from.\n\nWhen a releaser gives an exact version that doesn't exist yet, it is created\nautomatically as an unpublished draft so the artifact has a version to\nattach to; publishing that version later (via the version-creation\nendpoint) is a separate step. A group-scoped registration names a version\nCanopy already holds and drafts none. When a range pattern is given instead,\nthe artifact isn't tied to one version — it matches whichever\npublished version currently satisfies the range at lookup time.\n\nReturns the created artifact record. Returns 400 if the version or\nrange syntax can't be parsed.",
+        "summary": "Register a downloadable artifact for a version or version range.",
+        "description": "Requires a device certificate with the releaser role (or admin). The\npath identifies the version the artifact belongs to — either an exact\nversion (e.g. `2.10.5`) or a semver range pattern (e.g. `2.10.x`,\n`^2.10.0`) — followed by the artifact's type and target platform. The\nrequest body is the plain-text URL clients should download the\nartifact from.\n\nWhen an exact version is given and it doesn't exist yet, it is created\nautomatically as an unpublished draft so the artifact has a version to\nattach to; publishing that version later (via the version-creation\nendpoint) is a separate step. When a range pattern is given instead,\nthe artifact isn't tied to one version — it matches whichever\npublished version currently satisfies the range at lookup time.\n\nReturns the created artifact record. Returns 400 if the version or\nrange syntax can't be parsed.",
         "operationId": "register_artifact",
         "parameters": [
           {
@@ -142,17 +263,7 @@
           {
             "name": "group",
             "in": "query",
-            "description": "Group the artifact is for. A releaser credential carries no authorisation for any group; a component that produces a group's artifacts is authorised for that group alone.",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "run",
-            "in": "query",
-            "description": "The run that produced the artifact, where one produced it.",
+            "description": "Group the artifact is for. A releaser credential carries no authorisation for any group, so naming one here is refused.",
             "required": false,
             "schema": {
               "type": "string",
@@ -162,7 +273,7 @@
           {
             "name": "digest",
             "in": "query",
-            "description": "Subresource Integrity digest of the bytes at the URL, e.g. `sha256-LCTbqp…`, for an unscoped artifact. Whoever fetches it checks what it got against this; one registered without a digest is fetched unchecked. Ignored for a group-scoped artifact, whose digest Canopy takes of the bytes itself.",
+            "description": "Subresource Integrity digest of the bytes at the URL, e.g. `sha256-LCTbqp…`. Whoever fetches the artifact checks what it got against this; an artifact registered without one is fetched unchecked.",
             "required": false,
             "schema": {
               "type": "string"
@@ -170,7 +281,7 @@
           }
         ],
         "requestBody": {
-          "description": "For an unscoped artifact, its download URL as a plain-text body. For a group-scoped one, the artifact's bytes, which Canopy holds and verifies against the digest it takes of them.",
+          "description": "Download URL for the artifact, as a plain-text body.",
           "content": {
             "text/plain": {
               "schema": {
@@ -225,9 +336,6 @@
         "security": [
           {
             "releaser-device": []
-          },
-          {
-            "backup-restore-device": []
           }
         ]
       }
