@@ -698,8 +698,10 @@ fn fleet_columns(scope: Scope) -> Option<(Option<Uuid>, Option<Uuid>, Option<Uui
 }
 
 /// The environment each machine serves, for the machines in the groups these
-/// environments belong to. A box serves the environment of the highest-ranked
-/// application on it, the same rule its stage is derived from.
+/// environments belong to. The group is the one whose work the box carries;
+/// the rank is [`Machine::ranks`], over everything live on the box, so a box
+/// also carrying another group's production is not read here as serving a
+/// lesser environment than [`MaintenanceWindow::suspends`] gives it.
 // spec: MNT#declaring
 async fn environment_of_machines(
 	db: &mut AsyncPgConnection,
@@ -736,5 +738,11 @@ async fn environment_of_machines(
 			})
 			.or_insert((group, rank));
 	}
-	Ok(serving)
+
+	let machines: Vec<Uuid> = serving.keys().copied().collect();
+	let ranks = Machine::ranks(db, &machines).await?;
+	Ok(serving
+		.into_iter()
+		.filter_map(|(machine, (group, _))| Some((machine, (group, *ranks.get(&machine)?))))
+		.collect())
 }
