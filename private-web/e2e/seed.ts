@@ -1475,6 +1475,8 @@ export async function seedRestoreReplica(
 		enabled?: boolean;
 		/** Whether the replica is served de-identified. */
 		redacts?: boolean;
+		/** Whether the operator has made this the group's schema publisher. */
+		publishesSchemas?: boolean;
 	},
 ): Promise<SeededRestoreReplica> {
 	const id = randomUUID();
@@ -1483,8 +1485,8 @@ export async function seedRestoreReplica(
 	if (overdue == null) {
 		await sql.query(
 			`INSERT INTO restore_replicas
-			 (id, consumer_device_id, group_id, machine_id, type, intent, name, params, enabled, redacts)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)`,
+			 (id, consumer_device_id, group_id, machine_id, type, intent, name, params, enabled, redacts, publishes_schemas)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11)`,
 			[
 				id,
 				opts.consumerDeviceId,
@@ -1496,13 +1498,14 @@ export async function seedRestoreReplica(
 				params,
 				opts.enabled ?? true,
 				opts.redacts ?? false,
+				opts.publishesSchemas ?? false,
 			],
 		);
 	} else {
 		await sql.query(
 			`INSERT INTO restore_replicas
-			 (id, consumer_device_id, group_id, machine_id, type, intent, name, overdue_after, params, enabled, redacts)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, make_interval(secs => $8), $9::jsonb, $10, $11)`,
+			 (id, consumer_device_id, group_id, machine_id, type, intent, name, overdue_after, params, enabled, redacts, publishes_schemas)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, make_interval(secs => $8), $9::jsonb, $10, $11, $12)`,
 			[
 				id,
 				opts.consumerDeviceId,
@@ -1515,6 +1518,7 @@ export async function seedRestoreReplica(
 				params,
 				opts.enabled ?? true,
 				opts.redacts ?? false,
+				opts.publishesSchemas ?? false,
 			],
 		);
 	}

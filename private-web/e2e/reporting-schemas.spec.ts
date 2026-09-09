@@ -14,8 +14,9 @@ import {
 import { expect, test } from "./test-fixtures";
 
 /// A consumer that advertises a schema-building intent, declared against the
-/// group. That declaration is what brings the group's pairs into being: canopy
-/// owes a schema only where something is there to build one.
+/// group and marked by an operator as publishing its schema. That mark is what
+/// brings the group's pairs into being: canopy owes a schema only where an
+/// operator has put something there to build one.
 ///
 /// spec: RPT#pairs
 async function declareBuilder(sql: Sql, groupId: string): Promise<string> {
@@ -34,6 +35,7 @@ async function declareBuilder(sql: Sql, groupId: string): Promise<string> {
 		groupId,
 		intent: "reporting-schema",
 		name: "kamaka-schemas",
+		publishesSchemas: true,
 	});
 	return consumer.id;
 }
