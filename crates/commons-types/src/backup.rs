@@ -503,9 +503,16 @@ pub struct IntentDescriptor {
 	/// Human-readable description of the intent, if provided.
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub description: Option<String>,
-	/// Behaviours this intent opts into; see [`semantics`] for what each one
-	/// grants. Unrecognised values are stored but have no effect, so a consumer
-	/// may advertise ahead of Canopy support.
+	/// Behaviours this intent opts into. Recognised values are `check` (a
+	/// health report is expected for each replica), `once` (a given snapshot
+	/// is only ever dispatched to a replica once, rather than repeatedly until
+	/// overdue), `url` (a replica's health report includes a link to it),
+	/// `migrate` (Canopy names a target version and the replica applies that
+	/// version's migrations), `redact` (the replica de-identifies the restored
+	/// data before serving it), and `reporting-schema` (the replica builds a
+	/// Tamanu reporting schema and registers it for the group). Unrecognised
+	/// values are stored but have no effect, so a consumer may advertise ahead
+	/// of Canopy support.
 	#[serde(default)]
 	pub semantics: Vec<String>,
 	/// Configurable parameters this intent accepts per replica, keyed by
