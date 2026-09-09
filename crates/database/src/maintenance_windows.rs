@@ -711,7 +711,9 @@ async fn environment_of_machines(
 		return Ok(HashMap::new());
 	}
 	let group_ids: Vec<Uuid> = environments.iter().map(|(group, _)| *group).collect();
-	let members: Vec<(Uuid, Option<Uuid>, Option<ServerRank>)> = dsl::applications
+	// `applications.rank` is unconstrained text, so a spelling the model does
+	// not know leaves that application out rather than failing the read.
+	let members: Vec<(Uuid, Option<Uuid>, Option<String>)> = dsl::applications
 		.select((dsl::machine_id, dsl::group_id, dsl::rank))
 		.filter(dsl::group_id.eq_any(&group_ids))
 		.filter(dsl::deleted_at.is_null())
@@ -721,6 +723,7 @@ async fn environment_of_machines(
 
 	let mut serving: HashMap<Uuid, (Uuid, ServerRank)> = HashMap::new();
 	for (machine, group, rank) in members {
+		let rank: Option<ServerRank> = rank.and_then(|rank| rank.parse().ok());
 		let (Some(group), Some(rank)) = (group, rank) else {
 			continue;
 		};

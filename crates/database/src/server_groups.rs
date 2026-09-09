@@ -506,7 +506,10 @@ impl ServerGroup {
 		if group_ids.is_empty() {
 			return Ok(Vec::new());
 		}
-		let members: Vec<(Uuid, Option<Uuid>, Option<ServerRank>, String)> = dsl::applications
+		// `applications.rank` is unconstrained text, so a spelling the model
+		// does not know leaves that application in no environment rather than
+		// failing the read for the whole fleet.
+		let members: Vec<(Uuid, Option<Uuid>, Option<String>, String)> = dsl::applications
 			.select((dsl::id, dsl::group_id, dsl::rank, dsl::type_))
 			.filter(dsl::group_id.eq_any(group_ids))
 			.filter(dsl::deleted_at.is_null())
@@ -518,6 +521,7 @@ impl ServerGroup {
 		let mut present: HashMap<Uuid, BTreeSet<ServerRank>> = HashMap::new();
 		let mut central: HashMap<(Uuid, ServerRank), Uuid> = HashMap::new();
 		for (id, group_id, rank, r#type) in members {
+			let rank: Option<ServerRank> = rank.and_then(|rank| rank.parse().ok());
 			let (Some(group_id), Some(rank)) = (group_id, rank) else {
 				continue;
 			};

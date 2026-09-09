@@ -527,7 +527,10 @@ impl Machine {
 		if machines.is_empty() {
 			return Ok(HashMap::new());
 		}
-		let rows: Vec<(Uuid, Option<commons_types::server::rank::ServerRank>)> = dsl::applications
+		// `applications.rank` is unconstrained text, so a spelling the model
+		// does not know leaves that application unranked rather than failing
+		// every read that touches the box.
+		let rows: Vec<(Uuid, Option<String>)> = dsl::applications
 			.select((dsl::machine_id, dsl::rank))
 			.filter(dsl::machine_id.eq_any(machines))
 			.filter(dsl::deleted_at.is_null())
@@ -537,7 +540,9 @@ impl Machine {
 
 		let mut out = HashMap::new();
 		for (machine, rank) in rows {
-			let Some(rank) = rank else {
+			let Some(rank): Option<commons_types::server::rank::ServerRank> =
+				rank.and_then(|rank| rank.parse().ok())
+			else {
 				continue;
 			};
 			out.entry(machine)
