@@ -93,14 +93,31 @@ async fn a_second_declaration_dispatches_no_second_build() {
 		async |mut conn, cert, device_id, public, _| {
 			seed(&mut conn, device_id).await;
 
+			// A second publisher for the group is refused outright: what a
+			// builder registers replaces what was registered before it, so two
+			// would overwrite each other and which schema a machine ends up on
+			// would be whichever reported last.
+			// spec: RPT#the-build-contract
+			let second = conn
+				.batch_execute(&format!(
+					"INSERT INTO restore_replicas
+						(consumer_device_id, group_id, type, intent, name, enabled, publishes_schemas)
+					 VALUES ('{device_id}', '{GROUP}', 'tamanu-postgres', 'schema-build',
+						'schemas-weekly', true, true)"
+				))
+				.await;
+			assert!(second.is_err(), "one publisher per group");
+
+			// A declaration of the same intent that does not publish is allowed,
+			// and dispatches nothing of its own.
 			conn.batch_execute(&format!(
 				"INSERT INTO restore_replicas
 					(consumer_device_id, group_id, type, intent, name, enabled, publishes_schemas)
 				 VALUES ('{device_id}', '{GROUP}', 'tamanu-postgres', 'schema-build',
-					'schemas-weekly', true, true)"
+					'schemas-weekly', true, false)"
 			))
 			.await
-			.expect("a second schema declaration");
+			.expect("a non-publishing declaration");
 
 			let response = public
 				.get("/restore-worklist")
@@ -672,7 +689,20 @@ async fn a_builder_cannot_displace_the_group_s_installer() {
 				.add_header("content-type", "application/octet-stream")
 				.text("MZ...")
 				.await;
-			assert_eq!(installer.status_code(), StatusCode::FORBIDDEN);
+			assert_eq!(installer.status_code(), StatusCode::BAD_REQUEST);
+
+			// The platform is fixed for the same reason the type is: offering
+			// dedupes per type and platform, so a schema per platform would
+			// have a group offered every one of them.
+			let other_platform = public
+				.post(&format!(
+					"/artifacts/groups/{GROUP}/2.60.0/reporting-schema/windows"
+				))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.add_header("content-type", "application/sql")
+				.text("CREATE VIEW ...")
+				.await;
+			assert_eq!(other_platform.status_code(), StatusCode::BAD_REQUEST);
 
 			let schema = public
 				.post(&format!(

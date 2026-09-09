@@ -378,28 +378,16 @@ impl Artifact {
 		pattern_rank(pattern_b).cmp(&pattern_rank(pattern_a))
 	}
 
-	/// When any artifact a build reads was last registered for this version.
+	/// When any artifact a build reads was last registered for each of these
+	/// versions, in two queries however many versions are asked about.
 	///
 	/// A schema built from a superseded release of a version is not the schema
 	/// that version describes, so this is what a build is held against. Only
 	/// the unscoped artifacts count: a group-scoped one is a build's own output,
 	/// and registering it would put every group's pair for the version back on
-	/// the worklist, including the pair that just produced it.
-	// spec: RPT#pairs
-	pub async fn newest_change_for_version(
-		db: &mut AsyncPgConnection,
-		version: Uuid,
-	) -> Result<Option<jiff::Timestamp>> {
-		let version = Version::get_by_id(db, version).await?;
-		let newest = Self::newest_change_for_versions(db, std::slice::from_ref(&version)).await?;
-		Ok(newest.get(&version.id).copied())
-	}
-
-	/// When any artifact a build reads was last registered for each of these
-	/// versions, in two queries however many versions are asked about.
-	///
-	/// A range artifact counts for every version it covers, since that is how
-	/// one is resolved for a build.
+	/// the worklist, including the pair that just produced it. A range artifact
+	/// counts for every version it covers, since that is how one is resolved
+	/// for a build.
 	// spec: RPT#pairs
 	pub async fn newest_change_for_versions(
 		db: &mut AsyncPgConnection,
@@ -422,10 +410,17 @@ impl Artifact {
 			.filter_map(|(id, at)| Some((id?, at?.into())))
 			.collect();
 
-		let ranges: Vec<(Option<String>, jiff_diesel::Timestamp)> = dsl::artifacts
+		// One row per distinct pattern rather than per artifact: the answer only
+		// needs the newest change under each, and every row returned costs a
+		// semver parse below.
+		let ranges: Vec<(Option<String>, Option<jiff_diesel::Timestamp>)> = dsl::artifacts
 			.filter(dsl::version_id.is_null())
 			.filter(dsl::group_id.is_null())
-			.select((dsl::version_range_pattern, dsl::updated_at))
+			.group_by(dsl::version_range_pattern)
+			.select((
+				dsl::version_range_pattern,
+				diesel::dsl::max(dsl::updated_at),
+			))
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
@@ -439,6 +434,7 @@ impl Artifact {
 			else {
 				continue;
 			};
+			let Some(at) = at else { continue };
 			let at: jiff::Timestamp = at.into();
 
 			for version in versions.iter().filter(|v| range.satisfies(&v.as_semver())) {

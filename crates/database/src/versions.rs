@@ -176,38 +176,37 @@ impl Version {
 	) -> Result<Vec<Self>> {
 		use crate::schema::versions::dsl::*;
 
-		type Predicate = Box<
-			dyn diesel::BoxableExpression<
-					crate::schema::versions::table,
-					diesel::pg::Pg,
-					SqlType = diesel::sql_types::Bool,
-				>,
-		>;
-
-		let mut wants: Option<Predicate> = None;
-		for want in wanted {
-			let one: Predicate = Box::new(
-				major
-					.eq(want.0.major as i32)
-					.and(minor.eq(want.0.minor as i32))
-					.and(patch.eq(want.0.patch as i32)),
-			);
-			wants = Some(match wants {
-				Some(so_far) => Box::new(so_far.or(one)),
-				None => one,
-			});
+		if wanted.is_empty() {
+			return Ok(Vec::new());
 		}
 
-		let Some(wants) = wants else {
-			return Ok(Vec::new());
-		};
+		// The SQL narrows on the major and the triple is matched here: one
+		// predicate per version builds a boxed OR chain as long as the fleet's
+		// version spread, for a set small enough to sift in memory.
+		let mut majors: Vec<i32> = wanted.iter().map(|want| want.0.major as i32).collect();
+		majors.sort_unstable();
+		majors.dedup();
 
-		versions
-			.filter(wants)
+		let rows: Vec<Self> = versions
+			.filter(major.eq_any(majors))
 			.select(Version::as_select())
 			.load(db)
 			.await
-			.map_err(AppError::from)
+			.map_err(AppError::from)?;
+
+		Ok(rows
+			.into_iter()
+			.filter(|row| {
+				wanted.iter().any(|want| {
+					(row.major, row.minor, row.patch)
+						== (
+							want.0.major as i32,
+							want.0.minor as i32,
+							want.0.patch as i32,
+						)
+				})
+			})
+			.collect())
 	}
 
 	pub async fn get_by_id(db: &mut AsyncPgConnection, version_id: Uuid) -> Result<Self> {

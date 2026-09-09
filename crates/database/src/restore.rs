@@ -159,6 +159,14 @@ fn unique_violation(info: &dyn diesel::result::DatabaseErrorInformation) -> AppE
 		Some("restore_replicas_consumer_name") | None => {
 			AppError::Conflict("this consumer already has a restore replica with that name".into())
 		}
+		// What a builder registers is offered to every machine in the group and
+		// replaces what was registered before it, so two publishers overwrite
+		// each other and which schema a machine ends up on is whichever
+		// reported last.
+		// spec: RPT#the-build-contract
+		Some("restore_replicas_one_schema_publisher") => AppError::Conflict(
+			"another enabled declaration already publishes this group's reporting schema".into(),
+		),
 		Some(other) => {
 			AppError::Conflict(format!("this declaration collides with another ({other})"))
 		}

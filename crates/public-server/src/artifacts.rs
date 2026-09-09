@@ -106,6 +106,10 @@ const MAX_UPLOAD_BODY_BYTES: usize = MAX_HELD_ARTIFACT_BYTES + 64 * 1024;
 /// The artifact type a reporting-schema build publishes.
 const REPORTING_SCHEMA_TYPE: &str = "reporting-schema";
 
+/// The platform it publishes on. A schema follows the version's migrations
+/// rather than anything about the machine reading it.
+const SCHEMA_PLATFORM: &str = "any";
+
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new().routes(routes!(create)).merge(
 		OpenApiRouter::new()
@@ -287,14 +291,17 @@ async fn register_for_group(
 	let device_id = device.0.id;
 
 	// What a schema builder is authorised for is the artifact its declaration
-	// names. Any other type registered under it would displace the releaser's
-	// own for every machine in the group, and those machines fetch and run what
-	// they are offered.
-	// spec: ART#registration
-	if artifact_type != REPORTING_SCHEMA_TYPE {
-		return Err(AppError::AuthInsufficientPermissions {
-			required: format!("a group-scoped artifact to be a {REPORTING_SCHEMA_TYPE}"),
-		});
+	// names. Any other type or platform registered under it would displace the
+	// releaser's own for every machine in the group, and those machines fetch
+	// and run what they are offered. A schema is one artifact per version, so
+	// the platform it is published on is fixed too: left open, one builder
+	// registers a schema per platform and a group is offered every one of them.
+	// spec: ART#registration, RPT#the-build-contract
+	if artifact_type != REPORTING_SCHEMA_TYPE || platform != SCHEMA_PLATFORM {
+		return Err(AppError::BadRequest(format!(
+			"this registers a {REPORTING_SCHEMA_TYPE} on {SCHEMA_PLATFORM}, not a \
+			 {artifact_type} on {platform}"
+		)));
 	}
 
 	let authorised = device.0.role == DeviceRole::Admin

@@ -183,6 +183,44 @@ pub struct WorklistEntry {
 	pub target_version_id: Option<Uuid>,
 }
 
+/// What dispatching a group's schema builds needs of the group itself.
+///
+/// A build restores the group's canonical central and differs per pair only in
+/// the version it migrates to, so this is the same for every declaration
+/// covering the group.
+// spec: RPT#the-build-contract
+struct SchemaGroup {
+	machine_id: Uuid,
+	central_type: commons_types::server::app_type::ApplicationType,
+	versions: Vec<database::versions::Version>,
+	settlement: database::reporting_schemas::Settlement,
+}
+
+/// Resolve a group's central and pairs, or `None` where it has no central to
+/// build from.
+async fn resolve_schema_group(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	group_id: Uuid,
+) -> Result<Option<SchemaGroup>> {
+	let members = database::applications::Application::list_live_in_group(conn, group_id).await?;
+	let Some(central) = database::server_groups::ServerGroup::canonical_central(&members) else {
+		return Ok(None);
+	};
+	let central_type = central.r#type.clone();
+	let machine = database::machines::Machine::get_by_id(conn, central.machine_id).await?;
+
+	let versions = database::reporting_schemas::versions_for_group(conn, group_id).await?;
+	let settlement =
+		database::reporting_schemas::Settlement::for_group(conn, group_id, &versions).await?;
+
+	Ok(Some(SchemaGroup {
+		machine_id: machine.id,
+		central_type,
+		versions,
+		settlement,
+	}))
+}
+
 /// Fetch the full set of replicas this device should maintain.
 ///
 /// Returns the device's complete desired state, computed fresh on every call:
@@ -243,13 +281,11 @@ async fn worklist(
 	// covering one group with schema-building intents would each emit the whole
 	// pair list: a restore and a migrate paid for twice per build.
 	let mut pairs: HashSet<(Uuid, Uuid)> = HashSet::new();
-	// Resolving a group's pairs walks its applications and their reported
-	// versions, so a group covered by several declarations is resolved once.
-	let mut version_cache: HashMap<Uuid, Vec<database::versions::Version>> = HashMap::new();
-	// Where each of a group's pairs stands, resolved once for the group rather
-	// than per pair: every restore consumer polls this on a schedule.
-	let mut settlement_cache: HashMap<Uuid, database::reporting_schemas::Settlement> =
-		HashMap::new();
+	// Everything a build's dispatch needs of a group: its canonical central,
+	// the versions its pairs cover, and where each pair stands. Resolved once
+	// per group rather than per declaration, and the absence of a central is
+	// cached too, since every restore consumer polls this on a schedule.
+	let mut schema_groups: HashMap<Uuid, Option<SchemaGroup>> = HashMap::new();
 	// Per-group caches so a group referenced by several declarations is resolved
 	// once: the latest produced snapshot per (machine, type), and the latest
 	// healthy-verified snapshot per (machine, type, intent) for `once` suppression.
@@ -352,38 +388,22 @@ async fn worklist(
 				params.clone()
 			};
 
-			let members =
-				database::applications::Application::list_live_in_group(&mut conn, d.group_id)
-					.await?;
-			let Some(central) = database::server_groups::ServerGroup::canonical_central(&members)
-			else {
+			if !schema_groups.contains_key(&d.group_id) {
+				let resolved = resolve_schema_group(&mut conn, d.group_id).await?;
+				schema_groups.insert(d.group_id, resolved);
+			}
+			let Some(group) = &schema_groups[&d.group_id] else {
 				continue;
 			};
-			let central_type = central.r#type.clone();
-			let machine =
-				database::machines::Machine::get_by_id(&mut conn, central.machine_id).await?;
-			let latest = snapshots.get(&(machine.id, d.r#type.clone()));
 
-			if let std::collections::hash_map::Entry::Vacant(e) = version_cache.entry(d.group_id) {
-				let versions =
-					database::reporting_schemas::versions_for_group(&mut conn, d.group_id).await?;
-				settlement_cache.insert(
-					d.group_id,
-					database::reporting_schemas::Settlement::for_group(
-						&mut conn, d.group_id, &versions,
-					)
-					.await?,
-				);
-				e.insert(versions);
-			}
-			let settlement = &settlement_cache[&d.group_id];
+			let latest = snapshots.get(&(group.machine_id, d.r#type.clone()));
 
-			for version in version_cache[&d.group_id].clone() {
+			for version in &group.versions {
 				if !pairs.insert((d.group_id, version.id)) {
 					continue;
 				}
 
-				if once && settlement.settled(version.id) {
+				if once && group.settlement.settled(version.id) {
 					continue;
 				}
 
@@ -391,9 +411,9 @@ async fn worklist(
 				out.push(WorklistEntry {
 					replica_id: d.id,
 					group_id: d.group_id,
-					machine_id: machine.id,
-					server_id: machine.id,
-					application_type: Some(central_type.clone()),
+					machine_id: group.machine_id,
+					server_id: group.machine_id,
+					application_type: Some(group.central_type.clone()),
 					r#type: d.r#type.clone(),
 					intent: d.intent.clone(),
 					name: d.name.clone(),

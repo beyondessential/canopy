@@ -324,7 +324,7 @@ pub struct Pair {
 /// nothing will pick up.
 // spec: RPT#pairs
 pub async fn pairs_for_group(db: &mut AsyncPgConnection, group: Uuid) -> Result<Vec<Pair>> {
-	if !group_builds_schemas(db, group).await? {
+	if !groups_building_schemas(db).await?.contains(&group) {
 		return Ok(Vec::new());
 	}
 
@@ -473,17 +473,28 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 	};
 	use commons_types::status::CheckResult;
 
-	for group in ServerGroup::list_all(db).await? {
-		if !group_builds_schemas(db, group.id).await? {
-			continue;
-		}
+	// Which groups have a builder is one question of the whole fleet rather than
+	// one per group: asking per group walked every group's declarations and
+	// every declaration's consumer, once a minute, for groups that have none.
+	let builders = groups_building_schemas(db).await?;
 
+	for group in ServerGroup::list_all(db).await? {
 		let members = Application::list_live_in_group(db, group.id).await?;
 		let Some(central) = ServerGroup::canonical_central(&members).map(|a| a.id) else {
 			continue;
 		};
 
-		let pairs = pairs_of_members(db, group.id, &members).await?;
+		// A group that has stopped building still has whatever this check filed
+		// while it did, and nothing else recovers it. Filing no instances is
+		// what says the finding is gone; where none was open this costs one
+		// query and writes nothing.
+		// spec: RPT#alerting
+		let pairs = if builders.contains(&group.id) {
+			pairs_of_members(db, group.id, &members).await?
+		} else {
+			Vec::new()
+		};
+
 		let instances: Vec<CheckInstance> = pairs
 			.iter()
 			.filter(|p| p.state != PairState::Awaiting)
@@ -547,28 +558,40 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 	Ok(())
 }
 
-/// Whether a group has an enabled declaration whose intent builds schemas.
+/// The groups an enabled declaration builds schemas for.
 ///
-/// The same predicate that authorises a builder to publish the group's schema,
-/// asked of each of its consumers: dispatching builds a group would then refuse
-/// to accept is the divergence worth not having.
-async fn group_builds_schemas(db: &mut AsyncPgConnection, group: Uuid) -> Result<bool> {
-	use crate::restore::RestoreReplica;
+/// The same conditions `RestoreReplica::authorizes_schema_artifacts` asks of one
+/// consumer and one group, asked of the fleet at once: dispatching builds a
+/// group would then refuse to accept is the divergence worth not having.
+async fn groups_building_schemas(
+	db: &mut AsyncPgConnection,
+) -> Result<std::collections::HashSet<Uuid>> {
+	use crate::schema::{restore_consumer_capabilities, restore_replicas};
+	use diesel::dsl::sql;
+	use diesel::sql_types::Bool;
 
-	let mut consumers: Vec<Uuid> = RestoreReplica::list_for_group(db, group)
-		.await?
-		.into_iter()
-		.filter(|d| d.enabled)
-		.map(|d| d.consumer_device_id)
-		.collect();
-	consumers.sort_unstable();
-	consumers.dedup();
+	let groups: Vec<Uuid> = restore_replicas::table
+		.inner_join(
+			restore_consumer_capabilities::table.on(
+				restore_consumer_capabilities::consumer_device_id
+					.eq(restore_replicas::consumer_device_id)
+					.and(restore_consumer_capabilities::intent.eq(restore_replicas::intent)),
+			),
+		)
+		.filter(restore_replicas::enabled.eq(true))
+		.filter(restore_replicas::publishes_schemas.eq(true))
+		// Dispatch builds no schema from a redacting or machine-scoped
+		// declaration, and one nothing is dispatched for publishes nothing.
+		.filter(restore_replicas::redacts.eq(false))
+		.filter(restore_replicas::machine_id.is_null())
+		.filter(sql::<Bool>(
+			"restore_consumer_capabilities.semantics @> '[\"reporting-schema\"]'::jsonb",
+		))
+		.select(restore_replicas::group_id)
+		.distinct()
+		.load(db)
+		.await
+		.map_err(AppError::from)?;
 
-	for consumer in consumers {
-		if RestoreReplica::authorizes_schema_artifacts(db, consumer, group).await? {
-			return Ok(true);
-		}
-	}
-
-	Ok(false)
+	Ok(groups.into_iter().collect())
 }
