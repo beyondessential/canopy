@@ -1025,6 +1025,65 @@ async fn an_application_with_no_rank_follows_the_headline_environment() {
 	.await
 }
 
+/// A group nobody has ranked still has somewhere to go: its applications are
+/// its production environment, so a plan can be recorded for it, is what its
+/// members are tested against, and is met when the group arrives.
+// spec: GRP#environments
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_with_no_ranked_member_plans_as_its_production() {
+	TestDb::run(|mut conn, _url| async move {
+		let group: RowId =
+			sql_query("INSERT INTO server_groups (name) VALUES ('drifting') RETURNING id")
+				.get_result(&mut conn)
+				.await
+				.expect("group");
+		let central: AppRow = sql_query(
+			"WITH m AS (INSERT INTO machines (group_id) VALUES ($1) RETURNING id) INSERT INTO applications (host, type, group_id, machine_id) SELECT 'https://central.drifting.example', 'tamanu-central', $1, m.id FROM m RETURNING id, machine_id",
+		)
+		.bind::<sql_types::Uuid, _>(group.id)
+		.get_result(&mut conn)
+		.await
+		.expect("central");
+		report(&mut conn, central.id, central.machine_id, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+
+		UpgradePlan::record(
+			&mut conn,
+			group.id,
+			ServerRank::Production,
+			target.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("a group with nothing ranked is still plannable");
+
+		let unranked = Application::get_by_id(&mut conn, central.id)
+			.await
+			.expect("get central");
+		assert_eq!(
+			candidate_for(&mut conn, &unranked)
+				.await
+				.expect("candidate")
+				.map(|version| version.id),
+			Some(target.id),
+			"its members are tested against the plan"
+		);
+
+		report(&mut conn, central.id, central.machine_id, "2.61.0").await;
+		close_met_plans(&mut conn).await.expect("sweep");
+		assert!(
+			UpgradePlan::open_for_environment(&mut conn, group.id, ServerRank::Production)
+				.await
+				.expect("open")
+				.is_none(),
+			"the plan is met once the group arrives"
+		);
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_plan_needs_an_environment_the_group_has() {
 	TestDb::run(|mut conn, _url| async move {
