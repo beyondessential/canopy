@@ -84,6 +84,10 @@ export async function uploadApi<T>(
 			method: "POST",
 			headers: {
 				"content-type": body.type || "application/octet-stream",
+				// A raw body is a content type a form can send, so this is what
+				// makes the browser preflight the request and keeps a
+				// cross-origin page off the endpoint.
+				"x-canopy-upload": "1",
 			},
 			body,
 		},
@@ -203,34 +207,12 @@ export function useApiAction<
 	error: Error | null;
 	reset: () => void;
 } {
-	const [pending, setPending] = useState(false);
-	const [error, setError] = useState<Error | null>(null);
-
-	const call = useCallback(
-		async (params: Record<string, unknown> = {}): Promise<T> => {
-			setPending(true);
-			setError(null);
-			try {
-				const result = await callApi<M, F, T>(module, fn, params);
-				// Broadcast so global, page-agnostic queries (e.g. the open-
-				// incidents nav badge) can refetch without the caller having
-				// to know they exist. Listeners hook via useReloadInterval.
-				document.dispatchEvent(new Event("canopy-data-changed"));
-				return result;
-			} catch (err) {
-				const e = err instanceof Error ? err : new Error(String(err));
-				setError(e);
-				throw e;
-			} finally {
-				setPending(false);
-			}
-		},
-		[module, fn],
+	return useApiCall<[Record<string, unknown>?], T>(
+		useCallback(
+			(params = {}) => callApi<M, F, T>(module, fn, params),
+			[module, fn],
+		),
 	);
-
-	const reset = useCallback(() => setError(null), []);
-
-	return { call, pending, error, reset };
 }
 
 /**
@@ -245,15 +227,39 @@ export function useApiUpload<T>(
 	error: Error | null;
 	reset: () => void;
 } {
+	return useApiCall<[Record<string, string>, Blob], T>(
+		useCallback(
+			(query, body) => uploadApi<T>(module, fn, query, body),
+			[module, fn],
+		),
+	);
+}
+
+/**
+ * The pending/error bookkeeping both write hooks share, so the two cannot
+ * differ on what they report or on telling the rest of the page that
+ * something changed.
+ */
+function useApiCall<A extends unknown[], T>(
+	request: (...args: A) => Promise<T>,
+): {
+	call: (...args: A) => Promise<T>;
+	pending: boolean;
+	error: Error | null;
+	reset: () => void;
+} {
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<Error | null>(null);
 
 	const call = useCallback(
-		async (query: Record<string, string>, body: Blob): Promise<T> => {
+		async (...args: A): Promise<T> => {
 			setPending(true);
 			setError(null);
 			try {
-				const result = await uploadApi<T>(module, fn, query, body);
+				const result = await request(...args);
+				// Broadcast so global, page-agnostic queries (e.g. the open-
+				// incidents nav badge) can refetch without the caller having
+				// to know they exist. Listeners hook via useReloadInterval.
 				document.dispatchEvent(new Event("canopy-data-changed"));
 				return result;
 			} catch (err) {
@@ -264,7 +270,7 @@ export function useApiUpload<T>(
 				setPending(false);
 			}
 		},
-		[module, fn],
+		[request],
 	);
 
 	const reset = useCallback(() => setError(null), []);

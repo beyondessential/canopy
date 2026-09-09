@@ -8,7 +8,7 @@ use commons_servers::device_auth::{AuthDevice, ReleaserDevice};
 use commons_types::version::{VersionStatus, VersionStr};
 use database::{
 	Db,
-	artifacts::{Artifact as ArtifactRow, NewArtifact, Scope, parse_sri, sri},
+	artifacts::{Artifact as ArtifactRow, NewArtifact, Scope, parse_sri_opt, sri},
 	machines::Machine,
 	versions::{NewVersion, Version},
 };
@@ -155,24 +155,9 @@ async fn create(
 		});
 	}
 
-	// A blank body is no location at all. The constraint only tests for NULL,
-	// so an empty string would pass it and leave an artifact nothing can be
-	// fetched from.
-	// spec: ART#where-an-artifact-rests
-	if url.trim().is_empty() {
-		return Err(AppError::BadRequest(
-			"an artifact needs a download URL".into(),
-		));
-	}
-
-	// A blank digest is no digest: recorded, it says the bytes were checked
-	// against something when nothing was.
-	// spec: ART#digests
-	let digest = named
-		.digest
-		.filter(|d| !d.trim().is_empty())
-		.map(|d| parse_sri(&d))
-		.transpose()?;
+	// Where the artifact rests, and the refusal for a body that is no location
+	// at all, is `Artifact::register`'s to settle.
+	let digest = parse_sri_opt(named.digest.as_deref())?;
 
 	let mut db = db.get().await?;
 	let device_id = device.0.0.id;

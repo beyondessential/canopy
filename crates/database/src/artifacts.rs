@@ -138,9 +138,27 @@ pub fn parse_sri(value: &str) -> Result<Vec<u8>> {
 
 /// A blank URL is no location at all. The constraint only tests for NULL, so an
 /// empty string passes it and leaves an artifact nothing can be fetched from.
+///
+/// The trimmed value is what is kept: a plain-text body picks up whatever
+/// newline the shell that sent it added, and a URL nothing can parse is offered
+/// to every device that asks.
 // spec: ART#where-an-artifact-rests
 fn location(url: Option<String>) -> Option<String> {
-	url.filter(|url| !url.trim().is_empty())
+	url.map(|url| url.trim().to_owned())
+		.filter(|url| !url.is_empty())
+}
+
+/// The digest a registration names, where it names one at all.
+///
+/// A blank digest is no digest: recorded, it says the bytes were checked
+/// against something when nothing was.
+// spec: ART#digests
+pub fn parse_sri_opt(value: Option<&str>) -> Result<Option<Vec<u8>>> {
+	value
+		.map(str::trim)
+		.filter(|value| !value.is_empty())
+		.map(parse_sri)
+		.transpose()
 }
 
 impl NewArtifact {
@@ -196,11 +214,27 @@ impl Artifact {
 	/// equally specific.
 	// spec: ART#what-a-version-offers
 	fn offered(artifacts: Vec<Self>, scope: Scope) -> Vec<Self> {
-		let mut seen = std::collections::HashSet::new();
+		let offered = Self::offered_ids(&artifacts, scope);
 		artifacts
 			.into_iter()
+			.filter(|a| offered.contains(&a.id))
+			.collect()
+	}
+
+	/// The ids of the artifacts a sorted match set offers `scope`.
+	///
+	/// The operator view answers the same question per resolved scope, so the
+	/// rule lives here rather than being written out again beside it: the two
+	/// disagreeing would have the listing mark an artifact as served that the
+	/// public path passes over.
+	// spec: ART#what-a-version-offers
+	fn offered_ids(artifacts: &[Self], scope: Scope) -> std::collections::HashSet<Uuid> {
+		let mut seen = std::collections::HashSet::new();
+		artifacts
+			.iter()
 			.filter(|a| scope.sees(a.group_id))
-			.filter(|a| seen.insert((a.artifact_type.clone(), a.platform.clone())))
+			.filter(|a| seen.insert((a.artifact_type.as_str(), a.platform.as_str())))
+			.map(|a| a.id)
 			.collect()
 	}
 
@@ -340,11 +374,22 @@ impl Artifact {
 	pub async fn content_for(
 		db: &mut AsyncPgConnection,
 		artifact_id: Uuid,
+		scope: Scope,
 	) -> Result<Option<ArtifactContent>> {
 		use crate::schema::artifacts::dsl::*;
 
-		let row: Option<(Option<Vec<u8>>, Option<String>, Option<Vec<u8>>)> = artifacts
-			.filter(id.eq(artifact_id))
+		// The scope is part of the read rather than the caller's to remember:
+		// the bytes of a group's artifact are the thing the boundary exists to
+		// keep, and an id is guessable in a way a query is not.
+		// spec: ART#who-is-offered-a-group-scoped-artifact
+		let mut query = artifacts.filter(id.eq(artifact_id)).into_boxed();
+		query = match scope {
+			Scope::Unscoped => query.filter(group_id.is_null()),
+			Scope::Group(caller) => query.filter(group_id.is_null().or(group_id.eq(caller))),
+			Scope::Fleet => query,
+		};
+
+		let row: Option<(Option<Vec<u8>>, Option<String>, Option<Vec<u8>>)> = query
 			.select((content, content_type, digest))
 			.first(db)
 			.await
@@ -416,9 +461,9 @@ impl Artifact {
 		// An artifact Canopy holds has no location to change. Replacing its
 		// bytes is a registration, which is what carries the digest.
 		// spec: ART#where-an-artifact-rests
-		let scoped: Option<Uuid> = artifacts
+		let (scoped, current_url): (Option<Uuid>, Option<String>) = artifacts
 			.filter(id.eq(artifact_id))
-			.select(group_id)
+			.select((group_id, download_url))
 			.first(db)
 			.await
 			.map_err(AppError::from)?;
@@ -437,11 +482,18 @@ impl Artifact {
 			_ => {}
 		}
 
+		// A digest describes the bytes at a location, so it does not survive
+		// the location changing: kept, it has every device that honours it
+		// refuse a file that is the right one.
+		// spec: ART#digests
+		let moved = new_url != current_url;
+
 		match diesel::update(artifacts.filter(id.eq(artifact_id)))
 			.set((
 				artifact_type.eq(new_type),
 				platform.eq(new_platform),
 				download_url.eq(new_url),
+				moved.then_some(digest.eq(None::<Vec<u8>>)),
 			))
 			.execute(db)
 			.await
@@ -479,7 +531,6 @@ impl Artifact {
 		target_version_id: Uuid,
 		scope: Scope,
 	) -> Result<Vec<(Self, bool, bool, bool)>> {
-		let version = crate::versions::Version::get_by_id(db, target_version_id).await?;
 		let matching_artifacts =
 			Self::get_for_version_all_matches(db, target_version_id, scope).await?;
 
@@ -503,35 +554,32 @@ impl Artifact {
 			resolved => vec![resolved],
 		};
 
-		let mut public_api_ids: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
-		for scope in scopes {
-			let mut seen = std::collections::HashSet::new();
-			for a in matching_artifacts.iter().filter(|a| scope.sees(a.group_id)) {
-				if seen.insert((a.artifact_type.as_str(), a.platform.as_str())) {
-					public_api_ids.insert(a.id);
-				}
-			}
-		}
+		let public_api_ids: std::collections::HashSet<Uuid> = scopes
+			.into_iter()
+			.flat_map(|scope| Self::offered_ids(&matching_artifacts, scope))
+			.collect();
 
-		// Only a range artifact can be the one an exact artifact displaces, so
-		// the rest of the table has no bearing on the answer.
-		use crate::schema::artifacts::*;
-		let ranges: Vec<Self> = table
-			.select(Self::as_select())
-			.filter(version_range_pattern.is_not_null())
-			.load(db)
-			.await?;
-
-		let semver = version.as_semver();
+		// Only a range artifact can be the one an exact artifact displaces, and
+		// a range only reached this set by matching this version, so what
+		// displaces what is answerable from the set itself.
+		let ranges: Vec<&Self> = matching_artifacts
+			.iter()
+			.filter(|a| a.version_range_pattern.is_some())
+			.collect();
 
 		let result = matching_artifacts
-			.into_iter()
+			.iter()
 			.map(|a| {
 				let is_exact = a.version_id == Some(target_version_id);
-				let has_range_override = Self::overridden_range(&ranges, &a, &semver);
+				let has_range_override = Self::overridden_range(&ranges, a);
 				let is_used_in_public_api = public_api_ids.contains(&a.id);
 
-				(a, is_exact, has_range_override, is_used_in_public_api)
+				(
+					a.clone(),
+					is_exact,
+					has_range_override,
+					is_used_in_public_api,
+				)
 			})
 			.collect();
 
@@ -539,12 +587,15 @@ impl Artifact {
 	}
 
 	/// Whether an exact artifact displaces a range artifact that also matches.
-	fn overridden_range(all: &[Self], artifact: &Self, semver: &node_semver::Version) -> bool {
+	///
+	/// `ranges` are the range artifacts of the same match set, which are there
+	/// only because they match this version already.
+	fn overridden_range(ranges: &[&Self], artifact: &Self) -> bool {
 		if artifact.version_id.is_none() {
 			return false;
 		}
 
-		all.iter().any(|other| {
+		ranges.iter().any(|other| {
 			other.artifact_type == artifact.artifact_type
 				&& other.platform == artifact.platform
 				// A range this artifact's own scope cannot see is not one it
@@ -553,12 +604,6 @@ impl Artifact {
 				// or an unscoped one.
 				// spec: ART#what-a-version-offers
 				&& (other.group_id.is_none() || other.group_id == artifact.group_id)
-				&& other.id != artifact.id
-				&& other
-					.version_range_pattern
-					.as_deref()
-					.and_then(|pattern| node_semver::Range::parse(pattern).ok())
-					.is_some_and(|range| range.satisfies(semver))
 		})
 	}
 }

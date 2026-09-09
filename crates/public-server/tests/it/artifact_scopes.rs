@@ -893,3 +893,49 @@ async fn a_known_issue_does_not_withhold_a_version_s_own_artifacts() {
 	)
 	.await
 }
+
+/// A URL Canopy handed out keeps working after a more specific artifact of the
+/// same type and platform is registered. Fetchability is what a caller may see,
+/// not which artifact currently wins the offer.
+// spec: ART#who-is-offered-a-group-scoped-artifact
+#[tokio::test(flavor = "multi_thread")]
+async fn a_displaced_artifact_is_still_fetchable() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn).await;
+			enrol(&mut conn, device_id, GROUP_A).await;
+
+			// A range artifact of group A's, which group A's exact one displaces.
+			let ranged = "44444444-4444-4444-4444-444444444444";
+			let digest = hex::encode(digest_of(b"the range schema"));
+			conn.batch_execute(&format!(
+				"INSERT INTO artifacts
+				   (id, version_id, platform, artifact_type, version_range_pattern, group_id, content, content_type, digest)
+				 VALUES ('{ranged}', NULL, 'any', 'reporting-schema', '2.60.x', '{GROUP_A}',
+				         'the range schema'::bytea, 'application/sql', '\\x{digest}'::bytea)"
+			))
+			.await
+			.expect("seed the range artifact");
+
+			let listed = public
+				.get("/versions/2.60.0/artifacts")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			listed.assert_status_ok();
+			let artifacts: Vec<serde_json::Value> = listed.json();
+			assert_eq!(artifacts.len(), 1, "one artifact per type and platform");
+			assert_eq!(artifacts[0]["id"], THEIRS, "the exact one is offered");
+
+			// The one specificity passed over is still fetchable by the URL it
+			// was offered under before.
+			let download = public
+				.get(&format!("/versions/2.60.0/artifacts/{ranged}/download"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			download.assert_status_ok();
+			assert_eq!(download.text(), "the range schema");
+		},
+	)
+	.await
+}

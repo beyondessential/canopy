@@ -16257,7 +16257,10 @@ export interface operations {
                  */
                 digest: string;
             };
-            header?: never;
+            header: {
+                /** @description Any value. Required: it makes a browser preflight the request, so a cross-origin page cannot spend an operator's session on this endpoint. */
+                "x-canopy-upload": string;
+            };
             path?: never;
             cookie?: never;
         };

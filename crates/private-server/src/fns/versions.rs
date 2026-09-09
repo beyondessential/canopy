@@ -9,7 +9,7 @@ use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::version::{VersionStatus, VersionStr};
 use database::{
-	artifacts::{Artifact, NewArtifact, Scope, digest_of, parse_sri, sri},
+	artifacts::{Artifact, NewArtifact, Scope, digest_of, parse_sri, parse_sri_opt, sri},
 	server_groups::ServerGroup,
 	version_known_issues::VersionKnownIssue,
 	versions::Version,
@@ -25,6 +25,10 @@ use crate::state::AppState;
 /// SQL file; anything approaching this is not one, and the rows live in
 /// Postgres alongside everything else.
 const MAX_HELD_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
+
+/// Header the SPA sets on an upload, which no cross-origin page can send
+/// without the browser preflighting the request first.
+const FETCH_HEADER: &str = "x-canopy-upload";
 
 /// Body budget for `upload_artifact`. Sizing above the cap keeps an over-limit
 /// upload the handler's structured refusal rather than axum's plain-text 413.
@@ -677,13 +681,7 @@ pub async fn create_artifact(
 	// the bytes it got against, so one that cannot be checked against is
 	// refused rather than published.
 	// spec: ART#digests
-	let digest = args
-		.digest
-		.as_deref()
-		.map(str::trim)
-		.filter(|d| !d.is_empty())
-		.map(parse_sri)
-		.transpose()?;
+	let digest = parse_sri_opt(args.digest.as_deref())?;
 
 	// Where the artifact rests, and the refusal when it names neither place or
 	// both, is `Artifact::register`'s to settle.
@@ -736,7 +734,10 @@ pub struct UploadArtifactQuery {
 	path = "/upload_artifact",
 	tag = "versions",
 	security(("tailscale-admin" = [])),
-	params(UploadArtifactQuery),
+	params(
+		UploadArtifactQuery,
+		("x-canopy-upload" = String, Header, description = "Any value. Required: it makes a browser preflight the request, so a cross-origin page cannot spend an operator's session on this endpoint."),
+	),
 	request_body(content = Vec<u8>, content_type = "application/octet-stream", description = "The artifact's bytes."),
 	responses(
 		(status = 200, body = ArtifactData),
@@ -750,6 +751,17 @@ pub async fn upload_artifact(
 	headers: axum::http::HeaderMap,
 	body: Bytes,
 ) -> Result<Json<ArtifactData>> {
+	// Every other write here carries a JSON body, which is not a content type a
+	// form can send, so the browser preflights it and a cross-origin page never
+	// reaches it. This one takes raw bytes, so it asks for a header of its own
+	// to the same end: the operator's tailnet identity is supplied by the proxy,
+	// and a page they merely visited must not be able to spend it.
+	if !headers.contains_key(FETCH_HEADER) {
+		return Err(AppError::BadRequest(format!(
+			"an upload must carry the {FETCH_HEADER} header"
+		)));
+	}
+
 	let mut conn = state.db.get().await?;
 
 	if body.len() > MAX_HELD_ARTIFACT_BYTES {
@@ -788,7 +800,7 @@ pub async fn upload_artifact(
 			device_id: None,
 			version_range_pattern: None,
 			group_id: Some(named.group_id),
-			content: Some(body.to_vec()),
+			content: Some(Vec::from(body)),
 			content_type,
 			digest: Some(digest),
 			run_id: None,
