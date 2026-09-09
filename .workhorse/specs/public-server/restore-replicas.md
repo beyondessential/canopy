@@ -100,6 +100,7 @@ The recognised semantics are:
   `once` for such an intent is keyed to the snapshot and the target version together (see [Pre-upgrade migration testing](#pre-upgrade-migration-testing)).
 - **reporting-schema** — the intent builds a Tamanu reporting schema from the replica it restores and registers it as an artifact (see [RPT](reporting-schemas.md)).
   It carries `migrate` alongside, and its entries name the version of the pair of group and Tamanu version being built for, on a central server of the group, rather than the server's candidate.
+  Canopy dispatches a build only for a declaration an operator has marked as publishing its group's schema, and accepts a published schema only from one (see [RPT](reporting-schemas.md)).
   `once` for such an intent is keyed to the group and the version rather than the snapshot, so a newer snapshot does not rebuild a schema the pair already has, and a failed build settles the pair.
   A settled pair is reinstated when the version's artifacts change or an operator asks for the build (see [RPT](reporting-schemas.md)).
 - **redact** — the intent can de-identify the restored data before serving it.
@@ -129,6 +130,7 @@ Each declaration carries:
 - a human-readable **name**, distinct from every other declaration assigned to the same consumer;
 - **parameter values** for the intent's schema, defaulted where the schema provides one;
 - whether the replica **redacts**, offered only for an intent carrying `redact` (see [Redaction](#redaction));
+- whether the declaration **publishes its group's reporting schema**, offered only for a group-wide, non-redacting declaration of an intent carrying `reporting-schema` (see [RPT](reporting-schemas.md));
 - an **overdue bound**: the maximum time a replica may go without meeting its intent's health expectation before Canopy considers it overdue, interpreted per the intent's semantics (see [Alerting](#alerting));
 - whether the declaration is **enabled**.
 

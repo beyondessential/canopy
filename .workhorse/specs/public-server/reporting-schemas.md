@@ -21,7 +21,7 @@ A **schema builder** produces a reporting schema from a database Canopy has rest
 It is a restore consumer (see [RST](restore-replicas.md)): a build operates on a replica, so the builder is dispatched, credentialled, and reports over the replica pathways and authorisations, and it advertises an intent carrying `reporting-schema`.
 How the builder produces a schema is the builder's own.
 
-An **operator** declares which groups have a builder, reads which schema each application runs, and asks for the builds the derivation does not produce.
+An **operator** declares which groups have a builder, marks the declaration that publishes a group's schema, reads which schema each application runs, and asks for the builds the derivation does not produce.
 
 The **device of a machine a Tamanu application runs on** fetches the schema Canopy offers that application and applies it (see [DID](machine-identity.md)).
 
@@ -30,8 +30,8 @@ Canopy owns which pairs exist, the replica a build is given, the artifact that r
 ## Pairs
 
 A reporting schema is unique per pair of group and Tamanu version, and Canopy holds zero or one per pair.
-The pairs are, for each group covered by an enabled declaration of a `reporting-schema` intent, each version a Tamanu application of the group reports running and the version its open plan moves it to (see [UPG](../private-server/upgrade-plans.md)).
-That declaration is what covers a group: it names the group, is enabled or disabled, and is audited (see [RST](restore-replicas.md)).
+The pairs are, for each group covered by an enabled declaration marked as publishing its schema, each version a Tamanu application of the group reports running and the version its open plan moves it to (see [UPG](../private-server/upgrade-plans.md)).
+That declaration is what covers a group: it names the group, is enabled or disabled, carries the operator's mark, and is audited (see [RST](restore-replicas.md)).
 Only a published version is in a pair, since a version's migrations reach a builder as its published artifacts (see [ART](../platform/artifacts.md)) and an unpublished one has none.
 
 A pair with no schema is built, and a pair with one is settled.
@@ -51,7 +51,9 @@ The builder obtains read credentials for the restore per run as any consumer doe
 
 In the run it reports, the builder registers the **reporting schema** as an artifact of the exact version being built for, scoped to the group, of type `reporting-schema` on platform `any`, carrying a digest and the bytes themselves, which Canopy holds and serves (see [ART](../platform/artifacts.md)).
 It may register further artifacts beside the schema for the same version and group, under types of its choosing, which Canopy offers as it offers any artifact.
-The builder is authorised to register artifacts for a group its enabled `reporting-schema` declaration covers and for no other, and is the one device other than a releaser that registers artifacts (see [ART](../platform/artifacts.md)).
+The builder is authorised to register artifacts for a group whose enabled declaration an operator has marked as publishing its reporting schema, and for no other, and is the one device other than a releaser that registers artifacts (see [ART](../platform/artifacts.md)).
+The mark is the operator's alone, and is the whole of the authorisation: a consumer registers the set of semantics it advertises itself, so they shape what Canopy dispatches to it and grant it nothing, and what is published for a group is offered to every machine in it and applied.
+Only a group-wide, non-redacting declaration of an intent carrying `reporting-schema` can carry the mark, which is the same declaration a build is dispatched for, so Canopy asks for no build it would refuse the result of.
 
 A schema is published for the exact version and never for a range, since it follows from the migrations that version applies, and one built against a patch is not the schema another patch of the same minor describes.
 
