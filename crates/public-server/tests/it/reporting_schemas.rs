@@ -43,8 +43,8 @@ async fn seed(conn: &mut database::diesel_async::AsyncPgConnection, consumer: uu
 		         '[\"check\", \"once\", \"migrate\", \"reporting-schema\"]'::jsonb, '{{}}'::jsonb);
 
 		 INSERT INTO restore_replicas
-		   (consumer_device_id, group_id, type, intent, name, enabled)
-		 VALUES ('{consumer}', '{GROUP}', 'tamanu-postgres', 'schema-build', 'schemas', true)",
+		   (consumer_device_id, group_id, type, intent, name, enabled, publishes_schemas)
+		 VALUES ('{consumer}', '{GROUP}', 'tamanu-postgres', 'schema-build', 'schemas', true, true)",
 	))
 	.await
 	.expect("seed");
@@ -95,9 +95,9 @@ async fn a_second_declaration_dispatches_no_second_build() {
 
 			conn.batch_execute(&format!(
 				"INSERT INTO restore_replicas
-					(consumer_device_id, group_id, type, intent, name, enabled)
+					(consumer_device_id, group_id, type, intent, name, enabled, publishes_schemas)
 				 VALUES ('{device_id}', '{GROUP}', 'tamanu-postgres', 'schema-build',
-					'schemas-weekly', true)"
+					'schemas-weekly', true, true)"
 			))
 			.await
 			.expect("a second schema declaration");
@@ -493,6 +493,100 @@ async fn restoring_for_a_group_does_not_authorise_publishing_its_schema() {
 				.await;
 
 			assert_eq!(refused.status_code(), StatusCode::FORBIDDEN);
+		},
+	)
+	.await
+}
+
+/// A consumer registers its own capability set, so the semantics an intent
+/// carries are its own claim: a device declared for the group can put
+/// `reporting-schema` back on its intent in one request. What the operator set
+/// on the declaration is what decides, so the refusal stands.
+///
+/// spec: RPT#the-build-contract
+#[tokio::test(flavor = "multi_thread")]
+async fn a_consumer_cannot_advertise_itself_into_publishing() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+
+			// An operator has this consumer restoring for the group, and has
+			// not made it the group's publisher.
+			conn.batch_execute(&format!(
+				"UPDATE restore_replicas SET publishes_schemas = false
+				 WHERE consumer_device_id = '{device_id}'"
+			))
+			.await
+			.expect("the operator has not granted publishing");
+
+			let readvertised = public
+				.post("/restore-capabilities")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.json(&serde_json::json!({
+					"intents": [{
+						"intent": "schema-build",
+						"description": "builds schemas",
+						"semantics": ["check", "once", "migrate", "reporting-schema"],
+						"params": {},
+					}],
+				}))
+				.await;
+			assert_eq!(
+				readvertised.status_code(),
+				StatusCode::NO_CONTENT,
+				"a consumer may advertise what it likes"
+			);
+
+			let refused = public
+				.post(&format!(
+					"/artifacts/2.60.0/reporting-schema/any?group={GROUP}"
+				))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.add_header("content-type", "application/sql")
+				.text("CREATE VIEW ...")
+				.await;
+
+			assert_eq!(
+				refused.status_code(),
+				StatusCode::FORBIDDEN,
+				"advertising the semantic grants nothing"
+			);
+		},
+	)
+	.await
+}
+
+/// The flag is the operator's, and it is what the group's builds and the
+/// operator page follow: a declaration without it is dispatched no build, so
+/// Canopy never asks for one it would refuse to accept.
+///
+/// spec: RPT#the-build-contract
+#[tokio::test(flavor = "multi_thread")]
+async fn a_declaration_that_does_not_publish_is_dispatched_no_build() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+
+			conn.batch_execute(&format!(
+				"UPDATE restore_replicas SET publishes_schemas = false
+				 WHERE consumer_device_id = '{device_id}'"
+			))
+			.await
+			.expect("withdraw publishing");
+
+			let response = public
+				.get("/restore-worklist")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			response.assert_status_ok();
+			let entries: Vec<serde_json::Value> = response.json();
+
+			assert!(
+				!entries.iter().any(|e| e["intent"] == "schema-build"),
+				"no build is dispatched for it: {entries:?}"
+			);
 		},
 	)
 	.await

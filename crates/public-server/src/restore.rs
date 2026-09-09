@@ -315,6 +315,14 @@ async fn worklist(
 		// the version it is migrated to.
 		// spec: RPT#the-build-contract
 		if builds_schema {
+			// A build nobody may publish the result of is a restore and a
+			// migrate spent for nothing, so the operator's flag gates dispatch
+			// as well as publishing.
+			// spec: RPT#the-build-contract
+			if !d.publishes_schemas {
+				continue;
+			}
+
 			// Masking alters the configuration a schema follows from, so a
 			// redacting declaration builds nothing rather than building from a
 			// database that is no longer the group's.
