@@ -56,7 +56,7 @@ test.describe("group-scoped artifacts", () => {
 		// The group's artifact says whose it is and shows its digest rather
 		// than a location, because Canopy holds the bytes.
 		await expect(page.getByText("Held by Canopy for kamaka")).toBeVisible();
-		await expect(page.getByText(/^sha256:/)).toBeVisible();
+		await expect(page.getByText(/^sha256-/)).toBeVisible();
 
 		// The unscoped one still shows where it rests.
 		await expect(
@@ -199,16 +199,15 @@ test.describe("group-scoped artifacts", () => {
 			digest: string | null;
 			content: string | null;
 		}>(
-			`SELECT download_url, digest, encode(content, 'escape') AS content
+			`SELECT download_url, encode(digest, 'base64') AS digest,
+			        encode(content, 'escape') AS content
 			 FROM artifacts WHERE version_id = $1`,
 			[version.id],
 		);
 		expect(rows).toHaveLength(1);
 		expect(rows[0].download_url).toBeNull();
 		expect(rows[0].content).toBe("kamaka schema");
-		expect(rows[0].digest).toBe(
-			"sha256:214b3ad41c660e2837e03418fe87c70b1e82cc7c3531d78efeff9a3409ea91d9",
-		);
+		expect(rows[0].digest).toBe("IUs61BxmDig34DQY/ofHCx6CzHw1MdeO/v+aNAnqkdk=");
 	});
 
 	/// An artifact Canopy holds has no location to edit. Replacing its bytes is

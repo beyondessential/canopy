@@ -7,7 +7,7 @@ pub const OPENAPI_VERSION: &str = "1.0.0";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "302fb747c1d1c53a54f849123e5d0eeb6d7a2d3af2f8169b13f3789551db9142";
+pub const OPENAPI_BLAKE3: &str = "626c2115b5bedb1e43372e734c98bcbf018e1c8f5ccb81683f2d1b13c4ddcee1";
 
 /// Error types.
 pub mod error {
@@ -232,13 +232,14 @@ impl ::std::fmt::Display for ApplicationType {
         self.0.fmt(f)
     }
 }
-///An artifact as it is offered to a caller.
+/**A downloadable artifact belonging to a release version: an installer,
+package, or other file published for a given type and platform.*/
 ///
 /// <details><summary>JSON schema</summary>
 ///
 /// ```json
 ///{
-///  "description": "An artifact as it is offered to a caller.",
+///  "description": "A downloadable artifact belonging to a release version: an installer,\npackage, or other file published for a given type and platform.",
 ///  "type": "object",
 ///  "required": [
 ///    "artifact_type",
@@ -260,23 +261,15 @@ impl ::std::fmt::Display for ApplicationType {
 ///      "format": "uuid"
 ///    },
 ///    "digest": {
-///      "description": "Algorithm-prefixed digest of the artifact's bytes, e.g.\n`sha256:2cf24dba…`, where one was recorded.",
+///      "description": "Subresource Integrity digest of the artifact's bytes, e.g.\n`sha256-LCTbqp…`, where one was recorded.",
 ///      "type": [
 ///        "string",
 ///        "null"
 ///      ]
 ///    },
 ///    "download_url": {
-///      "description": "URL the artifact can be downloaded from. For an artifact whose bytes\nCanopy holds, this is Canopy's own download endpoint for it.",
+///      "description": "URL the artifact can be downloaded from.",
 ///      "type": "string"
-///    },
-///    "group_id": {
-///      "description": "The group this artifact is for. `null` for an artifact that is for\nevery group.",
-///      "type": [
-///        "string",
-///        "null"
-///      ],
-///      "format": "uuid"
 ///    },
 ///    "id": {
 ///      "description": "Unique identifier of the artifact.",
@@ -316,17 +309,12 @@ pub struct Artifact {
 releaser device rather than created by an operator.*/
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub device_id: ::std::option::Option<::uuid::Uuid>,
-    /**Algorithm-prefixed digest of the artifact's bytes, e.g.
-`sha256:2cf24dba…`, where one was recorded.*/
+    /**Subresource Integrity digest of the artifact's bytes, e.g.
+`sha256-LCTbqp…`, where one was recorded.*/
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub digest: ::std::option::Option<::std::string::String>,
-    /**URL the artifact can be downloaded from. For an artifact whose bytes
-Canopy holds, this is Canopy's own download endpoint for it.*/
+    ///URL the artifact can be downloaded from.
     pub download_url: ::std::string::String,
-    /**The group this artifact is for. `null` for an artifact that is for
-every group.*/
-    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
-    pub group_id: ::std::option::Option<::uuid::Uuid>,
     ///Unique identifier of the artifact.
     pub id: ::uuid::Uuid,
     ///The platform the artifact targets (e.g. an OS or architecture name).

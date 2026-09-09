@@ -4,7 +4,7 @@
 
 use commons_tests::db::TestDb;
 use database::{
-	artifacts::{Artifact, NewArtifact, Scope, digest_of},
+	artifacts::{Artifact, NewArtifact, Scope, digest_of, parse_sri, sri},
 	diesel_async::AsyncPgConnection,
 };
 use diesel_async::{RunQueryDsl, SimpleAsyncConnection};
@@ -267,15 +267,33 @@ async fn the_operator_view_marks_every_group_s_own_as_offered() {
 	.await;
 }
 
-/// The digest is a prefixed sha256 of the bytes. Pinned against a known answer
-/// rather than against `digest_of` of the same input, which would hold just as
-/// well if the function returned a constant.
+/// The digest is a sha256 of the bytes, carried as Subresource Integrity writes
+/// it. Pinned against a known answer rather than against `digest_of` of the
+/// same input, which would hold just as well if the function returned a
+/// constant.
+// spec: ART#digests
 #[test]
-fn the_digest_is_a_prefixed_sha256() {
+fn the_digest_is_a_sha256_in_sri_form() {
 	assert_eq!(
-		digest_of(b""),
-		"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+		sri(&digest_of(b"")),
+		"sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
 	);
+	assert_eq!(
+		parse_sri("sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=").unwrap(),
+		digest_of(b"")
+	);
+
+	// A value nothing can check the bytes against is refused rather than
+	// recorded as though they had been.
+	for claimed in [
+		"",
+		"sha256:abcd",
+		"notadigest",
+		"sha256-abcd",
+		"sha512-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
+	] {
+		assert!(parse_sri(claimed).is_err(), "{claimed:?} is not a digest");
+	}
 }
 
 /// A range artifact registered twice replaces itself. Before the identity

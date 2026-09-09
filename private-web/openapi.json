@@ -7866,6 +7866,16 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -8220,6 +8230,108 @@
         "responses": {
           "200": {
             "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/versions/upload_artifact": {
+      "post": {
+        "tags": [
+          "versions"
+        ],
+        "summary": "Register an artifact whose bytes Canopy holds, for one group.",
+        "description": "The body is the artifact itself and its `Content-Type` is what the bytes\nare served back as. Returns the created artifact.",
+        "operationId": "upload_artifact",
+        "parameters": [
+          {
+            "name": "version_id",
+            "in": "query",
+            "description": "Id of the version to attach the new artifact to.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "artifact_type",
+            "in": "query",
+            "description": "Artifact type.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "platform",
+            "in": "query",
+            "description": "Target platform.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group_id",
+            "in": "query",
+            "description": "The group this artifact is for.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "description": "Subresource Integrity digest of the body, e.g. `sha256-LCTbqp…`.\nCanopy checks the bytes against it as they arrive and refuses the\nregistration on a mismatch, so a corrupted upload is refused while\nwhoever sent it is still there to send it again.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The artifact's bytes.",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactData"
+                }
+              }
+            }
           },
           "400": {
             "description": "",
@@ -8665,7 +8777,7 @@
               "string",
               "null"
             ],
-            "description": "Algorithm-prefixed digest recorded for the artifact, where there is one."
+            "description": "Subresource Integrity digest recorded for the artifact, where there is\none."
           },
           "download_url": {
             "type": [
@@ -9983,52 +10095,28 @@
       },
       "CreateArtifactArgs": {
         "type": "object",
-        "description": "A new artifact to register against a version.",
+        "description": "A new artifact to register against a version, at a location Canopy records.\n\nAn artifact whose bytes Canopy holds is registered through\n`upload_artifact` instead, since the bytes are the body there.",
         "required": [
           "version_id",
           "artifact_type",
-          "platform"
+          "platform",
+          "download_url"
         ],
         "properties": {
           "artifact_type": {
             "type": "string",
             "description": "Artifact type."
           },
-          "content_base64": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The artifact's bytes, base64-encoded. Required when a group is named."
-          },
-          "content_type": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Media type of those bytes."
-          },
           "digest": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Algorithm-prefixed digest of those bytes, e.g. `sha256:2cf24dba…`.\nRequired when a group is named: Canopy checks the bytes against it as\nthey arrive and refuses the registration on a mismatch, so a corrupted\nupload is refused while whoever sent it is still there to send it again."
+            "description": "Subresource Integrity digest of the bytes at that URL, e.g.\n`sha256-LCTbqp…`, where one is recorded. Whoever fetches the artifact\nchecks what it got against this."
           },
           "download_url": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Download URL, for an artifact Canopy records a location for."
-          },
-          "group_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The group this artifact is for. Naming one makes Canopy hold the bytes."
+            "type": "string",
+            "description": "URL the artifact is downloaded from."
           },
           "platform": {
             "type": "string",

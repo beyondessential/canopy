@@ -152,7 +152,7 @@
           {
             "name": "digest",
             "in": "query",
-            "description": "Algorithm-prefixed digest of the bytes at the URL, e.g. `sha256:2cf24dba…`. Whoever fetches the artifact checks what it got against this; an artifact registered without one is fetched unchecked.",
+            "description": "Subresource Integrity digest of the bytes at the URL, e.g. `sha256-LCTbqp…`. Whoever fetches the artifact checks what it got against this; an artifact registered without one is fetched unchecked.",
             "required": false,
             "schema": {
               "type": "string"
@@ -1686,7 +1686,7 @@
       },
       "Artifact": {
         "type": "object",
-        "description": "An artifact as it is offered to a caller.",
+        "description": "A downloadable artifact belonging to a release version: an installer,\npackage, or other file published for a given type and platform.",
         "required": [
           "id",
           "artifact_type",
@@ -1711,19 +1711,11 @@
               "string",
               "null"
             ],
-            "description": "Algorithm-prefixed digest of the artifact's bytes, e.g.\n`sha256:2cf24dba…`, where one was recorded."
+            "description": "Subresource Integrity digest of the artifact's bytes, e.g.\n`sha256-LCTbqp…`, where one was recorded."
           },
           "download_url": {
             "type": "string",
-            "description": "URL the artifact can be downloaded from. For an artifact whose bytes\nCanopy holds, this is Canopy's own download endpoint for it."
-          },
-          "group_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The group this artifact is for. `null` for an artifact that is for\nevery group."
+            "description": "URL the artifact can be downloaded from."
           },
           "id": {
             "type": "string",

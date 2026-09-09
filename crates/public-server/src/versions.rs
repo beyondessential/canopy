@@ -682,8 +682,7 @@ async fn download_artifact(
 		.ok_or(AppError::ArtifactNotFound)?;
 
 	if let Some(held) = ArtifactRow::content_for(&mut db, artifact.id).await? {
-		let recomputed = database::artifacts::digest_of(&held.bytes);
-		if recomputed != held.digest {
+		if database::artifacts::digest_of(&held.bytes) != held.digest {
 			tracing::error!(
 				artifact = %artifact.id,
 				"held artifact does not match its digest; refusing to serve"

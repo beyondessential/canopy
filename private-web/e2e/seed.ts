@@ -1054,7 +1054,7 @@ export async function seedArtifact(
 	const scoped = opts.groupId != null;
 	const content = opts.content ?? "held bytes";
 	const digest = scoped
-		? `sha256:${createHash("sha256").update(content).digest("hex")}`
+		? createHash("sha256").update(content).digest()
 		: null;
 
 	await sql.query(

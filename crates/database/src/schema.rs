@@ -101,7 +101,7 @@ diesel::table! {
 		group_id -> Nullable<Uuid>,
 		content -> Nullable<Bytea>,
 		content_type -> Nullable<Text>,
-		digest -> Nullable<Text>,
+		digest -> Nullable<Bytea>,
 		run_id -> Nullable<Uuid>,
 	}
 }

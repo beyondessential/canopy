@@ -8,7 +8,7 @@ use commons_servers::device_auth::{AuthDevice, ReleaserDevice};
 use commons_types::version::{VersionStatus, VersionStr};
 use database::{
 	Db,
-	artifacts::{Artifact as ArtifactRow, NewArtifact, Scope},
+	artifacts::{Artifact as ArtifactRow, NewArtifact, Scope, parse_sri, sri},
 	machines::Machine,
 	versions::{NewVersion, Version},
 };
@@ -19,7 +19,8 @@ use uuid::Uuid;
 
 use crate::state::AppState;
 
-/// An artifact as it is offered to a caller.
+/// A downloadable artifact belonging to a release version: an installer,
+/// package, or other file published for a given type and platform.
 #[derive(Debug, Clone, Serialize, serde::Deserialize, utoipa::ToSchema)]
 pub struct Artifact {
 	/// Unique identifier of the artifact.
@@ -32,8 +33,7 @@ pub struct Artifact {
 	pub artifact_type: String,
 	/// The platform the artifact targets (e.g. an OS or architecture name).
 	pub platform: String,
-	/// URL the artifact can be downloaded from. For an artifact whose bytes
-	/// Canopy holds, this is Canopy's own download endpoint for it.
+	/// URL the artifact can be downloaded from.
 	pub download_url: String,
 	/// The device that registered this artifact, if it was registered by a
 	/// releaser device rather than created by an operator.
@@ -42,11 +42,8 @@ pub struct Artifact {
 	/// shared across a range of versions rather than pinned to one. `null`
 	/// for exact-version artifacts.
 	pub version_range_pattern: Option<String>,
-	/// The group this artifact is for. `null` for an artifact that is for
-	/// every group.
-	pub group_id: Option<Uuid>,
-	/// Algorithm-prefixed digest of the artifact's bytes, e.g.
-	/// `sha256:2cf24dba…`, where one was recorded.
+	/// Subresource Integrity digest of the artifact's bytes, e.g.
+	/// `sha256-LCTbqp…`, where one was recorded.
 	pub digest: Option<String>,
 }
 
@@ -71,8 +68,7 @@ impl Artifact {
 			download_url,
 			device_id: row.device_id,
 			version_range_pattern: row.version_range_pattern,
-			group_id: row.group_id,
-			digest: row.digest,
+			digest: row.digest.as_deref().map(sri),
 		}
 	}
 }
@@ -128,7 +124,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		("artifact_type" = String, Path),
 		("platform" = String, Path),
 		("group" = Option<Uuid>, Query, description = "Group the artifact is for. A releaser credential carries no authorisation for any group, so naming one here is refused."),
-		("digest" = Option<String>, Query, description = "Algorithm-prefixed digest of the bytes at the URL, e.g. `sha256:2cf24dba…`. Whoever fetches the artifact checks what it got against this; an artifact registered without one is fetched unchecked."),
+		("digest" = Option<String>, Query, description = "Subresource Integrity digest of the bytes at the URL, e.g. `sha256-LCTbqp…`. Whoever fetches the artifact checks what it got against this; an artifact registered without one is fetched unchecked."),
 	),
 	request_body(content = String, description = "Download URL for the artifact, as a plain-text body."),
 	responses(
@@ -172,7 +168,11 @@ async fn create(
 	// A blank digest is no digest: recorded, it says the bytes were checked
 	// against something when nothing was.
 	// spec: ART#digests
-	let digest = named.digest.filter(|d| !d.trim().is_empty());
+	let digest = named
+		.digest
+		.filter(|d| !d.trim().is_empty())
+		.map(|d| parse_sri(&d))
+		.transpose()?;
 
 	let mut db = db.get().await?;
 	let device_id = device.0.0.id;
@@ -238,9 +238,10 @@ async fn create(
 struct RegisterQuery {
 	/// The group the artifact is for, where it names one.
 	group: Option<Uuid>,
-	/// The digest whoever registers it records, where they record one. An
-	/// unscoped artifact is fetched from its location by the caller rather
-	/// than by Canopy, so this is what that caller checks against.
+	/// The Subresource Integrity digest whoever registers it records, where
+	/// they record one. An unscoped artifact is fetched from its location by
+	/// the caller rather than by Canopy, so this is what that caller checks
+	/// against.
 	// spec: ART#digests
 	digest: Option<String>,
 }

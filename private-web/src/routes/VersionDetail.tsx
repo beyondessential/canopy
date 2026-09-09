@@ -33,7 +33,7 @@ import { useParams } from "react-router-dom";
 import Markdown from "../components/Markdown";
 import TimeAgo from "../components/TimeAgo";
 import VersionStatusChip from "../components/VersionStatusChip";
-import { useApi, useApiAction } from "../api";
+import { useApi, useApiAction, useApiUpload } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { prettifyVersionRange } from "../lib/versionRange";
@@ -649,25 +649,13 @@ function EditArtifactRow({
 	);
 }
 
-/// Canopy holds a group-scoped artifact's bytes, and the API takes them in the
-/// JSON body, so the file is read here rather than posted as a multipart form.
-/// The digest goes with them: Canopy checks the bytes it received against it and
-/// refuses the registration on a mismatch.
-async function readFile(file: File): Promise<{ base64: string; digest: string }> {
-	const buffer = await file.arrayBuffer();
-	const bytes = new Uint8Array(buffer);
-
-	const chunks: string[] = [];
-	for (let i = 0; i < bytes.length; i += 0x8000) {
-		chunks.push(String.fromCharCode(...bytes.subarray(i, i + 0x8000)));
-	}
-
-	const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", buffer));
-	const hex = Array.from(hash)
-		.map((b) => b.toString(16).padStart(2, "0"))
-		.join("");
-
-	return { base64: btoa(chunks.join("")), digest: `sha256:${hex}` };
+/// The digest travels with the bytes: Canopy checks what it received against
+/// it and refuses the registration on a mismatch.
+async function digestOf(file: File): Promise<string> {
+	const hash = new Uint8Array(
+		await crypto.subtle.digest("SHA-256", await file.arrayBuffer()),
+	);
+	return `sha256-${btoa(String.fromCharCode(...hash))}`;
 }
 
 const MAX_HELD_ARTIFACT_BYTES = 32 * 1024 * 1024;
@@ -686,25 +674,35 @@ function CreateArtifactForm({
 	const [groupId, setGroupId] = useState("");
 	const [file, setFile] = useState<File | null>(null);
 	const [fileError, setFileError] = useState<string | null>(null);
-	const action = useApiAction("versions", "create_artifact");
+	const create = useApiAction("versions", "create_artifact");
+	const upload = useApiUpload("versions", "upload_artifact");
 	const groups = useApi("fleet/groups", "list", {}, []);
 
 	const scoped = groupId !== "";
+	const action = scoped ? upload : create;
 
 	const submit = async (e: React.FormEvent) => {
 		e.preventDefault();
 		try {
-			const contents = scoped && file ? await readFile(file) : null;
-			await action.call({
-				version_id: versionId,
-				artifact_type: type,
-				platform,
-				download_url: scoped ? null : url,
-				group_id: scoped ? groupId : null,
-				content_base64: contents?.base64 ?? null,
-				content_type: contents ? file?.type || null : null,
-				digest: contents?.digest ?? null,
-			});
+			if (scoped && file) {
+				await upload.call(
+					{
+						version_id: versionId,
+						artifact_type: type,
+						platform,
+						group_id: groupId,
+						digest: await digestOf(file),
+					},
+					file,
+				);
+			} else {
+				await create.call({
+					version_id: versionId,
+					artifact_type: type,
+					platform,
+					download_url: url,
+				});
+			}
 			setType("");
 			setPlatform("");
 			setUrl("");

@@ -4198,6 +4198,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/versions/upload_artifact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register an artifact whose bytes Canopy holds, for one group.
+         * @description The body is the artifact itself and its `Content-Type` is what the bytes
+         *     are served back as. Returns the created artifact.
+         */
+        post: operations["upload_artifact"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4467,7 +4488,10 @@ export interface components {
             artifact_type: string;
             /** @description `true` when Canopy holds this artifact's bytes rather than a location. */
             canopy_holds_bytes: boolean;
-            /** @description Algorithm-prefixed digest recorded for the artifact, where there is one. */
+            /**
+             * @description Subresource Integrity digest recorded for the artifact, where there is
+             *     one.
+             */
             digest?: string | null;
             /**
              * @description URL clients use to download this artifact. `null` when Canopy holds
@@ -5368,28 +5392,23 @@ export interface components {
             /** @description The rolled-up health over these checks, by the one classifier. */
             health_state: components["schemas"]["HealthState"];
         };
-        /** @description A new artifact to register against a version. */
+        /**
+         * @description A new artifact to register against a version, at a location Canopy records.
+         *
+         *     An artifact whose bytes Canopy holds is registered through
+         *     `upload_artifact` instead, since the bytes are the body there.
+         */
         CreateArtifactArgs: {
             /** @description Artifact type. */
             artifact_type: string;
-            /** @description The artifact's bytes, base64-encoded. Required when a group is named. */
-            content_base64?: string | null;
-            /** @description Media type of those bytes. */
-            content_type?: string | null;
             /**
-             * @description Algorithm-prefixed digest of those bytes, e.g. `sha256:2cf24dba…`.
-             *     Required when a group is named: Canopy checks the bytes against it as
-             *     they arrive and refuses the registration on a mismatch, so a corrupted
-             *     upload is refused while whoever sent it is still there to send it again.
+             * @description Subresource Integrity digest of the bytes at that URL, e.g.
+             *     `sha256-LCTbqp…`, where one is recorded. Whoever fetches the artifact
+             *     checks what it got against this.
              */
             digest?: string | null;
-            /** @description Download URL, for an artifact Canopy records a location for. */
-            download_url?: string | null;
-            /**
-             * Format: uuid
-             * @description The group this artifact is for. Naming one makes Canopy hold the bytes.
-             */
-            group_id?: string | null;
+            /** @description URL the artifact is downloaded from. */
+            download_url: string;
             /** @description Target platform. */
             platform: string;
             /**
@@ -15958,6 +15977,14 @@ export interface operations {
                     "application/json": components["schemas"]["ArtifactData"];
                 };
             };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
         };
     };
     delete_artifact: {
@@ -16200,6 +16227,54 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    upload_artifact: {
+        parameters: {
+            query: {
+                /** @description Id of the version to attach the new artifact to. */
+                version_id: string;
+                /** @description Artifact type. */
+                artifact_type: string;
+                /** @description Target platform. */
+                platform: string;
+                /** @description The group this artifact is for. */
+                group_id: string;
+                /**
+                 * @description Subresource Integrity digest of the body, e.g. `sha256-LCTbqp…`.
+                 *     Canopy checks the bytes against it as they arrive and refuses the
+                 *     registration on a mismatch, so a corrupted upload is refused while
+                 *     whoever sent it is still there to send it again.
+                 */
+                digest: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description The artifact's bytes. */
+        requestBody: {
+            content: {
+                "application/octet-stream": number[];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArtifactData"];
+                };
             };
             400: {
                 headers: {
