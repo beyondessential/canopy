@@ -94,6 +94,12 @@ pub struct RestoreReplicaView {
 	/// True when the intent carries the `redact` semantic, so the declaration
 	/// can be switched to redacting.
 	pub can_redact: bool,
+	/// Whether this declaration's consumer may publish the group's reporting
+	/// schema. Only an operator sets it.
+	pub publishes_schemas: bool,
+	/// True when the intent carries the `reporting-schema` semantic, so the
+	/// declaration can be made the group's publisher.
+	pub can_publish_schemas: bool,
 	/// Servers this declaration covers that cannot currently be redacted:
 	/// either their product publishes no masking manifest, or the version
 	/// they report has none published. Each is withheld from the worklist
@@ -191,6 +197,12 @@ pub struct RestoreReplicasCreateArgs {
 	/// to set. Defaults to false.
 	#[serde(default)]
 	pub redacts: bool,
+	/// Whether this consumer may publish the group's reporting schema.
+	/// Accepted only for a group-wide, non-redacting declaration whose intent
+	/// carries the `reporting-schema` semantic. Defaults to false, so a
+	/// consumer publishes only where an operator has said it may.
+	#[serde(default)]
+	pub publishes_schemas: bool,
 }
 
 /// Request to update an existing declaration.
@@ -236,6 +248,11 @@ pub struct RestoreReplicasUpdateArgs {
 	/// intent carrying the `redact` semantic. Defaults to false.
 	#[serde(default)]
 	pub redacts: bool,
+	/// Whether this consumer may publish the group's reporting schema.
+	/// Accepted only for a group-wide, non-redacting declaration whose intent
+	/// carries the `reporting-schema` semantic. Defaults to false.
+	#[serde(default)]
+	pub publishes_schemas: bool,
 	/// Whether the declaration should be active.
 	pub enabled: bool,
 }
@@ -262,15 +279,18 @@ fn overdue_after_to_pg(overdue_after: Option<&str>) -> Result<Option<PgDuration>
 }
 
 /// Resolve human-unit strings in operator-supplied parameter values to their
-/// raw stored form and validate them against the consumer's advertised schema
-/// for `intent`. If the intent is not advertised (a gap) there is no schema to
-/// resolve or check against, so the values are accepted as-is.
+/// raw stored form, validate them against the consumer's advertised schema for
+/// `intent`, and refuse a flag the declaration cannot carry. If the intent is
+/// not advertised (a gap) there is no schema to resolve or check against, so
+/// the values are accepted as-is.
 async fn normalized_params_for_intent(
 	conn: &mut AsyncPgConnection,
 	consumer_device_id: Uuid,
 	intent: &RestoreIntent,
 	params: &ParamValues,
 	redacts: bool,
+	publishes_schemas: bool,
+	machine_id: Option<Uuid>,
 ) -> Result<ParamValues> {
 	let descriptors =
 		RestoreConsumerCapability::list_for_consumer(conn, consumer_device_id).await?;
@@ -288,6 +308,28 @@ async fn normalized_params_for_intent(
 		return Err(AppError::BadRequest(format!(
 			"intent {intent} cannot redact: it does not carry the `redact` semantic"
 		)));
+	}
+
+	// A schema is built per group from its canonical central, from data the
+	// masking manifest has not altered, so a declaration Canopy would never
+	// dispatch a build to cannot be the group's publisher either.
+	// spec: RPT#the-build-contract
+	if publishes_schemas {
+		if !desc.has_semantic(semantics::REPORTING_SCHEMA) {
+			return Err(AppError::BadRequest(format!(
+				"intent {intent} cannot publish a reporting schema: it does not carry the `reporting-schema` semantic"
+			)));
+		}
+		if redacts {
+			return Err(AppError::BadRequest(
+				"a redacting declaration cannot publish a reporting schema".into(),
+			));
+		}
+		if machine_id.is_some() {
+			return Err(AppError::BadRequest(
+				"a machine-scoped declaration cannot publish a reporting schema: a build is per group".into(),
+			));
+		}
 	}
 	let params = if owns_masking {
 		&params
@@ -393,6 +435,11 @@ async fn to_views(
 					.get(&r.consumer_device_id)
 					.and_then(|descs| descs.iter().find(|d| d.intent == r.intent))
 					.is_some_and(|d| d.has_semantic(semantics::REDACT)),
+				can_publish_schemas: caps
+					.get(&r.consumer_device_id)
+					.and_then(|descs| descs.iter().find(|d| d.intent == r.intent))
+					.is_some_and(|d| d.has_semantic(semantics::REPORTING_SCHEMA)),
+				publishes_schemas: r.publishes_schemas,
 				redacts: r.redacts,
 				redaction_gaps: gaps.remove(&r.id).unwrap_or_default(),
 				consumer_name: names.get(&r.consumer_device_id).cloned().flatten(),
@@ -737,6 +784,8 @@ pub async fn create(
 		&args.intent,
 		&args.params,
 		args.redacts,
+		args.publishes_schemas,
+		args.machine_id,
 	)
 	.await?;
 	let replica = RestoreReplica::create(
@@ -751,6 +800,7 @@ pub async fn create(
 			overdue_after: overdue_after_to_pg(args.overdue_after.as_deref())?,
 			params: serde_json::to_value(&params).expect("params serialize"),
 			redacts: args.redacts,
+			publishes_schemas: args.publishes_schemas,
 			created_by: Some(admin.login),
 		},
 	)
@@ -803,6 +853,8 @@ pub async fn update(
 		&args.intent,
 		&args.params,
 		args.redacts,
+		args.publishes_schemas,
+		args.machine_id,
 	)
 	.await?;
 	let replica = RestoreReplica::update(
@@ -818,6 +870,7 @@ pub async fn update(
 			overdue_after: overdue_after_to_pg(args.overdue_after.as_deref())?,
 			params: serde_json::to_value(&params).expect("params serialize"),
 			redacts: args.redacts,
+			publishes_schemas: args.publishes_schemas,
 			enabled: args.enabled,
 		},
 	)

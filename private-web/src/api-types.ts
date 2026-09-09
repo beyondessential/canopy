@@ -8773,6 +8773,11 @@ export interface components {
          */
         RestoreReplicaView: {
             /**
+             * @description True when the intent carries the `reporting-schema` semantic, so the
+             *     declaration can be made the group's publisher.
+             */
+            can_publish_schemas: boolean;
+            /**
              * @description True when the intent carries the `redact` semantic, so the declaration
              *     can be switched to redacting.
              */
@@ -8837,6 +8842,11 @@ export interface components {
              */
             params: Record<string, never>;
             /**
+             * @description Whether this declaration's consumer may publish the group's reporting
+             *     schema. Only an operator sets it.
+             */
+            publishes_schemas: boolean;
+            /**
              * @description Servers this declaration covers that cannot currently be redacted:
              *     either their product publishes no masking manifest, or the version
              *     they report has none published. Each is withheld from the worklist
@@ -8895,6 +8905,13 @@ export interface components {
              *     as raw integer seconds/bytes. Defaults to empty.
              */
             params?: Record<string, never>;
+            /**
+             * @description Whether this consumer may publish the group's reporting schema.
+             *     Accepted only for a group-wide, non-redacting declaration whose intent
+             *     carries the `reporting-schema` semantic. Defaults to false, so a
+             *     consumer publishes only where an operator has said it may.
+             */
+            publishes_schemas?: boolean;
             /**
              * @description Whether the replica is served de-identified. Accepted only for an
              *     intent carrying the `redact` semantic; Canopy resolves the masking
@@ -8969,6 +8986,12 @@ export interface components {
              *     seconds/bytes. Defaults to empty.
              */
             params?: Record<string, never>;
+            /**
+             * @description Whether this consumer may publish the group's reporting schema.
+             *     Accepted only for a group-wide, non-redacting declaration whose intent
+             *     carries the `reporting-schema` semantic. Defaults to false.
+             */
+            publishes_schemas?: boolean;
             /**
              * @description Whether the replica is served de-identified. Accepted only for an
              *     intent carrying the `redact` semantic. Defaults to false.

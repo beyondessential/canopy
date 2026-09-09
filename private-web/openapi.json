@@ -15415,6 +15415,8 @@
           "params",
           "redacts",
           "can_redact",
+          "publishes_schemas",
+          "can_publish_schemas",
           "redaction_gaps",
           "enabled",
           "gap",
@@ -15422,6 +15424,10 @@
           "updated_at"
         ],
         "properties": {
+          "can_publish_schemas": {
+            "type": "boolean",
+            "description": "True when the intent carries the `reporting-schema` semantic, so the\ndeclaration can be made the group's publisher."
+          },
           "can_redact": {
             "type": "boolean",
             "description": "True when the intent carries the `redact` semantic, so the declaration\ncan be switched to redacting."
@@ -15494,6 +15500,10 @@
             "type": "object",
             "description": "Operator-supplied parameter values (name → value). Values of\n`duration` and `bytes` parameters are formatted as human-friendly\nstrings (e.g. `2h 30m`, `20Gi`) when the intent's schema is known;\n`create` and `update` accept these strings back."
           },
+          "publishes_schemas": {
+            "type": "boolean",
+            "description": "Whether this declaration's consumer may publish the group's reporting\nschema. Only an operator sets it."
+          },
           "redaction_gaps": {
             "type": "array",
             "items": {
@@ -15562,6 +15572,10 @@
           "params": {
             "type": "object",
             "description": "Parameter values for the intent (name → value), validated against the\nconsumer's advertised parameter schema. `duration` and `bytes`\nparameters accept human-unit strings (e.g. `2h 30m`, `20Gi`) as well\nas raw integer seconds/bytes. Defaults to empty."
+          },
+          "publishes_schemas": {
+            "type": "boolean",
+            "description": "Whether this consumer may publish the group's reporting schema.\nAccepted only for a group-wide, non-redacting declaration whose intent\ncarries the `reporting-schema` semantic. Defaults to false, so a\nconsumer publishes only where an operator has said it may."
           },
           "redacts": {
             "type": "boolean",
@@ -15645,6 +15659,10 @@
           "params": {
             "type": "object",
             "description": "New parameter values (name → value), validated against the intent's\nadvertised parameter schema. `duration` and `bytes` parameters accept\nhuman-unit strings (e.g. `2h 30m`, `20Gi`) as well as raw integer\nseconds/bytes. Defaults to empty."
+          },
+          "publishes_schemas": {
+            "type": "boolean",
+            "description": "Whether this consumer may publish the group's reporting schema.\nAccepted only for a group-wide, non-redacting declaration whose intent\ncarries the `reporting-schema` semantic. Defaults to false."
           },
           "redacts": {
             "type": "boolean",
