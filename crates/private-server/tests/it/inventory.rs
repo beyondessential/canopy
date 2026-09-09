@@ -730,6 +730,15 @@ async fn declare_machine_window(
 	.expect("declare window");
 }
 
+async fn amend_window(conn: &mut AsyncPgConnection, group: Uuid, amended_by: &str) {
+	conn.batch_execute(&format!(
+		"UPDATE maintenance_windows SET amended_by = '{amended_by}', amended_at = NOW()
+		 WHERE server_group_id = '{group}' AND ended_at IS NULL"
+	))
+	.await
+	.expect("amend window");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_a_lease_under_a_window_someone_else_declared() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
@@ -769,6 +778,69 @@ async fn takes_a_lease_under_the_readers_own_window() {
 			.json(&json!({ "server_group_id": group }))
 			.await
 			.assert_status_ok();
+	})
+	.await
+}
+
+/// A second operator declaring over an open window amends it rather than
+/// opening one of their own, so the amendment is their declaration of the same
+/// work and the environment is theirs to run on.
+#[tokio::test(flavor = "multi_thread")]
+async fn takes_a_lease_under_a_window_the_reader_amended() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		declare_group_window(
+			&mut conn,
+			group,
+			"someone.else@bes.au",
+			"NOW() + INTERVAL '2 hours'",
+		)
+		.await;
+		amend_window(&mut conn, group, ME).await;
+
+		let state = read_run_state(&private, group).await;
+		assert_eq!(state["window"]["amended_by"], ME);
+		assert_eq!(state["refuses"], false);
+
+		private
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "server_group_id": group }))
+			.await
+			.assert_status_ok();
+	})
+	.await
+}
+
+/// The amendment that stands is the one that speaks for the window, so an
+/// operator it does not belong to is refused and told who to wait for.
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_a_lease_under_a_window_someone_else_amended() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		declare_group_window(
+			&mut conn,
+			group,
+			"someone.else@bes.au",
+			"NOW() + INTERVAL '2 hours'",
+		)
+		.await;
+		amend_window(&mut conn, group, "third.party@bes.au").await;
+
+		let state = read_run_state(&private, group).await;
+		assert_eq!(state["refuses"], true);
+
+		let response = private
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "server_group_id": group }))
+			.await;
+		response.assert_status(axum::http::StatusCode::CONFLICT);
+		let detail = response.json::<Value>()["detail"]
+			.as_str()
+			.expect("detail")
+			.to_owned();
+		assert!(detail.contains("third.party@bes.au"), "{detail}");
 	})
 	.await
 }

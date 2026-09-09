@@ -675,8 +675,8 @@ pub async fn for_group(
 }
 
 /// The window a take is refused for: one holding over the environment that
-/// somebody other than the caller declared. The group page and the refusal
-/// read the same windows the same way, so they cannot disagree.
+/// belongs to somebody else. The group page and the refusal read the same
+/// windows the same way, so they cannot disagree.
 fn refusing_window<'a>(
 	windows: &'a [MaintenanceWindow],
 	login: &str,
@@ -688,7 +688,17 @@ fn refusing_window<'a>(
 				.declared_by
 				.as_deref()
 				.is_some_and(|who| who != login)
+			&& window.amended_by.as_deref() != Some(login)
 	})
+}
+
+/// The operator a window belongs to: an amendment declares the same work, so
+/// the one that stands speaks for the window over the original declaration.
+fn window_operator(window: &MaintenanceWindow) -> Option<&str> {
+	window
+		.amended_by
+		.as_deref()
+		.or(window.declared_by.as_deref())
 }
 
 /// Two machines at one address would have a run configure one box twice and
@@ -808,7 +818,7 @@ fn under_maintenance(
 	machines: &[Machine],
 	window: &MaintenanceWindow,
 ) -> String {
-	let who = window.declared_by.as_deref().unwrap_or("an operator");
+	let who = window_operator(window).unwrap_or("an operator");
 	let note = window
 		.note
 		.as_deref()

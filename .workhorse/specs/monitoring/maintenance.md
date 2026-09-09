@@ -29,6 +29,7 @@ A group's window covers the group's own checks and those of every machine in it,
 A machine covered by its own window and by its group's stays suspended until the last of them has ended.
 
 A target has at most one open window: declaring over one that already has a window amends it, recording who amended and when.
+The window is then the amender's work as well as the declarer's, which decides who may run against it (see [INV](../private-server/inventory.md), "Work under way").
 
 Canopy never opens a window by itself.
 A group with an open upgrade plan is offered the declaration from that plan, prefilled with its window and note, so declaring is one action at the moment the work starts (see [UPG](../private-server/upgrade-plans.md)).
@@ -46,7 +47,7 @@ Where that close is notified, the notice says maintenance was declared, so a rea
 
 Canopy-wide checks are Canopy monitoring its own operation, and are never suspended by a window over a machine or a group (see [SELF](../private-server/self-alerts.md)).
 
-A window also holds off configuration runs by others: while it holds, no one but the operator who declared it can take a run lease on an environment it covers (see [INV](../private-server/inventory.md), "Work under way").
+A window also holds off configuration runs by others: while it holds, no one but the operator who declared it, or the one whose amendment of it stands, can take a run lease on an environment it covers (see [INV](../private-server/inventory.md), "Work under way").
 
 ## Ending
 
