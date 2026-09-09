@@ -53,6 +53,7 @@ import ServerRankChip from "../components/ServerRankChip";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { environmentName } from "../types";
 import type { ApiResponse, ServerRank } from "../types";
 
 type PastPlan = ApiResponse<"upgrade_plans", "history">[number];
@@ -277,12 +278,6 @@ function behindLabel(behind: number): string {
 	const minors = behind % 1000;
 	if (majors > 0) return `${majors} major${majors === 1 ? "" : "s"}`;
 	return `${minors} minor${minors === 1 ? "" : "s"}`;
-}
-
-/// How an environment is named where it is read: the group, with the rank after
-/// it unless it is the group's production.
-function environmentName(group: string, rank: ServerRank): string {
-	return rank === "production" ? group : `${group} ${rank}`;
 }
 
 function EnvironmentName({

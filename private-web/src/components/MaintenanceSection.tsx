@@ -13,6 +13,7 @@ import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
+import { environmentName } from "../types";
 import type { MaintenanceScope, MaintenanceWindow, ServerRank } from "../types";
 import DeclareMaintenanceDialog from "./DeclareMaintenanceDialog";
 import ServerRankChip from "./ServerRankChip";
@@ -33,6 +34,7 @@ export default function MaintenanceSection({
 	groupId,
 	groupName,
 	rank,
+	environments,
 	onChanged,
 	anchor,
 }: {
@@ -54,6 +56,10 @@ export default function MaintenanceSection({
 	/** The environment the target serves: a window over its group's
 	 * environment at that rank covers it too. */
 	rank?: ServerRank | null;
+	/** For a group, the environments it has. Each is a target of its own, so
+	 * the group's surface is where one is declared over without a plan. */
+	// spec: MNT#declaring
+	environments?: ServerRank[];
 	/** Called after declaring or lifting, so the page can refresh the
 	 * health and checks that the window changes. */
 	onChanged?: () => void;
@@ -61,6 +67,10 @@ export default function MaintenanceSection({
 	const isAdmin = useIsAdmin() === true;
 	const [tick, setTick] = useState(0);
 	const [dialogOpen, setDialogOpen] = useState(false);
+	const [environmentDialog, setEnvironmentDialog] = useState<{
+		rank: ServerRank;
+		existing: MaintenanceWindow | null;
+	} | null>(null);
 	const lift = useApiAction("maintenance", "lift");
 
 	const result = useApi(
@@ -113,7 +123,9 @@ export default function MaintenanceSection({
 	const windows: MaintenanceWindow[] = result.data;
 	// A group's own window, not one of its environments'.
 	const open = windows.find((w) => w.ended_at === null && !w.rank) ?? null;
-	const environments = windows.filter((w) => w.ended_at === null && w.rank);
+	const environmentWindows = windows.filter((w) => w.ended_at === null && w.rank);
+	const held = new Set(environmentWindows.map((w) => w.rank));
+	const declarable = (environments ?? []).filter((r) => !held.has(r));
 	const fromGroup =
 		covering.status === "ok"
 			? ((covering.data as MaintenanceWindow[]).find(
@@ -130,7 +142,8 @@ export default function MaintenanceSection({
 
 	if (
 		!open &&
-		environments.length === 0 &&
+		environmentWindows.length === 0 &&
+		declarable.length === 0 &&
 		!fromGroup &&
 		!fromMachine &&
 		history.length === 0 &&
@@ -243,7 +256,7 @@ export default function MaintenanceSection({
 					</Button>
 				)
 			)}
-			{environments.map((window) => (
+			{environmentWindows.map((window) => (
 				<Alert
 					key={window.id}
 					severity="info"
@@ -252,22 +265,36 @@ export default function MaintenanceSection({
 					data-testid="environment-window"
 					action={
 						isAdmin ? (
-							<Button
-								size="small"
-								color="info"
-								variant="outlined"
-								disabled={lift.pending}
-								onClick={async () => {
-									try {
-										await lift.call({ id: window.id });
-										reload();
-									} catch {
-										/* surfaced below */
+							<Stack direction="row" spacing={1}>
+								<Button
+									size="small"
+									color="info"
+									onClick={() =>
+										setEnvironmentDialog({
+											rank: window.rank as ServerRank,
+											existing: window,
+										})
 									}
-								}}
-							>
-								Lift
-							</Button>
+								>
+									Amend
+								</Button>
+								<Button
+									size="small"
+									color="info"
+									variant="outlined"
+									disabled={lift.pending}
+									onClick={async () => {
+										try {
+											await lift.call({ id: window.id });
+											reload();
+										} catch {
+											/* surfaced below */
+										}
+									}}
+								>
+									Lift
+								</Button>
+							</Stack>
 						) : undefined
 					}
 				>
@@ -285,6 +312,29 @@ export default function MaintenanceSection({
 					)}
 				</Alert>
 			))}
+			{isAdmin && declarable.length > 0 && (
+				<Stack
+					direction="row"
+					spacing={1}
+					sx={{ mt: 1, flexWrap: "wrap" }}
+					useFlexGap
+					data-testid="declare-environment"
+				>
+					{declarable.map((environment) => (
+						<Button
+							key={environment}
+							size="small"
+							variant="outlined"
+							startIcon={<BuildOutlinedIcon />}
+							onClick={() =>
+								setEnvironmentDialog({ rank: environment, existing: null })
+							}
+						>
+							Declare maintenance for {environment}
+						</Button>
+					))}
+				</Stack>
+			)}
 			{lift.error && (
 				<Alert severity="error" sx={{ mt: 1 }}>
 					{lift.error.message}
@@ -328,6 +378,22 @@ export default function MaintenanceSection({
 				existing={open}
 				onDone={reload}
 			/>
+			{environmentDialog && (
+				<DeclareMaintenanceDialog
+					open
+					onClose={() => setEnvironmentDialog(null)}
+					scope={scope}
+					id={id}
+					rank={environmentDialog.rank}
+					targetLabel={
+						targetLabel
+							? environmentName(targetLabel, environmentDialog.rank)
+							: undefined
+					}
+					existing={environmentDialog.existing}
+					onDone={reload}
+				/>
+			)}
 		</Paper>
 	);
 }

@@ -10949,6 +10949,7 @@
           "applications",
           "machines",
           "billing_labels",
+          "environments",
           "maintained",
           "maintenance_settling"
         ],
@@ -10966,6 +10967,13 @@
               "$ref": "#/components/schemas/BillingTag"
             },
             "description": "The group's effective `billing.*` labels (product/deployment/stage)."
+          },
+          "environments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServerRank"
+            },
+            "description": "The environments the group has, production first: the ranks its live\napplications sit at. Each is a maintenance target of its own."
           },
           "group": {
             "$ref": "#/components/schemas/ServerGroup",

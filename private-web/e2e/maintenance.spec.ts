@@ -354,6 +354,98 @@ test.describe("maintenance windows", () => {
 			.toEqual([["site can absorb 2.61 only", "production"]]);
 	});
 
+	// spec: MNT#declaring
+	test("the group page declares over an environment with no plan open", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const production = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		await seedStatus(sql, { serverId: production.id, version: "2.61.0" });
+		const clone = await seedServer(sql, {
+			name: "kamaka-clone",
+			groupId: group.id,
+			rank: "clone",
+		});
+		await seedStatus(sql, { serverId: clone.id, version: "2.60.0" });
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		await page
+			.getByRole("button", { name: "Declare maintenance for clone" })
+			.click();
+		await expect(
+			page.getByRole("heading", { name: "Declare maintenance — kamaka clone" }),
+		).toBeVisible();
+		await page.getByLabel("What's being done").fill("rehearsing 2.61");
+		await page.getByRole("button", { name: "Declare", exact: true }).click();
+
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ rank: string | null; note: string | null }>(
+					"SELECT rank, note FROM maintenance_windows \
+					 WHERE server_group_id = $1 AND ended_at IS NULL",
+					[group.id],
+				);
+				return rows.map((r) => [r.rank, r.note]);
+			})
+			.toEqual([["clone", "rehearsing 2.61"]]);
+
+		// The environment now reads as declared over, and production is left
+		// to be declared over on its own.
+		await expect(page.getByTestId("environment-window")).toContainText("clone");
+		await expect(
+			page.getByRole("button", { name: "Declare maintenance for production" }),
+		).toBeVisible();
+		await expect(
+			page.getByRole("button", { name: "Declare maintenance for clone" }),
+		).toHaveCount(0);
+	});
+
+	// spec: MNT#presentation
+	test("the group page amends an environment's window", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const clone = await seedServer(sql, {
+			name: "kamaka-clone",
+			groupId: group.id,
+			rank: "clone",
+		});
+		await seedStatus(sql, { serverId: clone.id, version: "2.60.0" });
+		await seedMaintenanceWindow(sql, {
+			serverGroupId: group.id,
+			rank: "clone",
+			note: "rehearsing 2.61",
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		await page
+			.getByTestId("environment-window")
+			.getByRole("button", { name: "Amend" })
+			.click();
+		await expect(
+			page.getByRole("heading", { name: "Amend maintenance — kamaka clone" }),
+		).toBeVisible();
+		await expect(page.getByLabel("What's being done")).toHaveValue(
+			"rehearsing 2.61",
+		);
+		await page.getByLabel("What's being done").fill("restore is slow");
+		await page.getByRole("button", { name: "Amend", exact: true }).last().click();
+
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ note: string | null }>(
+					"SELECT note FROM maintenance_windows \
+					 WHERE server_group_id = $1 AND ended_at IS NULL",
+					[group.id],
+				);
+				return rows.map((r) => r.note);
+			})
+			.toEqual(["restore is slow"]);
+	});
+
 	// spec: MNT#declaring, MNT#what-a-window-suspends
 	test("declaring from a clone's plan covers the clone and not production", async ({
 		page,

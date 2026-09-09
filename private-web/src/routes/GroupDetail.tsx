@@ -254,6 +254,7 @@ export default function GroupDetail() {
 				anchor="maintenance"
 				id={group.id}
 				targetLabel={group.name}
+				environments={detail.data.environments}
 			/>
 			<SilencedRefsSection scope="group" id={group.id} />
 		</Stack>

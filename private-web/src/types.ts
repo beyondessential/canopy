@@ -278,6 +278,12 @@ export const SERVER_RANK_ORDER: ServerRank[] = [
 	"dev",
 ];
 
+/// How an environment is named where it is read: the group, with the rank after
+/// it unless it is the group's production.
+export function environmentName(group: string, rank: ServerRank): string {
+	return rank === "production" ? group : `${group} ${rank}`;
+}
+
 /// Sort key for a rank, with `null` ranks pushed last. Ranks are an ordered
 /// set; types are not, so a type tiebreak sorts alphabetically at the
 /// comparison rather than through a table here.

@@ -5,7 +5,7 @@ use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::{backup_jobs::BillingLabels, tailscale_auth::TailscaleAdmin};
 use commons_types::{
 	Uuid,
-	server::TagMap,
+	server::{TagMap, rank::ServerRank},
 	status::{HealthState, ShortStatus},
 };
 use database::server_groups::{NewServerGroup, PartialServerGroup, ServerGroup};
@@ -162,6 +162,10 @@ pub struct GroupDetail {
 	pub machines: Vec<GroupMachine>,
 	/// The group's effective `billing.*` labels (product/deployment/stage).
 	pub billing_labels: Vec<BillingTag>,
+	/// The environments the group has, production first: the ranks its live
+	/// applications sit at. Each is a maintenance target of its own.
+	// spec: MNT#declaring
+	pub environments: Vec<ServerRank>,
 	/// Whether a maintenance window (or its settle period) suspends the group.
 	pub maintained: bool,
 	/// Whether the suspension is only the settle period: the window has
@@ -229,6 +233,11 @@ pub async fn get(
 	let group = ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
 	let (applications, machines) = tree_members(&mut conn, &group).await?;
 	let billing_labels = group_billing_labels(&mut conn, &group).await?;
+	let environments = ServerGroup::environments(&mut conn, &[args.server_group_id])
+		.await?
+		.into_iter()
+		.map(|environment| environment.rank)
+		.collect();
 	let maintained = database::maintenance_windows::MaintenanceWindow::suspends(
 		&mut conn,
 		None,
@@ -252,6 +261,7 @@ pub async fn get(
 		maintained,
 		maintenance_settling,
 		billing_labels,
+		environments,
 	}))
 }
 

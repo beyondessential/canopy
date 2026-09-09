@@ -43,6 +43,7 @@ Canopy never opens a window by itself.
 An environment with an open upgrade plan is offered the declaration over itself from that plan, prefilled with the plan's window and note, so declaring is one action at the moment the work starts (see [UPG](../private-server/upgrade-plans.md)).
 An hour someone typed in advance is not evidence that work began, so a planned window suspends nothing on its own.
 An open incident offers the declaration over its target too, so an operator who recognises an alert as their own work declares from where they are reading it.
+A group's own surface offers the declaration over the group and over each environment the group has, so an environment is declarable whether or not a plan is open on it and whoever is reading the group can declare from there.
 
 ## What a window suspends
 
@@ -94,7 +95,7 @@ The view answers "what are we not watching right now" without reading each group
 
 A target's own surface presents its open window with the actions to amend or lift it, and its ended windows as history.
 An application presents the window over the machine it runs on, and a machine covered by its group's window or its environment's presents that window too, naming what holds it and leading there, since a target under maintenance without a window of its own would otherwise read as one nobody had declared.
-A group presents the windows over its environments beside its own, each naming the environment it covers, since a group whose clone is under maintenance is only partly quiet.
+A group presents the windows over its environments beside its own, each naming the environment it covers, since a group whose clone is under maintenance is only partly quiet, and offers the actions to amend or lift each of them as it does for its own.
 The mark sits on the target rather than on each of its checks, a window covering all of them alike, so a check under one is read against the target's mark exactly as a check on an unmonitored target is.
 
 ## Out of scope

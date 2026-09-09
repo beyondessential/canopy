@@ -5988,6 +5988,11 @@ export interface components {
             applications: components["schemas"]["ServerInfo"][];
             /** @description The group's effective `billing.*` labels (product/deployment/stage). */
             billing_labels: components["schemas"]["BillingTag"][];
+            /**
+             * @description The environments the group has, production first: the ranks its live
+             *     applications sit at. Each is a maintenance target of its own.
+             */
+            environments: components["schemas"]["ServerRank"][];
             /** @description The group itself. */
             group: components["schemas"]["ServerGroup"];
             /**
