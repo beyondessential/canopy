@@ -2,18 +2,26 @@
 //! rank intend to move to, and optionally when.
 //!
 //! A plan is a statement of intent. Nothing here performs or schedules an
-//! upgrade; the date is presentational and Canopy decides a plan is met by
-//! watching what the environment reports running.
+//! upgrade; the date is presentational and Canopy decides a plan is met from
+//! what the environment reports running and what is declared over it.
 
 use commons_errors::{AppError, Result};
 use commons_types::{server::rank::ServerRank, version::VersionStr};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use jiff::{Timestamp, civil::Date, civil::Time, tz::TimeZone};
+use jiff::{SignedDuration, Timestamp, civil::Date, civil::Time, tz::TimeZone};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{server_groups::ServerGroup, versions::Version};
+use crate::{
+	maintenance_windows::MaintenanceWindow, server_groups::ServerGroup, versions::Version,
+};
+
+/// How long an environment must stand at or past its target before the plan
+/// closes. A version is on a box from the moment it is installed, which is
+/// ahead of the environment serving it.
+// spec: UPG#when-a-plan-is-met
+pub const SETTLE: SignedDuration = SignedDuration::from_mins(30);
 
 /// An environment's recorded intention to move to a version.
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema)]
@@ -56,6 +64,11 @@ pub struct UpgradePlan {
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	#[schema(value_type = Option<String>)]
 	pub met_at: Option<Timestamp>,
+	/// When the environment was first seen at or past the target, for one that
+	/// has been.
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	#[schema(value_type = Option<String>)]
+	pub target_reached_at: Option<Timestamp>,
 	/// When a newer plan replaced this one.
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	#[schema(value_type = Option<String>)]
@@ -399,12 +412,13 @@ pub fn ended_at(plan: &UpgradePlan) -> Option<Timestamp> {
 		.max()
 }
 
-/// Close every open plan whose environment has reached its target, returning
-/// how many were closed.
+/// Close every open plan whose environment has stood at its target for
+/// [`SETTLE`] with nothing declared over it, returning how many were closed.
 ///
-/// Reaching a version past the target closes the plan too: an environment that
-/// jumped further has done the upgrade and then some, and holding the plan open
-/// would report it as outstanding.
+/// Reaching a version past the target counts too: an environment that jumped
+/// further has done the upgrade and then some, and holding the plan open would
+/// report it as outstanding. An environment that falls back below the target
+/// starts the period again.
 // spec: UPG#when-a-plan-is-met
 pub async fn close_met_plans(db: &mut AsyncPgConnection) -> Result<usize> {
 	use crate::schema::upgrade_plans::dsl;
@@ -417,14 +431,43 @@ pub async fn close_met_plans(db: &mut AsyncPgConnection) -> Result<usize> {
 			.into_iter()
 			.filter_map(|env| env.version.map(|v| ((env.group_id, env.rank), v)))
 			.collect();
+	let suspended = MaintenanceWindow::suspended_targets(db).await?;
+	let now = Timestamp::now();
 
 	let mut closed = 0;
 	for plan in open {
-		let Some(running) = running.get(&(plan.group_id, plan.rank)) else {
+		let at_target = match running.get(&(plan.group_id, plan.rank)) {
+			Some(running) => {
+				let target = Version::get_by_id(db, plan.target_version_id).await?;
+				running.0 >= target.as_semver()
+			}
+			None => false,
+		};
+
+		if !at_target {
+			if plan.target_reached_at.is_some() {
+				diesel::update(dsl::upgrade_plans)
+					.filter(dsl::id.eq(plan.id))
+					.set(dsl::target_reached_at.eq(None::<jiff_diesel::Timestamp>))
+					.execute(db)
+					.await?;
+			}
+			continue;
+		}
+
+		let Some(reached_at) = plan.target_reached_at else {
+			diesel::update(dsl::upgrade_plans)
+				.filter(dsl::id.eq(plan.id))
+				.set(dsl::target_reached_at.eq(diesel::dsl::now))
+				.execute(db)
+				.await?;
 			continue;
 		};
-		let target = Version::get_by_id(db, plan.target_version_id).await?;
-		if running.0 < target.as_semver() {
+
+		if reached_at + SETTLE > now
+			|| suspended.environment_window(plan.group_id, plan.rank)
+			|| suspended.group_window(plan.group_id)
+		{
 			continue;
 		}
 

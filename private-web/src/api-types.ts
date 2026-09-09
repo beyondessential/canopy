@@ -10492,6 +10492,11 @@ export interface components {
             /** @description When a newer plan replaced this one. */
             superseded_at?: string | null;
             /**
+             * @description When the environment was first seen at or past the target, for one that
+             *     has been.
+             */
+            target_reached_at?: string | null;
+            /**
              * Format: uuid
              * @description The version it intends to move to.
              */

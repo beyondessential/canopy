@@ -18015,6 +18015,13 @@
             ],
             "description": "When a newer plan replaced this one."
           },
+          "target_reached_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the environment was first seen at or past the target, for one that\nhas been."
+          },
           "target_version_id": {
             "type": "string",
             "format": "uuid",
