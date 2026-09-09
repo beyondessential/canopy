@@ -2,29 +2,28 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use axum::Json;
-use axum::extract::{DefaultBodyLimit, State};
-use base64::{Engine as _, prelude::BASE64_STANDARD};
+use axum::body::Bytes;
+use axum::extract::{DefaultBodyLimit, Query, State};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::version::{VersionStatus, VersionStr};
 use database::{
-	artifacts::{Artifact, MAX_HELD_ARTIFACT_BYTES, NewArtifact, Scope, digest_of},
+	artifacts::{Artifact, MAX_HELD_ARTIFACT_BYTES, NewArtifact, Scope, digest_of, parse_sri, sri},
 	server_groups::ServerGroup,
 	version_known_issues::VersionKnownIssue,
 	versions::Version,
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::state::AppState;
 
-/// Body budget for `create_artifact`. Base64 inflates the bytes by a third, and
-/// sizing above that keeps an over-limit upload the handler's structured
-/// refusal rather than axum's plain-text 413.
-const MAX_CREATE_ARTIFACT_BODY_BYTES: usize = MAX_HELD_ARTIFACT_BYTES / 3 * 4 + 64 * 1024;
+/// Body budget for `upload_artifact`. Sizing above the cap keeps an over-limit
+/// upload the handler's structured refusal rather than axum's plain-text 413.
+const MAX_UPLOAD_ARTIFACT_BODY_BYTES: usize = MAX_HELD_ARTIFACT_BYTES + 64 * 1024;
 
 /// A single released (or draft) software version.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -195,7 +194,8 @@ pub struct ArtifactData {
 	pub group_id: Option<Uuid>,
 	/// Name of that group, for display.
 	pub group_name: Option<String>,
-	/// Algorithm-prefixed digest recorded for the artifact, where there is one.
+	/// Subresource Integrity digest recorded for the artifact, where there is
+	/// one.
 	pub digest: Option<String>,
 	/// `true` when Canopy holds this artifact's bytes rather than a location.
 	pub canopy_holds_bytes: bool,
@@ -224,10 +224,11 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(update_version_status))
 		.routes(routes!(update_version_changelog))
 		.routes(routes!(update_artifact))
+		.routes(routes!(create_artifact))
 		.merge(
 			OpenApiRouter::new()
-				.routes(routes!(create_artifact))
-				.layer(DefaultBodyLimit::max(MAX_CREATE_ARTIFACT_BODY_BYTES)),
+				.routes(routes!(upload_artifact))
+				.layer(DefaultBodyLimit::max(MAX_UPLOAD_ARTIFACT_BODY_BYTES)),
 		)
 		.routes(routes!(delete_artifact))
 		.routes(routes!(list_known_issues))
@@ -483,7 +484,7 @@ async fn artifacts_of(
 				download_url: a.download_url,
 				group_name: a.group_id.and_then(|g| group_names.get(&g).cloned()),
 				group_id: a.group_id,
-				digest: a.digest,
+				digest: a.digest.as_deref().map(sri),
 				is_exact,
 				version_range_pattern: a.version_range_pattern,
 				has_range_override,
@@ -624,7 +625,11 @@ pub async fn update_artifact(
 	Ok(Json(()))
 }
 
-/// A new artifact to register against a version.
+/// A new artifact to register against a version, at a location Canopy records.
+///
+/// An artifact whose bytes Canopy holds is registered through
+/// `upload_artifact` instead, since the bytes are the body there.
+// spec: ART#where-an-artifact-rests
 #[derive(Deserialize, ToSchema)]
 pub struct CreateArtifactArgs {
 	/// Id of the version to attach the new artifact to.
@@ -633,18 +638,11 @@ pub struct CreateArtifactArgs {
 	pub artifact_type: String,
 	/// Target platform.
 	pub platform: String,
-	/// Download URL, for an artifact Canopy records a location for.
-	pub download_url: Option<String>,
-	/// The group this artifact is for. Naming one makes Canopy hold the bytes.
-	pub group_id: Option<Uuid>,
-	/// The artifact's bytes, base64-encoded. Required when a group is named.
-	pub content_base64: Option<String>,
-	/// Media type of those bytes.
-	pub content_type: Option<String>,
-	/// Algorithm-prefixed digest of those bytes, e.g. `sha256:2cf24dba…`.
-	/// Required when a group is named: Canopy checks the bytes against it as
-	/// they arrive and refuses the registration on a mismatch, so a corrupted
-	/// upload is refused while whoever sent it is still there to send it again.
+	/// URL the artifact is downloaded from.
+	pub download_url: String,
+	/// Subresource Integrity digest of the bytes at that URL, e.g.
+	/// `sha256-LCTbqp…`, where one is recorded. Whoever fetches the artifact
+	/// checks what it got against this.
 	pub digest: Option<String>,
 }
 
@@ -660,6 +658,7 @@ pub struct CreateArtifactArgs {
 	request_body = CreateArtifactArgs,
 	responses(
 		(status = 200, body = ArtifactData),
+		(status = 400, body = ProblemDetailsSchema),
 	),
 )]
 pub async fn create_artifact(
@@ -669,71 +668,17 @@ pub async fn create_artifact(
 ) -> Result<Json<ArtifactData>> {
 	let mut conn = state.db.get().await?;
 
-	// An artifact is either for a group, in which case Canopy holds its bytes,
-	// or for every group, in which case Canopy records where it rests.
-	// spec: ART#where-an-artifact-rests
-	let (content, digest) = match (&args.group_id, &args.content_base64) {
-		(Some(_), Some(encoded)) => {
-			let bytes = BASE64_STANDARD
-				.decode(encoded)
-				.map_err(|_| AppError::BadRequest("content_base64 is not valid base64".into()))?;
-			if bytes.len() > MAX_HELD_ARTIFACT_BYTES {
-				return Err(AppError::BadRequest(format!(
-					"artifact is larger than the {} MiB limit",
-					MAX_HELD_ARTIFACT_BYTES / (1024 * 1024)
-				)));
-			}
-			let Some(claimed) = args
-				.digest
-				.as_deref()
-				.map(str::trim)
-				.filter(|d| !d.is_empty())
-			else {
-				return Err(AppError::BadRequest(
-					"a group-scoped artifact must carry the digest of its bytes".into(),
-				));
-			};
-			// spec: ART#digests
-			let digest = digest_of(&bytes);
-			if claimed != digest {
-				return Err(AppError::BadRequest(format!(
-					"the bytes are {digest}, not the {claimed} the registration names"
-				)));
-			}
-			(Some(bytes), Some(digest))
-		}
-		(Some(_), None) => {
-			return Err(AppError::BadRequest(
-				"a group-scoped artifact must carry its bytes".into(),
-			));
-		}
-		(None, Some(_)) => {
-			return Err(AppError::BadRequest(
-				"only a group-scoped artifact carries bytes".into(),
-			));
-		}
-		(None, None) => {
-			// The media type describes bytes Canopy holds, and it holds none
-			// for an unscoped artifact.
-			// spec: ART#where-an-artifact-rests
-			if args.content_type.is_some() {
-				return Err(AppError::BadRequest(
-					"only a group-scoped artifact carries a media type".into(),
-				));
-			}
-			// A digest against a location is what whoever fetches the artifact
-			// checks the bytes it got against, so it is recorded rather than
-			// dropped.
-			// spec: ART#digests
-			let claimed = args
-				.digest
-				.as_deref()
-				.map(str::trim)
-				.filter(|d| !d.is_empty())
-				.map(str::to_owned);
-			(None, claimed)
-		}
-	};
+	// A digest against a location is what whoever fetches the artifact checks
+	// the bytes it got against, so one that cannot be checked against is
+	// refused rather than published.
+	// spec: ART#digests
+	let digest = args
+		.digest
+		.as_deref()
+		.map(str::trim)
+		.filter(|d| !d.is_empty())
+		.map(parse_sri)
+		.transpose()?;
 
 	// Where the artifact rests, and the refusal when it names neither place or
 	// both, is `Artifact::register`'s to settle.
@@ -743,25 +688,124 @@ pub async fn create_artifact(
 			version_id: Some(args.version_id),
 			artifact_type: args.artifact_type,
 			platform: args.platform,
-			download_url: args.download_url,
+			download_url: Some(args.download_url),
 			device_id: None,
 			version_range_pattern: None,
-			group_id: args.group_id,
-			content,
-			content_type: args.content_type,
+			group_id: None,
+			content: None,
+			content_type: None,
 			digest,
 			run_id: None,
 		},
 	)
 	.await?;
 
-	// Read back through the listing rather than describing the row a second
-	// time here: whether it overrides a range and whether it is the one served
-	// follow from the version's other artifacts, not from this registration.
-	artifacts_of(&mut conn, args.version_id)
+	registered(&mut conn, args.version_id, artifact.id).await
+}
+
+/// What an upload names beside its bytes.
+// spec: ART#where-an-artifact-rests
+#[derive(Deserialize, IntoParams)]
+pub struct UploadArtifactQuery {
+	/// Id of the version to attach the new artifact to.
+	pub version_id: Uuid,
+	/// Artifact type.
+	pub artifact_type: String,
+	/// Target platform.
+	pub platform: String,
+	/// The group this artifact is for.
+	pub group_id: Uuid,
+	/// Subresource Integrity digest of the body, e.g. `sha256-LCTbqp…`.
+	/// Canopy checks the bytes against it as they arrive and refuses the
+	/// registration on a mismatch, so a corrupted upload is refused while
+	/// whoever sent it is still there to send it again.
+	pub digest: String,
+}
+
+/// Register an artifact whose bytes Canopy holds, for one group.
+///
+/// The body is the artifact itself and its `Content-Type` is what the bytes
+/// are served back as. Returns the created artifact.
+#[utoipa::path(
+	post,
+	path = "/upload_artifact",
+	tag = "versions",
+	security(("tailscale-admin" = [])),
+	params(UploadArtifactQuery),
+	request_body(content = Vec<u8>, content_type = "application/octet-stream", description = "The artifact's bytes."),
+	responses(
+		(status = 200, body = ArtifactData),
+		(status = 400, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn upload_artifact(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Query(named): Query<UploadArtifactQuery>,
+	headers: axum::http::HeaderMap,
+	body: Bytes,
+) -> Result<Json<ArtifactData>> {
+	let mut conn = state.db.get().await?;
+
+	if body.len() > MAX_HELD_ARTIFACT_BYTES {
+		return Err(AppError::BadRequest(format!(
+			"artifact is larger than the {} MiB limit",
+			MAX_HELD_ARTIFACT_BYTES / (1024 * 1024)
+		)));
+	}
+
+	let claimed = parse_sri(&named.digest)?;
+	let digest = digest_of(&body);
+	if claimed != digest {
+		return Err(AppError::BadRequest(format!(
+			"the bytes are {}, not the {} the registration names",
+			sri(&digest),
+			sri(&claimed)
+		)));
+	}
+
+	// The media type is served back as a header, and the browser sends none
+	// for a file it cannot type, so an absent one is the artifact's own
+	// default rather than a refusal.
+	let content_type = headers
+		.get(axum::http::header::CONTENT_TYPE)
+		.and_then(|value| value.to_str().ok())
+		.map(str::to_owned)
+		.filter(|media_type| media_type != "application/octet-stream");
+
+	let artifact = Artifact::register(
+		&mut conn,
+		NewArtifact {
+			version_id: Some(named.version_id),
+			artifact_type: named.artifact_type,
+			platform: named.platform,
+			download_url: None,
+			device_id: None,
+			version_range_pattern: None,
+			group_id: Some(named.group_id),
+			content: Some(body.to_vec()),
+			content_type,
+			digest: Some(digest),
+			run_id: None,
+		},
+	)
+	.await?;
+
+	registered(&mut conn, named.version_id, artifact.id).await
+}
+
+/// Read a just-registered artifact back through the listing rather than
+/// describing the row a second time: whether it overrides a range and whether
+/// it is the one served follow from the version's other artifacts.
+async fn registered(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	version_id: Uuid,
+	artifact_id: Uuid,
+) -> Result<Json<ArtifactData>> {
+	artifacts_of(conn, version_id)
 		.await?
 		.into_iter()
-		.find(|a| a.id == artifact.id)
+		.find(|a| a.id == artifact_id)
 		.map(Json)
 		.ok_or_else(|| AppError::custom("the artifact just registered is not listed"))
 }

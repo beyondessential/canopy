@@ -1,3 +1,4 @@
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use commons_errors::{AppError, Result};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -74,9 +75,9 @@ pub struct Artifact {
 	pub group_id: Option<Uuid>,
 	/// Media type of the bytes Canopy holds, where the registration named one.
 	pub content_type: Option<String>,
-	/// Algorithm-prefixed digest of the artifact's bytes, e.g.
-	/// `sha256:2cf24dba…`. Always set for a group-scoped artifact.
-	pub digest: Option<String>,
+	/// SHA-256 of the artifact's bytes. Always set for a group-scoped
+	/// artifact.
+	pub digest: Option<Vec<u8>>,
 	/// The run that produced this artifact, where the registration named one.
 	pub run_id: Option<Uuid>,
 	/// When this artifact was last registered.
@@ -98,7 +99,7 @@ pub struct NewArtifact {
 	pub group_id: Option<Uuid>,
 	pub content: Option<Vec<u8>>,
 	pub content_type: Option<String>,
-	pub digest: Option<String>,
+	pub digest: Option<Vec<u8>>,
 	pub run_id: Option<Uuid>,
 }
 
@@ -106,7 +107,7 @@ pub struct NewArtifact {
 pub struct ArtifactContent {
 	pub bytes: Vec<u8>,
 	pub content_type: Option<String>,
-	pub digest: String,
+	pub digest: Vec<u8>,
 }
 
 /// Cap on the bytes Canopy will hold for one artifact. A reporting schema is a
@@ -115,8 +116,32 @@ pub struct ArtifactContent {
 pub const MAX_HELD_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
 
 /// The digest Canopy records and verifies bytes against.
-pub fn digest_of(bytes: &[u8]) -> String {
-	format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
+pub fn digest_of(bytes: &[u8]) -> Vec<u8> {
+	Sha256::digest(bytes).to_vec()
+}
+
+/// A digest as Subresource Integrity writes it, which is the form every
+/// interface carries it in.
+// spec: ART#digests
+pub fn sri(digest: &[u8]) -> String {
+	format!("sha256-{}", BASE64.encode(digest))
+}
+
+/// The digest an SRI string names, refusing anything that cannot be one.
+///
+/// A value nothing can check the bytes against is worse than none: it says the
+/// bytes were verified when they cannot be.
+// spec: ART#digests
+pub fn parse_sri(value: &str) -> Result<Vec<u8>> {
+	let refuse = || AppError::BadRequest(format!("{value:?} is not a sha256 SRI digest"));
+
+	let encoded = value.trim().strip_prefix("sha256-").ok_or_else(refuse)?;
+	let digest = BASE64.decode(encoded).map_err(|_| refuse())?;
+	if digest.len() != 32 {
+		return Err(refuse());
+	}
+
+	Ok(digest)
 }
 
 /// A blank URL is no location at all. The constraint only tests for NULL, so an
@@ -400,7 +425,7 @@ impl Artifact {
 	) -> Result<Option<ArtifactContent>> {
 		use crate::schema::artifacts::dsl::*;
 
-		let row: Option<(Option<Vec<u8>>, Option<String>, Option<String>)> = artifacts
+		let row: Option<(Option<Vec<u8>>, Option<String>, Option<Vec<u8>>)> = artifacts
 			.filter(id.eq(artifact_id))
 			.select((content, content_type, digest))
 			.first(db)
@@ -447,7 +472,18 @@ impl Artifact {
 			.returning(Self::as_select())
 			.get_result(db)
 			.await
-			.map_err(AppError::from)
+			.map_err(|error| match error {
+				// A registration naming a group or version Canopy does not
+				// hold is the caller's own input, so it is refused rather than
+				// left to surface as a database fault.
+				diesel::result::Error::DatabaseError(
+					diesel::result::DatabaseErrorKind::ForeignKeyViolation,
+					_,
+				) => AppError::BadRequest(
+					"the registration names a group or version Canopy does not hold".into(),
+				),
+				error => AppError::from(error),
+			})
 	}
 
 	pub async fn update(

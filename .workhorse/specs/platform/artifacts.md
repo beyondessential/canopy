@@ -39,8 +39,8 @@ It is offered one artifact per type and platform, and where the bytes rest is no
 ## What a version offers
 
 A read names an exact version or a range.
-An exact version is answered for itself, since a caller naming one is saying what it runs rather than asking where to go, and what is published for the version a caller is on does not depend on whether that version is one to move to.
-A range is answered for the latest published version it covers that no known issue covers, since a range is a question about where to go and a version Canopy has vouched against is not an answer to it.
+An exact version is answered for itself, since a caller naming one is saying what it runs rather than asking where to go.
+A range is answered for the latest published version it covers that no known issue covers.
 
 Canopy offers a caller one artifact per type and platform, chosen from the artifacts that caller may see: those belonging to no group, and those scoped to the caller's group where that group is known.
 Where several match, the most specific is offered.
@@ -77,6 +77,8 @@ Canopy records which device registered an artifact and, where the registration n
 ## Digests
 
 An artifact carries a digest where whoever registers it records one, and a group-scoped artifact carries one always.
+A digest is carried as Subresource Integrity writes it, `sha256-` followed by the base64 of the hash, so what a caller is offered is a value it can hand to a checker unchanged.
+A registration naming anything else is refused, since a digest nothing can check the bytes against says they were verified when they cannot be.
 Canopy verifies a group-scoped artifact's bytes against its digest as they arrive and refuses the registration on a mismatch, so a corrupted upload is refused while whoever sent it is still there to send it again.
 It verifies them again as it serves them and refuses them on a mismatch, so an artifact corrupted after it was taken in fails the read rather than reaching a server as the artifact it is not.
 An unscoped artifact is read from its location by the caller rather than by Canopy, so its digest is what that caller checks what it fetched against, and an artifact registered without one is fetched unchecked.

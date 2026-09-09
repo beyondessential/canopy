@@ -1,6 +1,12 @@
 use commons_tests::diesel_async::SimpleAsyncConnection;
+use database::artifacts::{digest_of, sri};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+/// The digest an upload names for the bytes it carries.
+fn sri_of(bytes: &[u8]) -> String {
+	sri(&digest_of(bytes))
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ArtifactData {
@@ -85,56 +91,47 @@ async fn a_registration_that_rests_nowhere_is_refused() {
 		.await
 		.unwrap();
 
-		let refusals = [
-			// Neither a location nor a group.
-			serde_json::json!({
+		// A location that is no location.
+		let refused = private
+			.post("/api/versions/create_artifact")
+			.json(&serde_json::json!({
 				"version_id": version, "artifact_type": "installer", "platform": "any",
-			}),
-			// A group and a location together: it rests in one place or the other.
-			serde_json::json!({
-				"version_id": version, "artifact_type": "installer", "platform": "any",
-				"group_id": group, "content_base64": "aGVsbG8=",
-				"digest": database::artifacts::digest_of(b"hello"),
-				"download_url": "https://example.com/x.exe",
-			}),
-			// A group with no bytes to hold.
-			serde_json::json!({
-				"version_id": version, "artifact_type": "installer", "platform": "any",
-				"group_id": group,
-			}),
-			// Bytes with no group to hold them for.
-			serde_json::json!({
-				"version_id": version, "artifact_type": "installer", "platform": "any",
-				"content_base64": "aGVsbG8=", "download_url": "https://example.com/x.exe",
-			}),
-			// Bytes that are not base64.
-			serde_json::json!({
-				"version_id": version, "artifact_type": "installer", "platform": "any",
-				"group_id": group, "content_base64": "not base64 at all!!",
-				"digest": database::artifacts::digest_of(b"hello"),
-			}),
-			// Bytes that are not the digest the registration names.
-			serde_json::json!({
-				"version_id": version, "artifact_type": "installer", "platform": "any",
-				"group_id": group, "content_base64": "aGVsbG8=",
-				"digest": database::artifacts::digest_of(b"something else"),
-			}),
-			// Bytes with no digest to check them against.
-			serde_json::json!({
-				"version_id": version, "artifact_type": "installer", "platform": "any",
-				"group_id": group, "content_base64": "aGVsbG8=",
-			}),
-		];
+				"download_url": "   ",
+			}))
+			.await;
+		assert_eq!(refused.status_code(), axum::http::StatusCode::BAD_REQUEST);
 
-		for args in refusals {
-			let response = private
-				.post("/api/versions/create_artifact")
-				.json(&args)
+		// Bytes that are not the digest the upload names.
+		let mismatched = private
+			.post("/api/versions/upload_artifact")
+			.add_query_param("version_id", version)
+			.add_query_param("artifact_type", "installer")
+			.add_query_param("platform", "any")
+			.add_query_param("group_id", group)
+			.add_query_param("digest", sri_of(b"something else"))
+			.content_type("application/sql")
+			.bytes("hello".into())
+			.await;
+		assert_eq!(
+			mismatched.status_code(),
+			axum::http::StatusCode::BAD_REQUEST
+		);
+
+		// A digest nothing can check the bytes against.
+		for claimed in ["", "   ", "sha256:abcd", "notadigest", "sha256-abcd"] {
+			let refused = private
+				.post("/api/versions/upload_artifact")
+				.add_query_param("version_id", version)
+				.add_query_param("artifact_type", "installer")
+				.add_query_param("platform", "any")
+				.add_query_param("group_id", group)
+				.add_query_param("digest", claimed)
+				.bytes("hello".into())
 				.await;
 			assert_eq!(
-				response.status_code(),
+				refused.status_code(),
 				axum::http::StatusCode::BAD_REQUEST,
-				"refused as a client mistake: {args}"
+				"refused as a client mistake: {claimed:?}"
 			);
 		}
 	})
@@ -205,18 +202,15 @@ async fn an_operator_registers_a_group_scoped_artifact() {
 		.await
 		.unwrap();
 
-		// "kamaka schema" — the digest asserted below is of exactly these bytes.
 		let response = private
-			.post("/api/versions/create_artifact")
-			.json(&serde_json::json!({
-				"version_id": version,
-				"artifact_type": "reporting-schema",
-				"platform": "any",
-				"group_id": group,
-				"content_base64": "a2FtYWthIHNjaGVtYQ==",
-				"content_type": "application/sql",
-				"digest": database::artifacts::digest_of(b"kamaka schema"),
-			}))
+			.post("/api/versions/upload_artifact")
+			.add_query_param("version_id", version)
+			.add_query_param("artifact_type", "reporting-schema")
+			.add_query_param("platform", "any")
+			.add_query_param("group_id", group)
+			.add_query_param("digest", sri_of(b"kamaka schema"))
+			.content_type("application/sql")
+			.bytes("kamaka schema".into())
 			.await;
 		response.assert_status_ok();
 
@@ -225,22 +219,19 @@ async fn an_operator_registers_a_group_scoped_artifact() {
 		assert!(artifact["download_url"].is_null(), "it rests in Canopy");
 		assert_eq!(artifact["group_id"], group);
 		assert_eq!(artifact["group_name"], "kamaka");
-		assert_eq!(
-			artifact["digest"],
-			database::artifacts::digest_of(b"kamaka schema")
-		);
+		assert_eq!(artifact["digest"], sri_of(b"kamaka schema"));
 	})
 	.await
 }
 
-/// A media type describes bytes Canopy holds, and it holds none for an
-/// artifact that names no group. Passed through, it trips the check constraint,
-/// so operator input answers 500 instead of being refused.
-// spec: ART#where-an-artifact-rests
+/// The group an artifact names is a foreign key, so an id that names no group
+/// answers the operator's own input with a database fault instead of a refusal.
+// spec: ART#registration
 #[tokio::test(flavor = "multi_thread")]
-async fn an_unscoped_artifact_carries_no_media_type() {
+async fn a_registration_naming_no_group_that_exists_is_refused() {
 	commons_tests::server::run(async |mut conn, _public, private| {
-		let version = "11111111-2222-0000-0000-111111111111";
+		let version = "11111111-5555-0000-0000-111111111111";
+		let gone = "cccccccc-5555-0000-0000-cccccccccccc";
 
 		conn.batch_execute(&format!(
 			"INSERT INTO versions (id, major, minor, patch, changelog, status)
@@ -250,14 +241,13 @@ async fn an_unscoped_artifact_carries_no_media_type() {
 		.unwrap();
 
 		let created = private
-			.post("/api/versions/create_artifact")
-			.json(&serde_json::json!({
-				"version_id": version,
-				"artifact_type": "installer",
-				"platform": "windows",
-				"download_url": "https://example.com/x.exe",
-				"content_type": "text/html",
-			}))
+			.post("/api/versions/upload_artifact")
+			.add_query_param("version_id", version)
+			.add_query_param("artifact_type", "reporting-schema")
+			.add_query_param("platform", "any")
+			.add_query_param("group_id", gone)
+			.add_query_param("digest", sri_of(b"kamaka schema"))
+			.bytes("kamaka schema".into())
 			.await;
 		assert_eq!(created.status_code(), axum::http::StatusCode::BAD_REQUEST);
 	})
@@ -287,16 +277,13 @@ async fn a_digest_against_a_location_is_recorded() {
 				"artifact_type": "installer",
 				"platform": "windows",
 				"download_url": "https://example.com/x.exe",
-				"digest": database::artifacts::digest_of(b"kamaka installer"),
+				"digest": sri_of(b"kamaka installer"),
 			}))
 			.await;
 		created.assert_status_ok();
 
 		let artifact: serde_json::Value = created.json();
-		assert_eq!(
-			artifact["digest"],
-			database::artifacts::digest_of(b"kamaka installer")
-		);
+		assert_eq!(artifact["digest"], sri_of(b"kamaka installer"));
 	})
 	.await
 }
@@ -353,7 +340,7 @@ async fn a_blank_download_url_is_not_a_location() {
 	.await
 }
 
-/// The create route carries a body limit sized from the held-bytes cap, so an
+/// The upload route carries a body limit sized from the held-bytes cap, so an
 /// upload well past axum's 2 MB default is accepted, and one past the cap is
 /// refused by the handler naming the limit rather than by axum with a
 /// plain-text 413 the SPA has nothing structured to render.
@@ -372,32 +359,27 @@ async fn an_upload_over_the_limit_is_told_what_it_is() {
 		.await
 		.unwrap();
 
-		// "AAAA" decodes to three zero bytes, so the repeat count sets the size.
-		let four_mib_bytes = 3 * (4 * 1024 * 1024 / 3);
-		let four_mib = "A".repeat(4 * (four_mib_bytes / 3));
+		let four_mib = vec![0u8; 4 * 1024 * 1024];
 		let accepted = private
-			.post("/api/versions/create_artifact")
-			.json(&serde_json::json!({
-				"version_id": version,
-				"artifact_type": "reporting-schema",
-				"platform": "any",
-				"group_id": group,
-				"content_base64": four_mib,
-				"digest": database::artifacts::digest_of(&vec![0u8; four_mib_bytes]),
-			}))
+			.post("/api/versions/upload_artifact")
+			.add_query_param("version_id", version)
+			.add_query_param("artifact_type", "reporting-schema")
+			.add_query_param("platform", "any")
+			.add_query_param("group_id", group)
+			.add_query_param("digest", sri_of(&four_mib))
+			.bytes(four_mib.into())
 			.await;
 		accepted.assert_status_ok();
 
-		let over_limit = "A".repeat(4 * (32 * 1024 * 1024 / 3 + 1));
+		let over_limit = vec![0u8; 32 * 1024 * 1024 + 1];
 		let refused = private
-			.post("/api/versions/create_artifact")
-			.json(&serde_json::json!({
-				"version_id": version,
-				"artifact_type": "reporting-schema",
-				"platform": "linux",
-				"group_id": group,
-				"content_base64": over_limit,
-			}))
+			.post("/api/versions/upload_artifact")
+			.add_query_param("version_id", version)
+			.add_query_param("artifact_type", "reporting-schema")
+			.add_query_param("platform", "linux")
+			.add_query_param("group_id", group)
+			.add_query_param("digest", sri_of(&over_limit))
+			.bytes(over_limit.into())
 			.await;
 
 		assert_eq!(refused.status_code(), axum::http::StatusCode::BAD_REQUEST);
@@ -442,7 +424,7 @@ async fn the_listing_says_which_artifacts_are_offered() {
 			 VALUES ('{range_installer}', NULL, 'windows', 'installer', '2.60.x', 'https://example.com/range.exe');
 
 			 INSERT INTO artifacts (id, version_id, platform, artifact_type, group_id, content, content_type, digest)
-			 VALUES ('{group_schema}', '{version}', 'any', 'reporting-schema', '{group}', 'kamaka schema', 'application/sql', 'sha256:x')",
+			 VALUES ('{group_schema}', '{version}', 'any', 'reporting-schema', '{group}', 'kamaka schema', 'application/sql', '\\x00'::bytea)",
 		))
 		.await
 		.unwrap();
@@ -504,21 +486,19 @@ async fn a_registration_answers_what_it_overrides() {
 			 VALUES (NULL, 'any', 'reporting-schema', '2.60.x', 'https://example.com/range.sql');
 
 			 INSERT INTO artifacts (version_id, platform, artifact_type, version_range_pattern, group_id, content, content_type, digest)
-			 VALUES (NULL, 'windows', 'installer', '2.60.x', '{theirs}', 'theirs', 'application/octet-stream', 'sha256:x')",
+			 VALUES (NULL, 'windows', 'installer', '2.60.x', '{theirs}', 'theirs', 'application/octet-stream', '\\x00'::bytea)",
 		))
 		.await
 		.unwrap();
 
 		let held = private
-			.post("/api/versions/create_artifact")
-			.json(&serde_json::json!({
-				"version_id": version,
-				"artifact_type": "reporting-schema",
-				"platform": "any",
-				"group_id": ours,
-				"content_base64": "a2FtYWthIHNjaGVtYQ==",
-				"digest": database::artifacts::digest_of(b"kamaka schema"),
-			}))
+			.post("/api/versions/upload_artifact")
+			.add_query_param("version_id", version)
+			.add_query_param("artifact_type", "reporting-schema")
+			.add_query_param("platform", "any")
+			.add_query_param("group_id", ours)
+			.add_query_param("digest", sri_of(b"kamaka schema"))
+			.bytes("kamaka schema".into())
 			.await;
 		held.assert_status_ok();
 		let held: serde_json::Value = held.json();

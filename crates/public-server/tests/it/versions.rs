@@ -575,6 +575,22 @@ async fn artifact_download_proxy_with_mock_server() {
 			.await;
 		response.assert_status_ok();
 
+		// Proxied bytes come off the same origin as this server's own HTML
+		// pages, carrying an upstream media type, so they are downloaded rather
+		// than displayed.
+		// spec: ART#where-an-artifact-rests
+		assert_eq!(
+			response.header("x-content-type-options").to_str().unwrap(),
+			"nosniff"
+		);
+		assert!(
+			response
+				.header("content-disposition")
+				.to_str()
+				.unwrap()
+				.starts_with("attachment")
+		);
+
 		// Verify we got the content
 		let text = response.text();
 		assert_eq!(text.as_bytes(), test_content);

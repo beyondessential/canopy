@@ -35,33 +35,61 @@ export async function callApi<
 		signal,
 	});
 
-	if (!response.ok) {
-		let detail: unknown = null;
-		try {
-			detail = await response.json();
-		} catch {
-			detail = await response.text().catch(() => null);
-		}
-		// Surface the problem-details title (and detail line, if present)
-		// in the thrown error's message so action.error?.message in the UI
-		// shows the actual server-side cause, not just the HTTP status.
-		let extra = "";
-		if (
-			detail &&
-			typeof detail === "object" &&
-			"title" in detail &&
-			typeof (detail as { title?: unknown }).title === "string"
-		) {
-			extra = `: ${(detail as { title: string }).title}`;
-		}
-		throw new ApiError(
-			response.status,
-			`server fn ${module}.${fn} failed: ${response.status}${extra}`,
-			detail,
-		);
-	}
+	return (await answered(response, module, fn)) as T;
+}
 
-	return (await response.json()) as T;
+async function answered(
+	response: Response,
+	module: string,
+	fn: string,
+): Promise<unknown> {
+	if (response.ok) return await response.json();
+
+	let detail: unknown = null;
+	try {
+		detail = await response.json();
+	} catch {
+		detail = await response.text().catch(() => null);
+	}
+	// Surface the problem-details title (and detail line, if present)
+	// in the thrown error's message so action.error?.message in the UI
+	// shows the actual server-side cause, not just the HTTP status.
+	let extra = "";
+	if (
+		detail &&
+		typeof detail === "object" &&
+		"title" in detail &&
+		typeof (detail as { title?: unknown }).title === "string"
+	) {
+		extra = `: ${(detail as { title: string }).title}`;
+	}
+	throw new ApiError(
+		response.status,
+		`server fn ${module}.${fn} failed: ${response.status}${extra}`,
+		detail,
+	);
+}
+
+// An endpoint whose body is the bytes themselves: everything it is told about
+// them travels in the query string.
+export async function uploadApi<T>(
+	module: string,
+	fn: string,
+	query: Record<string, string>,
+	body: Blob,
+): Promise<T> {
+	const response = await fetch(
+		`/api/${module}/${fn}?${new URLSearchParams(query)}`,
+		{
+			method: "POST",
+			headers: {
+				"content-type": body.type || "application/octet-stream",
+			},
+			body,
+		},
+	);
+
+	return (await answered(response, module, fn)) as T;
 }
 
 export type ApiState<T> =
@@ -187,6 +215,45 @@ export function useApiAction<
 				// Broadcast so global, page-agnostic queries (e.g. the open-
 				// incidents nav badge) can refetch without the caller having
 				// to know they exist. Listeners hook via useReloadInterval.
+				document.dispatchEvent(new Event("canopy-data-changed"));
+				return result;
+			} catch (err) {
+				const e = err instanceof Error ? err : new Error(String(err));
+				setError(e);
+				throw e;
+			} finally {
+				setPending(false);
+			}
+		},
+		[module, fn],
+	);
+
+	const reset = useCallback(() => setError(null), []);
+
+	return { call, pending, error, reset };
+}
+
+/**
+ * `useApiAction` for an endpoint whose body is the bytes themselves.
+ */
+export function useApiUpload<T>(
+	module: string,
+	fn: string,
+): {
+	call: (query: Record<string, string>, body: Blob) => Promise<T>;
+	pending: boolean;
+	error: Error | null;
+	reset: () => void;
+} {
+	const [pending, setPending] = useState(false);
+	const [error, setError] = useState<Error | null>(null);
+
+	const call = useCallback(
+		async (query: Record<string, string>, body: Blob): Promise<T> => {
+			setPending(true);
+			setError(null);
+			try {
+				const result = await uploadApi<T>(module, fn, query, body);
 				document.dispatchEvent(new Event("canopy-data-changed"));
 				return result;
 			} catch (err) {

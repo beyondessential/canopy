@@ -3,7 +3,7 @@
 //! spec: ART
 
 use axum::http::StatusCode;
-use database::artifacts::digest_of;
+use database::artifacts::{digest_of, sri};
 use diesel_async::SimpleAsyncConnection;
 
 const VERSION: &str = "11111111-1111-1111-1111-111111111111";
@@ -15,7 +15,7 @@ const GROUP_B: &str = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 /// One published version, two groups, and a `reporting-schema` artifact for
 /// each of the unscoped and group-A cases.
 async fn seed(conn: &mut database::diesel_async::AsyncPgConnection) {
-	let digest = digest_of(b"group a schema");
+	let digest = hex::encode(digest_of(b"group a schema"));
 	conn.batch_execute(&format!(
 		"INSERT INTO versions (id, major, minor, patch, changelog, status)
 		 VALUES ('{VERSION}', 2, 60, 0, '', 'published');
@@ -28,7 +28,7 @@ async fn seed(conn: &mut database::diesel_async::AsyncPgConnection) {
 
 		 INSERT INTO artifacts (id, version_id, platform, artifact_type, group_id, content, content_type, digest)
 		 VALUES ('{THEIRS}', '{VERSION}', 'any', 'reporting-schema', '{GROUP_A}',
-		         'group a schema'::bytea, 'application/sql', '{digest}')",
+		         'group a schema'::bytea, 'application/sql', '\\x{digest}'::bytea)",
 	))
 	.await
 	.expect("seed");
@@ -62,7 +62,6 @@ async fn an_anonymous_read_sees_only_unscoped_artifacts() {
 
 		assert_eq!(artifacts.len(), 1);
 		assert_eq!(artifacts[0]["id"], UNSCOPED);
-		assert!(artifacts[0]["group_id"].is_null());
 	})
 	.await
 }
@@ -87,7 +86,16 @@ async fn a_machine_is_offered_its_own_group_s_artifact() {
 
 			assert_eq!(artifacts.len(), 1, "never offered both");
 			assert_eq!(artifacts[0]["id"], THEIRS);
-			assert_eq!(artifacts[0]["group_id"], GROUP_A);
+
+			// A caller is offered one artifact per type and platform. Which
+			// group it belongs to is how Canopy chose it, not part of what
+			// the caller is told.
+			// spec: ART#what-a-version-offers
+			assert!(
+				artifacts[0].get("group_id").is_none(),
+				"the scope is not disclosed, but got {}",
+				artifacts[0]
+			);
 		},
 	)
 	.await
@@ -622,7 +630,6 @@ async fn an_admin_device_registers_for_any_group() {
 				.await;
 			scoped.assert_status_ok();
 			let scoped: serde_json::Value = scoped.json();
-			assert_eq!(scoped["group_id"], GROUP_A);
 			assert!(
 				scoped["digest"].is_string(),
 				"the bytes are held, so Canopy digests them"
@@ -789,14 +796,16 @@ async fn a_releaser_records_the_digest_it_publishes() {
 		async |mut conn, cert, _device_id, public, _| {
 			seed(&mut conn).await;
 
+			let claimed = sri(&digest_of(b"the installer"));
 			let recorded = public
-				.post("/artifacts/2.60.0/installer/windows?digest=sha256:abcd")
+				.post("/artifacts/2.60.0/installer/windows")
+				.add_query_param("digest", &claimed)
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.text("https://example.com/x.exe")
 				.await;
 			recorded.assert_status_ok();
 			let recorded: serde_json::Value = recorded.json();
-			assert_eq!(recorded["digest"], "sha256:abcd");
+			assert_eq!(recorded["digest"], claimed);
 
 			for query in ["", "?digest=", "?digest=%20%20"] {
 				let response = public
@@ -809,6 +818,22 @@ async fn a_releaser_records_the_digest_it_publishes() {
 				assert!(
 					artifact["digest"].is_null(),
 					"a blank digest is no digest, but got {artifact}"
+				);
+			}
+
+			// A digest nothing can check the bytes against is refused rather
+			// than published to every device that fetches the artifact.
+			for claimed in ["sha256:abcd", "notadigest", "sha256-abcd"] {
+				let response = public
+					.post("/artifacts/2.60.0/installer/macos")
+					.add_query_param("digest", claimed)
+					.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+					.text("https://example.com/x.dmg")
+					.await;
+				assert_eq!(
+					response.status_code(),
+					StatusCode::BAD_REQUEST,
+					"{claimed:?} is not a digest"
 				);
 			}
 		},

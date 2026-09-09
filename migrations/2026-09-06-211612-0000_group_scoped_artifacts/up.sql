@@ -9,7 +9,7 @@ ALTER TABLE artifacts
 	ADD COLUMN group_id UUID REFERENCES server_groups(id) ON DELETE CASCADE,
 	ADD COLUMN content BYTEA,
 	ADD COLUMN content_type TEXT,
-	ADD COLUMN digest TEXT,
+	ADD COLUMN digest BYTEA,
 	ADD COLUMN run_id UUID;
 
 ALTER TABLE artifacts ALTER COLUMN download_url DROP NOT NULL;

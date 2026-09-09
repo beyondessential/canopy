@@ -162,7 +162,7 @@
           {
             "name": "digest",
             "in": "query",
-            "description": "Algorithm-prefixed digest of the bytes at the URL, e.g. `sha256:2cf24dba…`, for an unscoped artifact. Whoever fetches it checks what it got against this; one registered without a digest is fetched unchecked. Ignored for a group-scoped artifact, whose digest Canopy takes of the bytes itself.",
+            "description": "Subresource Integrity digest of the bytes at the URL, e.g. `sha256-LCTbqp…`, for an unscoped artifact. Whoever fetches it checks what it got against this; one registered without a digest is fetched unchecked. Ignored for a group-scoped artifact, whose digest Canopy takes of the bytes itself.",
             "required": false,
             "schema": {
               "type": "string"
@@ -1699,7 +1699,7 @@
       },
       "Artifact": {
         "type": "object",
-        "description": "An artifact as it is offered to a caller.",
+        "description": "A downloadable artifact belonging to a release version: an installer,\npackage, or other file published for a given type and platform.",
         "required": [
           "id",
           "artifact_type",
@@ -1724,19 +1724,11 @@
               "string",
               "null"
             ],
-            "description": "Algorithm-prefixed digest of the artifact's bytes, e.g.\n`sha256:2cf24dba…`, where one was recorded."
+            "description": "Subresource Integrity digest of the artifact's bytes, e.g.\n`sha256-LCTbqp…`, where one was recorded."
           },
           "download_url": {
             "type": "string",
-            "description": "URL the artifact can be downloaded from. For an artifact whose bytes\nCanopy holds, this is Canopy's own download endpoint for it."
-          },
-          "group_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The group this artifact is for. `null` for an artifact that is for\nevery group."
+            "description": "URL the artifact can be downloaded from."
           },
           "id": {
             "type": "string",
@@ -2247,7 +2239,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Behaviours this intent opts into; see [`semantics`] for what each one\ngrants. Unrecognised values are stored but have no effect, so a consumer\nmay advertise ahead of Canopy support."
+            "description": "Behaviours this intent opts into. Recognised values are `check` (a\nhealth report is expected for each replica), `once` (a given snapshot\nis only ever dispatched to a replica once, rather than repeatedly until\noverdue), `url` (a replica's health report includes a link to it),\n`migrate` (Canopy names a target version and the replica applies that\nversion's migrations), `redact` (the replica de-identifies the restored\ndata before serving it), and `reporting-schema` (the replica builds a\nTamanu reporting schema and registers it for the group). Unrecognised\nvalues are stored but have no effect, so a consumer may advertise ahead\nof Canopy support."
           }
         }
       },

@@ -1013,7 +1013,6 @@ async fn a_registered_schema_is_offered_back_byte_for_byte() {
 				.expect("the group's schema is offered");
 
 			assert_eq!(schema["platform"], "any");
-			assert_eq!(schema["group_id"], GROUP);
 			assert_eq!(
 				schema["version_id"], VERSION,
 				"published against the exact version, not a range"
@@ -1024,7 +1023,7 @@ async fn a_registered_schema_is_offered_back_byte_for_byte() {
 			);
 			assert_eq!(
 				schema["digest"].as_str().expect("a digest"),
-				database::artifacts::digest_of(sql.as_bytes()),
+				database::artifacts::sri(&database::artifacts::digest_of(sql.as_bytes())),
 				"the digest describes the bytes canopy took in"
 			);
 
@@ -1065,12 +1064,12 @@ async fn a_facility_is_offered_the_same_schema_as_its_centrals() {
 			.expect("the builder device");
 			seed(&mut conn, consumer).await;
 
-			let digest = database::artifacts::digest_of(b"the group's schema");
+			let digest = hex::encode(database::artifacts::digest_of(b"the group's schema"));
 			conn.batch_execute(&format!(
 				"INSERT INTO artifacts
 				   (version_id, platform, artifact_type, group_id, content, content_type, digest)
 				 VALUES ('{VERSION}', 'any', 'reporting-schema', '{GROUP}',
-				         'the group''s schema'::bytea, 'application/sql', '{digest}');
+				         'the group''s schema'::bytea, 'application/sql', '\\x{digest}'::bytea);
 
 				 INSERT INTO machines (id, name, group_id, device_id)
 				 VALUES (gen_random_uuid(), 'facility-box', '{GROUP}', '{device_id}')"
@@ -1090,7 +1089,7 @@ async fn a_facility_is_offered_the_same_schema_as_its_centrals() {
 				.find(|a| a["artifact_type"] == "reporting-schema")
 				.expect("a facility's device is offered its group's schema");
 
-			assert_eq!(schema["group_id"], GROUP);
+			assert_eq!(schema["version_id"], VERSION);
 		},
 	)
 	.await
