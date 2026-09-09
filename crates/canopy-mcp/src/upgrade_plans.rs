@@ -175,6 +175,32 @@ impl CanopyMcp {
 			}
 		}
 
+		// A plan whose environment has no live application any more still says
+		// where the group was going, so leaving it out would answer "where is
+		// every environment going" with an environment missing.
+		let mut orphans: Vec<UpgradePlan> = open
+			.into_values()
+			.filter(|plan| names.contains_key(&plan.group_id))
+			.collect();
+		orphans.sort_by_key(|plan| (names[&plan.group_id].clone(), plan.rank));
+		for plan in orphans {
+			plans.push(OpenPlan {
+				group_id: plan.group_id,
+				group_name: names[&plan.group_id].clone(),
+				rank: plan.rank,
+				current_version: None,
+				target_version: version_name(&versions, plan.target_version_id),
+				late: database::upgrade_plans::is_late(&plan, today),
+				planned_for: plan.planned_for,
+				planned_time: plan.planned_time,
+				planned_end_time: plan.planned_end_time,
+				planned_zone: plan.planned_zone,
+				note: plan.note,
+				recorded_by: plan.created_by,
+				recorded_at: plan.created_at,
+			});
+		}
+
 		ok_json(&PlanList {
 			plans,
 			environments_without_a_plan: unplanned,
