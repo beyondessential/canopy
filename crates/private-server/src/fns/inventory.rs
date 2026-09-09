@@ -34,12 +34,18 @@ use database::{
 	server_groups::ServerGroup,
 	upgrade_plans::UpgradePlan,
 };
+use futures::{StreamExt, TryStreamExt};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
 use crate::state::AppState;
+
+/// How many of an environment's machine Secrets are read at once. Every
+/// machine carrying a secret variable is its own read, so an unbounded fan-out
+/// would put a large environment's whole apiserver burst on one run's startup.
+const SECRET_READS_AT_ONCE: usize = 8;
 
 /// The variable naming the address a run connects to, which overrides the one
 /// canopy holds for the machine.
@@ -579,16 +585,22 @@ pub async fn for_group(
 		}
 	}
 
-	let owned = futures::future::try_join_all(machines.iter().map(|machine| {
-		Scoped::read(
-			&state,
-			VariableScope::Machine {
-				machine_id: machine.id,
-			},
-			by_machine.get(&machine.id).map_or(&[][..], Vec::as_slice),
-		)
-	}))
-	.await?;
+	let reads: Vec<_> = machines
+		.iter()
+		.map(|machine| {
+			Scoped::read(
+				&state,
+				VariableScope::Machine {
+					machine_id: machine.id,
+				},
+				by_machine.get(&machine.id).map_or(&[][..], Vec::as_slice),
+			)
+		})
+		.collect();
+	let owned: Vec<Scoped> = futures::stream::iter(reads)
+		.buffered(SECRET_READS_AT_ONCE)
+		.try_collect()
+		.await?;
 
 	let mut hosts = Vec::with_capacity(machines.len());
 	for (machine, own) in machines.iter().zip(owned) {
