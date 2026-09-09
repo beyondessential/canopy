@@ -8414,6 +8414,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "x-canopy-upload",
+            "in": "header",
+            "description": "Any value. Required: it makes a browser preflight the request, so a cross-origin page cannot spend an operator's session on this endpoint.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {

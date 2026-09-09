@@ -671,24 +671,34 @@ async fn download_artifact(
 	let artifact_uuid = Uuid::parse_str(&artifact_id)
 		.map_err(|_| AppError::BadRequest("Invalid artifact ID".into()))?;
 
-	// Resolution is what enforces the boundary: an artifact scoped to a group
-	// this caller is not offered is simply not in the set, so it is missing in
-	// exactly the way an artifact that never existed is.
+	// The boundary is what the caller may see, not what it is currently offered:
+	// a URL Canopy handed out keeps working after a more specific artifact of
+	// the same type and platform is registered. An artifact this caller may not
+	// see is missing in exactly the way one that never existed is.
 	// spec: ART#who-is-offered-a-group-scoped-artifact
-	let artifacts = ArtifactRow::get_for_version(&mut db, version.id, scope).await?;
+	let artifacts = ArtifactRow::get_for_version_all_matches(&mut db, version.id, scope).await?;
 	let artifact = artifacts
 		.into_iter()
 		.find(|a| a.id == artifact_uuid)
 		.ok_or(AppError::ArtifactNotFound)?;
 
-	if let Some(held) = ArtifactRow::content_for(&mut db, artifact.id).await? {
-		if database::artifacts::digest_of(&held.bytes) != held.digest {
+	if let Some(held) = ArtifactRow::content_for(&mut db, artifact.id, scope).await? {
+		// Hashing the whole artifact is tens of milliseconds with no await in
+		// it, and a fleet fetching one schema at once would spend that on the
+		// runtime's own threads.
+		let held = tokio::task::spawn_blocking(move || {
+			(database::artifacts::digest_of(&held.bytes) == held.digest).then_some(held)
+		})
+		.await
+		.map_err(|err| AppError::custom(format!("verifying the artifact failed: {err}")))?;
+
+		let Some(held) = held else {
 			tracing::error!(
 				artifact = %artifact.id,
 				"held artifact does not match its digest; refusing to serve"
 			);
 			return Err(AppError::ArtifactDigestMismatch);
-		}
+		};
 
 		let content_type = held
 			.content_type

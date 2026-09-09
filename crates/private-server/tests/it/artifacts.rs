@@ -104,6 +104,7 @@ async fn a_registration_that_rests_nowhere_is_refused() {
 		// Bytes that are not the digest the upload names.
 		let mismatched = private
 			.post("/api/versions/upload_artifact")
+			.add_header("x-canopy-upload", "1")
 			.add_query_param("version_id", version)
 			.add_query_param("artifact_type", "installer")
 			.add_query_param("platform", "any")
@@ -121,6 +122,7 @@ async fn a_registration_that_rests_nowhere_is_refused() {
 		for claimed in ["", "   ", "sha256:abcd", "notadigest", "sha256-abcd"] {
 			let refused = private
 				.post("/api/versions/upload_artifact")
+				.add_header("x-canopy-upload", "1")
 				.add_query_param("version_id", version)
 				.add_query_param("artifact_type", "installer")
 				.add_query_param("platform", "any")
@@ -204,6 +206,7 @@ async fn an_operator_registers_a_group_scoped_artifact() {
 
 		let response = private
 			.post("/api/versions/upload_artifact")
+			.add_header("x-canopy-upload", "1")
 			.add_query_param("version_id", version)
 			.add_query_param("artifact_type", "reporting-schema")
 			.add_query_param("platform", "any")
@@ -242,6 +245,7 @@ async fn a_registration_naming_no_group_that_exists_is_refused() {
 
 		let created = private
 			.post("/api/versions/upload_artifact")
+			.add_header("x-canopy-upload", "1")
 			.add_query_param("version_id", version)
 			.add_query_param("artifact_type", "reporting-schema")
 			.add_query_param("platform", "any")
@@ -362,6 +366,7 @@ async fn an_upload_over_the_limit_is_told_what_it_is() {
 		let four_mib = vec![0u8; 4 * 1024 * 1024];
 		let accepted = private
 			.post("/api/versions/upload_artifact")
+			.add_header("x-canopy-upload", "1")
 			.add_query_param("version_id", version)
 			.add_query_param("artifact_type", "reporting-schema")
 			.add_query_param("platform", "any")
@@ -374,6 +379,7 @@ async fn an_upload_over_the_limit_is_told_what_it_is() {
 		let over_limit = vec![0u8; 32 * 1024 * 1024 + 1];
 		let refused = private
 			.post("/api/versions/upload_artifact")
+			.add_header("x-canopy-upload", "1")
 			.add_query_param("version_id", version)
 			.add_query_param("artifact_type", "reporting-schema")
 			.add_query_param("platform", "linux")
@@ -493,6 +499,7 @@ async fn a_registration_answers_what_it_overrides() {
 
 		let held = private
 			.post("/api/versions/upload_artifact")
+			.add_header("x-canopy-upload", "1")
 			.add_query_param("version_id", version)
 			.add_query_param("artifact_type", "reporting-schema")
 			.add_query_param("platform", "any")
@@ -524,6 +531,47 @@ async fn a_registration_answers_what_it_overrides() {
 			unscoped["has_range_override"], false,
 			"a group's range outranks an unscoped exact, so nothing is displaced"
 		);
+	})
+	.await
+}
+
+/// Every other write here carries a JSON body, which a form cannot send, so the
+/// browser preflights it and a cross-origin page never reaches it. This one
+/// takes raw bytes, so it asks for a header of its own to the same end: the
+/// operator's identity comes from the proxy, and a page they merely visited
+/// must not be able to spend it.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_upload_without_the_fetch_header_is_refused() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let version = "aaaaaaaa-9999-0000-0000-aaaaaaaaaaaa";
+		let group = "cccccccc-9999-0000-0000-cccccccccccc";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status)
+			 VALUES ('{version}', 2, 60, 0, '', 'published');
+			 INSERT INTO server_groups (id, name) VALUES ('{group}', 'kamaka')",
+		))
+		.await
+		.unwrap();
+
+		let refused = private
+			.post("/api/versions/upload_artifact")
+			.add_query_param("version_id", version)
+			.add_query_param("artifact_type", "reporting-schema")
+			.add_query_param("platform", "any")
+			.add_query_param("group_id", group)
+			.add_query_param("digest", sri_of(b"kamaka schema"))
+			.bytes("kamaka schema".into())
+			.await;
+		assert_eq!(refused.status_code(), axum::http::StatusCode::BAD_REQUEST);
+
+		// Nothing was written by it.
+		let listed = private
+			.post("/api/versions/get_version_artifacts")
+			.json(&serde_json::json!({ "version": "2.60.0" }))
+			.await;
+		let artifacts: Vec<serde_json::Value> = listed.json();
+		assert!(artifacts.is_empty(), "the refusal wrote nothing");
 	})
 	.await
 }

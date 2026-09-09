@@ -195,7 +195,7 @@ async fn registering_again_replaces_the_bytes_it_held() {
 			.expect("operator view");
 		assert_eq!(all.len(), 1, "a caller is never offered two of a kind");
 
-		let content = Artifact::content_for(&mut conn, second.id)
+		let content = Artifact::content_for(&mut conn, second.id, Scope::Fleet)
 			.await
 			.expect("read content")
 			.expect("bytes are held");
@@ -564,7 +564,7 @@ async fn deleting_an_artifact_takes_its_bytes() {
 			.expect("delete");
 
 		assert!(
-			Artifact::content_for(&mut conn, artifact.id)
+			Artifact::content_for(&mut conn, artifact.id, Scope::Fleet)
 				.await
 				.expect("read content")
 				.is_none()
@@ -590,7 +590,7 @@ async fn an_unscoped_artifact_holds_no_bytes() {
 			.expect("register");
 
 		assert!(
-			Artifact::content_for(&mut conn, artifact.id)
+			Artifact::content_for(&mut conn, artifact.id, Scope::Fleet)
 				.await
 				.expect("read content")
 				.is_none()
@@ -804,6 +804,79 @@ async fn the_group_scope_migration_reverses() {
 		)
 		.await
 		.expect("a group-scoped artifact registers again");
+	})
+	.await;
+}
+
+/// A digest describes the bytes at a location, so moving the location drops it.
+/// Kept, every device that honours the digest refuses a file that is the right
+/// one, and one that ignores it verifies new bytes against an old hash.
+// spec: ART#digests
+#[tokio::test(flavor = "multi_thread")]
+async fn moving_an_artifact_drops_the_digest_of_where_it_was() {
+	TestDb::run(|mut conn, _url| async move {
+		let version = seed_version(&mut conn, 2, 60, 0).await;
+
+		let mut first = unscoped(version, "installer", "https://x/first.exe");
+		first.digest = Some(digest_of(b"the first build"));
+		let artifact = Artifact::register(&mut conn, first)
+			.await
+			.expect("register");
+		assert!(artifact.digest.is_some());
+
+		// Renaming without touching the location keeps it: the bytes it
+		// describes have not moved.
+		Artifact::update(
+			&mut conn,
+			artifact.id,
+			"installer".into(),
+			"windows".into(),
+			Some("https://x/first.exe".into()),
+		)
+		.await
+		.expect("rename");
+		let all = Artifact::get_for_version_all_matches(&mut conn, version, Scope::Fleet)
+			.await
+			.expect("list");
+		assert!(all[0].digest.is_some(), "the bytes did not move");
+
+		Artifact::update(
+			&mut conn,
+			artifact.id,
+			"installer".into(),
+			"windows".into(),
+			Some("https://x/second.exe".into()),
+		)
+		.await
+		.expect("move");
+		let all = Artifact::get_for_version_all_matches(&mut conn, version, Scope::Fleet)
+			.await
+			.expect("list");
+		assert!(
+			all[0].digest.is_none(),
+			"a digest for the old location is worse than none"
+		);
+	})
+	.await;
+}
+
+/// A URL is stored as it was tested. A plain-text body picks up whatever the
+/// shell that sent it added, and a location nothing can parse is handed to
+/// every device that asks.
+// spec: ART#where-an-artifact-rests
+#[tokio::test(flavor = "multi_thread")]
+async fn a_location_is_recorded_trimmed() {
+	TestDb::run(|mut conn, _url| async move {
+		let version = seed_version(&mut conn, 2, 60, 0).await;
+
+		let artifact = Artifact::register(
+			&mut conn,
+			unscoped(version, "installer", "  https://x/y.exe\n"),
+		)
+		.await
+		.expect("register");
+
+		assert_eq!(artifact.download_url.as_deref(), Some("https://x/y.exe"));
 	})
 	.await;
 }
