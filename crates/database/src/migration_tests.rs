@@ -65,21 +65,86 @@ pub async fn candidate_for(
 	crate::upgrade_plans::planned_target(db, group_id, rank).await
 }
 
-/// Every candidate across the fleet, at most one per server.
+/// The version each of `applications` should be tested against, by application
+/// id, resolving each group's environment and open plans once for the whole
+/// set rather than once per application.
+///
+/// The answer [`candidate_for`] gives one at a time.
 // spec: RST#candidate-versions
-pub async fn candidates(db: &mut AsyncPgConnection) -> Result<Vec<Candidate>> {
-	let mut candidates = Vec::new();
+async fn candidates_for(
+	db: &mut AsyncPgConnection,
+	applications: &[Application],
+) -> Result<HashMap<Uuid, Version>> {
+	use commons_types::server::rank::ServerRank;
+	use std::collections::{HashMap, HashSet, hash_map::Entry};
 
-	for server in Application::get_all(db, 0, None).await? {
-		if let Some(version) = candidate_for(db, &server).await? {
-			candidates.push(Candidate {
-				server_id: server.id,
-				version_id: version.id,
-			});
+	let unranked: HashSet<Uuid> = applications
+		.iter()
+		.filter(|application| application.rank.is_none())
+		.filter_map(|application| application.group_id)
+		.collect();
+	let unranked: Vec<Uuid> = unranked.into_iter().collect();
+	let headline = crate::server_groups::ServerGroup::highest_member_ranks(db, &unranked).await?;
+
+	let mut open: HashMap<(Uuid, ServerRank), crate::upgrade_plans::UpgradePlan> = HashMap::new();
+	let mut sole: HashMap<Uuid, Option<ServerRank>> = HashMap::new();
+	for plan in crate::upgrade_plans::UpgradePlan::all_open(db).await? {
+		sole.entry(plan.group_id)
+			.and_modify(|held| *held = None)
+			.or_insert(Some(plan.rank));
+		open.insert((plan.group_id, plan.rank), plan);
+	}
+
+	let mut targets: HashMap<Uuid, Option<Version>> = HashMap::new();
+	let mut out = HashMap::new();
+	for application in applications {
+		// The migrations under test are Tamanu's, so only Tamanu has candidates.
+		if application.r#type.software() != "tamanu" {
+			continue;
+		}
+		let Some(group_id) = application.group_id else {
+			continue;
+		};
+		// A group with no ranked member has one environment, the one its plan
+		// names. Without this its plan stays open against no candidate at all,
+		// and the verdict sits at not-tested-yet for good.
+		let Some(rank) = application
+			.rank
+			.or_else(|| headline.get(&group_id).copied())
+			.or_else(|| sole.get(&group_id).copied().flatten())
+		else {
+			continue;
+		};
+		let Some(plan) = open.get(&(group_id, rank)) else {
+			continue;
+		};
+		let target = match targets.entry(plan.target_version_id) {
+			Entry::Occupied(held) => held.into_mut(),
+			Entry::Vacant(slot) => slot.insert(crate::upgrade_plans::target_of(db, plan).await?),
+		};
+		if let Some(version) = target {
+			out.insert(application.id, version.clone());
 		}
 	}
 
-	Ok(candidates)
+	Ok(out)
+}
+
+/// Every candidate across the fleet, at most one per server.
+// spec: RST#candidate-versions
+pub async fn candidates(db: &mut AsyncPgConnection) -> Result<Vec<Candidate>> {
+	let applications = Application::get_all(db, 0, None).await?;
+	let candidates = candidates_for(db, &applications).await?;
+
+	Ok(applications
+		.iter()
+		.filter_map(|server| {
+			candidates.get(&server.id).map(|version| Candidate {
+				server_id: server.id,
+				version_id: version.id,
+			})
+		})
+		.collect())
 }
 
 /// How long one migration took, in the order it ran.
@@ -528,13 +593,14 @@ pub async fn verdicts(
 	db: &mut AsyncPgConnection,
 	applications: Vec<Application>,
 ) -> Result<Vec<GroupVerdict>> {
-	let mut out = Vec::new();
+	let candidates = candidates_for(db, &applications).await?;
 
-	for server in applications {
-		let Some(version) = candidate_for(db, &server).await? else {
+	let mut out = Vec::new();
+	for server in &applications {
+		let Some(version) = candidates.get(&server.id) else {
 			continue;
 		};
-		out.push(verdict_row(db, &server, &version).await?);
+		out.push(verdict_row(db, server, version).await?);
 	}
 
 	Ok(out)

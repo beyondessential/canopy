@@ -479,9 +479,17 @@ pub async fn planned_target(
 	let Some(plan) = UpgradePlan::open_for_environment(db, group_id, rank).await? else {
 		return Ok(None);
 	};
+	target_of(db, &plan).await
+}
+
+/// The version a plan steers testing towards, for a caller that has the plan
+/// already.
+///
+/// A target yanked after the plan was recorded has no artefacts to fetch, so it
+/// cannot steer testing; the plan stays open for the operator to revisit.
+// spec: UPG#what-reads-a-plan
+pub async fn target_of(db: &mut AsyncPgConnection, plan: &UpgradePlan) -> Result<Option<Version>> {
 	let target = Version::get_by_id(db, plan.target_version_id).await?;
-	// A target yanked after the plan was recorded has no artefacts to fetch, so
-	// it cannot steer testing; the plan stays open for the operator to revisit.
 	if target.status != commons_types::version::VersionStatus::Published {
 		return Ok(None);
 	}
