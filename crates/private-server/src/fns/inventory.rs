@@ -336,13 +336,7 @@ pub async fn take_lease(
 		.map(|machine| machine.id)
 		.collect();
 	let windows = MaintenanceWindow::open_over(&mut conn, group.id, &machine_ids).await?;
-	if let Some(window) = windows.iter().find(|window| {
-		window.holds_at(now)
-			&& window
-				.declared_by
-				.as_deref()
-				.is_some_and(|who| who != login)
-	}) {
+	if let Some(window) = refusing_window(&windows, login, now) {
 		return Err(AppError::Conflict(under_maintenance(
 			group,
 			&environment.machines,
@@ -491,28 +485,16 @@ pub async fn run_state(
 		.iter()
 		.map(|machine| machine.id)
 		.collect();
-	let holding: Vec<MaintenanceWindow> =
-		MaintenanceWindow::open_over(&mut conn, environment.group.id, &machine_ids)
-			.await?
-			.into_iter()
-			.filter(|window| window.holds_at(now))
-			.collect();
-	let refusing = |window: &MaintenanceWindow| {
-		window
-			.declared_by
-			.as_deref()
-			.is_some_and(|who| who != login)
-	};
-	let window = holding
-		.iter()
-		.find(|window| refusing(window))
-		.or_else(|| holding.first())
-		.cloned();
+	let windows =
+		MaintenanceWindow::open_over(&mut conn, environment.group.id, &machine_ids).await?;
+	let refusing = refusing_window(&windows, login, now);
 
 	Ok(Json(RunState {
-		refuses: window.as_ref().is_some_and(refusing),
+		refuses: refusing.is_some(),
+		window: refusing
+			.or_else(|| windows.iter().find(|window| window.holds_at(now)))
+			.cloned(),
 		lease,
-		window,
 	}))
 }
 
@@ -678,6 +660,23 @@ pub async fn for_group(
 		secret_vars: wide.secret.into_iter().collect(),
 		hosts,
 	}))
+}
+
+/// The window a take is refused for: one holding over the environment that
+/// somebody other than the caller declared. The group page and the refusal
+/// read the same windows the same way, so they cannot disagree.
+fn refusing_window<'a>(
+	windows: &'a [MaintenanceWindow],
+	login: &str,
+	now: Timestamp,
+) -> Option<&'a MaintenanceWindow> {
+	windows.iter().find(|window| {
+		window.holds_at(now)
+			&& window
+				.declared_by
+				.as_deref()
+				.is_some_and(|who| who != login)
+	})
 }
 
 /// Two machines at one address would have a run configure one box twice and
