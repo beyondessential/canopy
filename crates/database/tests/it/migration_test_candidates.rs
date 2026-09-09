@@ -2,7 +2,10 @@
 //! The version its group's open plan names, and only for Tamanu applications.
 
 use commons_tests::db::TestDb;
-use commons_types::{server::app_type::ApplicationType, version::VersionStatus};
+use commons_types::{
+	server::{app_type::ApplicationType, rank::ServerRank},
+	version::VersionStatus,
+};
 use database::{
 	migration_tests::{Candidate, candidates},
 	upgrade_plans::{PlannedWhen, UpgradePlan},
@@ -60,6 +63,31 @@ async fn insert_server(
 		.await
 		.expect("machine");
 	let server: RowId = sql_query(
+		"INSERT INTO applications (host, rank, group_id, type, machine_id) VALUES ($1, 'production', $2, $3, $4) RETURNING id",
+	)
+	.bind::<sql_types::Text, _>(host)
+	.bind::<sql_types::Uuid, _>(group)
+	.bind::<sql_types::Text, _>(r#type.to_string())
+	.bind::<sql_types::Uuid, _>(machine.id)
+	.get_result(conn)
+	.await
+	.expect("server");
+	server.id
+}
+
+/// A member carrying no rank at all, so its group resolves to no environment.
+async fn insert_unranked_server(
+	conn: &mut diesel_async::AsyncPgConnection,
+	group: Uuid,
+	host: &str,
+	r#type: ApplicationType,
+) -> Uuid {
+	let machine: RowId = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
+		.bind::<sql_types::Uuid, _>(group)
+		.get_result(conn)
+		.await
+		.expect("machine");
+	let server: RowId = sql_query(
 		"INSERT INTO applications (host, group_id, type, machine_id) VALUES ($1, $2, $3, $4) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>(host)
@@ -76,6 +104,7 @@ async fn plan(conn: &mut diesel_async::AsyncPgConnection, group: Uuid, target: &
 	UpgradePlan::record(
 		conn,
 		group,
+		ServerRank::Production,
 		target.id,
 		PlannedWhen::default(),
 		None,
@@ -160,7 +189,7 @@ async fn a_withdrawn_plan_stops_the_testing() {
 		.await;
 		plan(&mut conn, group, &target).await;
 
-		let open = UpgradePlan::open_for_group(&mut conn, group)
+		let open = UpgradePlan::open_for_environment(&mut conn, group, ServerRank::Production)
 			.await
 			.expect("open plan")
 			.expect("a plan is open");
@@ -209,6 +238,49 @@ async fn only_tamanu_servers() {
 		assert!(
 			!found.iter().any(|c| c.server_id == senaite),
 			"another product has no path through Tamanu's migrations"
+		);
+	})
+	.await
+}
+
+/// A group whose members carry no rank has no environment to look a plan up by,
+/// but the migration gives its existing plan one anyway. The plan is the only
+/// environment such a group has, so its members are candidates against it —
+/// otherwise the dashboard lists the plan as open while nothing can ever be
+/// tested against it.
+// spec: RST#candidate-versions
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unranked_group_takes_its_plan_s_environment() {
+	TestDb::run(|mut conn, _url| async move {
+		let target = publish(&mut conn, 2, 63, 0).await;
+		let group = insert_group(&mut conn, "kamaka").await;
+		let central = insert_unranked_server(
+			&mut conn,
+			group,
+			"https://central.kamaka.example",
+			ApplicationType::TamanuCentral,
+		)
+		.await;
+		// `record` refuses a group with no production environment, so this state
+		// only ever arrives from the migration's backfill, which forces the
+		// rank on every plan that had none.
+		sql_query(
+			"INSERT INTO upgrade_plans (group_id, rank, target_version_id, created_by) \
+			 VALUES ($1, 'production', $2, 'someone@example.com')",
+		)
+		.bind::<sql_types::Uuid, _>(group)
+		.bind::<sql_types::Uuid, _>(target.id)
+		.execute(&mut conn)
+		.await
+		.expect("backfilled plan");
+
+		assert_eq!(
+			candidates(&mut conn).await.expect("candidates"),
+			vec![Candidate {
+				server_id: central,
+				version_id: target.id,
+			}],
+			"the group's one plan is the environment its members are tested for",
 		);
 	})
 	.await

@@ -152,9 +152,9 @@ test.describe("unmonitored servers are marked", () => {
 		expect(masks[0]).toBe("none");
 		expect(masks[1]).not.toBe("none");
 
-		// And the dot says why, for anyone who hovers it. The cell and the
-		// enclosure carry their own tooltips alongside the dot's, so match on
-		// the one we mean.
+		// And the box says why, for anyone who hovers it: the enclosure names
+		// what each of its dots stands for, so the dots carry no tooltip of
+		// their own to open on top of it.
 		await strip
 			.locator("[data-testid='rank-row'] > span > span > span")
 			.nth(1)

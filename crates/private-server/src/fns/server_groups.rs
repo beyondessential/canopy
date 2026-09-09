@@ -189,6 +189,13 @@ pub struct GroupMachine {
 	pub health: HealthState,
 	/// Whether a maintenance window suspends this box, its own or its group's.
 	pub maintained: bool,
+	/// Whether every window over the box has ended and it is serving out the
+	/// settle period.
+	pub maintenance_settling: bool,
+	/// Whether the window covering this box was declared over the box itself,
+	/// as against one reaching it through its environment or its group.
+	// spec: MNT#presentation
+	pub own_window: bool,
 	/// The platform the box reports, where it reports one. The one machine
 	/// figure the tree shows: it is what distinguishes two otherwise
 	/// identical rows.
@@ -225,6 +232,7 @@ pub async fn get(
 	let maintained = database::maintenance_windows::MaintenanceWindow::suspends(
 		&mut conn,
 		None,
+		None,
 		Some(args.server_group_id),
 	)
 	.await?;
@@ -232,6 +240,7 @@ pub async fn get(
 		&& database::maintenance_windows::MaintenanceWindow::open_for(
 			&mut conn,
 			database::issues::Scope::Group(args.server_group_id),
+			None,
 		)
 		.await?
 		.is_none();
@@ -296,16 +305,16 @@ pub async fn tree_members(
 	// A window is declared over a machine or a group, and a box is suspended
 	// by either.
 	// spec: MNT#presentation
-	let (maintained_machines, maintained_groups) =
+	let suspended =
 		database::maintenance_windows::MaintenanceWindow::suspended_targets(conn).await?;
 	let machines: Vec<GroupMachine> = boxes
 		.into_iter()
 		.map(|m| GroupMachine {
 			up: m.reachability(machine_reports.get(&m.id).copied()),
 			health: machine_health.get(&m.id).copied().unwrap_or_default(),
-			maintained: maintained_machines.contains(&m.id)
-				|| m.group_id
-					.is_some_and(|gid| maintained_groups.contains(&gid)),
+			maintained: suspended.suspends(m.id, m.group_id),
+			maintenance_settling: suspended.settling(m.id, m.group_id),
+			own_window: suspended.machine_window(m.id),
 			// A box's platform is its own reports' or nothing: the fallback
 			// through an application's Postgres banner belongs to the
 			// application grain, not here.

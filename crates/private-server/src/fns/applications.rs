@@ -73,6 +73,15 @@ pub struct ServerDetailData {
 	/// `group_machines`.
 	// spec: FLT#navigating-the-two-grains
 	pub machine_name: Option<String>,
+	/// The rank the box this application runs on serves: the highest among the
+	/// workloads on it.
+	///
+	/// Maintenance coverage is decided at the box's rank, not the
+	/// application's, so a page reading a window's reach needs this rather
+	/// than `server.rank`. They differ on a box carrying workloads at more
+	/// than one rank.
+	// spec: MNT#presentation
+	pub machine_rank: Option<commons_types::server::rank::ServerRank>,
 	/// The server's own effective `billing.*` labels
 	/// (product/deployment/stage) — the ones canopy hands the server's device,
 	/// carrying its own product and rank rather than its group's. Empty when
@@ -152,11 +161,15 @@ pub struct ServerInfo {
 	/// Whether the server may obtain TLS certificates for names under its
 	/// group's domains.
 	pub may_manage_tls: bool,
-	/// Whether a maintenance window suspends this server, its own or its
-	/// group's. Set alongside `up` and `health` by the endpoints that
-	/// decorate listings; `None` where they aren't.
+	/// Whether a maintenance window suspends this server, its own or one over
+	/// the box it runs on. Set alongside `up` and `health` by the endpoints
+	/// that decorate listings; `None` where they aren't.
 	// spec: MNT#presentation
 	pub maintained: Option<bool>,
+	/// Whether that window was declared over this application in particular.
+	/// One reaching it through its box is marked on the box.
+	// spec: MNT#presentation
+	pub own_window: Option<bool>,
 }
 
 /// The server's most recently reported status push: version/host info plus
@@ -307,6 +320,7 @@ pub(super) fn server_to_info(s: Application) -> ServerInfo {
 		up: None,
 		health: None,
 		maintained: None,
+		own_window: None,
 		may_manage_dns: s.may_manage_dns,
 		may_manage_tls: s.may_manage_tls,
 	}
@@ -340,12 +354,11 @@ pub(super) async fn decorate_with_status(
 	let server_groups: Vec<(Uuid, Option<Uuid>)> =
 		infos.iter().map(|i| (i.id, i.group_id)).collect();
 	let health = database::issues::health_from_check_state(conn, &server_groups).await?;
-	// A window is declared over a machine, so what suspends an application is
-	// its machine's window, not one naming the application's own id. The two
-	// coincide for anything that predates the split, which is why reading the
-	// wrong one still looked right.
+	// An application is suspended by a window naming it and by any over the box
+	// it runs on: work on the machine stops the workload whether or not anyone
+	// named it.
 	// spec: MNT#presentation
-	let (maintained_machines, maintained_groups) =
+	let suspended =
 		database::maintenance_windows::MaintenanceWindow::suspended_targets(conn).await?;
 	for info in infos.iter_mut() {
 		let st = by_server.get(&info.id).copied();
@@ -358,12 +371,9 @@ pub(super) async fn decorate_with_status(
 			.max(st.map(|s| s.created_at));
 		info.up = Some(ShortStatus::grade(last_reported_at, down_after));
 		info.health = Some(health.get(&info.id).copied().unwrap_or_default());
-		info.maintained = Some(
-			maintained_machines.contains(&info.machine_id)
-				|| info
-					.group_id
-					.is_some_and(|gid| maintained_groups.contains(&gid)),
-		);
+		info.maintained =
+			Some(suspended.suspends_application(info.id, info.machine_id, info.group_id));
+		info.own_window = Some(suspended.application_window(info.id));
 	}
 	Ok(())
 }
@@ -737,6 +747,7 @@ pub async fn get_detail(
 	let machine_name = database::machines::Machine::get_by_id(&mut conn, server.machine_id)
 		.await?
 		.name;
+	let machine_rank = database::machines::Machine::rank(&mut conn, server.machine_id).await?;
 
 	// This server's own attribution, not its group's: for a server whose
 	// product or rank differs from the group's, the page would otherwise show
@@ -756,27 +767,14 @@ pub async fn get_detail(
 		None => Vec::new(),
 	};
 
-	// An application is under maintenance when the box it runs on is: work on
-	// the machine stops the workload whether or not anyone named it.
-	let maintained = database::maintenance_windows::MaintenanceWindow::suspends(
-		&mut conn,
-		Some(server.machine_id),
-		server.group_id,
-	)
-	.await?;
-	let maintenance_settling = maintained && {
-		use database::issues::Scope;
-		use database::maintenance_windows::MaintenanceWindow;
-		let mut open = MaintenanceWindow::open_for(&mut conn, Scope::Machine(server.machine_id))
-			.await?
-			.is_some();
-		if !open && let Some(gid) = server.group_id {
-			open = MaintenanceWindow::open_for(&mut conn, Scope::Group(gid))
-				.await?
-				.is_some();
-		}
-		!open
-	};
+	// An application is under maintenance when a window names it, and when the
+	// box it runs on is under one: work on the machine stops the workload
+	// whether or not anyone named it.
+	let suspended =
+		database::maintenance_windows::MaintenanceWindow::suspended_targets(&mut conn).await?;
+	let maintained = suspended.suspends_application(server.id, server.machine_id, server.group_id);
+	let maintenance_settling =
+		suspended.settling_application(server.id, server.machine_id, server.group_id);
 
 	Ok(Json(ServerDetailData {
 		server: server_details,
@@ -791,6 +789,7 @@ pub async fn get_detail(
 		group_applications,
 		group_machines,
 		machine_name,
+		machine_rank,
 		billing_labels,
 	}))
 }
@@ -807,10 +806,11 @@ pub struct ServerUpdateArgs {
 /// Update a server's fields.
 ///
 /// Applies a partial update — only the fields present in `data` are
-/// changed. Moving a previously-ungrouped server into a group, or toggling
-/// `is_monitored`, re-evaluates the server's open issues so incidents catch
-/// up with the new state. Returns 400 if the update is rejected (e.g. an
-/// invalid host value, or a role the target product doesn't define).
+/// changed. Moving a previously-ungrouped server into a group, toggling
+/// `is_monitored`, or changing the rank re-evaluates the server's open issues
+/// so incidents catch up with the new state. Returns 400 if the update is
+/// rejected (e.g. an invalid host value, or a role the target product doesn't
+/// define).
 #[utoipa::path(
 	post,
 	path = "/update",
@@ -825,17 +825,20 @@ pub struct ServerUpdateArgs {
 )]
 pub async fn update(
 	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
+	admin: TailscaleAdmin,
 	Json(args): Json<ServerUpdateArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
 
-	// Capture the server's pre-update state when this request touches either
-	// of the two fields whose transitions warrant an incident catch-up:
-	// `group_id` (ungrouped → grouped opens pending issues into incidents)
-	// and `is_monitored` (un/monitored toggles incident eligibility
-	// symmetrically — on enrols open issues, off cascades them out).
-	let touches_catchup_field = args.data.group_id.is_some() || args.data.is_monitored.is_some();
+	// Capture the server's pre-update state when this request touches one of
+	// the fields whose transitions warrant an incident catch-up: `group_id`
+	// (ungrouped → grouped opens pending issues into incidents),
+	// `is_monitored` (un/monitored toggles incident eligibility symmetrically:
+	// on enrols open issues, off cascades them out), and `rank` (which
+	// environment the issues belong to).
+	let touches_catchup_field = args.data.group_id.is_some()
+		|| args.data.is_monitored.is_some()
+		|| args.data.rank.is_some();
 	let before = if touches_catchup_field {
 		Some(Application::get_by_id(&mut conn, args.server_id).await?)
 	} else {
@@ -900,8 +903,26 @@ pub async fn update(
 		(Some(b), Some(new_value)) => b.is_monitored != new_value,
 		_ => false,
 	};
+	let rank_changed = match (before.as_ref(), args.data.rank) {
+		(Some(b), Some(new_value)) => b.rank != Some(new_value),
+		_ => false,
+	};
 	if group_just_set || monitored_toggled {
 		database::issues::reevaluate_open_issues_for_server(&mut conn, args.server_id).await?;
+	}
+	if rank_changed {
+		// A box's environment is the highest rank among the workloads on it,
+		// so a rank change moves the machine's own issues too.
+		// spec: INC#targets
+		let machine_id = Application::get_by_id(&mut conn, args.server_id)
+			.await?
+			.machine_id;
+		database::issues::reevaluate_open_issues_for_scope(
+			&mut conn,
+			database::issues::Scope::Machine(machine_id),
+			Some(&format!("rank changed by {}", admin.0.login)),
+		)
+		.await?;
 	}
 	Ok(Json(()))
 }

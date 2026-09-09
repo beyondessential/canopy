@@ -53,6 +53,7 @@ diesel::table! {
 		extra -> Jsonb,
 		version -> Nullable<Text>,
 		reported_at -> Timestamptz,
+		version_reported_at -> Nullable<Timestamptz>,
 	}
 }
 
@@ -431,6 +432,7 @@ diesel::table! {
 		server_group_id -> Nullable<Uuid>,
 		escalated_at -> Nullable<Timestamptz>,
 		closing_at -> Nullable<Timestamptz>,
+		rank -> Nullable<Text>,
 	}
 }
 
@@ -555,6 +557,8 @@ diesel::table! {
 		settled_at -> Nullable<Timestamptz>,
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
+		rank -> Nullable<Text>,
+		application_id -> Nullable<Uuid>,
 	}
 }
 
@@ -791,6 +795,7 @@ diesel::table! {
 		planned_time -> Nullable<Time>,
 		planned_zone -> Nullable<Text>,
 		planned_end_time -> Nullable<Time>,
+		rank -> Text,
 	}
 }
 
@@ -871,6 +876,7 @@ diesel::joinable!(machine_enrollment_tokens -> machines (machine_id));
 diesel::joinable!(machine_reported_detail -> machines (machine_id));
 diesel::joinable!(machines -> devices (device_id));
 diesel::joinable!(machines -> server_groups (group_id));
+diesel::joinable!(maintenance_windows -> applications (application_id));
 diesel::joinable!(maintenance_windows -> machines (machine_id));
 diesel::joinable!(maintenance_windows -> server_groups (server_group_id));
 diesel::joinable!(migration_tests -> applications (application_id));

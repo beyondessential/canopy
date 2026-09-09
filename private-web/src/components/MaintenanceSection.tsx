@@ -13,8 +13,9 @@ import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
-import type { MaintenanceWindow } from "../types";
+import type { MaintenanceScope, MaintenanceWindow, ServerRank } from "../types";
 import DeclareMaintenanceDialog from "./DeclareMaintenanceDialog";
+import ServerRankChip from "./ServerRankChip";
 import TimeAgo from "./TimeAgo";
 
 const HISTORY_SHOWN = 5;
@@ -27,21 +28,32 @@ export default function MaintenanceSection({
 	scope,
 	id,
 	targetLabel,
+	machineId,
+	machineName,
 	groupId,
 	groupName,
+	rank,
 	onChanged,
 	anchor,
 }: {
 	/** DOM id, so a banner elsewhere on the page can link here. */
 	anchor?: string;
-	scope: "machine" | "group";
+	scope: MaintenanceScope;
 	id: string;
 	targetLabel?: string;
-	/** For a machine, its group: a group's window covers every machine in it,
-	 * so the machine is under maintenance without having a window of its own.
-	 * Its own surface has to say so. */
+	/** For an application, the box it runs on: a machine's window covers every
+	 * application on it, so the application is under maintenance without having
+	 * a window of its own. Its own surface has to say so. */
+	machineId?: string | null;
+	machineName?: string | null;
+	/** For a machine or an application, the group: a group's window covers
+	 * every machine in it, so the target is under maintenance without having a
+	 * window of its own. */
 	groupId?: string | null;
 	groupName?: string | null;
+	/** The environment the target serves: a window over its group's
+	 * environment at that rank covers it too. */
+	rank?: ServerRank | null;
 	/** Called after declaring or lifting, so the page can refresh the
 	 * health and checks that the window changes. */
 	onChanged?: () => void;
@@ -54,7 +66,11 @@ export default function MaintenanceSection({
 	const result = useApi(
 		"maintenance",
 		"for_target",
-		scope === "machine" ? { machine_id: id } : { server_group_id: id },
+		scope === "application"
+			? { application_id: id }
+			: scope === "machine"
+				? { machine_id: id }
+				: { server_group_id: id },
 		[id, tick],
 	);
 	const covering = useApi(
@@ -63,6 +79,13 @@ export default function MaintenanceSection({
 		{ server_group_id: groupId ?? "" },
 		[groupId, tick],
 		{ skip: !groupId },
+	);
+	const coveringMachine = useApi(
+		"maintenance",
+		"for_target",
+		{ machine_id: machineId ?? "" },
+		[machineId, tick],
+		{ skip: !machineId },
 	);
 
 	const reload = () => {
@@ -88,18 +111,58 @@ export default function MaintenanceSection({
 	}
 
 	const windows: MaintenanceWindow[] = result.data;
-	const open = windows.find((w) => w.ended_at === null) ?? null;
+	// A group's own window, not one of its environments'.
+	const open = windows.find((w) => w.ended_at === null && !w.rank) ?? null;
+	const environments = windows.filter((w) => w.ended_at === null && w.rank);
 	const fromGroup =
 		covering.status === "ok"
-			? ((covering.data as MaintenanceWindow[]).find((w) => w.ended_at === null) ?? null)
+			? ((covering.data as MaintenanceWindow[]).find(
+					(w) => w.ended_at === null && (!w.rank || w.rank === rank),
+				) ?? null)
+			: null;
+	const fromMachine =
+		coveringMachine.status === "ok"
+			? ((coveringMachine.data as MaintenanceWindow[]).find(
+					(w) => w.ended_at === null,
+				) ?? null)
 			: null;
 	const history = windows.filter((w) => w.ended_at !== null).slice(0, HISTORY_SHOWN);
 
-	if (!open && !fromGroup && history.length === 0 && !isAdmin) return null;
+	if (
+		!open &&
+		environments.length === 0 &&
+		!fromGroup &&
+		!fromMachine &&
+		history.length === 0 &&
+		!isAdmin
+	)
+		return null;
 
 	return (
 		<Paper id={anchor} variant="outlined" sx={{ p: 2 }} data-testid="maintenance-section">
 			<Heading />
+			{fromMachine && (
+				<Alert
+					severity="info"
+					icon={<BuildOutlinedIcon fontSize="inherit" />}
+					sx={{ mb: 2 }}
+					data-testid="covering-machine-window"
+				>
+					<Typography variant="body2">
+						Under maintenance, ending{" "}
+						<TimeAgo timestamp={fromMachine.expected_end} />, as part of{" "}
+						<MuiLink component={RouterLink} to={`/fleet/machines/${machineId}`}>
+							{machineName ?? "the machine it runs on"}
+						</MuiLink>
+						. Amend or lift it there.
+					</Typography>
+					{fromMachine.note && (
+						<Typography variant="body2" sx={{ mt: 0.5, fontStyle: "italic" }}>
+							{fromMachine.note}
+						</Typography>
+					)}
+				</Alert>
+			)}
 			{fromGroup && (
 				<Alert
 					severity="info"
@@ -156,8 +219,8 @@ export default function MaintenanceSection({
 					<Typography variant="body2">
 						Under maintenance, ending <TimeAgo timestamp={open.expected_end} />.
 
-						Checks are still recorded and shown. Nothing on this{" "}
-						{scope === "machine" ? "machine" : "group"} alerts.
+						Checks are still recorded and shown. Nothing on this {scope}{" "}
+						alerts.
 					</Typography>
 					{open.note && (
 						<Typography variant="body2" sx={{ mt: 0.5, fontStyle: "italic" }}>
@@ -174,10 +237,54 @@ export default function MaintenanceSection({
 						onClick={() => setDialogOpen(true)}
 						sx={{ mb: history.length ? 2 : 0 }}
 					>
-						{fromGroup ? "Declare for this server as well" : "Declare maintenance"}
+						{fromMachine || fromGroup
+							? `Declare for this ${scope} as well`
+							: `Declare maintenance for this ${scope}`}
 					</Button>
 				)
 			)}
+			{environments.map((window) => (
+				<Alert
+					key={window.id}
+					severity="info"
+					icon={<BuildOutlinedIcon fontSize="inherit" />}
+					sx={{ mt: 1 }}
+					data-testid="environment-window"
+					action={
+						isAdmin ? (
+							<Button
+								size="small"
+								color="info"
+								variant="outlined"
+								disabled={lift.pending}
+								onClick={async () => {
+									try {
+										await lift.call({ id: window.id });
+										reload();
+									} catch {
+										/* surfaced below */
+									}
+								}}
+							>
+								Lift
+							</Button>
+						) : undefined
+					}
+				>
+					<Typography variant="body2">
+						<Box component="span" sx={{ textTransform: "capitalize" }}>
+							{window.rank}
+						</Box>{" "}
+						under maintenance, ending <TimeAgo timestamp={window.expected_end} />.
+						The rest of the group stays watched.
+					</Typography>
+					{window.note && (
+						<Typography variant="body2" sx={{ mt: 0.5, fontStyle: "italic" }}>
+							{window.note}
+						</Typography>
+					)}
+				</Alert>
+			))}
 			{lift.error && (
 				<Alert severity="error" sx={{ mt: 1 }}>
 					{lift.error.message}
@@ -199,6 +306,7 @@ export default function MaintenanceSection({
 								<Typography variant="body2">
 									{window.note ?? "Maintenance"}
 								</Typography>
+								{window.rank && <ServerRankChip rank={window.rank} />}
 								<Box sx={{ flex: 1 }} />
 								<Typography variant="caption" color="text.secondary">
 									ended <TimeAgo timestamp={window.ended_at as string} />

@@ -1,7 +1,10 @@
-import { Chip, Stack, Typography } from "@mui/material";
+import { Box, Chip, Stack, Typography } from "@mui/material";
 import PersonIcon from "@mui/icons-material/Person";
 import type { HealthState, ShortStatus } from "../types";
-import MachineEnclosure from "./MachineEnclosure";
+import MachineEnclosure, {
+	ownWindowStripes,
+	waveWhileHolding,
+} from "./MachineEnclosure";
 import StatusDot from "./StatusDot";
 import VersionSquare from "./VersionSquare";
 
@@ -39,7 +42,6 @@ const DOT_ENTRIES: Array<{
 const MACHINE_ENTRIES: Array<{
 	up: ShortStatus;
 	health: HealthState;
-	maintained?: boolean;
 	dots?: number;
 	label: string;
 }> = [
@@ -50,12 +52,6 @@ const MACHINE_ENTRIES: Array<{
 		health: "healthy",
 		dots: 2,
 		label: "Machine down (everything on it with it)",
-	},
-	{
-		up: "up",
-		health: "healthy",
-		maintained: true,
-		label: "Hatched: under maintenance (being worked on)",
 	},
 	{
 		up: "up",
@@ -110,6 +106,17 @@ export function StatusLegend() {
 					Cut through: unmonitored (state shown, nothing alerts)
 				</Typography>
 			</Stack>
+			<Stack
+				data-testid="maintenance-dot-key"
+				direction="row"
+				spacing={0.5}
+				sx={{ alignItems: "center" }}
+			>
+				<StatusDot up="up" health="healthy" maintained quiet />
+				<Typography variant="body2" color="text.secondary">
+					Hollow: this application is under maintenance
+				</Typography>
+			</Stack>
 		</Stack>
 	);
 }
@@ -130,14 +137,14 @@ export function OperatorLegend() {
 export function HealthLegend() {
 	return (
 		<Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap" }}>
-			{MACHINE_ENTRIES.map(({ up, health, maintained, dots = 1, label }) => (
+			{MACHINE_ENTRIES.map(({ up, health, dots = 1, label }) => (
 				<Stack
 					key={label}
 					direction="row"
 					spacing={0.5}
 					sx={{ alignItems: "center" }}
 				>
-					<MachineEnclosure up={up} health={health} maintained={maintained}>
+					<MachineEnclosure up={up} health={health}>
 						{Array.from({ length: dots }, (_, i) => (
 							<StatusDot key={i} up="up" health="healthy" />
 						))}
@@ -147,6 +154,41 @@ export function HealthLegend() {
 					</Typography>
 				</Stack>
 			))}
+		</Stack>
+	);
+}
+
+/// The larger grains take stripes, the dot having no room for them and
+/// hollowing instead (see `StatusLegend`). One swatch and a sentence, rather
+/// than an entry per state and per grain.
+/// spec: MNT#presentation
+export function MaintenanceLegend() {
+	return (
+		<Stack
+			data-testid="maintenance-legend"
+			direction="row"
+			spacing={0.75}
+			sx={{ alignItems: "flex-start" }}
+		>
+			<Box
+				data-testid="maintenance-stripes"
+				data-maintenance="holding"
+				sx={{
+					flex: "none",
+					width: "1.25em",
+					height: "1.25em",
+					mt: "0.1em",
+					borderRadius: "2px",
+					border: 1,
+					borderColor: "divider",
+					backgroundImage: (theme) => ownWindowStripes(theme, false),
+					...waveWhileHolding(true),
+				}}
+			/>
+			<Typography variant="body2" color="text.secondary">
+				Striped: under maintenance, raising nothing. On a machine's icon, an
+				environment's row, or a group's card. Still and lighter once lifted.
+			</Typography>
 		</Stack>
 	);
 }

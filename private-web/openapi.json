@@ -3474,7 +3474,7 @@
           "applications"
         ],
         "summary": "Update a server's fields.",
-        "description": "Applies a partial update — only the fields present in `data` are\nchanged. Moving a previously-ungrouped server into a group, or toggling\n`is_monitored`, re-evaluates the server's open issues so incidents catch\nup with the new state. Returns 400 if the update is rejected (e.g. an\ninvalid host value, or a role the target product doesn't define).",
+        "description": "Applies a partial update — only the fields present in `data` are\nchanged. Moving a previously-ungrouped server into a group, toggling\n`is_monitored`, or changing the rank re-evaluates the server's open issues\nso incidents catch up with the new state. Returns 400 if the update is\nrejected (e.g. an invalid host value, or a role the target product doesn't\ndefine).",
         "operationId": "server_update",
         "requestBody": {
           "content": {
@@ -5149,7 +5149,7 @@
           "incidents"
         ],
         "summary": "List incidents for a server group.",
-        "description": "Returns the group's incidents. By default only open incidents are\nreturned; set `include_closed` to also include closed ones.",
+        "description": "Returns the group's own incidents and those of every environment in it. By\ndefault only open incidents are returned; set `include_closed` to also\ninclude closed ones.",
         "operationId": "incident_list_for_group",
         "requestBody": {
           "content": {
@@ -5189,7 +5189,7 @@
           "incidents"
         ],
         "summary": "List incidents involving a server.",
-        "description": "Returns incidents that issues on the given server have contributed to.\nBy default only open incidents are returned; set `include_closed` to\nalso include closed ones.",
+        "description": "Returns the incidents on the environment the application is in, and the\ngroup's own where it belongs to no environment. By default only open\nincidents are returned; set `include_closed` to also include closed ones.",
         "operationId": "incident_list_for_server",
         "requestBody": {
           "content": {
@@ -5774,8 +5774,8 @@
         "tags": [
           "maintenance"
         ],
-        "summary": "Declare that a server or a group is being worked on.",
-        "description": "Every check on the target grades to skipped while the window holds and\nfor a settle period after it ends, so nothing on it opens or joins an\nincident. Issues already in an open incident leave it, closing the\nincident where nothing else holds it open. A target that already has an\nopen window has that window amended rather than a second opened.\nRequires admin access.",
+        "summary": "Declare that an application, a machine, a group, or one of a group's\nenvironments is being worked on.",
+        "description": "Every check on the target grades to skipped while the window holds and\nfor a settle period after it ends, so nothing on it opens or joins an\nincident. A window over one application leaves the rest of the box watched;\none over the machine covers everything on it. Issues already in an open\nincident leave it, closing the incident where nothing else holds it open. A\ntarget that already has an open window has that window amended rather than\na second opened.\nRequires admin access.",
         "operationId": "declare",
         "requestBody": {
           "content": {
@@ -7460,11 +7460,11 @@
           "upgrade_plans"
         ],
         "summary": "Planned upgrades across the fleet.",
-        "description": "Every live group, whether or not it has a plan. A group several minors\nbehind with no plan is the thing this view exists to surface, so it is listed\nrather than omitted.",
+        "description": "Every environment of every live group, whether or not it has a plan. A\ngroup several minors behind with no plan is the thing this view exists to\nsurface, so its environments are listed rather than omitted.",
         "operationId": "upgrade_plans_fleet",
         "responses": {
           "200": {
-            "description": "One row per live group.",
+            "description": "One row per environment of each live group.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7619,8 +7619,8 @@
         "tags": [
           "upgrade_plans"
         ],
-        "summary": "Record where a group is going, retiring any plan it already had.",
-        "description": "A group goes one place next, so this replaces rather than queues. The target\nmust be published and ahead of what the group runs.",
+        "summary": "Record where an environment is going, retiring any plan it already had.",
+        "description": "An environment goes one place next, so this replaces rather than queues. The\ntarget must be published and ahead of what the environment runs.",
         "operationId": "upgrade_plans_record",
         "requestBody": {
           "content": {
@@ -7644,7 +7644,7 @@
             }
           },
           "400": {
-            "description": "The target is unpublished, or not ahead of the group.",
+            "description": "The target is unpublished, or not ahead of the environment.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7686,14 +7686,14 @@
         "tags": [
           "upgrade_plans"
         ],
-        "summary": "The versions a group could be planned onto: published, and ahead of what it\nruns.",
+        "summary": "The versions an environment could be planned onto: published, and ahead of\nwhat it runs.",
         "description": "Offering only valid targets is what keeps the operator from picking one\n`record` would refuse.",
         "operationId": "upgrade_plans_targets",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PlansForGroupArgs"
+                "$ref": "#/components/schemas/TargetsArgs"
               }
             }
           },
@@ -10075,6 +10075,14 @@
           "expected_end"
         ],
         "properties": {
+          "application_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The application, for a window over one workload. Covers that\napplication and nothing else on the box it runs on."
+          },
           "expected_end": {
             "type": "string",
             "format": "date-time",
@@ -10095,13 +10103,24 @@
             ],
             "description": "What is being done."
           },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "With the group, the rank of the environment the window covers: the\nmachines serving the group's applications at that rank, and nothing else\nof the group. Absent for a window over the whole group."
+              }
+            ]
+          },
           "server_group_id": {
             "type": [
               "string",
               "null"
             ],
             "format": "uuid",
-            "description": "The group, for a window over a whole group."
+            "description": "The group, for a window over a whole group or one of its environments."
           }
         }
       },
@@ -10560,7 +10579,12 @@
           "machine_id",
           "machine_up",
           "machine_health",
-          "machine_maintained"
+          "maintained",
+          "own_window",
+          "maintenance_settling",
+          "machine_maintained",
+          "machine_own_window",
+          "machine_maintenance_settling"
         ],
         "properties": {
           "health": {
@@ -10587,7 +10611,11 @@
           },
           "machine_maintained": {
             "type": "boolean",
-            "description": "Whether a maintenance window suspends this box — its own or its\ngroup's. A window is declared over a machine and never over an\napplication, so this is the box's fact and the applications on it are\nsuspended by it rather than carrying one of their own."
+            "description": "Whether a maintenance window suspends the box this runs on, its own or\none reaching it through its environment or its group."
+          },
+          "machine_maintenance_settling": {
+            "type": "boolean",
+            "description": "Whether every window over the box has ended and it is serving out the\nsettle period, so a lift reads as taken effect rather than as a window\nthat is still holding."
           },
           "machine_name": {
             "type": [
@@ -10596,9 +10624,21 @@
             ],
             "description": "The box's name, where an operator gave it one."
           },
+          "machine_own_window": {
+            "type": "boolean",
+            "description": "Whether the window covering this box was declared over the box itself,\nas against one it falls under through its environment or its group. A\nreader marks at the grain the operator declared at, so an environment's\nwindow is not drawn as every box in it having its own."
+          },
           "machine_up": {
             "$ref": "#/components/schemas/ShortStatus",
             "description": "The box's own reachability, which is not this application's: a machine\nthat has gone quiet takes everything on it with it, and one that is fine\nsays nothing about whether the software on it is."
+          },
+          "maintained": {
+            "type": "boolean",
+            "description": "Whether a maintenance window suspends this application, by naming it or\nby covering the box it runs on."
+          },
+          "maintenance_settling": {
+            "type": "boolean",
+            "description": "Whether every window covering this application has ended and it is\nserving out the settle period."
           },
           "name": {
             "type": "string",
@@ -10610,6 +10650,10 @@
               "$ref": "#/components/schemas/OperatorPresence"
             },
             "description": "People currently connected to this server, from its latest status\nupdate. Always empty unless the server is actively reporting (`up`\nor `blip`) — a stale report can't be trusted to reflect who is\nconnected right now."
+          },
+          "own_window": {
+            "type": "boolean",
+            "description": "Whether the window suspending it was declared over this application in\nparticular. A window reaching it through its box is marked at that\ngrain, so the dot stays plain."
           },
           "rank": {
             "oneOf": [
@@ -11023,7 +11067,9 @@
           "id",
           "up",
           "health",
-          "maintained"
+          "maintained",
+          "maintenance_settling",
+          "own_window"
         ],
         "properties": {
           "health": {
@@ -11039,12 +11085,20 @@
             "type": "boolean",
             "description": "Whether a maintenance window suspends this box, its own or its group's."
           },
+          "maintenance_settling": {
+            "type": "boolean",
+            "description": "Whether every window over the box has ended and it is serving out the\nsettle period."
+          },
           "name": {
             "type": [
               "string",
               "null"
             ],
             "description": "The operator-assigned name, where it has one."
+          },
+          "own_window": {
+            "type": "boolean",
+            "description": "Whether the window covering this box was declared over the box itself,\nas against one reaching it through its environment or its group."
           },
           "platform": {
             "type": [
@@ -11387,7 +11441,7 @@
       },
       "IncidentData": {
         "type": "object",
-        "description": "An operational incident: a group-scoped roll-up of related issues.\n\nAn incident opens when an issue on a server in the group crosses the\nseverity threshold, gathers further contributing issues while open, and\ncloses automatically once the last serious contributor clears. Operators\ncan additionally mark an incident resolved with a reason.",
+        "description": "An operational incident: a roll-up of the related issues on one target,\nwhich is one of a group's environments, the group itself, or canopy.\n\nAn incident opens when an issue on its target crosses the severity\nthreshold, gathers further contributing issues while open, and closes\nautomatically once the last serious contributor clears. Operators can\nadditionally mark an incident resolved with a reason.",
         "required": [
           "id",
           "server_group_name",
@@ -11447,6 +11501,17 @@
             "format": "date-time",
             "description": "When the incident opened."
           },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "Which of the group's environments the incident targets. Null with a\ngroup means the group itself: its own checks, and the members of a\ngroup with no ranked application."
+              }
+            ]
+          },
           "resolved_at": {
             "type": [
               "string",
@@ -11489,7 +11554,7 @@
               "null"
             ],
             "format": "uuid",
-            "description": "Identifier of the server group the incident belongs to, or null for\na canopy-wide incident (aggregating canopy's self-alerts)."
+            "description": "Identifier of the group the incident belongs to, or null for\na canopy-wide incident (aggregating canopy's self-alerts)."
           },
           "server_group_name": {
             "type": "string",
@@ -13121,7 +13186,7 @@
       },
       "MaintenanceWindow": {
         "type": "object",
-        "description": "A declaration that a machine or a group is being worked on.",
+        "description": "A declaration that an application, a machine, a group, or one of a group's\nenvironments is being worked on.",
         "required": [
           "id",
           "expected_end",
@@ -13144,6 +13209,14 @@
               "null"
             ],
             "description": "The operator who last amended the window, where one has."
+          },
+          "application_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Set for a window over one application, covering that application's\nchecks and nothing else on the box it runs on."
           },
           "created_at": {
             "type": "string",
@@ -13201,6 +13274,17 @@
               "null"
             ],
             "description": "What is being done, where the operator said."
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "Set with `server_group_id` for a window over one of the group's\nenvironments, covering the machines serving that environment and\nnothing else of the group."
+              }
+            ]
           },
           "server_group_id": {
             "type": [
@@ -13770,7 +13854,7 @@
                     "boolean",
                     "null"
                   ],
-                  "description": "Whether a maintenance window suspends this server, its own or its\ngroup's. Set alongside `up` and `health` by the endpoints that\ndecorate listings; `None` where they aren't."
+                  "description": "Whether a maintenance window suspends this server, its own or one over\nthe box it runs on. Set alongside `up` and `health` by the endpoints\nthat decorate listings; `None` where they aren't."
                 },
                 "may_manage_dns": {
                   "type": "boolean",
@@ -13790,6 +13874,13 @@
                 "notes": {
                   "type": "string",
                   "description": "Free-text operator notes about the server."
+                },
+                "own_window": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ],
+                  "description": "Whether that window was declared over this application in particular.\nOne reaching it through its box is marked on the box."
                 },
                 "public_name": {
                   "type": [
@@ -14077,7 +14168,7 @@
       },
       "PlanOutcome": {
         "type": "string",
-        "description": "How a plan stands: still where the group is going, or the way it closed.",
+        "description": "How a plan stands: still where the environment is going, or the way it\nclosed.",
         "enum": [
           "open",
           "met",
@@ -14111,10 +14202,12 @@
       },
       "PlannedUpgrade": {
         "type": "object",
-        "description": "One row of the planned-upgrades view.",
+        "description": "One row of the planned-upgrades view: one of a group's environments.",
         "required": [
           "group_id",
           "group_name",
+          "rank",
+          "headline",
           "late"
         ],
         "properties": {
@@ -14129,12 +14222,21 @@
               }
             ]
           },
+          "behind": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How far that is behind the newest published version, as majors times a\nthousand plus minors. Zero where it is current; `null` where it has\nreported no version.",
+            "minimum": 0
+          },
           "current_version": {
             "type": [
               "string",
               "null"
             ],
-            "description": "The version the group runs now, where it has reported one."
+            "description": "The version the environment runs now, where it has reported one."
           },
           "group_id": {
             "type": "string",
@@ -14144,6 +14246,10 @@
           "group_name": {
             "type": "string",
             "description": "Its name, so the view reads without a second lookup."
+          },
+          "headline": {
+            "type": "boolean",
+            "description": "Whether this is the group's highest-ranked environment, the one the\ngroup's own version is read from."
           },
           "late": {
             "type": "boolean",
@@ -14156,9 +14262,13 @@
               },
               {
                 "$ref": "#/components/schemas/UpgradePlan",
-                "description": "The plan, absent for a group with none."
+                "description": "The plan, absent for an environment with none."
               }
             ]
+          },
+          "rank": {
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "The rank of the environment this concerns: the group's applications at\nthat rank."
           },
           "target_version": {
             "type": [
@@ -14179,7 +14289,7 @@
               "string",
               "null"
             ],
-            "description": "Where the group's data stands against the planned version, rolled up from\nits applications: any failure makes the group a failure, since one server\nwhose data breaks is enough to stop the upgrade. `null` without a plan."
+            "description": "Where the environment's data stands against the planned version, rolled\nup from its applications: any failure makes the environment a failure,\nsince one application whose data breaks is enough to stop the upgrade.\n`null` without a plan."
           }
         }
       },
@@ -14552,13 +14662,14 @@
         "description": "Request body for recording where a group is going.",
         "required": [
           "group_id",
+          "rank",
           "target_version_id"
         ],
         "properties": {
           "group_id": {
             "type": "string",
             "format": "uuid",
-            "description": "The group that intends to move."
+            "description": "The group whose environment intends to move."
           },
           "note": {
             "type": [
@@ -14594,6 +14705,10 @@
               "null"
             ],
             "description": "The IANA zone the planned time is a wall clock in, such as\n`Pacific/Fiji`. Required alongside a time."
+          },
+          "rank": {
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "The rank of the environment within it that intends to move."
           },
           "target_version_id": {
             "type": "string",
@@ -15999,6 +16114,17 @@
             ],
             "description": "The name of the box this application runs on, where it has one.\n\nThe page names its machine in the heading, so it needs the name and not\nonly the id `server.machine_id` carries — and it needs it whether or\nnot the application is grouped, which is why it is not read out of\n`group_machines`."
           },
+          "machine_rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "The rank the box this application runs on serves: the highest among the\nworkloads on it.\n\nMaintenance coverage is decided at the box's rank, not the\napplication's, so a page reading a window's reach needs this rather\nthan `server.rank`. They differ on a box carrying workloads at more\nthan one rank."
+              }
+            ]
+          },
           "maintained": {
             "type": "boolean",
             "description": "Whether a maintenance window suspends this server, its own or its\ngroup's: its checks are recorded and shown, and raise nothing."
@@ -16103,7 +16229,11 @@
           "name",
           "notes",
           "members",
-          "all_members_quiet"
+          "all_members_quiet",
+          "maintained_ranks",
+          "settling_ranks",
+          "maintained",
+          "maintenance_settling"
         ],
         "properties": {
           "all_members_quiet": {
@@ -16114,6 +16244,21 @@
             "type": "string",
             "format": "uuid",
             "description": "Unique identifier of the group."
+          },
+          "maintained": {
+            "type": "boolean",
+            "description": "Whether a window is declared over the group itself, covering every box\nin it whatever its rank."
+          },
+          "maintained_ranks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServerRank"
+            },
+            "description": "The group's environments under a window of their own, so a reader marks\nthe environment's row rather than each box in it."
+          },
+          "maintenance_settling": {
+            "type": "boolean",
+            "description": "Whether the group's own window has ended and it is serving out the\nsettle period."
           },
           "members": {
             "type": "array",
@@ -16129,6 +16274,13 @@
           "notes": {
             "type": "string",
             "description": "Free-text notes about the group."
+          },
+          "settling_ranks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServerRank"
+            },
+            "description": "Of those, the ones serving out the settle period."
           },
           "version": {
             "oneOf": [
@@ -16391,7 +16543,7 @@
               "boolean",
               "null"
             ],
-            "description": "Whether a maintenance window suspends this server, its own or its\ngroup's. Set alongside `up` and `health` by the endpoints that\ndecorate listings; `None` where they aren't."
+            "description": "Whether a maintenance window suspends this server, its own or one over\nthe box it runs on. Set alongside `up` and `health` by the endpoints\nthat decorate listings; `None` where they aren't."
           },
           "may_manage_dns": {
             "type": "boolean",
@@ -16411,6 +16563,13 @@
           "notes": {
             "type": "string",
             "description": "Free-text operator notes about the server."
+          },
+          "own_window": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether that window was declared over this application in particular.\nOne reaching it through its box is marked on the box."
           },
           "public_name": {
             "type": [
@@ -17469,8 +17628,16 @@
       },
       "TargetArgs": {
         "type": "object",
-        "description": "The target a window covers: exactly one of the two is set.",
+        "description": "The target a window covers: exactly one of the ids is set.",
         "properties": {
+          "application_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The application, for a window over one workload. Covers that\napplication and nothing else on the box it runs on."
+          },
           "machine_id": {
             "type": [
               "string",
@@ -17485,7 +17652,26 @@
               "null"
             ],
             "format": "uuid",
-            "description": "The group, for a window over a whole group."
+            "description": "The group, for a window over a whole group or one of its environments."
+          }
+        }
+      },
+      "TargetsArgs": {
+        "type": "object",
+        "description": "Request body for the versions an environment could be planned onto.",
+        "required": [
+          "group_id",
+          "rank"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group."
+          },
+          "rank": {
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "The rank of the environment within it."
           }
         }
       },
@@ -17732,10 +17918,11 @@
       },
       "UpgradePlan": {
         "type": "object",
-        "description": "A group's recorded intention to move to a version.",
+        "description": "An environment's recorded intention to move to a version.",
         "required": [
           "id",
           "group_id",
+          "rank",
           "target_version_id",
           "created_at"
         ],
@@ -17768,7 +17955,7 @@
           "group_id": {
             "type": "string",
             "format": "uuid",
-            "description": "The group that intends to move."
+            "description": "The group whose environment intends to move."
           },
           "id": {
             "type": "string",
@@ -17780,7 +17967,7 @@
               "string",
               "null"
             ],
-            "description": "When the group's reported version reached the target."
+            "description": "When the environment's reported version reached the target."
           },
           "note": {
             "type": [
@@ -17816,6 +18003,10 @@
               "null"
             ],
             "description": "The IANA zone the planned time is a wall clock in."
+          },
+          "rank": {
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "The rank of the environment that intends to move: the group's\napplications at that rank."
           },
           "superseded_at": {
             "type": [

@@ -28,6 +28,14 @@ pub fn rank_priority(rank: Option<ServerRank>) -> u8 {
 	}
 }
 
+/// The environment a group has when no live application of its carries a rank:
+/// production, which is also the rank the plan migration gives such a group's
+/// plans. Every environment question about a group like that is answered here,
+/// so a plan can be recorded for it, met, and read back against the same
+/// environment.
+// spec: GRP#environments
+pub const UNRANKED_ENVIRONMENT: ServerRank = ServerRank::Production;
+
 /// Ordering key for a server's kind — lower is higher priority. Central applications
 /// are the headline of a group; facility ties below them, standalone last.
 // spec: APP#versions
@@ -36,6 +44,29 @@ fn higher_rank(a: ServerRank, b: ServerRank) -> ServerRank {
 		a
 	} else {
 		b
+	}
+}
+
+/// A group's applications at one rank, and what the environment's own central
+/// reports running.
+// spec: GRP#environments
+#[derive(Debug, Clone)]
+pub struct Environment {
+	pub group_id: Uuid,
+	pub rank: ServerRank,
+	/// The group's highest-ranked environment, which is the one an unranked
+	/// application belongs to.
+	pub headline: bool,
+	pub version: Option<VersionStr>,
+}
+
+/// How an environment is named where it is read: the group's name, with the
+/// rank after it unless it is production.
+// spec: INC#notification
+pub fn environment_name(group: &str, rank: ServerRank) -> String {
+	match rank {
+		ServerRank::Production => group.to_owned(),
+		rank => format!("{group} {rank}"),
 	}
 }
 
@@ -462,6 +493,141 @@ impl ServerGroup {
 			*counts.entry(gid).or_insert(0) += 1;
 		}
 		Ok(counts)
+	}
+
+	/// Every environment across `group_ids`: each group's live applications at
+	/// one rank, in the order the groups were given and then by rank,
+	/// production first. A group whose live applications are all unranked has
+	/// the one [`UNRANKED_ENVIRONMENT`] names, holding all of them.
+	///
+	/// An environment's version is its own central's, which is the group's
+	/// headline derivation confined to one rank, so an environment holding no
+	/// central has no version.
+	// spec: GRP#environments
+	pub async fn environments(
+		db: &mut AsyncPgConnection,
+		group_ids: &[Uuid],
+	) -> Result<Vec<Environment>> {
+		use crate::schema::applications::dsl;
+		use std::collections::{BTreeSet, HashMap, HashSet};
+
+		if group_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+		// `applications.rank` is unconstrained text, so an unknown spelling
+		// leaves its application in no environment and the fleet still readable.
+		let members: Vec<(Uuid, Option<Uuid>, Option<String>, String)> = dsl::applications
+			.select((dsl::id, dsl::group_id, dsl::rank, dsl::type_))
+			.filter(dsl::group_id.eq_any(group_ids))
+			.filter(dsl::deleted_at.is_null())
+			.load(db)
+			.await?;
+
+		let parsed: Vec<(Uuid, Option<Uuid>, Option<ServerRank>, String)> = members
+			.into_iter()
+			.map(|(id, group_id, rank, r#type)| {
+				(
+					id,
+					group_id,
+					rank.and_then(|rank| rank.parse().ok()),
+					r#type,
+				)
+			})
+			.collect();
+		let ranked: HashSet<Uuid> = parsed
+			.iter()
+			.filter(|(_, _, rank, _)| rank.is_some())
+			.filter_map(|(_, group_id, _, _)| *group_id)
+			.collect();
+
+		let tamanu_central = ApplicationType::TamanuCentral.to_string();
+		let mut present: HashMap<Uuid, BTreeSet<ServerRank>> = HashMap::new();
+		let mut central: HashMap<(Uuid, ServerRank), Uuid> = HashMap::new();
+		for (id, group_id, rank, r#type) in parsed {
+			let Some(group_id) = group_id else {
+				continue;
+			};
+			let rank = match rank {
+				Some(rank) => rank,
+				// An unranked application sits in no environment for as long as
+				// its group has ranked ones to sit beside.
+				None if ranked.contains(&group_id) => continue,
+				None => UNRANKED_ENVIRONMENT,
+			};
+			present.entry(group_id).or_default().insert(rank);
+			if !r#type.eq_ignore_ascii_case(&tamanu_central) {
+				continue;
+			}
+			central
+				.entry((group_id, rank))
+				.and_modify(|held| {
+					if id < *held {
+						*held = id;
+					}
+				})
+				.or_insert(id);
+		}
+
+		let ids: Vec<Uuid> = central.values().copied().collect();
+		let versions = crate::reported_detail::ReportedDetail::last_versions(db, &ids).await?;
+
+		let mut out = Vec::new();
+		for group_id in group_ids {
+			let mut ranks: Vec<ServerRank> = present
+				.get(group_id)
+				.map(|ranks| ranks.iter().copied().collect())
+				.unwrap_or_default();
+			ranks.sort_by_key(|rank| rank_priority(Some(*rank)));
+			for (position, rank) in ranks.into_iter().enumerate() {
+				out.push(Environment {
+					group_id: *group_id,
+					rank,
+					headline: position == 0,
+					version: central
+						.get(&(*group_id, rank))
+						.and_then(|id| versions.get(id))
+						.cloned(),
+				});
+			}
+		}
+		Ok(out)
+	}
+
+	/// One of a group's environments, if the group has applications at that
+	/// rank.
+	// spec: GRP#environments
+	pub async fn environment(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		rank: ServerRank,
+	) -> Result<Option<Environment>> {
+		Ok(Self::environments(db, &[group_id])
+			.await?
+			.into_iter()
+			.find(|env| env.rank == rank))
+	}
+
+	/// The environment an application belongs to: its own rank, or for one
+	/// carrying none, its group's headline environment. `None` for an
+	/// application in no group.
+	// spec: GRP#environments
+	pub async fn environment_of(
+		db: &mut AsyncPgConnection,
+		application: &Application,
+	) -> Result<Option<ServerRank>> {
+		if let Some(rank) = application.rank {
+			return Ok(Some(rank));
+		}
+		let Some(group_id) = application.group_id else {
+			return Ok(None);
+		};
+		Ok(Some(
+			Self::highest_member_ranks(db, &[group_id])
+				.await?
+				.get(&group_id)
+				.copied()
+				.unwrap_or(UNRANKED_ENVIRONMENT),
+		))
 	}
 
 	/// Recompute the cached canonical member and its version for `group_id`.

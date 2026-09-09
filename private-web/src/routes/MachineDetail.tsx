@@ -32,6 +32,7 @@ import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { humanSeconds } from "../lib/humanDuration";
 import {
+	incidentTargetName,
 	type MachineDetailData,
 	SERVER_RANK_ORDER,
 	type ServerInfo,
@@ -182,7 +183,7 @@ export default function MachineDetail() {
 			{openIncident && (
 				<ActiveIncidentCard
 					incident={openIncident}
-					groupName={data.group?.name ?? null}
+					targetName={incidentTargetName(openIncident)}
 				/>
 			)}
 
@@ -238,7 +239,6 @@ export default function MachineDetail() {
 					operators={data.operators}
 					target={{ kind: "machine", id: data.machine.id }}
 					groupId={data.group?.id ?? null}
-					maintained={data.maintained}
 					refreshTick={refreshTick}
 					onSilenced={bumpRefresh}
 				/>
@@ -313,6 +313,7 @@ export default function MachineDetail() {
 				targetLabel={machineLabel(data) ?? undefined}
 				groupId={data.group?.id ?? null}
 				groupName={data.group?.name ?? null}
+				rank={rank}
 				onChanged={bumpRefresh}
 			/>
 

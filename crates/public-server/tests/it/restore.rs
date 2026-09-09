@@ -44,7 +44,9 @@ async fn make_config(conn: &mut AsyncPgConnection, group_id: Uuid, status: &str)
 async fn make_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uuid {
 	let server_id = Uuid::new_v4();
 	let host = format!("https://srv-{server_id}.example.com");
-	sql_query("WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES ($1, $2, 'tamanu-central', $3, $1)")
+	sql_query(
+		"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES ($1, $2, 'tamanu-central', 'production', $3, $1)",
+	)
 		.bind::<sql_types::Uuid, _>(server_id)
 		.bind::<sql_types::Text, _>(host)
 		.bind::<sql_types::Uuid, _>(group_id)
@@ -994,11 +996,12 @@ async fn report_version(conn: &mut AsyncPgConnection, server_id: Uuid, version: 
 	.expect("report version");
 }
 
-/// The group's open plan, which is what names the version to migrate to.
+/// The production environment's open plan, which is what names the version to
+/// migrate to.
 async fn plan_upgrade(conn: &mut AsyncPgConnection, group: Uuid, version_id: Uuid) {
 	sql_query(
-		"INSERT INTO upgrade_plans (group_id, target_version_id, created_by)
-		 VALUES ($1, $2, 'test@example.com')",
+		"INSERT INTO upgrade_plans (group_id, rank, target_version_id, created_by)
+		 VALUES ($1, 'production', $2, 'test@example.com')",
 	)
 	.bind::<sql_types::Uuid, _>(group)
 	.bind::<sql_types::Uuid, _>(version_id)

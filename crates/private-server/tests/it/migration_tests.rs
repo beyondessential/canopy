@@ -17,13 +17,13 @@ const FLEET: &str = "INSERT INTO versions (major, minor, patch, changelog, statu
 		 'bbbbbbbb-0000-0000-0000-000000000001'),
 		('bbbbbbbb-0000-0000-0000-0000000000b0',
 		 'bbbbbbbb-0000-0000-0000-000000000001');
-	INSERT INTO applications (id, name, host, type, group_id, machine_id) VALUES
+	INSERT INTO applications (id, name, host, type, rank, group_id, machine_id) VALUES
 		('bbbbbbbb-0000-0000-0000-0000000000a0', 'central',
-		 'https://central.example.com', 'tamanu-central',
+		 'https://central.example.com', 'tamanu-central', 'production',
 		 'bbbbbbbb-0000-0000-0000-000000000001',
 		 'bbbbbbbb-0000-0000-0000-0000000000a0'),
 		('bbbbbbbb-0000-0000-0000-0000000000b0', 'facility',
-		 'https://facility.example.com', 'tamanu-facility',
+		 'https://facility.example.com', 'tamanu-facility', 'production',
 		 'bbbbbbbb-0000-0000-0000-000000000001',
 		 'bbbbbbbb-0000-0000-0000-0000000000b0');
 	INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES
@@ -35,8 +35,8 @@ async fn for_group_reports_a_verdict_per_server() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(FLEET).await.unwrap();
 		conn.batch_execute(
-			"INSERT INTO upgrade_plans (group_id, target_version_id, created_by)
-				SELECT 'bbbbbbbb-0000-0000-0000-000000000001', id, 'test@example.com'
+			"INSERT INTO upgrade_plans (group_id, rank, target_version_id, created_by)
+				SELECT 'bbbbbbbb-0000-0000-0000-000000000001', 'production', id, 'test@example.com'
 				FROM versions WHERE major = 2 AND minor = 63 AND patch = 0;",
 		)
 		.await

@@ -23,7 +23,6 @@ use commons_types::{
 };
 use database::applications::Application;
 use database::devices::{Device, TailscaleIdentity};
-use database::issues::Scope;
 use jiff::Timestamp;
 
 use database::machine_enrollment_tokens::MachineEnrollmentToken;
@@ -282,21 +281,12 @@ pub async fn get_detail(
 		None => None,
 	};
 
-	// The box's own window, or its group's — the same pair an application on
-	// it is judged by, since taking the box down stops the workload too.
-	let maintained =
-		MaintenanceWindow::suspends(&mut conn, Some(machine.id), machine.group_id).await?;
-	let maintenance_settling = maintained && {
-		let mut open = MaintenanceWindow::open_for(&mut conn, Scope::Machine(machine.id))
-			.await?
-			.is_some();
-		if !open && let Some(gid) = machine.group_id {
-			open = MaintenanceWindow::open_for(&mut conn, Scope::Group(gid))
-				.await?
-				.is_some();
-		}
-		!open
-	};
+	// The box's own window, its group's, or its environment's, the same set an
+	// application on it is judged by, since taking the box down stops the
+	// workload too.
+	let suspended = MaintenanceWindow::suspended_targets(&mut conn).await?;
+	let maintained = suspended.suspends(machine.id, machine.group_id);
+	let maintenance_settling = suspended.settling(machine.id, machine.group_id);
 
 	let mut applications: Vec<super::applications::ServerInfo> = machine
 		.applications(&mut conn)
