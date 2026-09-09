@@ -435,9 +435,9 @@ async fn declare_builder(conn: &mut AsyncPgConnection, enabled: bool) {
 		         '[\"check\",\"once\",\"migrate\",\"reporting-schema\"]'::jsonb, '[]'::jsonb);
 
 		 INSERT INTO restore_replicas
-		 (consumer_device_id, group_id, type, intent, name, enabled, params)
+		 (consumer_device_id, group_id, type, intent, name, enabled, params, publishes_schemas)
 		 VALUES ('{CONSUMER}', '{GROUP}', 'tamanu-postgres', 'reporting-schema',
-		         'kamaka-schemas', {enabled}, '{{}}'::jsonb)",
+		         'kamaka-schemas', {enabled}, '{{}}'::jsonb, true)",
 	))
 	.await
 	.expect("declare builder");

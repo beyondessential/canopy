@@ -81,6 +81,12 @@ pub struct RestoreReplica {
 	/// the whole of the operator's say in it, and it answers on its own
 	/// whether a replica that came up unmasked is a finding.
 	pub redacts: bool,
+	/// Whether this declaration's consumer may publish the group's reporting
+	/// schema. Only an operator sets it: what a consumer advertises is the
+	/// consumer's own claim, and every machine in the group runs what is
+	/// published for it.
+	// spec: RPT#the-build-contract
+	pub publishes_schemas: bool,
 	/// Whether this declaration is currently active. When disabled, it
 	/// produces no work and grants no access, but is kept for reference.
 	pub enabled: bool,
@@ -107,6 +113,7 @@ pub struct NewRestoreReplica {
 	pub overdue_after: Option<PgDuration>,
 	pub params: serde_json::Value,
 	pub redacts: bool,
+	pub publishes_schemas: bool,
 	pub created_by: Option<String>,
 }
 
@@ -124,6 +131,7 @@ pub struct RestoreReplicaUpdate {
 	pub overdue_after: Option<PgDuration>,
 	pub params: serde_json::Value,
 	pub redacts: bool,
+	pub publishes_schemas: bool,
 	pub enabled: bool,
 }
 
@@ -261,6 +269,7 @@ impl RestoreReplica {
 				dsl::overdue_after.eq(update.overdue_after),
 				dsl::params.eq(update.params),
 				dsl::redacts.eq(update.redacts),
+				dsl::publishes_schemas.eq(update.publishes_schemas),
 				dsl::enabled.eq(update.enabled),
 			))
 			.returning(Self::as_select())
@@ -312,12 +321,16 @@ impl RestoreReplica {
 	}
 
 	/// Whether a consumer may register group-scoped artifacts for this group:
-	/// it has an enabled declaration covering the group whose intent it
-	/// advertises as building reporting schemas, and no other group.
+	/// an operator has marked an enabled declaration of theirs covering the
+	/// group as publishing its schema, and that declaration is one a build is
+	/// actually dispatched for.
 	///
-	/// The authorisation is defined with the artifact rather than granted to
-	/// restore consumers at large, so a consumer that restores for a group but
-	/// builds nothing publishes nothing.
+	/// The operator's flag is what grants this, not the semantics the consumer
+	/// advertises: a device registers its own capability set, so a semantic is
+	/// a claim the claimant controls, and what is published here is offered to
+	/// every machine in the group and run. The advertised semantic still has to
+	/// be there, since a consumer that cannot build a schema has no business
+	/// publishing one, but it grants nothing on its own.
 	// spec: ART#registration, RPT#the-build-contract
 	pub async fn authorizes_schema_artifacts(
 		db: &mut AsyncPgConnection,
@@ -342,6 +355,11 @@ impl RestoreReplica {
 			.filter(dsl::group_id.eq(group_id))
 			.filter(dsl::intent.eq_any(building.iter().map(|i| i.0.clone()).collect::<Vec<_>>()))
 			.filter(dsl::enabled.eq(true))
+			.filter(dsl::publishes_schemas.eq(true))
+			// Dispatch builds no schema from a redacting or machine-scoped
+			// declaration, and one nothing is dispatched for publishes nothing.
+			.filter(dsl::redacts.eq(false))
+			.filter(dsl::machine_id.is_null())
 			.count()
 			.get_result(db)
 			.await

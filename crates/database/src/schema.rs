@@ -655,6 +655,7 @@ diesel::table! {
 		updated_at -> Timestamptz,
 		params -> Jsonb,
 		redacts -> Bool,
+		publishes_schemas -> Bool,
 	}
 }
 
