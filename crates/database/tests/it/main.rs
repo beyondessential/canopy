@@ -40,6 +40,7 @@ mod machine_enrollment;
 mod machine_restore_window;
 mod machine_silences;
 mod machines;
+mod maintenance_window_application_migration;
 mod maintenance_window_machine_migration;
 mod maintenance_windows;
 mod mcp_tokens;
