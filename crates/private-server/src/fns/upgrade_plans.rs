@@ -181,7 +181,8 @@ pub async fn fleet(
 						application
 							.rank
 							.or_else(|| headline.get(&env.group_id).copied())
-							== Some(env.rank)
+							.unwrap_or(database::server_groups::UNRANKED_ENVIRONMENT)
+							== env.rank
 					})
 					.cloned()
 					.collect();

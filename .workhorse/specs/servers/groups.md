@@ -42,6 +42,7 @@ An environment is where a group's applications are going next: it holds at most 
 An environment is also what trouble in it is an incident against, announced on its group's channel and delayed by its group's grace (see [INC](../monitoring/incidents.md)).
 A maintenance window covers one environment where an operator declares it over one (see [MNT](../monitoring/maintenance.md)).
 An environment's version is its own central's, derived the way a group's headline version is (see [APP](application-types.md), "Versions").
+A group whose applications are all unranked has one environment all the same: its production, holding every one of them, so it can be planned for, tested against that plan, and have the plan met like any other.
 Everything else Canopy attaches belongs to the group, and it presents a group's members under their rank.
 
 ## A group's headline rank
@@ -53,6 +54,7 @@ A group's billing stage is the same value (see [APP](application-types.md), "Bil
 
 The headline rank is distinct from the headline version, which is the version the group's highest-ranked central reports (see [APP](application-types.md), "Versions").
 A group's headline environment is its applications at its headline rank, and it is the environment an unranked application belongs to.
+A group with nothing ranked has no headline rank, and its applications belong to the one environment it has (see "Environments" above).
 
 ## Naming
 

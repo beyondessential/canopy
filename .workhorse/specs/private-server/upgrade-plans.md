@@ -52,6 +52,7 @@ What an environment runs is what its own central reports, so a site's production
 Wherever an environment is named, it is named by its group with the rank after it, except a group's production, which is named by the group alone.
 An application with no rank belongs to its group's headline environment, the one at the group's highest rank (see [GRP](../servers/groups.md), "A group's headline rank").
 A plan names an environment the group has applications at; one cannot be recorded for a rank the group holds nothing at.
+A group with nothing ranked at all has one environment, its production, and that is the rank its plans take (see [GRP](../servers/groups.md), "Environments").
 
 An open plan's date, time, and note can be amended, and an amendment records who made it and when.
 A corrected date or a reworded note is the same plan better described, so it stays one plan rather than entering the history as a second.
