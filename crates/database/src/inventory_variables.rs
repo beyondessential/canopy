@@ -7,7 +7,7 @@
 
 use commons_errors::{AppError, Result};
 use commons_types::server::rank::ServerRank;
-use diesel::{PgExpressionMethods, prelude::*};
+use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
 use serde::Serialize;
@@ -239,26 +239,35 @@ impl InventoryVariable {
 	}
 }
 
-/// The rows at one scope: the three columns matched nulls and all, a group's
-/// variable being the one with no rank, which `= NULL` never finds.
+/// The rows at one scope. Each arm is spelled as equality and `IS NULL` so the
+/// migration's partial unique indexes serve the lookup, which one predicate
+/// over `IS NOT DISTINCT FROM` would leave to a sequential scan.
 fn at_scope(
 	scope: VariableScope,
 ) -> Box<
 	dyn diesel::BoxableExpression<
 			crate::schema::inventory_variables::table,
 			diesel::pg::Pg,
-			SqlType = diesel::sql_types::Bool,
+			SqlType = diesel::sql_types::Nullable<diesel::sql_types::Bool>,
 		>,
 > {
 	use crate::schema::inventory_variables::dsl;
 
-	let (group_id, rank, machine_id) = columns(scope);
-	Box::new(
-		dsl::server_group_id
-			.is_not_distinct_from(group_id)
-			.and(dsl::rank.is_not_distinct_from(rank))
-			.and(dsl::machine_id.is_not_distinct_from(machine_id)),
-	)
+	match scope {
+		VariableScope::Group { group_id } => Box::new(
+			dsl::server_group_id
+				.eq(group_id)
+				.and(dsl::rank.is_null())
+				.and(dsl::machine_id.is_null()),
+		),
+		VariableScope::Environment { group_id, rank } => Box::new(
+			dsl::server_group_id
+				.eq(group_id)
+				.and(dsl::rank.eq(rank.to_string()))
+				.and(dsl::machine_id.is_null()),
+		),
+		VariableScope::Machine { machine_id } => Box::new(dsl::machine_id.eq(machine_id)),
+	}
 }
 
 fn columns(scope: VariableScope) -> (Option<Uuid>, Option<String>, Option<Uuid>) {
