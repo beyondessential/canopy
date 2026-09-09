@@ -674,6 +674,16 @@ pub async fn create_artifact(
 ) -> Result<Json<ArtifactData>> {
 	let mut conn = state.db.get().await?;
 
+	// The media type is served back as a header, so a value no header can carry
+	// leaves an artifact nothing can download.
+	if let Some(media_type) = &args.content_type
+		&& axum::http::HeaderValue::from_str(media_type).is_err()
+	{
+		return Err(AppError::BadRequest(
+			"content_type is not a usable media type".into(),
+		));
+	}
+
 	// An artifact is either for a group, in which case Canopy holds its bytes,
 	// or for every group, in which case Canopy records where it rests.
 	// spec: ART#where-an-artifact-rests

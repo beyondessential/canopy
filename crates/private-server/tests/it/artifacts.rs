@@ -264,6 +264,73 @@ async fn an_unscoped_artifact_carries_no_media_type() {
 	.await
 }
 
+/// The media type is served back as a header when the bytes are read, so one no
+/// header can carry would leave an artifact that answers a fault on every
+/// download and can only be mended by registering it again.
+// spec: ART#where-an-artifact-rests
+#[tokio::test(flavor = "multi_thread")]
+async fn a_media_type_no_header_can_carry_is_refused() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let version = "11111111-4444-0000-0000-111111111111";
+		let group = "cccccccc-4444-0000-0000-cccccccccccc";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status)
+			 VALUES ('{version}', 2, 60, 0, '', 'published');
+			 INSERT INTO server_groups (id, name) VALUES ('{group}', 'kamaka')",
+		))
+		.await
+		.unwrap();
+
+		let created = private
+			.post("/api/versions/create_artifact")
+			.json(&serde_json::json!({
+				"version_id": version,
+				"artifact_type": "reporting-schema",
+				"platform": "any",
+				"group_id": group,
+				"content_base64": "a2FtYWthIHNjaGVtYQ==",
+				"content_type": "application/sql\r\nx-injected: yes",
+				"digest": database::artifacts::digest_of(b"kamaka schema"),
+			}))
+			.await;
+		assert_eq!(created.status_code(), axum::http::StatusCode::BAD_REQUEST);
+	})
+	.await
+}
+
+/// The group an artifact names is a foreign key, so an id that names no group
+/// answers the operator's own input with a database fault instead of a refusal.
+// spec: ART#registration
+#[tokio::test(flavor = "multi_thread")]
+async fn a_registration_naming_no_group_that_exists_is_refused() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let version = "11111111-5555-0000-0000-111111111111";
+		let gone = "cccccccc-5555-0000-0000-cccccccccccc";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status)
+			 VALUES ('{version}', 2, 60, 0, '', 'published')",
+		))
+		.await
+		.unwrap();
+
+		let created = private
+			.post("/api/versions/create_artifact")
+			.json(&serde_json::json!({
+				"version_id": version,
+				"artifact_type": "reporting-schema",
+				"platform": "any",
+				"group_id": gone,
+				"content_base64": "a2FtYWthIHNjaGVtYQ==",
+				"digest": database::artifacts::digest_of(b"kamaka schema"),
+			}))
+			.await;
+		assert_eq!(created.status_code(), axum::http::StatusCode::BAD_REQUEST);
+	})
+	.await
+}
+
 /// A digest against a location is what whoever fetches the artifact checks the
 /// bytes it got against. Dropped, a caller that supplied one gets no error and
 /// no digest, and the fetch is unchecked.

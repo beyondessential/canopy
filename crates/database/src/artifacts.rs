@@ -365,7 +365,18 @@ impl Artifact {
 			.returning(Self::as_select())
 			.get_result(db)
 			.await
-			.map_err(AppError::from)
+			.map_err(|error| match error {
+				// A registration naming a group or version Canopy does not
+				// hold is the caller's own input, so it is refused rather than
+				// left to surface as a database fault.
+				diesel::result::Error::DatabaseError(
+					diesel::result::DatabaseErrorKind::ForeignKeyViolation,
+					_,
+				) => AppError::BadRequest(
+					"the registration names a group or version Canopy does not hold".into(),
+				),
+				error => AppError::from(error),
+			})
 	}
 
 	pub async fn update(
