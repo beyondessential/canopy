@@ -14955,7 +14955,7 @@ export interface operations {
                     "application/json": components["schemas"]["InventoryVariable"];
                 };
             };
-            /** @description Not one scope, not a usable variable name, or `ansible_host` outside machine scope */
+            /** @description Not one scope, not a usable variable name, or an `ansible_host` outside machine scope or not a string */
             400: {
                 headers: {
                     [name: string]: unknown;

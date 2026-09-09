@@ -659,6 +659,24 @@ async fn refuses_ansible_host_outside_machine_scope() {
 			);
 		}
 
+		// A machine's address is a string, so a value of another shape is
+		// refused rather than served as no override at all.
+		let response = private
+			.post("/api/inventory_variables/set")
+			.json(&json!({
+				"machine_id": Uuid::new_v4(),
+				"name": "ansible_host",
+				"value": 10,
+			}))
+			.await;
+		response.assert_status(axum::http::StatusCode::BAD_REQUEST);
+		assert!(
+			response.json::<Value>()["detail"]
+				.as_str()
+				.expect("detail")
+				.contains("so it is a string"),
+		);
+
 		// `ansible_user` is not so restricted: an environment's machines share
 		// the account a run connects as.
 		set_var(

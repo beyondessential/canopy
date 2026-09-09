@@ -137,7 +137,7 @@ pub async fn for_group(
 	request_body = SetArgs,
 	responses(
 		(status = 200, body = InventoryVariable),
-		(status = 400, description = "Not one scope, not a usable variable name, or `ansible_host` outside machine scope", body = ProblemDetailsSchema),
+		(status = 400, description = "Not one scope, not a usable variable name, or an `ansible_host` outside machine scope or not a string", body = ProblemDetailsSchema),
 		(status = 404, description = "No such server group or machine", body = ProblemDetailsSchema),
 		(status = 502, description = "The secret store is unavailable", body = ProblemDetailsSchema),
 	),
@@ -149,7 +149,7 @@ pub async fn set(
 ) -> Result<Json<InventoryVariable>> {
 	let scope = VariableScope::try_from(args.scope)?;
 	check_name(&args.name)?;
-	check_machine_scoped(scope, &args.name)?;
+	check_ansible_host(scope, &args.name, &args.value)?;
 
 	let mut conn = state.db.get().await?;
 	check_scope(&mut conn, scope).await?;
@@ -281,11 +281,21 @@ fn check_name(name: &str) -> Result<()> {
 }
 
 /// `ansible_host` names one machine, so a wider scope would give every machine
-/// in the environment the same address.
-fn check_machine_scoped(scope: VariableScope, name: &str) -> Result<()> {
-	if name == super::inventory::ANSIBLE_HOST && !matches!(scope, VariableScope::Machine { .. }) {
+/// in the environment the same address. It is served as the address a run
+/// connects to, which is read as a string, so a value of any other shape would
+/// leave the machine on the address it was overriding.
+fn check_ansible_host(scope: VariableScope, name: &str, value: &Value) -> Result<()> {
+	if name != super::inventory::ANSIBLE_HOST {
+		return Ok(());
+	}
+	if !matches!(scope, VariableScope::Machine { .. }) {
 		return Err(AppError::BadRequest(format!(
 			"{name:?} names one machine, so it is set on a machine rather than on a group or an environment"
+		)));
+	}
+	if !value.is_string() {
+		return Err(AppError::BadRequest(format!(
+			"{name:?} is the address a run connects to, so it is a string"
 		)));
 	}
 	Ok(())
