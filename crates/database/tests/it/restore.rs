@@ -4,6 +4,7 @@
 use commons_errors::AppError;
 use commons_tests::db::TestDb;
 use commons_types::backup::{BackupType, IntentDescriptor, RestoreIntent, RunOutcome};
+use commons_types::server::rank::ServerRank;
 use database::diesel_async::AsyncPgConnection;
 use database::pg_duration::PgDuration;
 use database::{
@@ -2068,6 +2069,144 @@ async fn the_three_checks_file_at_the_grain_they_are_about() {
 		assert_eq!(
 			row.machine_id, None,
 			"a box hosting two workloads carries this against the one the version was for"
+		);
+	})
+	.await;
+}
+
+/// A ranked machine and the one application on it, as `(machine, application)`.
+/// A declaration over one machine covers the environment that machine serves,
+/// so a rank is what makes the two declarations below different.
+async fn insert_ranked_server(
+	conn: &mut AsyncPgConnection,
+	group_id: Uuid,
+	rank: &str,
+) -> (Uuid, Uuid) {
+	let (machine, application) = insert_server(conn, group_id).await;
+	sql_query("UPDATE applications SET rank = $2 WHERE id = $1")
+		.bind::<sql_types::Uuid, _>(application)
+		.bind::<sql_types::Text, _>(rank)
+		.execute(conn)
+		.await
+		.expect("set rank");
+	(machine, application)
+}
+
+/// Advertise `intent` as migrating, which is what makes a declaration of it
+/// count towards an environment being testable.
+async fn advertise_migrating(conn: &mut AsyncPgConnection, consumer: Uuid, intent: &str) {
+	RestoreConsumerCapability::register(
+		conn,
+		consumer,
+		&[descriptor(intent, &["check", "migrate"])],
+	)
+	.await
+	.expect("advertise");
+}
+
+/// A declaration attached to one machine speaks for that machine's environment
+/// and no other, so a clone being restored and migrated says nothing about
+/// whether anything tests production.
+// spec: RST#verdicts
+#[tokio::test(flavor = "multi_thread")]
+async fn a_declaration_on_one_machine_only_migrates_its_own_environment() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "kamaka").await;
+		let (clone_box, _) = insert_ranked_server(&mut conn, group, "clone").await;
+		insert_ranked_server(&mut conn, group, "production").await;
+		advertise_migrating(&mut conn, consumer, "migrate").await;
+
+		RestoreReplica::create(
+			&mut conn,
+			new_replica(
+				consumer,
+				group,
+				Some(clone_box),
+				RestoreIntent::from("migrate"),
+				"migrate-clone",
+			),
+		)
+		.await
+		.expect("declare over the clone");
+
+		assert!(
+			database::restore::environment_migrates(&mut conn, group, ServerRank::Clone)
+				.await
+				.expect("clone"),
+			"the clone is what the declaration is attached to"
+		);
+		assert!(
+			!database::restore::environment_migrates(&mut conn, group, ServerRank::Production)
+				.await
+				.expect("production"),
+			"and production is not, so its plan has nothing testing it"
+		);
+	})
+	.await;
+}
+
+/// A declaration with no machine is the group's, so it speaks for every
+/// environment in it: this is the ordinary shape, and the reason the case above
+/// is worth pinning separately.
+// spec: RST#verdicts
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_wide_declaration_migrates_every_environment() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "drifting").await;
+		insert_ranked_server(&mut conn, group, "clone").await;
+		insert_ranked_server(&mut conn, group, "production").await;
+		advertise_migrating(&mut conn, consumer, "migrate").await;
+		declare(&mut conn, consumer, group, "migrate").await;
+
+		for rank in [ServerRank::Clone, ServerRank::Production] {
+			assert!(
+				database::restore::environment_migrates(&mut conn, group, rank)
+					.await
+					.expect("rank"),
+				"a group-wide declaration covers {rank}"
+			);
+		}
+	})
+	.await;
+}
+
+/// A declaration that does not migrate makes no environment testable, however
+/// it is scoped: the semantic is what counts, not the declaration existing.
+// spec: RST#verdicts
+#[tokio::test(flavor = "multi_thread")]
+async fn a_declaration_that_does_not_migrate_leaves_its_environment_untested() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "kamaka-verify").await;
+		let (clone_box, _) = insert_ranked_server(&mut conn, group, "clone").await;
+		RestoreConsumerCapability::register(
+			&mut conn,
+			consumer,
+			&[descriptor("verify", &["check", "once"])],
+		)
+		.await
+		.expect("advertise a verify that does not migrate");
+
+		RestoreReplica::create(
+			&mut conn,
+			new_replica(
+				consumer,
+				group,
+				Some(clone_box),
+				RestoreIntent::from("verify"),
+				"verify-clone",
+			),
+		)
+		.await
+		.expect("declare");
+
+		assert!(
+			!database::restore::environment_migrates(&mut conn, group, ServerRank::Clone)
+				.await
+				.expect("clone"),
+			"restoring without migrating does not test an upgrade"
 		);
 	})
 	.await;

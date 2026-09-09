@@ -10,7 +10,7 @@ How device reports arrive is the status contract (see [STA](../public-server/sta
 
 ## Targets
 
-Every check is scoped to exactly one target: an application, a machine, a server group, or Canopy as a whole.
+Every check is scoped to exactly one target: an application, a machine, a group, or Canopy as a whole.
 
 Application checks and machine checks both come from sources reporting on them, and from Canopy's own determinations such as reachability.
 What separates them is what the check asserts something about: whether the software is serving, or whether the box it runs on has room on its disk (see [FLT](../servers/overview.md)).
@@ -124,8 +124,9 @@ Transforms apply in order — fleet catalog, then group, then the target itself 
 The operator interface presents two scoped policies.
 The **silence** is a scoped ceiling of `skipped` on one check, recording who silenced and when.
 A silenced check keeps recording its observed results; its effective result is skipped, so it raises nothing and counts nowhere.
-The **maintenance window** is the same ceiling applied to every check on a target for a bounded time, so that work an operator is doing raises nothing while it runs (see [MNT](maintenance.md)).
-The model admits arbitrary scoped transforms; surfaces beyond these two are deliberately not offered yet.
+The model admits arbitrary scoped transforms; surfaces beyond the silence are deliberately not offered yet.
+
+A maintenance window is not one of these transforms: it holds a target's issues out of incidents for a bounded time and leaves their grading alone, so an operator sees what their work is doing (see [MNT](maintenance.md)).
 
 #### Silences follow the event
 
@@ -266,8 +267,13 @@ Reachability was once carried alongside health on the application's mark, from w
 Severity reads from colour and subject from shape, so a colour means the same thing wherever it appears.
 A degraded machine is distinguished from a degraded application, since one affects everything on the box and the other affects one workload.
 
-A maintenance window is declared over a machine or a group and never over an application, so wherever a box is drawn its enclosure carries the window (see [MNT](maintenance.md)).
-Where only applications are drawn, each suspended application carries it instead — that is the window's consequence for that application rather than a window of its own.
+An incident is on one of a group's environments or on the group itself (see [INC](incidents.md)), so wherever a group's environments are drawn the incident is marked on the one it is on.
+A group's own incident has no environment to mark and is carried by the mark for the group.
+That mark stands for whichever of its environments is in trouble, so a group with an incident anywhere in it reads as such before any environment is read.
+Where several of its environments have an incident at once, the group's mark takes the state of the most serious of them.
+
+A maintenance window is declared over an application, a machine, a group, or one of a group's environments (see [MNT](maintenance.md)), and is marked where that grain is drawn: an application's window on its mark, a machine's on its enclosure.
+Where a window reaches a target it was not declared over, that target is muted without taking the mark, the window's consequence for it rather than a window of its own.
 A window's mark is distinguished from the mark for a target nobody is watching, so deliberate, temporary work does not read as neglect.
 
 ## Operator controls

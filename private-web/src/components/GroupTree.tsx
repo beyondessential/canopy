@@ -96,6 +96,17 @@ function MachineBlock({
 					health={machine.health}
 					name={machine.name}
 					maintained={machine.maintained}
+					settling={machine.maintenance_settling}
+					ownWindow={machine.own_window}
+					describes={applications.map((application) =>
+						[
+							applicationName(application),
+							application.own_window ? "under maintenance" : null,
+							application.is_monitored === false ? "unmonitored" : null,
+						]
+							.filter(Boolean)
+							.join(" · "),
+					)}
 				>
 					{applications.map((application) => (
 						<Box key={application.id} component="span" sx={dotCellSx}>
@@ -103,7 +114,9 @@ function MachineBlock({
 								up={application.up ?? "gone"}
 								health={application.health ?? undefined}
 								monitored={application.is_monitored !== false}
-								title={applicationName(application)}
+								maintained={application.own_window ?? false}
+								quiet
+								size={DOT_SIZE}
 							/>
 						</Box>
 					))}
@@ -143,6 +156,8 @@ function MachineBlock({
 								up={application.up ?? "gone"}
 								health={application.health ?? undefined}
 								monitored={application.is_monitored !== false}
+								maintained={application.own_window ?? false}
+								size={DOT_SIZE}
 							/>
 							<Name
 								to={
@@ -172,10 +187,14 @@ const DIVIDER_LIGHT = "rgba(0, 0, 0, 0.06)";
 
 // Every dot sits in an identical fixed-size cell, so the enclosure's dots
 // align however many there are. Spacing comes from the enclosure's own gap.
+/// The dot is sized to its cell, since a flex item wider than the cell holding
+/// it is squeezed on one axis only and draws as an oval.
+const DOT_SIZE = "0.9em";
+
 const dotCellSx = {
 	display: "inline-flex",
-	width: "0.85em",
-	height: "0.85em",
+	width: DOT_SIZE,
+	height: DOT_SIZE,
 	alignItems: "center",
 	justifyContent: "center",
 	flex: "none",

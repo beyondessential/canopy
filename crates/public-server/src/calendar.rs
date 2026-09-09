@@ -20,7 +20,12 @@ use axum::{
 	routing::get,
 };
 use commons_errors::{AppError, Result};
-use database::{server_groups::ServerGroup, upgrade_plans::UpgradePlan, versions::Version};
+use commons_types::{server::rank::ServerRank, version::VersionStr};
+use database::{
+	server_groups::{ServerGroup, environment_name},
+	upgrade_plans::UpgradePlan,
+	versions::Version,
+};
 use jiff::{SignedDuration, Timestamp, civil::Date, civil::Time, tz::TimeZone};
 use subtle::ConstantTimeEq as _;
 use uuid::Uuid;
@@ -83,6 +88,12 @@ async fn render(conn: &mut diesel_async::AsyncPgConnection) -> Result<String> {
 		.into_iter()
 		.map(|group| (group.id, group))
 		.collect();
+	let running: HashMap<(Uuid, ServerRank), VersionStr> =
+		ServerGroup::environments(conn, &group_ids)
+			.await?
+			.into_iter()
+			.filter_map(|env| env.version.map(|v| ((env.group_id, env.rank), v)))
+			.collect();
 	// Including drafts: a target yanked since the plan was recorded still has to
 	// render as the version the group is going to.
 	let versions: HashMap<Uuid, String> = Version::get_all_including_drafts(conn)
@@ -101,7 +112,7 @@ async fn render(conn: &mut diesel_async::AsyncPgConnection) -> Result<String> {
 	line(&mut out, "X-WR-CALNAME:Canopy upgrades");
 	line(
 		&mut out,
-		"X-WR-CALDESC:Where each group is going, and when.",
+		"X-WR-CALDESC:Where each environment is going, and when.",
 	);
 	line(
 		&mut out,
@@ -119,7 +130,15 @@ async fn render(conn: &mut diesel_async::AsyncPgConnection) -> Result<String> {
 		let Some(date) = plan.planned_for else {
 			continue;
 		};
-		event(&mut out, &plan, group, target, date, stamp)?;
+		event(
+			&mut out,
+			&plan,
+			&environment_name(&group.name, plan.rank),
+			running.get(&(plan.group_id, plan.rank)),
+			target,
+			date,
+			stamp,
+		)?;
 	}
 
 	line(&mut out, "END:VCALENDAR");
@@ -130,7 +149,8 @@ async fn render(conn: &mut diesel_async::AsyncPgConnection) -> Result<String> {
 fn event(
 	out: &mut String,
 	plan: &UpgradePlan,
-	group: &ServerGroup,
+	name: &str,
+	running: Option<&VersionStr>,
 	target: &str,
 	date: Date,
 	stamp: Timestamp,
@@ -184,16 +204,16 @@ fn event(
 	}
 
 	let summary = if done {
-		format!("{} upgraded to {target}", group.name)
+		format!("{name} upgraded to {target}")
 	} else {
-		format!("{} upgrade to {target}", group.name)
+		format!("{name} upgrade to {target}")
 	};
 	line(out, &format!("SUMMARY:{}", escape(&summary)));
 
 	let mut description = Vec::new();
 	if let Some(met_at) = plan.met_at {
 		description.push(format!("Reached {}", met_at.strftime("%Y-%m-%d")));
-	} else if let Some(running) = &group.effective_version {
+	} else if let Some(running) = running {
 		description.push(format!("Now on {running}"));
 	}
 	if let Some(note) = plan

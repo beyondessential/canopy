@@ -60,13 +60,8 @@ async fn reconcile_on_startup(pool: &database::Db) {
 		return;
 	};
 	match reconcile_open_incidents(&mut db).await {
-		Ok((0, 0)) => debug!("incident reconciliation: nothing to walk"),
-		Ok((applications, issues)) => {
-			info!(
-				"incident reconciliation: walked {issues} open issue(s) across \
-				 {applications} server(s)"
-			);
-		}
+		Ok(0) => debug!("incident reconciliation: nothing to walk"),
+		Ok(issues) => info!("incident reconciliation: walked {issues} open issue(s)"),
 		Err(err) => warn!("incident reconciliation: failed: {err}"),
 	}
 }

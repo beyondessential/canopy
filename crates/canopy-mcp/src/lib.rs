@@ -96,7 +96,9 @@ impl ServerHandler for CanopyMcp {
 			 canopy itself), and its `kind` is its role within that product. The version tools \
 			 cover Tamanu's releases; a server whose product has no application version reports \
 			 none, which is not the same as a Tamanu server that has yet to report one.\n\n\
-			 Incidents: an incident groups the issues active for a group over a span of time. \
+			 Incidents: an incident groups the issues active on one target over a span of time. \
+			 A target is one of a group's environments (its applications at one rank), the group \
+			 itself for its own checks, or canopy; each incident carries the `rank` it is on. \
 			 find_incidents returns everything open in the window, including heavy sub-grace \
 			 flapping that was recorded but never surfaced. When summarizing or ranking, count \
 			 `published` incidents (also given as `published_count`), not raw rows: an incident is \

@@ -36,6 +36,7 @@ test.describe("lingering incidents", () => {
 		const cleared = new Date(Date.now() - 2 * 60_000).toISOString();
 		const incident = await seedIncident(sql, {
 			serverGroupId: group.id,
+			rank: "production",
 			openedAt: opened,
 			closingAt: cleared,
 			issues: [{ issueId: issue.id, joinedAt: opened, leftAt: cleared }],

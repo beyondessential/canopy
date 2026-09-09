@@ -1813,10 +1813,11 @@ export interface paths {
         /**
          * Update a server's fields.
          * @description Applies a partial update — only the fields present in `data` are
-         *     changed. Moving a previously-ungrouped server into a group, or toggling
-         *     `is_monitored`, re-evaluates the server's open issues so incidents catch
-         *     up with the new state. Returns 400 if the update is rejected (e.g. an
-         *     invalid host value, or a role the target product doesn't define).
+         *     changed. Moving a previously-ungrouped server into a group, toggling
+         *     `is_monitored`, or changing the rank re-evaluates the server's open issues
+         *     so incidents catch up with the new state. Returns 400 if the update is
+         *     rejected (e.g. an invalid host value, or a role the target product doesn't
+         *     define).
          */
         post: operations["server_update"];
         delete?: never;
@@ -2576,8 +2577,9 @@ export interface paths {
         put?: never;
         /**
          * List incidents for a server group.
-         * @description Returns the group's incidents. By default only open incidents are
-         *     returned; set `include_closed` to also include closed ones.
+         * @description Returns the group's own incidents and those of every environment in it. By
+         *     default only open incidents are returned; set `include_closed` to also
+         *     include closed ones.
          */
         post: operations["incident_list_for_group"];
         delete?: never;
@@ -2597,9 +2599,9 @@ export interface paths {
         put?: never;
         /**
          * List incidents involving a server.
-         * @description Returns incidents that issues on the given server have contributed to.
-         *     By default only open incidents are returned; set `include_closed` to
-         *     also include closed ones.
+         * @description Returns the incidents on the environment the application is in, and the
+         *     group's own where it belongs to no environment. By default only open
+         *     incidents are returned; set `include_closed` to also include closed ones.
          */
         post: operations["incident_list_for_server"];
         delete?: never;
@@ -3097,12 +3099,15 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Declare that a server or a group is being worked on.
+         * Declare that an application, a machine, a group, or one of a group's
+         *     environments is being worked on.
          * @description Every check on the target grades to skipped while the window holds and
          *     for a settle period after it ends, so nothing on it opens or joins an
-         *     incident. Issues already in an open incident leave it, closing the
-         *     incident where nothing else holds it open. A target that already has an
-         *     open window has that window amended rather than a second opened.
+         *     incident. A window over one application leaves the rest of the box watched;
+         *     one over the machine covers everything on it. Issues already in an open
+         *     incident leave it, closing the incident where nothing else holds it open. A
+         *     target that already has an open window has that window amended rather than
+         *     a second opened.
          *     Requires admin access.
          */
         post: operations["declare"];
@@ -4018,9 +4023,9 @@ export interface paths {
         put?: never;
         /**
          * Planned upgrades across the fleet.
-         * @description Every live group, whether or not it has a plan. A group several minors
-         *     behind with no plan is the thing this view exists to surface, so it is listed
-         *     rather than omitted.
+         * @description Every environment of every live group, whether or not it has a plan. A
+         *     group several minors behind with no plan is the thing this view exists to
+         *     surface, so its environments are listed rather than omitted.
          */
         post: operations["upgrade_plans_fleet"];
         delete?: never;
@@ -4081,9 +4086,9 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Record where a group is going, retiring any plan it already had.
-         * @description A group goes one place next, so this replaces rather than queues. The target
-         *     must be published and ahead of what the group runs.
+         * Record where an environment is going, retiring any plan it already had.
+         * @description An environment goes one place next, so this replaces rather than queues. The
+         *     target must be published and ahead of what the environment runs.
          */
         post: operations["upgrade_plans_record"];
         delete?: never;
@@ -4102,8 +4107,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * The versions a group could be planned onto: published, and ahead of what it
-         *     runs.
+         * The versions an environment could be planned onto: published, and ahead of
+         *     what it runs.
          * @description Offering only valid targets is what keeps the operator from picking one
          *     `record` would refuse.
          */
@@ -5616,6 +5621,12 @@ export interface components {
         /** @description Declare a window over a target, or amend the one it already has. */
         DeclareArgs: {
             /**
+             * Format: uuid
+             * @description The application, for a window over one workload. Covers that
+             *     application and nothing else on the box it runs on.
+             */
+            application_id?: string | null;
+            /**
              * Format: date-time
              * @description When the work is expected to finish. The window ends itself then.
              */
@@ -5627,9 +5638,10 @@ export interface components {
             machine_id?: string | null;
             /** @description What is being done. */
             note?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: uuid
-             * @description The group, for a window over a whole group.
+             * @description The group, for a window over a whole group or one of its environments.
              */
             server_group_id?: string | null;
         };
@@ -5936,20 +5948,41 @@ export interface components {
              */
             machine_id: string;
             /**
-             * @description Whether a maintenance window suspends this box — its own or its
-             *     group's. A window is declared over a machine and never over an
-             *     application, so this is the box's fact and the applications on it are
-             *     suspended by it rather than carrying one of their own.
+             * @description Whether a maintenance window suspends the box this runs on, its own or
+             *     one reaching it through its environment or its group.
              */
             machine_maintained: boolean;
+            /**
+             * @description Whether every window over the box has ended and it is serving out the
+             *     settle period, so a lift reads as taken effect rather than as a window
+             *     that is still holding.
+             */
+            machine_maintenance_settling: boolean;
             /** @description The box's name, where an operator gave it one. */
             machine_name?: string | null;
+            /**
+             * @description Whether the window covering this box was declared over the box itself,
+             *     as against one it falls under through its environment or its group. A
+             *     reader marks at the grain the operator declared at, so an environment's
+             *     window is not drawn as every box in it having its own.
+             */
+            machine_own_window: boolean;
             /**
              * @description The box's own reachability, which is not this application's: a machine
              *     that has gone quiet takes everything on it with it, and one that is fine
              *     says nothing about whether the software on it is.
              */
             machine_up: components["schemas"]["ShortStatus"];
+            /**
+             * @description Whether a maintenance window suspends this application, by naming it or
+             *     by covering the box it runs on.
+             */
+            maintained: boolean;
+            /**
+             * @description Whether every window covering this application has ended and it is
+             *     serving out the settle period.
+             */
+            maintenance_settling: boolean;
             /** @description Name of the server. */
             name: string;
             /**
@@ -5959,6 +5992,12 @@ export interface components {
              *     connected right now.
              */
             operators: components["schemas"]["OperatorPresence"][];
+            /**
+             * @description Whether the window suspending it was declared over this application in
+             *     particular. A window reaching it through its box is marked at that
+             *     grain, so the dot stays plain.
+             */
+            own_window: boolean;
             rank?: null | components["schemas"]["ServerRank"];
             /** @description The application the server runs, presented alongside its role. */
             type: components["schemas"]["ApplicationType"];
@@ -6221,8 +6260,18 @@ export interface components {
             id: string;
             /** @description Whether a maintenance window suspends this box, its own or its group's. */
             maintained: boolean;
+            /**
+             * @description Whether every window over the box has ended and it is serving out the
+             *     settle period.
+             */
+            maintenance_settling: boolean;
             /** @description The operator-assigned name, where it has one. */
             name?: string | null;
+            /**
+             * @description Whether the window covering this box was declared over the box itself,
+             *     as against one reaching it through its environment or its group.
+             */
+            own_window: boolean;
             /**
              * @description The platform the box reports, where it reports one. The one machine
              *     figure the tree shows: it is what distinguishes two otherwise
@@ -6451,12 +6500,13 @@ export interface components {
             incident_id: string;
         };
         /**
-         * @description An operational incident: a group-scoped roll-up of related issues.
+         * @description An operational incident: a roll-up of the related issues on one target,
+         *     which is one of a group's environments, the group itself, or canopy.
          *
-         *     An incident opens when an issue on a server in the group crosses the
-         *     severity threshold, gathers further contributing issues while open, and
-         *     closes automatically once the last serious contributor clears. Operators
-         *     can additionally mark an incident resolved with a reason.
+         *     An incident opens when an issue on its target crosses the severity
+         *     threshold, gathers further contributing issues while open, and closes
+         *     automatically once the last serious contributor clears. Operators can
+         *     additionally mark an incident resolved with a reason.
          */
         IncidentData: {
             /**
@@ -6511,6 +6561,7 @@ export interface components {
              * @description When the incident opened.
              */
             opened_at: string;
+            rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: date-time
              * @description When an operator marked the incident resolved; null if it has not
@@ -6530,7 +6581,7 @@ export interface components {
             resolved_reason?: string | null;
             /**
              * Format: uuid
-             * @description Identifier of the server group the incident belongs to, or null for
+             * @description Identifier of the group the incident belongs to, or null for
              *     a canopy-wide incident (aggregating canopy's self-alerts).
              */
             server_group_id?: string | null;
@@ -7756,7 +7807,10 @@ export interface components {
          * @enum {string}
          */
         MaintenanceKind: "quick" | "full";
-        /** @description A declaration that a machine or a group is being worked on. */
+        /**
+         * @description A declaration that an application, a machine, a group, or one of a group's
+         *     environments is being worked on.
+         */
         MaintenanceWindow: {
             /**
              * Format: date-time
@@ -7765,6 +7819,12 @@ export interface components {
             amended_at?: string | null;
             /** @description The operator who last amended the window, where one has. */
             amended_by?: string | null;
+            /**
+             * Format: uuid
+             * @description Set for a window over one application, covering that application's
+             *     checks and nothing else on the box it runs on.
+             */
+            application_id?: string | null;
             /**
              * Format: date-time
              * @description When this record was created.
@@ -7806,6 +7866,7 @@ export interface components {
             machine_id?: string | null;
             /** @description What is being done, where the operator said. */
             note?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: uuid
              * @description Set for a window over a group, covering the group's own checks and
@@ -8142,9 +8203,9 @@ export interface components {
                  */
                 machine_id: string;
                 /**
-                 * @description Whether a maintenance window suspends this server, its own or its
-                 *     group's. Set alongside `up` and `health` by the endpoints that
-                 *     decorate listings; `None` where they aren't.
+                 * @description Whether a maintenance window suspends this server, its own or one over
+                 *     the box it runs on. Set alongside `up` and `health` by the endpoints
+                 *     that decorate listings; `None` where they aren't.
                  */
                 maintained?: boolean | null;
                 /**
@@ -8161,6 +8222,11 @@ export interface components {
                 name?: string | null;
                 /** @description Free-text operator notes about the server. */
                 notes: string;
+                /**
+                 * @description Whether that window was declared over this application in particular.
+                 *     One reaching it through its box is marked on the box.
+                 */
+                own_window?: boolean | null;
                 /**
                  * @description Name this server appears under in the public mobile-app server list.
                  *     `None` means the server is not listed publicly.
@@ -8313,7 +8379,8 @@ export interface components {
             type: string;
         };
         /**
-         * @description How a plan stands: still where the group is going, or the way it closed.
+         * @description How a plan stands: still where the environment is going, or the way it
+         *     closed.
          * @enum {string}
          */
         PlanOutcome: "open" | "met" | "replaced" | "withdrawn";
@@ -8333,10 +8400,17 @@ export interface components {
             /** @description Its semver. */
             version: string;
         };
-        /** @description One row of the planned-upgrades view. */
+        /** @description One row of the planned-upgrades view: one of a group's environments. */
         PlannedUpgrade: {
             attempt?: null | components["schemas"]["AttemptState"];
-            /** @description The version the group runs now, where it has reported one. */
+            /**
+             * Format: int64
+             * @description How far that is behind the newest published version, as majors times a
+             *     thousand plus minors. Zero where it is current; `null` where it has
+             *     reported no version.
+             */
+            behind?: number | null;
+            /** @description The version the environment runs now, where it has reported one. */
             current_version?: string | null;
             /**
              * Format: uuid
@@ -8346,11 +8420,21 @@ export interface components {
             /** @description Its name, so the view reads without a second lookup. */
             group_name: string;
             /**
+             * @description Whether this is the group's highest-ranked environment, the one the
+             *     group's own version is read from.
+             */
+            headline: boolean;
+            /**
              * @description Whether the planned date has passed without the upgrade happening.
              *     Presentational: a slipping upgrade is normal operational reality.
              */
             late: boolean;
             plan?: null | components["schemas"]["UpgradePlan"];
+            /**
+             * @description The rank of the environment this concerns: the group's applications at
+             *     that rank.
+             */
+            rank: components["schemas"]["ServerRank"];
             /** @description The plan's target as semver. */
             target_version?: string | null;
             /**
@@ -8361,9 +8445,10 @@ export interface components {
              */
             testable?: boolean | null;
             /**
-             * @description Where the group's data stands against the planned version, rolled up from
-             *     its applications: any failure makes the group a failure, since one server
-             *     whose data breaks is enough to stop the upgrade. `null` without a plan.
+             * @description Where the environment's data stands against the planned version, rolled
+             *     up from its applications: any failure makes the environment a failure,
+             *     since one application whose data breaks is enough to stop the upgrade.
+             *     `null` without a plan.
              */
             verdict?: string | null;
         };
@@ -8623,7 +8708,7 @@ export interface components {
         RecordArgs: {
             /**
              * Format: uuid
-             * @description The group that intends to move.
+             * @description The group whose environment intends to move.
              */
             group_id: string;
             /** @description Anything the next reader needs to know. Optional. */
@@ -8645,6 +8730,8 @@ export interface components {
              *     `Pacific/Fiji`. Required alongside a time.
              */
             planned_zone?: string | null;
+            /** @description The rank of the environment within it that intends to move. */
+            rank: components["schemas"]["ServerRank"];
             /**
              * Format: uuid
              * @description The published version it intends to move to.
@@ -9622,6 +9709,7 @@ export interface components {
              *     `group_machines`.
              */
             machine_name?: string | null;
+            machine_rank?: null | components["schemas"]["ServerRank"];
             /**
              * @description Whether a maintenance window suspends this server, its own or its
              *     group's: its checks are recorded and shown, and raise nothing.
@@ -9720,12 +9808,29 @@ export interface components {
              * @description Unique identifier of the group.
              */
             id: string;
+            /**
+             * @description Whether a window is declared over the group itself, covering every box
+             *     in it whatever its rank.
+             */
+            maintained: boolean;
+            /**
+             * @description The group's environments under a window of their own, so a reader marks
+             *     the environment's row rather than each box in it.
+             */
+            maintained_ranks: components["schemas"]["ServerRank"][];
+            /**
+             * @description Whether the group's own window has ended and it is serving out the
+             *     settle period.
+             */
+            maintenance_settling: boolean;
             /** @description Status of each server belonging to this group. */
             members: components["schemas"]["FacilityServerStatus"][];
             /** @description Name of the group. */
             name: string;
             /** @description Free-text notes about the group. */
             notes: string;
+            /** @description Of those, the ones serving out the settle period. */
+            settling_ranks: components["schemas"]["ServerRank"][];
             version?: null | components["schemas"]["VersionStr"];
             /**
              * Format: int64
@@ -9881,9 +9986,9 @@ export interface components {
              */
             machine_id: string;
             /**
-             * @description Whether a maintenance window suspends this server, its own or its
-             *     group's. Set alongside `up` and `health` by the endpoints that
-             *     decorate listings; `None` where they aren't.
+             * @description Whether a maintenance window suspends this server, its own or one over
+             *     the box it runs on. Set alongside `up` and `health` by the endpoints
+             *     that decorate listings; `None` where they aren't.
              */
             maintained?: boolean | null;
             /**
@@ -9900,6 +10005,11 @@ export interface components {
             name?: string | null;
             /** @description Free-text operator notes about the server. */
             notes: string;
+            /**
+             * @description Whether that window was declared over this application in particular.
+             *     One reaching it through its box is marked on the box.
+             */
+            own_window?: boolean | null;
             /**
              * @description Name this server appears under in the public mobile-app server list.
              *     `None` means the server is not listed publicly.
@@ -10582,8 +10692,14 @@ export interface components {
             /** @description Take over a lease another operator holds, which is audited. */
             take_over?: boolean;
         };
-        /** @description The target a window covers: exactly one of the two is set. */
+        /** @description The target a window covers: exactly one of the ids is set. */
         TargetArgs: {
+            /**
+             * Format: uuid
+             * @description The application, for a window over one workload. Covers that
+             *     application and nothing else on the box it runs on.
+             */
+            application_id?: string | null;
             /**
              * Format: uuid
              * @description The machine, for a window over one box. Covers every application on it.
@@ -10591,9 +10707,19 @@ export interface components {
             machine_id?: string | null;
             /**
              * Format: uuid
-             * @description The group, for a window over a whole group.
+             * @description The group, for a window over a whole group or one of its environments.
              */
             server_group_id?: string | null;
+        };
+        /** @description Request body for the versions an environment could be planned onto. */
+        TargetsArgs: {
+            /**
+             * Format: uuid
+             * @description The group.
+             */
+            group_id: string;
+            /** @description The rank of the environment within it. */
+            rank: components["schemas"]["ServerRank"];
         };
         /**
          * @description One healthy↔degraded transition: the state became (or was first
@@ -10732,7 +10858,7 @@ export interface components {
             /** @description Exact version string to update (e.g. `"1.2.3"`). */
             version: string;
         };
-        /** @description A group's recorded intention to move to a version. */
+        /** @description An environment's recorded intention to move to a version. */
         UpgradePlan: {
             /** @description When it was last amended. */
             amended_at?: string | null;
@@ -10744,7 +10870,7 @@ export interface components {
             created_by?: string | null;
             /**
              * Format: uuid
-             * @description The group that intends to move.
+             * @description The group whose environment intends to move.
              */
             group_id: string;
             /**
@@ -10752,7 +10878,7 @@ export interface components {
              * @description Unique identifier for this plan.
              */
             id: string;
-            /** @description When the group's reported version reached the target. */
+            /** @description When the environment's reported version reached the target. */
             met_at?: string | null;
             /** @description Whatever the operator needs the next reader to know. */
             note?: string | null;
@@ -10767,6 +10893,11 @@ export interface components {
             planned_time?: string | null;
             /** @description The IANA zone the planned time is a wall clock in. */
             planned_zone?: string | null;
+            /**
+             * @description The rank of the environment that intends to move: the group's
+             *     applications at that rank.
+             */
+            rank: components["schemas"]["ServerRank"];
             /** @description When a newer plan replaced this one. */
             superseded_at?: string | null;
             /**
@@ -16415,7 +16546,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description One row per live group. */
+            /** @description One row per environment of each live group. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -16540,7 +16671,7 @@ export interface operations {
                     "application/json": components["schemas"]["UpgradePlan"];
                 };
             };
-            /** @description The target is unpublished, or not ahead of the group. */
+            /** @description The target is unpublished, or not ahead of the environment. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -16576,7 +16707,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PlansForGroupArgs"];
+                "application/json": components["schemas"]["TargetsArgs"];
             };
         };
         responses: {

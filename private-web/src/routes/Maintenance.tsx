@@ -77,6 +77,12 @@ export default function Maintenance() {
 											<RouterLink to={`/fleet/machines/${window.machine_id}`}>
 												{target}
 											</RouterLink>
+										) : window.application_id ? (
+											<RouterLink
+												to={`/fleet/applications/${window.application_id}`}
+											>
+												{target}
+											</RouterLink>
 										) : (
 											target
 										)}

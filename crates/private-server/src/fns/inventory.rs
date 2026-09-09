@@ -352,7 +352,7 @@ pub async fn take_lease(
 
 	if args.intent == RunIntent::Upgrade
 		&& rank == ServerRank::Production
-		&& UpgradePlan::open_for_group(&mut conn, group.id)
+		&& UpgradePlan::open_for_environment(&mut conn, group.id, rank)
 			.await?
 			.is_none()
 	{

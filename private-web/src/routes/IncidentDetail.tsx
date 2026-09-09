@@ -35,6 +35,7 @@ import {
 	CHECK_RESULT_ORDER,
 	RESOLVED_REASONS,
 	RESOLVED_REASON_LABEL,
+	incidentTargetName,
 	isIncidentLingering,
 	type CheckResult,
 	type IncidentIssueData,
@@ -68,7 +69,7 @@ export default function IncidentDetail() {
 
 	usePageTitle(
 		detail.status === "ok"
-			? `Incident ${detail.data.incident.id.slice(0, 8)} on ${detail.data.incident.server_group_name || "(unknown)"}`
+			? `Incident ${detail.data.incident.id.slice(0, 8)} on ${incidentTargetName(detail.data.incident) || "(unknown)"}`
 			: "Incident",
 	);
 
@@ -219,7 +220,7 @@ function Header({
 								underline="hover"
 								color="inherit"
 							>
-								{incident.server_group_name || "(unknown group)"}
+								{incidentTargetName(incident) || "(unknown group)"}
 							</MuiLink>
 						) : (
 							// A canopy-wide incident has no group page; the
