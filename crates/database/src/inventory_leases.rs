@@ -123,6 +123,16 @@ impl InventoryLease {
 		self.released_at.is_none() && self.expires_at > now
 	}
 
+	/// Whether it holds for somebody other than `login`, which is what a take
+	/// is refused for and what taking over goes around.
+	pub fn holds_for_another(&self, login: Option<&str>, now: Timestamp) -> bool {
+		self.holds_at(now)
+			&& self
+				.held_by
+				.as_deref()
+				.is_some_and(|who| Some(who) != login)
+	}
+
 	/// The environment's unreleased lease, expired or not. A caller deciding
 	/// whether the environment is held pairs this with [`Self::holds_at`].
 	pub async fn open_for(
@@ -170,13 +180,7 @@ impl InventoryLease {
 				.map_err(AppError::from)?;
 
 			if let Some(open) = Self::open_for(conn, group_id, rank).await? {
-				if !take_over
-					&& open.holds_at(Timestamp::now())
-					&& open
-						.held_by
-						.as_deref()
-						.is_some_and(|who| Some(who) != held_by)
-				{
+				if !take_over && open.holds_for_another(held_by, Timestamp::now()) {
 					return Err(AppError::Conflict(open.held_by_another()));
 				}
 				Self::release(conn, open.id, held_by).await?;

@@ -324,8 +324,7 @@ pub async fn take_lease(
 	let now = Timestamp::now();
 
 	if let Some(held) = InventoryLease::open_for(&mut conn, group.id, rank).await?
-		&& held.holds_at(now)
-		&& held.held_by.as_deref().is_some_and(|who| who != login)
+		&& held.holds_for_another(Some(login), now)
 		&& !args.take_over
 	{
 		return Err(AppError::Conflict(held.held_by_another()));
