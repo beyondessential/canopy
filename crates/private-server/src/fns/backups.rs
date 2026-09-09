@@ -2475,6 +2475,7 @@ pub async fn delete(
 }
 
 // ── recovery vault verification ceremony ───────────────────────────────────────────
+// spec: ESC#the-verification-ceremony
 
 /// Status of the disaster-recovery verification ceremony: whether recovery
 /// is configured, and whether a fresh verification is due.

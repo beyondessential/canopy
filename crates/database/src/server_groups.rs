@@ -200,6 +200,19 @@ impl ServerGroup {
 			.map_err(AppError::from)
 	}
 
+	/// Groups carrying this exact name, archived ones included, so a caller
+	/// resolving a group by name can tell an archived group from one that does
+	/// not exist. Names aren't unique, so this can return several.
+	pub async fn find_by_name(db: &mut AsyncPgConnection, name: &str) -> Result<Vec<Self>> {
+		use crate::schema::server_groups::dsl;
+		dsl::server_groups
+			.select(Self::as_select())
+			.filter(dsl::name.eq(name))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn list_all(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::schema::server_groups::dsl;
 		dsl::server_groups

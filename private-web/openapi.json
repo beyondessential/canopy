@@ -5337,6 +5337,485 @@
         ]
       }
     },
+    "/api/inventory/extend_lease": {
+      "post": {
+        "tags": [
+          "inventory"
+        ],
+        "summary": "Push a held lease's expiry out, so a run still going keeps the environment.",
+        "description": "Only the holder can extend, and only while the lease is unreleased: one that\nhas been released is gone, and taking a fresh one goes through the same\nrefusals a first one does.",
+        "operationId": "inventory_extend_lease",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeaseArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryLease"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such lease",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Held by someone else, or no longer held",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/inventory/for_group": {
+      "post": {
+        "tags": [
+          "inventory"
+        ],
+        "summary": "Serve the inventory of the environment the caller holds the lease on.",
+        "description": "Refuses a lease that is not the caller's or no longer holds, and a secret\nvariable whose value cannot be read: a run receiving a machine that looks\nconfigured and is missing a value is worse than one that does not run.",
+        "operationId": "inventory_for_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventoryArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such lease",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The lease is someone else's, no longer holds, the environment is gone, or two machines share an address",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "A secret variable could not be read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/inventory/release_lease": {
+      "post": {
+        "tags": [
+          "inventory"
+        ],
+        "summary": "Give the environment back when the run ends.",
+        "description": "Releasing is audited with who did it, since it can be another operator\ntaking work over rather than the holder finishing.",
+        "operationId": "inventory_release_lease",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeaseArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Released",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "default": null
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such lease, or it was already released",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/inventory/run_state": {
+      "post": {
+        "tags": [
+          "inventory"
+        ],
+        "summary": "What a run on this environment would meet: the lease holding it and the\nmaintenance window over it, read the way taking a lease reads them so the\ngroup page and the refusal agree.",
+        "description": "Available to any operator: it names who is running and until when, and\ncarries nothing a run receives.",
+        "operationId": "inventory_run_state",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnvironmentArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunState"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such server group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Archived, empty, or ambiguously named",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/inventory/take_lease": {
+      "post": {
+        "tags": [
+          "inventory"
+        ],
+        "summary": "Take the environment's run lease.",
+        "description": "Refuses a group canopy does not have, one that has been archived, one\nholding several environments with no rank named, a rank with no live\napplication to configure, an environment another operator holds or has\ndeclared maintenance over, and an upgrade of production with no plan\nrecorded, saying which it was so an operator knows what to do or who to\nwait for.",
+        "operationId": "inventory_take_lease",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TakeLeaseArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryLease"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Neither or both of the group arguments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such server group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Archived, empty, ambiguously named, spanning environments, held by someone else, under someone else's maintenance, or an unplanned upgrade of production",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/inventory_variables/for_group": {
+      "post": {
+        "tags": [
+          "inventory"
+        ],
+        "summary": "Everything set under a group: its own, its environments', and those of the\nmachines in it.",
+        "description": "A secret's value is not among them; it is served only as part of an\ninventory, and only to an administrator.",
+        "operationId": "inventory_variables_for_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VariablesForGroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InventoryVariable"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such server group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/inventory_variables/remove": {
+      "post": {
+        "tags": [
+          "inventory"
+        ],
+        "summary": "Forget a variable, value and all.",
+        "description": "The row goes first, so a value the secret store will not let go of leaves\nnothing behind that would refuse every later read of the inventory.",
+        "operationId": "inventory_variables_remove",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "default": null
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not one scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No variable of that name in that scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The secret store is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/inventory_variables/set": {
+      "post": {
+        "tags": [
+          "inventory"
+        ],
+        "summary": "Set or replace a variable.",
+        "description": "A secret's value goes to the secret store keyed by name, and the row holds\nno value at all. Turning a secret into a plain variable forgets the stored\nvalue, so a later switch back never resurrects a stale one.",
+        "operationId": "inventory_variables_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryVariable"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not one scope, not a usable variable name, or an `ansible_host` outside machine scope or not a string",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such server group or machine",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The secret store is unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/issues/add_note": {
       "post": {
         "tags": [
@@ -10552,6 +11031,38 @@
           }
         }
       },
+      "EnvironmentArgs": {
+        "type": "object",
+        "description": "Which environment to act on: exactly one of the group's identifier or its\nname, and the rank where the group holds more than one environment.",
+        "properties": {
+          "group": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name of the server group, matched exactly."
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "Rank of the environment within the group. Required only where the\ngroup's live applications span more than one rank."
+              }
+            ]
+          },
+          "server_group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Identifier of the server group."
+          }
+        }
+      },
       "ExecuteArgs": {
         "type": "object",
         "description": "Request body for running a query in the SQL playground.",
@@ -11770,6 +12281,285 @@
           }
         }
       },
+      "InventoryApplication": {
+        "type": "object",
+        "description": "One application on a machine, so a run knows what it is configuring there.",
+        "required": [
+          "id",
+          "name",
+          "type"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifier of the application."
+          },
+          "name": {
+            "type": "string",
+            "description": "The application's name within its group, falling back to its host and\nthen its identifier."
+          },
+          "type": {
+            "$ref": "#/components/schemas/ApplicationType",
+            "description": "What the application is: the software and the role it plays together."
+          }
+        }
+      },
+      "InventoryArgs": {
+        "type": "object",
+        "description": "Read an environment's inventory under a lease held on it.",
+        "required": [
+          "lease_id"
+        ],
+        "properties": {
+          "lease_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifier of the lease the run holds, from `take_lease`."
+          }
+        }
+      },
+      "InventoryHost": {
+        "type": "object",
+        "description": "One machine in an environment.",
+        "required": [
+          "id",
+          "name",
+          "applications",
+          "vars",
+          "own_vars",
+          "secret_vars"
+        ],
+        "properties": {
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The address to reach it at: an `ansible_host` variable, the tailnet name\nof the device bound to it, or the recorded host of an application on it.\nNull where canopy holds none of those."
+          },
+          "applications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InventoryApplication"
+            },
+            "description": "The applications the machine carries in this environment, by name."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifier of the machine."
+          },
+          "name": {
+            "type": "string",
+            "description": "The machine's name, falling back to its identifier."
+          },
+          "own_vars": {
+            "$ref": "#/components/schemas/VarMap",
+            "description": "The variables the machine sets itself, so a value inherited from a wider\nscope can be told from one set here even where the two agree."
+          },
+          "secret_vars": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Which of `vars` are secret."
+          },
+          "vars": {
+            "$ref": "#/components/schemas/VarMap",
+            "description": "The effective variables: the machine's over the environment's over the\ngroup's. This is what a run acts on."
+          }
+        }
+      },
+      "InventoryLease": {
+        "type": "object",
+        "description": "A run's hold on one environment.",
+        "required": [
+          "id",
+          "server_group_id",
+          "rank",
+          "intent",
+          "taken_at",
+          "expires_at"
+        ],
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it stops holding unless extended."
+          },
+          "held_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The login the lease is held by."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier of this lease, which a run names to read the\ninventory."
+          },
+          "intent": {
+            "$ref": "#/components/schemas/RunIntent",
+            "description": "What the run holding it intends."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the holder said they are doing."
+          },
+          "rank": {
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "The rank of the environment within it."
+          },
+          "released_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When it was released, and `None` while it is still held."
+          },
+          "released_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who released it."
+          },
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group the environment belongs to."
+          },
+          "taken_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was taken."
+          }
+        }
+      },
+      "InventoryVariable": {
+        "type": "object",
+        "description": "One variable: where it is set, its name, and its value where it is not a\nsecret.",
+        "required": [
+          "id",
+          "name",
+          "is_secret",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the name was first set here."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier of this variable."
+          },
+          "is_secret": {
+            "type": "boolean",
+            "description": "Whether the value is a secret. Applies to the whole value."
+          },
+          "machine_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Set for a variable belonging to one machine."
+          },
+          "name": {
+            "type": "string",
+            "description": "The variable's name, unique within its scope."
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "Set alongside `server_group_id` for a variable belonging to one\nenvironment rather than to the whole group."
+              }
+            ]
+          },
+          "server_group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Set for a variable belonging to a group or to one of its environments."
+          },
+          "set_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The login that last set the value."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When its value was last replaced."
+          },
+          "value": {
+            "description": "The value, and `None` for a secret, whose value is in the secret store."
+          }
+        }
+      },
+      "InventoryView": {
+        "type": "object",
+        "description": "An environment's inventory.",
+        "required": [
+          "group_id",
+          "group",
+          "rank",
+          "vars",
+          "secret_vars",
+          "hosts"
+        ],
+        "properties": {
+          "group": {
+            "type": "string",
+            "description": "Name of the server group."
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifier of the server group the inventory covers."
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InventoryHost"
+            },
+            "description": "The environment's machines, ordered by name."
+          },
+          "rank": {
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "Rank of the environment served."
+          },
+          "secret_vars": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Which of `vars` are secret."
+          },
+          "vars": {
+            "$ref": "#/components/schemas/VarMap",
+            "description": "The group's and the environment's variables, merged. Every machine\nbelow carries these too, under its own overrides."
+          }
+        }
+      },
       "IssueAddNoteArgs": {
         "type": "object",
         "description": "A note to add to an issue.",
@@ -12367,6 +13157,20 @@
           "verdict": {
             "$ref": "#/components/schemas/Verdict",
             "description": "Whether the migrations applied."
+          }
+        }
+      },
+      "LeaseArgs": {
+        "type": "object",
+        "description": "Name a lease.",
+        "required": [
+          "lease_id"
+        ],
+        "properties": {
+          "lease_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifier of the lease."
           }
         }
       },
@@ -14928,6 +15732,26 @@
           }
         }
       },
+      "RemoveArgs": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ScopeArgs"
+          },
+          {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "The variable's name."
+              }
+            }
+          }
+        ],
+        "description": "Name one variable to forget."
+      },
       "RequestArgs": {
         "type": "object",
         "description": "Identifies a one-off backup or restore request for a server.",
@@ -15611,6 +16435,14 @@
           }
         }
       },
+      "RunIntent": {
+        "type": "string",
+        "description": "What a run intends to do to the environment it holds.",
+        "enum": [
+          "configure",
+          "upgrade"
+        ]
+      },
       "RunOutcome": {
         "type": "string",
         "description": "Outcome of a reported backup or restore run.",
@@ -15719,6 +16551,41 @@
           }
         }
       },
+      "RunState": {
+        "type": "object",
+        "description": "The lease and the maintenance window a run on an environment would meet.",
+        "required": [
+          "refuses"
+        ],
+        "properties": {
+          "lease": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/InventoryLease",
+                "description": "The lease holding the environment, where one holds."
+              }
+            ]
+          },
+          "refuses": {
+            "type": "boolean",
+            "description": "Whether that window is someone else's, which is what refuses a take."
+          },
+          "window": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MaintenanceWindow",
+                "description": "The window holding over the environment or over a machine in it: the\none refusing a take where one does, and otherwise the caller's own."
+              }
+            ]
+          }
+        }
+      },
       "RunStatus": {
         "type": "string",
         "description": "State of an activity row: a device-reported run, or a run inferred from a\ncredential issuance that never matched a report.",
@@ -15817,6 +16684,39 @@
           "type": {
             "type": "string",
             "description": "Backup type this override applies to."
+          }
+        }
+      },
+      "ScopeArgs": {
+        "type": "object",
+        "description": "Which scope a request addresses: a group, one of its environments, or one\nmachine.",
+        "properties": {
+          "machine_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Identifier of the machine, for a variable one machine carries."
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "Rank of the environment within the group, for a variable one\nenvironment carries rather than the whole group."
+              }
+            ]
+          },
+          "server_group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Identifier of the server group, for a variable a whole group carries\nor one of its environments does."
           }
         }
       },
@@ -16841,6 +17741,34 @@
           }
         }
       },
+      "SetArgs": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ScopeArgs"
+          },
+          {
+            "type": "object",
+            "required": [
+              "name",
+              "value"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "The variable's name."
+              },
+              "secret": {
+                "type": "boolean",
+                "description": "Whether the value is a secret, held in the secret store and served only\nas part of an inventory."
+              },
+              "value": {
+                "description": "The value, as JSON."
+              }
+            }
+          }
+        ],
+        "description": "Set or replace one variable."
+      },
       "SetCapabilityArgs": {
         "type": "object",
         "description": "Request to enable or disable a server's backup capability for one type.",
@@ -17626,6 +18554,34 @@
           }
         }
       },
+      "TakeLeaseArgs": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/EnvironmentArgs"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "intent": {
+                "$ref": "#/components/schemas/RunIntent",
+                "description": "What the run intends. Configuring where not named."
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "What the holder is doing, shown to whoever is refused meanwhile."
+              },
+              "take_over": {
+                "type": "boolean",
+                "description": "Take over a lease another operator holds, which is audited."
+              }
+            }
+          }
+        ],
+        "description": "Take the lease on an environment, which a run holds while it runs."
+      },
       "TargetArgs": {
         "type": "object",
         "description": "The target a window covers: exactly one of the ids is set.",
@@ -18082,6 +19038,25 @@
         "description": "A URL, given as a plain string. Any trailing slash is stripped when the\nvalue is returned."
       },
       "Value": {},
+      "VarMap": {
+        "type": "object",
+        "description": "Variables as a JSON object.",
+        "additionalProperties": true
+      },
+      "VariablesForGroupArgs": {
+        "type": "object",
+        "description": "Which group's variables to list.",
+        "required": [
+          "server_group_id"
+        ],
+        "properties": {
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifier of the server group."
+          }
+        }
+      },
       "Verdict": {
         "type": "string",
         "description": "Where a (server, version) pair stands.",
@@ -18338,6 +19313,10 @@
     {
       "name": "incidents",
       "description": "Operational incidents (groups of issues against a server)."
+    },
+    {
+      "name": "inventory",
+      "description": "An environment's applications and the variables that configure them, for the tooling that configures them."
     },
     {
       "name": "issues",
