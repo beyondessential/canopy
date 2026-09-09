@@ -946,8 +946,8 @@ async fn plan_upgrade(
 	conn.batch_execute(&format!(
 		"INSERT INTO versions (id, major, minor, patch, changelog, status)
 		 VALUES ('{version}', 2, 63, 0, '', 'published');
-		 INSERT INTO upgrade_plans (group_id, target_version_id{extra_columns})
-		 VALUES ('{group}', '{version}'{extra_values})"
+		 INSERT INTO upgrade_plans (group_id, target_version_id, rank{extra_columns})
+		 VALUES ('{group}', '{version}', 'production'{extra_values})"
 	))
 	.await
 	.expect("plan upgrade");
