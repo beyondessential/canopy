@@ -245,19 +245,9 @@ fn stored(value: &Value) -> SecretString {
 /// name is removed, and where it stops being a secret, so a later switch back
 /// never resurrects a stale value.
 async fn forget_secret_value(state: &AppState, scope: VariableScope, name: &str) -> Result<()> {
-	let kube = secret_store(state)?;
-	let secret = scope.secret_name();
-	let Some(mut keys) = kube.try_read_secret_keys(&secret).await? else {
-		return Ok(());
-	};
-	if keys.remove(name).is_none() {
-		return Ok(());
-	}
-	if keys.is_empty() {
-		kube.delete_password(&secret).await
-	} else {
-		kube.put_secret_keys(&secret, &keys).await
-	}
+	secret_store(state)?
+		.forget_secret_key(&scope.secret_name(), name)
+		.await
 }
 
 pub(super) fn secret_store(state: &AppState) -> Result<&BackupSecrets> {

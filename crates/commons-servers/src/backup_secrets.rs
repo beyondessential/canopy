@@ -301,6 +301,37 @@ impl BackupSecrets {
 		}
 	}
 
+	/// Drop one key from the named Secret, leaving every other key as it is.
+	/// A Secret that is not there holds nothing to drop.
+	pub async fn forget_secret_key(&self, secret_name: &str, key: &str) -> Result<()> {
+		match self {
+			Self::Kube { client, namespace } => {
+				use k8s_openapi::api::core::v1::Secret;
+				use kube::{
+					Api,
+					api::{Patch, PatchParams},
+				};
+
+				let api: Api<Secret> = Api::namespaced(client.clone(), namespace);
+				let patch = serde_json::json!({ "data": { key: null } });
+				match api
+					.patch(secret_name, &PatchParams::default(), &Patch::Merge(&patch))
+					.await
+				{
+					Ok(_) => Ok(()),
+					Err(kube::Error::Api(e)) if e.code == 404 => Ok(()),
+					Err(e) => Err(AppError::Upstream(format!("secret patch failed: {e}"))),
+				}
+			}
+			Self::Memory(store) => {
+				if let Some(keys) = store.lock().unwrap().get_mut(secret_name) {
+					keys.remove(key);
+				}
+				Ok(())
+			}
+		}
+	}
+
 	/// Create-or-replace the named Secret to hold **exactly** `keys` (server-side
 	/// apply with force). Keys this manager owns but that are omitted from `keys`
 	/// are removed — so a rotation "promote" that writes only `{password}` cleans
