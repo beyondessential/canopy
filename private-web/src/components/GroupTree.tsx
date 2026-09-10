@@ -157,6 +157,7 @@ function MachineBlock({
 								health={application.health ?? undefined}
 								monitored={application.is_monitored !== false}
 								maintained={application.own_window ?? false}
+								suspended={application.maintained ?? false}
 								size={DOT_SIZE}
 							/>
 							<Name

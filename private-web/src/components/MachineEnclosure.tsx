@@ -42,7 +42,9 @@ const WAVE = keyframes`
 /// of them are out of play, so a failing one does not read as one nobody has
 /// noticed.
 // spec: MNT#presentation
-const MUTED = 0.55;
+/// How far a target the window reaches is faded: out of play, but still read.
+// spec: MNT#presentation
+export const MUTED = 0.55;
 
 /// The pill is a band a few pixels tall, so a wave crossing it is gone before
 /// it resolves. It pulses the whole mark instead, on the wave's timing, from

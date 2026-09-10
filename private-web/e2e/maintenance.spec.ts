@@ -206,6 +206,41 @@ test.describe("maintenance windows", () => {
 		).toHaveAttribute("href", `/fleet/groups/${group.id}`);
 	});
 
+	/// A machine's window covers every application on it. The mark stays on the
+	/// enclosure so the application does not read as having a window of its own,
+	/// but the application is out of play and has to look it, or a failing one
+	/// reads as one nobody has noticed.
+	/// spec: MNT#presentation
+	test("an application under its machine's window is muted, not marked", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const server = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		await seedMaintenanceWindow(sql, { machineId: server.machineId });
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		const dots = page.getByTestId("status-dot");
+		await expect(dots.first()).toBeVisible();
+
+		const marks = await dots.evaluateAll((nodes) =>
+			nodes.map((node) => ({
+				marked: node.getAttribute("data-maintenance"),
+				opacity: Number(getComputedStyle(node).opacity),
+			})),
+		);
+		// Nothing claims a window of its own: that mark belongs to the machine's
+		// enclosure, which is not a dot.
+		expect(marks.every((m) => m.marked === null)).toBe(true);
+		// And the application is faded, so a failing one under maintenance does
+		// not read as one nobody has noticed.
+		expect(marks.some((m) => m.opacity < 1)).toBe(true);
+	});
+
 	/// A group's own window and its production environment's are named the same,
 	/// since an environment at that rank is named for its group. The list has to
 	/// say which is which or two rows read identically.

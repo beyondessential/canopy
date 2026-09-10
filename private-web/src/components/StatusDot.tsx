@@ -1,6 +1,7 @@
 import { Box, Tooltip, keyframes, type Theme } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import type { HealthState, ShortStatus } from "../types";
+import { MUTED } from "./MachineEnclosure";
 
 // One dot, one subject, one colourway.
 //
@@ -89,6 +90,12 @@ interface StatusDotProps {
 	 * period. */
 	// spec: MNT#settling
 	settling?: boolean;
+	/** Whether a window reaches this target without being declared over it: one
+	 * over the box it runs on, its environment, or its group. The mark stays at
+	 * the grain it was declared over, so this only mutes, saying the target is
+	 * out of play without claiming a window of its own. */
+	// spec: MNT#presentation
+	suspended?: boolean;
 	/** Whether something around this dot already names what it stands for. Two
 	 * tooltips over the same few pixels open together and overlap, and the
 	 * reader loses both, so a dot inside a `MachineEnclosure` carries none of
@@ -104,6 +111,7 @@ export default function StatusDot({
 	monitored = true,
 	maintained = false,
 	settling = false,
+	suspended = false,
 	quiet = false,
 }: StatusDotProps) {
 	const mask = monitored ? undefined : UNMONITORED_MASK;
@@ -133,6 +141,11 @@ export default function StatusDot({
 					verticalAlign: "middle",
 					maskImage: mask,
 					WebkitMaskImage: mask,
+					// Out of play, so a failing target under maintenance is not
+					// read as one nobody has noticed. The mark, where there is
+					// one, is what says a window was declared here.
+					// spec: MNT#presentation
+					...(suspended && !maintained ? { opacity: MUTED } : {}),
 					...(maintained && !settling
 						? {
 								animation: `${PULSE} 2s ease-in-out 0.5s infinite`,
