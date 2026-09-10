@@ -43,6 +43,19 @@ CREATE INDEX artifacts_group_id ON artifacts (group_id);
 
 ALTER TABLE artifacts DROP CONSTRAINT artifacts_type_platform_version_id;
 
+-- Range rows had no uniqueness to conflict with, so a repeat registration of
+-- one is a second row and the index below cannot be created over the pair. The
+-- newest is the registration that would have replaced the others had this key
+-- been in force, so that is the one kept.
+DELETE FROM artifacts a
+USING artifacts b
+WHERE a.artifact_type = b.artifact_type
+	AND a.platform = b.platform
+	AND a.version_id IS NOT DISTINCT FROM b.version_id
+	AND a.version_range_pattern IS NOT DISTINCT FROM b.version_range_pattern
+	AND a.group_id IS NOT DISTINCT FROM b.group_id
+	AND (a.created_at, a.id) < (b.created_at, b.id);
+
 CREATE UNIQUE INDEX artifacts_identity
 	ON artifacts (artifact_type, platform, version_id, version_range_pattern, group_id)
 	NULLS NOT DISTINCT;
