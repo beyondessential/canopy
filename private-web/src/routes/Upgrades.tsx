@@ -222,24 +222,24 @@ export default function Upgrades() {
 
 			<Disclosure
 				title="No plan recorded"
-				subject="groups with no plan"
+				subject="environments with no plan"
 				caption={
 					unplanned.length === 1
-						? "1 group is behind with no plan, so it gets no pre-upgrade testing"
-						: `${unplanned.length} groups are behind with no plan, so they get no pre-upgrade testing`
+						? "1 environment is behind with no plan, so it gets no pre-upgrade testing"
+						: `${unplanned.length} environments are behind with no plan, so they get no pre-upgrade testing`
 				}
 				testId="unplanned-upgrades"
 			>
 					{unplanned.length === 0 ? (
 						<Typography variant="body2" color="text.secondary">
-							Every group that is behind has a plan.
+							Every environment that is behind has a plan.
 						</Typography>
 					) : (
 						<TableContainer>
 							<Table size="small" sx={TIGHT_TABLE}>
 							<TableHead>
 								<TableRow>
-									<TableCell>Group</TableCell>
+									<TableCell>Environment</TableCell>
 									<TableCell>Running</TableCell>
 									<TableCell>Behind by</TableCell>
 								</TableRow>

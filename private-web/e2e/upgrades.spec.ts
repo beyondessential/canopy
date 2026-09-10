@@ -93,7 +93,7 @@ test.describe("upgrades dashboard", () => {
 		// The group with nothing recorded is the one this view exists to
 		// surface, so it is listed rather than omitted, behind a disclosure.
 		await page
-			.getByRole("button", { name: "Show groups with no plan" })
+			.getByRole("button", { name: "Show environments with no plan" })
 			.click();
 		const drifting = page
 			.getByTestId("unplanned-upgrade-row")
@@ -178,7 +178,7 @@ test.describe("upgrades dashboard", () => {
 			"No group has a recorded plan",
 		);
 		await page
-			.getByRole("button", { name: "Show groups with no plan" })
+			.getByRole("button", { name: "Show environments with no plan" })
 			.click();
 		await expect(
 			page
@@ -345,7 +345,7 @@ test.describe("upgrades dashboard", () => {
 			page.getByRole("button", { name: "Withdraw kamaka clone's plan" }),
 		).toBeVisible();
 		await page
-			.getByRole("button", { name: "Show groups with no plan" })
+			.getByRole("button", { name: "Show environments with no plan" })
 			.click();
 		await expect(
 			page
@@ -524,7 +524,7 @@ test.describe("upgrades dashboard", () => {
 
 		await page.goto("/upgrades");
 		await page
-			.getByRole("button", { name: "Show groups with no plan" })
+			.getByRole("button", { name: "Show environments with no plan" })
 			.click();
 
 		await expect(
