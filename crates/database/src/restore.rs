@@ -81,6 +81,12 @@ pub struct RestoreReplica {
 	/// the whole of the operator's say in it, and it answers on its own
 	/// whether a replica that came up unmasked is a finding.
 	pub redacts: bool,
+	/// Whether this declaration's consumer may publish the group's reporting
+	/// schema. Only an operator sets it: what a consumer advertises is the
+	/// consumer's own claim, and every machine in the group runs what is
+	/// published for it.
+	// spec: RPT#the-build-contract
+	pub publishes_schemas: bool,
 	/// Whether this declaration is currently active. When disabled, it
 	/// produces no work and grants no access, but is kept for reference.
 	pub enabled: bool,
@@ -107,6 +113,7 @@ pub struct NewRestoreReplica {
 	pub overdue_after: Option<PgDuration>,
 	pub params: serde_json::Value,
 	pub redacts: bool,
+	pub publishes_schemas: bool,
 	pub created_by: Option<String>,
 }
 
@@ -124,6 +131,7 @@ pub struct RestoreReplicaUpdate {
 	pub overdue_after: Option<PgDuration>,
 	pub params: serde_json::Value,
 	pub redacts: bool,
+	pub publishes_schemas: bool,
 	pub enabled: bool,
 }
 
@@ -151,6 +159,14 @@ fn unique_violation(info: &dyn diesel::result::DatabaseErrorInformation) -> AppE
 		Some("restore_replicas_consumer_name") | None => {
 			AppError::Conflict("this consumer already has a restore replica with that name".into())
 		}
+		// What a builder registers is offered to every machine in the group and
+		// replaces what was registered before it, so two publishers overwrite
+		// each other and which schema a machine ends up on is whichever
+		// reported last.
+		// spec: RPT#the-build-contract
+		Some("restore_replicas_one_schema_publisher") => AppError::Conflict(
+			"another enabled declaration already publishes this group's reporting schema".into(),
+		),
 		Some(other) => {
 			AppError::Conflict(format!("this declaration collides with another ({other})"))
 		}
@@ -261,6 +277,7 @@ impl RestoreReplica {
 				dsl::overdue_after.eq(update.overdue_after),
 				dsl::params.eq(update.params),
 				dsl::redacts.eq(update.redacts),
+				dsl::publishes_schemas.eq(update.publishes_schemas),
 				dsl::enabled.eq(update.enabled),
 			))
 			.returning(Self::as_select())
@@ -309,6 +326,100 @@ impl RestoreReplica {
 			Ok(())
 		})
 		.await
+	}
+
+	/// Whether a consumer may register group-scoped artifacts for this group:
+	/// an operator has marked an enabled declaration of theirs covering the
+	/// group as publishing its schema, and that declaration is one a build is
+	/// actually dispatched for.
+	///
+	/// The operator's flag is what grants this, not the semantics the consumer
+	/// advertises: a device registers its own capability set, so a semantic is
+	/// a claim the claimant controls, and what is published here is offered to
+	/// every machine in the group and run. The advertised semantic still has to
+	/// be there, since a consumer that cannot build a schema has no business
+	/// publishing one, but it grants nothing on its own.
+	// spec: ART#registration, RPT#the-build-contract
+	pub async fn authorizes_schema_artifacts(
+		db: &mut AsyncPgConnection,
+		consumer_device_id: Uuid,
+		group_id: Uuid,
+	) -> Result<bool> {
+		let building: Vec<RestoreIntent> =
+			RestoreConsumerCapability::list_for_consumer(db, consumer_device_id)
+				.await?
+				.into_iter()
+				.filter(|d| d.has_semantic(semantics::REPORTING_SCHEMA))
+				.map(|d| d.intent)
+				.collect();
+
+		if building.is_empty() {
+			return Ok(false);
+		}
+
+		use crate::schema::restore_replicas::dsl;
+		let n: i64 = dsl::restore_replicas
+			.filter(dsl::consumer_device_id.eq(consumer_device_id))
+			.filter(dsl::group_id.eq(group_id))
+			.filter(dsl::intent.eq_any(building.iter().map(|i| i.0.clone()).collect::<Vec<_>>()))
+			.filter(dsl::enabled.eq(true))
+			.filter(dsl::publishes_schemas.eq(true))
+			// Dispatch builds no schema from a redacting or machine-scoped
+			// declaration, and one nothing is dispatched for publishes nothing.
+			.filter(dsl::redacts.eq(false))
+			.filter(dsl::machine_id.is_null())
+			.count()
+			.get_result(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(n > 0)
+	}
+
+	/// Whether a run id is already recorded against a different consumer or
+	/// group.
+	///
+	/// A run id is minted by the device performing the run, so one Canopy has
+	/// not seen is ordinary: an artifact is registered mid-restore, before the
+	/// report of that restore lands. One already recorded for somebody else is
+	/// a claim on their run, and provenance a party can forge for itself is
+	/// worth nothing to the operator reading it.
+	pub async fn run_claimed_elsewhere(
+		db: &mut AsyncPgConnection,
+		run: Uuid,
+		consumer_device_id: Uuid,
+		group_id: Uuid,
+	) -> Result<bool> {
+		use crate::schema::{backup_restore_checks, backup_runs};
+
+		let checks: i64 = backup_restore_checks::table
+			.filter(backup_restore_checks::run_id.eq(Some(run)))
+			.filter(
+				backup_restore_checks::consumer_device_id
+					.ne(consumer_device_id)
+					.or(backup_restore_checks::group_id.ne(group_id)),
+			)
+			.count()
+			.get_result(db)
+			.await
+			.map_err(AppError::from)?;
+		if checks > 0 {
+			return Ok(true);
+		}
+
+		let runs: i64 = backup_runs::table
+			.filter(backup_runs::id.eq(run))
+			.filter(
+				backup_runs::device_id
+					.ne(consumer_device_id)
+					.or(backup_runs::group_id.ne(group_id)),
+			)
+			.count()
+			.get_result(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(runs > 0)
 	}
 
 	/// Whether an enabled declaration covers `(consumer, group, type)` — the
@@ -1655,11 +1766,11 @@ async fn file_migration(
 /// The fixed parts of one restore check: what it is called, the documentation it
 /// ships with, its headline when degraded, and what it says once a server has no
 /// instances of it left.
-struct RestoreCheck<'a> {
-	r#ref: &'a str,
-	documentation: &'a str,
-	title: &'a str,
-	gone: &'a str,
+pub(crate) struct RestoreCheck<'a> {
+	pub(crate) r#ref: &'a str,
+	pub(crate) documentation: &'a str,
+	pub(crate) title: &'a str,
+	pub(crate) gone: &'a str,
 }
 
 /// File one of a server's restore checks from its instances, and say whether it
@@ -1671,7 +1782,7 @@ struct RestoreCheck<'a> {
 /// instances is recovered on its own — with no instances there is nothing left
 /// to grade, so it is filed as the plain passing check it has become rather
 /// than left open with nothing that could ever clear it.
-async fn file_restore_check(
+pub(crate) async fn file_restore_check(
 	db: &mut AsyncPgConnection,
 	scope: Scope,
 	check: RestoreCheck<'_>,

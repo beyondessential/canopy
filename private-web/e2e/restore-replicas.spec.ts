@@ -178,6 +178,87 @@ test.describe("restore replicas", () => {
 		expect(rows[0]?.redacts).toBe(true);
 	});
 
+	/** A consumer advertising an intent that builds reporting schemas. */
+	async function schemaBuildingConsumer(sql: Sql): Promise<string> {
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedRestoreConsumerCapability(sql, {
+			deviceId: consumer.id,
+			intents: [
+				{
+					intent: "schema-build",
+					semantics: ["check", "once", "migrate", "reporting-schema"],
+				},
+			],
+		});
+		return consumer.id;
+	}
+
+	/// Publishing a group's schema is the operator's grant, so it is set on the
+	/// declaration rather than followed from what the consumer advertises.
+	///
+	/// spec: RPT#the-build-contract
+	test("an operator marks which declaration publishes the group's schema", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await schemaBuildingConsumer(sql);
+		const groupId = await groupWithBackups(sql, "publish-declare");
+		await seedServer(sql, { groupId, name: "publish-srv" });
+
+		await page.goto(`/fleet/groups/${groupId}/backups`);
+		await page.getByRole("button", { name: /declare replica/i }).click();
+
+		const dialog = page.getByRole("dialog");
+		const publishes = dialog.getByRole("switch", {
+			name: /publish this group's reporting schema/i,
+		});
+		await expect(publishes).not.toBeChecked();
+		await publishes.check();
+		await dialog.getByRole("button", { name: /^declare$/i }).click();
+
+		await expect(dialog).toHaveCount(0);
+		const rows = await sql.query<{ publishes_schemas: boolean }>(
+			`SELECT publishes_schemas FROM restore_replicas WHERE consumer_device_id = $1`,
+			[consumer],
+		);
+		expect(rows[0]?.publishes_schemas).toBe(true);
+
+		await expect(
+			page.getByRole("row", { name: /publish-declare/ }).first(),
+		).toBeVisible();
+		await expect(page.getByText("publishes schema").first()).toBeVisible();
+	});
+
+	/// A build is dispatched per group from data the masking manifest has not
+	/// altered, so a declaration narrowed to one machine cannot be the group's
+	/// publisher.
+	///
+	/// spec: RPT#the-build-contract
+	test("a machine-scoped declaration cannot publish the schema", async ({
+		page,
+		sql,
+	}) => {
+		await schemaBuildingConsumer(sql);
+		const groupId = await groupWithBackups(sql, "publish-scope");
+		await seedServer(sql, { groupId, name: "publish-one" });
+
+		await page.goto(`/fleet/groups/${groupId}/backups`);
+		await page.getByRole("button", { name: /declare replica/i }).click();
+
+		const dialog = page.getByRole("dialog");
+		const publishes = dialog.getByRole("switch", {
+			name: /publish this group's reporting schema/i,
+		});
+		await publishes.check();
+		await expect(publishes).toBeChecked();
+
+		await dialog.getByLabel("Machine").click();
+		await page.getByRole("option", { name: "publish-one" }).click();
+
+		await expect(publishes).toBeDisabled();
+		await expect(publishes).not.toBeChecked();
+	});
+
 	test("a partial redaction shows against the report that carried it", async ({
 		page,
 		sql,

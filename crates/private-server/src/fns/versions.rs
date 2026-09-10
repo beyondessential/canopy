@@ -9,7 +9,10 @@ use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::version::{VersionStatus, VersionStr};
 use database::{
-	artifacts::{Artifact, NewArtifact, Scope, digest_of, parse_sri, parse_sri_opt, sri},
+	artifacts::{
+		Artifact, MAX_HELD_ARTIFACT_BYTES, NewArtifact, Scope, digest_of, parse_sri, parse_sri_opt,
+		sri,
+	},
 	server_groups::ServerGroup,
 	version_known_issues::VersionKnownIssue,
 	versions::Version,
@@ -20,11 +23,6 @@ use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::state::AppState;
-
-/// Cap on the bytes Canopy will hold for one artifact. A reporting schema is a
-/// SQL file; anything approaching this is not one, and the rows live in
-/// Postgres alongside everything else.
-const MAX_HELD_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
 
 /// Header the SPA sets on an upload, which no cross-origin page can send
 /// without the browser preflighting the request first.

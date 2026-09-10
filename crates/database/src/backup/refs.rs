@@ -122,6 +122,13 @@ pub const MIGRATION_TEST: &str = "migration-test";
 /// redacting replicas as instances.
 pub const REDACTION: &str = "redaction";
 
+/// A reporting schema could not be built for a pair of this group and a Tamanu
+/// version it runs or is moving to. Application-scoped, `Warning`, does not
+/// escalate. One check on the group's central application with its unbuilt
+/// pairs as instances.
+// spec: RPT#alerting
+pub const REPORTING_SCHEMA: &str = "reporting-schema";
+
 // --- shipped documentation (seeded into the catalog on first filing) ---
 
 pub const STALENESS_DOC: &str = "## Description
@@ -301,6 +308,18 @@ One of this server's managed restore replicas reported a failed restorability ch
 ## Solve
 
 Read the detail for the replicas named: restore errors point at the snapshot or credentials, staleness at the consumer itself. To handle one replica differently from the rest, write a rule or silence against its `check.replica_key` rather than the check as a whole.";
+
+pub const REPORTING_SCHEMA_DOC: &str = "## Description
+
+A reporting schema is built for each pair of a group and a Tamanu version it runs or is moving to, from a replica of the group's own data migrated to that version. This check says a build for one of those pairs failed. Reports on the servers themselves keep working against whatever schema they already have; what is missing is the schema for a version, so reports written against it have nothing to read from. The version is in the detail rather than the check name, so a release doesn't spawn a catalog entry of its own.
+
+## Results
+
+- **warn**: a build for one of this group's pairs failed. The server is up and its reports return rows, so this is for whoever maintains the reports rather than whoever is on call.
+
+## Solve
+
+Read the failure in the report detail. A build failing against a fixed version and configuration fails the same way every time, so the pair stays settled until the version's artifacts change or an operator asks for the build again.";
 
 pub const MIGRATION_TEST_DOC: &str = "## Description
 

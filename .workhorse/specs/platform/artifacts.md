@@ -63,7 +63,9 @@ Canopy passes a group-scoped artifact's bytes only to a caller it is offered to.
 
 ## Registration
 
-A registration names the version or range, the type, the platform, and the group where the artifact has one, and carries either the location of an unscoped artifact or the bytes of a group-scoped one.
+Registering an unscoped artifact and registering a group's are separate: they name different things, carry different bodies, and are authorised differently, so each is its own path rather than one path that changes shape on a parameter.
+An unscoped registration names the version or range, the type and the platform, and carries the artifact's location.
+A group-scoped one names the group as well, carries the artifact's bytes, and names an exact version Canopy already holds rather than drafting one.
 The group is named on the registration rather than inferred from the caller.
 
 A releaser device registers unscoped artifacts, and carries no authorisation for any group.

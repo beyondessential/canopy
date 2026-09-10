@@ -207,7 +207,7 @@ async fn a_releaser_cannot_register_for_a_group() {
 
 			let response = public
 				.post(&format!(
-					"/artifacts/2.60.0/reporting-schema/any?group={GROUP_A}"
+					"/artifacts/groups/{GROUP_A}/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.text("https://example.com/x.sql")
@@ -609,27 +609,32 @@ async fn held_bytes_are_never_rendered_by_a_browser() {
 	.await
 }
 
-/// An operator device registers either kind, but the group-scoped path is not
-/// reachable from this endpoint at all, so an admin naming a group is refused
-/// exactly as a releaser is. Publishing into a group is the private server's.
+/// An operator device registers either kind, and needs no declaration to name a
+/// group: the authorisation a builder holds is what a component has instead of
+/// being an operator, not a narrower form of it.
 // spec: ART#registration
 #[tokio::test(flavor = "multi_thread")]
-async fn an_admin_device_cannot_register_for_a_group_here_either() {
+async fn an_admin_device_registers_for_any_group() {
 	commons_tests::server::run_with_device_auth(
 		"admin",
 		async |mut conn, cert, _device_id, public, _| {
 			seed(&mut conn).await;
 
-			let refused = public
+			let scoped = public
 				.post(&format!(
-					"/artifacts/2.60.0/reporting-schema/any?group={GROUP_A}"
+					"/artifacts/groups/{GROUP_A}/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
-				.text("https://example.com/x.sql")
+				.add_header("content-type", "application/sql")
+				.text("CREATE VIEW ...")
 				.await;
-			assert_eq!(refused.status_code(), StatusCode::FORBIDDEN);
+			scoped.assert_status_ok();
+			let scoped: serde_json::Value = scoped.json();
+			assert!(
+				scoped["digest"].is_string(),
+				"the bytes are held, so Canopy digests them"
+			);
 
-			// Unscoped, the same admin credential registers fine.
 			let accepted = public
 				.post("/artifacts/2.60.0/installer/windows")
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
@@ -667,9 +672,9 @@ async fn a_registration_with_nothing_in_it_is_refused() {
 			}
 
 			let malformed = public
-				.post("/artifacts/2.60.0/installer/windows?group=not-a-uuid")
+				.post("/artifacts/groups/not-a-uuid/2.60.0/reporting-schema/any")
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
-				.text("https://example.com/x.exe")
+				.text("CREATE VIEW ...")
 				.await;
 			assert_eq!(
 				malformed.status_code(),

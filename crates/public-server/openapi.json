@@ -105,6 +105,127 @@
         ]
       }
     },
+    "/artifacts/groups/{group}/{version}/{artifact_type}/{platform}": {
+      "post": {
+        "tags": [
+          "artifacts"
+        ],
+        "summary": "Register a reporting schema for one group, carrying its bytes.",
+        "description": "Requires a device certificate whose restore declaration for the named group\nadvertises that it builds reporting schemas. The bytes travel on this\nconnection and Canopy holds them, so the builder is issued no credential to\nany store. The path names the group the artifact is for, the exact version\nit was built against, and the artifact's type and target platform.\n\nThe version must be one Canopy already holds: a build is dispatched for a\ngroup and version Canopy knows about, so a version that does not exist is\nrefused rather than drafted. A range pattern is refused for the same reason:\na schema follows the migrations one exact version applies.\n\nReturns the created artifact record.",
+        "operationId": "register_group_artifact",
+        "parameters": [
+          {
+            "name": "group",
+            "in": "path",
+            "description": "Group the artifact is for.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "description": "Exact semver (e.g. `2.10.5`) the schema was built against.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "artifact_type",
+            "in": "path",
+            "description": "Must be `reporting-schema`: the authorisation is defined with that artifact.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "platform",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "run",
+            "in": "query",
+            "description": "The run that produced the artifact, where one produced it.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The artifact's bytes, which Canopy holds and records the digest of.",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Artifact"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "backup-restore-device": []
+          }
+        ]
+      }
+    },
     "/artifacts/{version}/{artifact_type}/{platform}": {
       "post": {
         "tags": [
@@ -2226,7 +2347,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Behaviours this intent opts into. Recognised values are `check` (a\nhealth report is expected for each replica), `once` (a given snapshot\nis only ever dispatched to a replica once, rather than repeatedly\nuntil overdue), and `url` (a replica's health report includes a link\nto it). Unrecognised values are stored but have no effect."
+            "description": "Behaviours this intent opts into. Recognised values are `check` (a\nhealth report is expected for each replica), `once` (a given snapshot\nis only ever dispatched to a replica once, rather than repeatedly until\noverdue), `url` (a replica's health report includes a link to it),\n`migrate` (Canopy names a target version and the replica applies that\nversion's migrations), `redact` (the replica de-identifies the restored\ndata before serving it), and `reporting-schema` (the replica builds a\nTamanu reporting schema and registers it for the group). Unrecognised\nvalues are stored but have no effect, so a consumer may advertise ahead\nof Canopy support."
           }
         }
       },
@@ -2757,6 +2878,49 @@
           }
         }
       },
+      "ReportingSchemaArgs": {
+        "type": "object",
+        "description": "What a reporting-schema build reports beyond its replica's restore health.",
+        "required": [
+          "built"
+        ],
+        "properties": {
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The artifacts the build registered, of which the schema is one."
+          },
+          "built": {
+            "type": "boolean",
+            "description": "Whether a schema came out of the build."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What went wrong, where the build failed."
+          },
+          "target_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The version the schema was built for, as semver, echoed from the\nworklist entry's `target_version`."
+          },
+          "target_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The same version as the identifier, echoed from `target_version_id`.\nAccepted for a consumer that reports the identifier; omit it when\n`target_version` is sent."
+          }
+        }
+      },
       "RequestCertificateArgs": {
         "type": "object",
         "description": "A request to certify a key for a name.",
@@ -3162,6 +3326,17 @@
             "type": "string",
             "format": "uuid",
             "description": "The declaration this report concerns, taken from the worklist entry's\n`replica_id`. Required: several replicas can share one group, machine,\ntype, and intent, so a report that named no declaration could not be\nattributed to one of them."
+          },
+          "reporting_schema": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ReportingSchemaArgs",
+                "description": "What a reporting-schema build produced, where the replica was restored\nfor one. Absent on any other report."
+              }
+            ]
           },
           "run_id": {
             "type": [

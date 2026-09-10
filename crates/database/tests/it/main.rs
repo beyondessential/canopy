@@ -49,6 +49,7 @@ mod reachability_silence_migration;
 mod reachability_sweep;
 mod recovery_vault;
 mod reported_detail;
+mod reporting_schemas;
 mod restore;
 mod rotation_interlock;
 mod scope;

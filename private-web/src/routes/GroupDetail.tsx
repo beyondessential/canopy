@@ -17,6 +17,7 @@ import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import GroupDomainsSection from "../components/GroupDomainsSection";
 import MigrationTestsSection from "../components/MigrationTestsSection";
+import ReportingSchemasSection from "../components/ReportingSchemasSection";
 import { OperatorAvatar, connectedFor } from "../components/OperatorAvatars";
 import ActiveIncidentCard from "../components/ActiveIncidentCard";
 import GroupTree from "../components/GroupTree";
@@ -241,6 +242,7 @@ export default function GroupDetail() {
 			<BackupsCard groupId={group.id} isAdmin={admin} />
 
 			<MigrationTestsSection groupId={group.id} servers={applications} />
+			<ReportingSchemasSection groupId={group.id} />
 
 			<GroupDomainsSection groupId={group.id} />
 

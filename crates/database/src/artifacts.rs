@@ -80,6 +80,9 @@ pub struct Artifact {
 	pub digest: Option<Vec<u8>>,
 	/// The run that produced this artifact, where the registration named one.
 	pub run_id: Option<Uuid>,
+	/// When this artifact was last registered.
+	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
+	pub updated_at: jiff::Timestamp,
 }
 
 #[derive(Debug, Deserialize, Insertable)]
@@ -106,6 +109,11 @@ pub struct ArtifactContent {
 	pub content_type: Option<String>,
 	pub digest: Vec<u8>,
 }
+
+/// Cap on the bytes Canopy will hold for one artifact. A reporting schema is a
+/// SQL file; anything approaching this is not one, and the rows live in Postgres
+/// alongside everything else.
+pub const MAX_HELD_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
 
 /// The digest Canopy records and verifies bytes against.
 pub fn digest_of(bytes: &[u8]) -> Vec<u8> {
@@ -419,6 +427,51 @@ impl Artifact {
 		pattern_rank(pattern_b).cmp(&pattern_rank(pattern_a))
 	}
 
+	/// When any artifact a build reads was last registered for each of these
+	/// versions, in one query however many versions are asked about.
+	///
+	/// A schema built from a superseded release of a version is not the schema
+	/// that version describes, so this is what a build is held against. Only
+	/// the unscoped artifacts count: a group-scoped one is a build's own output,
+	/// and registering it would put every group's pair for the version back on
+	/// the worklist, including the pair that just produced it. A range artifact
+	/// counts for every version it covers, since that is how one is resolved
+	/// for a build.
+	// spec: RPT#pairs
+	pub async fn newest_change_for_versions(
+		db: &mut AsyncPgConnection,
+		versions: &[Version],
+		ranges: &RangeChanges,
+	) -> Result<std::collections::HashMap<Uuid, jiff::Timestamp>> {
+		use crate::schema::artifacts::dsl;
+
+		let ids: Vec<Uuid> = versions.iter().map(|v| v.id).collect();
+		let exact: Vec<(Option<Uuid>, Option<jiff_diesel::Timestamp>)> = dsl::artifacts
+			.filter(dsl::version_id.eq_any(&ids))
+			.filter(dsl::group_id.is_null())
+			.group_by(dsl::version_id)
+			.select((dsl::version_id, diesel::dsl::max(dsl::updated_at)))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		let mut newest: std::collections::HashMap<Uuid, jiff::Timestamp> = exact
+			.into_iter()
+			.filter_map(|(id, at)| Some((id?, at?.into())))
+			.collect();
+
+		for (range, at) in &ranges.0 {
+			for version in versions.iter().filter(|v| range.satisfies(&v.as_semver())) {
+				newest
+					.entry(version.id)
+					.and_modify(|held| *held = (*held).max(*at))
+					.or_insert(*at);
+			}
+		}
+
+		Ok(newest)
+	}
+
 	/// The bytes Canopy holds for an artifact, where it holds any.
 	pub async fn content_for(
 		db: &mut AsyncPgConnection,
@@ -654,5 +707,46 @@ impl Artifact {
 				// spec: ART#what-a-version-offers
 				&& (other.group_id.is_none() || other.group_id == artifact.group_id)
 		})
+	}
+}
+
+/// When each unscoped range artifact last changed, with its pattern parsed.
+///
+/// A range covers versions rather than naming one, so which of them it answers
+/// for is decided in memory. Loaded once and handed to each version it is asked
+/// about: the patterns do not vary by group, and a worklist poll asks the same
+/// question of every group it covers.
+// spec: RPT#pairs
+pub struct RangeChanges(Vec<(node_semver::Range, jiff::Timestamp)>);
+
+impl RangeChanges {
+	/// One row per distinct pattern rather than per artifact: the answer only
+	/// needs the newest change under each, and every row returned costs a
+	/// semver parse.
+	pub async fn load(db: &mut AsyncPgConnection) -> Result<Self> {
+		use crate::schema::artifacts::dsl;
+
+		let rows: Vec<(Option<String>, Option<jiff_diesel::Timestamp>)> = dsl::artifacts
+			.filter(dsl::version_id.is_null())
+			.filter(dsl::group_id.is_null())
+			.group_by(dsl::version_range_pattern)
+			.select((
+				dsl::version_range_pattern,
+				diesel::dsl::max(dsl::updated_at),
+			))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(Self(
+			rows.into_iter()
+				.filter_map(|(pattern, at)| {
+					// An unparseable pattern matches nothing rather than
+					// everything, as it does where the artifact is offered.
+					let range = node_semver::Range::parse(pattern?).ok()?;
+					Some((range, at?.into()))
+				})
+				.collect(),
+		))
 	}
 }

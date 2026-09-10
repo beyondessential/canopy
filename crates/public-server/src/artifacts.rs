@@ -1,15 +1,22 @@
 use axum::{
 	Json,
-	extract::{Path, Query, State},
+	extract::{DefaultBodyLimit, Path, Query, State},
 };
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::device_auth::{AuthDevice, ReleaserDevice};
-use commons_types::version::{VersionStatus, VersionStr};
+use commons_types::{
+	device::DeviceRole,
+	version::{VersionStatus, VersionStr},
+};
 use database::{
 	Db,
-	artifacts::{Artifact as ArtifactRow, NewArtifact, Scope, location, parse_sri_opt, sri},
+	artifacts::{
+		Artifact as ArtifactRow, MAX_HELD_ARTIFACT_BYTES, NewArtifact, Scope, digest_of, location,
+		parse_sri_opt, sri,
+	},
 	machines::Machine,
+	restore::RestoreReplica,
 	versions::{NewVersion, Version},
 };
 use diesel::SelectableHelper as _;
@@ -91,8 +98,24 @@ pub(crate) async fn caller_scope(
 	Ok(Scope::for_caller(machine.and_then(|m| m.group_id)))
 }
 
+/// Body budget for a schema upload. Sized above the held-bytes cap so an
+/// over-limit upload is the handler's structured refusal naming the limit,
+/// rather than axum's plain-text 413.
+const MAX_UPLOAD_BODY_BYTES: usize = MAX_HELD_ARTIFACT_BYTES + 64 * 1024;
+
+/// The artifact type a reporting-schema build publishes.
+const REPORTING_SCHEMA_TYPE: &str = "reporting-schema";
+
+/// The platform it publishes on. A schema follows the version's migrations
+/// rather than anything about the machine reading it.
+const SCHEMA_PLATFORM: &str = "any";
+
 pub fn routes() -> OpenApiRouter<AppState> {
-	OpenApiRouter::new().routes(routes!(create))
+	OpenApiRouter::new().routes(routes!(create)).merge(
+		OpenApiRouter::new()
+			.routes(routes!(register_for_group))
+			.layer(DefaultBodyLimit::max(MAX_UPLOAD_BODY_BYTES)),
+	)
 }
 
 /// Register a downloadable artifact for a version or version range.
@@ -220,6 +243,159 @@ async fn create(
 
 	let base = crate::versions::public_base_url(&headers);
 	Ok(Json(Artifact::offered(row, &base, &version)))
+}
+
+/// Register a reporting schema for one group, carrying its bytes.
+///
+/// Requires a device certificate whose restore declaration for the named group
+/// advertises that it builds reporting schemas. The bytes travel on this
+/// connection and Canopy holds them, so the builder is issued no credential to
+/// any store. The path names the group the artifact is for, the exact version
+/// it was built against, and the artifact's type and target platform.
+///
+/// The version must be one Canopy already holds: a build is dispatched for a
+/// group and version Canopy knows about, so a version that does not exist is
+/// refused rather than drafted. A range pattern is refused for the same reason:
+/// a schema follows the migrations one exact version applies.
+///
+/// Returns the created artifact record.
+#[utoipa::path(
+	post,
+	path = "/groups/{group}/{version}/{artifact_type}/{platform}",
+	operation_id = "register_group_artifact",
+	tag = "artifacts",
+	security(("backup-restore-device" = [])),
+	params(
+		("group" = Uuid, Path, description = "Group the artifact is for."),
+		("version" = String, Path, description = "Exact semver (e.g. `2.10.5`) the schema was built against."),
+		("artifact_type" = String, Path, description = "Must be `reporting-schema`: the authorisation is defined with that artifact."),
+		("platform" = String, Path),
+		("run" = Option<Uuid>, Query, description = "The run that produced the artifact, where one produced it."),
+	),
+	request_body(content = Vec<u8>, content_type = "application/octet-stream", description = "The artifact's bytes, which Canopy holds and records the digest of."),
+	responses(
+		(status = 200, body = Artifact),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
+#[axum::debug_handler]
+async fn register_for_group(
+	device: AuthDevice,
+	State(db): State<Db>,
+	Path((group, version, artifact_type, platform)): Path<(Uuid, String, String, String)>,
+	Query(named): Query<GroupRegisterQuery>,
+	headers: axum::http::HeaderMap,
+	body: axum::body::Bytes,
+) -> Result<Json<Artifact>> {
+	use node_semver::Version as SemverVersion;
+
+	let mut db = db.get().await?;
+	let device_id = device.0.id;
+
+	// What a schema builder is authorised for is the artifact its declaration
+	// names. Any other type or platform registered under it would displace the
+	// releaser's own for every machine in the group, and those machines fetch
+	// and run what they are offered. A schema is one artifact per version, so
+	// the platform it is published on is fixed too: left open, one builder
+	// registers a schema per platform and a group is offered every one of them.
+	// spec: ART#registration, RPT#the-build-contract
+	if artifact_type != REPORTING_SCHEMA_TYPE || platform != SCHEMA_PLATFORM {
+		return Err(AppError::BadRequest(format!(
+			"this registers a {REPORTING_SCHEMA_TYPE} on {SCHEMA_PLATFORM}, not a \
+			 {artifact_type} on {platform}"
+		)));
+	}
+
+	let authorised = device.0.role == DeviceRole::Admin
+		|| RestoreReplica::authorizes_schema_artifacts(&mut db, device_id, group).await?;
+	if !authorised {
+		// Refused the same way whether the group exists or not, so the endpoint
+		// is not a directory of which groups have a builder.
+		return Err(AppError::AuthInsufficientPermissions {
+			required: "an enabled declaration building this group's artifacts".into(),
+		});
+	}
+
+	if body.len() > MAX_HELD_ARTIFACT_BYTES {
+		return Err(AppError::BadRequest(format!(
+			"artifact is larger than the {MAX_HELD_ARTIFACT_BYTES} byte limit"
+		)));
+	}
+	if body.is_empty() {
+		return Err(AppError::BadRequest(
+			"a group-scoped artifact carries its bytes".into(),
+		));
+	}
+
+	// Provenance is what an operator reads to answer what produced the bytes,
+	// so a run already recorded for somebody else is not one this registration
+	// may name.
+	if let Some(run) = named.run
+		&& RestoreReplica::run_claimed_elsewhere(&mut db, run, device_id, group).await?
+	{
+		return Err(AppError::BadRequest(
+			"the named run belongs to another consumer or group".into(),
+		));
+	}
+
+	// A schema follows the migrations one exact version applies, and Canopy
+	// resolves a range artifact for every version it covers.
+	// spec: RPT#the-build-contract
+	let semver = SemverVersion::parse(&version)
+		.map_err(|_| AppError::BadRequest("a reporting schema names an exact version".into()))?;
+
+	// A build is dispatched for a pair whose version Canopy already holds, so
+	// this names one rather than drafting a release nobody has cut.
+	// spec: RPT#pairs
+	let version_row = match Version::get_by_version(&mut db, VersionStr(semver)).await {
+		Ok(version) => version,
+		Err(AppError::DatabaseQuery(diesel::result::Error::NotFound)) => {
+			return Err(AppError::BadRequest(format!(
+				"no version {version} to register a group-scoped artifact against"
+			)));
+		}
+		Err(error) => return Err(error),
+	};
+
+	let content_type = headers
+		.get(axum::http::header::CONTENT_TYPE)
+		.and_then(|v| v.to_str().ok())
+		.map(str::to_owned);
+
+	// Canopy holds these bytes, so it records the digest of what it actually
+	// took in rather than one the registration claims for them.
+	// spec: ART#digests
+	let digest = digest_of(&body);
+
+	let row = ArtifactRow::register(
+		&mut db,
+		NewArtifact {
+			version_id: Some(version_row.id),
+			platform,
+			artifact_type,
+			download_url: None,
+			device_id: Some(device_id),
+			version_range_pattern: None,
+			group_id: Some(group),
+			content: Some(Vec::from(body)),
+			content_type,
+			digest: Some(digest),
+			run_id: named.run,
+		},
+	)
+	.await?;
+
+	let base = crate::versions::public_base_url(&headers);
+	Ok(Json(Artifact::offered(row, &base, &version)))
+}
+
+/// What a group-scoped registration names beside the path.
+#[derive(Debug, serde::Deserialize)]
+struct GroupRegisterQuery {
+	/// The run that produced the artifact, where one produced it.
+	run: Option<Uuid>,
 }
 
 /// What a registration names beside the path.
