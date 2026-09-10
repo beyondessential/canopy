@@ -59,6 +59,7 @@ export default function DeclareMaintenanceDialog({
 	onDone: () => void;
 }) {
 	const declare = useApiAction("maintenance", "declare");
+	const lift = useApiAction("maintenance", "lift");
 	const [endsAt, setEndsAt] = useState(() => hoursFromNow(2));
 	const [note, setNote] = useState("");
 
@@ -68,6 +69,7 @@ export default function DeclareMaintenanceDialog({
 		setEndsAt(end ? toLocalInput(new Date(end)) : hoursFromNow(2));
 		setNote(existing?.note ?? prefill?.note ?? "");
 		declare.reset();
+		lift.reset();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [open, existing?.id]);
 
@@ -145,14 +147,33 @@ export default function DeclareMaintenanceDialog({
 					{declare.error && (
 						<Alert severity="error">{declare.error.message}</Alert>
 					)}
+					{lift.error && <Alert severity="error">{lift.error.message}</Alert>}
 				</Stack>
 			</DialogContent>
 			<DialogActions>
+				{amending && existing && (
+					<Button
+						color="error"
+						disabled={lift.pending || declare.pending}
+						onClick={async () => {
+							try {
+								await lift.call({ id: existing.id });
+								onDone();
+								onClose();
+							} catch {
+								/* surfaced above */
+							}
+						}}
+						sx={{ mr: "auto" }}
+					>
+						Lift
+					</Button>
+				)}
 				<Button onClick={onClose}>Cancel</Button>
 				<Button
 					variant="contained"
 					onClick={submit}
-					disabled={declare.pending || endsAt === ""}
+					disabled={declare.pending || lift.pending || endsAt === ""}
 				>
 					{amending ? "Amend" : "Declare"}
 				</Button>

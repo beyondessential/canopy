@@ -851,6 +851,19 @@ test.describe("upgrade windows", () => {
 		await expect(
 			page.getByRole("heading", { name: "Amend maintenance" }),
 		).toBeVisible();
+
+		// And the work can be ended from the same place it is read.
+		await page.getByRole("button", { name: "Lift", exact: true }).click();
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ ended_at: string | null }>(
+					"SELECT ended_at FROM maintenance_windows WHERE server_group_id = $1",
+					[group.id],
+				);
+				return rows.every((r) => r.ended_at !== null);
+			})
+			.toBe(true);
+		await expect(page.getByTestId("plan-under-maintenance")).toHaveCount(0);
 	});
 });
 
