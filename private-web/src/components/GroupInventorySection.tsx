@@ -32,7 +32,7 @@ import TimeAgo from "./TimeAgo";
 
 type Machine = { id: string; name?: string | null };
 
-/// What a configuration run receives for each of this group's environments:
+/// What a configuration run receives for one of this group's environments:
 /// the machines it acts on, and the variables that configure them, with a
 /// value inherited from a wider scope told apart from one the machine sets
 /// itself. A secret appears by name and never by value.
@@ -58,6 +58,7 @@ export default function GroupInventorySection({
 	onMaintenanceChange: () => void;
 }) {
 	const [tick, setTick] = useState(0);
+	const [selected, setSelected] = useState<ServerRank | null>(null);
 	const reload = () => setTick((n) => n + 1);
 	const variables = useApi(
 		"inventory_variables",
@@ -71,6 +72,8 @@ export default function GroupInventorySection({
 	const ranks = SERVER_RANK_ORDER.filter((rank) =>
 		applications.some((application) => (application.rank ?? "dev") === rank),
 	);
+	const rank =
+		selected !== null && ranks.includes(selected) ? selected : ranks[0];
 
 	return (
 		<Box data-testid="group-inventory">
@@ -88,29 +91,24 @@ export default function GroupInventorySection({
 					</Typography>
 				</Paper>
 			) : (
-				<Stack spacing={2}>
-					{ranks.map((rank) => (
-						<EnvironmentInventory
-							key={rank}
-							groupId={groupId}
-							groupName={groupName}
-							rank={rank}
-							machines={machines.filter((machine) =>
-								applications.some(
-									(application) =>
-										application.machine_id === machine.id &&
-										(application.rank ?? "dev") === rank,
-								),
-							)}
-							variables={
-								variables.status === "ok" ? variables.data : []
-							}
-							onChanged={reload}
-							maintenanceTick={maintenanceTick}
-							onMaintenanceChange={onMaintenanceChange}
-						/>
-					))}
-				</Stack>
+				<EnvironmentInventory
+					groupId={groupId}
+					groupName={groupName}
+					rank={rank}
+					ranks={ranks}
+					onSelect={setSelected}
+					machines={machines.filter((machine) =>
+						applications.some(
+							(application) =>
+								application.machine_id === machine.id &&
+								(application.rank ?? "dev") === rank,
+						),
+					)}
+					variables={variables.status === "ok" ? variables.data : []}
+					onChanged={reload}
+					maintenanceTick={maintenanceTick}
+					onMaintenanceChange={onMaintenanceChange}
+				/>
 			)}
 		</Box>
 	);
@@ -120,6 +118,8 @@ function EnvironmentInventory({
 	groupId,
 	groupName,
 	rank,
+	ranks,
+	onSelect,
 	machines,
 	variables,
 	onChanged,
@@ -129,6 +129,8 @@ function EnvironmentInventory({
 	groupId: string;
 	groupName: string;
 	rank: ServerRank;
+	ranks: ReadonlyArray<ServerRank>;
+	onSelect: (rank: ServerRank) => void;
 	machines: ReadonlyArray<Machine>;
 	variables: ReadonlyArray<InventoryVariable>;
 	onChanged: () => void;
@@ -148,13 +150,30 @@ function EnvironmentInventory({
 
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }} data-testid={`environment-${rank}`}>
-			<Typography
-				variant="overline"
-				color="text.secondary"
-				sx={{ display: "block" }}
-			>
-				{rank}
-			</Typography>
+			{ranks.length > 1 ? (
+				<TextField
+					select
+					size="small"
+					label="Environment"
+					value={rank}
+					onChange={(event) => onSelect(event.target.value as ServerRank)}
+					sx={{ minWidth: 180 }}
+				>
+					{ranks.map((option) => (
+						<MenuItem key={option} value={option}>
+							{option}
+						</MenuItem>
+					))}
+				</TextField>
+			) : (
+				<Typography
+					variant="overline"
+					color="text.secondary"
+					sx={{ display: "block" }}
+				>
+					{rank}
+				</Typography>
+			)}
 
 			<Stack spacing={2} sx={{ mt: 1 }}>
 				<Run
@@ -197,7 +216,9 @@ function EnvironmentInventory({
 				))}
 
 				{isAdmin && (
+					// The scope field can name a machine another environment does not carry.
 					<SetVariable
+						key={rank}
 						groupId={groupId}
 						rank={rank}
 						machines={machines}
