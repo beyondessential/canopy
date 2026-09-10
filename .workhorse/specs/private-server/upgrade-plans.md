@@ -70,11 +70,15 @@ A planned date is a plan, not a deadline.
 Canopy decides a plan is met, rather than asking anyone to mark it done.
 
 A version is on a machine from the moment it is installed there, which is ahead of the environment serving it: an upgrade reports the version it is putting on as the work begins, with hours of it still to run.
-A plan is met once the environment's reported version has reached its target and nothing is declared over it, at which point the plan closes and records when.
+A plan is met once the environment's reported version has reached its target and its work is over, at which point the plan closes and records when.
 
-A window over the environment or over its group says the work is under way, so the plan stays open while one holds and through the suspension that outlasts it (see [MNT](../monitoring/maintenance.md), "Settling").
-An operator working through a declared window has the plan in front of them for the length of the work rather than losing it partway.
-Declaring is what says the work is still going: no elapsed time stands in for it, since an upgrade that finishes in a minute and one that runs for hours are not told apart by a clock.
+Two things say the work is still going, and either holds the plan open.
+The plan's own window is the first: an operator who recorded when the work runs has said so in advance, and the plan stays open until that window closes whether or not anything else is declared.
+A maintenance window over the environment or its group is the second, and it holds the plan for as long as it holds.
+A plan that recorded no window has nothing to wait on, so the version arriving is all the evidence there is.
+
+An operator therefore has the plan, and the controls on it, in front of them for the length of the work rather than losing it partway.
+No elapsed time stands in for either signal: an upgrade that finishes in a minute and one that runs for hours are not told apart by a clock.
 
 Reaching a version *past* the target counts as reaching it: an environment that jumped further than planned has done the upgrade and then some, and holding the plan open would misreport it as outstanding.
 A clone arriving says nothing about its production, whose plan stays open until the production itself reports the target.

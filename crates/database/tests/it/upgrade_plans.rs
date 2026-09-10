@@ -19,7 +19,7 @@ use database::{
 use diesel::{QueryableByName, SelectableHelper, sql_query, sql_types};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::civil::{date, time};
-use jiff::{SignedDuration, Timestamp};
+use jiff::{SignedDuration, Timestamp, Zoned, tz::TimeZone};
 use uuid::Uuid;
 
 #[derive(QueryableByName)]
@@ -286,6 +286,78 @@ async fn canopy_closes_a_plan_once_the_group_arrives() {
 				.is_none(),
 			"and stops steering the test target"
 		);
+	})
+	.await
+}
+
+/// The case this exists for: the version appears as the upgrade starts, well
+/// before traffic switches, and nobody declared maintenance. The plan's own
+/// window is the operator saying when the work runs, so it holds the plan.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plan_stays_open_through_its_own_window() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, server) = group_running(&mut conn, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+		let now = Zoned::now().with_time_zone(TimeZone::UTC);
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			ServerRank::Production,
+			target.id,
+			PlannedWhen {
+				date: Some(now.date()),
+				time: Some(now.time()),
+				// Still running for another two hours.
+				end: Some((&now + SignedDuration::from_hours(2)).time()),
+				zone: Some("UTC".to_owned()),
+			},
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
+
+		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
+		assert_eq!(
+			close_met_plans(&mut conn).await.expect("sweep"),
+			0,
+			"the window the operator planned is still running"
+		);
+
+		sql_query("UPDATE upgrade_plans SET planned_for = planned_for - 2")
+			.execute(&mut conn)
+			.await
+			.expect("age the plan past its window");
+		assert_eq!(
+			close_met_plans(&mut conn).await.expect("sweep"),
+			1,
+			"the window has closed and the environment stands on the target"
+		);
+	})
+	.await
+}
+
+/// A plan with no window recorded has nothing to wait on, so the version
+/// arriving is all the evidence there is.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plan_without_a_window_closes_on_the_version() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, server) = group_running(&mut conn, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			ServerRank::Production,
+			target.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
+
+		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
+		assert_eq!(close_met_plans(&mut conn).await.expect("sweep"), 1);
 	})
 	.await
 }

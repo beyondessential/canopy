@@ -401,14 +401,42 @@ pub fn ended_at(plan: &UpgradePlan) -> Option<Timestamp> {
 		.max()
 }
 
-/// Close every open plan whose environment has reached its target with nothing
-/// declared over it, returning how many were closed.
+/// The instant a plan's own window closes, for a plan that recorded one.
+///
+/// The window is the operator's statement of when the work runs, so it is the
+/// evidence for whether the work is still going. A window closing earlier in the
+/// day than it opened runs into the next morning.
+// spec: UPG#when-a-plan-is-met
+pub fn planned_window_end(plan: &UpgradePlan) -> Option<Timestamp> {
+	let date = plan.planned_for?;
+	let opens = plan.planned_time?;
+	let closes = plan.planned_end_time?;
+	let tz = TimeZone::get(plan.planned_zone.as_deref()?).ok()?;
+	let ends_on = if closes < opens {
+		date.tomorrow().ok()?
+	} else {
+		date
+	};
+	ends_on
+		.to_datetime(closes)
+		.to_zoned(tz)
+		.ok()
+		.map(|at| at.timestamp())
+}
+
+/// Close every open plan whose environment has reached its target and whose work
+/// is over, returning how many were closed.
 ///
 /// Reaching a version past the target counts too: an environment that jumped
 /// further has done the upgrade and then some, and holding the plan open would
-/// report it as outstanding. Work declared over the environment holds its plan
-/// open for the length of that work, so the plan cannot close underneath an
-/// upgrade still in progress.
+/// report it as outstanding.
+///
+/// A version appears on a machine when it is installed, which is ahead of the
+/// environment serving it, so arriving at the target is not on its own the work
+/// being finished. Two things say it is still going, and either holds the plan:
+/// the plan's own window, which is the operator saying when the work runs, and a
+/// maintenance window declared over the environment, which is the operator
+/// saying they are in there now.
 // spec: UPG#when-a-plan-is-met
 pub async fn close_met_plans(db: &mut AsyncPgConnection) -> Result<usize> {
 	use crate::schema::upgrade_plans::dsl;
@@ -435,6 +463,7 @@ pub async fn close_met_plans(db: &mut AsyncPgConnection) -> Result<usize> {
 		};
 
 		if !at_target
+			|| planned_window_end(&plan).is_some_and(|end| end > now)
 			|| suspended.environment_holding(plan.group_id, plan.rank)
 			|| suspended.group_holding(plan.group_id)
 		{
