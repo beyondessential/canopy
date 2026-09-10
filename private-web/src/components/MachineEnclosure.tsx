@@ -85,6 +85,20 @@ export function waveWhileHolding(
 // fixed grey, so the stripes hold on a dark card, and they carry their own
 // phase so no background offset exposes the gradient's tile as a seam.
 // spec: MNT#presentation
+/// What to say about a suspended target: whether the work was declared here, and
+/// where it was declared if not.
+// spec: MNT#presentation
+function maintenanceLine(
+	ownWindow: boolean,
+	settling: boolean,
+	heldBy?: string | null,
+): string {
+	const state = settling
+		? "maintenance just ended, watching resumes shortly"
+		: "under maintenance";
+	return ownWindow || !heldBy ? state : `${state} as part of ${heldBy}`;
+}
+
 export function ownWindowStripes(theme: Theme, settling: boolean): string {
 	// The settle period drops much further than the window itself: nobody is in
 	// there any more, and the mark is only saying watching has yet to resume.
@@ -114,6 +128,7 @@ export default function MachineEnclosure({
 	maintained = false,
 	settling = false,
 	ownWindow = false,
+	heldBy,
 	describes,
 	children,
 }: {
@@ -140,6 +155,11 @@ export default function MachineEnclosure({
 	 * so the dots need no tooltip of their own: two tooltips over the same few
 	 * pixels open together and overlap, and the reader loses both. */
 	describes?: string[];
+	/** What holds the window where it was not declared over this box: the
+	 * environment it serves, or its group. Named so a suspended box says what
+	 * caught it rather than reading as one nobody declared. */
+	// spec: MNT#presentation
+	heldBy?: string | null;
 	/** The dots for the applications on this machine. */
 	children: ReactNode;
 }) {
@@ -147,11 +167,7 @@ export default function MachineEnclosure({
 	const box = [
 		name,
 		enclosureTitle(up, health),
-		maintained
-			? settling
-				? "maintenance just ended, watching resumes shortly"
-				: "under maintenance"
-			: null,
+		maintained ? maintenanceLine(ownWindow, settling, heldBy) : null,
 	]
 		.filter(Boolean)
 		.join(" · ");

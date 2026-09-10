@@ -10,7 +10,7 @@ import {
 	type ServerInfo,
 } from "../types";
 import ApplicationTypeChip from "./ApplicationTypeChip";
-import MachineEnclosure, { ownWindowStripes } from "./MachineEnclosure";
+import MachineEnclosure from "./MachineEnclosure";
 import StatusDot from "./StatusDot";
 
 /// The group as an operator navigates it: rank, then the boxes at that rank,
@@ -59,6 +59,13 @@ export default function GroupTree({
 								key={box.machine.id}
 								machine={box.machine}
 								applications={box.applications}
+								heldBy={
+									environments?.find(
+										(environment) => environment.rank === rank,
+									)?.maintained
+										? `the ${rank} environment`
+										: null
+								}
 								currentMachineId={currentMachineId}
 								currentApplicationId={currentApplicationId}
 							/>
@@ -95,21 +102,14 @@ function EnvironmentHeading({
 			variant="overline"
 			color="text.secondary"
 			data-maintenance={held ? (settling ? "settling" : "holding") : undefined}
-			sx={(theme) => ({
-				display: "block",
-				mt: first ? 0 : 1.5,
-				mb: 0.5,
-				...(held
-					? {
-							backgroundImage: ownWindowStripes(theme, settling),
-							px: 0.75,
-							borderRadius: 1,
-						}
-					: {}),
-			})}
+			sx={{ display: "block", mt: first ? 0 : 1.5, mb: 0.5 }}
 		>
 			{rank ?? "unranked"}
-			{held ? (settling ? " · maintenance just ended" : " · under maintenance") : ""}
+			{held && (
+				<Box component="span" sx={{ color: "info.main" }}>
+					{settling ? " · maintenance ended" : " · under maintenance"}
+				</Box>
+			)}
 		</Typography>
 	);
 }
@@ -117,11 +117,15 @@ function EnvironmentHeading({
 function MachineBlock({
 	machine,
 	applications,
+	heldBy,
 	currentMachineId,
 	currentApplicationId,
 }: {
 	machine: GroupMachine;
 	applications: ServerInfo[];
+	/// What holds a window this box did not have declared over it.
+	// spec: MNT#presentation
+	heldBy?: string | null;
 	currentMachineId?: string;
 	currentApplicationId?: string;
 }) {
@@ -143,9 +147,13 @@ function MachineBlock({
 					maintained={machine.maintained}
 					settling={machine.maintenance_settling}
 					ownWindow={machine.own_window}
+					heldBy={heldBy}
 					describes={applications.map((application) =>
 						[
 							applicationName(application),
+							// Only a window of its own: the box's line already says what
+							// caught everything on it, and repeating it per application
+							// says the same thing twice.
 							application.own_window ? "under maintenance" : null,
 							application.is_monitored === false ? "unmonitored" : null,
 						]
