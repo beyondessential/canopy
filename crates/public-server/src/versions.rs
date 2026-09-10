@@ -676,10 +676,8 @@ async fn download_artifact(
 	// the same type and platform is registered. An artifact this caller may not
 	// see is missing in exactly the way one that never existed is.
 	// spec: ART#who-is-offered-a-group-scoped-artifact
-	let artifacts = ArtifactRow::get_for_version_all_matches(&mut db, version.id, scope).await?;
-	let artifact = artifacts
-		.into_iter()
-		.find(|a| a.id == artifact_uuid)
+	let artifact = ArtifactRow::of_version(&mut db, artifact_uuid, &version, scope)
+		.await?
 		.ok_or(AppError::ArtifactNotFound)?;
 
 	if let Some(held) = ArtifactRow::content_for(&mut db, artifact.id, scope).await? {
