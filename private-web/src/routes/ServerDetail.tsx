@@ -203,6 +203,7 @@ export default function ServerDetail() {
 					</Typography>
 					<GroupTree
 						machines={data.group_machines}
+						environments={data.group_environments}
 						applications={data.group_applications}
 						currentApplicationId={data.server.id}
 					/>
@@ -462,16 +463,17 @@ function InfoSection({
 	const caps = useApplicationTypeCaps(server.type);
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
-			{status && (
-				<HealthIndicator
-					health={health}
-					up={up}
-					monitored={server.is_monitored !== false}
-					maintained={maintained}
-					maintenanceSettling={maintenanceSettling}
-					operators={status.operators}
-				/>
-			)}
+			{/* Not behind a status: an application under maintenance is under it
+			    whether or not it has ever reported, and the chip is where that is
+			    said. */}
+			<HealthIndicator
+				health={health}
+				up={up}
+				monitored={server.is_monitored !== false}
+				maintained={maintained}
+				maintenanceSettling={maintenanceSettling}
+				operators={status?.operators ?? []}
+			/>
 			<Stack
 				direction="row"
 				spacing={4}

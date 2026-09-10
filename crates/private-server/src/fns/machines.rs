@@ -187,6 +187,12 @@ pub struct MachineDetailData {
 	pub maintained: bool,
 	/// Whether the suspension is only the settle period.
 	pub maintenance_settling: bool,
+	/// Whether that window was declared over this box, rather than reaching it
+	/// through its environment or its group. The mark is drawn at the grain it
+	/// was declared over, and what a box's applications are held by follows
+	/// from it.
+	// spec: MNT#presentation
+	pub own_window: bool,
 	/// The machine's own checks across every source, graded and classified.
 	pub checks: commons_types::status::ConsolidatedChecks,
 	/// The people logged in to this box right now, from its `external_users`
@@ -206,6 +212,11 @@ pub struct MachineDetailData {
 	/// machine is ungrouped.
 	// spec: FLT
 	pub group_machines: Vec<super::server_groups::GroupMachine>,
+	/// The group's environments and whether a window holds over each, so the
+	/// group summary marks the row a window was declared over rather than
+	/// leaving it to be inferred from the boxes it caught.
+	// spec: MNT#presentation
+	pub group_environments: Vec<super::server_groups::GroupEnvironment>,
 	/// The machine's effective `billing.*` labels — the ones Canopy hands its
 	/// device. A machine carries no product, a box not being a piece of
 	/// software.
@@ -287,6 +298,7 @@ pub async fn get_detail(
 	let suspended = MaintenanceWindow::suspended_targets(&mut conn).await?;
 	let maintained = suspended.suspends(machine.id, machine.group_id);
 	let maintenance_settling = suspended.settling(machine.id, machine.group_id);
+	let own_window = suspended.machine_window(machine.id);
 
 	let mut applications: Vec<super::applications::ServerInfo> = machine
 		.applications(&mut conn)
@@ -306,6 +318,10 @@ pub async fn get_detail(
 		Some(g) => super::server_groups::tree_members(&mut conn, g).await?,
 		None => (Vec::new(), Vec::new()),
 	};
+	let group_environments = match group.as_ref() {
+		Some(g) => super::server_groups::group_environments(&mut conn, g.id, &suspended).await?,
+		None => Vec::new(),
+	};
 
 	Ok(Json(MachineDetailData {
 		machine,
@@ -318,11 +334,13 @@ pub async fn get_detail(
 		health,
 		maintained,
 		maintenance_settling,
+		own_window,
 		checks,
 		operators,
 		applications,
 		group_applications,
 		group_machines,
+		group_environments,
 		billing_labels,
 	}))
 }

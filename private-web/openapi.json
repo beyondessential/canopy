@@ -13759,11 +13759,13 @@
           "health",
           "maintained",
           "maintenance_settling",
+          "own_window",
           "checks",
           "operators",
           "applications",
           "group_applications",
           "group_machines",
+          "group_environments",
           "billing_labels"
         ],
         "properties": {
@@ -13818,6 +13820,13 @@
             },
             "description": "Every application in this box's group, for the tree the page ends with.\nEmpty when the machine is ungrouped. The applications on this box are\namong them, the tree being a map of the group rather than of elsewhere."
           },
+          "group_environments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupEnvironment"
+            },
+            "description": "The group's environments and whether a window holds over each, so the\ngroup summary marks the row a window was declared over rather than\nleaving it to be inferred from the boxes it caught."
+          },
           "group_machines": {
             "type": "array",
             "items": {
@@ -13859,6 +13868,10 @@
               "$ref": "#/components/schemas/OperatorPresence"
             },
             "description": "The people logged in to this box right now, from its `external_users`\ncheck. Empty unless the box is currently reporting: a stale report\ncannot say who is on it now."
+          },
+          "own_window": {
+            "type": "boolean",
+            "description": "Whether that window was declared over this box, rather than reaching it\nthrough its environment or its group. The mark is drawn at the grain it\nwas declared over, and what a box's applications are held by follows\nfrom it."
           },
           "up": {
             "$ref": "#/components/schemas/ShortStatus",
@@ -17013,6 +17026,7 @@
           "checks",
           "group_applications",
           "group_machines",
+          "group_environments",
           "billing_labels"
         ],
         "properties": {
@@ -17055,6 +17069,13 @@
               "$ref": "#/components/schemas/ServerInfo"
             },
             "description": "Every application in the group, this one included, for the tree the page\nends with. Empty when the application is ungrouped. Each entry carries\nits own `up` / `health` so the tree renders a status dot per workload."
+          },
+          "group_environments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupEnvironment"
+            },
+            "description": "The group's environments and whether a window holds over each, so the\ngroup summary marks the row a window was declared over rather than\nleaving it to be inferred from the boxes it caught."
           },
           "group_machines": {
             "type": "array",

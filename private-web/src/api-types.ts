@@ -7706,6 +7706,12 @@ export interface components {
              */
             group_applications: components["schemas"]["ServerInfo"][];
             /**
+             * @description The group's environments and whether a window holds over each, so the
+             *     group summary marks the row a window was declared over rather than
+             *     leaving it to be inferred from the boxes it caught.
+             */
+            group_environments: components["schemas"]["GroupEnvironment"][];
+            /**
              * @description Every machine in this box's group, for the same tree. Empty when the
              *     machine is ungrouped.
              */
@@ -7741,6 +7747,13 @@ export interface components {
              *     cannot say who is on it now.
              */
             operators: components["schemas"]["OperatorPresence"][];
+            /**
+             * @description Whether that window was declared over this box, rather than reaching it
+             *     through its environment or its group. The mark is drawn at the grain it
+             *     was declared over, and what a box's applications are held by follows
+             *     from it.
+             */
+            own_window: boolean;
             /** @description Whether the box is currently reporting, on its own threshold. */
             up: components["schemas"]["ShortStatus"];
         };
@@ -9724,6 +9737,12 @@ export interface components {
              *     its own `up` / `health` so the tree renders a status dot per workload.
              */
             group_applications: components["schemas"]["ServerInfo"][];
+            /**
+             * @description The group's environments and whether a window holds over each, so the
+             *     group summary marks the row a window was declared over rather than
+             *     leaving it to be inferred from the boxes it caught.
+             */
+            group_environments: components["schemas"]["GroupEnvironment"][];
             /**
              * @description Every machine in the group, for the same tree: the boxes the
              *     applications above are arranged under. Empty when the application is

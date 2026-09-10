@@ -188,6 +188,25 @@ pub struct GroupEnvironment {
 	pub maintenance_settling: bool,
 }
 
+/// A group's environments with the maintenance state of each, so every surface
+/// that draws the group's tree marks the same rows.
+// spec: MNT#presentation
+pub(super) async fn group_environments(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	group: Uuid,
+	suspended: &database::maintenance_windows::SuspendedTargets,
+) -> Result<Vec<GroupEnvironment>> {
+	Ok(ServerGroup::environments(conn, &[group])
+		.await?
+		.into_iter()
+		.map(|environment| GroupEnvironment {
+			rank: environment.rank,
+			maintained: suspended.environment_window(group, environment.rank),
+			maintenance_settling: suspended.environment_window_settling(group, environment.rank),
+		})
+		.collect())
+}
+
 /// One of a group's machines, as an operator picks it out of a list.
 ///
 /// Carries the box's own state as well as its name, because the group tree
@@ -250,16 +269,7 @@ pub async fn get(
 	let billing_labels = group_billing_labels(&mut conn, &group).await?;
 	let suspended =
 		database::maintenance_windows::MaintenanceWindow::suspended_targets(&mut conn).await?;
-	let environments = ServerGroup::environments(&mut conn, &[args.server_group_id])
-		.await?
-		.into_iter()
-		.map(|environment| GroupEnvironment {
-			rank: environment.rank,
-			maintained: suspended.environment_window(args.server_group_id, environment.rank),
-			maintenance_settling: suspended
-				.environment_window_settling(args.server_group_id, environment.rank),
-		})
-		.collect();
+	let environments = group_environments(&mut conn, args.server_group_id, &suspended).await?;
 	let maintained = database::maintenance_windows::MaintenanceWindow::suspends(
 		&mut conn,
 		None,

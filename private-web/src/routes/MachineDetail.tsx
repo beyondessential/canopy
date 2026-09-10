@@ -244,7 +244,14 @@ export default function MachineDetail() {
 				/>
 			</Paper>
 
-			<ApplicationsOnThisBox applications={data.applications} />
+			<ApplicationsOnThisBox
+				applications={data.applications}
+				heldBy={
+					data.own_window
+						? `the machine ${data.machine.name ?? "it runs on"}`
+						: null
+				}
+			/>
 
 			<MachineBackupSection
 				machineId={data.machine.id}
@@ -324,6 +331,7 @@ export default function MachineDetail() {
 					</Typography>
 					<GroupTree
 						machines={data.group_machines}
+						environments={data.group_environments}
 						applications={data.group_applications}
 						currentMachineId={data.machine.id}
 					/>
@@ -424,8 +432,13 @@ function gibibytes(bytes: number): string {
 /// it answers. The group is left off — every one of them is in this box's.
 function ApplicationsOnThisBox({
 	applications,
+	heldBy,
 }: {
 	applications: ServerInfo[];
+	/// What holds a window the box's applications did not have declared over
+	/// them, where the box's own window is what caught them.
+	// spec: MNT#presentation
+	heldBy?: string | null;
 }) {
 	return (
 		<Box data-testid="applications-on-box">
@@ -443,6 +456,7 @@ function ApplicationsOnThisBox({
 							key={application.id}
 							server={application}
 							withGroup={false}
+							heldBy={heldBy}
 						/>
 					))}
 				</Stack>
