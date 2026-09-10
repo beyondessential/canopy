@@ -435,8 +435,8 @@ pub async fn close_met_plans(db: &mut AsyncPgConnection) -> Result<usize> {
 		};
 
 		if !at_target
-			|| suspended.environment_window(plan.group_id, plan.rank)
-			|| suspended.group_window(plan.group_id)
+			|| suspended.environment_holding(plan.group_id, plan.rank)
+			|| suspended.group_holding(plan.group_id)
 		{
 			continue;
 		}

@@ -247,8 +247,8 @@ pub async fn fleet(
 			verdict,
 			attempt,
 			testable,
-			under_maintenance: suspended.environment_window(env.group_id, env.rank)
-				|| suspended.group_window(env.group_id),
+			under_maintenance: suspended.environment_holding(env.group_id, env.rank)
+				|| suspended.group_holding(env.group_id),
 		});
 	}
 

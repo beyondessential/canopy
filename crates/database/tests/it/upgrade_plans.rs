@@ -325,19 +325,11 @@ async fn a_declared_window_holds_the_plan_open_until_the_work_is_over() {
 			"the operator is still in there"
 		);
 
+		// Suspension outlasts the window so alerts stay quiet through a restart,
+		// but nobody is working any more: lifting is the operator saying so.
 		MaintenanceWindow::lift(&mut conn, window.id, Some("a@example.com"))
 			.await
 			.expect("lift");
-		assert_eq!(
-			close_met_plans(&mut conn).await.expect("sweep"),
-			0,
-			"suspension outlasts the window, and so does the plan"
-		);
-
-		sql_query("UPDATE maintenance_windows SET ended_at = ended_at - interval '1 hour'")
-			.execute(&mut conn)
-			.await
-			.expect("settle the window");
 		assert_eq!(
 			close_met_plans(&mut conn).await.expect("sweep"),
 			1,

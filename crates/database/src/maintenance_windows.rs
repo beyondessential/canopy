@@ -137,6 +137,18 @@ impl SuspendedTargets {
 			&& !self.holding_environments.contains(&(group, rank))
 	}
 
+	/// A window over one of a group's environments that is still holding, rather
+	/// than one that has ended and is serving out the settle period. The settle
+	/// period suppresses alerts; it does not mean anyone is still working.
+	pub fn environment_holding(&self, group: Uuid, rank: ServerRank) -> bool {
+		self.holding_environments.contains(&(group, rank))
+	}
+
+	/// A window over the group itself that is still holding.
+	pub fn group_holding(&self, group: Uuid) -> bool {
+		self.holding_groups.contains(&group)
+	}
+
 	/// A window declared over the group itself.
 	pub fn group_window(&self, group: Uuid) -> bool {
 		self.groups.contains(&group)
