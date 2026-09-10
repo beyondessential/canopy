@@ -1559,7 +1559,7 @@ function UnderMaintenance({
 		>
 			<Typography
 				variant="caption"
-				color="info.main"
+				sx={{ color: "info.main" }}
 				data-testid="plan-under-maintenance"
 			>
 				{whole ? "group in maintenance" : "in maintenance"}
