@@ -2259,17 +2259,15 @@ function WithdrawPlan({
  * wall clocks. A close earlier in the day than the open is the following
  * morning, as the plan reads it. Two hours where the plan names no window,
  * which is what a declaration otherwise starts from. */
-/// The plan's window as a reader would say it, for a confirmation that has to
-/// stand on its own without the form behind it.
-function planWindowLabel(planned: { starts_at: string; ends_at: string }): string {
-	const clock = (at: string) =>
-		new Date(at).toLocaleString(undefined, {
-			hour: "2-digit",
-			minute: "2-digit",
-			day: "numeric",
-			month: "short",
-		});
-	return `${clock(planned.starts_at)} to ${clock(planned.ends_at)}`;
+/// When the plan's window closes, as a reader would say it. A declaration runs
+/// from now, so its end is the only part of the window that bounds it.
+function planWindowLabel(planned: { ends_at: string }): string {
+	return new Date(planned.ends_at).toLocaleString(undefined, {
+		hour: "2-digit",
+		minute: "2-digit",
+		day: "numeric",
+		month: "short",
+	});
 }
 
 function plannedHours(time: string | null, end: string | null): number {
@@ -2355,8 +2353,8 @@ function DeclareFromPlan({
 					<DialogTitle>Declare maintenance — {groupName}</DialogTitle>
 					<DialogContent>
 						<Typography variant="body2">
-							Suspends this environment's alerting for the plan's window,{" "}
-							{planWindowLabel(planned)}.
+							Suspends this environment's alerting from now until{" "}
+							{planWindowLabel(planned)}, the end of the plan's window.
 						</Typography>
 						{note && (
 							<Typography
