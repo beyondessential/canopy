@@ -497,7 +497,10 @@ test.describe("maintenance windows", () => {
 		// The clone's page says it is covered through the group; production's
 		// does not.
 		await page.goto(`/fleet/applications/${clone.id}`);
-		await expect(page.getByTestId("covering-group-window")).toBeVisible();
+		// Named as the environment it is, not just the group it sits in.
+		await expect(page.getByTestId("covering-group-window")).toContainText(
+			"kamaka clone",
+		);
 		await page.goto(`/fleet/applications/${production.id}`);
 		await expect(page.getByTestId("maintenance-section")).toBeVisible();
 		await expect(page.getByTestId("covering-group-window")).toHaveCount(0);
