@@ -143,6 +143,7 @@ function MachineBlock({
 }) {
 	const current = machine.id === currentMachineId;
 	const name = machine.name ?? "Unnamed machine";
+	const own = machine.own_window === true;
 	return (
 		<Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
 			<Row
@@ -167,7 +168,9 @@ function MachineBlock({
 								up={application.up ?? "gone"}
 								health={application.health ?? undefined}
 								monitored={application.is_monitored !== false}
-								suspended={application.maintained ?? false}
+								maintained={own}
+								settling={machine.maintenance_settling === true}
+								suspended={!own && (application.maintained ?? false)}
 								quiet
 								size={DOT_SIZE}
 							/>

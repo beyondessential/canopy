@@ -770,7 +770,9 @@ export function RankedDotStrip({
 											up={m.up}
 											health={m.health}
 											monitored={m.is_monitored}
-											suspended={m.maintained}
+											maintained={box.lead.machine_own_window}
+											settling={box.lead.machine_maintenance_settling}
+											suspended={!box.lead.machine_own_window && m.maintained}
 											quiet
 											size={DOT_SIZE}
 										/>
