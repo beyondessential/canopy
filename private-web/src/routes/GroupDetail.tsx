@@ -38,12 +38,16 @@ import {
 export default function GroupDetail() {
 	const { id = "" } = useParams<{ id: string }>();
 	const navigate = useNavigate();
-	const detail = useApi("fleet/groups", "get", { server_group_id: id }, [id]);
+	// A window declared or lifted below changes what a run on this group's
+	// inventory would be served, and which environments the tree marks, so the
+	// page reads one state.
+	const [maintenanceTick, setMaintenanceTick] = useState(0);
+	const detail = useApi("fleet/groups", "get", { server_group_id: id }, [
+		id,
+		maintenanceTick,
+	]);
 	const admin = useIsAdmin() === true;
 	const archive = useApiAction("fleet/groups", "delete");
-	// A window declared or lifted below changes what a run on this group's
-	// inventory would be served, so the two sections read the same state.
-	const [maintenanceTick, setMaintenanceTick] = useState(0);
 	// Only currently-open incidents matter for the active-incident section;
 	// closed ones live behind the /incidents filter route. A group holds one
 	// per environment plus its own, so there can be several at once.

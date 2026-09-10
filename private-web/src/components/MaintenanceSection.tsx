@@ -204,11 +204,14 @@ export default function MaintenanceSection({
 						Under maintenance, ending{" "}
 						<TimeAgo timestamp={fromGroup.expected_end} />, as part of{" "}
 						<MuiLink component={RouterLink} to={`/fleet/groups/${groupId}`}>
-							{groupName
-								? fromGroup.rank
-									? environmentName(groupName, fromGroup.rank)
-									: groupName
-								: "its group"}
+							{/* A production environment is named for its group, so naming
+							    the grain is the only thing that tells its window apart
+							    from the group's own. */}
+							{fromGroup.rank
+								? `the ${fromGroup.rank} environment`
+								: groupName
+									? `the group ${groupName}`
+									: "its group"}
 						</MuiLink>
 						. Amend or lift it there.
 					</Typography>
@@ -259,9 +262,8 @@ export default function MaintenanceSection({
 							</>
 						) : (
 							<>
-								Maintenance ran past its expected end{" "}
-								<TimeAgo timestamp={open.expected_end} />, so this {scope} is
-								watched again. The window closes on the next sweep.
+								Maintenance ended <TimeAgo timestamp={open.expected_end} />.
+								This {scope} is watched again.
 							</>
 						)}
 					</Typography>
@@ -361,8 +363,18 @@ export default function MaintenanceSection({
 						<Box component="span" sx={{ textTransform: "capitalize" }}>
 							{window.rank}
 						</Box>{" "}
-						under maintenance, ending <TimeAgo timestamp={window.expected_end} />.
-						The rest of the group stays watched.
+						{holds(window) ? (
+							<>
+								under maintenance, ending{" "}
+								<TimeAgo timestamp={window.expected_end} />. The rest of the
+								group stays watched.
+							</>
+						) : (
+							<>
+								maintenance ended <TimeAgo timestamp={window.expected_end} />.
+								It is watched again.
+							</>
+						)}
 					</Typography>
 					{window.note && (
 						<Typography variant="body2" sx={{ mt: 0.5, fontStyle: "italic" }}>

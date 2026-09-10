@@ -224,7 +224,7 @@ test.describe("maintenance windows", () => {
 
 		await page.goto(`/fleet/applications/${server.id}`);
 		const section = page.getByTestId("maintenance-section");
-		await expect(section).toContainText("ran past its expected end");
+		await expect(section).toContainText("Maintenance ended");
 		await expect(section).toContainText("watched again");
 		// The controls stay: the record is still open and can be lifted.
 		await expect(section.getByRole("button", { name: "Lift" })).toBeVisible();
@@ -626,9 +626,10 @@ test.describe("maintenance windows", () => {
 		// The clone's page says it is covered through the group; production's
 		// does not.
 		await page.goto(`/fleet/applications/${clone.id}`);
-		// Named as the environment it is, not just the group it sits in.
+		// Named as the grain it was declared over: a production environment is
+		// named for its group, so only the grain tells the two apart.
 		await expect(page.getByTestId("covering-group-window")).toContainText(
-			"kamaka clone",
+			"the clone environment",
 		);
 		await page.goto(`/fleet/applications/${production.id}`);
 		await expect(page.getByTestId("maintenance-section")).toBeVisible();
