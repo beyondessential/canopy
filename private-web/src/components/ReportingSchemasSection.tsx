@@ -14,6 +14,7 @@ import {
 	Typography,
 } from "@mui/material";
 import { useApi, useApiAction } from "../api";
+import { useIsAdmin } from "../hooks/useIsAdmin";
 
 type PairState = "awaiting" | "built" | "failed";
 
@@ -34,6 +35,7 @@ export default function ReportingSchemasSection({
 		[groupId],
 	);
 	const build = useApiAction("reporting_schemas", "build");
+	const isAdmin = useIsAdmin() === true;
 
 	if (pairs.status === "loading" || pairs.status === "idle") {
 		return (
@@ -109,13 +111,15 @@ export default function ReportingSchemasSection({
 										Build asked for
 									</Typography>
 								) : (
-									<Button
-										size="small"
-										onClick={() => ask(pair.version_id)}
-										disabled={build.pending}
-									>
-										{pair.state === "awaiting" ? "Build sooner" : "Build again"}
-									</Button>
+									isAdmin && (
+										<Button
+											size="small"
+											onClick={() => ask(pair.version_id)}
+											disabled={build.pending}
+										>
+											{pair.state === "awaiting" ? "Build sooner" : "Build again"}
+										</Button>
+									)
 								)}
 							</TableCell>
 						</TableRow>
