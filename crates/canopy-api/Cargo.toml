@@ -9,7 +9,7 @@
 [package]
 publish = true
 name = "bes-canopy-api"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 resolver = "3"
 license = "GPL-3.0-or-later"
