@@ -726,7 +726,7 @@ async fn an_archived_group_is_still_named() {
 		.await
 		.expect("archive the group");
 
-		let names = database::server_groups::ServerGroup::names_by_id(&mut conn)
+		let names = database::server_groups::ServerGroup::names_by_ids(&mut conn, &[theirs])
 			.await
 			.expect("names");
 		assert_eq!(names.get(&theirs).map(String::as_str), Some("kamaka"));

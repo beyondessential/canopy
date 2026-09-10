@@ -481,7 +481,11 @@ async fn artifacts_of(
 ) -> Result<Vec<ArtifactData>> {
 	let artifacts_with_metadata =
 		Artifact::get_for_version_all_matches_with_metadata(conn, version_id, Scope::Fleet).await?;
-	let group_names = ServerGroup::names_by_id(conn).await?;
+	let groups: Vec<Uuid> = artifacts_with_metadata
+		.iter()
+		.filter_map(|(artifact, ..)| artifact.group_id)
+		.collect();
+	let group_names = ServerGroup::names_by_ids(conn, &groups).await?;
 	Ok(artifacts_with_metadata
 		.into_iter()
 		.map(
