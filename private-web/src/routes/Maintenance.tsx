@@ -1,6 +1,7 @@
 import {
 	Alert,
 	Button,
+	Chip,
 	LinearProgress,
 	Paper,
 	Stack,
@@ -13,9 +14,33 @@ import {
 } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
+import ServerRankChip from "../components/ServerRankChip";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
+import type { ServerRank } from "../types";
+
+/// What a window covers, beside the target's name. A group's own window and its
+/// production environment's read the same otherwise, since an environment at
+/// that rank is named for the group.
+// spec: MNT#presentation
+function TargetKind({
+	window,
+}: {
+	window: { rank: ServerRank | null; machine_id: string | null; application_id: string | null; server_group_id: string | null };
+}) {
+	if (window.rank) {
+		return <ServerRankChip rank={window.rank} />;
+	}
+	const kind = window.application_id
+		? "application"
+		: window.machine_id
+			? "machine"
+			: window.server_group_id
+				? "group"
+				: "fleet";
+	return <Chip size="small" variant="outlined" label={kind} />;
+}
 
 /// What the fleet is not being watched on right now: every maintenance
 /// window currently holding, what it covers, and when it ends.
@@ -69,23 +94,33 @@ export default function Maintenance() {
 							{rows.map(({ window, target }) => (
 								<TableRow key={window.id} hover>
 									<TableCell>
-										{window.server_group_id ? (
-											<RouterLink to={`/fleet/groups/${window.server_group_id}`}>
-												{target}
-											</RouterLink>
-										) : window.machine_id ? (
-											<RouterLink to={`/fleet/machines/${window.machine_id}`}>
-												{target}
-											</RouterLink>
-										) : window.application_id ? (
-											<RouterLink
-												to={`/fleet/applications/${window.application_id}`}
-											>
-												{target}
-											</RouterLink>
-										) : (
-											target
-										)}
+										<Stack
+											direction="row"
+											spacing={0.75}
+											sx={{ alignItems: "center", flexWrap: "wrap" }}
+											useFlexGap
+										>
+											{window.server_group_id ? (
+												<RouterLink
+													to={`/fleet/groups/${window.server_group_id}`}
+												>
+													{target}
+												</RouterLink>
+											) : window.machine_id ? (
+												<RouterLink to={`/fleet/machines/${window.machine_id}`}>
+													{target}
+												</RouterLink>
+											) : window.application_id ? (
+												<RouterLink
+													to={`/fleet/applications/${window.application_id}`}
+												>
+													{target}
+												</RouterLink>
+											) : (
+												target
+											)}
+											<TargetKind window={window} />
+										</Stack>
 									</TableCell>
 									<TableCell>
 										<TimeAgo timestamp={window.expected_end} />

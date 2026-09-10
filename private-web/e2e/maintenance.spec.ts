@@ -188,6 +188,28 @@ test.describe("maintenance windows", () => {
 		).toHaveAttribute("href", `/fleet/groups/${group.id}`);
 	});
 
+	/// A group's own window and its production environment's are named the same,
+	/// since an environment at that rank is named for its group. The list has to
+	/// say which is which or two rows read identically.
+	/// spec: MNT#presentation
+	test("the maintenance page says what each window covers", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await seedMaintenanceWindow(sql, { serverGroupId: group.id });
+		await seedMaintenanceWindow(sql, {
+			serverGroupId: group.id,
+			rank: "production",
+		});
+
+		await page.goto("/maintenance");
+		const rows = page.getByRole("row", { name: /kamaka/ });
+		await expect(rows).toHaveCount(2);
+		await expect(rows.filter({ hasText: "group" })).toHaveCount(1);
+		await expect(rows.filter({ hasText: "production" })).toHaveCount(1);
+	});
+
 	/// A window over a box names the box, and the name is the way to it: the
 	/// fleet view is where an operator finds work in progress they did not
 	/// declare, so every target it lists reaches its own page.
