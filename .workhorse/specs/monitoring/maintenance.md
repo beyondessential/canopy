@@ -38,6 +38,7 @@ An environment is a group's applications at one rank, and the machines serving i
 A target stays suspended until the last window covering it has ended: for an application, its own and its machine's; for a machine, its own, its environment's and its group's.
 
 A group's own window, and the window over each of its environments, are separate targets, so a target has at most one open window: declaring over one that already has a window amends it, recording who amended and when.
+The window is then the amender's work as well as the declarer's, which decides who may run against it (see [INV](../private-server/inventory.md), "Work under way").
 
 Canopy never opens a window by itself.
 An environment with an open upgrade plan is offered the declaration over itself from that plan, prefilled with the plan's window and note, so declaring is one action at the moment the work starts (see [UPG](../private-server/upgrade-plans.md)).
@@ -55,6 +56,8 @@ An issue in an open incident leaves it when the window is declared, and an incid
 Where that close is notified, the notice says maintenance was declared, so a reader does not take it as the problem having gone away.
 
 Canopy-wide checks are Canopy monitoring its own operation, and are never suspended by any window (see [SELF](../private-server/self-alerts.md)).
+
+A window also holds off configuration runs by others: while it holds, no one but the operator who declared it, or the one whose amendment of it stands, can take a run lease on an environment it covers (see [INV](../private-server/inventory.md), "Work under way").
 
 ## Ending
 

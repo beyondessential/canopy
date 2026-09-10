@@ -17,6 +17,8 @@ pub mod certificate_alerts;
 pub mod check_policies;
 pub mod chrome_releases;
 pub mod devices;
+pub mod inventory_leases;
+pub mod inventory_variables;
 pub mod issues;
 pub mod machine_enrollment_challenges;
 pub mod machine_enrollment_tokens;

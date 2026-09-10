@@ -14,6 +14,8 @@ use std::{
 	sync::{Arc, Mutex},
 };
 
+pub use age::secrecy::{ExposeSecret, SecretString};
+
 use commons_errors::{AppError, Result};
 
 /// Env var that forces the in-memory secret store (no cluster needed). Set by the
@@ -191,32 +193,142 @@ impl BackupSecrets {
 	/// Read all string keys of the named Secret — for the rotation dual-key state
 	/// machine (`password` + `password_next`). Missing Secret → Err; absent keys
 	/// are simply not in the map.
+	///
+	/// The values arrive as plain `String`s and are not zeroed on drop. Prefer
+	/// [`Self::try_read_secret_keys`] for anything holding one past the call.
 	pub async fn read_keys(&self, secret_name: &str) -> Result<BTreeMap<String, String>> {
+		Ok(self
+			.read_secret_keys(secret_name)
+			.await?
+			.into_iter()
+			.map(|(k, v)| (k, v.expose_secret().to_owned()))
+			.collect())
+	}
+
+	/// Read all string keys of the named Secret, each value held in a
+	/// [`SecretString`] so it is zeroed when the caller drops it. Missing
+	/// Secret → Err.
+	pub async fn read_secret_keys(
+		&self,
+		secret_name: &str,
+	) -> Result<BTreeMap<String, SecretString>> {
+		self.try_read_secret_keys(secret_name)
+			.await?
+			.ok_or_else(|| AppError::Upstream(format!("secret get failed: {secret_name}")))
+	}
+
+	/// [`Self::read_secret_keys`], answering `None` for a Secret that does not
+	/// exist rather than an error. A caller that reads-modifies-writes needs an
+	/// absent Secret told apart from an API failure: treating a failure as empty
+	/// would have the write back drop every key already there.
+	pub async fn try_read_secret_keys(
+		&self,
+		secret_name: &str,
+	) -> Result<Option<BTreeMap<String, SecretString>>> {
 		match self {
 			Self::Kube { client, namespace } => {
 				use k8s_openapi::api::core::v1::Secret;
 				use kube::Api;
 
 				let api: Api<Secret> = Api::namespaced(client.clone(), namespace);
-				let secret = api
-					.get(secret_name)
-					.await
-					.map_err(|e| AppError::Upstream(format!("secret get failed: {e}")))?;
-				let mut out = BTreeMap::new();
-				for (k, v) in secret.data.unwrap_or_default() {
-					let s = String::from_utf8(v.0).map_err(|_| {
-						AppError::Upstream(format!("secret {secret_name} key {k} not utf-8"))
-					})?;
-					out.insert(k, s);
+				match api.get_opt(secret_name).await {
+					Ok(Some(secret)) => decode(secret_name, secret).map(Some),
+					Ok(None) => Ok(None),
+					Err(e) => Err(AppError::Upstream(format!("secret get failed: {e}"))),
 				}
-				Ok(out)
 			}
-			Self::Memory(store) => store
-				.lock()
-				.unwrap()
-				.get(secret_name)
-				.cloned()
-				.ok_or_else(|| AppError::Upstream(format!("secret get failed: {secret_name}"))),
+			Self::Memory(store) => Ok(store.lock().unwrap().get(secret_name).map(as_secrets)),
+		}
+	}
+
+	/// Set one key of the named Secret, leaving every other key as it is, and
+	/// create the Secret where there is none. Two writers setting different
+	/// keys at one scope keep both values, which a read-modify-write of the
+	/// whole keyset does not.
+	pub async fn put_secret_key(
+		&self,
+		secret_name: &str,
+		key: &str,
+		value: &SecretString,
+	) -> Result<()> {
+		match self {
+			Self::Kube { client, namespace } => {
+				use k8s_openapi::api::core::v1::Secret;
+				use kube::{
+					Api,
+					api::{Patch, PatchParams, PostParams},
+				};
+
+				let api: Api<Secret> = Api::namespaced(client.clone(), namespace);
+				let patch = serde_json::json!({ "stringData": { key: value.expose_secret() } });
+				let merge = async || {
+					api.patch(secret_name, &PatchParams::default(), &Patch::Merge(&patch))
+						.await
+				};
+				match merge().await {
+					Ok(_) => Ok(()),
+					Err(kube::Error::Api(e)) if e.code == 404 => {
+						match api
+							.create(
+								&PostParams::default(),
+								&secret_object(secret_name, key, value.expose_secret()),
+							)
+							.await
+						{
+							Ok(_) => Ok(()),
+							// Someone else created it in between, so the key
+							// still has to be merged into what they wrote.
+							Err(kube::Error::Api(e)) if e.code == 409 => {
+								merge().await.map(drop).map_err(|e| {
+									AppError::Upstream(format!("secret patch failed: {e}"))
+								})
+							}
+							Err(e) => Err(AppError::Upstream(format!("secret create failed: {e}"))),
+						}
+					}
+					Err(e) => Err(AppError::Upstream(format!("secret patch failed: {e}"))),
+				}
+			}
+			Self::Memory(store) => {
+				store
+					.lock()
+					.unwrap()
+					.entry(secret_name.to_string())
+					.or_default()
+					.insert(key.to_string(), value.expose_secret().to_owned());
+				Ok(())
+			}
+		}
+	}
+
+	/// Drop one key from the named Secret, leaving every other key as it is.
+	/// A Secret that is not there holds nothing to drop.
+	pub async fn forget_secret_key(&self, secret_name: &str, key: &str) -> Result<()> {
+		match self {
+			Self::Kube { client, namespace } => {
+				use k8s_openapi::api::core::v1::Secret;
+				use kube::{
+					Api,
+					api::{Patch, PatchParams},
+				};
+
+				let api: Api<Secret> = Api::namespaced(client.clone(), namespace);
+				let patch = serde_json::json!({ "data": { key: null } });
+				match api
+					.patch(secret_name, &PatchParams::default(), &Patch::Merge(&patch))
+					.await
+				{
+					Ok(_) => Ok(()),
+					Err(kube::Error::Api(e)) if e.code == 404 => Ok(()),
+					Err(e) => Err(AppError::Upstream(format!("secret patch failed: {e}"))),
+				}
+			}
+			Self::Memory(store) => {
+				if let Some(keys) = store.lock().unwrap().get_mut(secret_name) {
+					keys.remove(key);
+				}
+				Ok(())
+			}
 		}
 	}
 
@@ -224,6 +336,8 @@ impl BackupSecrets {
 	/// apply with force). Keys this manager owns but that are omitted from `keys`
 	/// are removed — so a rotation "promote" that writes only `{password}` cleans
 	/// up the leftover `password_next`. Used by the rotation dual-key dance.
+	///
+	/// The values are plain `String`s; see [`Self::put_secret_keys`].
 	pub async fn put_keys(&self, secret_name: &str, keys: &BTreeMap<String, String>) -> Result<()> {
 		match self {
 			Self::Kube { client, namespace } => {
@@ -261,6 +375,40 @@ impl BackupSecrets {
 			}
 		}
 	}
+
+	/// [`Self::put_keys`] taking [`SecretString`] values, so a caller holding
+	/// secret material never has to keep a plain `String` of it. The values are
+	/// exposed once here, into the request body kubernetes requires.
+	pub async fn put_secret_keys(
+		&self,
+		secret_name: &str,
+		keys: &BTreeMap<String, SecretString>,
+	) -> Result<()> {
+		let plain: BTreeMap<String, String> = keys
+			.iter()
+			.map(|(k, v)| (k.clone(), v.expose_secret().to_owned()))
+			.collect();
+		self.put_keys(secret_name, &plain).await
+	}
+}
+
+fn decode(
+	secret_name: &str,
+	secret: k8s_openapi::api::core::v1::Secret,
+) -> Result<BTreeMap<String, SecretString>> {
+	let mut out = BTreeMap::new();
+	for (k, v) in secret.data.unwrap_or_default() {
+		let s = String::from_utf8(v.0)
+			.map_err(|_| AppError::Upstream(format!("secret {secret_name} key {k} not utf-8")))?;
+		out.insert(k, SecretString::from(s));
+	}
+	Ok(out)
+}
+
+fn as_secrets(keys: &BTreeMap<String, String>) -> BTreeMap<String, SecretString> {
+	keys.iter()
+		.map(|(k, v)| (k.clone(), SecretString::from(v.clone())))
+		.collect()
 }
 
 /// Build a `Secret` carrying `value` under `key` named `secret_name`.

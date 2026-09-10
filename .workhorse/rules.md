@@ -44,3 +44,10 @@ From code, tie an implementation back to its spec with an inline `// spec: BAK` 
   Don't narrate a dependency's decision logic or version-specific quirks beyond the minimum needed to justify a requirement.
 - Don't scaffold or label: no "Strategy A/B", "Phase N", or plan tags in spec prose.
   Describe the mechanism directly.
+
+## Check the thing being replaced
+
+- A spec that replaces an existing artefact — an inventory file, a config, a hand-kept list — is written against that artefact's actual contents, read first.
+  Any claim about what the artefact holds ("carries no secret", "is only these fields", "nothing depends on it") is checked against every instance of it, not the one that was open.
+- Secrets specifically: grep the artefact for credentials, tokens, salts, and keys before asserting that what replaces it needs none.
+  A single file carrying one is the whole design, and finding it in review costs the design, not a sentence.
