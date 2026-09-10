@@ -9,7 +9,7 @@ use commons_errors::{AppError, Result};
 use commons_types::{server::rank::ServerRank, version::VersionStr};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use jiff::{Timestamp, civil::Date, civil::Time, tz::TimeZone};
+use jiff::{SignedDuration, Timestamp, civil::Date, civil::Time, tz::TimeZone};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -401,6 +401,10 @@ pub fn ended_at(plan: &UpgradePlan) -> Option<Timestamp> {
 		.max()
 }
 
+/// How long a window runs where the plan named an hour to start but none to
+/// finish.
+const DEFAULT_WINDOW: SignedDuration = SignedDuration::from_hours(2);
+
 /// The instants a plan's own window opens and closes, for a plan that recorded
 /// one.
 ///
@@ -412,19 +416,25 @@ pub fn ended_at(plan: &UpgradePlan) -> Option<Timestamp> {
 pub fn planned_window(plan: &UpgradePlan) -> Option<(Timestamp, Timestamp)> {
 	let date = plan.planned_for?;
 	let opens = plan.planned_time?;
-	let closes = plan.planned_end_time?;
 	let tz = TimeZone::get(plan.planned_zone.as_deref()?).ok()?;
-	let ends_on = if closes < opens {
-		date.tomorrow().ok()?
-	} else {
-		date
-	};
 	let start = date
 		.to_datetime(opens)
 		.to_zoned(tz.clone())
 		.ok()?
 		.timestamp();
-	let end = ends_on.to_datetime(closes).to_zoned(tz).ok()?.timestamp();
+	let end = match plan.planned_end_time {
+		Some(closes) => {
+			let ends_on = if closes < opens {
+				date.tomorrow().ok()?
+			} else {
+				date
+			};
+			ends_on.to_datetime(closes).to_zoned(tz).ok()?.timestamp()
+		}
+		// An hour to start and none to finish: the operator said when the work
+		// begins, not that it takes no time.
+		None => start.checked_add(DEFAULT_WINDOW).ok()?,
+	};
 	Some((start, end))
 }
 
@@ -459,23 +469,32 @@ pub async fn close_met_plans(db: &mut AsyncPgConnection) -> Result<usize> {
 			.filter_map(|env| env.version.map(|v| ((env.group_id, env.rank), v)))
 			.collect();
 	let suspended = MaintenanceWindow::suspended_targets(db).await?;
+	let targets: std::collections::HashMap<Uuid, Version> = Version::get_all_including_drafts(db)
+		.await?
+		.into_iter()
+		.map(|version| (version.id, version))
+		.collect();
 	let now = Timestamp::now();
 
 	let mut closed = 0;
 	for plan in open {
-		let at_target = match running.get(&(plan.group_id, plan.rank)) {
-			Some(running) => {
-				let target = Version::get_by_id(db, plan.target_version_id).await?;
-				running.0 >= target.as_semver()
-			}
-			None => false,
-		};
-
-		if !at_target
-			|| planned_window_end(&plan).is_some_and(|end| end > now)
+		// A window still ahead is not work under way: an environment that reaches
+		// its target early has done the upgrade, whatever the plan said.
+		if planned_window(&plan).is_some_and(|(start, end)| start <= now && now < end)
 			|| suspended.environment_holding(plan.group_id, plan.rank)
 			|| suspended.group_holding(plan.group_id)
 		{
+			continue;
+		}
+
+		let at_target = match (
+			running.get(&(plan.group_id, plan.rank)),
+			targets.get(&plan.target_version_id),
+		) {
+			(Some(running), Some(target)) => running.0 >= target.as_semver(),
+			_ => false,
+		};
+		if !at_target {
 			continue;
 		}
 

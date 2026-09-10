@@ -167,11 +167,14 @@ export default function Upgrades() {
 											/>
 										</TableCell>
 										<TableCell>
-											<PlannedTime
-												time={row.plan?.planned_time ?? null}
-												end={row.plan?.planned_end_time ?? null}
-												zone={row.plan?.planned_zone ?? null}
-											/>
+											<Stack spacing={0.25}>
+												<PlannedTime
+													time={row.plan?.planned_time ?? null}
+													end={row.plan?.planned_end_time ?? null}
+													zone={row.plan?.planned_zone ?? null}
+												/>
+												<UnderMaintenance held={row.maintenance_window} />
+											</Stack>
 										</TableCell>
 										<TableCell>
 											<PlanNote
@@ -1527,6 +1530,47 @@ function PlanNote({ note, testId }: { note: string | null; testId: string }) {
 /// The window a group moves in, as the wall clocks it was recorded as.
 /// Canopy holds no timezone for a group, so the zone travels with the time or
 /// the reader cannot tell whose midnight it is.
+/// Work declared over the environment, which is what holds an open plan open.
+/// Sits with the window because that is the shape of it: hours the environment
+/// is not being alerted on.
+// spec: UPG#when-a-plan-is-met
+function UnderMaintenance({
+	held,
+}: {
+	held: MaintenanceWindow | null | undefined;
+}) {
+	if (!held) {
+		return null;
+	}
+	// A window with no rank covers the whole group, so say so rather than let it
+	// read as this environment's alone.
+	const whole = held.rank === null;
+	const until = held.expected_end
+		? ` until ${new Date(held.expected_end).toLocaleTimeString(undefined, {
+				hour: "2-digit",
+				minute: "2-digit",
+			})}`
+		: "";
+	return (
+		<Tooltip
+			title={
+				whole
+					? "maintenance is declared over the whole group, so this plan stays open until that work is over"
+					: "maintenance is declared over this environment, so its plan stays open until the work is over"
+			}
+		>
+			<Typography
+				variant="caption"
+				color="info.main"
+				data-testid="plan-under-maintenance"
+			>
+				{whole ? "group in maintenance" : "in maintenance"}
+				{until}
+			</Typography>
+		</Tooltip>
+	);
+}
+
 function PlannedTime({
 	time,
 	end,
@@ -2272,34 +2316,34 @@ function DeclareFromPlan({
 	const [open, setOpen] = useState(false);
 	const [adjusting, setAdjusting] = useState(false);
 	const declare = useApiAction("maintenance", "declare");
+	// A window over the whole group is not this row's to amend or lift: ending it
+	// would un-suspend every other environment in the group.
+	const ownWindow = held && held.rank ? held : null;
 	const hours = plannedHours(plannedTime, plannedEnd);
 	// A plan whose hours are still ahead needs no form to declare over. One whose
 	// window has already passed says nothing about work starting now, so that
 	// falls back to the form and its length-from-now prefill.
 	const confirmable =
-		!held && !!planned && new Date(planned.ends_at).getTime() > Date.now();
+		!ownWindow && !!planned && new Date(planned.ends_at).getTime() > Date.now();
 	return (
 		<>
 			<Tooltip
 				title={
-					held
+					ownWindow
 						? "Maintenance is declared over this environment, so its plan stays open until the work is over; amend it here"
 						: "Declare maintenance: suspend this environment's alerting while the upgrade runs"
 				}
 			>
 				<IconButton
 					size="small"
-					aria-label={`${held ? "Amend" : "Declare"} maintenance for ${groupName}`}
+					aria-label={`${ownWindow ? "Amend" : "Declare"} maintenance for ${groupName}`}
 					onClick={() => {
 						setAdjusting(false);
 						setOpen(true);
 					}}
-					data-testid={held ? "plan-under-maintenance" : undefined}
+					data-testid={ownWindow ? "amend-maintenance" : undefined}
 				>
-					<BuildOutlinedIcon
-						fontSize="small"
-						color={held ? "info" : undefined}
-					/>
+					<BuildOutlinedIcon fontSize="small" />
 				</IconButton>
 			</Tooltip>
 			{confirmable && planned && (
@@ -2361,12 +2405,12 @@ function DeclareFromPlan({
 				onClose={() => setOpen(false)}
 				scope="group"
 				id={groupId}
-				rank={held ? (held.rank ?? undefined) : rank}
+				rank={ownWindow ? (ownWindow.rank ?? undefined) : rank}
 				targetLabel={groupName}
-				existing={held}
+				existing={ownWindow}
 				offerLift
 				prefill={
-					held
+					ownWindow
 						? undefined
 						: {
 								expectedEnd: new Date(

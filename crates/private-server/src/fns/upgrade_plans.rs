@@ -152,13 +152,22 @@ pub async fn fleet(
 			.map(|version| (version.id, version))
 			.collect();
 
-	let suspended =
-		database::maintenance_windows::MaintenanceWindow::suspended_targets(&mut conn).await?;
-	// The window itself, so the view can amend the work rather than only report
-	// it. A window over the group covers its environments, and the environment's
-	// own is the more specific of the two.
+	// The windows themselves, so the view can amend the work rather than only
+	// report it. Everything holding needs is on these rows, so this is the only
+	// read of the table the view makes.
 	let open_windows =
 		database::maintenance_windows::MaintenanceWindow::list_open(&mut conn).await?;
+	// A window over the group covers its environments, and the environment's own
+	// is the more specific of the two, so index both and prefer the specific.
+	let mut holding: HashMap<(Uuid, Option<ServerRank>), &_> = HashMap::new();
+	for window in &open_windows {
+		if let Some(group) = window.server_group_id
+			&& window.ended_at.is_none()
+			&& window.suspends_at(now_ts)
+		{
+			holding.insert((group, window.rank), window);
+		}
+	}
 	let mut environments = ServerGroup::environments(&mut conn, &ids).await?;
 	// A plan whose environment has no live application any more still says
 	// where the group was going, and this view is the only place it can be
@@ -275,38 +284,14 @@ pub async fn fleet(
 			attempt,
 			testable,
 			planned_window,
-			maintenance_window: holding_window(&open_windows, &suspended, env.group_id, env.rank),
+			maintenance_window: holding
+				.get(&(env.group_id, Some(env.rank)))
+				.or_else(|| holding.get(&(env.group_id, None)))
+				.map(|window| (*window).clone()),
 		});
 	}
 
 	Ok(Json(out))
-}
-
-/// The window holding over an environment: its own where it has one, else the
-/// one over its whole group. A window serving out the settle period has ended
-/// and nobody is working, so it does not count.
-fn holding_window(
-	open: &[database::maintenance_windows::MaintenanceWindow],
-	suspended: &database::maintenance_windows::SuspendedTargets,
-	group: Uuid,
-	rank: ServerRank,
-) -> Option<database::maintenance_windows::MaintenanceWindow> {
-	if suspended.environment_holding(group, rank) {
-		if let Some(window) = open.iter().find(|w| {
-			w.server_group_id == Some(group) && w.rank == Some(rank) && w.ended_at.is_none()
-		}) {
-			return Some(window.clone());
-		}
-	}
-	if suspended.group_holding(group) {
-		if let Some(window) = open
-			.iter()
-			.find(|w| w.server_group_id == Some(group) && w.rank.is_none() && w.ended_at.is_none())
-		{
-			return Some(window.clone());
-		}
-	}
-	None
 }
 
 /// The group's standing against its planned version: the worst of its applications'.

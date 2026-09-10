@@ -134,7 +134,8 @@ export default function MaintenanceSection({
 	const open = windows.find((w) => w.ended_at === null && !w.rank) ?? null;
 	const environmentWindows = windows.filter((w) => w.ended_at === null && w.rank);
 	const held = new Set(environmentWindows.map((w) => w.rank));
-	const declarable = (environments ?? []).filter((r) => !held.has(r));
+	// Only an admin is offered these, so for anyone else there is nothing to show.
+	const declarable = isAdmin ? (environments ?? []).filter((r) => !held.has(r)) : [];
 	const fromGroup =
 		covering.status === "ok"
 			? ((covering.data as MaintenanceWindow[]).find(

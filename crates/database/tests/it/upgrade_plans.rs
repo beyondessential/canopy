@@ -271,7 +271,6 @@ async fn canopy_closes_a_plan_once_the_group_arrives() {
 
 		// Through the periodic sweep, which is what runs in production.
 		database::backup::sweep(&mut conn).await.expect("sweep");
-		database::backup::sweep(&mut conn).await.expect("sweep");
 		assert!(
 			UpgradePlan::open_for_environment(&mut conn, group, ServerRank::Production)
 				.await
@@ -332,6 +331,77 @@ async fn a_plan_stays_open_through_its_own_window() {
 			close_met_plans(&mut conn).await.expect("sweep"),
 			1,
 			"the window has closed and the environment stands on the target"
+		);
+	})
+	.await
+}
+
+/// A window three weeks out says nothing about work happening now: an
+/// environment that arrives early has done the upgrade, whatever the plan said.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_window_that_has_not_started_does_not_hold_the_plan() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, server) = group_running(&mut conn, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+		let later =
+			Zoned::now().with_time_zone(TimeZone::UTC) + SignedDuration::from_hours(24 * 21);
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			ServerRank::Production,
+			target.id,
+			PlannedWhen {
+				date: Some(later.date()),
+				time: Some(later.time()),
+				end: Some((&later + SignedDuration::from_hours(2)).time()),
+				zone: Some("UTC".to_owned()),
+			},
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
+
+		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
+		assert_eq!(
+			close_met_plans(&mut conn).await.expect("sweep"),
+			1,
+			"the upgrade happened ahead of its slot, so the plan is met"
+		);
+	})
+	.await
+}
+
+/// An hour to start and none to finish still says work is under way: the
+/// operator named when it begins, not that it takes no time.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_start_with_no_end_still_holds_the_plan() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, server) = group_running(&mut conn, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+		let now = Zoned::now().with_time_zone(TimeZone::UTC);
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			ServerRank::Production,
+			target.id,
+			PlannedWhen {
+				date: Some(now.date()),
+				time: Some((&now - SignedDuration::from_mins(5)).time()),
+				end: None,
+				zone: Some("UTC".to_owned()),
+			},
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
+
+		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
+		assert_eq!(
+			close_met_plans(&mut conn).await.expect("sweep"),
+			0,
+			"the work started five minutes ago and has a default shift to run"
 		);
 	})
 	.await

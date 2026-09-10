@@ -847,7 +847,7 @@ test.describe("upgrade windows", () => {
 
 		// The operator reading the row is the one in the work, so the mark is the
 		// way back into it.
-		await mark.click();
+		await page.getByTestId("amend-maintenance").click();
 		await expect(
 			page.getByRole("heading", { name: "Amend maintenance" }),
 		).toBeVisible();
