@@ -2253,11 +2253,6 @@ function WithdrawPlan({
 	);
 }
 
-/** How long the plan says the group is down, from its window's two
- * wall clocks. A close earlier in the day than the open is the following
- * morning, as the plan reads it. Two hours where the plan names no window,
- * which is what a declaration otherwise starts from. */
-/// When the plan's window closes, as a reader would say it. A declaration runs
 /// When the plan's window closes, as a reader would say it. A declaration runs
 /// from now, so its end is the only part of the window that bounds it.
 function planWindowLabel(planned: { ends_at: string }): string {
