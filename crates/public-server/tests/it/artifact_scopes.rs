@@ -682,6 +682,25 @@ async fn a_registration_with_nothing_in_it_is_refused() {
 				"a group that is not a uuid is a client mistake, not a 500"
 			);
 
+			// The version a registration names is drafted so the artifact has
+			// something to attach to, so a refusal after that point leaves one
+			// standing for an artifact that was never registered.
+			let unknown = public
+				.post("/artifacts/9.9.9/installer/windows")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.text("  ")
+				.await;
+			assert_eq!(unknown.status_code(), StatusCode::BAD_REQUEST);
+			assert!(
+				database::versions::Version::get_by_version(
+					&mut conn,
+					"9.9.9".parse().expect("a version"),
+				)
+				.await
+				.is_err(),
+				"a refused registration drafts no version"
+			);
+
 			// Nothing was written by any of them.
 			let listed = public.get("/versions/2.60.0/artifacts").await;
 			let artifacts: Vec<serde_json::Value> = listed.json();

@@ -12,7 +12,7 @@ use commons_types::{
 use database::{
 	Db,
 	artifacts::{
-		Artifact as ArtifactRow, MAX_HELD_ARTIFACT_BYTES, NewArtifact, Scope, digest_of,
+		Artifact as ArtifactRow, MAX_HELD_ARTIFACT_BYTES, NewArtifact, Scope, digest_of, location,
 		parse_sri_opt, sri,
 	},
 	machines::Machine,
@@ -178,9 +178,13 @@ async fn create(
 		});
 	}
 
-	// Where the artifact rests, and the refusal for a body that is no location
-	// at all, is `Artifact::register`'s to settle.
+	// Settled before the draft version below is written: a body that is no
+	// location is refused inside `Artifact::register`, by which point the
+	// version named by a registration that came to nothing exists.
 	let digest = parse_sri_opt(named.digest.as_deref())?;
+	let url = location(Some(url)).ok_or_else(|| {
+		AppError::BadRequest("an artifact needs a download URL or a group".into())
+	})?;
 
 	let mut db = db.get().await?;
 	let device_id = device.0.0.id;

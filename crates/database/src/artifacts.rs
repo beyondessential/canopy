@@ -151,7 +151,7 @@ pub fn parse_sri(value: &str) -> Result<Vec<u8>> {
 /// newline the shell that sent it added, and a URL nothing can parse is offered
 /// to every device that asks.
 // spec: ART#where-an-artifact-rests
-fn location(url: Option<String>) -> Option<String> {
+pub fn location(url: Option<String>) -> Option<String> {
 	url.map(|url| url.trim().to_owned())
 		.filter(|url| !url.is_empty())
 }
@@ -244,6 +244,55 @@ impl Artifact {
 			.filter(|a| seen.insert((a.artifact_type.as_str(), a.platform.as_str())))
 			.map(|a| a.id)
 			.collect()
+	}
+
+	/// One of a version's artifacts, as `scope` may see it.
+	///
+	/// The version and the scope are both part of the read: an artifact of
+	/// another version, or of a group this caller is not in, is missing in
+	/// exactly the way one that never existed is. Read by id rather than by
+	/// taking the version's whole match set, which is every range artifact in
+	/// the table on the path every machine fetches from.
+	// spec: ART#who-is-offered-a-group-scoped-artifact
+	pub async fn of_version(
+		db: &mut AsyncPgConnection,
+		artifact_id: Uuid,
+		version: &Version,
+		scope: Scope,
+	) -> Result<Option<Self>> {
+		use crate::schema::artifacts::dsl::*;
+
+		let mut query = artifacts.filter(id.eq(artifact_id)).into_boxed();
+		query = match scope {
+			Scope::Unscoped => query.filter(group_id.is_null()),
+			Scope::Group(caller) => query.filter(group_id.is_null().or(group_id.eq(caller))),
+			Scope::Fleet => query,
+		};
+
+		let row: Option<Self> = query
+			.select(Self::as_select())
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)?;
+
+		Ok(row.filter(|row| row.belongs_to_version(version)))
+	}
+
+	/// Whether this artifact is one of `version`'s: named by it, or registered
+	/// for a range that covers it.
+	fn belongs_to_version(&self, version: &Version) -> bool {
+		if self.version_id == Some(version.id) {
+			return true;
+		}
+
+		// An unparseable pattern matches nothing rather than everything, so a
+		// malformed range withholds a file instead of offering it to the whole
+		// fleet.
+		self.version_range_pattern
+			.as_deref()
+			.and_then(|pattern| node_semver::Range::parse(pattern).ok())
+			.is_some_and(|range| range.satisfies(&version.as_semver()))
 	}
 
 	/// Every artifact of a version that `scope` may see, sorted most specific

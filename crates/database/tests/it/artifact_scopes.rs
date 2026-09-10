@@ -82,6 +82,61 @@ fn held(version_id: Uuid, artifact_type: &str, group: Uuid, bytes: &[u8]) -> New
 	}
 }
 
+/// A download reads one artifact by id, and what it may return is the same set
+/// the version offers: its own, a range covering it, and nothing of another
+/// version or another group.
+#[tokio::test(flavor = "multi_thread")]
+async fn one_artifact_is_read_as_the_version_offers_it() {
+	TestDb::run(|mut conn, _url| async move {
+		let version = seed_version(&mut conn, 2, 60, 0).await;
+		let elsewhere = seed_version(&mut conn, 2, 59, 0).await;
+		let theirs = seed_group(&mut conn, "kamaka").await;
+		let other = seed_group(&mut conn, "drifting").await;
+		let row = database::versions::Version::get_by_id(&mut conn, version)
+			.await
+			.expect("the version");
+
+		let exact = Artifact::register(&mut conn, unscoped(version, "installer", "https://x/y"))
+			.await
+			.expect("register exact");
+		let covering = Artifact::register(&mut conn, ranged("package", "2.60.x", "https://x/z"))
+			.await
+			.expect("register covering range");
+		let missing = Artifact::register(&mut conn, ranged("docs", "2.58.x", "https://x/w"))
+			.await
+			.expect("register range that misses");
+		let older = Artifact::register(&mut conn, unscoped(elsewhere, "installer", "https://x/o"))
+			.await
+			.expect("register another version's");
+		let scoped = Artifact::register(&mut conn, held(version, "reporting-schema", theirs, b"s"))
+			.await
+			.expect("register held");
+
+		for (artifact, found, why) in [
+			(exact.id, true, "the version's own"),
+			(covering.id, true, "a range covering the version"),
+			(missing.id, false, "a range that does not cover it"),
+			(older.id, false, "another version's"),
+			(scoped.id, false, "another group's"),
+		] {
+			let read = Artifact::of_version(&mut conn, artifact, &row, Scope::Group(other))
+				.await
+				.expect("read one");
+			assert_eq!(read.is_some(), found, "{why}");
+		}
+
+		let read = Artifact::of_version(&mut conn, scoped.id, &row, Scope::Group(theirs))
+			.await
+			.expect("read one");
+		assert_eq!(
+			read.map(|a| a.id),
+			Some(scoped.id),
+			"the owning group reads its own"
+		);
+	})
+	.await;
+}
+
 /// A group-scoped artifact and an unscoped one of the same type and platform
 /// are both recorded, each group is offered the one for it, and no caller is
 /// offered both.
@@ -671,7 +726,7 @@ async fn an_archived_group_is_still_named() {
 		.await
 		.expect("archive the group");
 
-		let names = database::server_groups::ServerGroup::names_by_id(&mut conn)
+		let names = database::server_groups::ServerGroup::names_by_ids(&mut conn, &[theirs])
 			.await
 			.expect("names");
 		assert_eq!(names.get(&theirs).map(String::as_str), Some("kamaka"));

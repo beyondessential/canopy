@@ -479,7 +479,11 @@ async fn artifacts_of(
 ) -> Result<Vec<ArtifactData>> {
 	let artifacts_with_metadata =
 		Artifact::get_for_version_all_matches_with_metadata(conn, version_id, Scope::Fleet).await?;
-	let group_names = ServerGroup::names_by_id(conn).await?;
+	let groups: Vec<Uuid> = artifacts_with_metadata
+		.iter()
+		.filter_map(|(artifact, ..)| artifact.group_id)
+		.collect();
+	let group_names = ServerGroup::names_by_ids(conn, &groups).await?;
 	Ok(artifacts_with_metadata
 		.into_iter()
 		.map(
@@ -760,8 +764,6 @@ pub async fn upload_artifact(
 		)));
 	}
 
-	let mut conn = state.db.get().await?;
-
 	if body.len() > MAX_HELD_ARTIFACT_BYTES {
 		return Err(AppError::BadRequest(format!(
 			"artifact is larger than the {} MiB limit",
@@ -770,7 +772,14 @@ pub async fn upload_artifact(
 	}
 
 	let claimed = parse_sri(&named.digest)?;
-	let digest = digest_of(&body);
+	// Hashing the whole artifact is tens of milliseconds with no await in it,
+	// and the pool it would be holding while it ran is five connections wide.
+	let digest = {
+		let body = body.clone();
+		tokio::task::spawn_blocking(move || digest_of(&body))
+			.await
+			.map_err(|err| AppError::custom(format!("digesting the artifact failed: {err}")))?
+	};
 	if claimed != digest {
 		return Err(AppError::BadRequest(format!(
 			"the bytes are {}, not the {} the registration names",
@@ -788,6 +797,7 @@ pub async fn upload_artifact(
 		.map(str::to_owned)
 		.filter(|media_type| media_type != "application/octet-stream");
 
+	let mut conn = state.db.get().await?;
 	let artifact = Artifact::register(
 		&mut conn,
 		NewArtifact {
