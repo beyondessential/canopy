@@ -16,7 +16,11 @@ import ActionButton from "../components/ActionButton";
 import ActiveIncidentCard from "../components/ActiveIncidentCard";
 import { ChecksTable, HealthIndicator } from "../components/ChecksTable";
 import IncidentsLink from "../components/IncidentsLink";
-import { HealthLegend, StatusLegend } from "../components/Legends";
+import {
+	HealthLegend,
+	MaintenanceLegend,
+	StatusLegend,
+} from "../components/Legends";
 import MachineBackupSection from "../components/MachineBackupSection";
 import MachineIdentitySection from "../components/MachineIdentitySection";
 import MachineSetupInstructions from "../components/MachineSetupInstructions";
@@ -343,6 +347,9 @@ export default function MachineDetail() {
 				<StatusLegend />
 				<Box sx={{ mt: 1 }}>
 					<HealthLegend />
+				</Box>
+				<Box sx={{ mt: 1 }}>
+					<MaintenanceLegend />
 				</Box>
 			</Box>
 		</Stack>
