@@ -143,7 +143,7 @@ pub fn parse_sri(value: &str) -> Result<Vec<u8>> {
 /// newline the shell that sent it added, and a URL nothing can parse is offered
 /// to every device that asks.
 // spec: ART#where-an-artifact-rests
-fn location(url: Option<String>) -> Option<String> {
+pub fn location(url: Option<String>) -> Option<String> {
 	url.map(|url| url.trim().to_owned())
 		.filter(|url| !url.is_empty())
 }
