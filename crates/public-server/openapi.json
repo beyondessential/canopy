@@ -138,6 +138,25 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "description": "Group the artifact is for. A releaser credential carries no authorisation for any group, so naming one here is refused.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "description": "Subresource Integrity digest of the bytes at the URL, e.g. `sha256-LCTbqp…`. Whoever fetches the artifact checks what it got against this; an artifact registered without one is fetched unchecked.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -1686,6 +1705,13 @@
             ],
             "format": "uuid",
             "description": "The device that registered this artifact, if it was registered by a\nreleaser device rather than created by an operator."
+          },
+          "digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Subresource Integrity digest of the artifact's bytes, e.g.\n`sha256-LCTbqp…`, where one was recorded."
           },
           "download_url": {
             "type": "string",

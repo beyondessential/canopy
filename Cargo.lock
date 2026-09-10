@@ -5032,6 +5032,7 @@ dependencies = [
  "diesel",
  "diesel-async",
  "futures",
+ "hex",
  "http 1.5.0",
  "jiff",
  "k8s-openapi",

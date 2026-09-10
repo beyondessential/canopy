@@ -2,18 +2,37 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 
 use axum::Json;
-use axum::extract::State;
+use axum::body::Bytes;
+use axum::extract::{DefaultBodyLimit, Query, State};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::version::{VersionStatus, VersionStr};
-use database::{artifacts::Artifact, version_known_issues::VersionKnownIssue, versions::Version};
+use database::{
+	artifacts::{Artifact, NewArtifact, Scope, digest_of, parse_sri, parse_sri_opt, sri},
+	server_groups::ServerGroup,
+	version_known_issues::VersionKnownIssue,
+	versions::Version,
+};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::state::AppState;
+
+/// Cap on the bytes Canopy will hold for one artifact. A reporting schema is a
+/// SQL file; anything approaching this is not one, and the rows live in
+/// Postgres alongside everything else.
+const MAX_HELD_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
+
+/// Header the SPA sets on an upload, which no cross-origin page can send
+/// without the browser preflighting the request first.
+const FETCH_HEADER: &str = "x-canopy-upload";
+
+/// Body budget for `upload_artifact`. Sizing above the cap keeps an over-limit
+/// upload the handler's structured refusal rather than axum's plain-text 413.
+const MAX_UPLOAD_ARTIFACT_BODY_BYTES: usize = MAX_HELD_ARTIFACT_BYTES + 64 * 1024;
 
 /// A single released (or draft) software version.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -177,8 +196,18 @@ pub struct ArtifactData {
 	pub artifact_type: String,
 	/// Target platform this artifact is built for.
 	pub platform: String,
-	/// URL clients use to download this artifact.
-	pub download_url: String,
+	/// URL clients use to download this artifact. `null` when Canopy holds
+	/// the bytes itself.
+	pub download_url: Option<String>,
+	/// The group this artifact is for, when it is for one alone.
+	pub group_id: Option<Uuid>,
+	/// Name of that group, for display.
+	pub group_name: Option<String>,
+	/// Subresource Integrity digest recorded for the artifact, where there is
+	/// one.
+	pub digest: Option<String>,
+	/// `true` when Canopy holds this artifact's bytes rather than a location.
+	pub canopy_holds_bytes: bool,
 	/// `true` when this artifact is tied to the exact version being
 	/// queried; `false` when it was matched via a version range pattern
 	/// instead.
@@ -205,6 +234,11 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(update_version_changelog))
 		.routes(routes!(update_artifact))
 		.routes(routes!(create_artifact))
+		.merge(
+			OpenApiRouter::new()
+				.routes(routes!(upload_artifact))
+				.layer(DefaultBodyLimit::max(MAX_UPLOAD_ARTIFACT_BODY_BYTES)),
+		)
 		.routes(routes!(delete_artifact))
 		.routes(routes!(list_known_issues))
 		.routes(routes!(add_known_issue))
@@ -415,6 +449,7 @@ pub async fn get_version_detail(
 	post,
 	path = "/get_version_artifacts",
 	tag = "versions",
+	security(("tailscale-user" = [])),
 	request_body = VersionStringArgs,
 	responses(
 		(status = 200, body = Vec<ArtifactData>),
@@ -423,30 +458,53 @@ pub async fn get_version_detail(
 )]
 pub async fn get_version_artifacts(
 	State(state): State<AppState>,
+	// Every group's artifacts, digests and group names, which ART discloses to
+	// an operator and to nobody else. The tagged-device layer above only turns
+	// away a caller that both carries no identity and comes from the tailnet.
+	// spec: ART#who-is-offered-a-group-scoped-artifact, ADM
+	_user: TailscaleUser,
 	Json(args): Json<VersionStringArgs>,
 ) -> Result<Json<Vec<ArtifactData>>> {
 	let mut conn = state.db_read.get().await?;
 	let version = VersionStr::from_str(&args.version)?;
 	let version_record = Version::get_by_version(&mut conn, version).await?;
+	Ok(Json(artifacts_of(&mut conn, version_record.id).await?))
+}
+
+/// Every artifact of a version as an operator sees it: the full set, including
+/// what specificity passed over and every group's, because what resolution
+/// hides is a fact about how a version was published.
+// spec: ART#what-a-version-offers
+async fn artifacts_of(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	version_id: Uuid,
+) -> Result<Vec<ArtifactData>> {
 	let artifacts_with_metadata =
-		Artifact::get_for_version_with_metadata(&mut conn, version_record.id).await?;
-	Ok(Json(
-		artifacts_with_metadata
-			.into_iter()
-			.map(
-				|(a, is_exact, has_range_override, is_used_in_public_api)| ArtifactData {
-					id: a.id,
-					artifact_type: a.artifact_type,
-					platform: a.platform,
-					download_url: a.download_url,
-					is_exact,
-					version_range_pattern: a.version_range_pattern,
-					has_range_override,
-					is_used_in_public_api,
-				},
-			)
-			.collect(),
-	))
+		Artifact::get_for_version_all_matches_with_metadata(conn, version_id, Scope::Fleet).await?;
+	let groups: Vec<Uuid> = artifacts_with_metadata
+		.iter()
+		.filter_map(|(artifact, ..)| artifact.group_id)
+		.collect();
+	let group_names = ServerGroup::names_by_ids(conn, &groups).await?;
+	Ok(artifacts_with_metadata
+		.into_iter()
+		.map(
+			|(a, is_exact, has_range_override, is_used_in_public_api)| ArtifactData {
+				id: a.id,
+				artifact_type: a.artifact_type,
+				platform: a.platform,
+				canopy_holds_bytes: a.download_url.is_none(),
+				download_url: a.download_url,
+				group_name: a.group_id.and_then(|g| group_names.get(&g).cloned()),
+				group_id: a.group_id,
+				digest: a.digest.as_deref().map(sri),
+				is_exact,
+				version_range_pattern: a.version_range_pattern,
+				has_range_override,
+				is_used_in_public_api,
+			},
+		)
+		.collect())
 }
 
 /// Identifies a version and the publication status to set on it.
@@ -545,8 +603,8 @@ pub struct UpdateArtifactArgs {
 	pub artifact_type: String,
 	/// New target platform.
 	pub platform: String,
-	/// New download URL.
-	pub download_url: String,
+	/// New download URL. Leave unset for an artifact whose bytes Canopy holds.
+	pub download_url: Option<String>,
 }
 
 /// Update an existing artifact's type, platform, and download URL.
@@ -580,7 +638,11 @@ pub async fn update_artifact(
 	Ok(Json(()))
 }
 
-/// A new artifact to register against a version.
+/// A new artifact to register against a version, at a location Canopy records.
+///
+/// An artifact whose bytes Canopy holds is registered through
+/// `upload_artifact` instead, since the bytes are the body there.
+// spec: ART#where-an-artifact-rests
 #[derive(Deserialize, ToSchema)]
 pub struct CreateArtifactArgs {
 	/// Id of the version to attach the new artifact to.
@@ -589,8 +651,12 @@ pub struct CreateArtifactArgs {
 	pub artifact_type: String,
 	/// Target platform.
 	pub platform: String,
-	/// Download URL for the artifact.
+	/// URL the artifact is downloaded from.
 	pub download_url: String,
+	/// Subresource Integrity digest of the bytes at that URL, e.g.
+	/// `sha256-LCTbqp…`, where one is recorded. Whoever fetches the artifact
+	/// checks what it got against this.
+	pub digest: Option<String>,
 }
 
 /// Create a new artifact tied to an exact version.
@@ -605,6 +671,7 @@ pub struct CreateArtifactArgs {
 	request_body = CreateArtifactArgs,
 	responses(
 		(status = 200, body = ArtifactData),
+		(status = 400, body = ProblemDetailsSchema),
 	),
 )]
 pub async fn create_artifact(
@@ -613,24 +680,161 @@ pub async fn create_artifact(
 	Json(args): Json<CreateArtifactArgs>,
 ) -> Result<Json<ArtifactData>> {
 	let mut conn = state.db.get().await?;
-	let artifact = Artifact::create(
+
+	// A digest against a location is what whoever fetches the artifact checks
+	// the bytes it got against, so one that cannot be checked against is
+	// refused rather than published.
+	// spec: ART#digests
+	let digest = parse_sri_opt(args.digest.as_deref())?;
+
+	// Where the artifact rests, and the refusal when it names neither place or
+	// both, is `Artifact::register`'s to settle.
+	let artifact = Artifact::register(
 		&mut conn,
-		args.version_id,
-		args.artifact_type,
-		args.platform,
-		args.download_url,
+		NewArtifact {
+			version_id: Some(args.version_id),
+			artifact_type: args.artifact_type,
+			platform: args.platform,
+			download_url: Some(args.download_url),
+			device_id: None,
+			version_range_pattern: None,
+			group_id: None,
+			content: None,
+			content_type: None,
+			digest,
+			run_id: None,
+		},
 	)
 	.await?;
-	Ok(Json(ArtifactData {
-		id: artifact.id,
-		artifact_type: artifact.artifact_type,
-		platform: artifact.platform,
-		download_url: artifact.download_url,
-		is_exact: true,
-		version_range_pattern: None,
-		has_range_override: false,
-		is_used_in_public_api: true,
-	}))
+
+	registered(&mut conn, args.version_id, artifact.id).await
+}
+
+/// What an upload names beside its bytes.
+// spec: ART#where-an-artifact-rests
+#[derive(Deserialize, IntoParams)]
+pub struct UploadArtifactQuery {
+	/// Id of the version to attach the new artifact to.
+	pub version_id: Uuid,
+	/// Artifact type.
+	pub artifact_type: String,
+	/// Target platform.
+	pub platform: String,
+	/// The group this artifact is for.
+	pub group_id: Uuid,
+	/// Subresource Integrity digest of the body, e.g. `sha256-LCTbqp…`.
+	/// Canopy checks the bytes against it as they arrive and refuses the
+	/// registration on a mismatch, so a corrupted upload is refused while
+	/// whoever sent it is still there to send it again.
+	pub digest: String,
+}
+
+/// Register an artifact whose bytes Canopy holds, for one group.
+///
+/// The body is the artifact itself and its `Content-Type` is what the bytes
+/// are served back as. Returns the created artifact.
+#[utoipa::path(
+	post,
+	path = "/upload_artifact",
+	tag = "versions",
+	security(("tailscale-admin" = [])),
+	params(
+		UploadArtifactQuery,
+		("x-canopy-upload" = String, Header, description = "Any value. Required: it makes a browser preflight the request, so a cross-origin page cannot spend an operator's session on this endpoint."),
+	),
+	request_body(content = Vec<u8>, content_type = "application/octet-stream", description = "The artifact's bytes."),
+	responses(
+		(status = 200, body = ArtifactData),
+		(status = 400, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn upload_artifact(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Query(named): Query<UploadArtifactQuery>,
+	headers: axum::http::HeaderMap,
+	body: Bytes,
+) -> Result<Json<ArtifactData>> {
+	// Every other write here carries a JSON body, which is not a content type a
+	// form can send, so the browser preflights it and a cross-origin page never
+	// reaches it. This one takes raw bytes, so it asks for a header of its own
+	// to the same end: the operator's tailnet identity is supplied by the proxy,
+	// and a page they merely visited must not be able to spend it.
+	if !headers.contains_key(FETCH_HEADER) {
+		return Err(AppError::BadRequest(format!(
+			"an upload must carry the {FETCH_HEADER} header"
+		)));
+	}
+
+	if body.len() > MAX_HELD_ARTIFACT_BYTES {
+		return Err(AppError::BadRequest(format!(
+			"artifact is larger than the {} MiB limit",
+			MAX_HELD_ARTIFACT_BYTES / (1024 * 1024)
+		)));
+	}
+
+	let claimed = parse_sri(&named.digest)?;
+	// Hashing the whole artifact is tens of milliseconds with no await in it,
+	// and the pool it would be holding while it ran is five connections wide.
+	let digest = {
+		let body = body.clone();
+		tokio::task::spawn_blocking(move || digest_of(&body))
+			.await
+			.map_err(|err| AppError::custom(format!("digesting the artifact failed: {err}")))?
+	};
+	if claimed != digest {
+		return Err(AppError::BadRequest(format!(
+			"the bytes are {}, not the {} the registration names",
+			sri(&digest),
+			sri(&claimed)
+		)));
+	}
+
+	// The media type is served back as a header, and the browser sends none
+	// for a file it cannot type, so an absent one is the artifact's own
+	// default rather than a refusal.
+	let content_type = headers
+		.get(axum::http::header::CONTENT_TYPE)
+		.and_then(|value| value.to_str().ok())
+		.map(str::to_owned)
+		.filter(|media_type| media_type != "application/octet-stream");
+
+	let mut conn = state.db.get().await?;
+	let artifact = Artifact::register(
+		&mut conn,
+		NewArtifact {
+			version_id: Some(named.version_id),
+			artifact_type: named.artifact_type,
+			platform: named.platform,
+			download_url: None,
+			device_id: None,
+			version_range_pattern: None,
+			group_id: Some(named.group_id),
+			content: Some(Vec::from(body)),
+			content_type,
+			digest: Some(digest),
+			run_id: None,
+		},
+	)
+	.await?;
+
+	registered(&mut conn, named.version_id, artifact.id).await
+}
+
+/// Read a just-registered artifact back through the listing rather than
+/// describing the row a second time: whether it overrides a range and whether
+/// it is the one served follow from the version's other artifacts.
+async fn registered(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	version_id: Uuid,
+	artifact_id: Uuid,
+) -> Result<Json<ArtifactData>> {
+	artifacts_of(conn, version_id)
+		.await?
+		.into_iter()
+		.find(|a| a.id == artifact_id)
+		.map(Json)
+		.ok_or_else(|| AppError::custom("the artifact just registered is not listed"))
 }
 
 /// Identifies a single artifact by id.

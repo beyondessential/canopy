@@ -7,7 +7,7 @@ pub const OPENAPI_VERSION: &str = "1.0.0";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "3bd62c232a727651fbe22f9a0be57d3f80eb1b48694f68d3f56db903df9276b4";
+pub const OPENAPI_BLAKE3: &str = "626c2115b5bedb1e43372e734c98bcbf018e1c8f5ccb81683f2d1b13c4ddcee1";
 
 /// Error types.
 pub mod error {
@@ -260,6 +260,13 @@ package, or other file published for a given type and platform.*/
 ///      ],
 ///      "format": "uuid"
 ///    },
+///    "digest": {
+///      "description": "Subresource Integrity digest of the artifact's bytes, e.g.\n`sha256-LCTbqp…`, where one was recorded.",
+///      "type": [
+///        "string",
+///        "null"
+///      ]
+///    },
 ///    "download_url": {
 ///      "description": "URL the artifact can be downloaded from.",
 ///      "type": "string"
@@ -302,6 +309,10 @@ pub struct Artifact {
 releaser device rather than created by an operator.*/
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub device_id: ::std::option::Option<::uuid::Uuid>,
+    /**Subresource Integrity digest of the artifact's bytes, e.g.
+`sha256-LCTbqp…`, where one was recorded.*/
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub digest: ::std::option::Option<::std::string::String>,
     ///URL the artifact can be downloaded from.
     pub download_url: ::std::string::String,
     ///Unique identifier of the artifact.

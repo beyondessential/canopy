@@ -7866,6 +7866,16 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -7982,7 +7992,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
       }
     },
     "/api/versions/get_version_detail": {
@@ -8215,6 +8230,117 @@
         "responses": {
           "200": {
             "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/versions/upload_artifact": {
+      "post": {
+        "tags": [
+          "versions"
+        ],
+        "summary": "Register an artifact whose bytes Canopy holds, for one group.",
+        "description": "The body is the artifact itself and its `Content-Type` is what the bytes\nare served back as. Returns the created artifact.",
+        "operationId": "upload_artifact",
+        "parameters": [
+          {
+            "name": "version_id",
+            "in": "query",
+            "description": "Id of the version to attach the new artifact to.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "artifact_type",
+            "in": "query",
+            "description": "Artifact type.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "platform",
+            "in": "query",
+            "description": "Target platform.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group_id",
+            "in": "query",
+            "description": "The group this artifact is for.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "description": "Subresource Integrity digest of the body, e.g. `sha256-LCTbqp…`.\nCanopy checks the bytes against it as they arrive and refuses the\nregistration on a mismatch, so a corrupted upload is refused while\nwhoever sent it is still there to send it again.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-canopy-upload",
+            "in": "header",
+            "description": "Any value. Required: it makes a browser preflight the request, so a cross-origin page cannot spend an operator's session on this endpoint.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The artifact's bytes.",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactData"
+                }
+              }
+            }
           },
           "400": {
             "description": "",
@@ -8641,7 +8767,7 @@
           "id",
           "artifact_type",
           "platform",
-          "download_url",
+          "canopy_holds_bytes",
           "is_exact",
           "has_range_override",
           "is_used_in_public_api"
@@ -8651,9 +8777,38 @@
             "type": "string",
             "description": "Kind of artifact (for example, an installer or update package)."
           },
+          "canopy_holds_bytes": {
+            "type": "boolean",
+            "description": "`true` when Canopy holds this artifact's bytes rather than a location."
+          },
+          "digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Subresource Integrity digest recorded for the artifact, where there is\none."
+          },
           "download_url": {
-            "type": "string",
-            "description": "URL clients use to download this artifact."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "URL clients use to download this artifact. `null` when Canopy holds\nthe bytes itself."
+          },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The group this artifact is for, when it is for one alone."
+          },
+          "group_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name of that group, for display."
           },
           "has_range_override": {
             "type": "boolean",
@@ -9949,7 +10104,7 @@
       },
       "CreateArtifactArgs": {
         "type": "object",
-        "description": "A new artifact to register against a version.",
+        "description": "A new artifact to register against a version, at a location Canopy records.\n\nAn artifact whose bytes Canopy holds is registered through\n`upload_artifact` instead, since the bytes are the body there.",
         "required": [
           "version_id",
           "artifact_type",
@@ -9961,9 +10116,16 @@
             "type": "string",
             "description": "Artifact type."
           },
+          "digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Subresource Integrity digest of the bytes at that URL, e.g.\n`sha256-LCTbqp…`, where one is recorded. Whoever fetches the artifact\nchecks what it got against this."
+          },
           "download_url": {
             "type": "string",
-            "description": "Download URL for the artifact."
+            "description": "URL the artifact is downloaded from."
           },
           "platform": {
             "type": "string",
@@ -17575,8 +17737,7 @@
         "required": [
           "artifact_id",
           "artifact_type",
-          "platform",
-          "download_url"
+          "platform"
         ],
         "properties": {
           "artifact_id": {
@@ -17589,8 +17750,11 @@
             "description": "New artifact type."
           },
           "download_url": {
-            "type": "string",
-            "description": "New download URL."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New download URL. Leave unset for an artifact whose bytes Canopy holds."
           },
           "platform": {
             "type": "string",

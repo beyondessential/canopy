@@ -1,5 +1,10 @@
 # API Errors
 
+## Not implemented
+
+Issued when an endpoint exists but the behaviour behind it does not yet.
+**501 Not Implemented**.
+
 ## Environment
 
 Issued with an environment variable is not present or in the wrong format.
@@ -37,6 +42,14 @@ Issued when a database resource (such as a version, server, or other entity) can
 
 Issued when a version range is valid, but does not match any of the available versions.
 
+## Artifact not found
+
+Issued when the version has no artifact with the given id that the caller is offered. An artifact scoped to a group the caller is not in is reported the same way as one that does not exist, so which groups hold an artifact cannot be discovered through this endpoint.
+
+## Artifact digest mismatch
+
+Issued when the bytes Canopy holds for an artifact do not match the digest recorded for it. The artifact is not served: a corrupted artifact fails the read rather than reaching a server as the artifact it is not.
+
 ## Unusable range
 
 Issued when a version range is syntactically valid, but not usable to obtain concrete versions.
@@ -44,6 +57,11 @@ Issued when a version range is syntactically valid, but not usable to obtain con
 ## Timesync
 
 Issued for the /timesync endpoint.
+
+## Auth: missing header
+
+Issued when a header carrying the caller's identity is required but not
+present. **401 Unauthorized**.
 
 ## Auth: missing certificate
 
