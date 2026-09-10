@@ -41,6 +41,7 @@ export default function DeclareMaintenanceDialog({
 	targetLabel,
 	existing,
 	prefill,
+	offerLift,
 	onDone,
 }: {
 	open: boolean;
@@ -56,6 +57,10 @@ export default function DeclareMaintenanceDialog({
 	/** Starting values where something else knows them, such as an upgrade
 	 * plan's window and note. */
 	prefill?: { expectedEnd?: string; note?: string };
+	/** Offer to end the work from in here, for a surface with no room to carry
+	 * a lift of its own. Where the caller already shows one, this stays off so
+	 * the same action is not in two places. */
+	offerLift?: boolean;
 	onDone: () => void;
 }) {
 	const declare = useApiAction("maintenance", "declare");
@@ -151,7 +156,7 @@ export default function DeclareMaintenanceDialog({
 				</Stack>
 			</DialogContent>
 			<DialogActions>
-				{amending && existing && (
+				{offerLift && amending && existing && (
 					<Button
 						color="error"
 						disabled={lift.pending || declare.pending}

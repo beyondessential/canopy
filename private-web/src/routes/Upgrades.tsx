@@ -2281,6 +2281,7 @@ function DeclareFromPlan({
 				rank={held ? (held.rank ?? undefined) : rank}
 				targetLabel={groupName}
 				existing={held}
+				offerLift
 				prefill={
 					held
 						? undefined
