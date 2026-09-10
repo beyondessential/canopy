@@ -292,6 +292,23 @@ async fn normalized_params_for_intent(
 	publishes_schemas: bool,
 	machine_id: Option<Uuid>,
 ) -> Result<ParamValues> {
+	// What a build is dispatched for does not depend on the intent's descriptor,
+	// and the mark is unique per group: a declaration accepted with it here
+	// holds the group's only publisher slot while authorising nothing.
+	// spec: RPT#the-build-contract
+	if publishes_schemas {
+		if redacts {
+			return Err(AppError::BadRequest(
+				"a redacting declaration cannot publish a reporting schema".into(),
+			));
+		}
+		if machine_id.is_some() {
+			return Err(AppError::BadRequest(
+				"a machine-scoped declaration cannot publish a reporting schema: a build is per group".into(),
+			));
+		}
+	}
+
 	let descriptors =
 		RestoreConsumerCapability::list_for_consumer(conn, consumer_device_id).await?;
 	let Some(desc) = descriptors.iter().find(|d| &d.intent == intent) else {
@@ -314,22 +331,10 @@ async fn normalized_params_for_intent(
 	// masking manifest has not altered, so a declaration Canopy would never
 	// dispatch a build to cannot be the group's publisher either.
 	// spec: RPT#the-build-contract
-	if publishes_schemas {
-		if !desc.has_semantic(semantics::REPORTING_SCHEMA) {
-			return Err(AppError::BadRequest(format!(
-				"intent {intent} cannot publish a reporting schema: it does not carry the `reporting-schema` semantic"
-			)));
-		}
-		if redacts {
-			return Err(AppError::BadRequest(
-				"a redacting declaration cannot publish a reporting schema".into(),
-			));
-		}
-		if machine_id.is_some() {
-			return Err(AppError::BadRequest(
-				"a machine-scoped declaration cannot publish a reporting schema: a build is per group".into(),
-			));
-		}
+	if publishes_schemas && !desc.has_semantic(semantics::REPORTING_SCHEMA) {
+		return Err(AppError::BadRequest(format!(
+			"intent {intent} cannot publish a reporting schema: it does not carry the `reporting-schema` semantic"
+		)));
 	}
 	let params = if owns_masking {
 		&params
