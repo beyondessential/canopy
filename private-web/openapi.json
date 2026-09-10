@@ -15089,6 +15089,17 @@
               }
             ]
           },
+          "planned_window": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PlannedWindow",
+                "description": "When the plan's own window opens and closes, where it recorded one. The\nhours the operator said the work runs, so declaring over it can offer\nexactly those rather than a guess from now."
+              }
+            ]
+          },
           "rank": {
             "$ref": "#/components/schemas/ServerRank",
             "description": "The rank of the environment this concerns: the group's applications at\nthat rank."
@@ -15113,6 +15124,24 @@
               "null"
             ],
             "description": "Where the environment's data stands against the planned version, rolled\nup from its applications: any failure makes the environment a failure,\nsince one application whose data breaks is enough to stop the upgrade.\n`null` without a plan."
+          }
+        }
+      },
+      "PlannedWindow": {
+        "type": "object",
+        "description": "The hours a plan says its work runs, resolved to instants.",
+        "required": [
+          "starts_at",
+          "ends_at"
+        ],
+        "properties": {
+          "ends_at": {
+            "type": "string",
+            "description": "When it is planned to be over. A window closing earlier in the day than\nit opened runs into the next morning."
+          },
+          "starts_at": {
+            "type": "string",
+            "description": "When the work is planned to start."
           }
         }
       },

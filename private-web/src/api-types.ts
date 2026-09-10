@@ -8436,6 +8436,7 @@ export interface components {
             late: boolean;
             maintenance_window?: null | components["schemas"]["MaintenanceWindow"];
             plan?: null | components["schemas"]["UpgradePlan"];
+            planned_window?: null | components["schemas"]["PlannedWindow"];
             /**
              * @description The rank of the environment this concerns: the group's applications at
              *     that rank.
@@ -8457,6 +8458,16 @@ export interface components {
              *     `null` without a plan.
              */
             verdict?: string | null;
+        };
+        /** @description The hours a plan says its work runs, resolved to instants. */
+        PlannedWindow: {
+            /**
+             * @description When it is planned to be over. A window closing earlier in the day than
+             *     it opened runs into the next morning.
+             */
+            ends_at: string;
+            /** @description When the work is planned to start. */
+            starts_at: string;
         };
         /**
          * @description Request body for reading one group's plans. Named apart from the

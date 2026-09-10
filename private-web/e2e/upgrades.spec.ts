@@ -865,6 +865,56 @@ test.describe("upgrade windows", () => {
 			.toBe(true);
 		await expect(page.getByTestId("plan-under-maintenance")).toHaveCount(0);
 	});
+
+	/// The incident: an upgrade runs with nothing declared. The plan already
+	/// carries the hours, so declaring over it is a confirmation.
+	// spec: MNT#declaring
+	test("declaring from a plan offers the hours the plan named", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const production = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		await seedStatus(sql, { serverId: production.id, version: "2.60.0" });
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			rank: "production",
+			targetVersionId: target.id,
+			plannedFor: new Date().toISOString().slice(0, 10),
+			plannedTime: "22:00",
+			plannedEndTime: "02:00",
+			plannedZone: "UTC",
+			note: "site can absorb 2.61",
+		});
+
+		await page.goto("/upgrades");
+		await page
+			.getByRole("button", { name: "Declare maintenance for kamaka" })
+			.click();
+
+		// A confirmation, not the form: the hours are already known.
+		const confirm = page.getByTestId("confirm-declare");
+		await expect(confirm).toBeVisible();
+		await expect(confirm).toContainText("site can absorb 2.61");
+		await confirm.getByRole("button", { name: "Declare" }).click();
+
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ expected_end: string }>(
+					"SELECT expected_end FROM maintenance_windows \
+					 WHERE server_group_id = $1 AND ended_at IS NULL",
+					[group.id],
+				);
+				return rows.length;
+			})
+			.toBe(1);
+		await expect(page.getByTestId("plan-under-maintenance")).toBeVisible();
+	});
 });
 
 /** The local calendar day, as the API and the grid both write it. */

@@ -401,13 +401,15 @@ pub fn ended_at(plan: &UpgradePlan) -> Option<Timestamp> {
 		.max()
 }
 
-/// The instant a plan's own window closes, for a plan that recorded one.
+/// The instants a plan's own window opens and closes, for a plan that recorded
+/// one.
 ///
-/// The window is the operator's statement of when the work runs, so it is the
-/// evidence for whether the work is still going. A window closing earlier in the
-/// day than it opened runs into the next morning.
+/// The window is the operator's statement of when the work runs, so it is both
+/// the evidence for whether the work is still going and the hours to suspend
+/// when declaring over it. A window closing earlier in the day than it opened
+/// runs into the next morning.
 // spec: UPG#when-a-plan-is-met
-pub fn planned_window_end(plan: &UpgradePlan) -> Option<Timestamp> {
+pub fn planned_window(plan: &UpgradePlan) -> Option<(Timestamp, Timestamp)> {
 	let date = plan.planned_for?;
 	let opens = plan.planned_time?;
 	let closes = plan.planned_end_time?;
@@ -417,11 +419,18 @@ pub fn planned_window_end(plan: &UpgradePlan) -> Option<Timestamp> {
 	} else {
 		date
 	};
-	ends_on
-		.to_datetime(closes)
-		.to_zoned(tz)
-		.ok()
-		.map(|at| at.timestamp())
+	let start = date
+		.to_datetime(opens)
+		.to_zoned(tz.clone())
+		.ok()?
+		.timestamp();
+	let end = ends_on.to_datetime(closes).to_zoned(tz).ok()?.timestamp();
+	Some((start, end))
+}
+
+/// The instant a plan's own window closes.
+pub fn planned_window_end(plan: &UpgradePlan) -> Option<Timestamp> {
+	planned_window(plan).map(|(_, end)| end)
 }
 
 /// Close every open plan whose environment has reached its target and whose work

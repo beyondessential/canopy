@@ -32,6 +32,18 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(withdraw))
 }
 
+/// The hours a plan says its work runs, resolved to instants.
+#[derive(Serialize, ToSchema)]
+pub struct PlannedWindow {
+	/// When the work is planned to start.
+	#[schema(value_type = String)]
+	pub starts_at: jiff::Timestamp,
+	/// When it is planned to be over. A window closing earlier in the day than
+	/// it opened runs into the next morning.
+	#[schema(value_type = String)]
+	pub ends_at: jiff::Timestamp,
+}
+
 /// One row of the planned-upgrades view: one of a group's environments.
 #[derive(Serialize, ToSchema)]
 pub struct PlannedUpgrade {
@@ -72,6 +84,11 @@ pub struct PlannedUpgrade {
 	/// at "not tested" indefinitely with nothing on its way. `null` without a
 	/// plan.
 	pub testable: Option<bool>,
+	/// When the plan's own window opens and closes, where it recorded one. The
+	/// hours the operator said the work runs, so declaring over it can offer
+	/// exactly those rather than a guess from now.
+	// spec: UPG#when-a-plan-is-met
+	pub planned_window: Option<PlannedWindow>,
 	/// The window holding over this environment or its group, where one is.
 	/// This is what holds an open plan open, so the view can both say why one
 	/// has not closed and amend the work from there.
@@ -164,6 +181,10 @@ pub async fn fleet(
 	let mut out = Vec::new();
 	for env in environments {
 		let plan = open.remove(&(env.group_id, env.rank));
+		let planned_window = plan.as_ref().and_then(|plan| {
+			database::upgrade_plans::planned_window(plan)
+				.map(|(starts_at, ends_at)| PlannedWindow { starts_at, ends_at })
+		});
 		let planned = plan
 			.as_ref()
 			.and_then(|plan| versions.get(&plan.target_version_id));
@@ -253,6 +274,7 @@ pub async fn fleet(
 			verdict,
 			attempt,
 			testable,
+			planned_window,
 			maintenance_window: holding_window(&open_windows, &suspended, env.group_id, env.rank),
 		});
 	}

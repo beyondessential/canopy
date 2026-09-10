@@ -206,6 +206,7 @@ export default function Upgrades() {
 													plannedEnd={row.plan?.planned_end_time ?? null}
 													note={row.plan?.note ?? null}
 													held={row.maintenance_window}
+												planned={row.planned_window}
 													onDeclared={() => setTick((t) => t + 1)}
 												/>
 											</TableCell>
@@ -2214,6 +2215,19 @@ function WithdrawPlan({
  * wall clocks. A close earlier in the day than the open is the following
  * morning, as the plan reads it. Two hours where the plan names no window,
  * which is what a declaration otherwise starts from. */
+/// The plan's hours as a reader would say them, for a confirmation that has to
+/// stand on its own without the form behind it.
+function planWindowLabel(planned: { starts_at: string; ends_at: string }): string {
+	const clock = (at: string) =>
+		new Date(at).toLocaleString(undefined, {
+			hour: "2-digit",
+			minute: "2-digit",
+			day: "numeric",
+			month: "short",
+		});
+	return `${clock(planned.starts_at)} to ${clock(planned.ends_at)}`;
+}
+
 function plannedHours(time: string | null, end: string | null): number {
 	if (!time || !end) return 2;
 	const minutes = (clock: string) => {
@@ -2236,6 +2250,7 @@ function DeclareFromPlan({
 	plannedEnd,
 	note,
 	held,
+	planned,
 	onDeclared,
 }: {
 	groupId: string;
@@ -2248,10 +2263,21 @@ function DeclareFromPlan({
 	/// The control then amends that work rather than declaring over it again.
 	// spec: UPG#when-a-plan-is-met
 	held: MaintenanceWindow | null | undefined;
+	/// The hours the plan says the work runs. Declaring over a plan that named
+	/// them is a confirmation rather than a form: the operator already said when.
+	// spec: MNT#declaring
+	planned: { starts_at: string; ends_at: string } | null | undefined;
 	onDeclared: () => void;
 }) {
 	const [open, setOpen] = useState(false);
+	const [adjusting, setAdjusting] = useState(false);
+	const declare = useApiAction("maintenance", "declare");
 	const hours = plannedHours(plannedTime, plannedEnd);
+	// A plan whose hours are still ahead needs no form to declare over. One whose
+	// window has already passed says nothing about work starting now, so that
+	// falls back to the form and its length-from-now prefill.
+	const confirmable =
+		!held && !!planned && new Date(planned.ends_at).getTime() > Date.now();
 	return (
 		<>
 			<Tooltip
@@ -2264,7 +2290,10 @@ function DeclareFromPlan({
 				<IconButton
 					size="small"
 					aria-label={`${held ? "Amend" : "Declare"} maintenance for ${groupName}`}
-					onClick={() => setOpen(true)}
+					onClick={() => {
+						setAdjusting(false);
+						setOpen(true);
+					}}
 					data-testid={held ? "plan-under-maintenance" : undefined}
 				>
 					<BuildOutlinedIcon
@@ -2273,8 +2302,62 @@ function DeclareFromPlan({
 					/>
 				</IconButton>
 			</Tooltip>
+			{confirmable && planned && (
+				<Dialog
+					open={open && !adjusting}
+					onClose={() => setOpen(false)}
+					data-testid="confirm-declare"
+				>
+					<DialogTitle>Declare maintenance — {groupName}</DialogTitle>
+					<DialogContent>
+						<Typography variant="body2">
+							Suspends this environment's alerting for the hours the plan
+							says the work runs, {planWindowLabel(planned)}.
+						</Typography>
+						{note && (
+							<Typography
+								variant="body2"
+								sx={{ mt: 1, fontStyle: "italic" }}
+							>
+								{note}
+							</Typography>
+						)}
+						{declare.error && (
+							<Alert severity="error" sx={{ mt: 2 }}>
+								{declare.error.message}
+							</Alert>
+						)}
+					</DialogContent>
+					<DialogActions>
+						<Button onClick={() => setAdjusting(true)} sx={{ mr: "auto" }}>
+							Adjust
+						</Button>
+						<Button onClick={() => setOpen(false)}>Cancel</Button>
+						<Button
+							variant="contained"
+							disabled={declare.pending}
+							onClick={async () => {
+								try {
+									await declare.call({
+										server_group_id: groupId,
+										rank,
+										expected_end: planned.ends_at,
+										note: note ?? undefined,
+									});
+									setOpen(false);
+									onDeclared();
+								} catch {
+									/* surfaced above */
+								}
+							}}
+						>
+							Declare
+						</Button>
+					</DialogActions>
+				</Dialog>
+			)}
 			<DeclareMaintenanceDialog
-				open={open}
+				open={open && (!confirmable || adjusting)}
 				onClose={() => setOpen(false)}
 				scope="group"
 				id={groupId}
