@@ -1,6 +1,11 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ReportingSchemasSection from "./ReportingSchemasSection";
+
+// The admin probe belongs to the page this section is mounted in, so the
+// section is rendered here with the answer it would have been given.
+const admin = vi.hoisted(() => ({ is: true as boolean | undefined }));
+vi.mock("../hooks/useIsAdmin", () => ({ useIsAdmin: () => admin.is }));
 
 type Pair = {
 	group_id: string;
@@ -50,6 +55,10 @@ function stubApi(pairs: Pair[], build: { status: number; body?: unknown } = { st
 	vi.stubGlobal("fetch", fetch);
 	return calls;
 }
+
+beforeEach(() => {
+	admin.is = true;
+});
 
 afterEach(() => {
 	vi.unstubAllGlobals();
@@ -123,6 +132,16 @@ describe("asking for a build", () => {
 
 		expect(await screen.findByText("Build sooner")).toBeTruthy();
 		expect(screen.getAllByText("Build again")).toHaveLength(2);
+	});
+
+	it("offers no build to an operator who cannot ask for one", async () => {
+		admin.is = false;
+		stubApi([pair({ state: "failed" }), pair({ version_id: "2", state: "built" })]);
+		render(<ReportingSchemasSection groupId={GROUP} />);
+
+		expect(await screen.findByText("Failed")).toBeTruthy();
+		expect(screen.queryByText("Build sooner")).toBeNull();
+		expect(screen.queryByText("Build again")).toBeNull();
 	});
 
 	it("names the pair rather than the group's latest version", async () => {
