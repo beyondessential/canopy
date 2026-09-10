@@ -7,7 +7,7 @@ import {
 } from "./seed";
 
 // The inventory a configuration run would receive, presented on the group
-// page: one panel per environment, the variables set at each scope, and
+// page: one environment at a time, the variables set at each scope, and
 // whether a run could take the environment's lease.
 // spec: INV#presentation
 test.describe("group inventory", () => {
@@ -15,7 +15,7 @@ test.describe("group inventory", () => {
 		await resetSeededTables(sql);
 	});
 
-	test("shows one panel per environment, with the machines in it", async ({
+	test("shows the selected environment, with the machines in it", async ({
 		page,
 		sql,
 	}) => {
@@ -41,9 +41,8 @@ test.describe("group inventory", () => {
 
 		const inventory = page.getByTestId("group-inventory");
 		const production = inventory.getByTestId("environment-production");
-		const demo = inventory.getByTestId("environment-demo");
 		await expect(production).toBeVisible();
-		await expect(demo).toBeVisible();
+		await expect(inventory.getByTestId("environment-demo")).toHaveCount(0);
 
 		// Each environment carries only the machines its own applications run
 		// on, though both sit in the same group.
@@ -51,9 +50,102 @@ test.describe("group inventory", () => {
 		await expect(
 			production.getByText("kamaka-prod-central", { exact: true }),
 		).toBeVisible();
+
+		await inventory.getByLabel("Environment").click();
+		await page.getByRole("option", { name: "demo" }).click();
+
+		const demo = inventory.getByTestId("environment-demo");
 		await expect(demo.getByTestId("inventory-machine")).toHaveCount(1);
 		await expect(
 			demo.getByText("kamaka-demo-central", { exact: true }),
+		).toBeVisible();
+		await expect(inventory.getByTestId("environment-production")).toHaveCount(0);
+
+		// The line a run is started with follows the selection.
+		await expect(demo.getByTestId("run-command")).toContainText(
+			"CANOPY_RANK=demo",
+		);
+	});
+
+	test("offers nothing to select where the group has one environment", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
+		await seedServer(sql, {
+			name: "kamaka-prod-central",
+			type: "tamanu-central",
+			rank: "production",
+			groupId: group.id,
+			tags: {},
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+
+		const inventory = page.getByTestId("group-inventory");
+		await expect(inventory.getByTestId("environment-production")).toBeVisible();
+		await expect(inventory.getByLabel("Environment")).toHaveCount(0);
+	});
+
+	test("says there is nothing to configure with no live applications", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
+
+		await page.goto(`/fleet/groups/${group.id}`);
+
+		const inventory = page.getByTestId("group-inventory");
+		await expect(inventory).toContainText("no environment to configure");
+		await expect(inventory.getByLabel("Environment")).toHaveCount(0);
+	});
+
+	test("sets a variable on the environment the selector names", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
+		await seedServer(sql, {
+			name: "kamaka-prod-central",
+			type: "tamanu-central",
+			rank: "production",
+			groupId: group.id,
+			tags: {},
+		});
+		await seedServer(sql, {
+			name: "kamaka-demo-central",
+			type: "tamanu-central",
+			rank: "demo",
+			groupId: group.id,
+			tags: {},
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		const inventory = page.getByTestId("group-inventory");
+
+		await inventory.getByLabel("Environment").click();
+		await page.getByRole("option", { name: "demo" }).click();
+
+		const demo = inventory.getByTestId("environment-demo");
+		const form = demo.getByTestId("set-variable");
+		await form.getByLabel("Name").fill("log_level");
+		await form.getByLabel("Value").fill("trace");
+		await form.getByRole("button", { name: "Set" }).click();
+		await expect(demo.getByTestId("var")).toContainText("log_level = trace");
+
+		// The variable is the demo environment's, so production does not carry
+		// it, and the machine offered as a scope is the selected environment's.
+		await inventory.getByLabel("Environment").click();
+		await page.getByRole("option", { name: "production" }).click();
+		const production = inventory.getByTestId("environment-production");
+		await expect(production.getByTestId("var")).toHaveCount(0);
+
+		await production.getByTestId("set-variable").getByLabel("Scope").click();
+		await expect(
+			page.getByRole("option", { name: "kamaka-demo-central" }),
+		).toHaveCount(0);
+		await expect(
+			page.getByRole("option", { name: "kamaka-prod-central" }),
 		).toBeVisible();
 	});
 
