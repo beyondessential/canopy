@@ -92,23 +92,6 @@ async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Ap
 /// The sweep run out to the far side of the settle period: the first pass
 /// records the environment as having arrived, the second closes the plan once
 /// that has stood.
-async fn sweep_settled(conn: &mut AsyncPgConnection) -> usize {
-	close_met_plans(conn).await.expect("sweep");
-	backdate_arrival(conn).await;
-	close_met_plans(conn).await.expect("sweep")
-}
-
-/// Put every open plan's arrival far enough back that the settle period has run.
-async fn backdate_arrival(conn: &mut AsyncPgConnection) {
-	sql_query(
-		"UPDATE upgrade_plans SET target_reached_at = target_reached_at - interval '1 day' \
-		 WHERE target_reached_at IS NOT NULL AND met_at IS NULL",
-	)
-	.execute(conn)
-	.await
-	.expect("backdate");
-}
-
 /// What an application says it runs.
 async fn report(conn: &mut AsyncPgConnection, application: Uuid, machine: Uuid, running: &str) {
 	let version: VersionStr = running.parse().expect("parse");
@@ -291,15 +274,6 @@ async fn canopy_closes_a_plan_once_the_group_arrives() {
 
 		// Through the periodic sweep, which is what runs in production.
 		database::backup::sweep(&mut conn).await.expect("sweep");
-		assert!(
-			UpgradePlan::open_for_environment(&mut conn, group, ServerRank::Production)
-				.await
-				.expect("open")
-				.is_some(),
-			"the version is only just there; the plan waits out the settle period"
-		);
-
-		backdate_arrival(&mut conn).await;
 		database::backup::sweep(&mut conn).await.expect("sweep");
 		assert!(
 			UpgradePlan::open_for_environment(&mut conn, group, ServerRank::Production)
@@ -314,89 +288,6 @@ async fn canopy_closes_a_plan_once_the_group_arrives() {
 				.expect("target")
 				.is_none(),
 			"and stops steering the test target"
-		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_version_appearing_does_not_meet_the_plan_on_its_own() {
-	TestDb::run(|mut conn, _url| async move {
-		let (group, server) = group_running(&mut conn, "2.60.0").await;
-		let target = publish(&mut conn, 61, 0).await;
-		UpgradePlan::record(
-			&mut conn,
-			group,
-			ServerRank::Production,
-			target.id,
-			PlannedWhen::default(),
-			None,
-			"a@example.com",
-		)
-		.await
-		.expect("plan");
-
-		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
-		assert_eq!(
-			close_met_plans(&mut conn).await.expect("sweep"),
-			0,
-			"the version is installed; the environment has yet to stand on it"
-		);
-
-		let plan = UpgradePlan::open_for_environment(&mut conn, group, ServerRank::Production)
-			.await
-			.expect("open")
-			.expect("still open");
-		assert!(
-			plan.target_reached_at.is_some(),
-			"the arrival is recorded so the period has something to run from"
-		);
-
-		backdate_arrival(&mut conn).await;
-		assert_eq!(
-			close_met_plans(&mut conn).await.expect("sweep"),
-			1,
-			"the period has run and nothing is declared over the environment"
-		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn an_environment_that_falls_back_starts_the_period_again() {
-	TestDb::run(|mut conn, _url| async move {
-		let (group, server) = group_running(&mut conn, "2.60.0").await;
-		let target = publish(&mut conn, 61, 0).await;
-		UpgradePlan::record(
-			&mut conn,
-			group,
-			ServerRank::Production,
-			target.id,
-			PlannedWhen::default(),
-			None,
-			"a@example.com",
-		)
-		.await
-		.expect("plan");
-
-		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
-		close_met_plans(&mut conn).await.expect("sweep");
-		backdate_arrival(&mut conn).await;
-
-		// Rolled back before the period ran out.
-		report(&mut conn, server.id, server.machine_id, "2.60.0").await;
-		assert_eq!(
-			close_met_plans(&mut conn).await.expect("sweep"),
-			0,
-			"an upgrade that was rolled back did not happen"
-		);
-		let plan = UpgradePlan::open_for_environment(&mut conn, group, ServerRank::Production)
-			.await
-			.expect("open")
-			.expect("still open");
-		assert!(
-			plan.target_reached_at.is_none(),
-			"the arrival is forgotten, so a second one starts the period over"
 		);
 	})
 	.await
@@ -431,8 +322,6 @@ async fn a_declared_window_holds_the_plan_open_until_the_work_is_over() {
 		.expect("declare");
 
 		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
-		close_met_plans(&mut conn).await.expect("sweep");
-		backdate_arrival(&mut conn).await;
 		assert_eq!(
 			close_met_plans(&mut conn).await.expect("sweep"),
 			0,
@@ -490,8 +379,6 @@ async fn a_window_over_the_group_holds_its_environments_plans_open() {
 		.expect("declare");
 
 		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
-		close_met_plans(&mut conn).await.expect("sweep");
-		backdate_arrival(&mut conn).await;
 		assert_eq!(
 			close_met_plans(&mut conn).await.expect("sweep"),
 			0,
@@ -711,7 +598,7 @@ async fn a_met_plan_is_not_amendable() {
 		.expect("plan");
 
 		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
-		sweep_settled(&mut conn).await;
+		close_met_plans(&mut conn).await.expect("sweep");
 
 		let refused = UpgradePlan::amend(
 			&mut conn,
@@ -1181,7 +1068,7 @@ async fn each_environment_goes_its_own_place() {
 
 		// The clone arrives; production has not moved.
 		report(&mut conn, clone.id, clone.machine_id, "2.61.0").await;
-		sweep_settled(&mut conn).await;
+		close_met_plans(&mut conn).await.expect("sweep");
 		assert!(
 			UpgradePlan::open_for_environment(&mut conn, group, ServerRank::Clone)
 				.await
@@ -1287,7 +1174,7 @@ async fn a_group_with_no_ranked_member_plans_as_its_production() {
 		);
 
 		report(&mut conn, central.id, central.machine_id, "2.61.0").await;
-		sweep_settled(&mut conn).await;
+		close_met_plans(&mut conn).await.expect("sweep");
 		assert!(
 			UpgradePlan::open_for_environment(&mut conn, group.id, ServerRank::Production)
 				.await

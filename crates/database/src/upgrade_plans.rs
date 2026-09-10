@@ -9,19 +9,13 @@ use commons_errors::{AppError, Result};
 use commons_types::{server::rank::ServerRank, version::VersionStr};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use jiff::{SignedDuration, Timestamp, civil::Date, civil::Time, tz::TimeZone};
+use jiff::{Timestamp, civil::Date, civil::Time, tz::TimeZone};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
 	maintenance_windows::MaintenanceWindow, server_groups::ServerGroup, versions::Version,
 };
-
-/// How long an environment must stand at or past its target before the plan
-/// closes. A version is on a box from the moment it is installed, which is
-/// ahead of the environment serving it.
-// spec: UPG#when-a-plan-is-met
-pub const SETTLE: SignedDuration = SignedDuration::from_mins(30);
 
 /// An environment's recorded intention to move to a version.
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema)]
@@ -64,11 +58,6 @@ pub struct UpgradePlan {
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	#[schema(value_type = Option<String>)]
 	pub met_at: Option<Timestamp>,
-	/// When the environment was first seen at or past the target, for one that
-	/// has been.
-	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
-	#[schema(value_type = Option<String>)]
-	pub target_reached_at: Option<Timestamp>,
 	/// When a newer plan replaced this one.
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	#[schema(value_type = Option<String>)]
@@ -412,13 +401,14 @@ pub fn ended_at(plan: &UpgradePlan) -> Option<Timestamp> {
 		.max()
 }
 
-/// Close every open plan whose environment has stood at its target for
-/// [`SETTLE`] with nothing declared over it, returning how many were closed.
+/// Close every open plan whose environment has reached its target with nothing
+/// declared over it, returning how many were closed.
 ///
 /// Reaching a version past the target counts too: an environment that jumped
 /// further has done the upgrade and then some, and holding the plan open would
-/// report it as outstanding. An environment that falls back below the target
-/// starts the period again.
+/// report it as outstanding. Work declared over the environment holds its plan
+/// open for the length of that work, so the plan cannot close underneath an
+/// upgrade still in progress.
 // spec: UPG#when-a-plan-is-met
 pub async fn close_met_plans(db: &mut AsyncPgConnection) -> Result<usize> {
 	use crate::schema::upgrade_plans::dsl;
@@ -444,27 +434,7 @@ pub async fn close_met_plans(db: &mut AsyncPgConnection) -> Result<usize> {
 			None => false,
 		};
 
-		if !at_target {
-			if plan.target_reached_at.is_some() {
-				diesel::update(dsl::upgrade_plans)
-					.filter(dsl::id.eq(plan.id))
-					.set(dsl::target_reached_at.eq(None::<jiff_diesel::Timestamp>))
-					.execute(db)
-					.await?;
-			}
-			continue;
-		}
-
-		let Some(reached_at) = plan.target_reached_at else {
-			diesel::update(dsl::upgrade_plans)
-				.filter(dsl::id.eq(plan.id))
-				.set(dsl::target_reached_at.eq(diesel::dsl::now))
-				.execute(db)
-				.await?;
-			continue;
-		};
-
-		if reached_at + SETTLE > now
+		if !at_target
 			|| suspended.environment_window(plan.group_id, plan.rank)
 			|| suspended.group_window(plan.group_id)
 		{

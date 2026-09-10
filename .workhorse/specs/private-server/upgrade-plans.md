@@ -70,13 +70,11 @@ A planned date is a plan, not a deadline.
 Canopy decides a plan is met, rather than asking anyone to mark it done.
 
 A version is on a machine from the moment it is installed there, which is ahead of the environment serving it: an upgrade reports the version it is putting on as the work begins, with hours of it still to run.
-The reported version reaching the target is where the evidence starts rather than all of it.
-A plan is met once the environment has stood at or past its target for a settle period with nothing declared over it, at which point the plan closes and records when.
-The settle period is the same for every plan.
+A plan is met once the environment's reported version has reached its target and nothing is declared over it, at which point the plan closes and records when.
 
-An environment that falls back below the target starts the period again: an upgrade that was rolled back did not happen.
 A window over the environment or over its group says the work is under way, so the plan stays open while one holds and through the suspension that outlasts it (see [MNT](../monitoring/maintenance.md), "Settling").
 An operator working through a declared window has the plan in front of them for the length of the work rather than losing it partway.
+Declaring is what says the work is still going: no elapsed time stands in for it, since an upgrade that finishes in a minute and one that runs for hours are not told apart by a clock.
 
 Reaching a version *past* the target counts as reaching it: an environment that jumped further than planned has done the upgrade and then some, and holding the plan open would misreport it as outstanding.
 A clone arriving says nothing about its production, whose plan stays open until the production itself reports the target.
