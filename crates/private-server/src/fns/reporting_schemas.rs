@@ -1,7 +1,7 @@
 use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
-use commons_errors::{ProblemDetailsSchema, Result};
+use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use database::reporting_schemas::{Pair, ReportingSchemaRequest};
 use serde::Deserialize;
@@ -78,6 +78,7 @@ pub struct BuildPairArgs {
 	request_body = BuildPairArgs,
 	responses(
 		(status = 200),
+		(status = 400, body = ProblemDetailsSchema),
 		(status = 401, body = ProblemDetailsSchema),
 		(status = 403, body = ProblemDetailsSchema),
 	),
@@ -89,6 +90,16 @@ pub async fn build(
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
 	let TailscaleAdmin(TailscaleUser { login, .. }) = admin;
+
+	// An ask against a pair the group does not have is one nothing dispatches
+	// and nothing clears, so it would stand against the group for good.
+	let pairs = database::reporting_schemas::pairs_for_group(&mut conn, args.group_id).await?;
+	if !pairs.iter().any(|pair| pair.version_id == args.version_id) {
+		return Err(AppError::BadRequest(
+			"that group has no pair for that version".into(),
+		));
+	}
+
 	ReportingSchemaRequest::enqueue(&mut conn, args.group_id, args.version_id, Some(&login))
 		.await?;
 	Ok(Json(()))
