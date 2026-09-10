@@ -375,8 +375,9 @@ test.describe("maintenance windows", () => {
 
 		await page.goto(`/fleet/groups/${group.id}`);
 		await page
-			.getByRole("button", { name: "Declare maintenance for clone" })
+			.getByRole("button", { name: "Declare maintenance over an environment" })
 			.click();
+		await page.getByRole("menuitem", { name: "clone" }).click();
 		await expect(
 			page.getByRole("heading", { name: "Declare maintenance — kamaka clone" }),
 		).toBeVisible();
@@ -397,12 +398,13 @@ test.describe("maintenance windows", () => {
 		// The environment now reads as declared over, and production is left
 		// to be declared over on its own.
 		await expect(page.getByTestId("environment-window")).toContainText("clone");
+		await page
+			.getByRole("button", { name: "Declare maintenance over an environment" })
+			.click();
 		await expect(
-			page.getByRole("button", { name: "Declare maintenance for production" }),
+			page.getByRole("menuitem", { name: "production" }),
 		).toBeVisible();
-		await expect(
-			page.getByRole("button", { name: "Declare maintenance for clone" }),
-		).toHaveCount(0);
+		await expect(page.getByRole("menuitem", { name: "clone" })).toHaveCount(0);
 	});
 
 	// spec: MNT#presentation

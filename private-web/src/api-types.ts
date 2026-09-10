@@ -8450,6 +8450,11 @@ export interface components {
              */
             testable?: boolean | null;
             /**
+             * @description Whether work is declared over this environment or its group. This is what
+             *     holds an open plan open, so the view can say why one has not closed.
+             */
+            under_maintenance: boolean;
+            /**
              * @description Where the environment's data stands against the planned version, rolled
              *     up from its applications: any failure makes the environment a failure,
              *     since one application whose data breaks is enough to stop the upgrade.

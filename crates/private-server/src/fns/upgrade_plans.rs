@@ -72,6 +72,10 @@ pub struct PlannedUpgrade {
 	/// at "not tested" indefinitely with nothing on its way. `null` without a
 	/// plan.
 	pub testable: Option<bool>,
+	/// Whether work is declared over this environment or its group. This is what
+	/// holds an open plan open, so the view can say why one has not closed.
+	// spec: UPG#when-a-plan-is-met
+	pub under_maintenance: bool,
 }
 
 /// Planned upgrades across the fleet.
@@ -130,6 +134,8 @@ pub async fn fleet(
 			.map(|version| (version.id, version))
 			.collect();
 
+	let suspended =
+		database::maintenance_windows::MaintenanceWindow::suspended_targets(&mut conn).await?;
 	let mut environments = ServerGroup::environments(&mut conn, &ids).await?;
 	// A plan whose environment has no live application any more still says
 	// where the group was going, and this view is the only place it can be
@@ -241,6 +247,8 @@ pub async fn fleet(
 			verdict,
 			attempt,
 			testable,
+			under_maintenance: suspended.environment_window(env.group_id, env.rank)
+				|| suspended.group_window(env.group_id),
 		});
 	}
 

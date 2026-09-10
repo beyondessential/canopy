@@ -3,11 +3,15 @@ import {
 	Box,
 	Button,
 	LinearProgress,
+	ListSubheader,
+	Menu,
+	MenuItem,
 	Link as MuiLink,
 	Paper,
 	Stack,
 	Typography,
 } from "@mui/material";
+import ArrowDropDownIcon from "@mui/icons-material/ArrowDropDown";
 import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
@@ -71,6 +75,7 @@ export default function MaintenanceSection({
 	const isAdmin = useIsAdmin() === true;
 	const [tick, setTick] = useState(0);
 	const [dialogOpen, setDialogOpen] = useState(false);
+	const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
 	const [environmentDialog, setEnvironmentDialog] = useState<{
 		rank: ServerRank;
 		existing: MaintenanceWindow | null;
@@ -247,17 +252,46 @@ export default function MaintenanceSection({
 				</Alert>
 			) : (
 				isAdmin && (
-					<Button
-						size="small"
-						variant="outlined"
-						startIcon={<BuildOutlinedIcon />}
-						onClick={() => setDialogOpen(true)}
+					<Stack
+						direction="row"
 						sx={{ mb: history.length ? 2 : 0 }}
 					>
-						{fromMachine || fromGroup
-							? `Declare for this ${scope} as well`
-							: `Declare maintenance for this ${scope}`}
-					</Button>
+						<Button
+							size="small"
+							variant="outlined"
+							startIcon={<BuildOutlinedIcon />}
+							onClick={() => setDialogOpen(true)}
+							sx={
+								declarable.length
+									? {
+											borderTopRightRadius: 0,
+											borderBottomRightRadius: 0,
+											borderRightColor: "transparent",
+										}
+									: undefined
+							}
+						>
+							{fromMachine || fromGroup
+								? `Declare for this ${scope} as well`
+								: `Declare maintenance`}
+						</Button>
+						{declarable.length > 0 && (
+							<Button
+								size="small"
+								variant="outlined"
+								aria-label="Declare maintenance over an environment"
+								onClick={(event) => setMenuAnchor(event.currentTarget)}
+								sx={{
+									minWidth: 32,
+									px: 0,
+									borderTopLeftRadius: 0,
+									borderBottomLeftRadius: 0,
+								}}
+							>
+								<ArrowDropDownIcon fontSize="small" />
+							</Button>
+						)}
+					</Stack>
 				)
 			)}
 			{environmentWindows.map((window) => (
@@ -317,27 +351,24 @@ export default function MaintenanceSection({
 				</Alert>
 			))}
 			{isAdmin && declarable.length > 0 && (
-				<Stack
-					direction="row"
-					spacing={1}
-					sx={{ mt: 1, flexWrap: "wrap" }}
-					useFlexGap
-					data-testid="declare-environment"
+				<Menu
+					anchorEl={menuAnchor}
+					open={menuAnchor !== null}
+					onClose={() => setMenuAnchor(null)}
 				>
+					<ListSubheader sx={{ lineHeight: 2 }}>Declare over environment</ListSubheader>
 					{declarable.map((environment) => (
-						<Button
+						<MenuItem
 							key={environment}
-							size="small"
-							variant="outlined"
-							startIcon={<BuildOutlinedIcon />}
-							onClick={() =>
-								setEnvironmentDialog({ rank: environment, existing: null })
-							}
+							onClick={() => {
+								setMenuAnchor(null);
+								setEnvironmentDialog({ rank: environment, existing: null });
+							}}
 						>
-							Declare maintenance for {environment}
-						</Button>
+							<ServerRankChip rank={environment} />
+						</MenuItem>
 					))}
-				</Stack>
+				</Menu>
 			)}
 			{lift.error && (
 				<Alert severity="error" sx={{ mt: 1 }}>

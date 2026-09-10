@@ -139,11 +139,21 @@ export default function Upgrades() {
 									data-testid="planned-upgrade-row"
 								>
 										<TableCell>
-											<EnvironmentName
-												groupId={row.group_id}
-												groupName={row.group_name}
-												rank={row.rank}
-											/>
+											<Stack
+												direction="row"
+												spacing={0.5}
+												sx={{ alignItems: "center", flexWrap: "wrap" }}
+												useFlexGap
+											>
+												<EnvironmentName
+													groupId={row.group_id}
+													groupName={row.group_name}
+													rank={row.rank}
+												/>
+												<MaintenanceChip
+													declared={row.under_maintenance}
+												/>
+											</Stack>
 										</TableCell>
 										<TableCell>{row.current_version ?? "unknown"}</TableCell>
 										<TableCell>{row.target_version}</TableCell>
@@ -1416,6 +1426,27 @@ function VerdictChip({
 
 /// An attempt under way, beside the verdict rather than replacing it: a row can
 /// read as failed with a fresh attempt already running.
+/// Work declared over the environment or its group, which is what holds an open
+/// plan open: without it the row reads as an upgrade nobody finished.
+// spec: UPG#when-a-plan-is-met
+function MaintenanceChip({ declared }: { declared: boolean }) {
+	if (!declared) {
+		return null;
+	}
+	return (
+		<Tooltip title="maintenance is declared over this environment, so its plan stays open until the work is over">
+			<Chip
+				size="small"
+				color="info"
+				variant="outlined"
+				icon={<BuildOutlinedIcon />}
+				label="maintenance"
+				data-testid="plan-under-maintenance"
+			/>
+		</Tooltip>
+	);
+}
+
 function AttemptChip({
 	attempt,
 }: {

@@ -2,6 +2,7 @@ import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
 	seedDevice,
+	seedMaintenanceWindow,
 	seedRestoreConsumerCapability,
 	seedRestoreReplica,
 	seedServer,
@@ -818,6 +819,31 @@ test.describe("upgrade windows", () => {
 		);
 	});
 
+
+	// spec: UPG#when-a-plan-is-met
+	test("a plan held open by maintenance says so", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const production = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		await seedStatus(sql, { serverId: production.id, version: "2.60.0" });
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			rank: "production",
+			targetVersionId: target.id,
+		});
+		await seedMaintenanceWindow(sql, {
+			serverGroupId: group.id,
+			rank: "production",
+			endsInHours: 2,
+		});
+
+		await page.goto("/upgrades");
+		await expect(page.getByTestId("plan-under-maintenance")).toBeVisible();
+	});
 });
 
 /** The local calendar day, as the API and the grid both write it. */

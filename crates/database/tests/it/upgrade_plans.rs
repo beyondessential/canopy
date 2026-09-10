@@ -89,9 +89,6 @@ async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Ap
 	(group.id, server)
 }
 
-/// The sweep run out to the far side of the settle period: the first pass
-/// records the environment as having arrived, the second closes the plan once
-/// that has stood.
 /// What an application says it runs.
 async fn report(conn: &mut AsyncPgConnection, application: Uuid, machine: Uuid, running: &str) {
 	let version: VersionStr = running.parse().expect("parse");
