@@ -180,15 +180,26 @@ impl Version {
 			return Ok(Vec::new());
 		}
 
-		// The SQL narrows on the major and the triple is matched here: one
+		// The SQL narrows on each component and the triple is matched here: one
 		// predicate per version builds a boxed OR chain as long as the fleet's
-		// version spread, for a set small enough to sift in memory.
+		// version spread, while three set predicates leave Postgres a cross
+		// product small enough to sift in memory.
 		let mut majors: Vec<i32> = wanted.iter().map(|want| want.0.major as i32).collect();
 		majors.sort_unstable();
 		majors.dedup();
 
+		let mut minors: Vec<i32> = wanted.iter().map(|want| want.0.minor as i32).collect();
+		minors.sort_unstable();
+		minors.dedup();
+
+		let mut patches: Vec<i32> = wanted.iter().map(|want| want.0.patch as i32).collect();
+		patches.sort_unstable();
+		patches.dedup();
+
 		let rows: Vec<Self> = versions
 			.filter(major.eq_any(majors))
+			.filter(minor.eq_any(minors))
+			.filter(patch.eq_any(patches))
 			.select(Version::as_select())
 			.load(db)
 			.await
