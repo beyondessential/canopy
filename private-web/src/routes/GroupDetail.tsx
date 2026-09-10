@@ -9,7 +9,6 @@ import {
 	Typography,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
-import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
 import BackupIcon from "@mui/icons-material/Backup";
 import EditIcon from "@mui/icons-material/Edit";
@@ -17,6 +16,7 @@ import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
 import { useState } from "react";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import GroupDomainsSection from "../components/GroupDomainsSection";
+import { MaintenanceMarker } from "../components/HealthChip";
 import GroupInventorySection from "../components/GroupInventorySection";
 import MigrationTestsSection from "../components/MigrationTestsSection";
 import { OperatorAvatar, connectedFor } from "../components/OperatorAvatars";
@@ -121,20 +121,9 @@ export default function GroupDetail() {
 						{group.name}
 					</Typography>
 					{detail.data.maintained && (
-						<Chip
-							size="small"
-							variant="outlined"
-							color="info"
-							icon={<BuildOutlinedIcon />}
-							label={
-								detail.data.maintenance_settling
-									? "Maintenance just ended"
-									: "Under maintenance"
-							}
-							component="a"
+						<MaintenanceMarker
+							settling={detail.data.maintenance_settling}
 							href="#maintenance"
-							clickable
-							data-testid="maintenance-marker"
 						/>
 					)}
 				</Stack>
