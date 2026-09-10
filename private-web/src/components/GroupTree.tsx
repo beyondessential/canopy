@@ -1,15 +1,26 @@
-import { Box, Chip, Link as MuiLink, Stack, Tooltip, Typography } from "@mui/material";
+import {
+	Box,
+	Chip,
+	Link as MuiLink,
+	Stack,
+	type Theme,
+	Tooltip,
+	Typography,
+} from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import { Link as RouterLink } from "react-router-dom";
 
 import {
 	applicationName,
+	type GroupEnvironment,
 	type GroupMachine,
 	groupServersByRank,
+	heldByLabel,
 	rankMachines,
 	type ServerInfo,
 } from "../types";
 import ApplicationTypeChip from "./ApplicationTypeChip";
-import MachineEnclosure from "./MachineEnclosure";
+import MachineEnclosure, { waveWhileHolding } from "./MachineEnclosure";
 import StatusDot from "./StatusDot";
 
 /// The group as an operator navigates it: rank, then the boxes at that rank,
@@ -23,11 +34,17 @@ import StatusDot from "./StatusDot";
 export default function GroupTree({
 	machines,
 	applications,
+	environments,
 	currentMachineId,
 	currentApplicationId,
 }: {
 	machines: GroupMachine[];
 	applications: ServerInfo[];
+	/// The group's environments and whether a window holds over each, so the
+	/// row a window was declared over carries the mark rather than only the
+	/// boxes it caught.
+	// spec: MNT#presentation
+	environments?: GroupEnvironment[];
 	/// The machine whose page this is, if any.
 	currentMachineId?: string;
 	/// The application whose page this is, if any.
@@ -37,29 +54,69 @@ export default function GroupTree({
 
 	return (
 		<Box data-testid="group-tree">
-			{groupServersByRank(ranked).map(([rank, boxes], index) => (
-				<Box key={rank ?? "_unranked"}>
-					<Typography
-						variant="overline"
-						color="text.secondary"
-						sx={{ display: "block", mt: index === 0 ? 0 : 1.5, mb: 0.5 }}
+			{groupServersByRank(ranked).map(([rank, boxes], index) => {
+				const environment = environments?.find((e) => e.rank === rank);
+				const held = environment?.maintained === true;
+				const settling = environment?.maintenance_settling === true;
+				return (
+					<Box
+						key={rank ?? "_unranked"}
+						data-testid="tree-environment"
+						data-rank={rank ?? "unranked"}
+						data-maintenance={
+							held ? (settling ? "settling" : "holding") : undefined
+						}
+						sx={{ mt: index === 0 ? 0 : 1.5 }}
 					>
-						{rank ?? "unranked"}
-					</Typography>
-					<Stack spacing={1}>
-						{boxes.map((box) => (
-							<MachineBlock
-								key={box.machine.id}
-								machine={box.machine}
-								applications={box.applications}
-								currentMachineId={currentMachineId}
-								currentApplicationId={currentApplicationId}
-							/>
-						))}
-					</Stack>
-				</Box>
-			))}
+						<EnvironmentHeading rank={rank} />
+						<Stack
+							spacing={1}
+							data-testid="tree-boxes"
+							sx={
+								held
+									? {
+											borderRadius: 1,
+											backgroundImage: (theme) =>
+												environmentHatch(theme, settling),
+											...waveWhileHolding(!settling, "&::before"),
+										}
+									: {}
+							}
+						>
+							{boxes.map((box) => (
+								<MachineBlock
+									key={box.machine.id}
+									machine={box.machine}
+									applications={box.applications}
+									heldBy={
+										rank && held
+											? heldByLabel({ kind: "environment", rank })
+											: null
+									}
+									currentMachineId={currentMachineId}
+									currentApplicationId={currentApplicationId}
+								/>
+							))}
+						</Stack>
+					</Box>
+				);
+			})}
 		</Box>
+	);
+}
+
+/// An environment's row. A window over the environment is drawn on the boxes
+/// under it rather than here.
+// spec: MNT#presentation
+function EnvironmentHeading({ rank }: { rank: string | null }) {
+	return (
+		<Typography
+			variant="overline"
+			color="text.secondary"
+			sx={{ display: "block", mb: 0.5 }}
+		>
+			{rank ?? "unranked"}
+		</Typography>
 	);
 }
 
@@ -72,16 +129,21 @@ export default function GroupTree({
 function MachineBlock({
 	machine,
 	applications,
+	heldBy,
 	currentMachineId,
 	currentApplicationId,
 }: {
 	machine: GroupMachine;
 	applications: ServerInfo[];
+	/// What holds a window this box did not have declared over it.
+	// spec: MNT#presentation
+	heldBy?: string | null;
 	currentMachineId?: string;
 	currentApplicationId?: string;
 }) {
 	const current = machine.id === currentMachineId;
 	const name = machine.name ?? "Unnamed machine";
+	const own = machine.own_window === true;
 	return (
 		<Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
 			<Row
@@ -98,15 +160,7 @@ function MachineBlock({
 					maintained={machine.maintained}
 					settling={machine.maintenance_settling}
 					ownWindow={machine.own_window}
-					describes={applications.map((application) =>
-						[
-							applicationName(application),
-							application.own_window ? "under maintenance" : null,
-							application.is_monitored === false ? "unmonitored" : null,
-						]
-							.filter(Boolean)
-							.join(" · "),
-					)}
+					heldBy={heldBy}
 				>
 					{applications.map((application) => (
 						<Box key={application.id} component="span" sx={dotCellSx}>
@@ -114,7 +168,9 @@ function MachineBlock({
 								up={application.up ?? "gone"}
 								health={application.health ?? undefined}
 								monitored={application.is_monitored !== false}
-								maintained={application.own_window ?? false}
+								maintained={own}
+								settling={machine.maintenance_settling === true}
+								suspended={!own && (application.maintained ?? false)}
 								quiet
 								size={DOT_SIZE}
 							/>
@@ -157,6 +213,9 @@ function MachineBlock({
 								health={application.health ?? undefined}
 								monitored={application.is_monitored !== false}
 								maintained={application.own_window ?? false}
+								suspended={application.maintained ?? false}
+								heldBy={heldBy ?? heldByLabel({ kind: "machine", name })}
+								title={applicationName(application)}
 								size={DOT_SIZE}
 							/>
 							<Name
@@ -184,6 +243,14 @@ function MachineBlock({
 }
 
 const DIVIDER_LIGHT = "rgba(0, 0, 0, 0.06)";
+
+/// The wash over an environment's whole section while a window over it holds:
+/// light enough that the cards inside stay readable through it.
+// spec: MNT#presentation
+function environmentHatch(theme: Theme, settling: boolean): string {
+	const ink = alpha(theme.palette.text.primary, settling ? 0.035 : 0.09);
+	return `repeating-linear-gradient(45deg, ${ink} 0 1px, transparent 1px 7px)`;
+}
 
 // Every dot sits in an identical fixed-size cell, so the enclosure's dots
 // align however many there are. Spacing comes from the enclosure's own gap.

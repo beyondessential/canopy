@@ -752,7 +752,7 @@ export function RankedDotStrip({
 								ownWindow={box.lead.machine_own_window}
 								describes={box.applications.map((m) =>
 									[
-										`${m.name}${m.rank ? ` · ${m.rank}` : ""} · ${m.type}`,
+										`Application ${m.name}${m.rank ? ` · ${m.rank}` : ""} · ${m.type}`,
 										m.own_window
 											? m.maintenance_settling
 												? "maintenance just ended"
@@ -770,8 +770,9 @@ export function RankedDotStrip({
 											up={m.up}
 											health={m.health}
 											monitored={m.is_monitored}
-											maintained={m.own_window}
-											settling={m.maintenance_settling}
+											maintained={box.lead.machine_own_window}
+											settling={box.lead.machine_maintenance_settling}
+											suspended={!box.lead.machine_own_window && m.maintained}
 											quiet
 											size={DOT_SIZE}
 										/>

@@ -1,6 +1,7 @@
 import {
 	Alert,
 	Button,
+	Chip,
 	LinearProgress,
 	Paper,
 	Stack,
@@ -11,11 +12,109 @@ import {
 	TableRow,
 	Typography,
 } from "@mui/material";
+import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
+import DeclareMaintenanceDialog from "../components/DeclareMaintenanceDialog";
+import ServerRankChip from "../components/ServerRankChip";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
+import type {
+	MaintenanceScope,
+	MaintenanceWindow,
+	ServerRank,
+} from "../types";
+
+/// Change a window's hours or note from the list, so the fleet view an operator
+/// finds work in is also where they adjust it.
+// spec: MNT#declaring
+function AmendWindow({
+	window,
+	targetLabel,
+	onAmended,
+}: {
+	window: MaintenanceWindow;
+	targetLabel: string;
+	onAmended: () => void;
+}) {
+	const [open, setOpen] = useState(false);
+	const scope: MaintenanceScope | null = window.application_id
+		? "application"
+		: window.machine_id
+			? "machine"
+			: window.server_group_id
+				? "group"
+				: null;
+	const id =
+		window.application_id ?? window.machine_id ?? window.server_group_id;
+	// A window over the whole fleet has no target page to amend it against.
+	if (!scope || !id) {
+		return null;
+	}
+	return (
+		<>
+			<Button size="small" onClick={() => setOpen(true)}>
+				Amend
+			</Button>
+			<DeclareMaintenanceDialog
+				open={open}
+				onClose={() => setOpen(false)}
+				scope={scope}
+				id={id}
+				rank={window.rank ?? undefined}
+				targetLabel={targetLabel}
+				existing={window}
+				onDone={onAmended}
+			/>
+		</>
+	);
+}
+
+/// What a window covers, beside the target's name. A group's own window and its
+/// production environment's read the same otherwise, since an environment at
+/// that rank is named for the group.
+// spec: MNT#presentation
+function TargetKind({
+	window,
+}: {
+	window: { rank: ServerRank | null; machine_id: string | null; application_id: string | null; server_group_id: string | null };
+}) {
+	if (window.rank) {
+		return (
+			<>
+				<KindChip kind="environment" />
+				<ServerRankChip rank={window.rank} />
+			</>
+		);
+	}
+	return (
+		<KindChip
+			kind={
+				window.application_id
+					? "application"
+					: window.machine_id
+						? "machine"
+						: window.server_group_id
+							? "group"
+							: "fleet"
+			}
+		/>
+	);
+}
+
+/// Styled to match [`ServerRankChip`], so a row carrying both reads as one set
+/// rather than two.
+function KindChip({ kind }: { kind: string }) {
+	return (
+		<Chip
+			size="small"
+			variant="outlined"
+			label={kind}
+			sx={{ textTransform: "capitalize" }}
+		/>
+	);
+}
 
 /// What the fleet is not being watched on right now: every maintenance
 /// window currently holding, what it covers, and when it ends.
@@ -69,23 +168,33 @@ export default function Maintenance() {
 							{rows.map(({ window, target }) => (
 								<TableRow key={window.id} hover>
 									<TableCell>
-										{window.server_group_id ? (
-											<RouterLink to={`/fleet/groups/${window.server_group_id}`}>
-												{target}
-											</RouterLink>
-										) : window.machine_id ? (
-											<RouterLink to={`/fleet/machines/${window.machine_id}`}>
-												{target}
-											</RouterLink>
-										) : window.application_id ? (
-											<RouterLink
-												to={`/fleet/applications/${window.application_id}`}
-											>
-												{target}
-											</RouterLink>
-										) : (
-											target
-										)}
+										<Stack
+											direction="row"
+											spacing={0.75}
+											sx={{ alignItems: "center", flexWrap: "wrap" }}
+											useFlexGap
+										>
+											{window.server_group_id ? (
+												<RouterLink
+													to={`/fleet/groups/${window.server_group_id}`}
+												>
+													{target}
+												</RouterLink>
+											) : window.machine_id ? (
+												<RouterLink to={`/fleet/machines/${window.machine_id}`}>
+													{target}
+												</RouterLink>
+											) : window.application_id ? (
+												<RouterLink
+													to={`/fleet/applications/${window.application_id}`}
+												>
+													{target}
+												</RouterLink>
+											) : (
+												target
+											)}
+											<TargetKind window={window} />
+										</Stack>
 									</TableCell>
 									<TableCell>
 										<TimeAgo timestamp={window.expected_end} />
@@ -97,20 +206,31 @@ export default function Maintenance() {
 									<TableCell>{window.note ?? "—"}</TableCell>
 									{isAdmin && (
 										<TableCell align="right">
-											<Button
-												size="small"
-												disabled={lift.pending}
-												onClick={async () => {
-													try {
-														await lift.call({ id: window.id });
-														list.reload();
-													} catch {
-														/* surfaced above */
-													}
-												}}
+											<Stack
+												direction="row"
+												spacing={1}
+												sx={{ justifyContent: "flex-end" }}
 											>
-												Lift
-											</Button>
+												<AmendWindow
+													window={window}
+													targetLabel={target}
+													onAmended={list.reload}
+												/>
+												<Button
+													size="small"
+													disabled={lift.pending}
+													onClick={async () => {
+														try {
+															await lift.call({ id: window.id });
+															list.reload();
+														} catch {
+															/* surfaced above */
+														}
+													}}
+												>
+													Lift
+												</Button>
+											</Stack>
 										</TableCell>
 									)}
 								</TableRow>

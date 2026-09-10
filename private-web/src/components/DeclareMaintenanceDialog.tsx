@@ -41,6 +41,7 @@ export default function DeclareMaintenanceDialog({
 	targetLabel,
 	existing,
 	prefill,
+	offerLift,
 	onDone,
 }: {
 	open: boolean;
@@ -56,9 +57,14 @@ export default function DeclareMaintenanceDialog({
 	/** Starting values where something else knows them, such as an upgrade
 	 * plan's window and note. */
 	prefill?: { expectedEnd?: string; note?: string };
+	/** Offer to end the work from in here, for a surface with no room to carry
+	 * a lift of its own. Where the caller already shows one, this stays off so
+	 * the same action is not in two places. */
+	offerLift?: boolean;
 	onDone: () => void;
 }) {
 	const declare = useApiAction("maintenance", "declare");
+	const lift = useApiAction("maintenance", "lift");
 	const [endsAt, setEndsAt] = useState(() => hoursFromNow(2));
 	const [note, setNote] = useState("");
 
@@ -68,6 +74,7 @@ export default function DeclareMaintenanceDialog({
 		setEndsAt(end ? toLocalInput(new Date(end)) : hoursFromNow(2));
 		setNote(existing?.note ?? prefill?.note ?? "");
 		declare.reset();
+		lift.reset();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [open, existing?.id]);
 
@@ -145,14 +152,33 @@ export default function DeclareMaintenanceDialog({
 					{declare.error && (
 						<Alert severity="error">{declare.error.message}</Alert>
 					)}
+					{lift.error && <Alert severity="error">{lift.error.message}</Alert>}
 				</Stack>
 			</DialogContent>
 			<DialogActions>
+				{offerLift && amending && existing && (
+					<Button
+						color="error"
+						disabled={lift.pending || declare.pending}
+						onClick={async () => {
+							try {
+								await lift.call({ id: existing.id });
+								onDone();
+								onClose();
+							} catch {
+								/* surfaced above */
+							}
+						}}
+						sx={{ mr: "auto" }}
+					>
+						Lift
+					</Button>
+				)}
 				<Button onClick={onClose}>Cancel</Button>
 				<Button
 					variant="contained"
 					onClick={submit}
-					disabled={declare.pending || endsAt === ""}
+					disabled={declare.pending || lift.pending || endsAt === ""}
 				>
 					{amending ? "Amend" : "Declare"}
 				</Button>

@@ -88,7 +88,7 @@ A secret's value never appears in a log.
 
 ## Presentation
 
-A group presents each of its environments: the machines in it and the variables set at each scope, with a value inherited from a wider scope distinguished from one the machine sets itself.
+A group presents one of its environments at a time, chosen by the operator where the group has more than one: the machines in it and the variables set at each scope, with a value inherited from a wider scope distinguished from one the machine sets itself.
 A secret variable appears by name, with the scope it is set at and when it last changed, and never its value.
 Where a lease or a maintenance window holds over the environment, the presentation names it.
 The invocation a run is started with is given, filled in with Canopy's address and the environment's identity.

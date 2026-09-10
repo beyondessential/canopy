@@ -1,7 +1,7 @@
 import { Box, Tooltip, keyframes, type Theme } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import type { ReactNode } from "react";
-import type { HealthState, ShortStatus } from "../types";
+import { type HealthState, type ShortStatus, maintenanceLine } from "../types";
 
 // The pill is the machine, so it carries the machine's state while the dots
 // inside carry each application's. Every machine is enclosed, whether it runs
@@ -42,7 +42,9 @@ const WAVE = keyframes`
 /// of them are out of play, so a failing one does not read as one nobody has
 /// noticed.
 // spec: MNT#presentation
-const MUTED = 0.55;
+/// How far a target the window reaches is faded: out of play, but still read.
+// spec: MNT#presentation
+export const MUTED = 0.55;
 
 /// The pill is a band a few pixels tall, so a wave crossing it is gone before
 /// it resolves. It pulses the whole mark instead, on the wave's timing, from
@@ -112,6 +114,7 @@ export default function MachineEnclosure({
 	maintained = false,
 	settling = false,
 	ownWindow = false,
+	heldBy,
 	describes,
 	children,
 }: {
@@ -119,10 +122,9 @@ export default function MachineEnclosure({
 	health: HealthState;
 	/** The box's name, for the tooltip. */
 	name?: string | null;
-	/** Whether a maintenance window suspends this box, its own or its group's.
-	 * A window is declared over a machine and never over an application, so it
-	 * is the enclosure that carries it — the applications inside are suspended
-	 * by their box rather than each saying so. */
+	/** Whether a maintenance window suspends this box, its own, its
+	 * environment's or its group's. A window over one application inside it
+	 * fades that dot alone and leaves the enclosure plain. */
 	// spec: MNT#presentation
 	maintained?: boolean;
 	/** Whether every window over the box has ended and it is serving out the
@@ -138,6 +140,11 @@ export default function MachineEnclosure({
 	 * so the dots need no tooltip of their own: two tooltips over the same few
 	 * pixels open together and overlap, and the reader loses both. */
 	describes?: string[];
+	/** What holds the window where it was not declared over this box: the
+	 * environment it serves, or its group. Named so a suspended box says what
+	 * caught it rather than reading as one nobody declared. */
+	// spec: MNT#presentation
+	heldBy?: string | null;
 	/** The dots for the applications on this machine. */
 	children: ReactNode;
 }) {
@@ -145,11 +152,7 @@ export default function MachineEnclosure({
 	const box = [
 		name,
 		enclosureTitle(up, health),
-		maintained
-			? settling
-				? "maintenance just ended, watching resumes shortly"
-				: "under maintenance"
-			: null,
+		maintained ? maintenanceLine(ownWindow, settling, heldBy) : null,
 	]
 		.filter(Boolean)
 		.join(" · ");

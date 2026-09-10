@@ -5,7 +5,7 @@ use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::{backup_jobs::BillingLabels, tailscale_auth::TailscaleAdmin};
 use commons_types::{
 	Uuid,
-	server::TagMap,
+	server::{TagMap, rank::ServerRank},
 	status::{HealthState, ShortStatus},
 };
 use database::server_groups::{NewServerGroup, PartialServerGroup, ServerGroup};
@@ -162,11 +162,49 @@ pub struct GroupDetail {
 	pub machines: Vec<GroupMachine>,
 	/// The group's effective `billing.*` labels (product/deployment/stage).
 	pub billing_labels: Vec<BillingTag>,
+	/// The environments the group has, production first: the ranks its live
+	/// applications sit at. Each is a maintenance target of its own.
+	// spec: MNT#declaring
+	pub environments: Vec<GroupEnvironment>,
 	/// Whether a maintenance window (or its settle period) suspends the group.
 	pub maintained: bool,
 	/// Whether the suspension is only the settle period: the window has
 	/// ended and watching resumes when it elapses.
 	pub maintenance_settling: bool,
+}
+
+/// One of a group's environments: its applications at one rank, and a
+/// maintenance target of its own, so the tree can mark the row a window was
+/// declared over rather than only the boxes it caught.
+// spec: MNT#presentation
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GroupEnvironment {
+	/// The rank its applications sit at.
+	pub rank: ServerRank,
+	/// Whether a window over this environment (or its settle period) suspends it.
+	pub maintained: bool,
+	/// Whether that window has ended and watching resumes when the settle
+	/// period elapses.
+	pub maintenance_settling: bool,
+}
+
+/// A group's environments with the maintenance state of each, so every surface
+/// that draws the group's tree marks the same rows.
+// spec: MNT#presentation
+pub(super) async fn group_environments(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	group: Uuid,
+	suspended: &database::maintenance_windows::SuspendedTargets,
+) -> Result<Vec<GroupEnvironment>> {
+	Ok(ServerGroup::environment_ranks(conn, &[group])
+		.await?
+		.into_iter()
+		.map(|environment| GroupEnvironment {
+			rank: environment.rank,
+			maintained: suspended.environment_window(group, environment.rank),
+			maintenance_settling: suspended.environment_window_settling(group, environment.rank),
+		})
+		.collect())
 }
 
 /// One of a group's machines, as an operator picks it out of a list.
@@ -229,6 +267,9 @@ pub async fn get(
 	let group = ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
 	let (applications, machines) = tree_members(&mut conn, &group).await?;
 	let billing_labels = group_billing_labels(&mut conn, &group).await?;
+	let suspended =
+		database::maintenance_windows::MaintenanceWindow::suspended_targets(&mut conn).await?;
+	let environments = group_environments(&mut conn, args.server_group_id, &suspended).await?;
 	let maintained = database::maintenance_windows::MaintenanceWindow::suspends(
 		&mut conn,
 		None,
@@ -252,6 +293,7 @@ pub async fn get(
 		maintained,
 		maintenance_settling,
 		billing_labels,
+		environments,
 	}))
 }
 

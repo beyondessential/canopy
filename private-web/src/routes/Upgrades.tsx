@@ -53,7 +53,8 @@ import ServerRankChip from "../components/ServerRankChip";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
-import type { ApiResponse, ServerRank } from "../types";
+import { environmentName } from "../types";
+import type { ApiResponse, MaintenanceWindow, ServerRank } from "../types";
 
 type PastPlan = ApiResponse<"upgrade_plans", "history">[number];
 type PlannableVersion = ApiResponse<"upgrade_plans", "targets">[number];
@@ -166,11 +167,14 @@ export default function Upgrades() {
 											/>
 										</TableCell>
 										<TableCell>
-											<PlannedTime
-												time={row.plan?.planned_time ?? null}
-												end={row.plan?.planned_end_time ?? null}
-												zone={row.plan?.planned_zone ?? null}
-											/>
+											<Stack spacing={0.25}>
+												<PlannedTime
+													time={row.plan?.planned_time ?? null}
+													end={row.plan?.planned_end_time ?? null}
+													zone={row.plan?.planned_zone ?? null}
+												/>
+												<UnderMaintenance held={row.maintenance_window} />
+											</Stack>
 										</TableCell>
 										<TableCell>
 											<PlanNote
@@ -201,9 +205,9 @@ export default function Upgrades() {
 													groupId={row.group_id}
 													rank={row.rank}
 													groupName={environmentName(row.group_name, row.rank)}
-													plannedTime={row.plan?.planned_time ?? null}
-													plannedEnd={row.plan?.planned_end_time ?? null}
 													note={row.plan?.note ?? null}
+													held={row.maintenance_window}
+													planned={row.planned_window}
 													onDeclared={() => setTick((t) => t + 1)}
 												/>
 											</TableCell>
@@ -218,24 +222,24 @@ export default function Upgrades() {
 
 			<Disclosure
 				title="No plan recorded"
-				subject="groups with no plan"
+				subject="environments with no plan"
 				caption={
 					unplanned.length === 1
-						? "1 group is behind with no plan, so it gets no pre-upgrade testing"
-						: `${unplanned.length} groups are behind with no plan, so they get no pre-upgrade testing`
+						? "1 environment is behind with no plan, so it gets no pre-upgrade testing"
+						: `${unplanned.length} environments are behind with no plan, so they get no pre-upgrade testing`
 				}
 				testId="unplanned-upgrades"
 			>
 					{unplanned.length === 0 ? (
 						<Typography variant="body2" color="text.secondary">
-							Every group that is behind has a plan.
+							Every environment that is behind has a plan.
 						</Typography>
 					) : (
 						<TableContainer>
 							<Table size="small" sx={TIGHT_TABLE}>
 							<TableHead>
 								<TableRow>
-									<TableCell>Group</TableCell>
+									<TableCell>Environment</TableCell>
 									<TableCell>Running</TableCell>
 									<TableCell>Behind by</TableCell>
 								</TableRow>
@@ -277,12 +281,6 @@ function behindLabel(behind: number): string {
 	const minors = behind % 1000;
 	if (majors > 0) return `${majors} major${majors === 1 ? "" : "s"}`;
 	return `${minors} minor${minors === 1 ? "" : "s"}`;
-}
-
-/// How an environment is named where it is read: the group, with the rank after
-/// it unless it is the group's production.
-function environmentName(group: string, rank: ServerRank): string {
-	return rank === "production" ? group : `${group} ${rank}`;
 }
 
 function EnvironmentName({
@@ -1530,6 +1528,47 @@ function PlanNote({ note, testId }: { note: string | null; testId: string }) {
 /// The window a group moves in, as the wall clocks it was recorded as.
 /// Canopy holds no timezone for a group, so the zone travels with the time or
 /// the reader cannot tell whose midnight it is.
+/// Work declared over the environment, which is what holds an open plan open.
+/// Sits with the window because that is the shape of it: hours the environment
+/// is not being alerted on.
+// spec: UPG#when-a-plan-is-met
+function UnderMaintenance({
+	held,
+}: {
+	held: MaintenanceWindow | null | undefined;
+}) {
+	if (!held) {
+		return null;
+	}
+	// A window with no rank covers the whole group, so say so rather than let it
+	// read as this environment's alone.
+	const whole = held.rank === null;
+	const until = held.expected_end
+		? ` until ${new Date(held.expected_end).toLocaleTimeString(undefined, {
+				hour: "2-digit",
+				minute: "2-digit",
+			})}`
+		: "";
+	return (
+		<Tooltip
+			title={
+				whole
+					? "maintenance is declared over the whole group, so this plan stays open until that work is over"
+					: "maintenance is declared over this environment, so its plan stays open until the work is over"
+			}
+		>
+			<Typography
+				variant="caption"
+				sx={{ color: "info.main" }}
+				data-testid="plan-under-maintenance"
+			>
+				{whole ? "group in maintenance" : "in maintenance"}
+				{until}
+			</Typography>
+		</Tooltip>
+	);
+}
+
 function PlannedTime({
 	time,
 	end,
@@ -2214,18 +2253,31 @@ function WithdrawPlan({
 	);
 }
 
-/** How long the plan says the group is down, from its window's two
- * wall clocks. A close earlier in the day than the open is the following
- * morning, as the plan reads it. Two hours where the plan names no window,
- * which is what a declaration otherwise starts from. */
-function plannedHours(time: string | null, end: string | null): number {
-	if (!time || !end) return 2;
-	const minutes = (clock: string) => {
-		const [h, m] = clock.split(":");
-		return Number(h) * 60 + Number(m ?? 0);
-	};
-	const span = minutes(end) - minutes(time);
-	return (span > 0 ? span : span + 24 * 60) / 60;
+/// When the plan's window closes, as a reader would say it. A declaration runs
+/// from now, so its end is the only part of the window that bounds it.
+function planWindowLabel(planned: { ends_at: string }): string {
+	return new Date(planned.ends_at).toLocaleString(undefined, {
+		hour: "2-digit",
+		minute: "2-digit",
+		day: "numeric",
+		month: "short",
+	});
+}
+
+/// How long a declaration should run, in milliseconds: the length of the plan's
+/// own window where it named one. A declaration opens now, so the plan supplies
+/// how long the work takes and not when it starts.
+// spec: MNT#declaring
+const DEFAULT_LENGTH_MS = 2 * 3600_000;
+function plannedLength(
+	planned: { starts_at: string; ends_at: string } | null | undefined,
+): number {
+	if (!planned) {
+		return DEFAULT_LENGTH_MS;
+	}
+	const span =
+		new Date(planned.ends_at).getTime() - new Date(planned.starts_at).getTime();
+	return span > 0 ? span : DEFAULT_LENGTH_MS;
 }
 
 /** Declare maintenance over an environment from its open plan, carrying the
@@ -2236,45 +2288,133 @@ function DeclareFromPlan({
 	groupId,
 	rank,
 	groupName,
-	plannedTime,
-	plannedEnd,
 	note,
+	held,
+	planned,
 	onDeclared,
 }: {
 	groupId: string;
 	rank: ServerRank;
 	groupName: string;
-	plannedTime: string | null;
-	plannedEnd: string | null;
 	note: string | null;
+	/// The window holding over this environment, where work is already declared.
+	/// The control then amends that work rather than declaring over it again.
+	// spec: UPG#when-a-plan-is-met
+	held: MaintenanceWindow | null | undefined;
+	/// The hours the plan says the work runs. Declaring over a plan that named
+	/// them is a confirmation rather than a form: the operator already said when.
+	// spec: MNT#declaring
+	planned: { starts_at: string; ends_at: string } | null | undefined;
 	onDeclared: () => void;
 }) {
 	const [open, setOpen] = useState(false);
-	const hours = plannedHours(plannedTime, plannedEnd);
+	const [adjusting, setAdjusting] = useState(false);
+	const declare = useApiAction("maintenance", "declare");
+	// A window over the whole group is not this row's to amend or lift: ending it
+	// would un-suspend every other environment in the group.
+	const ownWindow = held && held.rank ? held : null;
+	// Declaring opens the window now, so only a plan whose own hours are under
+	// way can be confirmed as they stand. One still ahead, or already past, falls
+	// back to the form.
+	const confirmable =
+		!ownWindow &&
+		!!planned &&
+		new Date(planned.starts_at).getTime() <= Date.now() &&
+		new Date(planned.ends_at).getTime() > Date.now();
 	return (
 		<>
-			<Tooltip title="Declare maintenance: suspend this environment's alerting while the upgrade runs">
+			<Tooltip
+				title={
+					ownWindow
+						? "Maintenance is declared over this environment, so its plan stays open until the work is over; amend it here"
+						: "Declare maintenance: suspend this environment's alerting while the upgrade runs"
+				}
+			>
 				<IconButton
 					size="small"
-					aria-label={`Declare maintenance for ${groupName}`}
-					onClick={() => setOpen(true)}
+					aria-label={`${ownWindow ? "Amend" : "Declare"} maintenance for ${groupName}`}
+					onClick={() => {
+						setAdjusting(false);
+						setOpen(true);
+					}}
+					data-testid={ownWindow ? "amend-maintenance" : undefined}
 				>
 					<BuildOutlinedIcon fontSize="small" />
 				</IconButton>
 			</Tooltip>
+			{confirmable && planned && (
+				<Dialog
+					open={open && !adjusting}
+					onClose={() => setOpen(false)}
+					data-testid="confirm-declare"
+				>
+					<DialogTitle>Declare maintenance — {groupName}</DialogTitle>
+					<DialogContent>
+						<Typography variant="body2">
+							Suspends this environment's alerting from now until{" "}
+							{planWindowLabel(planned)}, the end of the plan's window.
+						</Typography>
+						{note && (
+							<Typography
+								variant="body2"
+								sx={{ mt: 1, fontStyle: "italic" }}
+							>
+								{note}
+							</Typography>
+						)}
+						{declare.error && (
+							<Alert severity="error" sx={{ mt: 2 }}>
+								{declare.error.message}
+							</Alert>
+						)}
+					</DialogContent>
+					<DialogActions>
+						<Button onClick={() => setAdjusting(true)} sx={{ mr: "auto" }}>
+							Adjust
+						</Button>
+						<Button onClick={() => setOpen(false)}>Cancel</Button>
+						<Button
+							variant="contained"
+							disabled={declare.pending}
+							onClick={async () => {
+								try {
+									await declare.call({
+										server_group_id: groupId,
+										rank,
+										expected_end: planned.ends_at,
+										note: note ?? undefined,
+									});
+									setOpen(false);
+									onDeclared();
+								} catch {
+									/* surfaced above */
+								}
+							}}
+						>
+							Declare
+						</Button>
+					</DialogActions>
+				</Dialog>
+			)}
 			<DeclareMaintenanceDialog
-				open={open}
+				open={open && (!confirmable || adjusting)}
 				onClose={() => setOpen(false)}
 				scope="group"
 				id={groupId}
-				rank={rank}
+				rank={ownWindow ? (ownWindow.rank ?? undefined) : rank}
 				targetLabel={groupName}
-				prefill={{
-					expectedEnd: new Date(
-						Date.now() + hours * 3600_000,
-					).toISOString(),
-					note: note ?? undefined,
-				}}
+				existing={ownWindow}
+				offerLift
+				prefill={
+					ownWindow
+						? undefined
+						: {
+								expectedEnd: new Date(
+									Date.now() + plannedLength(planned),
+								).toISOString(),
+								note: note ?? undefined,
+							}
+				}
 				onDone={onDeclared}
 			/>
 		</>

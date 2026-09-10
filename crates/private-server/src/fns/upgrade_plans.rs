@@ -32,6 +32,18 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(withdraw))
 }
 
+/// The hours a plan says its work runs, resolved to instants.
+#[derive(Serialize, ToSchema)]
+pub struct PlannedWindow {
+	/// When the work is planned to start.
+	#[schema(value_type = String)]
+	pub starts_at: jiff::Timestamp,
+	/// When it is planned to be over. A window closing earlier in the day than
+	/// it opened runs into the next morning.
+	#[schema(value_type = String)]
+	pub ends_at: jiff::Timestamp,
+}
+
 /// One row of the planned-upgrades view: one of a group's environments.
 #[derive(Serialize, ToSchema)]
 pub struct PlannedUpgrade {
@@ -72,6 +84,16 @@ pub struct PlannedUpgrade {
 	/// at "not tested" indefinitely with nothing on its way. `null` without a
 	/// plan.
 	pub testable: Option<bool>,
+	/// When the plan's own window opens and closes, where it recorded one. The
+	/// hours the operator said the work runs, so declaring over it can offer
+	/// exactly those rather than a guess from now.
+	// spec: UPG#when-a-plan-is-met
+	pub planned_window: Option<PlannedWindow>,
+	/// The window holding over this environment or its group, where one is.
+	/// This is what holds an open plan open, so the view can both say why one
+	/// has not closed and amend the work from there.
+	// spec: UPG#when-a-plan-is-met
+	pub maintenance_window: Option<database::maintenance_windows::MaintenanceWindow>,
 }
 
 /// Planned upgrades across the fleet.
@@ -130,6 +152,22 @@ pub async fn fleet(
 			.map(|version| (version.id, version))
 			.collect();
 
+	// The windows themselves, so the view can amend the work rather than only
+	// report it. Everything holding needs is on these rows, so this is the only
+	// read of the table the view makes.
+	let open_windows =
+		database::maintenance_windows::MaintenanceWindow::list_open(&mut conn).await?;
+	// A window over the group covers its environments, and the environment's own
+	// is the more specific of the two, so index both and prefer the specific.
+	let mut holding: HashMap<(Uuid, Option<ServerRank>), &_> = HashMap::new();
+	for window in &open_windows {
+		if let Some(group) = window.server_group_id
+			&& window.ended_at.is_none()
+			&& window.holds_at(now_ts)
+		{
+			holding.insert((group, window.rank), window);
+		}
+	}
 	let mut environments = ServerGroup::environments(&mut conn, &ids).await?;
 	// A plan whose environment has no live application any more still says
 	// where the group was going, and this view is the only place it can be
@@ -152,6 +190,10 @@ pub async fn fleet(
 	let mut out = Vec::new();
 	for env in environments {
 		let plan = open.remove(&(env.group_id, env.rank));
+		let planned_window = plan.as_ref().and_then(|plan| {
+			database::upgrade_plans::planned_window(plan)
+				.map(|(starts_at, ends_at)| PlannedWindow { starts_at, ends_at })
+		});
 		let planned = plan
 			.as_ref()
 			.and_then(|plan| versions.get(&plan.target_version_id));
@@ -241,6 +283,11 @@ pub async fn fleet(
 			verdict,
 			attempt,
 			testable,
+			planned_window,
+			maintenance_window: holding
+				.get(&(env.group_id, Some(env.rank)))
+				.or_else(|| holding.get(&(env.group_id, None)))
+				.map(|window| (*window).clone()),
 		});
 	}
 

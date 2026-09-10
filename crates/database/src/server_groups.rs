@@ -521,6 +521,24 @@ impl ServerGroup {
 		db: &mut AsyncPgConnection,
 		group_ids: &[Uuid],
 	) -> Result<Vec<Environment>> {
+		Self::environments_inner(db, group_ids, true).await
+	}
+
+	/// The environments a group has, without the version each reports: for a
+	/// caller that wants the ranks and would discard the rest.
+	// spec: GRP#environments
+	pub async fn environment_ranks(
+		db: &mut AsyncPgConnection,
+		group_ids: &[Uuid],
+	) -> Result<Vec<Environment>> {
+		Self::environments_inner(db, group_ids, false).await
+	}
+
+	async fn environments_inner(
+		db: &mut AsyncPgConnection,
+		group_ids: &[Uuid],
+		with_versions: bool,
+	) -> Result<Vec<Environment>> {
 		use crate::schema::applications::dsl;
 		use std::collections::{BTreeSet, HashMap, HashSet};
 
@@ -581,8 +599,14 @@ impl ServerGroup {
 				.or_insert(id);
 		}
 
-		let ids: Vec<Uuid> = central.values().copied().collect();
-		let versions = crate::reported_detail::ReportedDetail::last_versions(db, &ids).await?;
+		// A caller that only needs the ranks does not pay for the version each
+		// environment reports.
+		let versions = if with_versions {
+			let ids: Vec<Uuid> = central.values().copied().collect();
+			crate::reported_detail::ReportedDetail::last_versions(db, &ids).await?
+		} else {
+			HashMap::new()
+		};
 
 		let mut out = Vec::new();
 		for group_id in group_ids {

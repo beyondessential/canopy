@@ -161,6 +161,21 @@ impl Version {
 			.map_err(AppError::from)
 	}
 
+	/// The versions with these ids, drafts included: a caller resolving the
+	/// targets of a handful of records needs those rows and not the table.
+	pub async fn get_all_by_ids(db: &mut AsyncPgConnection, ids: &[Uuid]) -> Result<Vec<Self>> {
+		use crate::schema::versions::dsl;
+		if ids.is_empty() {
+			return Ok(Vec::new());
+		}
+		dsl::versions
+			.select(Self::as_select())
+			.filter(dsl::id.eq_any(ids))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn get_all_including_drafts(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::schema::versions::*;
 

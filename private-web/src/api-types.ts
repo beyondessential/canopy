@@ -6180,6 +6180,11 @@ export interface components {
             applications: components["schemas"]["ServerInfo"][];
             /** @description The group's effective `billing.*` labels (product/deployment/stage). */
             billing_labels: components["schemas"]["BillingTag"][];
+            /**
+             * @description The environments the group has, production first: the ranks its live
+             *     applications sit at. Each is a maintenance target of its own.
+             */
+            environments: components["schemas"]["GroupEnvironment"][];
             /** @description The group itself. */
             group: components["schemas"]["ServerGroup"];
             /**
@@ -6230,6 +6235,22 @@ export interface components {
              *     no name beneath it until the zone is restored or the claim released.
              */
             zone?: string | null;
+        };
+        /**
+         * @description One of a group's environments: its applications at one rank, and a
+         *     maintenance target of its own, so the tree can mark the row a window was
+         *     declared over rather than only the boxes it caught.
+         */
+        GroupEnvironment: {
+            /** @description Whether a window over this environment (or its settle period) suspends it. */
+            maintained: boolean;
+            /**
+             * @description Whether that window has ended and watching resumes when the settle
+             *     period elapses.
+             */
+            maintenance_settling: boolean;
+            /** @description The rank its applications sit at. */
+            rank: components["schemas"]["ServerRank"];
         };
         /** @description Identifies the server group to operate on. */
         GroupIdArgs: {
@@ -7685,6 +7706,12 @@ export interface components {
              */
             group_applications: components["schemas"]["ServerInfo"][];
             /**
+             * @description The group's environments and whether a window holds over each, so the
+             *     group summary marks the row a window was declared over rather than
+             *     leaving it to be inferred from the boxes it caught.
+             */
+            group_environments: components["schemas"]["GroupEnvironment"][];
+            /**
              * @description Every machine in this box's group, for the same tree. Empty when the
              *     machine is ungrouped.
              */
@@ -7720,6 +7747,13 @@ export interface components {
              *     cannot say who is on it now.
              */
             operators: components["schemas"]["OperatorPresence"][];
+            /**
+             * @description Whether that window was declared over this box, rather than reaching it
+             *     through its environment or its group. The mark is drawn at the grain it
+             *     was declared over, and what a box's applications are held by follows
+             *     from it.
+             */
+            own_window: boolean;
             /** @description Whether the box is currently reporting, on its own threshold. */
             up: components["schemas"]["ShortStatus"];
         };
@@ -8429,7 +8463,9 @@ export interface components {
              *     Presentational: a slipping upgrade is normal operational reality.
              */
             late: boolean;
+            maintenance_window?: null | components["schemas"]["MaintenanceWindow"];
             plan?: null | components["schemas"]["UpgradePlan"];
+            planned_window?: null | components["schemas"]["PlannedWindow"];
             /**
              * @description The rank of the environment this concerns: the group's applications at
              *     that rank.
@@ -8451,6 +8487,16 @@ export interface components {
              *     `null` without a plan.
              */
             verdict?: string | null;
+        };
+        /** @description The hours a plan says its work runs, resolved to instants. */
+        PlannedWindow: {
+            /**
+             * @description When it is planned to be over. A window closing earlier in the day than
+             *     it opened runs into the next morning.
+             */
+            ends_at: string;
+            /** @description When the work is planned to start. */
+            starts_at: string;
         };
         /**
          * @description Request body for reading one group's plans. Named apart from the
@@ -9691,6 +9737,12 @@ export interface components {
              *     its own `up` / `health` so the tree renders a status dot per workload.
              */
             group_applications: components["schemas"]["ServerInfo"][];
+            /**
+             * @description The group's environments and whether a window holds over each, so the
+             *     group summary marks the row a window was declared over rather than
+             *     leaving it to be inferred from the boxes it caught.
+             */
+            group_environments: components["schemas"]["GroupEnvironment"][];
             /**
              * @description Every machine in the group, for the same tree: the boxes the
              *     applications above are arranged under. Empty when the application is

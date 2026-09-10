@@ -8,6 +8,8 @@ use commons_types::{
 };
 use database::{
 	applications::Application,
+	issues::Scope,
+	maintenance_windows::MaintenanceWindow,
 	migration_tests::candidate_for,
 	reported_detail::ReportedDetail,
 	server_groups::ServerGroup,
@@ -17,6 +19,7 @@ use database::{
 use diesel::{QueryableByName, SelectableHelper, sql_query, sql_types};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::civil::{date, time};
+use jiff::{SignedDuration, Timestamp, Zoned, tz::TimeZone};
 use uuid::Uuid;
 
 #[derive(QueryableByName)]
@@ -281,6 +284,236 @@ async fn canopy_closes_a_plan_once_the_group_arrives() {
 				.expect("target")
 				.is_none(),
 			"and stops steering the test target"
+		);
+	})
+	.await
+}
+
+/// The case this exists for: the version appears as the upgrade starts, well
+/// before traffic switches, and nobody declared maintenance. The plan's own
+/// window is the operator saying when the work runs, so it holds the plan.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plan_stays_open_through_its_own_window() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, server) = group_running(&mut conn, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+		let now = Zoned::now().with_time_zone(TimeZone::UTC);
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			ServerRank::Production,
+			target.id,
+			PlannedWhen {
+				date: Some(now.date()),
+				time: Some(now.time()),
+				// Still running for another two hours.
+				end: Some((&now + SignedDuration::from_hours(2)).time()),
+				zone: Some("UTC".to_owned()),
+			},
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
+
+		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
+		assert_eq!(
+			close_met_plans(&mut conn).await.expect("sweep"),
+			0,
+			"the window the operator planned is still running"
+		);
+
+		sql_query("UPDATE upgrade_plans SET planned_for = planned_for - 2")
+			.execute(&mut conn)
+			.await
+			.expect("age the plan past its window");
+		assert_eq!(
+			close_met_plans(&mut conn).await.expect("sweep"),
+			1,
+			"the window has closed and the environment stands on the target"
+		);
+	})
+	.await
+}
+
+/// A window three weeks out says nothing about work happening now: an
+/// environment that arrives early has done the upgrade, whatever the plan said.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_window_that_has_not_started_does_not_hold_the_plan() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, server) = group_running(&mut conn, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+		let later =
+			Zoned::now().with_time_zone(TimeZone::UTC) + SignedDuration::from_hours(24 * 21);
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			ServerRank::Production,
+			target.id,
+			PlannedWhen {
+				date: Some(later.date()),
+				time: Some(later.time()),
+				end: Some((&later + SignedDuration::from_hours(2)).time()),
+				zone: Some("UTC".to_owned()),
+			},
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
+
+		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
+		assert_eq!(
+			close_met_plans(&mut conn).await.expect("sweep"),
+			1,
+			"the upgrade happened ahead of its slot, so the plan is met"
+		);
+	})
+	.await
+}
+
+/// An hour to start and none to finish still says work is under way: the
+/// operator named when it begins, not that it takes no time.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_start_with_no_end_still_holds_the_plan() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, server) = group_running(&mut conn, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+		let started = Zoned::now().with_time_zone(TimeZone::UTC) - SignedDuration::from_mins(5);
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			ServerRank::Production,
+			target.id,
+			PlannedWhen {
+				date: Some(started.date()),
+				time: Some(started.time()),
+				end: None,
+				zone: Some("UTC".to_owned()),
+			},
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
+
+		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
+		assert_eq!(
+			close_met_plans(&mut conn).await.expect("sweep"),
+			0,
+			"the work started five minutes ago and has a default shift to run"
+		);
+	})
+	.await
+}
+
+/// A plan with no window recorded has nothing to wait on, so the version
+/// arriving is all the evidence there is.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plan_without_a_window_closes_on_the_version() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, server) = group_running(&mut conn, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			ServerRank::Production,
+			target.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
+
+		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
+		assert_eq!(close_met_plans(&mut conn).await.expect("sweep"), 1);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_declared_window_holds_the_plan_open_until_the_work_is_over() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, server) = group_running(&mut conn, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			ServerRank::Production,
+			target.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
+
+		let window = MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group),
+			Some(ServerRank::Production),
+			Timestamp::now() + SignedDuration::from_hours(4),
+			Some("upgrading to 2.61"),
+			Some("a@example.com"),
+		)
+		.await
+		.expect("declare");
+
+		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
+		assert_eq!(
+			close_met_plans(&mut conn).await.expect("sweep"),
+			0,
+			"the operator is still in there"
+		);
+
+		// Suspension outlasts the window so alerts stay quiet through a restart,
+		// but nobody is working any more: lifting is the operator saying so.
+		MaintenanceWindow::lift(&mut conn, window.id, Some("a@example.com"))
+			.await
+			.expect("lift");
+		assert_eq!(
+			close_met_plans(&mut conn).await.expect("sweep"),
+			1,
+			"the work is over and the environment stands on the target"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_window_over_the_group_holds_its_environments_plans_open() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, server) = group_running(&mut conn, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			ServerRank::Production,
+			target.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
+
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group),
+			None,
+			Timestamp::now() + SignedDuration::from_hours(4),
+			None,
+			Some("a@example.com"),
+		)
+		.await
+		.expect("declare");
+
+		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
+		assert_eq!(
+			close_met_plans(&mut conn).await.expect("sweep"),
+			0,
+			"a window over the whole group covers the environment in it"
 		);
 	})
 	.await

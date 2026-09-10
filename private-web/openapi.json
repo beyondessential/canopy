@@ -11460,6 +11460,7 @@
           "applications",
           "machines",
           "billing_labels",
+          "environments",
           "maintained",
           "maintenance_settling"
         ],
@@ -11477,6 +11478,13 @@
               "$ref": "#/components/schemas/BillingTag"
             },
             "description": "The group's effective `billing.*` labels (product/deployment/stage)."
+          },
+          "environments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupEnvironment"
+            },
+            "description": "The environments the group has, production first: the ranks its live\napplications sit at. Each is a maintenance target of its own."
           },
           "group": {
             "$ref": "#/components/schemas/ServerGroup",
@@ -11554,6 +11562,29 @@
               "null"
             ],
             "description": "Apex of the managed zone this domain resolves to — the longest\nconfigured apex it sits within. Null when no configured zone covers it,\nwhich means the zone has left Canopy's configuration since the claim was\nmade: the claim stands and still excludes others, but Canopy will act on\nno name beneath it until the zone is restored or the claim released."
+          }
+        }
+      },
+      "GroupEnvironment": {
+        "type": "object",
+        "description": "One of a group's environments: its applications at one rank, and a\nmaintenance target of its own, so the tree can mark the row a window was\ndeclared over rather than only the boxes it caught.",
+        "required": [
+          "rank",
+          "maintained",
+          "maintenance_settling"
+        ],
+        "properties": {
+          "maintained": {
+            "type": "boolean",
+            "description": "Whether a window over this environment (or its settle period) suspends it."
+          },
+          "maintenance_settling": {
+            "type": "boolean",
+            "description": "Whether that window has ended and watching resumes when the settle\nperiod elapses."
+          },
+          "rank": {
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "The rank its applications sit at."
           }
         }
       },
@@ -13728,11 +13759,13 @@
           "health",
           "maintained",
           "maintenance_settling",
+          "own_window",
           "checks",
           "operators",
           "applications",
           "group_applications",
           "group_machines",
+          "group_environments",
           "billing_labels"
         ],
         "properties": {
@@ -13787,6 +13820,13 @@
             },
             "description": "Every application in this box's group, for the tree the page ends with.\nEmpty when the machine is ungrouped. The applications on this box are\namong them, the tree being a map of the group rather than of elsewhere."
           },
+          "group_environments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupEnvironment"
+            },
+            "description": "The group's environments and whether a window holds over each, so the\ngroup summary marks the row a window was declared over rather than\nleaving it to be inferred from the boxes it caught."
+          },
           "group_machines": {
             "type": "array",
             "items": {
@@ -13828,6 +13868,10 @@
               "$ref": "#/components/schemas/OperatorPresence"
             },
             "description": "The people logged in to this box right now, from its `external_users`\ncheck. Empty unless the box is currently reporting: a stale report\ncannot say who is on it now."
+          },
+          "own_window": {
+            "type": "boolean",
+            "description": "Whether that window was declared over this box, rather than reaching it\nthrough its environment or its group. The mark is drawn at the grain it\nwas declared over, and what a box's applications are held by follows\nfrom it."
           },
           "up": {
             "$ref": "#/components/schemas/ShortStatus",
@@ -15059,6 +15103,17 @@
             "type": "boolean",
             "description": "Whether the planned date has passed without the upgrade happening.\nPresentational: a slipping upgrade is normal operational reality."
           },
+          "maintenance_window": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MaintenanceWindow",
+                "description": "The window holding over this environment or its group, where one is.\nThis is what holds an open plan open, so the view can both say why one\nhas not closed and amend the work from there."
+              }
+            ]
+          },
           "plan": {
             "oneOf": [
               {
@@ -15067,6 +15122,17 @@
               {
                 "$ref": "#/components/schemas/UpgradePlan",
                 "description": "The plan, absent for an environment with none."
+              }
+            ]
+          },
+          "planned_window": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PlannedWindow",
+                "description": "When the plan's own window opens and closes, where it recorded one. The\nhours the operator said the work runs, so declaring over it can offer\nexactly those rather than a guess from now."
               }
             ]
           },
@@ -15094,6 +15160,24 @@
               "null"
             ],
             "description": "Where the environment's data stands against the planned version, rolled\nup from its applications: any failure makes the environment a failure,\nsince one application whose data breaks is enough to stop the upgrade.\n`null` without a plan."
+          }
+        }
+      },
+      "PlannedWindow": {
+        "type": "object",
+        "description": "The hours a plan says its work runs, resolved to instants.",
+        "required": [
+          "starts_at",
+          "ends_at"
+        ],
+        "properties": {
+          "ends_at": {
+            "type": "string",
+            "description": "When it is planned to be over. A window closing earlier in the day than\nit opened runs into the next morning."
+          },
+          "starts_at": {
+            "type": "string",
+            "description": "When the work is planned to start."
           }
         }
       },
@@ -16942,6 +17026,7 @@
           "checks",
           "group_applications",
           "group_machines",
+          "group_environments",
           "billing_labels"
         ],
         "properties": {
@@ -16984,6 +17069,13 @@
               "$ref": "#/components/schemas/ServerInfo"
             },
             "description": "Every application in the group, this one included, for the tree the page\nends with. Empty when the application is ungrouped. Each entry carries\nits own `up` / `health` so the tree renders a status dot per workload."
+          },
+          "group_environments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupEnvironment"
+            },
+            "description": "The group's environments and whether a window holds over each, so the\ngroup summary marks the row a window was declared over rather than\nleaving it to be inferred from the boxes it caught."
           },
           "group_machines": {
             "type": "array",

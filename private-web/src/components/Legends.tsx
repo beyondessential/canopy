@@ -114,7 +114,7 @@ export function StatusLegend() {
 			>
 				<StatusDot up="up" health="healthy" maintained quiet />
 				<Typography variant="body2" color="text.secondary">
-					Hollow: this application is under maintenance
+					Hollow, or faded inside a machine's ring: this application is under maintenance
 				</Typography>
 			</Stack>
 		</Stack>

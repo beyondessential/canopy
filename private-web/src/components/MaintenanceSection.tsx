@@ -3,16 +3,21 @@ import {
 	Box,
 	Button,
 	LinearProgress,
+	ListSubheader,
+	Menu,
+	MenuItem,
 	Link as MuiLink,
 	Paper,
 	Stack,
 	Typography,
 } from "@mui/material";
+import ArrowDropDownIcon from "@mui/icons-material/ArrowDropDown";
 import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
+import { environmentName, heldByLabel } from "../types";
 import type { MaintenanceScope, MaintenanceWindow, ServerRank } from "../types";
 import DeclareMaintenanceDialog from "./DeclareMaintenanceDialog";
 import ServerRankChip from "./ServerRankChip";
@@ -33,6 +38,7 @@ export default function MaintenanceSection({
 	groupId,
 	groupName,
 	rank,
+	environments,
 	onChanged,
 	reloadKey = 0,
 	anchor,
@@ -55,6 +61,10 @@ export default function MaintenanceSection({
 	/** The environment the target serves: a window over its group's
 	 * environment at that rank covers it too. */
 	rank?: ServerRank | null;
+	/** For a group, the environments it has. Each is a target of its own, so
+	 * the group's surface is where one is declared over without a plan. */
+	// spec: MNT#declaring
+	environments?: ServerRank[];
 	/** Called after declaring or lifting, so the page can refresh the
 	 * health and checks that the window changes. */
 	onChanged?: () => void;
@@ -65,6 +75,11 @@ export default function MaintenanceSection({
 	const isAdmin = useIsAdmin() === true;
 	const [tick, setTick] = useState(0);
 	const [dialogOpen, setDialogOpen] = useState(false);
+	const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
+	const [environmentDialog, setEnvironmentDialog] = useState<{
+		rank: ServerRank;
+		existing: MaintenanceWindow | null;
+	} | null>(null);
 	const lift = useApiAction("maintenance", "lift");
 
 	const result = useApi(
@@ -115,26 +130,36 @@ export default function MaintenanceSection({
 	}
 
 	const windows: MaintenanceWindow[] = result.data;
+	// A window past its expected end suspends nothing, whether or not the sweep
+	// has closed it: saying otherwise claims alerting is off while it is back on.
+	// spec: MNT#settling
+	const holds = (window: MaintenanceWindow) =>
+		window.ended_at === null &&
+		new Date(window.expected_end).getTime() > Date.now();
 	// A group's own window, not one of its environments'.
 	const open = windows.find((w) => w.ended_at === null && !w.rank) ?? null;
-	const environments = windows.filter((w) => w.ended_at === null && w.rank);
+	const environmentWindows = windows.filter((w) => w.ended_at === null && w.rank);
+	const held = new Set(environmentWindows.map((w) => w.rank));
+	// Only an admin is offered these, so for anyone else there is nothing to show.
+	const declarable = isAdmin ? (environments ?? []).filter((r) => !held.has(r)) : [];
 	const fromGroup =
 		covering.status === "ok"
 			? ((covering.data as MaintenanceWindow[]).find(
-					(w) => w.ended_at === null && (!w.rank || w.rank === rank),
+					(w) => holds(w) && (!w.rank || w.rank === rank),
 				) ?? null)
 			: null;
 	const fromMachine =
 		coveringMachine.status === "ok"
 			? ((coveringMachine.data as MaintenanceWindow[]).find(
-					(w) => w.ended_at === null,
+					holds,
 				) ?? null)
 			: null;
 	const history = windows.filter((w) => w.ended_at !== null).slice(0, HISTORY_SHOWN);
 
 	if (
 		!open &&
-		environments.length === 0 &&
+		environmentWindows.length === 0 &&
+		declarable.length === 0 &&
 		!fromGroup &&
 		!fromMachine &&
 		history.length === 0 &&
@@ -156,7 +181,7 @@ export default function MaintenanceSection({
 						Under maintenance, ending{" "}
 						<TimeAgo timestamp={fromMachine.expected_end} />, as part of{" "}
 						<MuiLink component={RouterLink} to={`/fleet/machines/${machineId}`}>
-							{machineName ?? "the machine it runs on"}
+							{heldByLabel({ kind: "machine", name: machineName })}
 						</MuiLink>
 						. Amend or lift it there.
 					</Typography>
@@ -178,7 +203,9 @@ export default function MaintenanceSection({
 						Under maintenance, ending{" "}
 						<TimeAgo timestamp={fromGroup.expected_end} />, as part of{" "}
 						<MuiLink component={RouterLink} to={`/fleet/groups/${groupId}`}>
-							{groupName ?? "its group"}
+							{fromGroup.rank
+								? heldByLabel({ kind: "environment", rank: fromGroup.rank })
+								: heldByLabel({ kind: "group", name: groupName })}
 						</MuiLink>
 						. Amend or lift it there.
 					</Typography>
@@ -221,10 +248,18 @@ export default function MaintenanceSection({
 					}
 				>
 					<Typography variant="body2">
-						Under maintenance, ending <TimeAgo timestamp={open.expected_end} />.
-
-						Checks are still recorded and shown. Nothing on this {scope}{" "}
-						alerts.
+						{holds(open) ? (
+							<>
+								Under maintenance, ending{" "}
+								<TimeAgo timestamp={open.expected_end} />. Checks are still
+								recorded and shown. Nothing on this {scope} alerts.
+							</>
+						) : (
+							<>
+								Maintenance ended <TimeAgo timestamp={open.expected_end} />,
+								watching resumes shortly.
+							</>
+						)}
 					</Typography>
 					{open.note && (
 						<Typography variant="body2" sx={{ mt: 0.5, fontStyle: "italic" }}>
@@ -232,46 +267,102 @@ export default function MaintenanceSection({
 						</Typography>
 					)}
 				</Alert>
-			) : (
-				isAdmin && (
-					<Button
-						size="small"
-						variant="outlined"
-						startIcon={<BuildOutlinedIcon />}
-						onClick={() => setDialogOpen(true)}
-						sx={{ mb: history.length ? 2 : 0 }}
-					>
-						{fromMachine || fromGroup
-							? `Declare for this ${scope} as well`
-							: `Declare maintenance for this ${scope}`}
-					</Button>
-				)
+			) : null}
+			{/* One control, and the environment half outlives the group's own
+			    window: a group-wide window is not a substitute for one over a
+			    single environment. */}
+			{/* spec: MNT#declaring */}
+			{isAdmin && (!open || declarable.length > 0) && (
+				<Stack direction="row" sx={{ mb: history.length ? 2 : 0 }}>
+					{!open && (
+						<Button
+							size="small"
+							variant="outlined"
+							startIcon={<BuildOutlinedIcon />}
+							onClick={() => setDialogOpen(true)}
+							sx={
+								declarable.length
+									? {
+											borderTopRightRadius: 0,
+											borderBottomRightRadius: 0,
+											borderRightColor: "transparent",
+										}
+									: undefined
+							}
+						>
+							{fromMachine || fromGroup
+								? `Declare for this ${scope} as well`
+								: "Declare maintenance"}
+						</Button>
+					)}
+					{declarable.length > 0 &&
+						(open ? (
+							<Button
+								size="small"
+								variant="outlined"
+								startIcon={<BuildOutlinedIcon />}
+								endIcon={<ArrowDropDownIcon fontSize="small" />}
+								onClick={(event) => setMenuAnchor(event.currentTarget)}
+							>
+								Declare over an environment
+							</Button>
+						) : (
+							<Button
+								size="small"
+								variant="outlined"
+								aria-label="Declare over an environment"
+								onClick={(event) => setMenuAnchor(event.currentTarget)}
+								sx={{
+									minWidth: 32,
+									px: 0,
+									borderTopLeftRadius: 0,
+									borderBottomLeftRadius: 0,
+								}}
+							>
+								<ArrowDropDownIcon fontSize="small" />
+							</Button>
+						))}
+				</Stack>
 			)}
-			{environments.map((window) => (
+			{environmentWindows.map((window) => (
 				<Alert
 					key={window.id}
 					severity="info"
 					icon={<BuildOutlinedIcon fontSize="inherit" />}
-					sx={{ mt: 1 }}
+					sx={{ mt: 1, mb: 1 }}
 					data-testid="environment-window"
 					action={
 						isAdmin ? (
-							<Button
-								size="small"
-								color="info"
-								variant="outlined"
-								disabled={lift.pending}
-								onClick={async () => {
-									try {
-										await lift.call({ id: window.id });
-										reload();
-									} catch {
-										/* surfaced below */
+							<Stack direction="row" spacing={1}>
+								<Button
+									size="small"
+									color="info"
+									onClick={() =>
+										setEnvironmentDialog({
+											rank: window.rank as ServerRank,
+											existing: window,
+										})
 									}
-								}}
-							>
-								Lift
-							</Button>
+								>
+									Amend
+								</Button>
+								<Button
+									size="small"
+									color="info"
+									variant="outlined"
+									disabled={lift.pending}
+									onClick={async () => {
+										try {
+											await lift.call({ id: window.id });
+											reload();
+										} catch {
+											/* surfaced below */
+										}
+									}}
+								>
+									Lift
+								</Button>
+							</Stack>
 						) : undefined
 					}
 				>
@@ -279,8 +370,18 @@ export default function MaintenanceSection({
 						<Box component="span" sx={{ textTransform: "capitalize" }}>
 							{window.rank}
 						</Box>{" "}
-						under maintenance, ending <TimeAgo timestamp={window.expected_end} />.
-						The rest of the group stays watched.
+						{holds(window) ? (
+							<>
+								under maintenance, ending{" "}
+								<TimeAgo timestamp={window.expected_end} />. The rest of the
+								group stays watched.
+							</>
+						) : (
+							<>
+								maintenance ended <TimeAgo timestamp={window.expected_end} />,
+								watching resumes shortly.
+							</>
+						)}
 					</Typography>
 					{window.note && (
 						<Typography variant="body2" sx={{ mt: 0.5, fontStyle: "italic" }}>
@@ -289,6 +390,26 @@ export default function MaintenanceSection({
 					)}
 				</Alert>
 			))}
+			{isAdmin && declarable.length > 0 && (
+				<Menu
+					anchorEl={menuAnchor}
+					open={menuAnchor !== null}
+					onClose={() => setMenuAnchor(null)}
+				>
+					<ListSubheader sx={{ lineHeight: 2 }}>Declare over environment</ListSubheader>
+					{declarable.map((environment) => (
+						<MenuItem
+							key={environment}
+							onClick={() => {
+								setMenuAnchor(null);
+								setEnvironmentDialog({ rank: environment, existing: null });
+							}}
+						>
+							<ServerRankChip rank={environment} />
+						</MenuItem>
+					))}
+				</Menu>
+			)}
 			{lift.error && (
 				<Alert severity="error" sx={{ mt: 1 }}>
 					{lift.error.message}
@@ -332,6 +453,22 @@ export default function MaintenanceSection({
 				existing={open}
 				onDone={reload}
 			/>
+			{environmentDialog && (
+				<DeclareMaintenanceDialog
+					open
+					onClose={() => setEnvironmentDialog(null)}
+					scope={scope}
+					id={id}
+					rank={environmentDialog.rank}
+					targetLabel={
+						targetLabel
+							? environmentName(targetLabel, environmentDialog.rank)
+							: undefined
+					}
+					existing={environmentDialog.existing}
+					onDone={reload}
+				/>
+			)}
 		</Paper>
 	);
 }

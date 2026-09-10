@@ -37,7 +37,12 @@ import {
 	useApplicationTypeCaps,
 	useApplicationTypeLabel,
 } from "../hooks/useApplicationTypes";
-import { HealthLegend, StatusLegend, VersionLegend } from "../components/Legends";
+import {
+	HealthLegend,
+	MaintenanceLegend,
+	StatusLegend,
+	VersionLegend,
+} from "../components/Legends";
 import ServerRankChip from "../components/ServerRankChip";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
@@ -203,6 +208,7 @@ export default function ServerDetail() {
 					</Typography>
 					<GroupTree
 						machines={data.group_machines}
+						environments={data.group_environments}
 						applications={data.group_applications}
 						currentApplicationId={data.server.id}
 					/>
@@ -215,6 +221,9 @@ export default function ServerDetail() {
 				</Box>
 				<Box sx={{ mt: 1 }}>
 					<HealthLegend />
+				</Box>
+				<Box sx={{ mt: 1 }}>
+					<MaintenanceLegend />
 				</Box>
 			</Box>
 		</Stack>
@@ -462,16 +471,17 @@ function InfoSection({
 	const caps = useApplicationTypeCaps(server.type);
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
-			{status && (
-				<HealthIndicator
-					health={health}
-					up={up}
-					monitored={server.is_monitored !== false}
-					maintained={maintained}
-					maintenanceSettling={maintenanceSettling}
-					operators={status.operators}
-				/>
-			)}
+			{/* Not behind a status: an application under maintenance is under it
+			    whether or not it has ever reported, and the chip is where that is
+			    said. */}
+			<HealthIndicator
+				health={health}
+				up={up}
+				monitored={server.is_monitored !== false}
+				maintained={maintained}
+				maintenanceSettling={maintenanceSettling}
+				operators={status?.operators ?? []}
+			/>
 			<Stack
 				direction="row"
 				spacing={4}

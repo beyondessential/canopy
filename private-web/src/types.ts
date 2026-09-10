@@ -100,6 +100,8 @@ export type MaintenanceWindow = Solidify<Schemas["MaintenanceWindow"]>;
 /** The grain a window is declared at. An environment is a group with a rank.
  * spec: MNT#declaring */
 export type MaintenanceScope = "application" | "machine" | "group";
+
+export type GroupEnvironment = Solidify<Schemas["GroupEnvironment"]>;
 export type ResolvedReason = Solidify<Schemas["ResolvedReason"]>;
 
 export type VersionStr = Solidify<Schemas["VersionStr"]>;
@@ -279,6 +281,47 @@ export const SERVER_RANK_ORDER: ServerRank[] = [
 	"test",
 	"dev",
 ];
+
+/// How an environment is named where it is read: the group, with the rank after
+/// it unless it is the group's production.
+export function environmentName(group: string, rank: ServerRank): string {
+	return rank === "production" ? group : `${group} ${rank}`;
+}
+
+/// What holds a window over a target that did not have it declared over
+/// itself, as a sentence names it. One spelling, so a tooltip, an alert and a
+/// tree row all say the same thing about the same window.
+// spec: MNT#presentation
+export function heldByLabel(
+	holder:
+		| { kind: "machine"; name: string | null | undefined }
+		| { kind: "group"; name: string | null | undefined }
+		| { kind: "environment"; rank: ServerRank },
+): string {
+	switch (holder.kind) {
+		case "machine":
+			return `the machine ${holder.name ?? "it runs on"}`;
+		case "group":
+			return holder.name ? `the group ${holder.name}` : "its group";
+		case "environment":
+			return `the ${holder.rank} environment`;
+	}
+}
+
+/// The line a suspended target's tooltip carries: whether the work was declared
+/// here, and where it was declared if not. Suspension outlasts the window by a
+/// settle period, so a window that has ended is still "just ended" here.
+// spec: MNT#presentation
+export function maintenanceLine(
+	ownWindow: boolean,
+	settling: boolean,
+	heldBy?: string | null,
+): string {
+	const state = settling
+		? "maintenance just ended, watching resumes shortly"
+		: "under maintenance";
+	return ownWindow || !heldBy ? state : `${state} as part of ${heldBy}`;
+}
 
 /// Sort key for a rank, with `null` ranks pushed last. Ranks are an ordered
 /// set; types are not, so a type tiebreak sorts alphabetically at the

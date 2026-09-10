@@ -65,6 +65,11 @@ pub struct ServerDetailData {
 	/// ungrouped.
 	// spec: FLT
 	pub group_machines: Vec<super::server_groups::GroupMachine>,
+	/// The group's environments and whether a window holds over each, so the
+	/// group summary marks the row a window was declared over rather than
+	/// leaving it to be inferred from the boxes it caught.
+	// spec: MNT#presentation
+	pub group_environments: Vec<super::server_groups::GroupEnvironment>,
 	/// The name of the box this application runs on, where it has one.
 	///
 	/// The page names its machine in the heading, so it needs the name and not
@@ -772,6 +777,10 @@ pub async fn get_detail(
 	// whether or not anyone named it.
 	let suspended =
 		database::maintenance_windows::MaintenanceWindow::suspended_targets(&mut conn).await?;
+	let group_environments = match group.as_ref() {
+		Some(g) => super::server_groups::group_environments(&mut conn, g.id, &suspended).await?,
+		None => Vec::new(),
+	};
 	let maintained = suspended.suspends_application(server.id, server.machine_id, server.group_id);
 	let maintenance_settling =
 		suspended.settling_application(server.id, server.machine_id, server.group_id);
@@ -788,6 +797,7 @@ pub async fn get_detail(
 		group,
 		group_applications,
 		group_machines,
+		group_environments,
 		machine_name,
 		machine_rank,
 		billing_labels,

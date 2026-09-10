@@ -17,6 +17,7 @@ import { Link as MuiLink } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi } from "../api";
 import type { ServerInfo } from "../types";
+import ServerRankChip from "./ServerRankChip";
 import TimeAgo from "./TimeAgo";
 
 /// Where each of the group's servers stands against the version it would take
@@ -93,14 +94,25 @@ export default function MigrationTestsSection({
 						.map((row) => (
 						<TableRow key={row.server_id} data-testid="migration-test-row">
 							<TableCell>
-								<MuiLink
-									component={RouterLink}
-									to={`/fleet/applications/${row.server_id}`}
-									underline="hover"
-									color="text.primary"
+								<Stack
+									direction="row"
+									spacing={1}
+									sx={{ alignItems: "center" }}
 								>
-									{byId.get(row.server_id)?.name ?? row.server_id}
-								</MuiLink>
+									<MuiLink
+										component={RouterLink}
+										to={`/fleet/applications/${row.server_id}`}
+										underline="hover"
+										color="text.primary"
+									>
+										{byId.get(row.server_id)?.name ?? row.server_id}
+									</MuiLink>
+									{byId.get(row.server_id)?.rank && (
+										<ServerRankChip
+											rank={byId.get(row.server_id)!.rank!}
+										/>
+									)}
+								</Stack>
 							</TableCell>
 							<TableCell>{row.target_version}</TableCell>
 							<TableCell>

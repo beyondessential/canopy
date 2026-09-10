@@ -2,18 +2,20 @@
 //! rank intend to move to, and optionally when.
 //!
 //! A plan is a statement of intent. Nothing here performs or schedules an
-//! upgrade; the date is presentational and Canopy decides a plan is met by
-//! watching what the environment reports running.
+//! upgrade; the date is presentational and Canopy decides a plan is met from
+//! what the environment reports running and what is declared over it.
 
 use commons_errors::{AppError, Result};
 use commons_types::{server::rank::ServerRank, version::VersionStr};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use jiff::{Timestamp, civil::Date, civil::Time, tz::TimeZone};
+use jiff::{SignedDuration, Timestamp, civil::Date, civil::Time, tz::TimeZone};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{server_groups::ServerGroup, versions::Version};
+use crate::{
+	maintenance_windows::MaintenanceWindow, server_groups::ServerGroup, versions::Version,
+};
 
 /// An environment's recorded intention to move to a version.
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema)]
@@ -399,12 +401,61 @@ pub fn ended_at(plan: &UpgradePlan) -> Option<Timestamp> {
 		.max()
 }
 
-/// Close every open plan whose environment has reached its target, returning
-/// how many were closed.
+/// How long a window runs where the plan named an hour to start but none to
+/// finish.
+const DEFAULT_WINDOW: SignedDuration = SignedDuration::from_hours(2);
+
+/// The instants a plan's own window opens and closes, for a plan that recorded
+/// one.
 ///
-/// Reaching a version past the target closes the plan too: an environment that
-/// jumped further has done the upgrade and then some, and holding the plan open
-/// would report it as outstanding.
+/// The window is the operator's statement of when the work runs, so it is both
+/// the evidence for whether the work is still going and the hours to suspend
+/// when declaring over it. A window closing earlier in the day than it opened
+/// runs into the next morning.
+// spec: UPG#when-a-plan-is-met
+pub fn planned_window(plan: &UpgradePlan) -> Option<(Timestamp, Timestamp)> {
+	let date = plan.planned_for?;
+	let opens = plan.planned_time?;
+	let tz = TimeZone::get(plan.planned_zone.as_deref()?).ok()?;
+	let start = date
+		.to_datetime(opens)
+		.to_zoned(tz.clone())
+		.ok()?
+		.timestamp();
+	let end = match plan.planned_end_time {
+		Some(closes) => {
+			let ends_on = if closes < opens {
+				date.tomorrow().ok()?
+			} else {
+				date
+			};
+			ends_on.to_datetime(closes).to_zoned(tz).ok()?.timestamp()
+		}
+		// An hour to start and none to finish: the operator said when the work
+		// begins, not that it takes no time.
+		None => start.checked_add(DEFAULT_WINDOW).ok()?,
+	};
+	Some((start, end))
+}
+
+/// The instant a plan's own window closes.
+pub fn planned_window_end(plan: &UpgradePlan) -> Option<Timestamp> {
+	planned_window(plan).map(|(_, end)| end)
+}
+
+/// Close every open plan whose environment has reached its target and whose work
+/// is over, returning how many were closed.
+///
+/// Reaching a version past the target counts too: an environment that jumped
+/// further has done the upgrade and then some, and holding the plan open would
+/// report it as outstanding.
+///
+/// A version appears on a machine when it is installed, which is ahead of the
+/// environment serving it, so arriving at the target is not on its own the work
+/// being finished. Two things say it is still going, and either holds the plan:
+/// the plan's own window, which is the operator saying when the work runs, and a
+/// maintenance window declared over the environment, which is the operator
+/// saying they are in there now.
 // spec: UPG#when-a-plan-is-met
 pub async fn close_met_plans(db: &mut AsyncPgConnection) -> Result<usize> {
 	use crate::schema::upgrade_plans::dsl;
@@ -417,14 +468,39 @@ pub async fn close_met_plans(db: &mut AsyncPgConnection) -> Result<usize> {
 			.into_iter()
 			.filter_map(|env| env.version.map(|v| ((env.group_id, env.rank), v)))
 			.collect();
+	let suspended = MaintenanceWindow::suspended_targets(db).await?;
+	let targets: std::collections::HashMap<Uuid, Version> = Version::get_all_by_ids(
+		db,
+		&open
+			.iter()
+			.map(|plan| plan.target_version_id)
+			.collect::<Vec<_>>(),
+	)
+	.await?
+	.into_iter()
+	.map(|version| (version.id, version))
+	.collect();
+	let now = Timestamp::now();
 
 	let mut closed = 0;
 	for plan in open {
-		let Some(running) = running.get(&(plan.group_id, plan.rank)) else {
+		// A window still ahead is not work under way: an environment that reaches
+		// its target early has done the upgrade, whatever the plan said.
+		if planned_window(&plan).is_some_and(|(start, end)| start <= now && now < end)
+			|| suspended.environment_holding(plan.group_id, plan.rank)
+			|| suspended.group_holding(plan.group_id)
+		{
 			continue;
+		}
+
+		let at_target = match (
+			running.get(&(plan.group_id, plan.rank)),
+			targets.get(&plan.target_version_id),
+		) {
+			(Some(running), Some(target)) => running.0 >= target.as_semver(),
+			_ => false,
 		};
-		let target = Version::get_by_id(db, plan.target_version_id).await?;
-		if running.0 < target.as_semver() {
+		if !at_target {
 			continue;
 		}
 

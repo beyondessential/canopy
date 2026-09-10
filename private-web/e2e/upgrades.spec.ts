@@ -2,6 +2,7 @@ import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
 	seedDevice,
+	seedMaintenanceWindow,
 	seedRestoreConsumerCapability,
 	seedRestoreReplica,
 	seedServer,
@@ -92,7 +93,7 @@ test.describe("upgrades dashboard", () => {
 		// The group with nothing recorded is the one this view exists to
 		// surface, so it is listed rather than omitted, behind a disclosure.
 		await page
-			.getByRole("button", { name: "Show groups with no plan" })
+			.getByRole("button", { name: "Show environments with no plan" })
 			.click();
 		const drifting = page
 			.getByTestId("unplanned-upgrade-row")
@@ -177,7 +178,7 @@ test.describe("upgrades dashboard", () => {
 			"No group has a recorded plan",
 		);
 		await page
-			.getByRole("button", { name: "Show groups with no plan" })
+			.getByRole("button", { name: "Show environments with no plan" })
 			.click();
 		await expect(
 			page
@@ -344,7 +345,7 @@ test.describe("upgrades dashboard", () => {
 			page.getByRole("button", { name: "Withdraw kamaka clone's plan" }),
 		).toBeVisible();
 		await page
-			.getByRole("button", { name: "Show groups with no plan" })
+			.getByRole("button", { name: "Show environments with no plan" })
 			.click();
 		await expect(
 			page
@@ -523,7 +524,7 @@ test.describe("upgrades dashboard", () => {
 
 		await page.goto("/upgrades");
 		await page
-			.getByRole("button", { name: "Show groups with no plan" })
+			.getByRole("button", { name: "Show environments with no plan" })
 			.click();
 
 		await expect(
@@ -818,7 +819,159 @@ test.describe("upgrade windows", () => {
 		);
 	});
 
+
+	// spec: UPG#when-a-plan-is-met
+	test("a plan held open by maintenance says so", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const production = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		await seedStatus(sql, { serverId: production.id, version: "2.60.0" });
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			rank: "production",
+			targetVersionId: target.id,
+		});
+		await seedMaintenanceWindow(sql, {
+			serverGroupId: group.id,
+			rank: "production",
+			endsInHours: 2,
+		});
+
+		await page.goto("/upgrades");
+		const mark = page.getByTestId("plan-under-maintenance");
+		await expect(mark).toBeVisible();
+
+		// The operator reading the row is the one in the work, so the mark is the
+		// way back into it.
+		await page.getByTestId("amend-maintenance").click();
+		await expect(
+			page.getByRole("heading", { name: "Amend maintenance" }),
+		).toBeVisible();
+
+		// And the work can be ended from the same place it is read.
+		await page.getByRole("button", { name: "Lift", exact: true }).click();
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ ended_at: string | null }>(
+					"SELECT ended_at FROM maintenance_windows WHERE server_group_id = $1",
+					[group.id],
+				);
+				return rows.every((r) => r.ended_at !== null);
+			})
+			.toBe(true);
+		await expect(page.getByTestId("plan-under-maintenance")).toHaveCount(0);
+	});
+
+	/// Declaring opens the window now, so a plan whose hours are still ahead
+	/// cannot be confirmed as they stand: confirming it would silence the
+	/// environment from this moment to a distant end.
+	// spec: MNT#declaring
+	test("a plan whose window has not started falls through to the form", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const production = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		await seedStatus(sql, { serverId: production.id, version: "2.60.0" });
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		const ahead = new Date(Date.now() + 21 * 24 * 3600_000);
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			rank: "production",
+			targetVersionId: target.id,
+			plannedFor: ahead.toISOString().slice(0, 10),
+			plannedTime: "22:00",
+			plannedEndTime: "02:00",
+			plannedZone: "UTC",
+		});
+
+		await page.goto("/upgrades");
+		await page
+			.getByRole("button", { name: "Declare maintenance for kamaka" })
+			.click();
+
+		await expect(page.getByTestId("confirm-declare")).toHaveCount(0);
+		await expect(page.getByLabel("Expected to end")).toBeVisible();
+	});
+
+	/// The incident: an upgrade runs with nothing declared. The plan already
+	/// carries the hours, so declaring over it is a confirmation.
+	// spec: MNT#declaring
+	test("declaring from a plan offers the hours the plan named", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const production = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		await seedStatus(sql, { serverId: production.id, version: "2.60.0" });
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			rank: "production",
+			targetVersionId: target.id,
+			...startedWindow(),
+			plannedZone: "UTC",
+			note: "site can absorb 2.61",
+		});
+
+		await page.goto("/upgrades");
+		await page
+			.getByRole("button", { name: "Declare maintenance for kamaka" })
+			.click();
+
+		// A confirmation, not the form: the hours are already known, and they
+		// are under way, which is what a declaration opening now can stand for.
+		const confirm = page.getByTestId("confirm-declare");
+		await expect(confirm).toBeVisible();
+		await expect(confirm).toContainText("site can absorb 2.61");
+		await confirm.getByRole("button", { name: "Declare" }).click();
+
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ expected_end: string }>(
+					"SELECT expected_end FROM maintenance_windows \
+					 WHERE server_group_id = $1 AND ended_at IS NULL",
+					[group.id],
+				);
+				return rows.length;
+			})
+			.toBe(1);
+		await expect(page.getByTestId("plan-under-maintenance")).toBeVisible();
+	});
 });
+
+/// A plan window that opened an hour ago and runs for another two, in UTC: a
+/// declaration opens now, so only hours already under way can be confirmed as
+/// they stand.
+function startedWindow(): {
+	plannedFor: string;
+	plannedTime: string;
+	plannedEndTime: string;
+} {
+	const clock = (at: Date) =>
+		`${String(at.getUTCHours()).padStart(2, "0")}:${String(
+			at.getUTCMinutes(),
+		).padStart(2, "0")}`;
+	const started = new Date(Date.now() - 3600_000);
+	return {
+		plannedFor: started.toISOString().slice(0, 10),
+		plannedTime: clock(started),
+		plannedEndTime: clock(new Date(Date.now() + 2 * 3600_000)),
+	};
+}
+
 
 /** The local calendar day, as the API and the grid both write it. */
 function localIso(at: Date): string {
