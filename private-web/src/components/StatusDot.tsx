@@ -96,6 +96,10 @@ interface StatusDotProps {
 	 * out of play without claiming a window of its own. */
 	// spec: MNT#presentation
 	suspended?: boolean;
+	/** What holds that window, for a target it reaches without being declared
+	 * over it: the box it runs on, its environment, or its group. */
+	// spec: MNT#presentation
+	heldBy?: string | null;
 	/** Whether something around this dot already names what it stands for. Two
 	 * tooltips over the same few pixels open together and overlap, and the
 	 * reader loses both, so a dot inside a `MachineEnclosure` carries none of
@@ -112,6 +116,7 @@ export default function StatusDot({
 	maintained = false,
 	settling = false,
 	suspended = false,
+	heldBy,
 	quiet = false,
 }: StatusDotProps) {
 	const mask = monitored ? undefined : UNMONITORED_MASK;
@@ -166,7 +171,9 @@ export default function StatusDot({
 					? settling
 						? "maintenance just ended, watching resumes shortly"
 						: "under maintenance"
-					: null,
+					: suspended
+						? `under maintenance${heldBy ? ` as part of ${heldBy}` : ""}`
+						: null,
 				monitored ? null : "unmonitored",
 			]
 				.filter(Boolean)

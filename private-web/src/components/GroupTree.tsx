@@ -114,6 +114,30 @@ function EnvironmentHeading({
 	);
 }
 
+/// What each application on a box adds to the box's own tooltip. An entry that
+/// is only a name the box already carries says nothing, so it is left out
+/// rather than read as a second line about the same thing.
+function describeApplications(
+	applications: ServerInfo[],
+	machineName: string,
+): string[] {
+	return applications
+		.map((application) => {
+			const own = applicationName(application);
+			const notes = [
+				// Only a window of its own: the box's line already says what caught
+				// everything on it.
+				application.own_window ? "under maintenance" : null,
+				application.is_monitored === false ? "unmonitored" : null,
+			].filter(Boolean);
+			if (notes.length === 0 && own === machineName) {
+				return null;
+			}
+			return [own, ...notes].join(" · ");
+		})
+		.filter((line): line is string => line !== null);
+}
+
 function MachineBlock({
 	machine,
 	applications,
@@ -148,18 +172,7 @@ function MachineBlock({
 					settling={machine.maintenance_settling}
 					ownWindow={machine.own_window}
 					heldBy={heldBy}
-					describes={applications.map((application) =>
-						[
-							applicationName(application),
-							// Only a window of its own: the box's line already says what
-							// caught everything on it, and repeating it per application
-							// says the same thing twice.
-							application.own_window ? "under maintenance" : null,
-							application.is_monitored === false ? "unmonitored" : null,
-						]
-							.filter(Boolean)
-							.join(" · "),
-					)}
+					describes={describeApplications(applications, name)}
 				>
 					{applications.map((application) => (
 						<Box key={application.id} component="span" sx={dotCellSx}>
@@ -211,6 +224,8 @@ function MachineBlock({
 								monitored={application.is_monitored !== false}
 								maintained={application.own_window ?? false}
 								suspended={application.maintained ?? false}
+								heldBy={heldBy ?? `the machine ${name}`}
+								title={applicationName(application)}
 								size={DOT_SIZE}
 							/>
 							<Name
