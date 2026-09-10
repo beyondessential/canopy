@@ -634,6 +634,29 @@ pub(crate) async fn open_server_issue_active(
 	Ok(n > 0)
 }
 
+/// The applications an active `(canopy, ref)` issue is open against, with the
+/// group each belongs to.
+///
+/// One question of the whole fleet: a sweep that files per group otherwise asks
+/// it per group to learn whether it has anything to recover.
+pub(crate) async fn applications_with_open_issue(
+	db: &mut AsyncPgConnection,
+	r#ref: &str,
+) -> Result<Vec<(Uuid, Option<Uuid>)>> {
+	use crate::schema::{applications, issues};
+
+	issues::table
+		.inner_join(applications::table.on(applications::id.nullable().eq(issues::application_id)))
+		.filter(issues::source.eq(refs::CANOPY_SOURCE))
+		.filter(issues::ref_.eq(r#ref))
+		.filter(issues::active.eq(true))
+		.filter(issues::resolved_at.is_null())
+		.select((applications::id, applications::group_id))
+		.load(db)
+		.await
+		.map_err(Into::into)
+}
+
 /// Whether a machine-scoped `(canopy, ref)` check last *observed* something
 /// other than a pass.
 ///

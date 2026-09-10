@@ -657,6 +657,46 @@ async fn the_check_closes_once_the_group_owes_no_schema() {
 	.await;
 }
 
+/// The check files on the group's central, so a group that has lost it has an
+/// open finding nothing else regrades.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_that_lost_its_central_still_recovers() {
+	TestDb::run(|mut conn, _url| async move {
+		let (older, _newer) = seed(&mut conn).await;
+		declare_builder(&mut conn, true).await;
+		record_build(&mut conn, older, false).await;
+
+		database::reporting_schemas::sweep(&mut conn)
+			.await
+			.expect("sweep");
+		assert_eq!(
+			schema_issues(&mut conn).await[0].effective_result,
+			Some(commons_types::status::CheckResult::Warning),
+			"the warning stands while the pair is failed"
+		);
+
+		conn.batch_execute(&format!(
+			"UPDATE applications SET deleted_at = NOW() WHERE id = '{CENTRAL}';
+			 DELETE FROM reporting_schema_builds"
+		))
+		.await
+		.expect("retire the central");
+
+		database::reporting_schemas::sweep(&mut conn)
+			.await
+			.expect("sweep again");
+
+		let issues = schema_issues(&mut conn).await;
+		assert_eq!(issues.len(), 1, "the same check, regraded");
+		assert_eq!(
+			issues[0].effective_result,
+			Some(commons_types::status::CheckResult::Passed),
+			"a finding open against a former central is still recovered"
+		);
+	})
+	.await;
+}
+
 /// A group nothing builds schemas for is owed none, so it presents no pairs
 /// even where its applications report published versions. Listing them would
 /// offer an operator a build nothing will pick up.

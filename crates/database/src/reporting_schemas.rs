@@ -466,7 +466,7 @@ async fn versions_and_applications(
 pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 	use crate::{
 		applications::Application,
-		backup::refs,
+		backup::{refs, staleness::applications_with_open_issue},
 		issues::{CheckInstance, GradedInstance, Scope},
 		restore::{RestoreCheck, file_restore_check},
 		server_groups::ServerGroup,
@@ -478,17 +478,39 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 	// every declaration's consumer, once a minute, for groups that have none.
 	let builders = groups_building_schemas(db).await?;
 
+	// A group that has stopped building still has whatever this check filed
+	// while it did, and filing no instances is what says the finding is gone.
+	// Asked of the fleet at once, it is also what keeps this to the groups the
+	// sweep has something to say about: every other group is walked, its
+	// members loaded and its issues probed, once a minute, to file nothing.
+	// spec: RPT#alerting
+	let open = applications_with_open_issue(db, refs::REPORTING_SCHEMA).await?;
+	let walk: std::collections::HashSet<Uuid> = builders
+		.iter()
+		.copied()
+		.chain(open.iter().filter_map(|(_, group)| *group))
+		.collect();
+
 	for group in ServerGroup::list_all(db).await? {
+		if !walk.contains(&group.id) {
+			continue;
+		}
+
 		let members = Application::list_live_in_group(db, group.id).await?;
-		let Some(central) = ServerGroup::canonical_central(&members).map(|a| a.id) else {
+		// The check files on the group's central. A group that has lost it
+		// keeps the finding open against whichever application it was filed on,
+		// which is the only scope a recovery reaches it through.
+		let Some(central) = ServerGroup::canonical_central(&members)
+			.map(|a| a.id)
+			.or_else(|| {
+				open.iter()
+					.find(|(_, g)| *g == Some(group.id))
+					.map(|(application, _)| *application)
+			})
+		else {
 			continue;
 		};
 
-		// A group that has stopped building still has whatever this check filed
-		// while it did, and nothing else recovers it. Filing no instances is
-		// what says the finding is gone; where none was open this costs one
-		// query and writes nothing.
-		// spec: RPT#alerting
 		let pairs = if builders.contains(&group.id) {
 			pairs_of_members(db, group.id, &members).await?
 		} else {
