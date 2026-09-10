@@ -10,7 +10,10 @@ const UNMONITORED_TOOLTIP =
 	"This server is unmonitored — its checks are recorded and shown, but nothing alerts on them.";
 
 const MAINTAINED_TOOLTIP =
-	"Someone is working on this server. Checks are still recorded and shown, and raise nothing until the maintenance window ends.";
+	"Someone is working here. Checks are still recorded and shown, and raise nothing until the maintenance window ends.";
+
+const SETTLING_TOOLTIP =
+	"The maintenance window has ended. Checks are still recorded and shown, and alerting resumes once things have settled.";
 
 /// The mark a suspended target carries beside its health, wherever that health
 /// is presented. One component, so a group's title and a server's chip draw the
@@ -25,7 +28,7 @@ export function MaintenanceMarker({
 	href?: string;
 }) {
 	return (
-		<Tooltip title={MAINTAINED_TOOLTIP}>
+		<Tooltip title={settling ? SETTLING_TOOLTIP : MAINTAINED_TOOLTIP}>
 			<Chip
 				size="small"
 				variant="outlined"
