@@ -277,12 +277,12 @@ test.describe("maintenance windows", () => {
 		);
 	});
 
-	/// A machine's window covers every application on it. The mark stays on the
-	/// enclosure so the application does not read as having a window of its own,
-	/// but the application is out of play and has to look it, or a failing one
-	/// reads as one nobody has noticed.
+	/// A machine's window covers every application on it. The card is washed
+	/// and the dots in its pill go hollow, since the window is over all of them;
+	/// the application's own row below only fades, so it does not read as
+	/// having a window of its own.
 	/// spec: MNT#presentation
-	test("an application under its machine's window is muted, not marked", async ({
+	test("a machine's window washes its card and hollows its pill", async ({
 		page,
 		sql,
 	}) => {
@@ -295,21 +295,19 @@ test.describe("maintenance windows", () => {
 		await seedMaintenanceWindow(sql, { machineId: server.machineId });
 
 		await page.goto(`/fleet/groups/${group.id}`);
-		const dots = page.getByTestId("status-dot");
-		await expect(dots.first()).toBeVisible();
+		const card = page.getByTestId("tree-box").first();
+		await expect(card).toHaveAttribute("data-maintenance", "holding");
+		expect(
+			await card.evaluate((el) => getComputedStyle(el).backgroundImage),
+		).toContain("repeating-linear-gradient");
 
-		const marks = await dots.evaluateAll((nodes) =>
-			nodes.map((node) => ({
-				marked: node.getAttribute("data-maintenance"),
-				opacity: Number(getComputedStyle(node).opacity),
-			})),
-		);
-		// Nothing claims a window of its own: that mark belongs to the machine's
-		// enclosure, which is not a dot.
-		expect(marks.every((m) => m.marked === null)).toBe(true);
-		// And the application is faded, so a failing one under maintenance does
-		// not read as one nobody has noticed.
-		expect(marks.some((m) => m.opacity < 1)).toBe(true);
+		const inPill = card.getByTestId("tree-machine").getByTestId("status-dot");
+		await expect(inPill).toHaveAttribute("data-maintenance", "holding");
+		const rowDot = card.getByTestId("tree-application").getByTestId("status-dot");
+		await expect(rowDot).not.toHaveAttribute("data-maintenance");
+		expect(
+			await rowDot.evaluate((el) => Number(getComputedStyle(el).opacity)),
+		).toBeLessThan(1);
 	});
 
 	/// A group-wide window is not a substitute for one over a single
@@ -766,20 +764,18 @@ test.describe("maintenance windows", () => {
 
 		// The group, where the tree draws the box around its workloads. A
 		// machine's own window is not one the group's maintenance section
-		// lists, so the enclosure's mark is what carries it here.
+		// lists, so the washed card is what carries it here: one card of the
+		// two, and the dot in its pill.
 		await page.goto(`/fleet/groups/${group.id}`);
-		const enclosure = page
-			.getByTestId("group-tree")
-			.locator("[data-maintenance='holding']");
-		await expect(enclosure).toHaveCount(1);
-		// The enclosure holds dots rather than text, so its label is where the
-		// two facts sit side by side.
-		// The enclosure names the box, its health and the window, then the
-		// applications on it, all in the one tooltip.
-		await expect(enclosure).toHaveAttribute(
-			"aria-label",
-			/failing-on-purpose .* under maintenance/,
-		);
+		const tree = page.getByTestId("group-tree");
+		await expect(
+			tree.locator("[data-testid='tree-box'][data-maintenance='holding']"),
+		).toHaveCount(1);
+		// The pill holds dots rather than text, so its label is where the two
+		// facts sit side by side: the box, its health and the window.
+		await expect(
+			tree.getByTestId("tree-machine").locator("span[aria-label]").first(),
+		).toHaveAttribute("aria-label", /failing-on-purpose .* under maintenance/);
 
 		// The grid, where one box of the two is hatched and the other is not.
 		// The dot's colour comes from the health the card reports, which is

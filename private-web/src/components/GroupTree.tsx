@@ -77,7 +77,7 @@ export default function GroupTree({
 									? {
 											borderRadius: 1,
 											backgroundImage: (theme) =>
-												environmentHatch(theme, settling),
+												windowHatch(theme, settling),
 											...waveWhileHolding(!settling, "&::before"),
 										}
 									: {}
@@ -143,8 +143,27 @@ function MachineBlock({
 }) {
 	const current = machine.id === currentMachineId;
 	const name = machine.name ?? "Unnamed machine";
+	const own = machine.own_window === true;
+	const settling = machine.maintenance_settling === true;
 	return (
-		<Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
+		<Box
+			data-testid="tree-box"
+			data-maintenance={own ? (settling ? "settling" : "holding") : undefined}
+			sx={{
+				border: 1,
+				borderColor: "divider",
+				borderRadius: 1,
+				overflow: "hidden",
+				// The box's own window washes its card, the way an environment's
+				// washes its boxes, so the pill inside carries no stripes here.
+				...(own
+					? {
+							backgroundImage: (theme) => windowHatch(theme, settling),
+							...waveWhileHolding(!settling, "&::before"),
+						}
+					: {}),
+			}}
+		>
 			<Row
 				current={current}
 				sx={{ p: 1.5, gap: 1.5 }}
@@ -157,8 +176,7 @@ function MachineBlock({
 					health={machine.health}
 					name={machine.name}
 					maintained={machine.maintained}
-					settling={machine.maintenance_settling}
-					ownWindow={machine.own_window}
+					settling={settling}
 					heldBy={heldBy}
 				>
 					{applications.map((application) => (
@@ -167,7 +185,9 @@ function MachineBlock({
 								up={application.up ?? "gone"}
 								health={application.health ?? undefined}
 								monitored={application.is_monitored !== false}
-								suspended={application.maintained ?? false}
+								maintained={own}
+								settling={settling}
+								suspended={!own && (application.maintained ?? false)}
 								quiet
 								size={DOT_SIZE}
 							/>
@@ -241,10 +261,10 @@ function MachineBlock({
 
 const DIVIDER_LIGHT = "rgba(0, 0, 0, 0.06)";
 
-/// The wash over an environment's whole section while a window over it holds:
-/// light enough that the cards inside stay readable through it.
+/// The wash over what a window covers, an environment's boxes or one box's
+/// card: light enough that the text stays readable through it.
 // spec: MNT#presentation
-function environmentHatch(theme: Theme, settling: boolean): string {
+function windowHatch(theme: Theme, settling: boolean): string {
 	const ink = alpha(theme.palette.text.primary, settling ? 0.035 : 0.09);
 	return `repeating-linear-gradient(45deg, ${ink} 0 1px, transparent 1px 7px)`;
 }
