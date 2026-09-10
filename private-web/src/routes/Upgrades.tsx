@@ -139,27 +139,11 @@ export default function Upgrades() {
 									data-testid="planned-upgrade-row"
 								>
 										<TableCell>
-											<Stack
-												direction="row"
-												spacing={0.5}
-												sx={{ alignItems: "center", flexWrap: "wrap" }}
-												useFlexGap
-											>
-												<EnvironmentName
-													groupId={row.group_id}
-													groupName={row.group_name}
-													rank={row.rank}
-												/>
-												<MaintenanceMark
-													window={row.maintenance_window}
-													groupId={row.group_id}
-													groupName={environmentName(
-														row.group_name,
-														row.rank,
-													)}
-													onAmended={() => setTick((t) => t + 1)}
-												/>
-											</Stack>
+											<EnvironmentName
+												groupId={row.group_id}
+												groupName={row.group_name}
+												rank={row.rank}
+											/>
 										</TableCell>
 										<TableCell>{row.current_version ?? "unknown"}</TableCell>
 										<TableCell>{row.target_version}</TableCell>
@@ -221,6 +205,7 @@ export default function Upgrades() {
 													plannedTime={row.plan?.planned_time ?? null}
 													plannedEnd={row.plan?.planned_end_time ?? null}
 													note={row.plan?.note ?? null}
+													held={row.maintenance_window}
 													onDeclared={() => setTick((t) => t + 1)}
 												/>
 											</TableCell>
@@ -1432,51 +1417,6 @@ function VerdictChip({
 
 /// An attempt under way, beside the verdict rather than replacing it: a row can
 /// read as failed with a fresh attempt already running.
-/// Work declared over the environment or its group, which is what holds an open
-/// plan open: without it the row reads as an upgrade nobody finished. Clicking
-/// amends that work, since the operator reading the row is the one in it.
-// spec: UPG#when-a-plan-is-met
-function MaintenanceMark({
-	window,
-	groupId,
-	groupName,
-	onAmended,
-}: {
-	window: MaintenanceWindow | null | undefined;
-	groupId: string;
-	groupName: string;
-	onAmended: () => void;
-}) {
-	const [open, setOpen] = useState(false);
-	if (!window) {
-		return null;
-	}
-	return (
-		<>
-			<Tooltip title="maintenance is declared over this environment, so its plan stays open until the work is over; amend it here">
-				<IconButton
-					size="small"
-					aria-label={`Amend maintenance for ${groupName}`}
-					onClick={() => setOpen(true)}
-					data-testid="plan-under-maintenance"
-				>
-					<BuildOutlinedIcon color="info" fontSize="small" />
-				</IconButton>
-			</Tooltip>
-			<DeclareMaintenanceDialog
-				open={open}
-				onClose={() => setOpen(false)}
-				scope="group"
-				id={groupId}
-				rank={window.rank ?? undefined}
-				targetLabel={groupName}
-				existing={window}
-				onDone={onAmended}
-			/>
-		</>
-	);
-}
-
 function AttemptChip({
 	attempt,
 }: {
@@ -2295,6 +2235,7 @@ function DeclareFromPlan({
 	plannedTime,
 	plannedEnd,
 	note,
+	held,
 	onDeclared,
 }: {
 	groupId: string;
@@ -2303,19 +2244,33 @@ function DeclareFromPlan({
 	plannedTime: string | null;
 	plannedEnd: string | null;
 	note: string | null;
+	/// The window holding over this environment, where work is already declared.
+	/// The control then amends that work rather than declaring over it again.
+	// spec: UPG#when-a-plan-is-met
+	held: MaintenanceWindow | null | undefined;
 	onDeclared: () => void;
 }) {
 	const [open, setOpen] = useState(false);
 	const hours = plannedHours(plannedTime, plannedEnd);
 	return (
 		<>
-			<Tooltip title="Declare maintenance: suspend this environment's alerting while the upgrade runs">
+			<Tooltip
+				title={
+					held
+						? "Maintenance is declared over this environment, so its plan stays open until the work is over; amend it here"
+						: "Declare maintenance: suspend this environment's alerting while the upgrade runs"
+				}
+			>
 				<IconButton
 					size="small"
-					aria-label={`Declare maintenance for ${groupName}`}
+					aria-label={`${held ? "Amend" : "Declare"} maintenance for ${groupName}`}
 					onClick={() => setOpen(true)}
+					data-testid={held ? "plan-under-maintenance" : undefined}
 				>
-					<BuildOutlinedIcon fontSize="small" />
+					<BuildOutlinedIcon
+						fontSize="small"
+						color={held ? "info" : undefined}
+					/>
 				</IconButton>
 			</Tooltip>
 			<DeclareMaintenanceDialog
@@ -2323,14 +2278,19 @@ function DeclareFromPlan({
 				onClose={() => setOpen(false)}
 				scope="group"
 				id={groupId}
-				rank={rank}
+				rank={held ? (held.rank ?? undefined) : rank}
 				targetLabel={groupName}
-				prefill={{
-					expectedEnd: new Date(
-						Date.now() + hours * 3600_000,
-					).toISOString(),
-					note: note ?? undefined,
-				}}
+				existing={held}
+				prefill={
+					held
+						? undefined
+						: {
+								expectedEnd: new Date(
+									Date.now() + hours * 3600_000,
+								).toISOString(),
+								note: note ?? undefined,
+							}
+				}
 				onDone={onDeclared}
 			/>
 		</>
