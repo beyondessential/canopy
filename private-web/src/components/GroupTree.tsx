@@ -1,4 +1,13 @@
-import { Box, Chip, Link as MuiLink, Stack, Tooltip, Typography } from "@mui/material";
+import {
+	Box,
+	Chip,
+	Link as MuiLink,
+	Stack,
+	type Theme,
+	Tooltip,
+	Typography,
+} from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import { Link as RouterLink } from "react-router-dom";
 
 import {
@@ -11,7 +20,7 @@ import {
 	type ServerInfo,
 } from "../types";
 import ApplicationTypeChip from "./ApplicationTypeChip";
-import MachineEnclosure from "./MachineEnclosure";
+import MachineEnclosure, { waveWhileHolding } from "./MachineEnclosure";
 import StatusDot from "./StatusDot";
 
 /// The group as an operator navigates it: rank, then the boxes at that rank,
@@ -45,36 +54,53 @@ export default function GroupTree({
 
 	return (
 		<Box data-testid="group-tree">
-			{groupServersByRank(ranked).map(([rank, boxes], index) => (
-				<Box key={rank ?? "_unranked"}>
-					<EnvironmentHeading
-						rank={rank}
-						environment={environments?.find(
-							(environment) => environment.rank === rank,
-						)}
-						first={index === 0}
-					/>
-					<Stack spacing={1}>
-						{boxes.map((box) => (
-							<MachineBlock
-								key={box.machine.id}
-								machine={box.machine}
-								applications={box.applications}
-								heldBy={
-									rank &&
-									environments?.find(
-										(environment) => environment.rank === rank,
-									)?.maintained
-										? heldByLabel({ kind: "environment", rank })
-										: null
-								}
-								currentMachineId={currentMachineId}
-								currentApplicationId={currentApplicationId}
-							/>
-						))}
-					</Stack>
-				</Box>
-			))}
+			{groupServersByRank(ranked).map(([rank, boxes], index) => {
+				const environment = environments?.find((e) => e.rank === rank);
+				const held = environment?.maintained === true;
+				const settling = environment?.maintenance_settling === true;
+				return (
+					<Box
+						key={rank ?? "_unranked"}
+						data-testid="tree-environment"
+						data-rank={rank ?? "unranked"}
+						data-maintenance={
+							held ? (settling ? "settling" : "holding") : undefined
+						}
+						sx={{
+							mt: index === 0 ? 0 : 1.5,
+							...(held
+								? {
+										mx: -1,
+										px: 1,
+										py: 1,
+										borderRadius: 1,
+										backgroundImage: (theme) =>
+											environmentHatch(theme, settling),
+										...waveWhileHolding(!settling, "&::before"),
+									}
+								: {}),
+						}}
+					>
+						<EnvironmentHeading rank={rank} environment={environment} />
+						<Stack spacing={1}>
+							{boxes.map((box) => (
+								<MachineBlock
+									key={box.machine.id}
+									machine={box.machine}
+									applications={box.applications}
+									heldBy={
+										rank && held
+											? heldByLabel({ kind: "environment", rank })
+											: null
+									}
+									currentMachineId={currentMachineId}
+									currentApplicationId={currentApplicationId}
+								/>
+							))}
+						</Stack>
+					</Box>
+				);
+			})}
 		</Box>
 	);
 }
@@ -91,11 +117,9 @@ export default function GroupTree({
 function EnvironmentHeading({
 	rank,
 	environment,
-	first,
 }: {
 	rank: string | null;
 	environment: GroupEnvironment | undefined;
-	first: boolean;
 }) {
 	const held = environment?.maintained === true;
 	const settling = environment?.maintenance_settling === true;
@@ -104,7 +128,7 @@ function EnvironmentHeading({
 			variant="overline"
 			color="text.secondary"
 			data-maintenance={held ? (settling ? "settling" : "holding") : undefined}
-			sx={{ display: "block", mt: first ? 0 : 1.5, mb: 0.5 }}
+			sx={{ display: "block", mb: 0.5 }}
 		>
 			{rank ?? "unranked"}
 			{held && (
@@ -230,6 +254,14 @@ function MachineBlock({
 }
 
 const DIVIDER_LIGHT = "rgba(0, 0, 0, 0.06)";
+
+/// The wash over an environment's whole section while a window over it holds:
+/// light enough that the cards inside stay readable through it.
+// spec: MNT#presentation
+function environmentHatch(theme: Theme, settling: boolean): string {
+	const ink = alpha(theme.palette.text.primary, settling ? 0.035 : 0.09);
+	return `repeating-linear-gradient(45deg, ${ink} 0 1px, transparent 1px 7px)`;
+}
 
 // Every dot sits in an identical fixed-size cell, so the enclosure's dots
 // align however many there are. Spacing comes from the enclosure's own gap.
