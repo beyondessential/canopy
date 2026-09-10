@@ -308,32 +308,39 @@ test.describe("status page", () => {
 			.getByTestId("dot-strip")
 			.locator("[data-testid='rank-row'] > span")
 			.first();
-		// One box, two workloads, one of them declared over.
+		// One box, two workloads, one of them declared over. Inside the box's
+		// ring the dot only fades: a hollow, pulsing dot in there reads as the
+		// machine being worked on, and it is not.
 		const dots = pill.getByTestId("status-dot");
 		await expect(dots).toHaveCount(2);
-		await expect(dots.nth(0)).toHaveAttribute("data-maintenance", "holding");
+		await expect(dots.nth(0)).not.toHaveAttribute("data-maintenance");
 		await expect(dots.nth(1)).not.toHaveAttribute("data-maintenance");
-		// The mark is the dot's own, so the box carrying both stays plain: the
-		// machine is not being taken down.
 		await expect(pill).not.toHaveAttribute("data-maintenance");
 
-		// The window hollows the dot, leaving a ring in its health colour, so
-		// the workload reads as out of play with its health still on it.
 		const marks = await dots.evaluateAll((els) =>
 			els.map((el) => {
 				const style = getComputedStyle(el);
-				return { fill: style.backgroundColor, ring: style.borderTopWidth };
+				return {
+					fill: style.backgroundColor,
+					ring: style.borderTopWidth,
+					opacity: style.opacity,
+					animation: style.animationName,
+				};
 			}),
 		);
-		expect(marks[0]!.fill).toBe("rgba(0, 0, 0, 0)");
-		expect(marks[0]!.ring).not.toBe("0px");
-		expect(marks[1]!.fill).not.toBe("rgba(0, 0, 0, 0)");
-		expect(marks[1]!.ring).toBe("0px");
+		expect(marks[0]!.fill).not.toBe("rgba(0, 0, 0, 0)");
+		expect(marks[0]!.ring).toBe("0px");
+		expect(Number(marks[0]!.opacity)).toBeLessThan(1);
+		expect(marks[0]!.animation).toBe("none");
+		expect(marks[1]!.opacity).toBe("1");
 
-		// The enclosure names what its dots stand for, so hovering opens one
-		// tooltip rather than the dot's and the box's on top of each other.
+		// The enclosure's tooltip is where the status page says which
+		// application the window is over, since the dots have no rows of their own.
 		await pill.hover();
 		await expect(page.getByRole("tooltip")).toHaveCount(1);
+		await expect(page.getByRole("tooltip")).toContainText(
+			"Application aaa-being-upgraded",
+		);
 		await expect(page.getByRole("tooltip")).toContainText("under maintenance");
 	});
 

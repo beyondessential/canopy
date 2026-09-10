@@ -157,7 +157,7 @@ function MachineBlock({
 								up={application.up ?? "gone"}
 								health={application.health ?? undefined}
 								monitored={application.is_monitored !== false}
-								maintained={application.own_window ?? false}
+								suspended={application.maintained ?? false}
 								quiet
 								size={DOT_SIZE}
 							/>

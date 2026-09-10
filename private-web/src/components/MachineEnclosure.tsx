@@ -122,10 +122,9 @@ export default function MachineEnclosure({
 	health: HealthState;
 	/** The box's name, for the tooltip. */
 	name?: string | null;
-	/** Whether a maintenance window suspends this box, its own or its group's.
-	 * A window is declared over a machine and never over an application, so it
-	 * is the enclosure that carries it — the applications inside are suspended
-	 * by their box rather than each saying so. */
+	/** Whether a maintenance window suspends this box, its own, its
+	 * environment's or its group's. A window over one application inside it
+	 * fades that dot alone and leaves the enclosure plain. */
 	// spec: MNT#presentation
 	maintained?: boolean;
 	/** Whether every window over the box has ended and it is serving out the
