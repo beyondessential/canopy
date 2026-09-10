@@ -209,7 +209,8 @@ async fn resolve_schema_group(
 	let central_type = central.r#type.clone();
 	let machine = database::machines::Machine::get_by_id(conn, central.machine_id).await?;
 
-	let versions = database::reporting_schemas::versions_for_group(conn, group_id).await?;
+	let versions =
+		database::reporting_schemas::versions_of_members(conn, group_id, &members).await?;
 	let settlement =
 		database::reporting_schemas::Settlement::for_group(conn, group_id, &versions).await?;
 

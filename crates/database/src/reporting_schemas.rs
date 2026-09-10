@@ -407,8 +407,16 @@ async fn pairs_of_members(
 // spec: RPT#pairs
 pub async fn versions_for_group(db: &mut AsyncPgConnection, group: Uuid) -> Result<Vec<Version>> {
 	let members = crate::applications::Application::list_live_in_group(db, group).await?;
+	versions_of_members(db, group, &members).await
+}
 
-	Ok(versions_and_applications(db, group, &members)
+/// The versions of a group's pairs, from members already in hand.
+pub async fn versions_of_members(
+	db: &mut AsyncPgConnection,
+	group: Uuid,
+	members: &[crate::applications::Application],
+) -> Result<Vec<Version>> {
+	Ok(versions_and_applications(db, group, members)
 		.await?
 		.into_iter()
 		.map(|(version, _)| version)
