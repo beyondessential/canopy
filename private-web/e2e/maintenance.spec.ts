@@ -207,7 +207,9 @@ test.describe("maintenance windows", () => {
 		const rows = page.getByRole("row", { name: /kamaka/ });
 		await expect(rows).toHaveCount(2);
 		await expect(rows.filter({ hasText: "group" })).toHaveCount(1);
-		await expect(rows.filter({ hasText: "production" })).toHaveCount(1);
+		const environment = rows.filter({ hasText: "environment" });
+		await expect(environment).toHaveCount(1);
+		await expect(environment).toContainText("production");
 	});
 
 	/// A window over a box names the box, and the name is the way to it: the

@@ -30,16 +30,39 @@ function TargetKind({
 	window: { rank: ServerRank | null; machine_id: string | null; application_id: string | null; server_group_id: string | null };
 }) {
 	if (window.rank) {
-		return <ServerRankChip rank={window.rank} />;
+		return (
+			<>
+				<KindChip kind="environment" />
+				<ServerRankChip rank={window.rank} />
+			</>
+		);
 	}
-	const kind = window.application_id
-		? "application"
-		: window.machine_id
-			? "machine"
-			: window.server_group_id
-				? "group"
-				: "fleet";
-	return <Chip size="small" variant="outlined" label={kind} />;
+	return (
+		<KindChip
+			kind={
+				window.application_id
+					? "application"
+					: window.machine_id
+						? "machine"
+						: window.server_group_id
+							? "group"
+							: "fleet"
+			}
+		/>
+	);
+}
+
+/// Styled to match [`ServerRankChip`], so a row carrying both reads as one set
+/// rather than two.
+function KindChip({ kind }: { kind: string }) {
+	return (
+		<Chip
+			size="small"
+			variant="outlined"
+			label={kind}
+			sx={{ textTransform: "capitalize" }}
+		/>
+	);
 }
 
 /// What the fleet is not being watched on right now: every maintenance
