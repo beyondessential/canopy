@@ -685,13 +685,26 @@ function CreateArtifactForm({
 		e.preventDefault();
 		try {
 			if (scoped && file) {
+				// Digesting the file is the browser's own work rather than the
+				// upload's, so a failure here reaches no hook and would leave
+				// the form sitting there having done nothing.
+				let digest: string;
+				try {
+					digest = await digestOf(file);
+				} catch (err) {
+					setFileError(
+						err instanceof Error ? err.message : "could not read the file",
+					);
+					return;
+				}
+
 				await upload.call(
 					{
 						version_id: versionId,
 						artifact_type: type,
 						platform,
 						group_id: groupId,
-						digest: await digestOf(file),
+						digest,
 					},
 					file,
 				);
