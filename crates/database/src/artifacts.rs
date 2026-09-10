@@ -379,7 +379,7 @@ impl Artifact {
 	}
 
 	/// When any artifact a build reads was last registered for each of these
-	/// versions, in two queries however many versions are asked about.
+	/// versions, in one query however many versions are asked about.
 	///
 	/// A schema built from a superseded release of a version is not the schema
 	/// that version describes, so this is what a build is held against. Only
@@ -392,6 +392,7 @@ impl Artifact {
 	pub async fn newest_change_for_versions(
 		db: &mut AsyncPgConnection,
 		versions: &[Version],
+		ranges: &RangeChanges,
 	) -> Result<std::collections::HashMap<Uuid, jiff::Timestamp>> {
 		use crate::schema::artifacts::dsl;
 
@@ -410,38 +411,12 @@ impl Artifact {
 			.filter_map(|(id, at)| Some((id?, at?.into())))
 			.collect();
 
-		// One row per distinct pattern rather than per artifact: the answer only
-		// needs the newest change under each, and every row returned costs a
-		// semver parse below.
-		let ranges: Vec<(Option<String>, Option<jiff_diesel::Timestamp>)> = dsl::artifacts
-			.filter(dsl::version_id.is_null())
-			.filter(dsl::group_id.is_null())
-			.group_by(dsl::version_range_pattern)
-			.select((
-				dsl::version_range_pattern,
-				diesel::dsl::max(dsl::updated_at),
-			))
-			.load(db)
-			.await
-			.map_err(AppError::from)?;
-
-		for (pattern, at) in ranges {
-			// An unparseable pattern matches nothing rather than everything,
-			// as it does where the artifact is offered.
-			let Some(range) = pattern
-				.as_deref()
-				.and_then(|pattern| node_semver::Range::parse(pattern).ok())
-			else {
-				continue;
-			};
-			let Some(at) = at else { continue };
-			let at: jiff::Timestamp = at.into();
-
+		for (range, at) in &ranges.0 {
 			for version in versions.iter().filter(|v| range.satisfies(&v.as_semver())) {
 				newest
 					.entry(version.id)
-					.and_modify(|held| *held = (*held).max(at))
-					.or_insert(at);
+					.and_modify(|held| *held = (*held).max(*at))
+					.or_insert(*at);
 			}
 		}
 
@@ -683,5 +658,46 @@ impl Artifact {
 				// spec: ART#what-a-version-offers
 				&& (other.group_id.is_none() || other.group_id == artifact.group_id)
 		})
+	}
+}
+
+/// When each unscoped range artifact last changed, with its pattern parsed.
+///
+/// A range covers versions rather than naming one, so which of them it answers
+/// for is decided in memory. Loaded once and handed to each version it is asked
+/// about: the patterns do not vary by group, and a worklist poll asks the same
+/// question of every group it covers.
+// spec: RPT#pairs
+pub struct RangeChanges(Vec<(node_semver::Range, jiff::Timestamp)>);
+
+impl RangeChanges {
+	/// One row per distinct pattern rather than per artifact: the answer only
+	/// needs the newest change under each, and every row returned costs a
+	/// semver parse.
+	pub async fn load(db: &mut AsyncPgConnection) -> Result<Self> {
+		use crate::schema::artifacts::dsl;
+
+		let rows: Vec<(Option<String>, Option<jiff_diesel::Timestamp>)> = dsl::artifacts
+			.filter(dsl::version_id.is_null())
+			.filter(dsl::group_id.is_null())
+			.group_by(dsl::version_range_pattern)
+			.select((
+				dsl::version_range_pattern,
+				diesel::dsl::max(dsl::updated_at),
+			))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(Self(
+			rows.into_iter()
+				.filter_map(|(pattern, at)| {
+					// An unparseable pattern matches nothing rather than
+					// everything, as it does where the artifact is offered.
+					let range = node_semver::Range::parse(pattern?).ok()?;
+					Some((range, at?.into()))
+				})
+				.collect(),
+		))
 	}
 }

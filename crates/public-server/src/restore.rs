@@ -201,6 +201,7 @@ struct SchemaGroup {
 async fn resolve_schema_group(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	group_id: Uuid,
+	ranges: &database::artifacts::RangeChanges,
 ) -> Result<Option<SchemaGroup>> {
 	let members = database::applications::Application::list_live_in_group(conn, group_id).await?;
 	let Some(central) = database::server_groups::ServerGroup::canonical_central(&members) else {
@@ -212,7 +213,8 @@ async fn resolve_schema_group(
 	let versions =
 		database::reporting_schemas::versions_of_members(conn, group_id, &members).await?;
 	let settlement =
-		database::reporting_schemas::Settlement::for_group(conn, group_id, &versions).await?;
+		database::reporting_schemas::Settlement::for_group(conn, group_id, &versions, ranges)
+			.await?;
 
 	Ok(Some(SchemaGroup {
 		machine_id: machine.id,
@@ -287,6 +289,7 @@ async fn worklist(
 	// per group rather than per declaration, and the absence of a central is
 	// cached too, since every restore consumer polls this on a schedule.
 	let mut schema_groups: HashMap<Uuid, Option<SchemaGroup>> = HashMap::new();
+	let mut range_changes: Option<database::artifacts::RangeChanges> = None;
 	// Per-group caches so a group referenced by several declarations is resolved
 	// once: the latest produced snapshot per (machine, type), and the latest
 	// healthy-verified snapshot per (machine, type, intent) for `once` suppression.
@@ -390,7 +393,14 @@ async fn worklist(
 			};
 
 			if !schema_groups.contains_key(&d.group_id) {
-				let resolved = resolve_schema_group(&mut conn, d.group_id).await?;
+				// The range artifacts a pair is held against are the same set for
+				// every group, so they are read once for the poll rather than
+				// once per group it covers.
+				if range_changes.is_none() {
+					range_changes = Some(database::artifacts::RangeChanges::load(&mut conn).await?);
+				}
+				let ranges = range_changes.as_ref().expect("loaded above");
+				let resolved = resolve_schema_group(&mut conn, d.group_id, ranges).await?;
 				schema_groups.insert(d.group_id, resolved);
 			}
 			let Some(group) = &schema_groups[&d.group_id] else {

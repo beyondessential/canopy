@@ -165,7 +165,9 @@ impl ReportingSchemaBuild {
 		version: Uuid,
 	) -> Result<bool> {
 		let row = Version::get_by_id(db, version).await?;
-		let settlement = Settlement::for_group(db, group, std::slice::from_ref(&row)).await?;
+		let ranges = crate::artifacts::RangeChanges::load(db).await?;
+		let settlement =
+			Settlement::for_group(db, group, std::slice::from_ref(&row), &ranges).await?;
 		Ok(settlement.settled(version))
 	}
 }
@@ -187,11 +189,13 @@ impl Settlement {
 		db: &mut AsyncPgConnection,
 		group: Uuid,
 		versions: &[Version],
+		ranges: &crate::artifacts::RangeChanges,
 	) -> Result<Self> {
 		Ok(Self {
 			requested: ReportingSchemaRequest::pending_for_group(db, group).await?,
 			builds: ReportingSchemaBuild::latest_by_version_for_group(db, group).await?,
-			changed: crate::artifacts::Artifact::newest_change_for_versions(db, versions).await?,
+			changed: crate::artifacts::Artifact::newest_change_for_versions(db, versions, ranges)
+				.await?,
 		})
 	}
 
