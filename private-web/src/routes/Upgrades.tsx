@@ -2215,7 +2215,7 @@ function WithdrawPlan({
  * wall clocks. A close earlier in the day than the open is the following
  * morning, as the plan reads it. Two hours where the plan names no window,
  * which is what a declaration otherwise starts from. */
-/// The plan's hours as a reader would say them, for a confirmation that has to
+/// The plan's window as a reader would say it, for a confirmation that has to
 /// stand on its own without the form behind it.
 function planWindowLabel(planned: { starts_at: string; ends_at: string }): string {
 	const clock = (at: string) =>
@@ -2311,8 +2311,8 @@ function DeclareFromPlan({
 					<DialogTitle>Declare maintenance — {groupName}</DialogTitle>
 					<DialogContent>
 						<Typography variant="body2">
-							Suspends this environment's alerting for the hours the plan
-							says the work runs, {planWindowLabel(planned)}.
+							Suspends this environment's alerting for the plan's window,{" "}
+							{planWindowLabel(planned)}.
 						</Typography>
 						{note && (
 							<Typography
