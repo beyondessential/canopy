@@ -165,6 +165,10 @@ test.describe("maintenance windows", () => {
 		await expect(page.getByTestId("maintenance-marker")).toContainText(
 			"Maintenance just ended",
 		);
+		await page.getByTestId("maintenance-marker").hover();
+		await expect(page.getByRole("tooltip")).toContainText(
+			"The maintenance window has ended",
+		);
 		await expect(
 			page.getByRole("button", { name: "Declare maintenance" }),
 		).toBeVisible();
