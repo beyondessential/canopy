@@ -66,23 +66,23 @@ export default function GroupTree({
 						data-maintenance={
 							held ? (settling ? "settling" : "holding") : undefined
 						}
-						sx={{
-							mt: index === 0 ? 0 : 1.5,
-							...(held
-								? {
-										mx: -1,
-										px: 1,
-										py: 1,
-										borderRadius: 1,
-										backgroundImage: (theme) =>
-											environmentHatch(theme, settling),
-										...waveWhileHolding(!settling, "&::before"),
-									}
-								: {}),
-						}}
+						sx={{ mt: index === 0 ? 0 : 1.5 }}
 					>
-						<EnvironmentHeading rank={rank} environment={environment} />
-						<Stack spacing={1}>
+						<EnvironmentHeading rank={rank} />
+						<Stack
+							spacing={1}
+							data-testid="tree-boxes"
+							sx={
+								held
+									? {
+											borderRadius: 1,
+											backgroundImage: (theme) =>
+												environmentHatch(theme, settling),
+											...waveWhileHolding(!settling, "&::before"),
+										}
+									: {}
+							}
+						>
 							{boxes.map((box) => (
 								<MachineBlock
 									key={box.machine.id}
@@ -105,41 +105,27 @@ export default function GroupTree({
 	);
 }
 
+/// An environment's row. A window over the environment is drawn on the boxes
+/// under it rather than here.
+// spec: MNT#presentation
+function EnvironmentHeading({ rank }: { rank: string | null }) {
+	return (
+		<Typography
+			variant="overline"
+			color="text.secondary"
+			sx={{ display: "block", mb: 0.5 }}
+		>
+			{rank ?? "unranked"}
+		</Typography>
+	);
+}
+
 /// One box and what runs on it, as a single bordered block.
 ///
 /// The box and its workloads are one card rather than a heading over a list,
 /// because the sharing is the thing being shown: two rows inside one border is
 /// a fact about the host, while two rows under a label is a coincidence of
 /// indentation.
-/// An environment's row, marked where a window was declared over the
-/// environment itself. A window over one of its boxes is marked there instead.
-// spec: MNT#presentation
-function EnvironmentHeading({
-	rank,
-	environment,
-}: {
-	rank: string | null;
-	environment: GroupEnvironment | undefined;
-}) {
-	const held = environment?.maintained === true;
-	const settling = environment?.maintenance_settling === true;
-	return (
-		<Typography
-			variant="overline"
-			color="text.secondary"
-			data-maintenance={held ? (settling ? "settling" : "holding") : undefined}
-			sx={{ display: "block", mb: 0.5 }}
-		>
-			{rank ?? "unranked"}
-			{held && (
-				<Box component="span" sx={{ color: "info.main" }}>
-					{settling ? " · maintenance ended" : " · under maintenance"}
-				</Box>
-			)}
-		</Typography>
-	);
-}
-
 function MachineBlock({
 	machine,
 	applications,

@@ -234,10 +234,10 @@ test.describe("maintenance windows", () => {
 		await expect(section.getByRole("button", { name: "Lift" })).toBeVisible();
 	});
 
-	/// An environment's window is declared over the environment, so its row is
-	/// where the mark belongs: the boxes it catches are muted, not marked.
+	/// An environment's window is declared over the environment, so the mark is
+	/// a wash over the boxes in it rather than stripes on any one of them.
 	/// spec: MNT#presentation
-	test("an environment's row carries its own window's mark", async ({
+	test("an environment's window washes over its boxes", async ({
 		page,
 		sql,
 	}) => {
@@ -253,12 +253,27 @@ test.describe("maintenance windows", () => {
 		});
 
 		await page.goto(`/fleet/groups/${group.id}`);
-		const tree = page.getByTestId("group-tree");
-		await expect(
-			tree.locator('[data-maintenance="holding"]'),
-		).toContainText("clone");
-		await expect(tree.locator('[data-maintenance="holding"]')).toContainText(
-			"under maintenance",
+		const section = page
+			.getByTestId("group-tree")
+			.locator('[data-testid="tree-environment"][data-rank="clone"]');
+		await expect(section).toHaveAttribute("data-maintenance", "holding");
+		const boxes = section.getByTestId("tree-boxes");
+		const wash = await boxes.evaluate(
+			(el) => getComputedStyle(el).backgroundImage,
+		);
+		expect(wash).toContain("repeating-linear-gradient");
+		// The wash is the boxes' own footprint, not a band around them.
+		const [washBox, cardBox] = await Promise.all([
+			boxes.boundingBox(),
+			section.getByTestId("tree-machine").first().locator("..").boundingBox(),
+		]);
+		expect(washBox!.x).toBeCloseTo(cardBox!.x, 0);
+		expect(washBox!.width).toBeCloseTo(cardBox!.width, 0);
+		// Nothing is drawn on the box itself, so its tooltip is what says what
+		// caught it.
+		await section.getByTestId("tree-machine").locator("span").first().hover();
+		await expect(page.getByRole("tooltip")).toContainText(
+			"as part of the clone environment",
 		);
 	});
 
