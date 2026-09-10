@@ -173,9 +173,10 @@ export default function MaintenanceSection({
 				>
 					<Typography variant="body2">
 						Under maintenance, ending{" "}
-						<TimeAgo timestamp={fromMachine.expected_end} />, as part of{" "}
+						<TimeAgo timestamp={fromMachine.expected_end} />, as part of the
+						machine{" "}
 						<MuiLink component={RouterLink} to={`/fleet/machines/${machineId}`}>
-							{machineName ?? "the machine it runs on"}
+							{machineName ?? "it runs on"}
 						</MuiLink>
 						. Amend or lift it there.
 					</Typography>

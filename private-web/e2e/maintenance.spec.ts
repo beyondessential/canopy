@@ -104,7 +104,8 @@ test.describe("maintenance windows", () => {
 
 		await page.goto(`/fleet/applications/${server.id}`);
 		const covering = page.getByTestId("covering-machine-window");
-		await expect(covering).toContainText("Under maintenance, ending");
+		// Named as the machine it is, so the target is not read as a sibling.
+		await expect(covering).toContainText("as part of the machine");
 		await expect(covering).toContainText("Patching the host");
 		await expect(covering.getByRole("link")).toHaveAttribute(
 			"href",
