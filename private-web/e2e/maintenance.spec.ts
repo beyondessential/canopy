@@ -183,6 +183,23 @@ test.describe("maintenance windows", () => {
 		const row = page.getByRole("row", { name: /whole-group/ });
 		await expect(row).toContainText("Cutting over the database");
 		await expect(row).toContainText("seed@bes.au");
+
+		// The view an operator finds work in is where they adjust it.
+		await row.getByRole("button", { name: "Amend" }).click();
+		await expect(
+			page.getByRole("heading", { name: "Amend maintenance" }),
+		).toBeVisible();
+		await page.getByLabel("What's being done").fill("still cutting over");
+		await page.getByRole("button", { name: "Amend", exact: true }).last().click();
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ note: string | null }>(
+					"SELECT note FROM maintenance_windows WHERE server_group_id = $1",
+					[group.id],
+				);
+				return rows.map((r) => r.note);
+			})
+			.toEqual(["still cutting over"]);
 		await expect(
 			page.getByRole("link", { name: "whole-group" }),
 		).toHaveAttribute("href", `/fleet/groups/${group.id}`);
