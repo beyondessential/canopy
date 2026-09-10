@@ -72,10 +72,11 @@ pub struct PlannedUpgrade {
 	/// at "not tested" indefinitely with nothing on its way. `null` without a
 	/// plan.
 	pub testable: Option<bool>,
-	/// Whether work is declared over this environment or its group. This is what
-	/// holds an open plan open, so the view can say why one has not closed.
+	/// The window holding over this environment or its group, where one is.
+	/// This is what holds an open plan open, so the view can both say why one
+	/// has not closed and amend the work from there.
 	// spec: UPG#when-a-plan-is-met
-	pub under_maintenance: bool,
+	pub maintenance_window: Option<database::maintenance_windows::MaintenanceWindow>,
 }
 
 /// Planned upgrades across the fleet.
@@ -136,6 +137,11 @@ pub async fn fleet(
 
 	let suspended =
 		database::maintenance_windows::MaintenanceWindow::suspended_targets(&mut conn).await?;
+	// The window itself, so the view can amend the work rather than only report
+	// it. A window over the group covers its environments, and the environment's
+	// own is the more specific of the two.
+	let open_windows =
+		database::maintenance_windows::MaintenanceWindow::list_open(&mut conn).await?;
 	let mut environments = ServerGroup::environments(&mut conn, &ids).await?;
 	// A plan whose environment has no live application any more still says
 	// where the group was going, and this view is the only place it can be
@@ -247,12 +253,38 @@ pub async fn fleet(
 			verdict,
 			attempt,
 			testable,
-			under_maintenance: suspended.environment_holding(env.group_id, env.rank)
-				|| suspended.group_holding(env.group_id),
+			maintenance_window: holding_window(&open_windows, &suspended, env.group_id, env.rank),
 		});
 	}
 
 	Ok(Json(out))
+}
+
+/// The window holding over an environment: its own where it has one, else the
+/// one over its whole group. A window serving out the settle period has ended
+/// and nobody is working, so it does not count.
+fn holding_window(
+	open: &[database::maintenance_windows::MaintenanceWindow],
+	suspended: &database::maintenance_windows::SuspendedTargets,
+	group: Uuid,
+	rank: ServerRank,
+) -> Option<database::maintenance_windows::MaintenanceWindow> {
+	if suspended.environment_holding(group, rank) {
+		if let Some(window) = open.iter().find(|w| {
+			w.server_group_id == Some(group) && w.rank == Some(rank) && w.ended_at.is_none()
+		}) {
+			return Some(window.clone());
+		}
+	}
+	if suspended.group_holding(group) {
+		if let Some(window) = open
+			.iter()
+			.find(|w| w.server_group_id == Some(group) && w.rank.is_none() && w.ended_at.is_none())
+		{
+			return Some(window.clone());
+		}
+	}
+	None
 }
 
 /// The group's standing against its planned version: the worst of its applications'.

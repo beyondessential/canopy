@@ -54,7 +54,7 @@ import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { environmentName } from "../types";
-import type { ApiResponse, ServerRank } from "../types";
+import type { ApiResponse, MaintenanceWindow, ServerRank } from "../types";
 
 type PastPlan = ApiResponse<"upgrade_plans", "history">[number];
 type PlannableVersion = ApiResponse<"upgrade_plans", "targets">[number];
@@ -151,7 +151,13 @@ export default function Upgrades() {
 													rank={row.rank}
 												/>
 												<MaintenanceMark
-													declared={row.under_maintenance}
+													window={row.maintenance_window}
+													groupId={row.group_id}
+													groupName={environmentName(
+														row.group_name,
+														row.rank,
+													)}
+													onAmended={() => setTick((t) => t + 1)}
 												/>
 											</Stack>
 										</TableCell>
@@ -1427,21 +1433,47 @@ function VerdictChip({
 /// An attempt under way, beside the verdict rather than replacing it: a row can
 /// read as failed with a fresh attempt already running.
 /// Work declared over the environment or its group, which is what holds an open
-/// plan open: without it the row reads as an upgrade nobody finished.
+/// plan open: without it the row reads as an upgrade nobody finished. Clicking
+/// amends that work, since the operator reading the row is the one in it.
 // spec: UPG#when-a-plan-is-met
-function MaintenanceMark({ declared }: { declared: boolean }) {
-	if (!declared) {
+function MaintenanceMark({
+	window,
+	groupId,
+	groupName,
+	onAmended,
+}: {
+	window: MaintenanceWindow | null | undefined;
+	groupId: string;
+	groupName: string;
+	onAmended: () => void;
+}) {
+	const [open, setOpen] = useState(false);
+	if (!window) {
 		return null;
 	}
 	return (
-		<Tooltip title="maintenance is declared over this environment, so its plan stays open until the work is over">
-			<BuildOutlinedIcon
-				color="info"
-				fontSize="small"
-				aria-label="under maintenance"
-				data-testid="plan-under-maintenance"
+		<>
+			<Tooltip title="maintenance is declared over this environment, so its plan stays open until the work is over; amend it here">
+				<IconButton
+					size="small"
+					aria-label={`Amend maintenance for ${groupName}`}
+					onClick={() => setOpen(true)}
+					data-testid="plan-under-maintenance"
+				>
+					<BuildOutlinedIcon color="info" fontSize="small" />
+				</IconButton>
+			</Tooltip>
+			<DeclareMaintenanceDialog
+				open={open}
+				onClose={() => setOpen(false)}
+				scope="group"
+				id={groupId}
+				rank={window.rank ?? undefined}
+				targetLabel={groupName}
+				existing={window}
+				onDone={onAmended}
 			/>
-		</Tooltip>
+		</>
 	);
 }
 

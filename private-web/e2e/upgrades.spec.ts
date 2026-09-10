@@ -842,7 +842,15 @@ test.describe("upgrade windows", () => {
 		});
 
 		await page.goto("/upgrades");
-		await expect(page.getByTestId("plan-under-maintenance")).toBeVisible();
+		const mark = page.getByTestId("plan-under-maintenance");
+		await expect(mark).toBeVisible();
+
+		// The operator reading the row is the one in the work, so the mark is the
+		// way back into it.
+		await mark.click();
+		await expect(
+			page.getByRole("heading", { name: "Amend maintenance" }),
+		).toBeVisible();
 	});
 });
 

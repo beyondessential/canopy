@@ -15020,8 +15020,7 @@
           "group_name",
           "rank",
           "headline",
-          "late",
-          "under_maintenance"
+          "late"
         ],
         "properties": {
           "attempt": {
@@ -15068,6 +15067,17 @@
             "type": "boolean",
             "description": "Whether the planned date has passed without the upgrade happening.\nPresentational: a slipping upgrade is normal operational reality."
           },
+          "maintenance_window": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MaintenanceWindow",
+                "description": "The window holding over this environment or its group, where one is.\nThis is what holds an open plan open, so the view can both say why one\nhas not closed and amend the work from there."
+              }
+            ]
+          },
           "plan": {
             "oneOf": [
               {
@@ -15096,10 +15106,6 @@
               "null"
             ],
             "description": "Whether anything is declared to migrate this group's data. A plan on a\ngroup with nothing declared is never dispatched, so its verdict would sit\nat \"not tested\" indefinitely with nothing on its way. `null` without a\nplan."
-          },
-          "under_maintenance": {
-            "type": "boolean",
-            "description": "Whether work is declared over this environment or its group. This is what\nholds an open plan open, so the view can say why one has not closed."
           },
           "verdict": {
             "type": [
