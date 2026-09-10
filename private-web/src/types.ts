@@ -100,6 +100,8 @@ export type MaintenanceWindow = Solidify<Schemas["MaintenanceWindow"]>;
 /** The grain a window is declared at. An environment is a group with a rank.
  * spec: MNT#declaring */
 export type MaintenanceScope = "application" | "machine" | "group";
+
+export type GroupEnvironment = Solidify<Schemas["GroupEnvironment"]>;
 export type ResolvedReason = Solidify<Schemas["ResolvedReason"]>;
 
 export type VersionStr = Solidify<Schemas["VersionStr"]>;

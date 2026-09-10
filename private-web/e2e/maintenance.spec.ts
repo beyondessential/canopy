@@ -206,6 +206,34 @@ test.describe("maintenance windows", () => {
 		).toHaveAttribute("href", `/fleet/groups/${group.id}`);
 	});
 
+	/// An environment's window is declared over the environment, so its row is
+	/// where the mark belongs: the boxes it catches are muted, not marked.
+	/// spec: MNT#presentation
+	test("an environment's row carries its own window's mark", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await seedServer(sql, {
+			name: "kamaka-clone",
+			groupId: group.id,
+			rank: "clone",
+		});
+		await seedMaintenanceWindow(sql, {
+			serverGroupId: group.id,
+			rank: "clone",
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		const tree = page.getByTestId("group-tree");
+		await expect(
+			tree.locator('[data-maintenance="holding"]'),
+		).toContainText("clone");
+		await expect(tree.locator('[data-maintenance="holding"]')).toContainText(
+			"under maintenance",
+		);
+	});
+
 	/// A machine's window covers every application on it. The mark stays on the
 	/// enclosure so the application does not read as having a window of its own,
 	/// but the application is out of play and has to look it, or a failing one

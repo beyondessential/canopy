@@ -6184,7 +6184,7 @@ export interface components {
              * @description The environments the group has, production first: the ranks its live
              *     applications sit at. Each is a maintenance target of its own.
              */
-            environments: components["schemas"]["ServerRank"][];
+            environments: components["schemas"]["GroupEnvironment"][];
             /** @description The group itself. */
             group: components["schemas"]["ServerGroup"];
             /**
@@ -6235,6 +6235,22 @@ export interface components {
              *     no name beneath it until the zone is restored or the claim released.
              */
             zone?: string | null;
+        };
+        /**
+         * @description One of a group's environments: its applications at one rank, and a
+         *     maintenance target of its own, so the tree can mark the row a window was
+         *     declared over rather than only the boxes it caught.
+         */
+        GroupEnvironment: {
+            /** @description Whether a window over this environment (or its settle period) suspends it. */
+            maintained: boolean;
+            /**
+             * @description Whether that window has ended and watching resumes when the settle
+             *     period elapses.
+             */
+            maintenance_settling: boolean;
+            /** @description The rank its applications sit at. */
+            rank: components["schemas"]["ServerRank"];
         };
         /** @description Identifies the server group to operate on. */
         GroupIdArgs: {

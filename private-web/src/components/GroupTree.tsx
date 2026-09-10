@@ -3,13 +3,14 @@ import { Link as RouterLink } from "react-router-dom";
 
 import {
 	applicationName,
+	type GroupEnvironment,
 	type GroupMachine,
 	groupServersByRank,
 	rankMachines,
 	type ServerInfo,
 } from "../types";
 import ApplicationTypeChip from "./ApplicationTypeChip";
-import MachineEnclosure from "./MachineEnclosure";
+import MachineEnclosure, { ownWindowStripes } from "./MachineEnclosure";
 import StatusDot from "./StatusDot";
 
 /// The group as an operator navigates it: rank, then the boxes at that rank,
@@ -23,11 +24,17 @@ import StatusDot from "./StatusDot";
 export default function GroupTree({
 	machines,
 	applications,
+	environments,
 	currentMachineId,
 	currentApplicationId,
 }: {
 	machines: GroupMachine[];
 	applications: ServerInfo[];
+	/// The group's environments and whether a window holds over each, so the
+	/// row a window was declared over carries the mark rather than only the
+	/// boxes it caught.
+	// spec: MNT#presentation
+	environments?: GroupEnvironment[];
 	/// The machine whose page this is, if any.
 	currentMachineId?: string;
 	/// The application whose page this is, if any.
@@ -39,13 +46,13 @@ export default function GroupTree({
 		<Box data-testid="group-tree">
 			{groupServersByRank(ranked).map(([rank, boxes], index) => (
 				<Box key={rank ?? "_unranked"}>
-					<Typography
-						variant="overline"
-						color="text.secondary"
-						sx={{ display: "block", mt: index === 0 ? 0 : 1.5, mb: 0.5 }}
-					>
-						{rank ?? "unranked"}
-					</Typography>
+					<EnvironmentHeading
+						rank={rank}
+						environment={environments?.find(
+							(environment) => environment.rank === rank,
+						)}
+						first={index === 0}
+					/>
 					<Stack spacing={1}>
 						{boxes.map((box) => (
 							<MachineBlock
@@ -69,6 +76,44 @@ export default function GroupTree({
 /// because the sharing is the thing being shown: two rows inside one border is
 /// a fact about the host, while two rows under a label is a coincidence of
 /// indentation.
+/// An environment's row, marked where a window was declared over the
+/// environment itself. A window over one of its boxes is marked there instead.
+// spec: MNT#presentation
+function EnvironmentHeading({
+	rank,
+	environment,
+	first,
+}: {
+	rank: string | null;
+	environment: GroupEnvironment | undefined;
+	first: boolean;
+}) {
+	const held = environment?.maintained === true;
+	const settling = environment?.maintenance_settling === true;
+	return (
+		<Typography
+			variant="overline"
+			color="text.secondary"
+			data-maintenance={held ? (settling ? "settling" : "holding") : undefined}
+			sx={(theme) => ({
+				display: "block",
+				mt: first ? 0 : 1.5,
+				mb: 0.5,
+				...(held
+					? {
+							backgroundImage: ownWindowStripes(theme, settling),
+							px: 0.75,
+							borderRadius: 1,
+						}
+					: {}),
+			})}
+		>
+			{rank ?? "unranked"}
+			{held ? (settling ? " · maintenance just ended" : " · under maintenance") : ""}
+		</Typography>
+	);
+}
+
 function MachineBlock({
 	machine,
 	applications,

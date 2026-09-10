@@ -11482,7 +11482,7 @@
           "environments": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ServerRank"
+              "$ref": "#/components/schemas/GroupEnvironment"
             },
             "description": "The environments the group has, production first: the ranks its live\napplications sit at. Each is a maintenance target of its own."
           },
@@ -11562,6 +11562,29 @@
               "null"
             ],
             "description": "Apex of the managed zone this domain resolves to — the longest\nconfigured apex it sits within. Null when no configured zone covers it,\nwhich means the zone has left Canopy's configuration since the claim was\nmade: the claim stands and still excludes others, but Canopy will act on\nno name beneath it until the zone is restored or the claim released."
+          }
+        }
+      },
+      "GroupEnvironment": {
+        "type": "object",
+        "description": "One of a group's environments: its applications at one rank, and a\nmaintenance target of its own, so the tree can mark the row a window was\ndeclared over rather than only the boxes it caught.",
+        "required": [
+          "rank",
+          "maintained",
+          "maintenance_settling"
+        ],
+        "properties": {
+          "maintained": {
+            "type": "boolean",
+            "description": "Whether a window over this environment (or its settle period) suspends it."
+          },
+          "maintenance_settling": {
+            "type": "boolean",
+            "description": "Whether that window has ended and watching resumes when the settle\nperiod elapses."
+          },
+          "rank": {
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "The rank its applications sit at."
           }
         }
       },

@@ -165,11 +165,26 @@ pub struct GroupDetail {
 	/// The environments the group has, production first: the ranks its live
 	/// applications sit at. Each is a maintenance target of its own.
 	// spec: MNT#declaring
-	pub environments: Vec<ServerRank>,
+	pub environments: Vec<GroupEnvironment>,
 	/// Whether a maintenance window (or its settle period) suspends the group.
 	pub maintained: bool,
 	/// Whether the suspension is only the settle period: the window has
 	/// ended and watching resumes when it elapses.
+	pub maintenance_settling: bool,
+}
+
+/// One of a group's environments: its applications at one rank, and a
+/// maintenance target of its own, so the tree can mark the row a window was
+/// declared over rather than only the boxes it caught.
+// spec: MNT#presentation
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GroupEnvironment {
+	/// The rank its applications sit at.
+	pub rank: ServerRank,
+	/// Whether a window over this environment (or its settle period) suspends it.
+	pub maintained: bool,
+	/// Whether that window has ended and watching resumes when the settle
+	/// period elapses.
 	pub maintenance_settling: bool,
 }
 
@@ -233,10 +248,17 @@ pub async fn get(
 	let group = ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
 	let (applications, machines) = tree_members(&mut conn, &group).await?;
 	let billing_labels = group_billing_labels(&mut conn, &group).await?;
+	let suspended =
+		database::maintenance_windows::MaintenanceWindow::suspended_targets(&mut conn).await?;
 	let environments = ServerGroup::environments(&mut conn, &[args.server_group_id])
 		.await?
 		.into_iter()
-		.map(|environment| environment.rank)
+		.map(|environment| GroupEnvironment {
+			rank: environment.rank,
+			maintained: suspended.environment_window(args.server_group_id, environment.rank),
+			maintenance_settling: suspended
+				.environment_window_settling(args.server_group_id, environment.rank),
+		})
 		.collect();
 	let maintained = database::maintenance_windows::MaintenanceWindow::suspends(
 		&mut conn,

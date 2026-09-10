@@ -244,7 +244,11 @@ export default function GroupDetail() {
 						arrive by report.
 					</Alert>
 				) : (
-					<GroupTree machines={machines} applications={applications} />
+					<GroupTree
+						machines={machines}
+						applications={applications}
+						environments={detail.data.environments}
+					/>
 				)}
 			</Box>
 
@@ -268,7 +272,7 @@ export default function GroupDetail() {
 				anchor="maintenance"
 				id={group.id}
 				targetLabel={group.name}
-				environments={detail.data.environments}
+				environments={detail.data.environments.map((e) => e.rank)}
 				reloadKey={maintenanceTick}
 				onChanged={() => setMaintenanceTick((n) => n + 1)}
 			/>

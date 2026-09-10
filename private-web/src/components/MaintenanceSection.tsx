@@ -305,7 +305,7 @@ export default function MaintenanceSection({
 					key={window.id}
 					severity="info"
 					icon={<BuildOutlinedIcon fontSize="inherit" />}
-					sx={{ mt: 1 }}
+					sx={{ mt: 1, mb: 1 }}
 					data-testid="environment-window"
 					action={
 						isAdmin ? (
