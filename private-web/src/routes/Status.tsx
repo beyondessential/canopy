@@ -752,7 +752,7 @@ export function RankedDotStrip({
 								ownWindow={box.lead.machine_own_window}
 								describes={box.applications.map((m) =>
 									[
-										`${m.name}${m.rank ? ` · ${m.rank}` : ""} · ${m.type}`,
+										`Application ${m.name}${m.rank ? ` · ${m.rank}` : ""} · ${m.type}`,
 										m.own_window
 											? m.maintenance_settling
 												? "maintenance just ended"
