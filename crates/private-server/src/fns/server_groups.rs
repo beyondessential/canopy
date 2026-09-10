@@ -196,7 +196,7 @@ pub(super) async fn group_environments(
 	group: Uuid,
 	suspended: &database::maintenance_windows::SuspendedTargets,
 ) -> Result<Vec<GroupEnvironment>> {
-	Ok(ServerGroup::environments(conn, &[group])
+	Ok(ServerGroup::environment_ranks(conn, &[group])
 		.await?
 		.into_iter()
 		.map(|environment| GroupEnvironment {

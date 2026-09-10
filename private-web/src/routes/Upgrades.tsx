@@ -205,11 +205,9 @@ export default function Upgrades() {
 													groupId={row.group_id}
 													rank={row.rank}
 													groupName={environmentName(row.group_name, row.rank)}
-													plannedTime={row.plan?.planned_time ?? null}
-													plannedEnd={row.plan?.planned_end_time ?? null}
 													note={row.plan?.note ?? null}
 													held={row.maintenance_window}
-												planned={row.planned_window}
+													planned={row.planned_window}
 													onDeclared={() => setTick((t) => t + 1)}
 												/>
 											</TableCell>
@@ -2260,6 +2258,7 @@ function WithdrawPlan({
  * morning, as the plan reads it. Two hours where the plan names no window,
  * which is what a declaration otherwise starts from. */
 /// When the plan's window closes, as a reader would say it. A declaration runs
+/// When the plan's window closes, as a reader would say it. A declaration runs
 /// from now, so its end is the only part of the window that bounds it.
 function planWindowLabel(planned: { ends_at: string }): string {
 	return new Date(planned.ends_at).toLocaleString(undefined, {
@@ -2270,14 +2269,20 @@ function planWindowLabel(planned: { ends_at: string }): string {
 	});
 }
 
-function plannedHours(time: string | null, end: string | null): number {
-	if (!time || !end) return 2;
-	const minutes = (clock: string) => {
-		const [h, m] = clock.split(":");
-		return Number(h) * 60 + Number(m ?? 0);
-	};
-	const span = minutes(end) - minutes(time);
-	return (span > 0 ? span : span + 24 * 60) / 60;
+/// How long a declaration should run, in milliseconds: the length of the plan's
+/// own window where it named one. A declaration opens now, so the plan supplies
+/// how long the work takes and not when it starts.
+// spec: MNT#declaring
+const DEFAULT_LENGTH_MS = 2 * 3600_000;
+function plannedLength(
+	planned: { starts_at: string; ends_at: string } | null | undefined,
+): number {
+	if (!planned) {
+		return DEFAULT_LENGTH_MS;
+	}
+	const span =
+		new Date(planned.ends_at).getTime() - new Date(planned.starts_at).getTime();
+	return span > 0 ? span : DEFAULT_LENGTH_MS;
 }
 
 /** Declare maintenance over an environment from its open plan, carrying the
@@ -2288,8 +2293,6 @@ function DeclareFromPlan({
 	groupId,
 	rank,
 	groupName,
-	plannedTime,
-	plannedEnd,
 	note,
 	held,
 	planned,
@@ -2298,8 +2301,6 @@ function DeclareFromPlan({
 	groupId: string;
 	rank: ServerRank;
 	groupName: string;
-	plannedTime: string | null;
-	plannedEnd: string | null;
 	note: string | null;
 	/// The window holding over this environment, where work is already declared.
 	/// The control then amends that work rather than declaring over it again.
@@ -2317,12 +2318,14 @@ function DeclareFromPlan({
 	// A window over the whole group is not this row's to amend or lift: ending it
 	// would un-suspend every other environment in the group.
 	const ownWindow = held && held.rank ? held : null;
-	const hours = plannedHours(plannedTime, plannedEnd);
-	// A plan whose hours are still ahead needs no form to declare over. One whose
-	// window has already passed says nothing about work starting now, so that
-	// falls back to the form and its length-from-now prefill.
+	// Declaring opens the window now, so only a plan whose own hours are under
+	// way can be confirmed as they stand. One still ahead, or already past, falls
+	// back to the form.
 	const confirmable =
-		!ownWindow && !!planned && new Date(planned.ends_at).getTime() > Date.now();
+		!ownWindow &&
+		!!planned &&
+		new Date(planned.starts_at).getTime() <= Date.now() &&
+		new Date(planned.ends_at).getTime() > Date.now();
 	return (
 		<>
 			<Tooltip
@@ -2412,7 +2415,7 @@ function DeclareFromPlan({
 						? undefined
 						: {
 								expectedEnd: new Date(
-									Date.now() + hours * 3600_000,
+									Date.now() + plannedLength(planned),
 								).toISOString(),
 								note: note ?? undefined,
 							}

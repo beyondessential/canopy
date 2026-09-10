@@ -469,11 +469,17 @@ pub async fn close_met_plans(db: &mut AsyncPgConnection) -> Result<usize> {
 			.filter_map(|env| env.version.map(|v| ((env.group_id, env.rank), v)))
 			.collect();
 	let suspended = MaintenanceWindow::suspended_targets(db).await?;
-	let targets: std::collections::HashMap<Uuid, Version> = Version::get_all_including_drafts(db)
-		.await?
-		.into_iter()
-		.map(|version| (version.id, version))
-		.collect();
+	let targets: std::collections::HashMap<Uuid, Version> = Version::get_all_by_ids(
+		db,
+		&open
+			.iter()
+			.map(|plan| plan.target_version_id)
+			.collect::<Vec<_>>(),
+	)
+	.await?
+	.into_iter()
+	.map(|version| (version.id, version))
+	.collect();
 	let now = Timestamp::now();
 
 	let mut closed = 0;

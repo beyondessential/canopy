@@ -379,15 +379,15 @@ async fn a_start_with_no_end_still_holds_the_plan() {
 	TestDb::run(|mut conn, _url| async move {
 		let (group, server) = group_running(&mut conn, "2.60.0").await;
 		let target = publish(&mut conn, 61, 0).await;
-		let now = Zoned::now().with_time_zone(TimeZone::UTC);
+		let started = Zoned::now().with_time_zone(TimeZone::UTC) - SignedDuration::from_mins(5);
 		UpgradePlan::record(
 			&mut conn,
 			group,
 			ServerRank::Production,
 			target.id,
 			PlannedWhen {
-				date: Some(now.date()),
-				time: Some((&now - SignedDuration::from_mins(5)).time()),
+				date: Some(started.date()),
+				time: Some(started.time()),
 				end: None,
 				zone: Some("UTC".to_owned()),
 			},

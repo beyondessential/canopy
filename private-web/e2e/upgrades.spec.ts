@@ -866,6 +866,42 @@ test.describe("upgrade windows", () => {
 		await expect(page.getByTestId("plan-under-maintenance")).toHaveCount(0);
 	});
 
+	/// Declaring opens the window now, so a plan whose hours are still ahead
+	/// cannot be confirmed as they stand: confirming it would silence the
+	/// environment from this moment to a distant end.
+	// spec: MNT#declaring
+	test("a plan whose window has not started falls through to the form", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const production = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		await seedStatus(sql, { serverId: production.id, version: "2.60.0" });
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		const ahead = new Date(Date.now() + 21 * 24 * 3600_000);
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			rank: "production",
+			targetVersionId: target.id,
+			plannedFor: ahead.toISOString().slice(0, 10),
+			plannedTime: "22:00",
+			plannedEndTime: "02:00",
+			plannedZone: "UTC",
+		});
+
+		await page.goto("/upgrades");
+		await page
+			.getByRole("button", { name: "Declare maintenance for kamaka" })
+			.click();
+
+		await expect(page.getByTestId("confirm-declare")).toHaveCount(0);
+		await expect(page.getByLabel("Expected to end")).toBeVisible();
+	});
+
 	/// The incident: an upgrade runs with nothing declared. The plan already
 	/// carries the hours, so declaring over it is a confirmation.
 	// spec: MNT#declaring
@@ -885,9 +921,7 @@ test.describe("upgrade windows", () => {
 			groupId: group.id,
 			rank: "production",
 			targetVersionId: target.id,
-			plannedFor: new Date().toISOString().slice(0, 10),
-			plannedTime: "22:00",
-			plannedEndTime: "02:00",
+			...startedWindow(),
 			plannedZone: "UTC",
 			note: "site can absorb 2.61",
 		});
@@ -897,7 +931,8 @@ test.describe("upgrade windows", () => {
 			.getByRole("button", { name: "Declare maintenance for kamaka" })
 			.click();
 
-		// A confirmation, not the form: the hours are already known.
+		// A confirmation, not the form: the hours are already known, and they
+		// are under way, which is what a declaration opening now can stand for.
 		const confirm = page.getByTestId("confirm-declare");
 		await expect(confirm).toBeVisible();
 		await expect(confirm).toContainText("site can absorb 2.61");
@@ -916,6 +951,27 @@ test.describe("upgrade windows", () => {
 		await expect(page.getByTestId("plan-under-maintenance")).toBeVisible();
 	});
 });
+
+/// A plan window that opened an hour ago and runs for another two, in UTC: a
+/// declaration opens now, so only hours already under way can be confirmed as
+/// they stand.
+function startedWindow(): {
+	plannedFor: string;
+	plannedTime: string;
+	plannedEndTime: string;
+} {
+	const clock = (at: Date) =>
+		`${String(at.getUTCHours()).padStart(2, "0")}:${String(
+			at.getUTCMinutes(),
+		).padStart(2, "0")}`;
+	const started = new Date(Date.now() - 3600_000);
+	return {
+		plannedFor: started.toISOString().slice(0, 10),
+		plannedTime: clock(started),
+		plannedEndTime: clock(new Date(Date.now() + 2 * 3600_000)),
+	};
+}
+
 
 /** The local calendar day, as the API and the grid both write it. */
 function localIso(at: Date): string {

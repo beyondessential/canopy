@@ -293,6 +293,34 @@ test.describe("maintenance windows", () => {
 		expect(marks.some((m) => m.opacity < 1)).toBe(true);
 	});
 
+	/// A group-wide window is not a substitute for one over a single
+	/// environment, so the control for it stays whatever the group is under.
+	/// spec: MNT#declaring
+	test("an environment is declarable while the group has its own window", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		await seedMaintenanceWindow(sql, { serverGroupId: group.id });
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		await expect(page.getByTestId("maintenance-section")).toContainText(
+			"Under maintenance",
+		);
+		await page
+			.getByRole("button", { name: "Declare over an environment" })
+			.click();
+		await page.getByRole("menuitem", { name: "production" }).click();
+		await expect(
+			page.getByRole("heading", { name: "Declare maintenance" }),
+		).toBeVisible();
+	});
+
 	/// A group's own window and its production environment's are named the same,
 	/// since an environment at that rank is named for its group. The list has to
 	/// say which is which or two rows read identically.
@@ -504,7 +532,7 @@ test.describe("maintenance windows", () => {
 
 		await page.goto(`/fleet/groups/${group.id}`);
 		await page
-			.getByRole("button", { name: "Declare maintenance over an environment" })
+			.getByRole("button", { name: "Declare over an environment" })
 			.click();
 		await page.getByRole("menuitem", { name: "clone" }).click();
 		await expect(
@@ -528,7 +556,7 @@ test.describe("maintenance windows", () => {
 		// to be declared over on its own.
 		await expect(page.getByTestId("environment-window")).toContainText("clone");
 		await page
-			.getByRole("button", { name: "Declare maintenance over an environment" })
+			.getByRole("button", { name: "Declare over an environment" })
 			.click();
 		await expect(
 			page.getByRole("menuitem", { name: "production" }),

@@ -269,47 +269,34 @@ export default function MaintenanceSection({
 				</Alert>
 			) : (
 				isAdmin && (
-					<Stack
-						direction="row"
-						sx={{ mb: history.length ? 2 : 0 }}
+					<Button
+						size="small"
+						variant="outlined"
+						startIcon={<BuildOutlinedIcon />}
+						onClick={() => setDialogOpen(true)}
+						sx={{ mb: 1 }}
 					>
-						<Button
-							size="small"
-							variant="outlined"
-							startIcon={<BuildOutlinedIcon />}
-							onClick={() => setDialogOpen(true)}
-							sx={
-								declarable.length
-									? {
-											borderTopRightRadius: 0,
-											borderBottomRightRadius: 0,
-											borderRightColor: "transparent",
-										}
-									: undefined
-							}
-						>
-							{fromMachine || fromGroup
-								? `Declare for this ${scope} as well`
-								: `Declare maintenance`}
-						</Button>
-						{declarable.length > 0 && (
-							<Button
-								size="small"
-								variant="outlined"
-								aria-label="Declare maintenance over an environment"
-								onClick={(event) => setMenuAnchor(event.currentTarget)}
-								sx={{
-									minWidth: 32,
-									px: 0,
-									borderTopLeftRadius: 0,
-									borderBottomLeftRadius: 0,
-								}}
-							>
-								<ArrowDropDownIcon fontSize="small" />
-							</Button>
-						)}
-					</Stack>
+						{fromMachine || fromGroup
+							? `Declare for this ${scope} as well`
+							: "Declare maintenance"}
+					</Button>
 				)
+			)}
+			{/* Independent of the group's own window: a group-wide window is not a
+			    substitute for one over a single environment, so the control for it
+			    stays whatever the group is under. */}
+			{/* spec: MNT#declaring */}
+			{isAdmin && declarable.length > 0 && (
+				<Button
+					size="small"
+					variant="outlined"
+					startIcon={<BuildOutlinedIcon />}
+					endIcon={<ArrowDropDownIcon fontSize="small" />}
+					onClick={(event) => setMenuAnchor(event.currentTarget)}
+					sx={{ mb: history.length ? 2 : 0, ml: open ? 0 : 1 }}
+				>
+					Declare over an environment
+				</Button>
 			)}
 			{environmentWindows.map((window) => (
 				<Alert
