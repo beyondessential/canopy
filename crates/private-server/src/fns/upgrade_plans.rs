@@ -163,7 +163,7 @@ pub async fn fleet(
 	for window in &open_windows {
 		if let Some(group) = window.server_group_id
 			&& window.ended_at.is_none()
-			&& window.suspends_at(now_ts)
+			&& window.holds_at(now_ts)
 		{
 			holding.insert((group, window.rank), window);
 		}

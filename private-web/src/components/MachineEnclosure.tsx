@@ -1,7 +1,7 @@
 import { Box, Tooltip, keyframes, type Theme } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import type { ReactNode } from "react";
-import type { HealthState, ShortStatus } from "../types";
+import { type HealthState, type ShortStatus, maintenanceLine } from "../types";
 
 // The pill is the machine, so it carries the machine's state while the dots
 // inside carry each application's. Every machine is enclosed, whether it runs
@@ -85,20 +85,6 @@ export function waveWhileHolding(
 // fixed grey, so the stripes hold on a dark card, and they carry their own
 // phase so no background offset exposes the gradient's tile as a seam.
 // spec: MNT#presentation
-/// What to say about a suspended target: whether the work was declared here, and
-/// where it was declared if not.
-// spec: MNT#presentation
-function maintenanceLine(
-	ownWindow: boolean,
-	settling: boolean,
-	heldBy?: string | null,
-): string {
-	const state = settling
-		? "maintenance just ended, watching resumes shortly"
-		: "under maintenance";
-	return ownWindow || !heldBy ? state : `${state} as part of ${heldBy}`;
-}
-
 export function ownWindowStripes(theme: Theme, settling: boolean): string {
 	// The settle period drops much further than the window itself: nobody is in
 	// there any more, and the mark is only saying watching has yet to resume.

@@ -6,6 +6,7 @@ import {
 	type GroupEnvironment,
 	type GroupMachine,
 	groupServersByRank,
+	heldByLabel,
 	rankMachines,
 	type ServerInfo,
 } from "../types";
@@ -60,10 +61,11 @@ export default function GroupTree({
 								machine={box.machine}
 								applications={box.applications}
 								heldBy={
+									rank &&
 									environments?.find(
 										(environment) => environment.rank === rank,
 									)?.maintained
-										? `the ${rank} environment`
+										? heldByLabel({ kind: "environment", rank })
 										: null
 								}
 								currentMachineId={currentMachineId}
@@ -224,7 +226,7 @@ function MachineBlock({
 								monitored={application.is_monitored !== false}
 								maintained={application.own_window ?? false}
 								suspended={application.maintained ?? false}
-								heldBy={heldBy ?? `the machine ${name}`}
+								heldBy={heldBy ?? heldByLabel({ kind: "machine", name })}
 								title={applicationName(application)}
 								size={DOT_SIZE}
 							/>

@@ -225,7 +225,7 @@ test.describe("maintenance windows", () => {
 		await page.goto(`/fleet/applications/${server.id}`);
 		const section = page.getByTestId("maintenance-section");
 		await expect(section).toContainText("Maintenance ended");
-		await expect(section).toContainText("watched again");
+		await expect(section).toContainText("watching resumes shortly");
 		// The controls stay: the record is still open and can be lifted.
 		await expect(section.getByRole("button", { name: "Lift" })).toBeVisible();
 	});

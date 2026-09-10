@@ -1,6 +1,6 @@
 import { Box, Tooltip, keyframes, type Theme } from "@mui/material";
 import { alpha } from "@mui/material/styles";
-import type { HealthState, ShortStatus } from "../types";
+import { type HealthState, type ShortStatus, maintenanceLine } from "../types";
 import { MUTED } from "./MachineEnclosure";
 
 // One dot, one subject, one colourway.
@@ -167,13 +167,9 @@ export default function StatusDot({
 		? ""
 		: [
 				title,
-				maintained
-					? settling
-						? "maintenance just ended, watching resumes shortly"
-						: "under maintenance"
-					: suspended
-						? `under maintenance${heldBy ? ` as part of ${heldBy}` : ""}`
-						: null,
+				maintained || suspended
+					? maintenanceLine(maintained, settling, heldBy)
+					: null,
 				monitored ? null : "unmonitored",
 			]
 				.filter(Boolean)

@@ -37,6 +37,7 @@ import {
 	SERVER_RANK_ORDER,
 	type ServerInfo,
 	type ServerRank,
+	heldByLabel,
 } from "../types";
 
 /// A machine's own page: the box, what it reports about itself, its health,
@@ -248,7 +249,7 @@ export default function MachineDetail() {
 				applications={data.applications}
 				heldBy={
 					data.own_window
-						? `the machine ${data.machine.name ?? "it runs on"}`
+						? heldByLabel({ kind: "machine", name: data.machine.name })
 						: null
 				}
 			/>

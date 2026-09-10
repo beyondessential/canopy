@@ -17,7 +17,7 @@ import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
-import { environmentName } from "../types";
+import { environmentName, heldByLabel } from "../types";
 import type { MaintenanceScope, MaintenanceWindow, ServerRank } from "../types";
 import DeclareMaintenanceDialog from "./DeclareMaintenanceDialog";
 import ServerRankChip from "./ServerRankChip";
@@ -179,10 +179,9 @@ export default function MaintenanceSection({
 				>
 					<Typography variant="body2">
 						Under maintenance, ending{" "}
-						<TimeAgo timestamp={fromMachine.expected_end} />, as part of the
-						machine{" "}
+						<TimeAgo timestamp={fromMachine.expected_end} />, as part of{" "}
 						<MuiLink component={RouterLink} to={`/fleet/machines/${machineId}`}>
-							{machineName ?? "it runs on"}
+							{heldByLabel({ kind: "machine", name: machineName })}
 						</MuiLink>
 						. Amend or lift it there.
 					</Typography>
@@ -204,14 +203,9 @@ export default function MaintenanceSection({
 						Under maintenance, ending{" "}
 						<TimeAgo timestamp={fromGroup.expected_end} />, as part of{" "}
 						<MuiLink component={RouterLink} to={`/fleet/groups/${groupId}`}>
-							{/* A production environment is named for its group, so naming
-							    the grain is the only thing that tells its window apart
-							    from the group's own. */}
 							{fromGroup.rank
-								? `the ${fromGroup.rank} environment`
-								: groupName
-									? `the group ${groupName}`
-									: "its group"}
+								? heldByLabel({ kind: "environment", rank: fromGroup.rank })
+								: heldByLabel({ kind: "group", name: groupName })}
 						</MuiLink>
 						. Amend or lift it there.
 					</Typography>
@@ -262,8 +256,8 @@ export default function MaintenanceSection({
 							</>
 						) : (
 							<>
-								Maintenance ended <TimeAgo timestamp={open.expected_end} />.
-								This {scope} is watched again.
+								Maintenance ended <TimeAgo timestamp={open.expected_end} />,
+								watching resumes shortly.
 							</>
 						)}
 					</Typography>
@@ -371,8 +365,8 @@ export default function MaintenanceSection({
 							</>
 						) : (
 							<>
-								maintenance ended <TimeAgo timestamp={window.expected_end} />.
-								It is watched again.
+								maintenance ended <TimeAgo timestamp={window.expected_end} />,
+								watching resumes shortly.
 							</>
 						)}
 					</Typography>

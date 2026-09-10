@@ -288,6 +288,41 @@ export function environmentName(group: string, rank: ServerRank): string {
 	return rank === "production" ? group : `${group} ${rank}`;
 }
 
+/// What holds a window over a target that did not have it declared over
+/// itself, as a sentence names it. One spelling, so a tooltip, an alert and a
+/// tree row all say the same thing about the same window.
+// spec: MNT#presentation
+export function heldByLabel(
+	holder:
+		| { kind: "machine"; name: string | null | undefined }
+		| { kind: "group"; name: string | null | undefined }
+		| { kind: "environment"; rank: ServerRank },
+): string {
+	switch (holder.kind) {
+		case "machine":
+			return `the machine ${holder.name ?? "it runs on"}`;
+		case "group":
+			return holder.name ? `the group ${holder.name}` : "its group";
+		case "environment":
+			return `the ${holder.rank} environment`;
+	}
+}
+
+/// The line a suspended target's tooltip carries: whether the work was declared
+/// here, and where it was declared if not. Suspension outlasts the window by a
+/// settle period, so a window that has ended is still "just ended" here.
+// spec: MNT#presentation
+export function maintenanceLine(
+	ownWindow: boolean,
+	settling: boolean,
+	heldBy?: string | null,
+): string {
+	const state = settling
+		? "maintenance just ended, watching resumes shortly"
+		: "under maintenance";
+	return ownWindow || !heldBy ? state : `${state} as part of ${heldBy}`;
+}
+
 /// Sort key for a rank, with `null` ranks pushed last. Ranks are an ordered
 /// set; types are not, so a type tiebreak sorts alphabetically at the
 /// comparison rather than through a table here.
