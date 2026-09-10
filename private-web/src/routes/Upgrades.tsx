@@ -150,7 +150,7 @@ export default function Upgrades() {
 													groupName={row.group_name}
 													rank={row.rank}
 												/>
-												<MaintenanceChip
+												<MaintenanceMark
 													declared={row.under_maintenance}
 												/>
 											</Stack>
@@ -1429,18 +1429,16 @@ function VerdictChip({
 /// Work declared over the environment or its group, which is what holds an open
 /// plan open: without it the row reads as an upgrade nobody finished.
 // spec: UPG#when-a-plan-is-met
-function MaintenanceChip({ declared }: { declared: boolean }) {
+function MaintenanceMark({ declared }: { declared: boolean }) {
 	if (!declared) {
 		return null;
 	}
 	return (
 		<Tooltip title="maintenance is declared over this environment, so its plan stays open until the work is over">
-			<Chip
-				size="small"
+			<BuildOutlinedIcon
 				color="info"
-				variant="outlined"
-				icon={<BuildOutlinedIcon />}
-				label="maintenance"
+				fontSize="small"
+				aria-label="under maintenance"
 				data-testid="plan-under-maintenance"
 			/>
 		</Tooltip>
