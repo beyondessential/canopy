@@ -90,6 +90,16 @@ fn report_for(
 
 /// Record a build against a throwaway restore report for the pair.
 async fn record_build(conn: &mut AsyncPgConnection, version: Uuid, built: bool) {
+	record_build_for_run(conn, version, built, None).await;
+}
+
+/// The same, for a build reported as a named run.
+async fn record_build_for_run(
+	conn: &mut AsyncPgConnection,
+	version: Uuid,
+	built: bool,
+	run_id: Option<Uuid>,
+) {
 	let report = NewBackupRestoreCheck {
 		replica_id: None,
 		replica_name: None,
@@ -109,7 +119,7 @@ async fn record_build(conn: &mut AsyncPgConnection, version: Uuid, built: bool) 
 		s3_received_raw_bytes: None,
 		s3_received_payload_bytes: None,
 		health_details: None,
-		run_id: None,
+		run_id,
 		redaction_outcome: None,
 		redaction_manifest_version: None,
 		redaction_columns_masked: None,
@@ -227,6 +237,43 @@ async fn an_operator_ask_reinstates_a_settled_pair() {
 				.await
 				.unwrap(),
 			"the ask is answered once the build it asked for lands"
+		);
+	})
+	.await;
+}
+
+/// A build runs for half an hour and reports at the end of it. An ask entered
+/// while it ran is for whatever changed after it began, so the build it asked
+/// for is the next one.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_ask_made_while_the_build_ran_stands() {
+	TestDb::run(|mut conn, _url| async move {
+		let (_older, newer) = seed(&mut conn).await;
+		declare_builder(&mut conn, true).await;
+
+		const RUN: &str = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+		conn.batch_execute(&format!(
+			"INSERT INTO backup_credential_issuances
+			   (device_id, group_id, type, issued_at, expires_at, purpose,
+			    sts_assumed_role, bucket, prefix, run_id)
+			 VALUES ('{CONSUMER}', '{GROUP}', 'tamanu-postgres',
+			         now() - interval '30 minutes', now(), 'restore',
+			         'arn:test', 'b', '', '{RUN}')"
+		))
+		.await
+		.expect("issue the run its credentials");
+
+		ReportingSchemaRequest::enqueue(&mut conn, group(), newer, Some("someone@bes.au"))
+			.await
+			.expect("enqueue");
+
+		record_build_for_run(&mut conn, newer, true, Some(RUN.parse().unwrap())).await;
+
+		assert!(
+			!ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+				.await
+				.unwrap(),
+			"the ask stands until a build that began after it lands"
 		);
 	})
 	.await;

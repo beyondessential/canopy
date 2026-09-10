@@ -62,6 +62,10 @@ impl ReportingSchemaBuild {
 		build: NewReportingSchemaBuild,
 	) -> Result<i64> {
 		let restore_failed = report.outcome != RunOutcome::Success;
+		let began_at = match report.run_id {
+			Some(run) => run_started_at(db, run).await?.unwrap_or(report.observed_at),
+			None => report.observed_at,
+		};
 
 		let check_id = BackupRestoreCheck::record_report(db, report).await?;
 
@@ -91,8 +95,10 @@ impl ReportingSchemaBuild {
 			.await?;
 
 		// An operator's ask is answered once the build it asked for lands,
-		// whichever way it went.
-		ReportingSchemaRequest::clear(db, build.group_id, build.version_id).await?;
+		// whichever way it went. A build takes half an hour, and an ask entered
+		// while it ran is for whatever changed after it began, so what answers
+		// that one is the next build rather than this.
+		ReportingSchemaRequest::clear(db, build.group_id, build.version_id, began_at).await?;
 
 		Ok(check_id)
 	}
@@ -208,6 +214,25 @@ impl Settlement {
 	}
 }
 
+/// When the run behind a report began, read from the first credential it was
+/// issued.
+///
+/// A run reports once it is over, so its own timestamp is the far end of a
+/// window half an hour wide, and what it started before is the question an ask
+/// made inside that window turns on.
+async fn run_started_at(db: &mut AsyncPgConnection, run: Uuid) -> Result<Option<Timestamp>> {
+	use crate::schema::backup_credential_issuances::dsl;
+
+	let issued: Option<jiff_diesel::Timestamp> = dsl::backup_credential_issuances
+		.filter(dsl::run_id.eq(Some(run)))
+		.select(diesel::dsl::min(dsl::issued_at))
+		.first(db)
+		.await
+		.map_err(AppError::from)?;
+
+	Ok(issued.map(Into::into))
+}
+
 /// An operator asking for a pair's build.
 #[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::reporting_schema_requests)]
@@ -267,13 +292,20 @@ impl ReportingSchemaRequest {
 		Ok(versions.into_iter().collect())
 	}
 
-	async fn clear(db: &mut AsyncPgConnection, group: Uuid, version: Uuid) -> Result<()> {
+	/// Clear a pair's ask, where it was made before `answered_at`.
+	async fn clear(
+		db: &mut AsyncPgConnection,
+		group: Uuid,
+		version: Uuid,
+		answered_at: Timestamp,
+	) -> Result<()> {
 		use crate::schema::reporting_schema_requests::dsl;
 
 		diesel::delete(
 			dsl::reporting_schema_requests
 				.filter(dsl::group_id.eq(group))
-				.filter(dsl::version_id.eq(version)),
+				.filter(dsl::version_id.eq(version))
+				.filter(dsl::requested_at.lt(jiff_diesel::Timestamp::from(answered_at))),
 		)
 		.execute(db)
 		.await
