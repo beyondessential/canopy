@@ -206,6 +206,30 @@ test.describe("maintenance windows", () => {
 		).toHaveAttribute("href", `/fleet/groups/${group.id}`);
 	});
 
+	/// Suspension ends with the window's expected end, whether or not the sweep
+	/// has closed the record. Saying otherwise claims alerting is off while it is
+	/// back on, which is the wrong way round to be wrong.
+	/// spec: MNT#settling
+	test("a window past its expected end does not claim to suspend", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const server = await seedServer(sql, { groupId: group.id });
+		await seedMaintenanceWindow(sql, {
+			applicationId: server.id,
+			endsInHours: -2,
+			note: "ran long",
+		});
+
+		await page.goto(`/fleet/applications/${server.id}`);
+		const section = page.getByTestId("maintenance-section");
+		await expect(section).toContainText("ran past its expected end");
+		await expect(section).toContainText("watched again");
+		// The controls stay: the record is still open and can be lifted.
+		await expect(section.getByRole("button", { name: "Lift" })).toBeVisible();
+	});
+
 	/// An environment's window is declared over the environment, so its row is
 	/// where the mark belongs: the boxes it catches are muted, not marked.
 	/// spec: MNT#presentation

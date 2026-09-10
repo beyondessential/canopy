@@ -130,6 +130,12 @@ export default function MaintenanceSection({
 	}
 
 	const windows: MaintenanceWindow[] = result.data;
+	// A window past its expected end suspends nothing, whether or not the sweep
+	// has closed it: saying otherwise claims alerting is off while it is back on.
+	// spec: MNT#settling
+	const holds = (window: MaintenanceWindow) =>
+		window.ended_at === null &&
+		new Date(window.expected_end).getTime() > Date.now();
 	// A group's own window, not one of its environments'.
 	const open = windows.find((w) => w.ended_at === null && !w.rank) ?? null;
 	const environmentWindows = windows.filter((w) => w.ended_at === null && w.rank);
@@ -139,13 +145,13 @@ export default function MaintenanceSection({
 	const fromGroup =
 		covering.status === "ok"
 			? ((covering.data as MaintenanceWindow[]).find(
-					(w) => w.ended_at === null && (!w.rank || w.rank === rank),
+					(w) => holds(w) && (!w.rank || w.rank === rank),
 				) ?? null)
 			: null;
 	const fromMachine =
 		coveringMachine.status === "ok"
 			? ((coveringMachine.data as MaintenanceWindow[]).find(
-					(w) => w.ended_at === null,
+					holds,
 				) ?? null)
 			: null;
 	const history = windows.filter((w) => w.ended_at !== null).slice(0, HISTORY_SHOWN);
@@ -245,10 +251,19 @@ export default function MaintenanceSection({
 					}
 				>
 					<Typography variant="body2">
-						Under maintenance, ending <TimeAgo timestamp={open.expected_end} />.
-
-						Checks are still recorded and shown. Nothing on this {scope}{" "}
-						alerts.
+						{holds(open) ? (
+							<>
+								Under maintenance, ending{" "}
+								<TimeAgo timestamp={open.expected_end} />. Checks are still
+								recorded and shown. Nothing on this {scope} alerts.
+							</>
+						) : (
+							<>
+								Maintenance ran past its expected end{" "}
+								<TimeAgo timestamp={open.expected_end} />, so this {scope} is
+								watched again. The window closes on the next sweep.
+							</>
+						)}
 					</Typography>
 					{open.note && (
 						<Typography variant="body2" sx={{ mt: 0.5, fontStyle: "italic" }}>
