@@ -131,12 +131,18 @@ pub async fn candidates(db: &mut AsyncPgConnection) -> Result<Vec<Candidate>> {
 }
 
 /// How long one migration took, in the order it ran.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Queryable, Selectable)]
+#[derive(
+	Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema,
+)]
 #[diesel(table_name = crate::schema::migration_timings)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct MigrationTiming {
+	/// Where it fell in the run, counting from zero.
 	pub ordinal: i32,
+	/// The migration's name, as the migration runner reports it.
 	pub name: String,
+	/// Whole seconds this migration took.
+	#[schema(value_type = i64)]
 	pub elapsed: PgDuration,
 }
 
@@ -174,6 +180,7 @@ pub struct NewMigrationTest {
 /// One joined row behind [`latest_test`].
 #[derive(Queryable)]
 struct LatestRow {
+	check_id: i64,
 	outcome: RunOutcome,
 	failed_migration: Option<String>,
 	snapshot_id: Option<String>,
@@ -203,6 +210,8 @@ pub struct LatestTest {
 	pub data_bytes_before: i64,
 	/// Size of it afterwards; the growth is what a heavy backfill shows up as.
 	pub data_bytes_after: i64,
+	/// Each migration that ran, in the order they ran.
+	pub timings: Vec<MigrationTiming>,
 }
 
 /// Where one of a group's applications stands against the version it would take
@@ -334,6 +343,7 @@ pub async fn latest_test(
 	let row: Option<LatestRow> = migration_tests::table
 		.inner_join(backup_restore_checks::table)
 		.select((
+			migration_tests::check_id,
 			backup_restore_checks::outcome,
 			migration_tests::failed_migration,
 			backup_restore_checks::snapshot_id,
@@ -349,7 +359,12 @@ pub async fn latest_test(
 		.await
 		.optional()?;
 
-	Ok(row.map(|row| LatestTest {
+	let Some(row) = row else {
+		return Ok(None);
+	};
+	let timings = MigrationTest::timings(db, row.check_id).await?;
+
+	Ok(Some(LatestTest {
 		verdict: match (row.outcome, &row.failed_migration) {
 			(RunOutcome::Success, None) => Verdict::Passed,
 			_ => Verdict::Failed,
@@ -360,6 +375,7 @@ pub async fn latest_test(
 		total_elapsed: row.total_elapsed,
 		data_bytes_before: row.data_bytes_before,
 		data_bytes_after: row.data_bytes_after,
+		timings,
 	}))
 }
 

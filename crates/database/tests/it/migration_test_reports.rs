@@ -574,7 +574,10 @@ async fn a_group_shows_where_each_server_stands() {
 				failed_migration: Some("backfillNoteTypeIds".into()),
 				data_bytes_before: 200,
 				data_bytes_after: 260,
-				timings: vec![],
+				timings: vec![
+					("addIndexToFhirJobs".into(), secs(12)),
+					("backfillNoteTypeIds".into(), secs(3588)),
+				],
 			},
 		)
 		.await
@@ -602,6 +605,13 @@ async fn a_group_shows_where_each_server_stands() {
 			60,
 			"growth is readable from the verdict"
 		);
+		let names: Vec<&str> = latest.timings.iter().map(|t| t.name.as_str()).collect();
+		assert_eq!(
+			names,
+			vec!["addIndexToFhirJobs", "backfillNoteTypeIds"],
+			"the breakdown comes back in the order the migrations ran"
+		);
+		assert_eq!(latest.timings[1].elapsed, secs(3588));
 
 		let pending = &by_server[&untested_app];
 		assert_eq!(

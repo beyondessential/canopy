@@ -13149,7 +13149,8 @@
           "reported_at",
           "total_elapsed",
           "data_bytes_before",
-          "data_bytes_after"
+          "data_bytes_after",
+          "timings"
         ],
         "properties": {
           "data_bytes_after": {
@@ -13179,6 +13180,13 @@
               "null"
             ],
             "description": "The snapshot the verdict was reached against."
+          },
+          "timings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MigrationTiming"
+            },
+            "description": "Each migration that ran, in the order they ran."
           },
           "total_elapsed": {
             "type": "integer",
@@ -14258,6 +14266,31 @@
             "type": "string",
             "format": "uuid",
             "description": "The device that remains after the merge — usually the existing\ndevice that already owns the server attachment and connection\nhistory."
+          }
+        }
+      },
+      "MigrationTiming": {
+        "type": "object",
+        "description": "How long one migration took, in the order it ran.",
+        "required": [
+          "ordinal",
+          "name",
+          "elapsed"
+        ],
+        "properties": {
+          "elapsed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Whole seconds this migration took."
+          },
+          "name": {
+            "type": "string",
+            "description": "The migration's name, as the migration runner reports it."
+          },
+          "ordinal": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Where it fell in the run, counting from zero."
           }
         }
       },
