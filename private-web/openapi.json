@@ -13162,6 +13162,13 @@
             "format": "int64",
             "description": "Size of the data the migrations ran against."
           },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the migration runner said about that failure, when the consumer\nsent it."
+          },
           "failed_migration": {
             "type": [
               "string",
