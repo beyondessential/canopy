@@ -7282,6 +7282,8 @@ export interface components {
             reported_at: string;
             /** @description The snapshot the verdict was reached against. */
             snapshot_id?: string | null;
+            /** @description Each migration that ran, in the order they ran. */
+            timings: components["schemas"]["MigrationTiming"][];
             /**
              * Format: int64
              * @description Whole seconds the migration run took.
@@ -7994,6 +7996,21 @@ export interface components {
              *     history.
              */
             target_id: string;
+        };
+        /** @description How long one migration took, in the order it ran. */
+        MigrationTiming: {
+            /**
+             * Format: int64
+             * @description Whole seconds this migration took.
+             */
+            elapsed: number;
+            /** @description The migration's name, as the migration runner reports it. */
+            name: string;
+            /**
+             * Format: int32
+             * @description Where it fell in the run, counting from zero.
+             */
+            ordinal: number;
         };
         /**
          * @description A group of versions sharing the same major.minor release line, with a

@@ -1,7 +1,11 @@
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import {
 	Alert,
 	Box,
 	Chip,
+	Collapse,
+	IconButton,
 	LinearProgress,
 	Paper,
 	Stack,
@@ -14,9 +18,12 @@ import {
 	Typography,
 } from "@mui/material";
 import { Link as MuiLink } from "@mui/material";
+import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi } from "../api";
-import type { ServerInfo } from "../types";
+import type { ApiResponse, ServerInfo } from "../types";
+
+type GroupVerdict = ApiResponse<"migration_tests", "for_group">[number];
 import ServerRankChip from "./ServerRankChip";
 import TimeAgo from "./TimeAgo";
 
@@ -76,6 +83,7 @@ export default function MigrationTestsSection({
 			<Table size="small">
 				<TableHead>
 					<TableRow>
+						<TableCell padding="checkbox" />
 						<TableCell>Server</TableCell>
 						<TableCell>Upgrading to</TableCell>
 						<TableCell>Verdict</TableCell>
@@ -92,60 +100,11 @@ export default function MigrationTestsSection({
 								nameOf(a.server_id).localeCompare(nameOf(b.server_id)),
 						)
 						.map((row) => (
-						<TableRow key={row.server_id} data-testid="migration-test-row">
-							<TableCell>
-								<Stack
-									direction="row"
-									spacing={1}
-									sx={{ alignItems: "center" }}
-								>
-									<MuiLink
-										component={RouterLink}
-										to={`/fleet/applications/${row.server_id}`}
-										underline="hover"
-										color="text.primary"
-									>
-										{byId.get(row.server_id)?.name ?? row.server_id}
-									</MuiLink>
-									{byId.get(row.server_id)?.rank && (
-										<ServerRankChip
-											rank={byId.get(row.server_id)!.rank!}
-										/>
-									)}
-								</Stack>
-							</TableCell>
-							<TableCell>{row.target_version}</TableCell>
-							<TableCell>
-								<VerdictChip
-									verdict={row.verdict}
-									failedMigration={row.latest?.failed_migration ?? null}
-								/>
-							</TableCell>
-							<TableCell>
-								{row.latest ? formatDuration(row.latest.total_elapsed) : "—"}
-							</TableCell>
-							<TableCell>
-								{row.latest
-									? formatGrowth(
-											row.latest.data_bytes_before,
-											row.latest.data_bytes_after,
-										)
-									: "—"}
-							</TableCell>
-							<TableCell>
-								{row.latest ? (
-									<Tooltip
-										title={`snapshot ${row.latest.snapshot_id ?? "unknown"}`}
-									>
-										<Box component="span">
-											<TimeAgo timestamp={row.latest.reported_at} />
-										</Box>
-									</Tooltip>
-								) : (
-									"—"
-								)}
-							</TableCell>
-						</TableRow>
+							<TestRow
+								key={row.server_id}
+								row={row}
+								server={byId.get(row.server_id)}
+							/>
 						))}
 				</TableBody>
 			</Table>
@@ -218,4 +177,101 @@ function formatBytes(bytes: number) {
 		unit += 1;
 	}
 	return `${value.toFixed(value < 10 && unit > 0 ? 1 : 0)}${units[unit]}`;
+}
+
+function TestRow({
+	row,
+	server,
+}: {
+	row: GroupVerdict;
+	server: ServerInfo | undefined;
+}) {
+	const [open, setOpen] = useState(false);
+	const timings = row.latest?.timings ?? [];
+	const expandable = timings.length > 0;
+	return (
+		<>
+			<TableRow
+				data-testid="migration-test-row"
+				sx={expandable ? { "& > *": { borderBottom: "unset" } } : undefined}
+			>
+				<TableCell padding="checkbox">
+					{expandable && (
+						<IconButton
+							size="small"
+							aria-label={open ? "Hide migrations" : "Show migrations"}
+							onClick={() => setOpen((o) => !o)}
+						>
+							{open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+						</IconButton>
+					)}
+				</TableCell>
+				<TableCell>
+					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+						<MuiLink
+							component={RouterLink}
+							to={`/fleet/applications/${row.server_id}`}
+							underline="hover"
+							color="text.primary"
+						>
+							{server?.name ?? row.server_id}
+						</MuiLink>
+						{server?.rank && <ServerRankChip rank={server.rank} />}
+					</Stack>
+				</TableCell>
+				<TableCell>{row.target_version}</TableCell>
+				<TableCell>
+					<VerdictChip
+						verdict={row.verdict}
+						failedMigration={row.latest?.failed_migration ?? null}
+					/>
+				</TableCell>
+				<TableCell>
+					{row.latest ? formatDuration(row.latest.total_elapsed) : "—"}
+				</TableCell>
+				<TableCell>
+					{row.latest
+						? formatGrowth(
+								row.latest.data_bytes_before,
+								row.latest.data_bytes_after,
+							)
+						: "—"}
+				</TableCell>
+				<TableCell>
+					{row.latest ? (
+						<Tooltip title={`snapshot ${row.latest.snapshot_id ?? "unknown"}`}>
+							<Box component="span">
+								<TimeAgo timestamp={row.latest.reported_at} />
+							</Box>
+						</Tooltip>
+					) : (
+						"—"
+					)}
+				</TableCell>
+			</TableRow>
+			{expandable && (
+				<TableRow>
+					<TableCell sx={{ py: 0 }} colSpan={7}>
+						<Collapse in={open} timeout="auto" unmountOnExit>
+							<Table size="small" sx={{ my: 1 }} data-testid="migration-timings">
+								<TableBody>
+									{timings.map((timing) => (
+										<TableRow key={timing.ordinal}>
+											<TableCell>{timing.name}</TableCell>
+											<TableCell>{formatDuration(timing.elapsed)}</TableCell>
+											<TableCell>
+												{timing.name === row.latest?.failed_migration && (
+													<Chip size="small" color="warning" label="failed" />
+												)}
+											</TableCell>
+										</TableRow>
+									))}
+								</TableBody>
+							</Table>
+						</Collapse>
+					</TableCell>
+				</TableRow>
+			)}
+		</>
+	);
 }

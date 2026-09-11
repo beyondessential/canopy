@@ -52,6 +52,10 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 			totalElapsedSecs: 5400,
 			dataBytesBefore: 200_000_000_000,
 			dataBytesAfter: 260_000_000_000,
+			timings: [
+				{ name: "addIndexToFhirJobs", elapsedSecs: 12 },
+				{ name: "backfillNoteTypeIds", elapsedSecs: 5388 },
+			],
 		});
 
 		await page.goto(`/fleet/groups/${group.id}`);
@@ -76,6 +80,16 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 			.getByTestId("migration-test-row")
 			.filter({ hasText: "kamaka-facility" });
 		await expect(untestedRow).toContainText("not yet tested");
+
+		// Which migration to blame for the window is only visible expanded.
+		await failedRow.getByRole("button", { name: "Show migrations" }).click();
+		const timings = section.getByTestId("migration-timings");
+		await expect(timings).toContainText("addIndexToFhirJobs");
+		await expect(timings).toContainText("12s");
+		const culprit = timings
+			.getByRole("row")
+			.filter({ hasText: "backfillNoteTypeIds" });
+		await expect(culprit).toContainText("failed");
 	});
 
 	test("says so when the group has no open plan", async ({
