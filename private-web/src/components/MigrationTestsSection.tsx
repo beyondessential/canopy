@@ -119,6 +119,7 @@ export default function MigrationTestsSection({
 								<VerdictChip
 									verdict={row.verdict}
 									failedMigration={row.latest?.failed_migration ?? null}
+									error={row.latest?.error ?? null}
 								/>
 							</TableCell>
 							<TableCell>
@@ -176,9 +177,11 @@ function SectionHeading() {
 function VerdictChip({
 	verdict,
 	failedMigration,
+	error,
 }: {
 	verdict: "passed" | "failed" | "nottested";
 	failedMigration: string | null;
+	error: string | null;
 }) {
 	if (verdict === "passed") {
 		return <Chip size="small" color="success" label="passed" />;
@@ -187,7 +190,14 @@ function VerdictChip({
 		return <Chip size="small" variant="outlined" label="not yet tested" />;
 	}
 	return (
-		<Tooltip title={failedMigration ?? "no migration named"}>
+		<Tooltip
+			title={
+				<>
+					<Box>{failedMigration ?? "no migration named"}</Box>
+					{error && <Box sx={{ mt: 0.5 }}>{error}</Box>}
+				</>
+			}
+		>
 			<Chip size="small" color="warning" label="failed" />
 		</Tooltip>
 	);

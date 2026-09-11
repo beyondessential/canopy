@@ -151,6 +151,7 @@ pub struct MigrationTest {
 	pub failed_migration: Option<String>,
 	pub data_bytes_before: i64,
 	pub data_bytes_after: i64,
+	pub error: Option<String>,
 }
 
 /// What a consumer reports for one migration test, beyond the report's own
@@ -165,6 +166,9 @@ pub struct NewMigrationTest {
 	pub target_version_id: Uuid,
 	pub total_elapsed: PgDuration,
 	pub failed_migration: Option<String>,
+	/// What the migration runner said, sanitised by the consumer. Absent from
+	/// consumers that do not send it yet.
+	pub error: Option<String>,
 	pub data_bytes_before: i64,
 	pub data_bytes_after: i64,
 	/// One entry per migration that ran, in the order they ran.
@@ -176,6 +180,7 @@ pub struct NewMigrationTest {
 struct LatestRow {
 	outcome: RunOutcome,
 	failed_migration: Option<String>,
+	error: Option<String>,
 	snapshot_id: Option<String>,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp)]
 	reported_at: Timestamp,
@@ -191,6 +196,9 @@ pub struct LatestTest {
 	pub verdict: Verdict,
 	/// The migration that failed, when one did.
 	pub failed_migration: Option<String>,
+	/// What the migration runner said about that failure, when the consumer
+	/// sent it.
+	pub error: Option<String>,
 	/// The snapshot the verdict was reached against.
 	pub snapshot_id: Option<String>,
 	/// When the consumer reported it.
@@ -230,6 +238,17 @@ pub enum Verdict {
 	Failed,
 }
 
+/// Longest error kept: a migration runner can hand back a whole failing
+/// statement.
+const MAX_ERROR_CHARS: usize = 2000;
+
+fn truncate_error(error: String) -> String {
+	if error.chars().count() <= MAX_ERROR_CHARS {
+		return error;
+	}
+	error.chars().take(MAX_ERROR_CHARS).collect()
+}
+
 impl MigrationTest {
 	/// Record a migration test: the report that carries the common fields,
 	/// then the result and its per-migration timings.
@@ -261,6 +280,7 @@ impl MigrationTest {
 				crate::schema::migration_tests::target_version_id.eq(test.target_version_id),
 				crate::schema::migration_tests::total_elapsed.eq(test.total_elapsed),
 				crate::schema::migration_tests::failed_migration.eq(test.failed_migration),
+				crate::schema::migration_tests::error.eq(test.error.map(truncate_error)),
 				crate::schema::migration_tests::data_bytes_before.eq(test.data_bytes_before),
 				crate::schema::migration_tests::data_bytes_after.eq(test.data_bytes_after),
 			))
@@ -336,6 +356,7 @@ pub async fn latest_test(
 		.select((
 			backup_restore_checks::outcome,
 			migration_tests::failed_migration,
+			migration_tests::error,
 			backup_restore_checks::snapshot_id,
 			backup_restore_checks::reported_at,
 			migration_tests::total_elapsed,
@@ -355,6 +376,7 @@ pub async fn latest_test(
 			_ => Verdict::Failed,
 		},
 		failed_migration: row.failed_migration,
+		error: row.error,
 		snapshot_id: row.snapshot_id,
 		reported_at: row.reported_at,
 		total_elapsed: row.total_elapsed,
@@ -637,4 +659,22 @@ async fn verdict_row(
 			.map_or(Verdict::NotTested, |test| test.verdict),
 		latest,
 	})
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn a_long_error_is_capped_on_a_character_boundary() {
+		let long = "é".repeat(MAX_ERROR_CHARS + 500);
+		let kept = truncate_error(long);
+		assert_eq!(kept.chars().count(), MAX_ERROR_CHARS);
+	}
+
+	#[test]
+	fn a_short_error_is_kept_whole() {
+		let error = "column \"note_type_id\" does not exist".to_string();
+		assert_eq!(truncate_error(error.clone()), error);
+	}
 }

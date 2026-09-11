@@ -7276,6 +7276,11 @@ export interface components {
              * @description Size of the data the migrations ran against.
              */
             data_bytes_before: number;
+            /**
+             * @description What the migration runner said about that failure, when the consumer
+             *     sent it.
+             */
+            error?: string | null;
             /** @description The migration that failed, when one did. */
             failed_migration?: string | null;
             /** @description When the consumer reported it. */

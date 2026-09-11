@@ -738,6 +738,10 @@ pub struct MigrationArgs {
 	pub total_elapsed_seconds: i64,
 	/// The migration that failed, when one did.
 	pub failed_migration: Option<String>,
+	/// What the migration runner said about that failure, sanitised: it is shown
+	/// to operators, so send no connection strings, credentials or patient data.
+	/// Kept to the first 2000 characters.
+	pub error: Option<String>,
 	/// Size of the data before the migrations ran.
 	pub data_bytes_before: i64,
 	/// Size of the data after they ran. The growth between the two is what shows
@@ -954,6 +958,7 @@ impl MigrationArgs {
 			target_version_id,
 			total_elapsed: PgDuration(SignedDuration::from_secs(self.total_elapsed_seconds)),
 			failed_migration: self.failed_migration,
+			error: self.error,
 			data_bytes_before: self.data_bytes_before,
 			data_bytes_after: self.data_bytes_after,
 			timings: self
