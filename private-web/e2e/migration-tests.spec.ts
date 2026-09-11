@@ -49,6 +49,7 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 			applicationId: failed.id,
 			targetVersionId: target.id,
 			failedMigration: "backfillNoteTypeIds",
+			error: 'column "note_type_id" does not exist',
 			totalElapsedSecs: 5400,
 			dataBytesBefore: 200_000_000_000,
 			dataBytesAfter: 260_000_000_000,
@@ -90,6 +91,12 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 			.getByRole("row")
 			.filter({ hasText: "backfillNoteTypeIds" });
 		await expect(culprit).toContainText("failed");
+
+		// Which migration broke, and what it said.
+		await failedRow.getByText("failed").hover();
+		const tip = page.getByRole("tooltip");
+		await expect(tip).toContainText("backfillNoteTypeIds");
+		await expect(tip).toContainText('column "note_type_id" does not exist');
 	});
 
 	test("says so when the group has no open plan", async ({

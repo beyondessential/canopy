@@ -1146,6 +1146,7 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 						jiff::SignedDuration::from_secs(30),
 					),
 					failed_migration: Some("backfillNoteTypeIds".into()),
+					error: None,
 					data_bytes_before: 10,
 					data_bytes_after: 10,
 					timings: vec![],
@@ -1228,6 +1229,14 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 					.expect("verdict"),
 				database::migration_tests::Verdict::Passed
 			);
+			let latest = database::migration_tests::latest_test(&mut conn, server, planned)
+				.await
+				.expect("latest")
+				.expect("a test was reported");
+			assert_eq!(
+				latest.error, None,
+				"a consumer that sends no error leaves it unset"
+			);
 
 			// And the pair is settled, so it is not dispatched again.
 			let after: Vec<serde_json::Value> = public
@@ -1236,6 +1245,70 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 				.await
 				.json();
 			assert!(after.is_empty(), "got {after:?}");
+		},
+	)
+	.await;
+}
+
+/// A failing migration report carries the error the migration runner produced,
+/// so the group page can say what broke as well as where.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_migration_report_carries_its_error() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let server = make_server(&mut conn, group).await;
+			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
+			report_version(&mut conn, server, "2.62.0").await;
+			let planned = publish_version(&mut conn, 63, 2).await;
+			plan_upgrade(&mut conn, group, planned).await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
+			register_migrate_intent(&public, &cert).await;
+
+			let dispatched: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.await
+				.json();
+			let entry = &dispatched[0];
+
+			public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"replica_id": entry["replica_id"],
+					"group": group,
+					"machine_id": server,
+					"type": "tamanu-postgres",
+					"intent": "verify",
+					"snapshot_id": entry["snapshot_id"],
+					"outcome": "success",
+					"replica_healthy": true,
+					"observed_at": "2026-07-30T00:00:00Z",
+					"migration": {
+						"target_version": entry["target_version"],
+						"total_elapsed_seconds": 45,
+						"failed_migration": "backfillNoteTypeIds",
+						"error": "column \"note_type_id\" does not exist",
+						"data_bytes_before": 10,
+						"data_bytes_after": 10,
+						"timings": [],
+					},
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			let latest = database::migration_tests::latest_test(&mut conn, server, planned)
+				.await
+				.expect("latest")
+				.expect("a test was reported");
+			assert_eq!(
+				latest.error.as_deref(),
+				Some("column \"note_type_id\" does not exist"),
+				"the reason reaches the operator alongside the file name"
+			);
 		},
 	)
 	.await;

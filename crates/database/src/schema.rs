@@ -614,6 +614,7 @@ diesel::table! {
 		data_bytes_before -> Int8,
 		data_bytes_after -> Int8,
 		application_id -> Nullable<Uuid>,
+		error -> Nullable<Text>,
 	}
 }
 
