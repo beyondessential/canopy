@@ -94,11 +94,11 @@ export default function MigrationTestsSection({
 					<TableRow>
 						<TableCell padding="checkbox" />
 						<TableCell>Server</TableCell>
-						<TableCell>Upgrading to</TableCell>
-						<TableCell>Verdict</TableCell>
-						<TableCell>Migrations took</TableCell>
-						<TableCell>Growth</TableCell>
-						<TableCell>Tested</TableCell>
+						<TableCell sx={{ whiteSpace: "nowrap" }}>Upgrading to</TableCell>
+						<TableCell sx={{ whiteSpace: "nowrap" }}>Verdict</TableCell>
+						<TableCell sx={{ whiteSpace: "nowrap" }}>Migrations took</TableCell>
+						<TableCell sx={{ whiteSpace: "nowrap" }}>Growth</TableCell>
+						<TableCell sx={{ whiteSpace: "nowrap" }}>Tested</TableCell>
 					</TableRow>
 				</TableHead>
 				<TableBody>
@@ -234,7 +234,7 @@ function TestRow({
 						{server?.rank && <ServerRankChip rank={server.rank} />}
 					</Stack>
 				</TableCell>
-				<TableCell>{row.target_version}</TableCell>
+				<TableCell sx={{ whiteSpace: "nowrap" }}>{row.target_version}</TableCell>
 				<TableCell>
 					<VerdictChip
 						verdict={row.verdict}
@@ -242,10 +242,10 @@ function TestRow({
 						error={row.latest?.error ?? null}
 					/>
 				</TableCell>
-				<TableCell>
+				<TableCell sx={{ whiteSpace: "nowrap" }}>
 					{row.latest ? formatDuration(row.latest.total_elapsed) : "—"}
 				</TableCell>
-				<TableCell>
+				<TableCell sx={{ whiteSpace: "nowrap" }}>
 					{row.latest
 						? formatGrowth(
 								row.latest.data_bytes_before,
@@ -253,7 +253,7 @@ function TestRow({
 							)
 						: "—"}
 				</TableCell>
-				<TableCell>
+				<TableCell sx={{ whiteSpace: "nowrap" }}>
 					{row.latest ? (
 						<Tooltip title={`snapshot ${row.latest.snapshot_id ?? "unknown"}`}>
 							<Box component="span">
@@ -277,7 +277,9 @@ function TestRow({
 								<Chip size="small" color="warning" label="failed" />
 							)}
 						</TableCell>
-						<TableCell>{formatDuration(timing.elapsed)}</TableCell>
+						<TableCell sx={{ whiteSpace: "nowrap" }}>
+							{formatDuration(timing.elapsed)}
+						</TableCell>
 						<TableCell colSpan={2} />
 					</TableRow>
 				))}
