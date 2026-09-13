@@ -84,12 +84,11 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 
 		// Which migration to blame for the window is only visible expanded.
 		await failedRow.getByRole("button", { name: "Show migrations" }).click();
-		const timings = section.getByTestId("migration-timings");
-		await expect(timings).toContainText("addIndexToFhirJobs");
-		await expect(timings).toContainText("12s");
-		const culprit = timings
-			.getByRole("row")
-			.filter({ hasText: "backfillNoteTypeIds" });
+		const timings = section.getByTestId("migration-timing");
+		await expect(timings.filter({ hasText: "addIndexToFhirJobs" })).toContainText(
+			"12s",
+		);
+		const culprit = timings.filter({ hasText: "backfillNoteTypeIds" });
 		await expect(culprit).toContainText("failed");
 
 		// Which migration broke, and what it said.

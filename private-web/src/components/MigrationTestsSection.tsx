@@ -4,7 +4,6 @@ import {
 	Alert,
 	Box,
 	Chip,
-	Collapse,
 	IconButton,
 	LinearProgress,
 	Paper,
@@ -269,29 +268,22 @@ function TestRow({
 					)}
 				</TableCell>
 			</TableRow>
-			{expandable && (
-				<TableRow>
-					<TableCell sx={{ py: 0 }} colSpan={7}>
-						<Collapse in={open} timeout="auto" unmountOnExit>
-							<Table size="small" sx={{ my: 1 }} data-testid="migration-timings">
-								<TableBody>
-									{timings.map((timing) => (
-										<TableRow key={timing.ordinal}>
-											<TableCell>{timing.name}</TableCell>
-											<TableCell>{formatDuration(timing.elapsed)}</TableCell>
-											<TableCell>
-												{timing.name === row.latest?.failed_migration && (
-													<Chip size="small" color="warning" label="failed" />
-												)}
-											</TableCell>
-										</TableRow>
-									))}
-								</TableBody>
-							</Table>
-						</Collapse>
-					</TableCell>
-				</TableRow>
-			)}
+			{open &&
+				timings.map((timing) => (
+					<TableRow key={timing.ordinal} data-testid="migration-timing">
+						<TableCell />
+						<TableCell colSpan={2} sx={{ pl: 4 }}>
+							{timing.name}
+						</TableCell>
+						<TableCell>
+							{timing.name === row.latest?.failed_migration && (
+								<Chip size="small" color="warning" label="failed" />
+							)}
+						</TableCell>
+						<TableCell>{formatDuration(timing.elapsed)}</TableCell>
+						<TableCell colSpan={2} />
+					</TableRow>
+				))}
 		</>
 	);
 }
