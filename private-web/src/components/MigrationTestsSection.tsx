@@ -209,10 +209,7 @@ function TestRow({
 	const expandable = timings.length > 0;
 	return (
 		<>
-			<TableRow
-				data-testid="migration-test-row"
-				sx={expandable ? { "& > *": { borderBottom: "unset" } } : undefined}
-			>
+			<TableRow data-testid="migration-test-row">
 				<TableCell padding="checkbox">
 					{expandable && (
 						<IconButton
