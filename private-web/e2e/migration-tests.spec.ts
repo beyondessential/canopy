@@ -117,4 +117,54 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 			"nothing to test against",
 		);
 	});
+
+	test("the fleet view names the failure and links to the detail", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedVersion(sql, { major: 2, minor: 62, patch: 0 });
+		const target = await seedVersion(sql, { major: 2, minor: 63, patch: 0 });
+
+		const failed = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+		});
+		await seedStatus(sql, { serverId: failed.id, version: "2.62.0" });
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+		});
+		await seedMigrationTest(sql, {
+			consumerDeviceId: consumer.id,
+			groupId: group.id,
+			machineId: failed.machineId,
+			applicationId: failed.id,
+			targetVersionId: target.id,
+			failedMigration: "backfillNoteTypeIds",
+			error: 'column "note_type_id" does not exist',
+			totalElapsedSecs: 5400,
+			dataBytesBefore: 200_000_000_000,
+			dataBytesAfter: 260_000_000_000,
+			timings: [{ name: "backfillNoteTypeIds", elapsedSecs: 5388 }],
+		});
+
+		await page.goto("/upgrades");
+
+		const row = page
+			.getByTestId("planned-upgrade-row")
+			.filter({ hasText: "kamaka" });
+		const verdict = row.getByText("failed");
+		// Which application broke and why, without opening the group.
+		await verdict.hover();
+		const tip = page.getByRole("tooltip");
+		await expect(tip).toContainText("kamaka-central");
+		await expect(tip).toContainText("backfillNoteTypeIds");
+		await expect(tip).toContainText('column "note_type_id" does not exist');
+
+		await verdict.click();
+		await expect(page).toHaveURL(new RegExp(`/fleet/groups/${group.id}`));
+		await expect(page.getByTestId("migration-tests")).toBeVisible();
+	});
 });

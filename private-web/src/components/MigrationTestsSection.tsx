@@ -67,7 +67,12 @@ export default function MigrationTestsSection({
 
 	if (verdicts.data.length === 0) {
 		return (
-			<Paper variant="outlined" sx={{ p: 2 }} data-testid="migration-tests">
+			<Paper
+			id="migration-tests"
+			variant="outlined"
+			sx={{ p: 2, scrollMarginTop: 16 }}
+			data-testid="migration-tests"
+		>
 				<SectionHeading />
 				<Typography variant="body2" color="text.secondary">
 					No upgrade plan is open for this group, so there is nothing to
@@ -78,7 +83,12 @@ export default function MigrationTestsSection({
 	}
 
 	return (
-		<Paper variant="outlined" sx={{ p: 2 }} data-testid="migration-tests">
+		<Paper
+			id="migration-tests"
+			variant="outlined"
+			sx={{ p: 2, scrollMarginTop: 16 }}
+			data-testid="migration-tests"
+		>
 			<SectionHeading />
 			<Table size="small">
 				<TableHead>

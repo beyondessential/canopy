@@ -6007,6 +6007,18 @@ export interface components {
              */
             up: components["schemas"]["ShortStatus"];
         };
+        /**
+         * @description The failing test behind a `failed` verdict, so the fleet view can say what
+         *     broke without a second lookup.
+         */
+        FailedTest: {
+            /** @description The application whose data broke, since the verdict rolls up several. */
+            application: string;
+            /** @description Why it stopped, redacted by the runner that reported it. */
+            error?: string | null;
+            /** @description The migration it stopped at, absent when the runner named none. */
+            migration?: string | null;
+        };
         /** @description Both populations the fleet view spreads its figures over. */
         FleetDetailData: {
             /** @description Every live application, canopy's own excluded. */
@@ -8468,6 +8480,7 @@ export interface components {
             behind?: number | null;
             /** @description The version the environment runs now, where it has reported one. */
             current_version?: string | null;
+            failed_test?: null | components["schemas"]["FailedTest"];
             /**
              * Format: uuid
              * @description The group this concerns.

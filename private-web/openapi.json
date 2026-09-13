@@ -11187,6 +11187,33 @@
           }
         }
       },
+      "FailedTest": {
+        "type": "object",
+        "description": "The failing test behind a `failed` verdict, so the fleet view can say what\nbroke without a second lookup.",
+        "required": [
+          "application"
+        ],
+        "properties": {
+          "application": {
+            "type": "string",
+            "description": "The application whose data broke, since the verdict rolls up several."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it stopped, redacted by the runner that reported it."
+          },
+          "migration": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The migration it stopped at, absent when the runner named none."
+          }
+        }
+      },
       "FleetDetailData": {
         "type": "object",
         "description": "Both populations the fleet view spreads its figures over.",
@@ -15125,6 +15152,17 @@
               "null"
             ],
             "description": "The version the environment runs now, where it has reported one."
+          },
+          "failed_test": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FailedTest",
+                "description": "The failing test behind a `failed` verdict. `null` for any other verdict."
+              }
+            ]
           },
           "group_id": {
             "type": "string",
