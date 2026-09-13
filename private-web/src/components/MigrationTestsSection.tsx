@@ -89,16 +89,26 @@ export default function MigrationTestsSection({
 			data-testid="migration-tests"
 		>
 			<SectionHeading />
-			<Table size="small">
+			<Table size="small" sx={{ tableLayout: "fixed" }}>
 				<TableHead>
 					<TableRow>
-						<TableCell padding="checkbox" />
-						<TableCell>Server</TableCell>
-						<TableCell sx={{ whiteSpace: "nowrap" }}>Upgrading to</TableCell>
-						<TableCell sx={{ whiteSpace: "nowrap" }}>Verdict</TableCell>
-						<TableCell sx={{ whiteSpace: "nowrap" }}>Migrations took</TableCell>
-						<TableCell sx={{ whiteSpace: "nowrap" }}>Growth</TableCell>
-						<TableCell sx={{ whiteSpace: "nowrap" }}>Tested</TableCell>
+						<TableCell padding="checkbox" sx={{ width: "5%" }} />
+						<TableCell sx={{ width: "29%" }}>Server</TableCell>
+						<TableCell sx={{ width: "14%", whiteSpace: "nowrap" }}>
+							Upgrading to
+						</TableCell>
+						<TableCell sx={{ width: "11%", whiteSpace: "nowrap" }}>
+							Verdict
+						</TableCell>
+						<TableCell sx={{ width: "16%", whiteSpace: "nowrap" }}>
+							Migrations took
+						</TableCell>
+						<TableCell sx={{ width: "15%", whiteSpace: "nowrap" }}>
+							Growth
+						</TableCell>
+						<TableCell sx={{ width: "10%", whiteSpace: "nowrap" }}>
+							Tested
+						</TableCell>
 					</TableRow>
 				</TableHead>
 				<TableBody>
@@ -269,7 +279,10 @@ function TestRow({
 				timings.map((timing) => (
 					<TableRow key={timing.ordinal} data-testid="migration-timing">
 						<TableCell />
-						<TableCell colSpan={2} sx={{ pl: 4 }}>
+						<TableCell
+							colSpan={2}
+							sx={{ pl: 4, overflowWrap: "anywhere" }}
+						>
 							{timing.name}
 						</TableCell>
 						<TableCell>
