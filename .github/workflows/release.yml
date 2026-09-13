@@ -79,7 +79,7 @@ jobs:
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
 
-      - uses: taiki-e/install-action@v2.86.1
+      - uses: taiki-e/install-action@v2.87.2
         with:
           tool: just
 
