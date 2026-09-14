@@ -1,10 +1,5 @@
 # API Errors
 
-## Not implemented
-
-Issued when an endpoint exists but the behaviour behind it does not yet.
-**501 Not Implemented**.
-
 ## Environment
 
 Issued with an environment variable is not present or in the wrong format.
@@ -57,11 +52,6 @@ Issued when a version range is syntactically valid, but not usable to obtain con
 ## Timesync
 
 Issued for the /timesync endpoint.
-
-## Auth: missing header
-
-Issued when a header carrying the caller's identity is required but not
-present. **401 Unauthorized**.
 
 ## Auth: missing certificate
 
