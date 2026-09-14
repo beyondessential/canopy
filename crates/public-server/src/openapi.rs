@@ -8,7 +8,7 @@ use utoipa::{Modify, OpenApi, openapi::security::SecurityScheme};
 #[openapi(
 	info(
 		title = "canopy public-server",
-		version = "1.0.0",
+		version = "1.0.1",
 		description = "Internet-facing API for the canopy fleet. Device-authenticated endpoints require an mTLS client certificate.\n\nRequest bodies may be sent compressed, and this is recommended for large payloads: the server transparently decodes `Content-Encoding: gzip`, `br`, `deflate`, or `zstd`. The accepted encodings are also listed structurally in the `x-request-compression` extension.",
 		contact(name = "BES Developers", email = "contact@bes.au"),
 		license(name = "GPL-3.0-or-later"),
