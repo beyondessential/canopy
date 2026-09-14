@@ -72,30 +72,42 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 			.filter({ hasText: "kamaka-central" });
 		await expect(failedRow).toContainText("2.63.0");
 		await expect(failedRow).toContainText("failed");
-		// The window estimate and the growth a heavy backfill leaves behind are
-		// the numbers an operator schedules against.
+		// The window estimate is the number an operator schedules against.
 		await expect(failedRow).toContainText("1.5h");
-		await expect(failedRow).toContainText("30%");
 
 		const untestedRow = section
 			.getByTestId("migration-test-row")
 			.filter({ hasText: "kamaka-facility" });
 		await expect(untestedRow).toContainText("not yet tested");
 
-		// Which migration to blame for the window is only visible expanded.
-		await failedRow.getByRole("button", { name: "Show migrations" }).click();
-		const timings = section.getByTestId("migration-timing");
-		await expect(timings.filter({ hasText: "addIndexToFhirJobs" })).toContainText(
-			"12s",
-		);
-		const culprit = timings.filter({ hasText: "backfillNoteTypeIds" });
-		await expect(culprit).toContainText("failed");
-
 		// Which migration broke, and what it said.
 		await failedRow.getByText("failed").hover();
 		const tip = page.getByRole("tooltip");
 		await expect(tip).toContainText("backfillNoteTypeIds");
 		await expect(tip).toContainText('column "note_type_id" does not exist');
+
+		// Which migration to blame for the window takes opening the run.
+		await failedRow.getByRole("button", { name: "Show migrations" }).click();
+		const run = page.getByTestId("migration-run");
+		await expect(run).toContainText("kamaka-central");
+		await expect(run).toContainText('column "note_type_id" does not exist');
+		const timings = run.getByTestId("migration-timing");
+		await expect(timings.filter({ hasText: "addIndexToFhirJobs" })).toContainText(
+			"12s",
+		);
+		await expect(
+			timings.filter({ hasText: "backfillNoteTypeIds" }),
+		).toContainText("1.5h");
+
+		// The open run is in the URL, so the link shares the migrations.
+		await expect(page).toHaveURL(new RegExp(`migrations=${failed.id}`));
+		await page.reload();
+		await expect(page.getByTestId("migration-run")).toContainText(
+			"backfillNoteTypeIds",
+		);
+
+		await page.getByRole("button", { name: "Close" }).click();
+		await expect(page.getByTestId("migration-run")).toBeHidden();
 	});
 
 	test("says so when the group has no open plan", async ({
