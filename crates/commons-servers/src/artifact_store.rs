@@ -260,9 +260,9 @@ async fn assumed_credentials(
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use aws_sdk_s3::operation::get_object::GetObjectError;
 	use aws_sdk_s3::operation::get_object::GetObjectOutput;
 	use aws_sdk_s3::operation::put_object::PutObjectOutput;
-	use aws_sdk_s3::operation::get_object::GetObjectError;
 	use aws_sdk_s3::types::error::NoSuchKey;
 	use aws_smithy_mocks::{RuleMode, mock, mock_client};
 
@@ -299,7 +299,9 @@ mod tests {
 	#[tokio::test]
 	async fn an_artifact_is_read_back_from_its_own_key() {
 		let get = mock!(aws_sdk_s3::Client::get_object)
-			.match_requests(|req| req.key() == Some("artifacts/12345678-9abc-def0-1234-56789abcdef0"))
+			.match_requests(|req| {
+				req.key() == Some("artifacts/12345678-9abc-def0-1234-56789abcdef0")
+			})
 			.then_output(|| {
 				GetObjectOutput::builder()
 					.body(b"kamaka schema".to_vec().into())
