@@ -122,9 +122,11 @@ pub async fn attempt_state(
 /// The state of the newest unreported attempt among `issuances`, given the
 /// reports that have arrived.
 ///
-/// A chain whose first issuance predates the newest report is history: something
-/// has reported since, so the chain says nothing about where the pipeline is
-/// now, however long its credentials were re-minted for.
+/// A chain whose first issuance predates the newest report *on its own pipeline*
+/// is history: that pipeline has reported since, so the chain says nothing about
+/// where it is now, however long its credentials were re-minted for. A group's
+/// other replicas report on their own schedules, and a multi-hour test would
+/// otherwise disappear the moment one of them did.
 fn state_from_issuances(
 	issuances: Vec<database::backups::BackupCredentialIssuance>,
 	report_refs: &[crate::run_pairing::ReportRef],
@@ -132,10 +134,21 @@ fn state_from_issuances(
 ) -> Option<AttemptState> {
 	let (_starts, attempts) = crate::run_pairing::pair_issuances(issuances, report_refs);
 
-	let newest_report = report_refs.iter().map(|r| r.reported_at).max();
+	let newest_report = |attempt: &crate::run_pairing::Attempt| {
+		let key = crate::run_pairing::run_key(
+			attempt.first.device_id,
+			&attempt.first.r#type,
+			attempt.first.purpose,
+		);
+		report_refs
+			.iter()
+			.filter(|r| r.key == key)
+			.map(|r| r.reported_at)
+			.max()
+	};
 	let attempts: Vec<_> = attempts
 		.into_iter()
-		.filter(|a| newest_report.is_none_or(|newest| a.first.issued_at > newest))
+		.filter(|a| newest_report(a).is_none_or(|newest| a.first.issued_at > newest))
 		.collect();
 
 	// An in-flight attempt is the more useful of the two to report, since it
@@ -179,15 +192,27 @@ mod tests {
 			access_key_id: None,
 			bucket: String::new(),
 			prefix: String::new(),
-			run_id: None,
+			// Correlated, and to a different run than any report here: the chain
+			// is what a run that never reported leaves behind.
+			run_id: Some(Uuid::from_u128(7)),
 		}
 	}
 
+	/// A report from the same pipeline the issuances belong to.
 	fn report(reported: i64) -> crate::run_pairing::ReportRef {
+		report_from(1, reported)
+	}
+
+	/// A report from another replica in the same group.
+	fn other_report(reported: i64) -> crate::run_pairing::ReportRef {
+		report_from(3, reported)
+	}
+
+	fn report_from(device: u128, reported: i64) -> crate::run_pairing::ReportRef {
 		crate::run_pairing::ReportRef {
 			run_id: Some(Uuid::from_u128(9)),
 			key: crate::run_pairing::run_key(
-				Uuid::from_u128(3),
+				Uuid::from_u128(device),
 				&BackupType::TamanuPostgres,
 				BackupPurpose::Restore,
 			),
@@ -214,6 +239,17 @@ mod tests {
 		let issuances = vec![issuance(1, 2_500, 6_100)];
 		assert_eq!(
 			state_from_issuances(issuances, &[report(2_000)], ts(3_000)),
+			Some(AttemptState::InFlight)
+		);
+	}
+
+	#[test]
+	fn another_replicas_report_does_not_bury_a_run_still_going() {
+		// A migration test takes hours; the group's other replicas report on
+		// their own schedules throughout.
+		let issuances = vec![issuance(1, 1_000, 6_000)];
+		assert_eq!(
+			state_from_issuances(issuances, &[other_report(2_000)], ts(3_000)),
 			Some(AttemptState::InFlight)
 		);
 	}

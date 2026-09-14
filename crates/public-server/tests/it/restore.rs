@@ -45,7 +45,7 @@ async fn make_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uuid {
 	let server_id = Uuid::new_v4();
 	let host = format!("https://srv-{server_id}.example.com");
 	sql_query(
-		"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES ($1, $2, 'tamanu-central', 'production', $3, $1)",
+		"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, machine_id, name) VALUES ($1, $2, 'tamanu-central', 'production', $3, $1, 'kamaka')",
 	)
 		.bind::<sql_types::Uuid, _>(server_id)
 		.bind::<sql_types::Text, _>(host)
@@ -1154,6 +1154,27 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 			)
 			.await
 			.expect("record failing test");
+
+			// The operator reads this on the group page, so it names the
+			// deployment rather than handing them an id to look up.
+			let issues =
+				database::version_known_issues::VersionKnownIssue::list_for_minor(&mut conn, 2, 63)
+					.await
+					.expect("known issues");
+			let issue = issues
+				.iter()
+				.find(|i| i.application_id == Some(server))
+				.expect("a failed migration raises a known issue");
+			assert!(
+				issue.description.contains("kamaka"),
+				"expected the deployment's name, got: {}",
+				issue.description
+			);
+			assert!(
+				!issue.description.contains(&server.to_string()),
+				"expected no raw id, got: {}",
+				issue.description
+			);
 
 			let after: Vec<serde_json::Value> = public
 				.get("/restore-worklist")

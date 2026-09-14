@@ -172,8 +172,8 @@ pub struct NewMigrationTest {
 	pub target_version_id: Uuid,
 	pub total_elapsed: PgDuration,
 	pub failed_migration: Option<String>,
-	/// What the migration runner said, sanitised by the consumer. Absent from
-	/// consumers that do not send it yet.
+	/// What the migration runner said: the message, and the DETAIL naming the
+	/// row it refused. Absent from consumers that do not send it yet.
 	pub error: Option<String>,
 	pub data_bytes_before: i64,
 	pub data_bytes_after: i64,
@@ -580,11 +580,15 @@ async fn file_outcome(
 	let version = Version::get_by_id(db, target_version_id).await?;
 	let affected = (version.major, version.minor, version.patch);
 	if !VersionKnownIssue::unresolved_for_server(db, affected, application_id).await? {
+		let application = Application::get_by_id(db, application_id).await?;
 		VersionKnownIssue::add(
 			db,
 			affected,
 			refs::MIGRATION_TEST,
-			&format!("Migration {migration} failed against {application_id}'s data."),
+			&format!(
+				"Migration {migration} failed against {}'s data.",
+				application.display_name()
+			),
 			Some(application_id),
 		)
 		.await?;
