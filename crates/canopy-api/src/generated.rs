@@ -7,7 +7,7 @@ pub const OPENAPI_VERSION: &str = "1.0.0";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "626c2115b5bedb1e43372e734c98bcbf018e1c8f5ccb81683f2d1b13c4ddcee1";
+pub const OPENAPI_BLAKE3: &str = "3cfc9a09c64793448410328da3f666a868f4ba77d17b0f6b9031e7c9b669be3b";
 
 /// Error types.
 pub mod error {
@@ -1440,7 +1440,7 @@ opts into and the settings it accepts per replica.*/
 ///      "$ref": "#/components/schemas/BTreeMap"
 ///    },
 ///    "semantics": {
-///      "description": "Behaviours this intent opts into. Recognised values are `check` (a\nhealth report is expected for each replica), `once` (a given snapshot\nis only ever dispatched to a replica once, rather than repeatedly\nuntil overdue), and `url` (a replica's health report includes a link\nto it). Unrecognised values are stored but have no effect.",
+///      "description": "Behaviours this intent opts into. Recognised values are `check` (a\nhealth report is expected for each replica), `once` (a given snapshot\nis only ever dispatched to a replica once, rather than repeatedly until\noverdue), `url` (a replica's health report includes a link to it),\n`migrate` (Canopy names a target version and the replica applies that\nversion's migrations), `redact` (the replica de-identifies the restored\ndata before serving it), and `reporting-schema` (the replica builds a\nTamanu reporting schema and registers it for the group). Unrecognised\nvalues are stored but have no effect, so a consumer may advertise ahead\nof Canopy support.",
 ///      "type": "array",
 ///      "items": {
 ///        "type": "string"
@@ -1466,9 +1466,14 @@ parameter name.*/
     pub params: ::std::option::Option<BTreeMap>,
     /**Behaviours this intent opts into. Recognised values are `check` (a
 health report is expected for each replica), `once` (a given snapshot
-is only ever dispatched to a replica once, rather than repeatedly
-until overdue), and `url` (a replica's health report includes a link
-to it). Unrecognised values are stored but have no effect.*/
+is only ever dispatched to a replica once, rather than repeatedly until
+overdue), `url` (a replica's health report includes a link to it),
+`migrate` (Canopy names a target version and the replica applies that
+version's migrations), `redact` (the replica de-identifies the restored
+data before serving it), and `reporting-schema` (the replica builds a
+Tamanu reporting schema and registers it for the group). Unrecognised
+values are stored but have no effect, so a consumer may advertise ahead
+of Canopy support.*/
     #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
     pub semantics: ::std::vec::Vec<::std::string::String>,
 }
@@ -2423,6 +2428,78 @@ run: if progress reports already carried it, that value stands.*/
     #[serde(rename = "type")]
     pub type_: ::std::string::String,
 }
+///What a reporting-schema build reports beyond its replica's restore health.
+///
+/// <details><summary>JSON schema</summary>
+///
+/// ```json
+///{
+///  "description": "What a reporting-schema build reports beyond its replica's restore health.",
+///  "type": "object",
+///  "required": [
+///    "built"
+///  ],
+///  "properties": {
+///    "artifacts": {
+///      "description": "The artifacts the build registered, of which the schema is one.",
+///      "type": "array",
+///      "items": {
+///        "type": "string",
+///        "format": "uuid"
+///      }
+///    },
+///    "built": {
+///      "description": "Whether a schema came out of the build.",
+///      "type": "boolean"
+///    },
+///    "error": {
+///      "description": "What went wrong, where the build failed.",
+///      "type": [
+///        "string",
+///        "null"
+///      ]
+///    },
+///    "target_version": {
+///      "description": "The version the schema was built for, as semver, echoed from the\nworklist entry's `target_version`.",
+///      "type": [
+///        "string",
+///        "null"
+///      ]
+///    },
+///    "target_version_id": {
+///      "description": "The same version as the identifier, echoed from `target_version_id`.\nAccepted for a consumer that reports the identifier; omit it when\n`target_version` is sent.",
+///      "type": [
+///        "string",
+///        "null"
+///      ],
+///      "format": "uuid"
+///    }
+///  }
+///}
+/// ```
+/// </details>
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[derive(::bon::Builder)]
+#[non_exhaustive]
+pub struct ReportingSchemaArgs {
+    ///The artifacts the build registered, of which the schema is one.
+    #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+    pub artifacts: ::std::vec::Vec<::uuid::Uuid>,
+    ///Whether a schema came out of the build.
+    pub built: bool,
+    ///What went wrong, where the build failed.
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub error: ::std::option::Option<::std::string::String>,
+    /**The version the schema was built for, as semver, echoed from the
+worklist entry's `target_version`.*/
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub target_version: ::std::option::Option<::std::string::String>,
+    /**The same version as the identifier, echoed from `target_version_id`.
+Accepted for a consumer that reports the identifier; omit it when
+`target_version` is sent.*/
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub target_version_id: ::std::option::Option<::uuid::Uuid>,
+}
 ///A request to certify a key for a name.
 ///
 /// <details><summary>JSON schema</summary>
@@ -3361,6 +3438,17 @@ impl ::std::fmt::Display for UrlField {
 ///      "type": "string",
 ///      "format": "uuid"
 ///    },
+///    "reporting_schema": {
+///      "oneOf": [
+///        {
+///          "type": "null"
+///        },
+///        {
+///          "description": "What a reporting-schema build produced, where the replica was restored\nfor one. Absent on any other report.",
+///          "$ref": "#/components/schemas/ReportingSchemaArgs"
+///        }
+///      ]
+///    },
 ///    "run_id": {
 ///      "description": "This must be the run-uuid the client minted for this run.\nThe field is optional only so older clients don't break; it WILL be made\nmandatory in future.",
 ///      "type": [
@@ -3469,6 +3557,8 @@ checks. A replica only counts as verified when the outcome is
 type, and intent, so a report that named no declaration could not be
 attributed to one of them.*/
     pub replica_id: ::uuid::Uuid,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub reporting_schema: ::std::option::Option<ReportingSchemaArgs>,
     /**This must be the run-uuid the client minted for this run.
 The field is optional only so older clients don't break; it WILL be made
 mandatory in future.*/
@@ -3969,6 +4059,25 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
 	/// `GET /applications/self`
 	pub async fn applications_self(&self) -> crate::Result<SelfResponse> {
 		self.call_json(::http::Method::GET, "/applications/self", None::<&()>).await
+	}
+	/// Register a reporting schema for one group, carrying its bytes.
+	///
+	/// Requires a device certificate whose restore declaration for the named group
+	/// advertises that it builds reporting schemas. The bytes travel on this
+	/// connection and Canopy holds them, so the builder is issued no credential to
+	/// any store. The path names the group the artifact is for, the exact version
+	/// it was built against, and the artifact's type and target platform.
+	///
+	/// The version must be one Canopy already holds: a build is dispatched for a
+	/// group and version Canopy knows about, so a version that does not exist is
+	/// refused rather than drafted. A range pattern is refused for the same reason:
+	/// a schema follows the migrations one exact version applies.
+	///
+	/// Returns the created artifact record.
+	///
+	/// `POST /artifacts/groups/{group}/{version}/{artifact_type}/{platform}`
+	pub async fn artifacts_groups(&self, group: &str, version: &str, artifact_type: &str, platform: &str) -> crate::Result<Artifact> {
+		self.call_json(::http::Method::POST, &format!("/artifacts/groups/{}/{}/{}/{}", group, version, artifact_type, platform), None::<&()>).await
 	}
 	/// Register a downloadable artifact for a version or version range.
 	///

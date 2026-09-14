@@ -29,6 +29,7 @@ pub mod partitions;
 pub mod pg_duration;
 pub mod recovery_vault;
 pub mod reported_detail;
+pub mod reporting_schemas;
 pub mod restore;
 pub mod schema;
 pub mod self_alerts;

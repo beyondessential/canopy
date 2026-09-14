@@ -28,6 +28,7 @@ mod openapi_spec;
 mod operator_presence;
 mod private_statuses;
 mod provision_credential;
+mod reporting_schemas;
 mod restore_replicas;
 mod server_version_distance;
 mod sql;

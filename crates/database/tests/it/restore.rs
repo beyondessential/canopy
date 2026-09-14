@@ -164,6 +164,7 @@ fn new_replica(
 		overdue_after: None,
 		params: serde_json::json!({}),
 		redacts: false,
+		publishes_schemas: false,
 		created_by: Some("op@example.com".into()),
 	}
 }
@@ -181,6 +182,7 @@ fn update_from(r: &RestoreReplica) -> RestoreReplicaUpdate {
 		overdue_after: r.overdue_after,
 		params: r.params.clone(),
 		redacts: r.redacts,
+		publishes_schemas: r.publishes_schemas,
 		enabled: r.enabled,
 	}
 }

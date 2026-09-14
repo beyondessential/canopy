@@ -284,6 +284,36 @@ async fn an_intent_that_cannot_redact_refuses_the_flag() {
 	.await;
 }
 
+/// The publisher mark is unique per group, and a machine-scoped or redacting
+/// declaration is one no build is dispatched to. Accepting the mark on one
+/// takes the group's only slot and leaves the operator unable to declare the
+/// publisher that would work.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_declaration_no_build_is_dispatched_to_cannot_publish() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group = insert_group(&mut conn).await;
+		let consumer = insert_consumer(&mut conn).await;
+		let server = insert_server(&mut conn, group).await;
+
+		// The intent is one the consumer has not advertised, so the descriptor
+		// this would otherwise be checked against does not exist yet.
+		private
+			.post("/api/restore_replicas/create")
+			.json(&serde_json::json!({
+				"consumer_device_id": consumer,
+				"group_id": group,
+				"machine_id": server,
+				"type": "tamanu-postgres",
+				"intent": "reporting-schema",
+				"name": "one-box-publisher",
+				"publishes_schemas": true,
+			}))
+			.await
+			.assert_status_bad_request();
+	})
+	.await;
+}
+
 /// A server whose product publishes no manifest is withheld from the
 /// worklist, so the operator is shown which of the declaration's replicas
 /// aren't being restored and why.
