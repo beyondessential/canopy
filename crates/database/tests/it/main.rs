@@ -7,6 +7,7 @@ mod admins;
 mod application_certificates;
 mod application_reported_key;
 mod application_types;
+mod artifact_scopes;
 mod backfill_registered_at_migration;
 mod backup_detection;
 mod backups;

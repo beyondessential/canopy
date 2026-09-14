@@ -169,6 +169,28 @@ impl ServerGroup {
 			.map_err(AppError::from)
 	}
 
+	/// The named groups' names by id, including archived ones, so a reference
+	/// to a group can be shown by name whatever state the group is in.
+	pub async fn names_by_ids(
+		db: &mut AsyncPgConnection,
+		ids: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, String>> {
+		use crate::schema::server_groups::dsl;
+
+		if ids.is_empty() {
+			return Ok(std::collections::HashMap::new());
+		}
+
+		Ok(dsl::server_groups
+			.select((dsl::id, dsl::name))
+			.filter(dsl::id.eq_any(ids))
+			.load::<(Uuid, String)>(db)
+			.await
+			.map_err(AppError::from)?
+			.into_iter()
+			.collect())
+	}
+
 	pub async fn list_all(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::schema::server_groups::dsl;
 		dsl::server_groups

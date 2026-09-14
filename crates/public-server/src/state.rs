@@ -48,6 +48,11 @@ pub struct AppState {
 	/// Kube client for reading repo-password Secrets in canopy's namespace.
 	/// `None` in tests / non-cluster runs ⇒ `GET /backup-target` returns 502.
 	pub kube: Option<BackupSecrets>,
+	/// Where the bytes of the artifacts Canopy holds rest. `None` where no
+	/// bucket is configured, in which case serving one reports that rather than
+	/// the edge failing to start.
+	// spec: ART#where-an-artifact-rests
+	pub artifacts: Option<commons_servers::artifact_store::ArtifactStore>,
 	/// The DNS zones Canopy may write records in, from its instance
 	/// configuration. Empty when none are configured, in which case no name can
 	/// be acted on — read once at startup, so a change takes effect on restart.
@@ -102,6 +107,7 @@ impl AppState {
 		let mut state = Self::from_db(database::init())?;
 		state.sts = Some(Self::init_sts().await);
 		state.kube = Self::init_kube().await;
+		state.artifacts = commons_servers::artifact_store::ArtifactStore::try_default().await;
 		Ok(state)
 	}
 
@@ -142,6 +148,7 @@ impl AppState {
 			rate_limiter: crate::ratelimit::RateLimiter::default(),
 			sts: None,
 			kube: None,
+			artifacts: None,
 			dns_zones: dns_zones_from_env(),
 		})
 	}
@@ -157,11 +164,13 @@ impl AppState {
 		tailnet_directory: Option<TailnetDirectory>,
 		sts: Option<aws_sdk_sts::Client>,
 		kube: Option<BackupSecrets>,
+		artifacts: Option<commons_servers::artifact_store::ArtifactStore>,
 	) -> Result<Self> {
 		Ok(Self {
 			client_cert_header: commons_servers::device_auth::mtls::ClientCertHeader::from_env(),
 			sts,
 			kube,
+			artifacts,
 			..Self::from_db_with_directory(db, tailnet_directory)?
 		})
 	}

@@ -11,7 +11,7 @@
 // often don't want in setup (e.g. submitting a status fires events
 // and opens incidents).
 
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Client } from "pg";
 
 export interface Sql {
@@ -1034,6 +1034,48 @@ export async function seedVersion(
 		[id, major, minor, patch, opts.status ?? "published", opts.changelog ?? ""],
 	);
 	return { id, major, minor, patch };
+}
+
+/** Seed an artifact for a version. Naming a group makes Canopy hold the bytes
+ * rather than record a location; `content` is what its digest is taken of, the
+ * bytes themselves resting in the store rather than the row. */
+export async function seedArtifact(
+	sql: Sql,
+	opts: {
+		versionId?: string | null;
+		artifactType?: string;
+		platform?: string;
+		downloadUrl?: string;
+		rangePattern?: string | null;
+		groupId?: string | null;
+		content?: string;
+	},
+): Promise<string> {
+	const id = randomUUID();
+	const scoped = opts.groupId != null;
+	const content = opts.content ?? "held bytes";
+	const digest = scoped
+		? createHash("sha256").update(content).digest()
+		: null;
+
+	await sql.query(
+		`INSERT INTO artifacts
+			(id, version_id, artifact_type, platform, download_url, version_range_pattern,
+			 group_id, content_type, digest)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		[
+			id,
+			opts.versionId ?? null,
+			opts.artifactType ?? "installer",
+			opts.platform ?? "windows",
+			scoped ? null : (opts.downloadUrl ?? "https://example.com/installer.exe"),
+			opts.rangePattern ?? null,
+			opts.groupId ?? null,
+			scoped ? "application/sql" : null,
+			digest,
+		],
+	);
+	return id;
 }
 
 // ── Backup-credentials seeding ──────────────────────────────────────────────
