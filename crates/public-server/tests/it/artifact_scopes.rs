@@ -487,13 +487,12 @@ async fn registering_again_over_the_wire_replaces() {
 	.await
 }
 
-/// A credential Canopy cannot place is anonymous rather than refused, so a
-/// deactivated key still reads the unscoped artifacts instead of failing a path
-/// that serves everyone. The same credential registering is still a refusal:
-/// the downgrade widens nothing.
+/// Deactivating a key stops it reading. A credential that is presented and
+/// rejected fails rather than losing its identity and being served the unscoped
+/// set, which would leave a revoked key reading for as long as it is presented.
 // spec: ART#who-is-offered-a-group-scoped-artifact
 #[tokio::test(flavor = "multi_thread")]
-async fn a_deactivated_key_reads_as_anonymous_and_still_cannot_register() {
+async fn a_deactivated_key_is_refused_rather_than_read_as_anonymous() {
 	commons_tests::server::run_with_device_auth(
 		"releaser",
 		async |mut conn, cert, device_id, public, _| {
@@ -506,18 +505,13 @@ async fn a_deactivated_key_reads_as_anonymous_and_still_cannot_register() {
 			.await
 			.expect("deactivate the key");
 
-			// The read still answers, with the unscoped set rather than group A's.
 			let response = public
 				.get("/versions/2.60.0/artifacts")
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.await;
-			response.assert_status_ok();
-			let artifacts: Vec<serde_json::Value> = response.json();
-			assert_eq!(artifacts.len(), 1);
-			assert_eq!(artifacts[0]["id"], UNSCOPED);
+			assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
 
-			// Registering with the same credential is refused: a path that
-			// needs an identity does not accept one Canopy cannot place.
+			// Registering with the same credential is refused too.
 			let refused = public
 				.post("/artifacts/2.60.0/installer/windows")
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
@@ -710,11 +704,11 @@ async fn a_registration_with_nothing_in_it_is_refused() {
 
 /// Archiving a machine takes its group with it. The device is unbound and its
 /// keys deactivated in one transaction, so the credential that was offered the
-/// group's artifact reads as no identity at all afterwards rather than keeping
-/// the group the box used to be in.
+/// group's artifact stops reading rather than keeping the group the box used to
+/// be in or falling back to the unscoped set.
 // spec: ART#who-is-offered-a-group-scoped-artifact, FLT#archival
 #[tokio::test(flavor = "multi_thread")]
-async fn an_archived_machine_s_credential_keeps_no_group() {
+async fn an_archived_machine_s_credential_stops_reading() {
 	commons_tests::server::run_with_device_auth(
 		"machine",
 		async |mut conn, cert, device_id, public, _| {
@@ -742,13 +736,7 @@ async fn an_archived_machine_s_credential_keeps_no_group() {
 				.get("/versions/2.60.0/artifacts")
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.await;
-			after.assert_status_ok();
-			let artifacts: Vec<serde_json::Value> = after.json();
-			assert_eq!(artifacts.len(), 1);
-			assert_eq!(
-				artifacts[0]["id"], UNSCOPED,
-				"answered as a read carrying no identity is"
-			);
+			assert_eq!(after.status_code(), StatusCode::UNAUTHORIZED);
 
 			let refused = public
 				.get(&format!("/versions/2.60.0/artifacts/{THEIRS}/download"))
@@ -756,7 +744,7 @@ async fn an_archived_machine_s_credential_keeps_no_group() {
 				.await;
 			assert_eq!(
 				refused.status_code(),
-				StatusCode::NOT_FOUND,
+				StatusCode::UNAUTHORIZED,
 				"and the bytes it used to be served are out of reach"
 			);
 		},

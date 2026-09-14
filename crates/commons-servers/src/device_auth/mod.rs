@@ -88,24 +88,20 @@ device_role_struct!(ServerDevice, DeviceRole::Machine);
 device_role_struct!(ReleaserDevice, DeviceRole::Releaser);
 device_role_struct!(BackupRestoreDevice, DeviceRole::BackupRestore);
 
-/// Whether Canopy could not place this credential, as against refusing it or
-/// failing on the way to the answer.
+/// Whether the caller presented no credential at all, as against presenting
+/// one Canopy would not accept.
 ///
-/// A credential it cannot place is anonymous: a stale certificate must not fail
-/// a path that serves everyone. A refusal or a fault propagates, since serving
-/// the unscoped set to a machine that has a group presents it as that machine's
-/// answer. The variants are named rather than tested by status, so which
-/// callers are served does not follow from an unrelated mapping and a new
-/// variant is a decision somebody makes.
-fn unplaceable(err: &AppError) -> bool {
+/// Only an absent credential is anonymous. A credential that is presented and
+/// rejected propagates, so a stale or unknown certificate is refused rather
+/// than served the unscoped set as though it had identified itself. The
+/// variants are named rather than tested by status, so which callers are served
+/// does not follow from an unrelated mapping and a new variant is a decision
+/// somebody makes.
+fn no_credential(err: &AppError) -> bool {
 	matches!(
 		err,
 		AppError::AuthMissingHeader(_)
 			| AppError::AuthMissingCertificate
-			| AppError::AuthInvalidCertificate(_)
-			| AppError::AuthCertificateNotFound
-			| AppError::AuthFailed { .. }
-			| AppError::AuthTokenNotValid
 			| AppError::AuthTailnetIdentityMissing
 	)
 }
@@ -128,7 +124,7 @@ where
 	) -> Result<Option<Self>, Self::Rejection> {
 		match <Self as axum::extract::FromRequestParts<S>>::from_request_parts(parts, state).await {
 			Ok(device) => Ok(Some(device)),
-			Err(err) if unplaceable(&err) => Ok(None),
+			Err(err) if no_credential(&err) => Ok(None),
 			Err(err) => Err(err),
 		}
 	}
@@ -209,16 +205,36 @@ mod tests {
 	/// hands a machine that has a group the unscoped set and presents it as
 	/// that machine's answer.
 	#[test]
-	fn a_refusal_is_not_an_unplaceable_credential() {
-		assert!(!unplaceable(&AppError::AuthInsufficientPermissions {
+	fn a_refusal_is_not_an_absent_credential() {
+		assert!(!no_credential(&AppError::AuthInsufficientPermissions {
 			required: "releaser".into()
 		}));
-		assert!(!unplaceable(&AppError::AuthTailnetNodeNotPermitted));
-		assert!(!unplaceable(&AppError::AuthTailnetDirectoryUnavailable));
-		assert!(!unplaceable(&AppError::DeviceHasNoServer));
+		assert!(!no_credential(&AppError::AuthTailnetNodeNotPermitted));
+		assert!(!no_credential(&AppError::AuthTailnetDirectoryUnavailable));
+		assert!(!no_credential(&AppError::DeviceHasNoServer));
+	}
 
-		assert!(unplaceable(&AppError::AuthMissingCertificate));
-		assert!(unplaceable(&AppError::AuthCertificateNotFound));
-		assert!(unplaceable(&AppError::AuthTokenNotValid));
+	/// A certificate that is presented and not accepted fails the read. Serving
+	/// it as anonymous would let an expired or revoked credential keep reading
+	/// by losing its identity.
+	#[test]
+	fn a_stale_certificate_fails_rather_than_going_anonymous() {
+		assert!(!no_credential(&AppError::AuthCertificateNotFound));
+		assert!(!no_credential(&AppError::AuthInvalidCertificate(
+			"expired".into()
+		)));
+		assert!(!no_credential(&AppError::AuthTokenNotValid));
+		assert!(!no_credential(&AppError::AuthFailed {
+			reason: "mtls".into()
+		}));
+	}
+
+	/// No credential at all is anonymous: these reads are open, and a caller
+	/// that never identified itself is offered the unscoped set.
+	#[test]
+	fn an_absent_credential_is_anonymous() {
+		assert!(no_credential(&AppError::AuthMissingCertificate));
+		assert!(no_credential(&AppError::AuthMissingHeader("x")));
+		assert!(no_credential(&AppError::AuthTailnetIdentityMissing));
 	}
 }
