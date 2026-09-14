@@ -9,6 +9,7 @@ ALTER TABLE artifacts ADD CONSTRAINT artifacts_type_platform_version_id UNIQUE (
 DROP INDEX artifacts_group_id;
 
 ALTER TABLE artifacts DROP CONSTRAINT artifact_rests_by_scope;
+ALTER TABLE artifacts DROP CONSTRAINT artifact_download_url_not_blank;
 
 ALTER TABLE artifacts
 	DROP COLUMN group_id,

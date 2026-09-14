@@ -29,6 +29,17 @@ ALTER TABLE artifacts ADD CONSTRAINT artifact_rests_by_scope CHECK (
 		AND digest IS NOT NULL)
 );
 
+-- A blank location is no location, and a digest that is not a SHA-256 is
+-- nothing the bytes can be checked against. Both are enforced here so a writer
+-- that skips the application cannot record one.
+ALTER TABLE artifacts ADD CONSTRAINT artifact_download_url_not_blank CHECK (
+	download_url IS NULL OR btrim(download_url) <> ''
+);
+
+ALTER TABLE artifacts ADD CONSTRAINT artifact_digest_is_sha256 CHECK (
+	digest IS NULL OR octet_length(digest) = 32
+);
+
 CREATE INDEX artifacts_group_id ON artifacts (group_id);
 
 -- ── Identity ────────────────────────────────────────────────────────────────
