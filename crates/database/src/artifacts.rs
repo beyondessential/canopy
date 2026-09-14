@@ -406,10 +406,9 @@ impl Artifact {
 		pattern_rank(pattern_b).cmp(&pattern_rank(pattern_a))
 	}
 
-	/// The id an artifact of this identity is already registered under, where
-	/// one is. An artifact Canopy holds rests under its id, so a re-registration
-	/// puts the new bytes where the old ones were rather than leaving them for
-	/// nothing to reach.
+	/// The id an artifact of this identity is already registered under, where one
+	/// is. An artifact rests under its id, so a re-registration that reuses it
+	/// puts the new bytes where the old ones were.
 	// spec: ART#registration
 	pub async fn id_for_identity(
 		db: &mut AsyncPgConnection,
@@ -430,10 +429,8 @@ impl Artifact {
 			.map_err(AppError::from)
 	}
 
-	/// The ids of every artifact whose bytes Canopy holds.
-	///
-	/// What a sweep of the store checks each object against: an object under an
-	/// id not in here is one no artifact reaches.
+	/// The ids of every artifact whose bytes Canopy holds. An object under an id
+	/// not in here is one no artifact reaches.
 	// spec: ART#where-an-artifact-rests
 	pub async fn held_ids(db: &mut AsyncPgConnection) -> Result<HashSet<Uuid>> {
 		use crate::schema::artifacts::dsl::*;

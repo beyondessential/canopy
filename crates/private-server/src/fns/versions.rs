@@ -819,9 +819,8 @@ pub async fn upload_artifact(
 		run_id: None,
 	};
 
-	// The bytes go in before the row that names them, under the id the artifact
-	// already has where one is registered: a replacement then lands where the
-	// bytes it replaces were, and nothing is left behind.
+	// Under the id the artifact already has where one is registered, so a
+	// replacement lands where the bytes it replaces were.
 	// spec: ART#where-an-artifact-rests
 	let mut conn = state.db.get().await?;
 	let existing = Artifact::id_for_identity(&mut conn, &input).await?;
@@ -840,12 +839,9 @@ pub async fn upload_artifact(
 	)
 	.await;
 
-	// A registration naming a group or version Canopy does not hold is refused
-	// by the row write, with the bytes already stored, so a mistyped id would
-	// leave an object nothing reaches. Only bytes put under an id minted here
-	// are dropped: under an id that was already registered they are the live
-	// artifact's, and a write that failed for any other reason must not take
-	// them with it.
+	// The row write is what refuses a group or version Canopy does not hold, by
+	// which point the bytes are stored. Only an id minted here is dropped: under
+	// one already registered the bytes are the live artifact's.
 	let artifact = match registered_row {
 		Ok(artifact) => artifact,
 		Err(refusal) => {
@@ -886,8 +882,8 @@ pub struct ArtifactIdArgs {
 
 /// Permanently delete an artifact.
 ///
-/// The artifact record is removed outright; the file it pointed to is not
-/// touched. There is no undo.
+/// An artifact Canopy holds loses its bytes along with its record. One that
+/// records a location keeps whatever is at that location. There is no undo.
 #[utoipa::path(
 	post,
 	path = "/delete_artifact",
@@ -903,9 +899,9 @@ pub async fn delete_artifact(
 	_admin: TailscaleAdmin,
 	Json(args): Json<ArtifactIdArgs>,
 ) -> Result<Json<()>> {
-	// The bytes go before the row: a store that refuses the drop leaves the
-	// artifact registered and the operator retrying, rather than a row gone and
-	// bytes nothing reaches.
+	// Before the row: a store that refuses the drop leaves the artifact
+	// registered and the operator retrying, rather than a row gone and bytes
+	// nothing reaches.
 	// spec: ART#where-an-artifact-rests
 	if let Some(store) = &state.artifacts {
 		store.delete(args.artifact_id).await?;

@@ -4010,8 +4010,8 @@ export interface paths {
         put?: never;
         /**
          * Permanently delete an artifact.
-         * @description The artifact record is removed outright; the file it pointed to is not
-         *     touched. There is no undo.
+         * @description An artifact Canopy holds loses its bytes along with its record. One that
+         *     records a location keeps whatever is at that location. There is no undo.
          */
         post: operations["delete_artifact"];
         delete?: never;

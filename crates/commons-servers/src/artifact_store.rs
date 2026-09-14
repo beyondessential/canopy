@@ -1,13 +1,9 @@
-//! Where Canopy keeps the bytes of the artifacts it holds.
-//!
-//! A group-scoped artifact is carried to Canopy by the registration that
-//! publishes it, and Canopy keeps it in storage of its own, apart from any
-//! group's backup repo. Objects are addressed by the artifact's id, so a
+//! Where Canopy keeps the bytes of the artifacts it holds, apart from any
+//! group's backup repo. An object is addressed by its artifact's id, so a
 //! re-registration replaces the one object and a deregistration removes it.
 //!
-//! No caller addresses the store: the boundary is enforced on the read, which
-//! resolves the artifact against the caller's scope first and only then asks
-//! for its bytes.
+//! Nothing here checks who is asking: a read resolves the artifact against the
+//! caller's scope before it gets this far.
 //!
 //! `S3` is the real store; `Memory` is an in-process map for tests and the e2e
 //! binary, mirroring [`crate::backup_secrets::BackupSecrets`].
@@ -42,8 +38,6 @@ pub const DEFAULT_PREFIX: &str = "artifacts/";
 
 type MemoryStore = Arc<Mutex<BTreeMap<String, (Vec<u8>, Timestamp)>>>;
 
-/// The bytes Canopy holds for one artifact, and how to store, read and drop
-/// them.
 #[derive(Clone)]
 pub enum ArtifactStore {
 	S3 {
@@ -68,10 +62,10 @@ impl std::fmt::Debug for ArtifactStore {
 }
 
 impl ArtifactStore {
-	/// An in-process store for tests / the e2e binary. **Debug-only**: the
-	/// constructor — and therefore any way to reach the `Memory` variant — does
-	/// not exist in release builds, so a real instance can never keep artifacts
-	/// in a process-local map that vanishes with the pod.
+	/// An in-process store for tests / the e2e binary. **Debug-only**: with no
+	/// constructor in a release build there is no way to reach the `Memory`
+	/// variant, so a real instance can never keep artifacts in a process-local
+	/// map that vanishes with the pod.
 	#[cfg(debug_assertions)]
 	pub fn memory() -> Self {
 		Self::Memory(Arc::new(Mutex::new(BTreeMap::new())))
@@ -121,9 +115,9 @@ impl ArtifactStore {
 		})
 	}
 
-	/// Every artifact the store holds. **Debug-only**, and only for the in-memory
-	/// variant: a test asserting nothing was left behind has to be able to see
-	/// what is there, and the S3 variant would need a listing to answer.
+	/// What the store holds, by key. **Debug-only**: a test asserting nothing was
+	/// left behind has to be able to see what is there. [`Self::stored`] is the
+	/// same question asked of either variant.
 	#[cfg(debug_assertions)]
 	pub fn held(&self) -> Vec<String> {
 		match self {
@@ -137,8 +131,8 @@ impl ArtifactStore {
 		}
 	}
 
-	/// Backdate what the store holds for an artifact, so a test can reach a
-	/// sweep's age threshold without waiting for it. **Debug-only.**
+	/// Backdate an artifact, so a test reaches the sweep's age threshold without
+	/// waiting out a day. **Debug-only.**
 	#[cfg(debug_assertions)]
 	pub fn backdate(&self, artifact: Uuid, to: Timestamp) {
 		match self {
@@ -215,11 +209,8 @@ impl ArtifactStore {
 		}
 	}
 
-	/// Every artifact the store holds, with when each was last written.
-	///
-	/// The time is what keeps a sweep off an artifact still being registered:
-	/// the bytes go in before the row that names them, so an object younger than
-	/// that gap has a registration possibly still in flight behind it.
+	/// Every artifact the store holds, with when each was last written. The time
+	/// is what keeps a sweep off a registration still in flight.
 	// spec: ART#where-an-artifact-rests
 	pub async fn stored(&self) -> Result<Vec<(Uuid, Timestamp)>> {
 		match self {
@@ -242,8 +233,7 @@ impl ArtifactStore {
 					})?;
 					for object in page.contents() {
 						// Anything under the prefix that is not an artifact id
-						// was not put there by Canopy, so it is not Canopy's to
-						// sweep.
+						// was not put there by Canopy.
 						let Some(id) = object
 							.key()
 							.and_then(|key| key.strip_prefix(prefix.as_str()))
@@ -272,8 +262,7 @@ impl ArtifactStore {
 		}
 	}
 
-	/// Drop an artifact's bytes. Deleting what is not there is not an error:
-	/// Canopy keeps none of what it has stopped serving either way.
+	/// Drop an artifact's bytes. Dropping what is not there is not an error.
 	pub async fn delete(&self, artifact: Uuid) -> Result<()> {
 		let key = self.key(artifact);
 		match self {
@@ -399,8 +388,8 @@ mod tests {
 	}
 
 	/// An object that is not there is `None` rather than an error, which is what
-	/// lets the read answer 404 — identically to an artifact the caller is not
-	/// offered — instead of reporting a fault.
+	/// lets the read answer as missing, identically to an artifact the caller is
+	/// not offered, instead of reporting a fault.
 	// spec: ART#where-an-artifact-rests
 	#[tokio::test]
 	async fn a_missing_object_is_absent_rather_than_a_fault() {

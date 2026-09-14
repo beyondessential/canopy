@@ -127,9 +127,9 @@ where
 /// The artifact store the servers of this run were built on, for a test that
 /// seeds or reads the bytes Canopy holds.
 ///
-/// Keyed by the throwaway database's name, which is unique per run: a test
-/// reaches its own store through the connection it already has rather than
-/// every harness callback in the workspace growing an argument for it.
+/// Keyed by the throwaway database's name, so a test reaches its own store
+/// through the connection it already has rather than every harness callback in
+/// the workspace growing an argument for it.
 pub async fn artifacts(conn: &mut AsyncPgConnection) -> ArtifactStore {
 	#[derive(QueryableByName)]
 	struct Name {
