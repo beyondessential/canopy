@@ -2264,7 +2264,7 @@
               "string",
               "null"
             ],
-            "description": "What the migration runner said about that failure, sanitised: it is shown\nto operators, so send no connection strings, credentials or patient data.\nKept to the first 2000 characters."
+            "description": "What the migration runner said about that failure: the message, and the\nDETAIL naming the row it refused, which is what tells a deployment what\nto fix. Send no connection strings or credentials. Kept to the first\n2000 characters."
           },
           "failed_migration": {
             "type": [
