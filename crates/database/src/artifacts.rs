@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use commons_errors::{AppError, Result};
 use diesel::prelude::*;
@@ -456,10 +458,9 @@ impl Artifact {
 		Ok(newest)
 	}
 
-	/// The id an artifact of this identity is already registered under, where
-	/// one is. An artifact Canopy holds rests under its id, so a re-registration
-	/// puts the new bytes where the old ones were rather than leaving them for
-	/// nothing to reach.
+	/// The id an artifact of this identity is already registered under, where one
+	/// is. An artifact rests under its id, so a re-registration that reuses it
+	/// puts the new bytes where the old ones were.
 	// spec: ART#registration
 	pub async fn id_for_identity(
 		db: &mut AsyncPgConnection,
@@ -478,6 +479,22 @@ impl Artifact {
 			.await
 			.optional()
 			.map_err(AppError::from)
+	}
+
+	/// The ids of every artifact whose bytes Canopy holds. An object under an id
+	/// not in here is one no artifact reaches.
+	// spec: ART#where-an-artifact-rests
+	pub async fn held_ids(db: &mut AsyncPgConnection) -> Result<HashSet<Uuid>> {
+		use crate::schema::artifacts::dsl::*;
+
+		let ids: Vec<Uuid> = artifacts
+			.filter(download_url.is_null())
+			.select(id)
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(ids.into_iter().collect())
 	}
 
 	/// Register an artifact, replacing whatever is already registered for the

@@ -4,5 +4,6 @@
 //! read k8s Secrets; the pure scheduler helpers (jitter, due-ness, billing,
 //! retention floor) live in `commons_servers::backup_jobs`.
 
+pub mod artifact_sweep;
 pub mod backup;
 pub mod domains;

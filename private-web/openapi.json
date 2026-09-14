@@ -8011,7 +8011,7 @@
           "versions"
         ],
         "summary": "Permanently delete an artifact.",
-        "description": "The artifact record is removed outright; the file it pointed to is not\ntouched. There is no undo.",
+        "description": "An artifact Canopy holds loses its bytes along with its record. One that\nrecords a location keeps whatever is at that location. There is no undo.",
         "operationId": "delete_artifact",
         "requestBody": {
           "content": {

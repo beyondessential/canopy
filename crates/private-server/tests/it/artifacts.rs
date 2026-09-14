@@ -667,10 +667,10 @@ async fn deleting_an_artifact_takes_its_bytes() {
 }
 
 /// A registration that is refused leaves nothing in the store. The bytes go in
-/// before the row that names them, so a refusal the row write raises — a group
-/// or version that does not exist — is the one case where an object can outlive
-/// the registration that put it there, and it is reachable by typing an id
-/// wrong rather than by a crash.
+/// before the row that names them, so a refusal the row write raises, meaning a
+/// group or version that does not exist, is the one case where an object can
+/// outlive the registration that put it there. Reachable by typing an id wrong
+/// rather than by a crash.
 // spec: ART#where-an-artifact-rests
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_registration_leaves_no_bytes() {

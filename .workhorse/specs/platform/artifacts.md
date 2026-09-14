@@ -29,9 +29,12 @@ A publisher sends the bytes on the connection it registers over and is issued no
 Canopy holds such an artifact in storage of its own, apart from any group's backup repo, so an artifact carries the retention, access, and cost basis of an artifact rather than those a backup repo is kept under (see [BAK](../public-server/backup.md)).
 Where Canopy puts them is its own, and no caller addresses them there.
 Canopy holds an artifact's bytes for as long as that artifact is registered, and keeps none of what it has stopped serving.
+A registration or a deregistration that fails once the bytes have moved can leave bytes no artifact reaches, and Canopy drops those as well rather than letting them accumulate.
+It does not expire bytes by age: an artifact's bytes are kept as long as it is registered however long that is, so age alone never says an artifact is finished with.
 
 Canopy serves the bytes only to a caller the artifact is offered to.
 The boundary is therefore enforced on the read rather than resting on a location being hard to guess.
+An artifact whose bytes Canopy cannot produce is answered as one that does not exist, identically to an artifact the caller is not offered, so what Canopy has failed to keep is not discoverable through the read.
 
 An artifact Canopy holds and an artifact Canopy records a location for are one thing to whoever is offered it.
 It is offered one artifact per type and platform, and where the bytes rest is not part of what it is offered.

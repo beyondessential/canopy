@@ -388,9 +388,8 @@ async fn register_for_group(
 		run_id: named.run,
 	};
 
-	// The bytes go in before the row that names them, under the id the artifact
-	// already has where one is registered: a rebuild then lands where the build
-	// it replaces was, and nothing is left behind.
+	// Under the id the artifact already has where one is registered, so a rebuild
+	// lands where the build it replaces was.
 	// spec: ART#where-an-artifact-rests
 	let existing = ArtifactRow::id_for_identity(&mut db, &input).await?;
 	let artifact_id = existing.unwrap_or_else(Uuid::new_v4);
