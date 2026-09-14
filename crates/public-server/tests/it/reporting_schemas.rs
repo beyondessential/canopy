@@ -1097,9 +1097,9 @@ async fn a_facility_is_offered_the_same_schema_as_its_centrals() {
 			let digest = hex::encode(database::artifacts::digest_of(b"the group's schema"));
 			conn.batch_execute(&format!(
 				"INSERT INTO artifacts
-				   (version_id, platform, artifact_type, group_id, content, content_type, digest)
+				   (version_id, platform, artifact_type, group_id, content_type, digest)
 				 VALUES ('{VERSION}', 'any', 'reporting-schema', '{GROUP}',
-				         'the group''s schema'::bytea, 'application/sql', '\\x{digest}'::bytea);
+				         'application/sql', '\\x{digest}'::bytea);
 
 				 INSERT INTO machines (id, name, group_id, device_id)
 				 VALUES (gen_random_uuid(), 'facility-box', '{GROUP}', '{device_id}')"

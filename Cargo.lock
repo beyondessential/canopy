@@ -1694,6 +1694,9 @@ dependencies = [
  "aws-config",
  "aws-credential-types",
  "aws-sdk-route53",
+ "aws-sdk-s3",
+ "aws-sdk-sts",
+ "aws-smithy-mocks",
  "axum",
  "axum-client-ip",
  "axum-server-timing",
@@ -1723,6 +1726,7 @@ dependencies = [
  "tokio",
  "tower-http 0.7.0",
  "tracing",
+ "uuid",
  "x509-parser",
 ]
 

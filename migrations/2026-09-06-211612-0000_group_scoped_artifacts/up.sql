@@ -7,7 +7,6 @@
 
 ALTER TABLE artifacts
 	ADD COLUMN group_id UUID REFERENCES server_groups(id) ON DELETE CASCADE,
-	ADD COLUMN content BYTEA,
 	ADD COLUMN content_type TEXT,
 	ADD COLUMN digest BYTEA,
 	ADD COLUMN run_id UUID;
@@ -15,18 +14,27 @@ ALTER TABLE artifacts
 ALTER TABLE artifacts ALTER COLUMN download_url DROP NOT NULL;
 
 -- An unscoped artifact rests at a location Canopy records and does not hold; a
--- group-scoped one rests in Canopy and always carries a digest, which the read
--- verifies the bytes against.
+-- group-scoped one rests in Canopy's own storage under its id and always
+-- carries a digest, which the read verifies the bytes against.
 ALTER TABLE artifacts ADD CONSTRAINT artifact_rests_by_scope CHECK (
 	(group_id IS NULL
 		AND download_url IS NOT NULL
-		AND content IS NULL
 		AND content_type IS NULL)
 	OR
 	(group_id IS NOT NULL
 		AND download_url IS NULL
-		AND content IS NOT NULL
 		AND digest IS NOT NULL)
+);
+
+-- A blank location is no location, and a digest that is not a SHA-256 is
+-- nothing the bytes can be checked against. Both are enforced here so a writer
+-- that skips the application cannot record one.
+ALTER TABLE artifacts ADD CONSTRAINT artifact_download_url_not_blank CHECK (
+	download_url IS NULL OR btrim(download_url) <> ''
+);
+
+ALTER TABLE artifacts ADD CONSTRAINT artifact_digest_is_sha256 CHECK (
+	digest IS NULL OR octet_length(digest) = 32
 );
 
 CREATE INDEX artifacts_group_id ON artifacts (group_id);

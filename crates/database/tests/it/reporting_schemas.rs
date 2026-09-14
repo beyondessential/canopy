@@ -415,9 +415,9 @@ async fn a_group_s_own_schema_does_not_reinstate_the_pair() {
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{other}', 'drifting');
 			 INSERT INTO artifacts
-				(version_id, artifact_type, platform, group_id, content, content_type, digest)
+				(version_id, artifact_type, platform, group_id, content_type, digest)
 			 VALUES ('{newer}', 'reporting-schema', 'any', '{other}',
-				convert_to('CREATE VIEW ...', 'UTF8'), 'application/sql', 'sha256:00')",
+				'application/sql', sha256('CREATE VIEW ...'::bytea))",
 		))
 		.await
 		.expect("another group registers its schema");

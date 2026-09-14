@@ -44,6 +44,7 @@ async fn private_with_directory(url: &str, directory: TailnetDirectory) -> TestS
 			prober: private_server::backup_probe::BucketProber::fake(
 				private_server::backup_probe::ProbeState::Empty,
 			),
+			artifacts: Some(commons_servers::artifact_store::ArtifactStore::memory()),
 			recovery_recipients: None,
 			recovery_challenge: std::sync::Arc::new(std::sync::Mutex::new(None)),
 			dns_zones: Vec::new(),

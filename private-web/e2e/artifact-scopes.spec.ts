@@ -193,20 +193,18 @@ test.describe("group-scoped artifacts", () => {
 
 		await expect(page.getByText("Held by Canopy for kamaka")).toBeVisible();
 
-		// Canopy holds the bytes and records the digest of what it took in.
+		// Canopy holds the bytes elsewhere and records the digest of what it took
+		// in, so the row carries no location and the digest of the file.
 		const rows = await sql.query<{
 			download_url: string | null;
 			digest: string | null;
-			content: string | null;
 		}>(
-			`SELECT download_url, encode(digest, 'base64') AS digest,
-			        encode(content, 'escape') AS content
+			`SELECT download_url, encode(digest, 'base64') AS digest
 			 FROM artifacts WHERE version_id = $1`,
 			[version.id],
 		);
 		expect(rows).toHaveLength(1);
 		expect(rows[0].download_url).toBeNull();
-		expect(rows[0].content).toBe("kamaka schema");
 		expect(rows[0].digest).toBe("IUs61BxmDig34DQY/ofHCx6CzHw1MdeO/v+aNAnqkdk=");
 	});
 
@@ -282,7 +280,7 @@ test.describe("group-scoped artifacts", () => {
 		await expect(page.getByText("Held by Canopy for kamaka")).toHaveCount(0);
 
 		const [held] = await sql.query<{ n: string }>(
-			"SELECT count(*) AS n FROM artifacts WHERE content IS NOT NULL",
+			"SELECT count(*) AS n FROM artifacts WHERE download_url IS NULL",
 		);
 		expect(Number(held.n)).toBe(0);
 

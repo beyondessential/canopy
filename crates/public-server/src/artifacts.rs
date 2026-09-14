@@ -226,6 +226,7 @@ async fn create(
 	let row = ArtifactRow::register(
 		&mut db,
 		NewArtifact {
+			id: None,
 			version_id,
 			platform,
 			artifact_type,
@@ -233,7 +234,6 @@ async fn create(
 			device_id: Some(device_id),
 			version_range_pattern,
 			group_id: None,
-			content: None,
 			content_type: None,
 			digest,
 			run_id: None,
@@ -283,7 +283,7 @@ async fn create(
 #[axum::debug_handler]
 async fn register_for_group(
 	device: AuthDevice,
-	State(db): State<Db>,
+	State(state): State<AppState>,
 	Path((group, version, artifact_type, platform)): Path<(Uuid, String, String, String)>,
 	Query(named): Query<GroupRegisterQuery>,
 	headers: axum::http::HeaderMap,
@@ -291,7 +291,7 @@ async fn register_for_group(
 ) -> Result<Json<Artifact>> {
 	use node_semver::Version as SemverVersion;
 
-	let mut db = db.get().await?;
+	let mut db = state.db.get().await?;
 	let device_id = device.0.id;
 
 	// What a schema builder is authorised for is the artifact its declaration
@@ -369,23 +369,54 @@ async fn register_for_group(
 	// spec: ART#digests
 	let digest = digest_of(&body);
 
-	let row = ArtifactRow::register(
+	let store = state
+		.artifacts
+		.as_ref()
+		.ok_or_else(commons_servers::artifact_store::unconfigured)?;
+
+	let input = NewArtifact {
+		id: None,
+		version_id: Some(version_row.id),
+		platform,
+		artifact_type,
+		download_url: None,
+		device_id: Some(device_id),
+		version_range_pattern: None,
+		group_id: Some(group),
+		content_type,
+		digest: Some(digest),
+		run_id: named.run,
+	};
+
+	// The bytes go in before the row that names them, under the id the artifact
+	// already has where one is registered: a rebuild then lands where the build
+	// it replaces was, and nothing is left behind.
+	// spec: ART#where-an-artifact-rests
+	let existing = ArtifactRow::id_for_identity(&mut db, &input).await?;
+	let artifact_id = existing.unwrap_or_else(Uuid::new_v4);
+	store.put(artifact_id, Vec::from(body)).await?;
+
+	let row = match ArtifactRow::register(
 		&mut db,
 		NewArtifact {
-			version_id: Some(version_row.id),
-			platform,
-			artifact_type,
-			download_url: None,
-			device_id: Some(device_id),
-			version_range_pattern: None,
-			group_id: Some(group),
-			content: Some(Vec::from(body)),
-			content_type,
-			digest: Some(digest),
-			run_id: named.run,
+			id: Some(artifact_id),
+			..input
 		},
 	)
-	.await?;
+	.await
+	{
+		Ok(row) => row,
+		Err(refusal) => {
+			// Only bytes put under an id minted here are dropped: under one
+			// already registered they are the live artifact's.
+			if existing.is_none()
+				&& let Err(err) = store.delete(artifact_id).await
+			{
+				tracing::error!(artifact = %artifact_id, "refused registration left its bytes: {err}");
+			}
+			return Err(refusal);
+		}
+	};
 
 	let base = crate::versions::public_base_url(&headers);
 	Ok(Json(Artifact::offered(row, &base, &version)))

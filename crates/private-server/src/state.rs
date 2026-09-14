@@ -4,6 +4,7 @@ use axum::extract::FromRef;
 use bestool_postgres::pool::PgPool;
 use commons_errors::Result;
 use commons_servers::acme::Acme;
+use commons_servers::artifact_store::ArtifactStore;
 use commons_servers::recovery_vault::Recipients;
 use commons_servers::tailnet_directory::{TailnetDirectory, TailnetDirectoryConfig};
 use commons_types::dns::ManagedZone;
@@ -51,6 +52,11 @@ pub struct AppState {
 	/// Bucket prober for the setup wizard (assume role + inspect S3). `Aws` in
 	/// prod; a `Fake` canned result in tests / the e2e binary.
 	pub prober: BucketProber,
+	/// Where the bytes of the artifacts Canopy holds rest. `None` where no
+	/// bucket is configured, in which case registering or serving one reports
+	/// that rather than the server failing to start.
+	// spec: ART#where-an-artifact-rests
+	pub artifacts: Option<ArtifactStore>,
 	/// recovery vault recipient public keys (`CANOPY_RECOVERY_VAULT_KEYS`), for the
 	/// verification ceremony. `None` ⇒ the ceremony endpoints 502 (the backups
 	/// pod is what hard-requires them, not this admin server).
@@ -181,6 +187,7 @@ impl AppState {
 
 		let kube = BackupSecrets::try_default().await;
 		let prober = BucketProber::try_default().await;
+		let artifacts = ArtifactStore::try_default().await;
 		// For the nested `/public` mount's backup-credential issuance. Building
 		// the client needs no creds (they resolve per-call from the pod's IRSA
 		// identity), so this is always `Some` in a real run.
@@ -202,6 +209,7 @@ impl AppState {
 			kube,
 			sts,
 			prober,
+			artifacts,
 			recovery_recipients: recovery_recipients_from_env(),
 			recovery_challenge: Arc::new(Mutex::new(None)),
 			dns_zones: dns_zones_from_env(),
@@ -232,6 +240,9 @@ impl AppState {
 			// drives each probe state by naming the bucket — `…existing…` → kopia
 			// repo, `…other…` → other content, `…denied…` → inaccessible, else empty.
 			prober: BucketProber::Fake(None),
+			// In-process artifact store so upload and download are exercised in
+			// tests and the e2e fixture without a bucket.
+			artifacts: Some(ArtifactStore::memory()),
 			// Read from env so the e2e fixture can exercise the recovery ceremony.
 			recovery_recipients: recovery_recipients_from_env(),
 			recovery_challenge: Arc::new(Mutex::new(None)),

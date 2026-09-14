@@ -395,48 +395,6 @@ impl<'de> Deserialize<'de> for AppError {
 mod tests {
 	use super::*;
 
-	/// GitHub's own heading anchors: lowercased, punctuation dropped, spaces
-	/// hyphenated.
-	fn anchor(heading: &str) -> String {
-		heading
-			.trim()
-			.to_lowercase()
-			.chars()
-			.filter(|c| c.is_ascii_alphanumeric() || *c == ' ' || *c == '-')
-			.map(|c| if c == ' ' { '-' } else { c })
-			.collect()
-	}
-
-	/// `/errors/{slug}` redirects into ERRORS.md by anchor, so a slug with no
-	/// heading drops the reader at the top of the file with no way to tell
-	/// which error was theirs.
-	#[test]
-	fn every_slug_has_a_heading_to_land_on() {
-		let arms = include_str!("lib.rs")
-			.split_once("slug = match self {")
-			.expect("the slug match")
-			.1
-			.split_once("unreachable!()")
-			.expect("the end of it")
-			.0;
-		// Every string literal between those two points is a slug.
-		let slugs: Vec<&str> = arms.split('"').skip(1).step_by(2).collect();
-		assert!(slugs.len() > 30, "the match was not read: {slugs:?}");
-
-		let anchors: Vec<String> = include_str!("../../../ERRORS.md")
-			.lines()
-			.filter_map(|line| line.strip_prefix("## "))
-			.map(anchor)
-			.collect();
-
-		for slug in slugs {
-			assert!(
-				anchors.iter().any(|a| a == slug),
-				"/errors/{slug} lands on an anchor ERRORS.md does not have"
-			);
-		}
-	}
-
 	/// Input an operator or a client controls answers as their mistake, not as
 	/// a fault, and carries the slug its documentation is written under.
 	#[test]

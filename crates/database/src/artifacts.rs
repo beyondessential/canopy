@@ -43,8 +43,9 @@ impl Scope {
 /// A downloadable artifact belonging to a release version: an installer,
 /// package, or other file published for a given type and platform.
 ///
-/// The bytes of a group-scoped artifact are not loaded here; they are large,
-/// and every listing would carry them. Read them with [`Artifact::content_for`].
+/// An artifact whose bytes Canopy holds carries their digest and media type
+/// here; the bytes themselves rest in Canopy's own storage under the
+/// artifact's id.
 #[derive(Debug, Clone, Deserialize, Queryable, Selectable, Associations)]
 #[diesel(belongs_to(Version))]
 #[diesel(table_name = crate::schema::artifacts)]
@@ -60,8 +61,8 @@ pub struct Artifact {
 	pub artifact_type: String,
 	/// The platform the artifact targets (e.g. an OS or architecture name).
 	pub platform: String,
-	/// URL the artifact can be downloaded from. `null` for a group-scoped
-	/// artifact, whose bytes Canopy holds instead.
+	/// URL the artifact can be downloaded from. `null` for an artifact whose
+	/// bytes Canopy holds.
 	pub download_url: Option<String>,
 	/// The device that registered this artifact, if it was registered by a
 	/// releaser device rather than created by an operator.
@@ -73,10 +74,10 @@ pub struct Artifact {
 	/// The group this artifact is for. `null` for an artifact that is for
 	/// every group.
 	pub group_id: Option<Uuid>,
-	/// Media type of the bytes Canopy holds, where the registration named one.
+	/// Media type of the bytes Canopy holds, when known.
 	pub content_type: Option<String>,
-	/// SHA-256 of the artifact's bytes. Always set for a group-scoped
-	/// artifact.
+	/// SHA-256 of the artifact's bytes. Always set for an artifact Canopy
+	/// holds.
 	pub digest: Option<Vec<u8>>,
 	/// The run that produced this artifact, where the registration named one.
 	pub run_id: Option<Uuid>,
@@ -90,6 +91,10 @@ pub struct Artifact {
 #[diesel(table_name = crate::schema::artifacts)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewArtifact {
+	/// The id to register under, where the caller settled one already. An
+	/// artifact Canopy holds is stored under its id, so the bytes are put
+	/// there before the row naming them exists.
+	pub id: Option<Uuid>,
 	pub version_id: Option<Uuid>,
 	pub artifact_type: String,
 	pub platform: String,
@@ -97,22 +102,13 @@ pub struct NewArtifact {
 	pub device_id: Option<Uuid>,
 	pub version_range_pattern: Option<String>,
 	pub group_id: Option<Uuid>,
-	pub content: Option<Vec<u8>>,
 	pub content_type: Option<String>,
 	pub digest: Option<Vec<u8>>,
 	pub run_id: Option<Uuid>,
 }
 
-/// The bytes Canopy holds for a group-scoped artifact.
-pub struct ArtifactContent {
-	pub bytes: Vec<u8>,
-	pub content_type: Option<String>,
-	pub digest: Vec<u8>,
-}
-
 /// Cap on the bytes Canopy will hold for one artifact. A reporting schema is a
-/// SQL file; anything approaching this is not one, and the rows live in Postgres
-/// alongside everything else.
+/// SQL file, and anything approaching this is not one.
 pub const MAX_HELD_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
 
 /// The digest Canopy records and verifies bytes against.
@@ -120,17 +116,13 @@ pub fn digest_of(bytes: &[u8]) -> Vec<u8> {
 	Sha256::digest(bytes).to_vec()
 }
 
-/// A digest as Subresource Integrity writes it, which is the form every
-/// interface carries it in.
+/// A digest in Subresource Integrity format.
 // spec: ART#digests
 pub fn sri(digest: &[u8]) -> String {
 	format!("sha256-{}", BASE64.encode(digest))
 }
 
 /// The digest an SRI string names, refusing anything that cannot be one.
-///
-/// A value nothing can check the bytes against is worse than none: it says the
-/// bytes were verified when they cannot be.
 // spec: ART#digests
 pub fn parse_sri(value: &str) -> Result<Vec<u8>> {
 	let refuse = || AppError::BadRequest(format!("{value:?} is not a sha256 SRI digest"));
@@ -186,14 +178,12 @@ impl NewArtifact {
 			(false, false) => Err(AppError::BadRequest(
 				"an artifact needs a download URL or a group".into(),
 			)),
-			(true, false) if self.content.is_none() || self.digest.is_none() => {
-				Err(AppError::BadRequest(
-					"a group-scoped artifact must carry its bytes and their digest".into(),
-				))
-			}
-			(false, true) if self.content_type.is_some() || self.content.is_some() => Err(
-				AppError::BadRequest("only a group-scoped artifact carries bytes".into()),
-			),
+			(true, false) if self.digest.is_none() => Err(AppError::BadRequest(
+				"a group-scoped artifact must carry the digest of its bytes".into(),
+			)),
+			(false, true) if self.content_type.is_some() => Err(AppError::BadRequest(
+				"only a group-scoped artifact carries bytes".into(),
+			)),
 			_ => Ok(self),
 		}
 	}
@@ -214,12 +204,6 @@ impl Artifact {
 
 	/// The artifacts of a sorted match set that `scope` is actually served:
 	/// the most specific of each type and platform it can see.
-	///
-	/// Not `dedup_by_key`: that only drops *consecutive* duplicates, and the
-	/// specificity sort has destroyed the adjacency the SQL `ORDER BY` gave us
-	/// — every exact artifact now precedes every range one, so two artifacts of
-	/// the same type+platform are only neighbours when they happen to be
-	/// equally specific.
 	// spec: ART#what-a-version-offers
 	fn offered(artifacts: Vec<Self>, scope: Scope) -> Vec<Self> {
 		let offered = Self::offered_ids(&artifacts, scope);
@@ -472,40 +456,28 @@ impl Artifact {
 		Ok(newest)
 	}
 
-	/// The bytes Canopy holds for an artifact, where it holds any.
-	pub async fn content_for(
+	/// The id an artifact of this identity is already registered under, where
+	/// one is. An artifact Canopy holds rests under its id, so a re-registration
+	/// puts the new bytes where the old ones were rather than leaving them for
+	/// nothing to reach.
+	// spec: ART#registration
+	pub async fn id_for_identity(
 		db: &mut AsyncPgConnection,
-		artifact_id: Uuid,
-		scope: Scope,
-	) -> Result<Option<ArtifactContent>> {
+		input: &NewArtifact,
+	) -> Result<Option<Uuid>> {
 		use crate::schema::artifacts::dsl::*;
 
-		// The scope is part of the read rather than the caller's to remember:
-		// the bytes of a group's artifact are the thing the boundary exists to
-		// keep, and an id is guessable in a way a query is not.
-		// spec: ART#who-is-offered-a-group-scoped-artifact
-		let mut query = artifacts.filter(id.eq(artifact_id)).into_boxed();
-		query = match scope {
-			Scope::Unscoped => query.filter(group_id.is_null()),
-			Scope::Group(caller) => query.filter(group_id.is_null().or(group_id.eq(caller))),
-			Scope::Fleet => query,
-		};
-
-		let row: Option<(Option<Vec<u8>>, Option<String>, Option<Vec<u8>>)> = query
-			.select((content, content_type, digest))
+		artifacts
+			.filter(artifact_type.eq(&input.artifact_type))
+			.filter(platform.eq(&input.platform))
+			.filter(version_id.is_not_distinct_from(input.version_id))
+			.filter(version_range_pattern.is_not_distinct_from(&input.version_range_pattern))
+			.filter(group_id.is_not_distinct_from(input.group_id))
+			.select(id)
 			.first(db)
 			.await
 			.optional()
-			.map_err(AppError::from)?;
-
-		Ok(match row {
-			Some((Some(bytes), media_type, Some(recorded))) => Some(ArtifactContent {
-				bytes,
-				content_type: media_type,
-				digest: recorded,
-			}),
-			_ => None,
-		})
+			.map_err(AppError::from)
 	}
 
 	/// Register an artifact, replacing whatever is already registered for the
@@ -529,7 +501,6 @@ impl Artifact {
 			.set((
 				download_url.eq(&input.download_url),
 				device_id.eq(input.device_id),
-				content.eq(&input.content),
 				content_type.eq(&input.content_type),
 				digest.eq(&input.digest),
 				run_id.eq(input.run_id),
@@ -584,9 +555,9 @@ impl Artifact {
 			_ => {}
 		}
 
-		// A digest describes the bytes at a location, so it does not survive
-		// the location changing: kept, it has every device that honours it
-		// refuse a file that is the right one.
+		// The digest describes the bytes at the old URL, so a new URL clears
+		// it rather than carrying a checksum for a file that is no longer
+		// there.
 		// spec: ART#digests
 		let moved = new_url != current_url;
 

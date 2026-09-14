@@ -659,12 +659,12 @@ async fn update_for(
 
 async fn download_artifact(
 	device: Option<AuthDevice>,
-	State(db): State<Db>,
+	State(state): State<crate::state::AppState>,
 	Path((version, artifact_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse> {
 	use uuid::Uuid;
 
-	let mut db = db.get().await?;
+	let mut db = state.db.get().await?;
 	let version = version_named(&mut db, &version).await?;
 	let scope = caller_scope(&mut db, device).await?;
 
@@ -680,17 +680,29 @@ async fn download_artifact(
 		.await?
 		.ok_or(AppError::ArtifactNotFound)?;
 
-	if let Some(held) = ArtifactRow::content_for(&mut db, artifact.id, scope).await? {
+	// An artifact with no location of its own is one Canopy holds.
+	// spec: ART#where-an-artifact-rests
+	if artifact.download_url.is_none() {
+		let store = state
+			.artifacts
+			.as_ref()
+			.ok_or_else(commons_servers::artifact_store::unconfigured)?;
+		let (Some(bytes), Some(recorded)) =
+			(store.get(artifact.id).await?, artifact.digest.clone())
+		else {
+			return Err(AppError::ArtifactNotFound);
+		};
+
 		// Hashing the whole artifact is tens of milliseconds with no await in
 		// it, and a fleet fetching one schema at once would spend that on the
 		// runtime's own threads.
-		let held = tokio::task::spawn_blocking(move || {
-			(database::artifacts::digest_of(&held.bytes) == held.digest).then_some(held)
+		let bytes = tokio::task::spawn_blocking(move || {
+			(database::artifacts::digest_of(&bytes) == recorded).then_some(bytes)
 		})
 		.await
 		.map_err(|err| AppError::custom(format!("verifying the artifact failed: {err}")))?;
 
-		let Some(held) = held else {
+		let Some(bytes) = bytes else {
 			tracing::error!(
 				artifact = %artifact.id,
 				"held artifact does not match its digest; refusing to serve"
@@ -698,7 +710,7 @@ async fn download_artifact(
 			return Err(AppError::ArtifactDigestMismatch);
 		};
 
-		let content_type = held
+		let content_type = artifact
 			.content_type
 			.unwrap_or_else(|| "application/octet-stream".to_owned());
 
@@ -718,7 +730,7 @@ async fn download_artifact(
 					"nosniff".to_owned(),
 				),
 			],
-			Body::from(held.bytes),
+			Body::from(bytes),
 		)
 			.into_response());
 	}

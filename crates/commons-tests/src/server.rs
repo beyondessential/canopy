@@ -1,6 +1,10 @@
 use ::time::OffsetDateTime;
 use axum_client_ip::ClientIpSource;
 use axum_test::TestServer;
+use std::collections::BTreeMap;
+use std::sync::Mutex;
+
+use commons_servers::artifact_store::ArtifactStore;
 use commons_servers::device_auth::mtls::ClientCertHeader;
 use commons_servers::router;
 use diesel::{QueryableByName, sql_query, sql_types};
@@ -120,6 +124,38 @@ where
 	run_on(DEFAULT_CERT_HEADER, test).await
 }
 
+/// The artifact store the servers of this run were built on, for a test that
+/// seeds or reads the bytes Canopy holds.
+///
+/// Keyed by the throwaway database's name, which is unique per run: a test
+/// reaches its own store through the connection it already has rather than
+/// every harness callback in the workspace growing an argument for it.
+pub async fn artifacts(conn: &mut AsyncPgConnection) -> ArtifactStore {
+	#[derive(QueryableByName)]
+	struct Name {
+		#[diesel(sql_type = sql_types::Text)]
+		current_database: String,
+	}
+
+	let name: Name = sql_query("SELECT current_database()")
+		.get_result(conn)
+		.await
+		.expect("read database name");
+	store_for(&name.current_database)
+}
+
+/// The store for one throwaway database, created on first ask.
+fn store_for(database: &str) -> ArtifactStore {
+	static STORES: Mutex<BTreeMap<String, ArtifactStore>> = Mutex::new(BTreeMap::new());
+
+	STORES
+		.lock()
+		.expect("artifact stores")
+		.entry(database.to_owned())
+		.or_insert_with(ArtifactStore::memory)
+		.clone()
+}
+
 /// [`run`] against an explicitly chosen client-certificate header.
 pub async fn run_on<F, T, Fut>(cert_header: ClientCertHeader, test: F) -> T
 where
@@ -130,6 +166,11 @@ where
 		// One pool per state, shared between the RW and RO handles — a second
 		// pool would double connections against the throwaway test cluster,
 		// and this mirrors production with RO_DATABASE_URL unset.
+		// One store per run, shared by both servers: an artifact uploaded through
+		// the private API is the one the public download endpoint serves, the way
+		// a single bucket serves both pods.
+		let artifacts = store_for(database_name(&url));
+
 		let public_db = database::init_to(&url);
 		let public_state = public_server::state::AppState {
 			client_cert_header: cert_header,
@@ -141,6 +182,7 @@ where
 			rate_limiter: Default::default(),
 			sts: None,
 			kube: None,
+			artifacts: Some(artifacts.clone()),
 			// From the environment, so a test can configure zones before building
 			// the server the way the real edge does.
 			dns_zones: commons_types::dns::ManagedZone::list_from_env().unwrap_or_default(),
@@ -152,11 +194,12 @@ where
 			ClientIpSource::RightmostForwarded,
 		);
 		let private_router = router(
-			private_server::routes(
-				private_server::state::AppState::from_db_url(&url)
+			private_server::routes(private_server::state::AppState {
+				artifacts: Some(artifacts.clone()),
+				..private_server::state::AppState::from_db_url(&url)
 					.await
-					.unwrap(),
-			)
+					.unwrap()
+			})
 			.unwrap(),
 			ClientIpSource::RightmostForwarded,
 		);
@@ -320,6 +363,7 @@ where
 			rate_limiter: Default::default(),
 			sts: None,
 			kube: None,
+			artifacts: Some(store_for(database_name(&url))),
 			// From the environment, so a test can configure zones before building
 			// the server the way the real edge does.
 			dns_zones: commons_types::dns::ManagedZone::list_from_env().unwrap_or_default(),
@@ -343,6 +387,7 @@ where
 				prober: private_server::backup_probe::BucketProber::fake(
 					private_server::backup_probe::ProbeState::Empty,
 				),
+				artifacts: Some(store_for(database_name(&url))),
 				recovery_recipients: None,
 				recovery_challenge: std::sync::Arc::new(std::sync::Mutex::new(None)),
 				// This harness is for the tailnet-auth paths; no test on it
@@ -365,4 +410,9 @@ where
 		test(conn, tailnet_ip, node_id, device_id, public, private).await
 	})
 	.await
+}
+
+/// The throwaway database's name, which is the last path segment of its URL.
+fn database_name(url: &str) -> &str {
+	url.rsplit('/').next().expect("a database in the url")
 }

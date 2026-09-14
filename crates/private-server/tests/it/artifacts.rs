@@ -429,8 +429,8 @@ async fn the_listing_says_which_artifacts_are_offered() {
 			 INSERT INTO artifacts (id, version_id, platform, artifact_type, version_range_pattern, download_url)
 			 VALUES ('{range_installer}', NULL, 'windows', 'installer', '2.60.x', 'https://example.com/range.exe');
 
-			 INSERT INTO artifacts (id, version_id, platform, artifact_type, group_id, content, content_type, digest)
-			 VALUES ('{group_schema}', '{version}', 'any', 'reporting-schema', '{group}', 'kamaka schema', 'application/sql', '\\x00'::bytea)",
+			 INSERT INTO artifacts (id, version_id, platform, artifact_type, group_id, content_type, digest)
+			 VALUES ('{group_schema}', '{version}', 'any', 'reporting-schema', '{group}', 'application/sql', sha256('kamaka schema'::bytea))",
 		))
 		.await
 		.unwrap();
@@ -491,8 +491,8 @@ async fn a_registration_answers_what_it_overrides() {
 			 INSERT INTO artifacts (version_id, platform, artifact_type, version_range_pattern, download_url)
 			 VALUES (NULL, 'any', 'reporting-schema', '2.60.x', 'https://example.com/range.sql');
 
-			 INSERT INTO artifacts (version_id, platform, artifact_type, version_range_pattern, group_id, content, content_type, digest)
-			 VALUES (NULL, 'windows', 'installer', '2.60.x', '{theirs}', 'theirs', 'application/octet-stream', '\\x00'::bytea)",
+			 INSERT INTO artifacts (version_id, platform, artifact_type, version_range_pattern, group_id, content_type, digest)
+			 VALUES (NULL, 'windows', 'installer', '2.60.x', '{theirs}', 'application/octet-stream', sha256('theirs'::bytea))",
 		))
 		.await
 		.unwrap();
@@ -572,6 +572,138 @@ async fn an_upload_without_the_fetch_header_is_refused() {
 			.await;
 		let artifacts: Vec<serde_json::Value> = listed.json();
 		assert!(artifacts.is_empty(), "the refusal wrote nothing");
+	})
+	.await
+}
+
+/// A registration replaces whatever is already registered for the same version,
+/// type, platform and group, and the bytes it replaces go with it: the artifact
+/// rests under its id, so a rebuild is put where the old build was rather than
+/// beside it.
+// spec: ART#where-an-artifact-rests
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rebuild_replaces_the_bytes_where_they_rest() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let version = "dddddddd-0000-0000-0000-dddddddddddd";
+		let group = "eeeeeeee-0000-0000-0000-eeeeeeeeeeee";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status)
+			 VALUES ('{version}', 2, 60, 0, '', 'published');
+			 INSERT INTO server_groups (id, name) VALUES ('{group}', 'kamaka')",
+		))
+		.await
+		.unwrap();
+
+		let upload = async |bytes: &'static [u8]| {
+			private
+				.post("/api/versions/upload_artifact")
+				.add_header("x-canopy-upload", "1")
+				.add_query_param("version_id", version)
+				.add_query_param("artifact_type", "reporting-schema")
+				.add_query_param("platform", "any")
+				.add_query_param("group_id", group)
+				.add_query_param("digest", sri_of(bytes))
+				.bytes(bytes.into())
+				.await
+		};
+
+		let first: serde_json::Value = upload(b"first build").await.json();
+		let second: serde_json::Value = upload(b"second build").await.json();
+		assert_eq!(first["id"], second["id"], "replaced in place");
+
+		let id: Uuid = serde_json::from_value(second["id"].clone()).unwrap();
+		let store = commons_tests::server::artifacts(&mut conn).await;
+		assert_eq!(
+			store.get(id).await.unwrap().as_deref(),
+			Some(&b"second build"[..])
+		);
+	})
+	.await
+}
+
+/// Canopy keeps none of what it has stopped serving, so deregistering an
+/// artifact takes its bytes out of the store as well as its row.
+// spec: ART#where-an-artifact-rests
+#[tokio::test(flavor = "multi_thread")]
+async fn deleting_an_artifact_takes_its_bytes() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let version = "ffffffff-0000-0000-0000-ffffffffffff";
+		let group = "ffffffff-1111-0000-0000-ffffffffffff";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status)
+			 VALUES ('{version}', 2, 60, 0, '', 'published');
+			 INSERT INTO server_groups (id, name) VALUES ('{group}', 'kamaka')",
+		))
+		.await
+		.unwrap();
+
+		let registered: serde_json::Value = private
+			.post("/api/versions/upload_artifact")
+			.add_header("x-canopy-upload", "1")
+			.add_query_param("version_id", version)
+			.add_query_param("artifact_type", "reporting-schema")
+			.add_query_param("platform", "any")
+			.add_query_param("group_id", group)
+			.add_query_param("digest", sri_of(b"kamaka schema"))
+			.bytes("kamaka schema".into())
+			.await
+			.json();
+		let id: Uuid = serde_json::from_value(registered["id"].clone()).unwrap();
+
+		let store = commons_tests::server::artifacts(&mut conn).await;
+		assert!(store.get(id).await.unwrap().is_some());
+
+		private
+			.post("/api/versions/delete_artifact")
+			.json(&serde_json::json!({ "artifact_id": id }))
+			.await
+			.assert_status_ok();
+
+		assert!(store.get(id).await.unwrap().is_none());
+	})
+	.await
+}
+
+/// A registration that is refused leaves nothing in the store. The bytes go in
+/// before the row that names them, so a refusal the row write raises — a group
+/// or version that does not exist — is the one case where an object can outlive
+/// the registration that put it there, and it is reachable by typing an id
+/// wrong rather than by a crash.
+// spec: ART#where-an-artifact-rests
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_registration_leaves_no_bytes() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let version = "aaaaaaaa-9999-0000-0000-aaaaaaaaaaaa";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status)
+			 VALUES ('{version}', 2, 60, 0, '', 'published')",
+		))
+		.await
+		.unwrap();
+
+		let refused = private
+			.post("/api/versions/upload_artifact")
+			.add_header("x-canopy-upload", "1")
+			.add_query_param("version_id", version)
+			.add_query_param("artifact_type", "reporting-schema")
+			.add_query_param("platform", "any")
+			// No such group. The row write is what refuses it, by which point
+			// the bytes have been stored.
+			.add_query_param("group_id", "dddddddd-9999-0000-0000-dddddddddddd")
+			.add_query_param("digest", sri_of(b"kamaka schema"))
+			.bytes("kamaka schema".into())
+			.await;
+		assert_eq!(refused.status_code(), axum::http::StatusCode::BAD_REQUEST);
+
+		let store = commons_tests::server::artifacts(&mut conn).await;
+		assert!(
+			store.held().is_empty(),
+			"a refused registration left {:?} behind",
+			store.held()
+		);
 	})
 	.await
 }

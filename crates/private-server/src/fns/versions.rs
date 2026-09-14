@@ -6,6 +6,7 @@ use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Query, State};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
+use commons_servers::artifact_store;
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::version::{VersionStatus, VersionStr};
 use database::{
@@ -690,6 +691,7 @@ pub async fn create_artifact(
 	let artifact = Artifact::register(
 		&mut conn,
 		NewArtifact {
+			id: None,
 			version_id: Some(args.version_id),
 			artifact_type: args.artifact_type,
 			platform: args.platform,
@@ -697,7 +699,6 @@ pub async fn create_artifact(
 			device_id: None,
 			version_range_pattern: None,
 			group_id: None,
-			content: None,
 			content_type: None,
 			digest,
 			run_id: None,
@@ -797,24 +798,63 @@ pub async fn upload_artifact(
 		.map(str::to_owned)
 		.filter(|media_type| media_type != "application/octet-stream");
 
+	let store = state
+		.artifacts
+		.as_ref()
+		.ok_or_else(artifact_store::unconfigured)?;
+
+	let input = NewArtifact {
+		id: None,
+		version_id: Some(named.version_id),
+		artifact_type: named.artifact_type,
+		platform: named.platform,
+		download_url: None,
+		device_id: None,
+		version_range_pattern: None,
+		group_id: Some(named.group_id),
+		content_type,
+		digest: Some(digest),
+		run_id: None,
+	};
+
+	// The bytes go in before the row that names them, under the id the artifact
+	// already has where one is registered: a replacement then lands where the
+	// bytes it replaces were, and nothing is left behind.
+	// spec: ART#where-an-artifact-rests
 	let mut conn = state.db.get().await?;
-	let artifact = Artifact::register(
+	let existing = Artifact::id_for_identity(&mut conn, &input).await?;
+	let id = existing.unwrap_or_else(Uuid::new_v4);
+	drop(conn);
+
+	store.put(id, Vec::from(body)).await?;
+
+	let mut conn = state.db.get().await?;
+	let registered_row = Artifact::register(
 		&mut conn,
 		NewArtifact {
-			version_id: Some(named.version_id),
-			artifact_type: named.artifact_type,
-			platform: named.platform,
-			download_url: None,
-			device_id: None,
-			version_range_pattern: None,
-			group_id: Some(named.group_id),
-			content: Some(Vec::from(body)),
-			content_type,
-			digest: Some(digest),
-			run_id: None,
+			id: Some(id),
+			..input
 		},
 	)
-	.await?;
+	.await;
+
+	// A registration naming a group or version Canopy does not hold is refused
+	// by the row write, with the bytes already stored, so a mistyped id would
+	// leave an object nothing reaches. Only bytes put under an id minted here
+	// are dropped: under an id that was already registered they are the live
+	// artifact's, and a write that failed for any other reason must not take
+	// them with it.
+	let artifact = match registered_row {
+		Ok(artifact) => artifact,
+		Err(refusal) => {
+			if existing.is_none()
+				&& let Err(err) = store.delete(id).await
+			{
+				tracing::error!(artifact = %id, "refused registration left its bytes: {err}");
+			}
+			return Err(refusal);
+		}
+	};
 
 	registered(&mut conn, named.version_id, artifact.id).await
 }
@@ -861,6 +901,14 @@ pub async fn delete_artifact(
 	_admin: TailscaleAdmin,
 	Json(args): Json<ArtifactIdArgs>,
 ) -> Result<Json<()>> {
+	// The bytes go before the row: a store that refuses the drop leaves the
+	// artifact registered and the operator retrying, rather than a row gone and
+	// bytes nothing reaches.
+	// spec: ART#where-an-artifact-rests
+	if let Some(store) = &state.artifacts {
+		store.delete(args.artifact_id).await?;
+	}
+
 	let mut conn = state.db.get().await?;
 	Artifact::delete(&mut conn, args.artifact_id).await?;
 	Ok(Json(()))
