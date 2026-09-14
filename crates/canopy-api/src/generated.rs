@@ -7,7 +7,7 @@ pub const OPENAPI_VERSION: &str = "1.0.0";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "3bd62c232a727651fbe22f9a0be57d3f80eb1b48694f68d3f56db903df9276b4";
+pub const OPENAPI_BLAKE3: &str = "68d3f3e88aade3d41c8d2855243c3b7cc76fd53df8c68202729bb1e7ccfb387c";
 
 /// Error types.
 pub mod error {
@@ -1545,6 +1545,13 @@ on the wire.*/
 ///      "type": "integer",
 ///      "format": "int64"
 ///    },
+///    "error": {
+///      "description": "What the migration runner said about that failure: the message, and the\nDETAIL naming the row it refused, which is what tells a deployment what\nto fix. Send no connection strings or credentials. Kept to the first\n2000 characters.",
+///      "type": [
+///        "string",
+///        "null"
+///      ]
+///    },
 ///    "failed_migration": {
 ///      "description": "The migration that failed, when one did.",
 ///      "type": [
@@ -1598,6 +1605,12 @@ a migration that backfills heavily.*/
     pub data_bytes_after: i64,
     ///Size of the data before the migrations ran.
     pub data_bytes_before: i64,
+    /**What the migration runner said about that failure: the message, and the
+DETAIL naming the row it refused, which is what tells a deployment what
+to fix. Send no connection strings or credentials. Kept to the first
+2000 characters.*/
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub error: ::std::option::Option<::std::string::String>,
     ///The migration that failed, when one did.
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub failed_migration: ::std::option::Option<::std::string::String>,

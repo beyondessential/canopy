@@ -37,6 +37,7 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
+import { Link as MuiLink } from "@mui/material";
 import { alpha, type Theme } from "@mui/material/styles";
 import {
 	type ReactElement,
@@ -57,6 +58,8 @@ import { environmentName } from "../types";
 import type { ApiResponse, MaintenanceWindow, ServerRank } from "../types";
 
 type PastPlan = ApiResponse<"upgrade_plans", "history">[number];
+type PlannedUpgrade = ApiResponse<"upgrade_plans", "fleet">[number];
+type FailedTest = NonNullable<PlannedUpgrade["failed_test"]>;
 type PlannableVersion = ApiResponse<"upgrade_plans", "targets">[number];
 
 /// Where every group is going. A group with no plan is listed too: one
@@ -156,6 +159,8 @@ export default function Upgrades() {
 												<VerdictChip
 													verdict={row.verdict}
 													testable={row.testable}
+													groupId={row.group_id}
+													failedTest={row.failed_test}
 												/>
 												<AttemptChip attempt={row.attempt} />
 											</Stack>
@@ -1388,33 +1393,68 @@ function OutcomeChip({
 function VerdictChip({
 	verdict,
 	testable,
+	groupId,
+	failedTest,
 }: {
 	verdict: string | null | undefined;
 	testable: boolean | null | undefined;
+	groupId: string;
+	failedTest: FailedTest | null | undefined;
 }) {
+	const linked = (chip: ReactElement) => (
+		<MuiLink
+			component={RouterLink}
+			to={`/fleet/groups/${groupId}#migration-tests`}
+			underline="none"
+		>
+			{chip}
+		</MuiLink>
+	);
+
 	if (verdict === "passed") {
-		return <Chip size="small" color="success" label="passed" />;
+		return linked(
+			<Chip size="small" color="success" label="passed" clickable />,
+		);
 	}
 	if (verdict === "failed") {
 		return (
-			<Tooltip title="an application's data broke the migrations; the version is held back">
-				<Chip size="small" color="warning" label="failed" />
+			<Tooltip
+				title={
+					failedTest ? (
+						<>
+							<Box>
+								{failedTest.application}
+								{failedTest.migration ? `: ${failedTest.migration}` : ""}
+							</Box>
+							{failedTest.error && <Box sx={{ mt: 0.5 }}>{failedTest.error}</Box>}
+						</>
+					) : (
+						"an application's data broke the migrations; the version is held back"
+					)
+				}
+			>
+				{linked(<Chip size="small" color="warning" label="failed" clickable />)}
 			</Tooltip>
 		);
 	}
 	if (testable === false) {
 		return (
 			<Tooltip title="nothing is declared to migrate this group's data, so no test will run: declare a restore replica for it on the group's page">
-				<Chip
-					size="small"
-					color="warning"
-					variant="outlined"
-					label="not set up"
-				/>
+				{linked(
+					<Chip
+						size="small"
+						color="warning"
+						variant="outlined"
+						label="not set up"
+						clickable
+					/>,
+				)}
 			</Tooltip>
 		);
 	}
-	return <Chip size="small" variant="outlined" label="not yet tested" />;
+	return linked(
+		<Chip size="small" variant="outlined" label="not yet tested" clickable />,
+	);
 }
 
 /// An attempt under way, beside the verdict rather than replacing it: a row can

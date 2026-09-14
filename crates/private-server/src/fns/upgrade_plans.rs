@@ -79,6 +79,8 @@ pub struct PlannedUpgrade {
 	/// than folded into it: a restore takes hours, so a group mid-test would
 	/// otherwise read as untested for the whole window.
 	pub attempt: Option<crate::fns::migration_tests::AttemptState>,
+	/// The failing test behind a `failed` verdict. `null` for any other verdict.
+	pub failed_test: Option<FailedTest>,
 	/// Whether anything is declared to migrate this group's data. A plan on a
 	/// group with nothing declared is never dispatched, so its verdict would sit
 	/// at "not tested" indefinitely with nothing on its way. `null` without a
@@ -205,6 +207,7 @@ pub async fn fleet(
 		// The plan says where the environment is going; the verdict says whether
 		// its data survives getting there. Pairing them is what makes this view
 		// worth reading.
+		let mut failed_test = None;
 		let verdict = match &plan {
 			None => None,
 			Some(_) => {
@@ -228,9 +231,19 @@ pub async fn fleet(
 					})
 					.cloned()
 					.collect();
-				let per_server =
-					database::migration_tests::verdicts_against(&mut conn, applications, planned)
-						.await?;
+				let per_server = database::migration_tests::verdicts_against(
+					&mut conn,
+					applications.clone(),
+					planned,
+				)
+				.await?;
+				failed_test = newest_failure(&per_server, |server_id| {
+					applications
+						.iter()
+						.find(|application| application.id == server_id)
+						.and_then(|application| application.name.clone())
+						.unwrap_or_else(|| server_id.to_string())
+				});
 				Some(roll_up(&per_server).to_owned())
 			}
 		};
@@ -281,6 +294,7 @@ pub async fn fleet(
 			target_version: target,
 			late,
 			verdict,
+			failed_test,
 			attempt,
 			testable,
 			planned_window,
@@ -311,6 +325,38 @@ fn roll_up(per_server: &[database::migration_tests::GroupVerdict]) -> &'static s
 		return "nottested";
 	}
 	"passed"
+}
+
+/// The failing test behind a `failed` verdict, so the fleet view can say what
+/// broke without a second lookup.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
+pub struct FailedTest {
+	/// The application whose data broke, since the verdict rolls up several.
+	pub application: String,
+	/// The migration it stopped at, absent when the runner named none.
+	pub migration: Option<String>,
+	/// Why it stopped, redacted by the runner that reported it.
+	pub error: Option<String>,
+}
+
+/// The most recently reported failure among an environment's applications.
+/// Where several failed, the newest is shown and the rest stay on the group page.
+fn newest_failure(
+	per_server: &[database::migration_tests::GroupVerdict],
+	name_of: impl Fn(Uuid) -> String,
+) -> Option<FailedTest> {
+	use database::migration_tests::Verdict;
+
+	per_server
+		.iter()
+		.filter(|v| v.verdict == Verdict::Failed)
+		.filter_map(|v| v.latest.as_ref().map(|test| (v.server_id, test)))
+		.max_by_key(|(_, test)| test.reported_at)
+		.map(|(server_id, test)| FailedTest {
+			application: name_of(server_id),
+			migration: test.failed_migration.clone(),
+			error: test.error.clone(),
+		})
 }
 
 /// One plan that has closed, in the fleet's plan history.
@@ -688,4 +734,89 @@ pub async fn withdraw(
 	let mut conn = state.db.get().await?;
 	UpgradePlan::withdraw(&mut conn, args.id, &admin.0.login).await?;
 	Ok(Json(()))
+}
+
+#[cfg(test)]
+mod failure_tests {
+	use super::*;
+	use database::{
+		migration_tests::{GroupVerdict, LatestTest, Verdict},
+		pg_duration::PgDuration,
+	};
+	use jiff::{SignedDuration, Timestamp};
+
+	fn verdict(
+		server_id: Uuid,
+		verdict: Verdict,
+		reported_at: &str,
+		migration: &str,
+	) -> GroupVerdict {
+		GroupVerdict {
+			server_id,
+			target_version_id: Uuid::nil(),
+			target_version: "2.9.3".to_owned(),
+			verdict,
+			latest: Some(LatestTest {
+				verdict,
+				failed_migration: (verdict == Verdict::Failed).then(|| migration.to_owned()),
+				error: (verdict == Verdict::Failed)
+					.then(|| "42703: column \"…\" does not exist".to_owned()),
+				snapshot_id: None,
+				reported_at: reported_at.parse::<Timestamp>().expect("timestamp parses"),
+				total_elapsed: PgDuration(SignedDuration::from_secs(11)),
+				data_bytes_before: 0,
+				data_bytes_after: 0,
+				timings: Vec::new(),
+			}),
+		}
+	}
+
+	#[test]
+	fn the_newest_failure_is_the_one_shown() {
+		let older = Uuid::from_u128(1);
+		let newer = Uuid::from_u128(2);
+		let failed = newest_failure(
+			&[
+				verdict(
+					older,
+					Verdict::Failed,
+					"2026-09-13T04:51:00Z",
+					"0001-older.ts",
+				),
+				verdict(
+					newer,
+					Verdict::Failed,
+					"2026-09-13T16:52:00Z",
+					"0002-newer.ts",
+				),
+			],
+			|id| {
+				if id == newer {
+					"Facility A".to_owned()
+				} else {
+					"Central".to_owned()
+				}
+			},
+		);
+
+		assert_eq!(
+			failed,
+			Some(FailedTest {
+				application: "Facility A".to_owned(),
+				migration: Some("0002-newer.ts".to_owned()),
+				error: Some("42703: column \"…\" does not exist".to_owned()),
+			})
+		);
+	}
+
+	#[test]
+	fn a_passing_environment_has_no_failing_test() {
+		let passed = verdict(
+			Uuid::from_u128(3),
+			Verdict::Passed,
+			"2026-09-13T16:52:00Z",
+			"",
+		);
+		assert_eq!(newest_failure(&[passed], |_| "Central".to_owned()), None);
+	}
 }

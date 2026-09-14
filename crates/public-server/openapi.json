@@ -2259,6 +2259,13 @@
             "format": "int64",
             "description": "Size of the data before the migrations ran."
           },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the migration runner said about that failure: the message, and the\nDETAIL naming the row it refused, which is what tells a deployment what\nto fix. Send no connection strings or credentials. Kept to the first\n2000 characters."
+          },
           "failed_migration": {
             "type": [
               "string",

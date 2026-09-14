@@ -6007,6 +6007,18 @@ export interface components {
              */
             up: components["schemas"]["ShortStatus"];
         };
+        /**
+         * @description The failing test behind a `failed` verdict, so the fleet view can say what
+         *     broke without a second lookup.
+         */
+        FailedTest: {
+            /** @description The application whose data broke, since the verdict rolls up several. */
+            application: string;
+            /** @description Why it stopped, redacted by the runner that reported it. */
+            error?: string | null;
+            /** @description The migration it stopped at, absent when the runner named none. */
+            migration?: string | null;
+        };
         /** @description Both populations the fleet view spreads its figures over. */
         FleetDetailData: {
             /** @description Every live application, canopy's own excluded. */
@@ -7276,12 +7288,19 @@ export interface components {
              * @description Size of the data the migrations ran against.
              */
             data_bytes_before: number;
+            /**
+             * @description What the migration runner said about that failure, when the consumer
+             *     sent it.
+             */
+            error?: string | null;
             /** @description The migration that failed, when one did. */
             failed_migration?: string | null;
             /** @description When the consumer reported it. */
             reported_at: string;
             /** @description The snapshot the verdict was reached against. */
             snapshot_id?: string | null;
+            /** @description Each migration that ran, in the order they ran. */
+            timings: components["schemas"]["MigrationTiming"][];
             /**
              * Format: int64
              * @description Whole seconds the migration run took.
@@ -7995,6 +8014,21 @@ export interface components {
              */
             target_id: string;
         };
+        /** @description How long one migration took, in the order it ran. */
+        MigrationTiming: {
+            /**
+             * Format: int64
+             * @description Whole seconds this migration took.
+             */
+            elapsed: number;
+            /** @description The migration's name, as the migration runner reports it. */
+            name: string;
+            /**
+             * Format: int32
+             * @description Where it fell in the run, counting from zero.
+             */
+            ordinal: number;
+        };
         /**
          * @description A group of versions sharing the same major.minor release line, with a
          *     summary of the line's overall readiness.
@@ -8446,6 +8480,7 @@ export interface components {
             behind?: number | null;
             /** @description The version the environment runs now, where it has reported one. */
             current_version?: string | null;
+            failed_test?: null | components["schemas"]["FailedTest"];
             /**
              * Format: uuid
              * @description The group this concerns.

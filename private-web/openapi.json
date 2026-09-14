@@ -11187,6 +11187,33 @@
           }
         }
       },
+      "FailedTest": {
+        "type": "object",
+        "description": "The failing test behind a `failed` verdict, so the fleet view can say what\nbroke without a second lookup.",
+        "required": [
+          "application"
+        ],
+        "properties": {
+          "application": {
+            "type": "string",
+            "description": "The application whose data broke, since the verdict rolls up several."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it stopped, redacted by the runner that reported it."
+          },
+          "migration": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The migration it stopped at, absent when the runner named none."
+          }
+        }
+      },
       "FleetDetailData": {
         "type": "object",
         "description": "Both populations the fleet view spreads its figures over.",
@@ -13149,7 +13176,8 @@
           "reported_at",
           "total_elapsed",
           "data_bytes_before",
-          "data_bytes_after"
+          "data_bytes_after",
+          "timings"
         ],
         "properties": {
           "data_bytes_after": {
@@ -13161,6 +13189,13 @@
             "type": "integer",
             "format": "int64",
             "description": "Size of the data the migrations ran against."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the migration runner said about that failure, when the consumer\nsent it."
           },
           "failed_migration": {
             "type": [
@@ -13179,6 +13214,13 @@
               "null"
             ],
             "description": "The snapshot the verdict was reached against."
+          },
+          "timings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MigrationTiming"
+            },
+            "description": "Each migration that ran, in the order they ran."
           },
           "total_elapsed": {
             "type": "integer",
@@ -14261,6 +14303,31 @@
           }
         }
       },
+      "MigrationTiming": {
+        "type": "object",
+        "description": "How long one migration took, in the order it ran.",
+        "required": [
+          "ordinal",
+          "name",
+          "elapsed"
+        ],
+        "properties": {
+          "elapsed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Whole seconds this migration took."
+          },
+          "name": {
+            "type": "string",
+            "description": "The migration's name, as the migration runner reports it."
+          },
+          "ordinal": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Where it fell in the run, counting from zero."
+          }
+        }
+      },
       "MinorVersionGroup": {
         "type": "object",
         "description": "A group of versions sharing the same major.minor release line, with a\nsummary of the line's overall readiness.",
@@ -15085,6 +15152,17 @@
               "null"
             ],
             "description": "The version the environment runs now, where it has reported one."
+          },
+          "failed_test": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FailedTest",
+                "description": "The failing test behind a `failed` verdict. `null` for any other verdict."
+              }
+            ]
           },
           "group_id": {
             "type": "string",

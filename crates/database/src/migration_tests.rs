@@ -131,12 +131,18 @@ pub async fn candidates(db: &mut AsyncPgConnection) -> Result<Vec<Candidate>> {
 }
 
 /// How long one migration took, in the order it ran.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Queryable, Selectable)]
+#[derive(
+	Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema,
+)]
 #[diesel(table_name = crate::schema::migration_timings)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct MigrationTiming {
+	/// Where it fell in the run, counting from zero.
 	pub ordinal: i32,
+	/// The migration's name, as the migration runner reports it.
 	pub name: String,
+	/// Whole seconds this migration took.
+	#[schema(value_type = i64)]
 	pub elapsed: PgDuration,
 }
 
@@ -151,6 +157,7 @@ pub struct MigrationTest {
 	pub failed_migration: Option<String>,
 	pub data_bytes_before: i64,
 	pub data_bytes_after: i64,
+	pub error: Option<String>,
 }
 
 /// What a consumer reports for one migration test, beyond the report's own
@@ -165,6 +172,9 @@ pub struct NewMigrationTest {
 	pub target_version_id: Uuid,
 	pub total_elapsed: PgDuration,
 	pub failed_migration: Option<String>,
+	/// What the migration runner said: the message, and the DETAIL naming the
+	/// row it refused. Absent from consumers that do not send it yet.
+	pub error: Option<String>,
 	pub data_bytes_before: i64,
 	pub data_bytes_after: i64,
 	/// One entry per migration that ran, in the order they ran.
@@ -174,8 +184,10 @@ pub struct NewMigrationTest {
 /// One joined row behind [`latest_test`].
 #[derive(Queryable)]
 struct LatestRow {
+	check_id: i64,
 	outcome: RunOutcome,
 	failed_migration: Option<String>,
+	error: Option<String>,
 	snapshot_id: Option<String>,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp)]
 	reported_at: Timestamp,
@@ -191,6 +203,9 @@ pub struct LatestTest {
 	pub verdict: Verdict,
 	/// The migration that failed, when one did.
 	pub failed_migration: Option<String>,
+	/// What the migration runner said about that failure, when the consumer
+	/// sent it.
+	pub error: Option<String>,
 	/// The snapshot the verdict was reached against.
 	pub snapshot_id: Option<String>,
 	/// When the consumer reported it.
@@ -203,6 +218,8 @@ pub struct LatestTest {
 	pub data_bytes_before: i64,
 	/// Size of it afterwards; the growth is what a heavy backfill shows up as.
 	pub data_bytes_after: i64,
+	/// Each migration that ran, in the order they ran.
+	pub timings: Vec<MigrationTiming>,
 }
 
 /// Where one of a group's applications stands against the version it would take
@@ -228,6 +245,17 @@ pub enum Verdict {
 	NotTested,
 	Passed,
 	Failed,
+}
+
+/// Longest error kept: a migration runner can hand back a whole failing
+/// statement.
+const MAX_ERROR_CHARS: usize = 2000;
+
+fn truncate_error(error: String) -> String {
+	if error.chars().count() <= MAX_ERROR_CHARS {
+		return error;
+	}
+	error.chars().take(MAX_ERROR_CHARS).collect()
 }
 
 impl MigrationTest {
@@ -261,6 +289,7 @@ impl MigrationTest {
 				crate::schema::migration_tests::target_version_id.eq(test.target_version_id),
 				crate::schema::migration_tests::total_elapsed.eq(test.total_elapsed),
 				crate::schema::migration_tests::failed_migration.eq(test.failed_migration),
+				crate::schema::migration_tests::error.eq(test.error.map(truncate_error)),
 				crate::schema::migration_tests::data_bytes_before.eq(test.data_bytes_before),
 				crate::schema::migration_tests::data_bytes_after.eq(test.data_bytes_after),
 			))
@@ -334,8 +363,10 @@ pub async fn latest_test(
 	let row: Option<LatestRow> = migration_tests::table
 		.inner_join(backup_restore_checks::table)
 		.select((
+			migration_tests::check_id,
 			backup_restore_checks::outcome,
 			migration_tests::failed_migration,
+			migration_tests::error,
 			backup_restore_checks::snapshot_id,
 			backup_restore_checks::reported_at,
 			migration_tests::total_elapsed,
@@ -349,17 +380,24 @@ pub async fn latest_test(
 		.await
 		.optional()?;
 
-	Ok(row.map(|row| LatestTest {
+	let Some(row) = row else {
+		return Ok(None);
+	};
+	let timings = MigrationTest::timings(db, row.check_id).await?;
+
+	Ok(Some(LatestTest {
 		verdict: match (row.outcome, &row.failed_migration) {
 			(RunOutcome::Success, None) => Verdict::Passed,
 			_ => Verdict::Failed,
 		},
 		failed_migration: row.failed_migration,
+		error: row.error,
 		snapshot_id: row.snapshot_id,
 		reported_at: row.reported_at,
 		total_elapsed: row.total_elapsed,
 		data_bytes_before: row.data_bytes_before,
 		data_bytes_after: row.data_bytes_after,
+		timings,
 	}))
 }
 
@@ -542,11 +580,15 @@ async fn file_outcome(
 	let version = Version::get_by_id(db, target_version_id).await?;
 	let affected = (version.major, version.minor, version.patch);
 	if !VersionKnownIssue::unresolved_for_server(db, affected, application_id).await? {
+		let application = Application::get_by_id(db, application_id).await?;
 		VersionKnownIssue::add(
 			db,
 			affected,
 			refs::MIGRATION_TEST,
-			&format!("Migration {migration} failed against {application_id}'s data."),
+			&format!(
+				"Migration {migration} failed against {}'s data.",
+				application.display_name()
+			),
 			Some(application_id),
 		)
 		.await?;
@@ -637,4 +679,22 @@ async fn verdict_row(
 			.map_or(Verdict::NotTested, |test| test.verdict),
 		latest,
 	})
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn a_long_error_is_capped_on_a_character_boundary() {
+		let long = "é".repeat(MAX_ERROR_CHARS + 500);
+		let kept = truncate_error(long);
+		assert_eq!(kept.chars().count(), MAX_ERROR_CHARS);
+	}
+
+	#[test]
+	fn a_short_error_is_kept_whole() {
+		let error = "column \"note_type_id\" does not exist".to_string();
+		assert_eq!(truncate_error(error.clone()), error);
+	}
 }

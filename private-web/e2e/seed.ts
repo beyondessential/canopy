@@ -1563,6 +1563,7 @@ export async function seedMigrationTest(
 		targetVersionId: string;
 		snapshotId?: string;
 		failedMigration?: string | null;
+		error?: string | null;
 		totalElapsedSecs?: number;
 		dataBytesBefore?: number;
 		dataBytesAfter?: number;
@@ -1581,15 +1582,16 @@ export async function seedMigrationTest(
 
 	await sql.query(
 		`INSERT INTO migration_tests
-		 (check_id, application_id, target_version_id, total_elapsed, failed_migration,
+		 (check_id, application_id, target_version_id, total_elapsed, failed_migration, error,
 		  data_bytes_before, data_bytes_after)
-		 VALUES ($1, $2, $3, make_interval(secs => $4), $5, $6, $7)`,
+		 VALUES ($1, $2, $3, make_interval(secs => $4), $5, $6, $7, $8)`,
 		[
 			checkId,
 			opts.applicationId,
 			opts.targetVersionId,
 			opts.totalElapsedSecs ?? 60,
 			opts.failedMigration ?? null,
+			opts.error ?? null,
 			opts.dataBytesBefore ?? 0,
 			opts.dataBytesAfter ?? 0,
 		],

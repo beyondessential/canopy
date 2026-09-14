@@ -1,7 +1,10 @@
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import {
 	Alert,
 	Box,
 	Chip,
+	IconButton,
 	LinearProgress,
 	Paper,
 	Stack,
@@ -14,9 +17,12 @@ import {
 	Typography,
 } from "@mui/material";
 import { Link as MuiLink } from "@mui/material";
+import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi } from "../api";
-import type { ServerInfo } from "../types";
+import type { ApiResponse, ServerInfo } from "../types";
+
+type GroupVerdict = ApiResponse<"migration_tests", "for_group">[number];
 import ServerRankChip from "./ServerRankChip";
 import TimeAgo from "./TimeAgo";
 
@@ -60,7 +66,12 @@ export default function MigrationTestsSection({
 
 	if (verdicts.data.length === 0) {
 		return (
-			<Paper variant="outlined" sx={{ p: 2 }} data-testid="migration-tests">
+			<Paper
+			id="migration-tests"
+			variant="outlined"
+			sx={{ p: 2, scrollMarginTop: 16 }}
+			data-testid="migration-tests"
+		>
 				<SectionHeading />
 				<Typography variant="body2" color="text.secondary">
 					No upgrade plan is open for this group, so there is nothing to
@@ -71,17 +82,33 @@ export default function MigrationTestsSection({
 	}
 
 	return (
-		<Paper variant="outlined" sx={{ p: 2 }} data-testid="migration-tests">
+		<Paper
+			id="migration-tests"
+			variant="outlined"
+			sx={{ p: 2, scrollMarginTop: 16 }}
+			data-testid="migration-tests"
+		>
 			<SectionHeading />
-			<Table size="small">
+			<Table size="small" sx={{ tableLayout: "fixed" }}>
 				<TableHead>
 					<TableRow>
-						<TableCell>Server</TableCell>
-						<TableCell>Upgrading to</TableCell>
-						<TableCell>Verdict</TableCell>
-						<TableCell>Migrations took</TableCell>
-						<TableCell>Growth</TableCell>
-						<TableCell>Tested</TableCell>
+						<TableCell padding="checkbox" sx={{ width: "5%" }} />
+						<TableCell sx={{ width: "29%" }}>Server</TableCell>
+						<TableCell sx={{ width: "14%", whiteSpace: "nowrap" }}>
+							Upgrading to
+						</TableCell>
+						<TableCell sx={{ width: "11%", whiteSpace: "nowrap" }}>
+							Verdict
+						</TableCell>
+						<TableCell sx={{ width: "16%", whiteSpace: "nowrap" }}>
+							Migrations took
+						</TableCell>
+						<TableCell sx={{ width: "15%", whiteSpace: "nowrap" }}>
+							Growth
+						</TableCell>
+						<TableCell sx={{ width: "10%", whiteSpace: "nowrap" }}>
+							Tested
+						</TableCell>
 					</TableRow>
 				</TableHead>
 				<TableBody>
@@ -92,60 +119,11 @@ export default function MigrationTestsSection({
 								nameOf(a.server_id).localeCompare(nameOf(b.server_id)),
 						)
 						.map((row) => (
-						<TableRow key={row.server_id} data-testid="migration-test-row">
-							<TableCell>
-								<Stack
-									direction="row"
-									spacing={1}
-									sx={{ alignItems: "center" }}
-								>
-									<MuiLink
-										component={RouterLink}
-										to={`/fleet/applications/${row.server_id}`}
-										underline="hover"
-										color="text.primary"
-									>
-										{byId.get(row.server_id)?.name ?? row.server_id}
-									</MuiLink>
-									{byId.get(row.server_id)?.rank && (
-										<ServerRankChip
-											rank={byId.get(row.server_id)!.rank!}
-										/>
-									)}
-								</Stack>
-							</TableCell>
-							<TableCell>{row.target_version}</TableCell>
-							<TableCell>
-								<VerdictChip
-									verdict={row.verdict}
-									failedMigration={row.latest?.failed_migration ?? null}
-								/>
-							</TableCell>
-							<TableCell>
-								{row.latest ? formatDuration(row.latest.total_elapsed) : "—"}
-							</TableCell>
-							<TableCell>
-								{row.latest
-									? formatGrowth(
-											row.latest.data_bytes_before,
-											row.latest.data_bytes_after,
-										)
-									: "—"}
-							</TableCell>
-							<TableCell>
-								{row.latest ? (
-									<Tooltip
-										title={`snapshot ${row.latest.snapshot_id ?? "unknown"}`}
-									>
-										<Box component="span">
-											<TimeAgo timestamp={row.latest.reported_at} />
-										</Box>
-									</Tooltip>
-								) : (
-									"—"
-								)}
-							</TableCell>
-						</TableRow>
+							<TestRow
+								key={row.server_id}
+								row={row}
+								server={byId.get(row.server_id)}
+							/>
 						))}
 				</TableBody>
 			</Table>
@@ -176,9 +154,11 @@ function SectionHeading() {
 function VerdictChip({
 	verdict,
 	failedMigration,
+	error,
 }: {
 	verdict: "passed" | "failed" | "nottested";
 	failedMigration: string | null;
+	error: string | null;
 }) {
 	if (verdict === "passed") {
 		return <Chip size="small" color="success" label="passed" />;
@@ -187,7 +167,14 @@ function VerdictChip({
 		return <Chip size="small" variant="outlined" label="not yet tested" />;
 	}
 	return (
-		<Tooltip title={failedMigration ?? "no migration named"}>
+		<Tooltip
+			title={
+				<>
+					<Box>{failedMigration ?? "no migration named"}</Box>
+					{error && <Box sx={{ mt: 0.5 }}>{error}</Box>}
+				</>
+			}
+		>
 			<Chip size="small" color="warning" label="failed" />
 		</Tooltip>
 	);
@@ -218,4 +205,97 @@ function formatBytes(bytes: number) {
 		unit += 1;
 	}
 	return `${value.toFixed(value < 10 && unit > 0 ? 1 : 0)}${units[unit]}`;
+}
+
+function TestRow({
+	row,
+	server,
+}: {
+	row: GroupVerdict;
+	server: ServerInfo | undefined;
+}) {
+	const [open, setOpen] = useState(false);
+	const timings = row.latest?.timings ?? [];
+	const expandable = timings.length > 0;
+	return (
+		<>
+			<TableRow data-testid="migration-test-row">
+				<TableCell padding="checkbox">
+					{expandable && (
+						<IconButton
+							size="small"
+							aria-label={open ? "Hide migrations" : "Show migrations"}
+							onClick={() => setOpen((o) => !o)}
+						>
+							{open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
+						</IconButton>
+					)}
+				</TableCell>
+				<TableCell>
+					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+						<MuiLink
+							component={RouterLink}
+							to={`/fleet/applications/${row.server_id}`}
+							underline="hover"
+							color="text.primary"
+						>
+							{server?.name ?? row.server_id}
+						</MuiLink>
+						{server?.rank && <ServerRankChip rank={server.rank} />}
+					</Stack>
+				</TableCell>
+				<TableCell sx={{ whiteSpace: "nowrap" }}>{row.target_version}</TableCell>
+				<TableCell>
+					<VerdictChip
+						verdict={row.verdict}
+						failedMigration={row.latest?.failed_migration ?? null}
+						error={row.latest?.error ?? null}
+					/>
+				</TableCell>
+				<TableCell sx={{ whiteSpace: "nowrap" }}>
+					{row.latest ? formatDuration(row.latest.total_elapsed) : "—"}
+				</TableCell>
+				<TableCell sx={{ whiteSpace: "nowrap" }}>
+					{row.latest
+						? formatGrowth(
+								row.latest.data_bytes_before,
+								row.latest.data_bytes_after,
+							)
+						: "—"}
+				</TableCell>
+				<TableCell sx={{ whiteSpace: "nowrap" }}>
+					{row.latest ? (
+						<Tooltip title={`snapshot ${row.latest.snapshot_id ?? "unknown"}`}>
+							<Box component="span">
+								<TimeAgo timestamp={row.latest.reported_at} />
+							</Box>
+						</Tooltip>
+					) : (
+						"—"
+					)}
+				</TableCell>
+			</TableRow>
+			{open &&
+				timings.map((timing) => (
+					<TableRow key={timing.ordinal} data-testid="migration-timing">
+						<TableCell />
+						<TableCell
+							colSpan={2}
+							sx={{ pl: 4, overflowWrap: "anywhere" }}
+						>
+							{timing.name}
+						</TableCell>
+						<TableCell>
+							{timing.name === row.latest?.failed_migration && (
+								<Chip size="small" color="warning" label="failed" />
+							)}
+						</TableCell>
+						<TableCell sx={{ whiteSpace: "nowrap" }}>
+							{formatDuration(timing.elapsed)}
+						</TableCell>
+						<TableCell colSpan={2} />
+					</TableRow>
+				))}
+		</>
+	);
 }
