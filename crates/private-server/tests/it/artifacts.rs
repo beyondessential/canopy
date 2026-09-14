@@ -430,7 +430,7 @@ async fn the_listing_says_which_artifacts_are_offered() {
 			 VALUES ('{range_installer}', NULL, 'windows', 'installer', '2.60.x', 'https://example.com/range.exe');
 
 			 INSERT INTO artifacts (id, version_id, platform, artifact_type, group_id, content, content_type, digest)
-			 VALUES ('{group_schema}', '{version}', 'any', 'reporting-schema', '{group}', 'kamaka schema', 'application/sql', '\\x00'::bytea)",
+			 VALUES ('{group_schema}', '{version}', 'any', 'reporting-schema', '{group}', 'kamaka schema', 'application/sql', sha256('kamaka schema'::bytea))",
 		))
 		.await
 		.unwrap();
@@ -492,7 +492,7 @@ async fn a_registration_answers_what_it_overrides() {
 			 VALUES (NULL, 'any', 'reporting-schema', '2.60.x', 'https://example.com/range.sql');
 
 			 INSERT INTO artifacts (version_id, platform, artifact_type, version_range_pattern, group_id, content, content_type, digest)
-			 VALUES (NULL, 'windows', 'installer', '2.60.x', '{theirs}', 'theirs', 'application/octet-stream', '\\x00'::bytea)",
+			 VALUES (NULL, 'windows', 'installer', '2.60.x', '{theirs}', 'theirs', 'application/octet-stream', sha256('theirs'::bytea))",
 		))
 		.await
 		.unwrap();
