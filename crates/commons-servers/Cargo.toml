@@ -64,4 +64,6 @@ uuid = { version = "1.23.1", features = ["v4"] }
 x509-parser = { version = "0.18.1", features = ["verify"] }
 
 [dev-dependencies]
+aws-sdk-s3 = { workspace = true, features = ["test-util"] }
+aws-smithy-mocks.workspace = true
 axum-test = { workspace = true }

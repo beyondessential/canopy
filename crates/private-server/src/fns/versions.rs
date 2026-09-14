@@ -824,22 +824,39 @@ pub async fn upload_artifact(
 	// bytes it replaces were, and nothing is left behind.
 	// spec: ART#where-an-artifact-rests
 	let mut conn = state.db.get().await?;
-	let id = Artifact::id_for_identity(&mut conn, &input)
-		.await?
-		.unwrap_or_else(Uuid::new_v4);
+	let existing = Artifact::id_for_identity(&mut conn, &input).await?;
+	let id = existing.unwrap_or_else(Uuid::new_v4);
 	drop(conn);
 
 	store.put(id, Vec::from(body)).await?;
 
 	let mut conn = state.db.get().await?;
-	let artifact = Artifact::register(
+	let registered_row = Artifact::register(
 		&mut conn,
 		NewArtifact {
 			id: Some(id),
 			..input
 		},
 	)
-	.await?;
+	.await;
+
+	// A registration naming a group or version Canopy does not hold is refused
+	// by the row write, with the bytes already stored, so a mistyped id would
+	// leave an object nothing reaches. Only bytes put under an id minted here
+	// are dropped: under an id that was already registered they are the live
+	// artifact's, and a write that failed for any other reason must not take
+	// them with it.
+	let artifact = match registered_row {
+		Ok(artifact) => artifact,
+		Err(refusal) => {
+			if existing.is_none()
+				&& let Err(err) = store.delete(id).await
+			{
+				tracing::error!(artifact = %id, "refused registration left its bytes: {err}");
+			}
+			return Err(refusal);
+		}
+	};
 
 	registered(&mut conn, named.version_id, artifact.id).await
 }

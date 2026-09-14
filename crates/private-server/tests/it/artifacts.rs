@@ -665,3 +665,45 @@ async fn deleting_an_artifact_takes_its_bytes() {
 	})
 	.await
 }
+
+/// A registration that is refused leaves nothing in the store. The bytes go in
+/// before the row that names them, so a refusal the row write raises — a group
+/// or version that does not exist — is the one case where an object can outlive
+/// the registration that put it there, and it is reachable by typing an id
+/// wrong rather than by a crash.
+// spec: ART#where-an-artifact-rests
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_registration_leaves_no_bytes() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let version = "aaaaaaaa-9999-0000-0000-aaaaaaaaaaaa";
+
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status)
+			 VALUES ('{version}', 2, 60, 0, '', 'published')",
+		))
+		.await
+		.unwrap();
+
+		let refused = private
+			.post("/api/versions/upload_artifact")
+			.add_header("x-canopy-upload", "1")
+			.add_query_param("version_id", version)
+			.add_query_param("artifact_type", "reporting-schema")
+			.add_query_param("platform", "any")
+			// No such group. The row write is what refuses it, by which point
+			// the bytes have been stored.
+			.add_query_param("group_id", "dddddddd-9999-0000-0000-dddddddddddd")
+			.add_query_param("digest", sri_of(b"kamaka schema"))
+			.bytes("kamaka schema".into())
+			.await;
+		assert_eq!(refused.status_code(), axum::http::StatusCode::BAD_REQUEST);
+
+		let store = commons_tests::server::artifacts(&mut conn).await;
+		assert!(
+			store.held().is_empty(),
+			"a refused registration left {:?} behind",
+			store.held()
+		);
+	})
+	.await
+}

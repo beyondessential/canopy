@@ -1696,6 +1696,7 @@ dependencies = [
  "aws-sdk-route53",
  "aws-sdk-s3",
  "aws-sdk-sts",
+ "aws-smithy-mocks",
  "axum",
  "axum-client-ip",
  "axum-server-timing",

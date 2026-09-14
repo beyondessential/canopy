@@ -120,6 +120,22 @@ impl ArtifactStore {
 		})
 	}
 
+	/// Every artifact the store holds. **Debug-only**, and only for the in-memory
+	/// variant: a test asserting nothing was left behind has to be able to see
+	/// what is there, and the S3 variant would need a listing to answer.
+	#[cfg(debug_assertions)]
+	pub fn held(&self) -> Vec<String> {
+		match self {
+			Self::S3 { .. } => panic!("held() is for the in-memory store"),
+			Self::Memory(store) => store
+				.lock()
+				.expect("artifact store")
+				.keys()
+				.cloned()
+				.collect(),
+		}
+	}
+
 	fn key(&self, artifact: Uuid) -> String {
 		match self {
 			Self::S3 { prefix, .. } => format!("{prefix}{artifact}"),
@@ -239,4 +255,97 @@ async fn assumed_credentials(
 		None,
 		"canopy-artifacts",
 	))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use aws_sdk_s3::operation::get_object::GetObjectOutput;
+	use aws_sdk_s3::operation::put_object::PutObjectOutput;
+	use aws_sdk_s3::operation::get_object::GetObjectError;
+	use aws_sdk_s3::types::error::NoSuchKey;
+	use aws_smithy_mocks::{RuleMode, mock, mock_client};
+
+	const ARTIFACT: Uuid = Uuid::from_u128(0x1234_5678_9abc_def0_1234_5678_9abc_def0);
+
+	fn s3(client: aws_sdk_s3::Client) -> ArtifactStore {
+		ArtifactStore::S3 {
+			client,
+			bucket: "bes-canopy-artifacts".into(),
+			prefix: DEFAULT_PREFIX.into(),
+		}
+	}
+
+	/// An artifact rests under its own id beneath the configured prefix. The key
+	/// is what a re-registration overwrites and what a deregistration removes, so
+	/// a store that derived it any other way would leave the old bytes behind.
+	#[tokio::test]
+	async fn an_artifact_is_stored_under_its_id_beneath_the_prefix() {
+		let put = mock!(aws_sdk_s3::Client::put_object)
+			.match_requests(|req| {
+				req.bucket() == Some("bes-canopy-artifacts")
+					&& req.key() == Some("artifacts/12345678-9abc-def0-1234-56789abcdef0")
+			})
+			.then_output(|| PutObjectOutput::builder().build());
+
+		s3(mock_client!(aws_sdk_s3, RuleMode::MatchAny, [&put]))
+			.put(ARTIFACT, b"kamaka schema".to_vec())
+			.await
+			.expect("stored");
+		assert_eq!(put.num_calls(), 1);
+	}
+
+	/// Bytes come back whole, from the key the id names.
+	#[tokio::test]
+	async fn an_artifact_is_read_back_from_its_own_key() {
+		let get = mock!(aws_sdk_s3::Client::get_object)
+			.match_requests(|req| req.key() == Some("artifacts/12345678-9abc-def0-1234-56789abcdef0"))
+			.then_output(|| {
+				GetObjectOutput::builder()
+					.body(b"kamaka schema".to_vec().into())
+					.build()
+			});
+
+		let held = s3(mock_client!(aws_sdk_s3, RuleMode::MatchAny, [&get]))
+			.get(ARTIFACT)
+			.await
+			.expect("read");
+		assert_eq!(held.as_deref(), Some(&b"kamaka schema"[..]));
+	}
+
+	/// An object that is not there is `None` rather than an error, which is what
+	/// lets the read answer 404 — identically to an artifact the caller is not
+	/// offered — instead of reporting a fault.
+	// spec: ART#where-an-artifact-rests
+	#[tokio::test]
+	async fn a_missing_object_is_absent_rather_than_a_fault() {
+		let get = mock!(aws_sdk_s3::Client::get_object)
+			.then_error(|| GetObjectError::NoSuchKey(NoSuchKey::builder().build()));
+
+		let held = s3(mock_client!(aws_sdk_s3, RuleMode::MatchAny, [&get]))
+			.get(ARTIFACT)
+			.await
+			.expect("a missing object is not an error");
+		assert!(held.is_none());
+	}
+
+	/// A store that refuses the read is a fault, not an absent artifact. Reading
+	/// a refusal as "not there" would have a permissions problem present itself
+	/// as an artifact nobody registered.
+	#[tokio::test]
+	async fn a_refused_read_is_a_fault() {
+		let get = mock!(aws_sdk_s3::Client::get_object).then_error(|| {
+			GetObjectError::generic(
+				aws_sdk_s3::error::ErrorMetadata::builder()
+					.code("AccessDenied")
+					.message("Access Denied")
+					.build(),
+			)
+		});
+
+		s3(mock_client!(aws_sdk_s3, RuleMode::MatchAny, [&get]))
+			.get(ARTIFACT)
+			.await
+			.expect_err("a refusal is not an absent artifact");
+	}
 }
