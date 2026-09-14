@@ -203,6 +203,7 @@ async fn create(
 	let row = ArtifactRow::register(
 		&mut db,
 		NewArtifact {
+			id: None,
 			version_id,
 			platform,
 			artifact_type,
@@ -210,7 +211,6 @@ async fn create(
 			device_id: Some(device_id),
 			version_range_pattern,
 			group_id: None,
-			content: None,
 			content_type: None,
 			digest,
 			run_id: None,

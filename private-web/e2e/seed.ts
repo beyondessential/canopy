@@ -1037,7 +1037,8 @@ export async function seedVersion(
 }
 
 /** Seed an artifact for a version. Naming a group makes Canopy hold the bytes
- * rather than record a location. */
+ * rather than record a location; `content` is what its digest is taken of, the
+ * bytes themselves resting in the store rather than the row. */
 export async function seedArtifact(
 	sql: Sql,
 	opts: {
@@ -1060,8 +1061,8 @@ export async function seedArtifact(
 	await sql.query(
 		`INSERT INTO artifacts
 			(id, version_id, artifact_type, platform, download_url, version_range_pattern,
-			 group_id, content, content_type, digest)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			 group_id, content_type, digest)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		[
 			id,
 			opts.versionId ?? null,
@@ -1070,7 +1071,6 @@ export async function seedArtifact(
 			scoped ? null : (opts.downloadUrl ?? "https://example.com/installer.exe"),
 			opts.rangePattern ?? null,
 			opts.groupId ?? null,
-			scoped ? Buffer.from(content) : null,
 			scoped ? "application/sql" : null,
 			digest,
 		],

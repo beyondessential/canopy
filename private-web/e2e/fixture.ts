@@ -198,6 +198,9 @@ export async function startStack(opts: StartOptions = {}): Promise<StackHandle> 
 				// the bucket name (…existing… → kopia repo, …other… → other content,
 				// …denied… → inaccessible, else empty).
 				CANOPY_BACKUP_PROBER_FAKE: "1",
+				// No bucket in e2e: hold uploaded artifacts in the server's own
+				// process so registering and serving one is exercised end to end.
+				CANOPY_ARTIFACT_STORE_MEMORY: "1",
 				// A throwaway age recipient (bestool-generated) so the recovery vault
 				// ceremony page reports as configured. The matching private key isn't
 				// needed: the e2e exercises status + challenge + wrong-answer, and the

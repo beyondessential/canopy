@@ -6,6 +6,7 @@ use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Query, State};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
+use commons_servers::artifact_store;
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::version::{VersionStatus, VersionStr};
 use database::{
@@ -22,8 +23,8 @@ use uuid::Uuid;
 use crate::state::AppState;
 
 /// Cap on the bytes Canopy will hold for one artifact. A reporting schema is a
-/// SQL file; anything approaching this is not one, and the rows live in
-/// Postgres alongside everything else.
+/// SQL file; anything approaching this is not one, and the whole of it is held
+/// in memory to be digested before it is stored.
 const MAX_HELD_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
 
 /// Header the SPA sets on an upload, which no cross-origin page can send
@@ -692,6 +693,7 @@ pub async fn create_artifact(
 	let artifact = Artifact::register(
 		&mut conn,
 		NewArtifact {
+			id: None,
 			version_id: Some(args.version_id),
 			artifact_type: args.artifact_type,
 			platform: args.platform,
@@ -699,7 +701,6 @@ pub async fn create_artifact(
 			device_id: None,
 			version_range_pattern: None,
 			group_id: None,
-			content: None,
 			content_type: None,
 			digest,
 			run_id: None,
@@ -799,21 +800,43 @@ pub async fn upload_artifact(
 		.map(str::to_owned)
 		.filter(|media_type| media_type != "application/octet-stream");
 
+	let store = state
+		.artifacts
+		.as_ref()
+		.ok_or_else(artifact_store::unconfigured)?;
+
+	let input = NewArtifact {
+		id: None,
+		version_id: Some(named.version_id),
+		artifact_type: named.artifact_type,
+		platform: named.platform,
+		download_url: None,
+		device_id: None,
+		version_range_pattern: None,
+		group_id: Some(named.group_id),
+		content_type,
+		digest: Some(digest),
+		run_id: None,
+	};
+
+	// The bytes go in before the row that names them, under the id the artifact
+	// already has where one is registered: a replacement then lands where the
+	// bytes it replaces were, and nothing is left behind.
+	// spec: ART#where-an-artifact-rests
+	let mut conn = state.db.get().await?;
+	let id = Artifact::id_for_identity(&mut conn, &input)
+		.await?
+		.unwrap_or_else(Uuid::new_v4);
+	drop(conn);
+
+	store.put(id, Vec::from(body)).await?;
+
 	let mut conn = state.db.get().await?;
 	let artifact = Artifact::register(
 		&mut conn,
 		NewArtifact {
-			version_id: Some(named.version_id),
-			artifact_type: named.artifact_type,
-			platform: named.platform,
-			download_url: None,
-			device_id: None,
-			version_range_pattern: None,
-			group_id: Some(named.group_id),
-			content: Some(Vec::from(body)),
-			content_type,
-			digest: Some(digest),
-			run_id: None,
+			id: Some(id),
+			..input
 		},
 	)
 	.await?;
@@ -863,6 +886,14 @@ pub async fn delete_artifact(
 	_admin: TailscaleAdmin,
 	Json(args): Json<ArtifactIdArgs>,
 ) -> Result<Json<()>> {
+	// The bytes go before the row: a store that refuses the drop leaves the
+	// artifact registered and the operator retrying, rather than a row gone and
+	// bytes nothing reaches.
+	// spec: ART#where-an-artifact-rests
+	if let Some(store) = &state.artifacts {
+		store.delete(args.artifact_id).await?;
+	}
+
 	let mut conn = state.db.get().await?;
 	Artifact::delete(&mut conn, args.artifact_id).await?;
 	Ok(Json(()))

@@ -13,6 +13,7 @@ use tower_http::{
 use tracing::Span;
 
 pub mod acme;
+pub mod artifact_store;
 pub mod backup_jobs;
 pub mod backup_secrets;
 pub mod csr;

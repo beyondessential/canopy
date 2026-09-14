@@ -13,7 +13,6 @@ ALTER TABLE artifacts DROP CONSTRAINT artifact_download_url_not_blank;
 
 ALTER TABLE artifacts
 	DROP COLUMN group_id,
-	DROP COLUMN content,
 	DROP COLUMN content_type,
 	DROP COLUMN digest,
 	DROP COLUMN run_id;

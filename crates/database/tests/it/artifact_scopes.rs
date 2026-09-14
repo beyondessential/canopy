@@ -52,6 +52,7 @@ async fn seed_group(conn: &mut AsyncPgConnection, name: &str) -> Uuid {
 
 fn unscoped(version_id: Uuid, artifact_type: &str, url: &str) -> NewArtifact {
 	NewArtifact {
+		id: None,
 		version_id: Some(version_id),
 		artifact_type: artifact_type.to_owned(),
 		platform: "any".to_owned(),
@@ -59,7 +60,6 @@ fn unscoped(version_id: Uuid, artifact_type: &str, url: &str) -> NewArtifact {
 		device_id: None,
 		version_range_pattern: None,
 		group_id: None,
-		content: None,
 		content_type: None,
 		digest: None,
 		run_id: None,
@@ -68,6 +68,7 @@ fn unscoped(version_id: Uuid, artifact_type: &str, url: &str) -> NewArtifact {
 
 fn held(version_id: Uuid, artifact_type: &str, group: Uuid, bytes: &[u8]) -> NewArtifact {
 	NewArtifact {
+		id: None,
 		version_id: Some(version_id),
 		artifact_type: artifact_type.to_owned(),
 		platform: "any".to_owned(),
@@ -75,7 +76,6 @@ fn held(version_id: Uuid, artifact_type: &str, group: Uuid, bytes: &[u8]) -> New
 		device_id: None,
 		version_range_pattern: None,
 		group_id: Some(group),
-		content: Some(bytes.to_vec()),
 		content_type: Some("application/sql".to_owned()),
 		digest: Some(digest_of(bytes)),
 		run_id: None,
@@ -222,9 +222,9 @@ async fn group_scope_outranks_an_exact_unscoped_artifact() {
 }
 
 /// A registration replaces whatever is already registered for the same version,
-/// type, platform and group, and the bytes it replaces do not survive.
+/// type, platform and group, and what it replaces does not survive alongside it.
 #[tokio::test(flavor = "multi_thread")]
-async fn registering_again_replaces_the_bytes_it_held() {
+async fn registering_again_replaces_what_it_held() {
 	TestDb::run(|mut conn, _url| async move {
 		let version = seed_version(&mut conn, 2, 60, 0).await;
 		let theirs = seed_group(&mut conn, "kamaka").await;
@@ -250,12 +250,7 @@ async fn registering_again_replaces_the_bytes_it_held() {
 			.expect("operator view");
 		assert_eq!(all.len(), 1, "a caller is never offered two of a kind");
 
-		let content = Artifact::content_for(&mut conn, second.id, Scope::Fleet)
-			.await
-			.expect("read content")
-			.expect("bytes are held");
-		assert_eq!(content.bytes, b"second build");
-		assert_eq!(content.digest, digest_of(b"second build"));
+		assert_eq!(second.digest, Some(digest_of(b"second build")));
 	})
 	.await;
 }
@@ -419,6 +414,7 @@ async fn a_held_artifact_cannot_be_given_a_url() {
 /// A range artifact, for the specificity rules that need one.
 fn ranged(artifact_type: &str, pattern: &str, url: &str) -> NewArtifact {
 	NewArtifact {
+		id: None,
 		version_id: None,
 		artifact_type: artifact_type.to_owned(),
 		platform: "any".to_owned(),
@@ -426,7 +422,6 @@ fn ranged(artifact_type: &str, pattern: &str, url: &str) -> NewArtifact {
 		device_id: None,
 		version_range_pattern: Some(pattern.to_owned()),
 		group_id: None,
-		content: None,
 		content_type: None,
 		digest: None,
 		run_id: None,
@@ -599,10 +594,10 @@ async fn provenance_is_recorded_and_replaced() {
 }
 
 /// Canopy keeps none of what it has stopped serving, so deleting an artifact
-/// takes the bytes with it rather than leaving them addressable.
+/// takes the registration the bytes rest under with it.
 // spec: ART#where-an-artifact-rests
 #[tokio::test(flavor = "multi_thread")]
-async fn deleting_an_artifact_takes_its_bytes() {
+async fn deleting_an_artifact_takes_its_registration() {
 	TestDb::run(|mut conn, _url| async move {
 		let version = seed_version(&mut conn, 2, 60, 0).await;
 		let theirs = seed_group(&mut conn, "kamaka").await;
@@ -618,12 +613,6 @@ async fn deleting_an_artifact_takes_its_bytes() {
 			.await
 			.expect("delete");
 
-		assert!(
-			Artifact::content_for(&mut conn, artifact.id, Scope::Fleet)
-				.await
-				.expect("read content")
-				.is_none()
-		);
 		let all = Artifact::get_for_version_all_matches(&mut conn, version, Scope::Fleet)
 			.await
 			.expect("operator view");
@@ -632,11 +621,11 @@ async fn deleting_an_artifact_takes_its_bytes() {
 	.await;
 }
 
-/// An artifact Canopy does not hold has no bytes to read, which is what makes
-/// the download fall through to the location it recorded instead.
+/// An artifact Canopy does not hold records a location and nothing else, which
+/// is what makes the download fall through to that location instead.
 // spec: ART#where-an-artifact-rests
 #[tokio::test(flavor = "multi_thread")]
-async fn an_unscoped_artifact_holds_no_bytes() {
+async fn an_unscoped_artifact_records_only_a_location() {
 	TestDb::run(|mut conn, _url| async move {
 		let version = seed_version(&mut conn, 2, 60, 0).await;
 
@@ -644,12 +633,8 @@ async fn an_unscoped_artifact_holds_no_bytes() {
 			.await
 			.expect("register");
 
-		assert!(
-			Artifact::content_for(&mut conn, artifact.id, Scope::Fleet)
-				.await
-				.expect("read content")
-				.is_none()
-		);
+		assert_eq!(artifact.download_url.as_deref(), Some("https://x/i"));
+		assert!(artifact.content_type.is_none());
 	})
 	.await;
 }

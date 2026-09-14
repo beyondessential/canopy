@@ -99,7 +99,6 @@ diesel::table! {
 		device_id -> Nullable<Uuid>,
 		version_range_pattern -> Nullable<Text>,
 		group_id -> Nullable<Uuid>,
-		content -> Nullable<Bytea>,
 		content_type -> Nullable<Text>,
 		digest -> Nullable<Bytea>,
 		run_id -> Nullable<Uuid>,

@@ -26,12 +26,23 @@ async fn seed(conn: &mut database::diesel_async::AsyncPgConnection) {
 		 INSERT INTO artifacts (id, version_id, platform, artifact_type, download_url)
 		 VALUES ('{UNSCOPED}', '{VERSION}', 'any', 'reporting-schema', 'https://example.com/all.sql');
 
-		 INSERT INTO artifacts (id, version_id, platform, artifact_type, group_id, content, content_type, digest)
+		 INSERT INTO artifacts (id, version_id, platform, artifact_type, group_id, content_type, digest)
 		 VALUES ('{THEIRS}', '{VERSION}', 'any', 'reporting-schema', '{GROUP_A}',
-		         'group a schema'::bytea, 'application/sql', '\\x{digest}'::bytea)",
+		         'application/sql', '\\x{digest}'::bytea)",
 	))
 	.await
 	.expect("seed");
+
+	hold(conn, THEIRS, b"group a schema").await;
+}
+
+/// Put an artifact's bytes where Canopy holds them, as a registration would.
+async fn hold(conn: &mut database::diesel_async::AsyncPgConnection, artifact: &str, bytes: &[u8]) {
+	commons_tests::server::artifacts(conn)
+		.await
+		.put(artifact.parse().expect("an artifact id"), bytes.to_vec())
+		.await
+		.expect("hold the bytes");
 }
 
 /// Put the authenticated device on a machine in the given group.
@@ -178,11 +189,7 @@ async fn corrupted_bytes_fail_the_read() {
 			seed(&mut conn).await;
 			enrol(&mut conn, device_id, GROUP_A).await;
 
-			conn.batch_execute(&format!(
-				"UPDATE artifacts SET content = 'tampered'::bytea WHERE id = '{THEIRS}'"
-			))
-			.await
-			.expect("corrupt the stored bytes");
+			hold(&mut conn, THEIRS, b"tampered").await;
 
 			let response = public
 				.get(&format!("/versions/2.60.0/artifacts/{THEIRS}/download"))
@@ -191,6 +198,41 @@ async fn corrupted_bytes_fail_the_read() {
 
 			assert_eq!(response.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
 			assert!(!response.text().contains("tampered"));
+		},
+	)
+	.await
+}
+
+/// An artifact whose bytes are not where Canopy holds them is missing in
+/// exactly the way one that never existed is: the read is refused rather than
+/// answered with an empty file, and the caller learns nothing from which of the
+/// two it was.
+// spec: ART#where-an-artifact-rests
+#[tokio::test(flavor = "multi_thread")]
+async fn an_artifact_whose_bytes_are_gone_is_missing() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn).await;
+			enrol(&mut conn, device_id, GROUP_A).await;
+
+			commons_tests::server::artifacts(&mut conn)
+				.await
+				.delete(THEIRS.parse().expect("an artifact id"))
+				.await
+				.expect("drop the bytes");
+
+			let response = public
+				.get(&format!("/versions/2.60.0/artifacts/{THEIRS}/download"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+			let absent = public
+				.get("/versions/2.60.0/artifacts/99999999-9999-9999-9999-999999999999/download")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.await;
+
+			assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
+			assert_eq!(response.text(), absent.text());
 		},
 	)
 	.await
@@ -425,11 +467,7 @@ async fn a_digest_mismatch_says_what_it_is() {
 			seed(&mut conn).await;
 			enrol(&mut conn, device_id, GROUP_A).await;
 
-			conn.batch_execute(&format!(
-				"UPDATE artifacts SET content = 'tampered'::bytea WHERE id = '{THEIRS}'"
-			))
-			.await
-			.expect("corrupt the stored bytes");
+			hold(&mut conn, THEIRS, b"tampered").await;
 
 			let response = public
 				.get(&format!("/versions/2.60.0/artifacts/{THEIRS}/download"))
@@ -918,12 +956,13 @@ async fn a_displaced_artifact_is_still_fetchable() {
 			let digest = hex::encode(digest_of(b"the range schema"));
 			conn.batch_execute(&format!(
 				"INSERT INTO artifacts
-				   (id, version_id, platform, artifact_type, version_range_pattern, group_id, content, content_type, digest)
+				   (id, version_id, platform, artifact_type, version_range_pattern, group_id, content_type, digest)
 				 VALUES ('{ranged}', NULL, 'any', 'reporting-schema', '2.60.x', '{GROUP_A}',
-				         'the range schema'::bytea, 'application/sql', '\\x{digest}'::bytea)"
+				         'application/sql', '\\x{digest}'::bytea)"
 			))
 			.await
 			.expect("seed the range artifact");
+			hold(&mut conn, ranged, b"the range schema").await;
 
 			let listed = public
 				.get("/versions/2.60.0/artifacts")
