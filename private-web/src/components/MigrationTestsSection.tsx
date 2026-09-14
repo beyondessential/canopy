@@ -1,11 +1,9 @@
-import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
-import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import {
 	Alert,
 	Box,
 	Chip,
-	IconButton,
 	LinearProgress,
+	Link as MuiLink,
 	Paper,
 	Stack,
 	Table,
@@ -16,13 +14,13 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
-import { Link as MuiLink } from "@mui/material";
-import { useState } from "react";
-import { Link as RouterLink } from "react-router-dom";
+import { Link as RouterLink, useSearchParams } from "react-router-dom";
 import { useApi } from "../api";
+import { formatDuration } from "../lib/migrationTests";
 import type { ApiResponse, ServerInfo } from "../types";
 
 type GroupVerdict = ApiResponse<"migration_tests", "for_group">[number];
+import MigrationRunDialog from "./MigrationRunDialog";
 import ServerRankChip from "./ServerRankChip";
 import TimeAgo from "./TimeAgo";
 
@@ -40,6 +38,20 @@ export default function MigrationTestsSection({
 }) {
 	const byId = new Map(servers.map((server) => [server.id, server]));
 	const nameOf = (id: string) => byId.get(id)?.name ?? id;
+	// Which run is open lives in the URL, so a link to one server's migrations
+	// opens on the migrations rather than on the group.
+	const [params, setParams] = useSearchParams();
+	const openFor = params.get("migrations");
+	const setOpenFor = (serverId: string | null) =>
+		setParams(
+			(prev) => {
+				const next = new URLSearchParams(prev);
+				if (serverId === null) next.delete("migrations");
+				else next.set("migrations", serverId);
+				return next;
+			},
+			{ replace: true },
+		);
 	const verdicts = useApi(
 		"migration_tests",
 		"for_group",
@@ -92,21 +104,17 @@ export default function MigrationTestsSection({
 			<Table size="small" sx={{ tableLayout: "fixed" }}>
 				<TableHead>
 					<TableRow>
-						<TableCell padding="checkbox" sx={{ width: "5%" }} />
-						<TableCell sx={{ width: "29%" }}>Server</TableCell>
+						<TableCell sx={{ width: "32%" }}>Server</TableCell>
 						<TableCell sx={{ width: "14%", whiteSpace: "nowrap" }}>
 							Upgrading to
 						</TableCell>
-						<TableCell sx={{ width: "11%", whiteSpace: "nowrap" }}>
+						<TableCell sx={{ width: "14%", whiteSpace: "nowrap" }}>
 							Verdict
 						</TableCell>
-						<TableCell sx={{ width: "16%", whiteSpace: "nowrap" }}>
+						<TableCell sx={{ width: "26%", whiteSpace: "nowrap" }}>
 							Migrations took
 						</TableCell>
-						<TableCell sx={{ width: "15%", whiteSpace: "nowrap" }}>
-							Growth
-						</TableCell>
-						<TableCell sx={{ width: "10%", whiteSpace: "nowrap" }}>
+						<TableCell sx={{ width: "14%", whiteSpace: "nowrap" }}>
 							Tested
 						</TableCell>
 					</TableRow>
@@ -123,6 +131,9 @@ export default function MigrationTestsSection({
 								key={row.server_id}
 								row={row}
 								server={byId.get(row.server_id)}
+								open={openFor === row.server_id}
+								onOpen={() => setOpenFor(row.server_id)}
+								onClose={() => setOpenFor(null)}
 							/>
 						))}
 				</TableBody>
@@ -180,57 +191,23 @@ function VerdictChip({
 	);
 }
 
-function formatDuration(seconds: number) {
-	if (seconds < 60) return `${seconds}s`;
-	if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
-	const hours = seconds / 3600;
-	return `${hours.toFixed(hours < 10 ? 1 : 0)}h`;
-}
-
-/// How much the migrations added. Sizes are what makes a duration comparable
-/// across groups, and growth is what catches a heavy backfill.
-function formatGrowth(before: number, after: number) {
-	const added = after - before;
-	if (added <= 0) return "none";
-	const percent = before > 0 ? Math.round((added / before) * 100) : null;
-	return percent === null ? formatBytes(added) : `+${formatBytes(added)} (${percent}%)`;
-}
-
-function formatBytes(bytes: number) {
-	const units = ["B", "kB", "MB", "GB", "TB"];
-	let value = bytes;
-	let unit = 0;
-	while (value >= 1000 && unit < units.length - 1) {
-		value /= 1000;
-		unit += 1;
-	}
-	return `${value.toFixed(value < 10 && unit > 0 ? 1 : 0)}${units[unit]}`;
-}
-
 function TestRow({
 	row,
 	server,
+	open,
+	onOpen,
+	onClose,
 }: {
 	row: GroupVerdict;
 	server: ServerInfo | undefined;
+	open: boolean;
+	onOpen: () => void;
+	onClose: () => void;
 }) {
-	const [open, setOpen] = useState(false);
 	const timings = row.latest?.timings ?? [];
-	const expandable = timings.length > 0;
 	return (
 		<>
 			<TableRow data-testid="migration-test-row">
-				<TableCell padding="checkbox">
-					{expandable && (
-						<IconButton
-							size="small"
-							aria-label={open ? "Hide migrations" : "Show migrations"}
-							onClick={() => setOpen((o) => !o)}
-						>
-							{open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
-						</IconButton>
-					)}
-				</TableCell>
 				<TableCell>
 					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 						<MuiLink
@@ -253,15 +230,26 @@ function TestRow({
 					/>
 				</TableCell>
 				<TableCell sx={{ whiteSpace: "nowrap" }}>
-					{row.latest ? formatDuration(row.latest.total_elapsed) : "—"}
-				</TableCell>
-				<TableCell sx={{ whiteSpace: "nowrap" }}>
-					{row.latest
-						? formatGrowth(
-								row.latest.data_bytes_before,
-								row.latest.data_bytes_after,
-							)
-						: "—"}
+					{row.latest == null ? (
+						"—"
+					) : timings.length === 0 ? (
+						formatDuration(row.latest.total_elapsed)
+					) : (
+						<MuiLink
+							component="button"
+							type="button"
+							underline="hover"
+							aria-label="Show migrations"
+							onClick={onOpen}
+							color="text.primary"
+							sx={{ font: "inherit", verticalAlign: "baseline" }}
+						>
+							{formatDuration(row.latest.total_elapsed)}
+							<Box component="span" sx={{ color: "primary.main", ml: 0.5 }}>
+								· {timings.length} migrations
+							</Box>
+						</MuiLink>
+					)}
 				</TableCell>
 				<TableCell sx={{ whiteSpace: "nowrap" }}>
 					{row.latest ? (
@@ -275,27 +263,16 @@ function TestRow({
 					)}
 				</TableCell>
 			</TableRow>
-			{open &&
-				timings.map((timing) => (
-					<TableRow key={timing.ordinal} data-testid="migration-timing">
-						<TableCell />
-						<TableCell
-							colSpan={2}
-							sx={{ pl: 4, overflowWrap: "anywhere" }}
-						>
-							{timing.name}
-						</TableCell>
-						<TableCell>
-							{timing.name === row.latest?.failed_migration && (
-								<Chip size="small" color="warning" label="failed" />
-							)}
-						</TableCell>
-						<TableCell sx={{ whiteSpace: "nowrap" }}>
-							{formatDuration(timing.elapsed)}
-						</TableCell>
-						<TableCell colSpan={2} />
-					</TableRow>
-				))}
+			{row.latest && (
+				<MigrationRunDialog
+					open={open}
+					onClose={onClose}
+					serverName={server?.name ?? row.server_id}
+					rank={server?.rank}
+					targetVersion={row.target_version}
+					latest={row.latest}
+				/>
+			)}
 		</>
 	);
 }
