@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use commons_errors::{AppError, Result};
 use diesel::prelude::*;
@@ -426,6 +428,24 @@ impl Artifact {
 			.await
 			.optional()
 			.map_err(AppError::from)
+	}
+
+	/// The ids of every artifact whose bytes Canopy holds.
+	///
+	/// What a sweep of the store checks each object against: an object under an
+	/// id not in here is one no artifact reaches.
+	// spec: ART#where-an-artifact-rests
+	pub async fn held_ids(db: &mut AsyncPgConnection) -> Result<HashSet<Uuid>> {
+		use crate::schema::artifacts::dsl::*;
+
+		let ids: Vec<Uuid> = artifacts
+			.filter(download_url.is_null())
+			.select(id)
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(ids.into_iter().collect())
 	}
 
 	/// Register an artifact, replacing whatever is already registered for the

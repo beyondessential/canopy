@@ -19,6 +19,7 @@ use std::{
 };
 
 use commons_errors::{AppError, Result};
+use jiff::Timestamp;
 use uuid::Uuid;
 
 /// Bucket the artifacts Canopy holds are kept in. Unset ⇒ no store is
@@ -39,7 +40,7 @@ const MEMORY_ENV: &str = "CANOPY_ARTIFACT_STORE_MEMORY";
 
 pub const DEFAULT_PREFIX: &str = "artifacts/";
 
-type MemoryStore = Arc<Mutex<BTreeMap<String, Vec<u8>>>>;
+type MemoryStore = Arc<Mutex<BTreeMap<String, (Vec<u8>, Timestamp)>>>;
 
 /// The bytes Canopy holds for one artifact, and how to store, read and drop
 /// them.
@@ -136,6 +137,24 @@ impl ArtifactStore {
 		}
 	}
 
+	/// Backdate what the store holds for an artifact, so a test can reach a
+	/// sweep's age threshold without waiting for it. **Debug-only.**
+	#[cfg(debug_assertions)]
+	pub fn backdate(&self, artifact: Uuid, to: Timestamp) {
+		match self {
+			Self::S3 { .. } => panic!("backdate() is for the in-memory store"),
+			Self::Memory(store) => {
+				if let Some((_, at)) = store
+					.lock()
+					.expect("artifact store")
+					.get_mut(&self.key(artifact))
+				{
+					*at = to;
+				}
+			}
+		}
+	}
+
 	fn key(&self, artifact: Uuid) -> String {
 		match self {
 			Self::S3 { prefix, .. } => format!("{prefix}{artifact}"),
@@ -160,7 +179,10 @@ impl ArtifactStore {
 					})?;
 			}
 			Self::Memory(store) => {
-				store.lock().expect("artifact store").insert(key, bytes);
+				store
+					.lock()
+					.expect("artifact store")
+					.insert(key, (bytes, Timestamp::now()));
 			}
 		}
 		Ok(())
@@ -185,7 +207,68 @@ impl ArtifactStore {
 				})?;
 				Ok(Some(bytes.to_vec()))
 			}
-			Self::Memory(store) => Ok(store.lock().expect("artifact store").get(&key).cloned()),
+			Self::Memory(store) => Ok(store
+				.lock()
+				.expect("artifact store")
+				.get(&key)
+				.map(|(bytes, _)| bytes.clone())),
+		}
+	}
+
+	/// Every artifact the store holds, with when each was last written.
+	///
+	/// The time is what keeps a sweep off an artifact still being registered:
+	/// the bytes go in before the row that names them, so an object younger than
+	/// that gap has a registration possibly still in flight behind it.
+	// spec: ART#where-an-artifact-rests
+	pub async fn stored(&self) -> Result<Vec<(Uuid, Timestamp)>> {
+		match self {
+			Self::S3 {
+				client,
+				bucket,
+				prefix,
+			} => {
+				let mut found = Vec::new();
+				let mut pages = client
+					.list_objects_v2()
+					.bucket(bucket)
+					.prefix(prefix)
+					.into_paginator()
+					.send();
+
+				while let Some(page) = pages.next().await {
+					let page = page.map_err(|err| {
+						AppError::custom(format!("listing the artifacts failed: {err}"))
+					})?;
+					for object in page.contents() {
+						// Anything under the prefix that is not an artifact id
+						// was not put there by Canopy, so it is not Canopy's to
+						// sweep.
+						let Some(id) = object
+							.key()
+							.and_then(|key| key.strip_prefix(prefix.as_str()))
+							.and_then(|id| id.parse().ok())
+						else {
+							continue;
+						};
+						let Some(at) = object
+							.last_modified()
+							.and_then(|at| Timestamp::from_second(at.secs()).ok())
+						else {
+							continue;
+						};
+						found.push((id, at));
+					}
+				}
+
+				Ok(found)
+			}
+			Self::Memory(store) => Ok(store
+				.lock()
+				.expect("artifact store")
+				.iter()
+				.filter_map(|(key, (_, at))| Some((key.parse().ok()?, *at)))
+				.collect()),
 		}
 	}
 

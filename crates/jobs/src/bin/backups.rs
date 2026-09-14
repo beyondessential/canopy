@@ -75,6 +75,9 @@ async fn main() -> miette::Result<()> {
 	let tag_reconcile = jobs::backup::tag_reconcile::spawn();
 	let progress_prune = jobs::backup::progress_prune::spawn();
 	let recovery_snapshot = jobs::backup::recovery_snapshot::spawn(worker, recovery_config);
+
+	let artifact_sweep = jobs::artifact_sweep::spawn().await;
+
 	tokio::try_join!(
 		preflight,
 		maintenance,
@@ -83,7 +86,8 @@ async fn main() -> miette::Result<()> {
 		s3_metrics,
 		tag_reconcile,
 		progress_prune,
-		recovery_snapshot
+		recovery_snapshot,
+		artifact_sweep
 	)
 	.into_diagnostic()?;
 	Ok(())
