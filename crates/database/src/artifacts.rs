@@ -60,8 +60,8 @@ pub struct Artifact {
 	pub artifact_type: String,
 	/// The platform the artifact targets (e.g. an OS or architecture name).
 	pub platform: String,
-	/// URL the artifact can be downloaded from. `null` for a group-scoped
-	/// artifact, whose bytes Canopy holds instead.
+	/// URL the artifact can be downloaded from. `null` for an artifact whose
+	/// bytes Canopy holds.
 	pub download_url: Option<String>,
 	/// The device that registered this artifact, if it was registered by a
 	/// releaser device rather than created by an operator.
@@ -73,10 +73,10 @@ pub struct Artifact {
 	/// The group this artifact is for. `null` for an artifact that is for
 	/// every group.
 	pub group_id: Option<Uuid>,
-	/// Media type of the bytes Canopy holds, where the registration named one.
+	/// Media type of the bytes Canopy holds, when known.
 	pub content_type: Option<String>,
-	/// SHA-256 of the artifact's bytes. Always set for a group-scoped
-	/// artifact.
+	/// SHA-256 of the artifact's bytes. Always set for an artifact Canopy
+	/// holds.
 	pub digest: Option<Vec<u8>>,
 	/// The run that produced this artifact, where the registration named one.
 	pub run_id: Option<Uuid>,
@@ -112,17 +112,13 @@ pub fn digest_of(bytes: &[u8]) -> Vec<u8> {
 	Sha256::digest(bytes).to_vec()
 }
 
-/// A digest as Subresource Integrity writes it, which is the form every
-/// interface carries it in.
+/// A digest in Subresource Integrity format.
 // spec: ART#digests
 pub fn sri(digest: &[u8]) -> String {
 	format!("sha256-{}", BASE64.encode(digest))
 }
 
 /// The digest an SRI string names, refusing anything that cannot be one.
-///
-/// A value nothing can check the bytes against is worse than none: it says the
-/// bytes were verified when they cannot be.
 // spec: ART#digests
 pub fn parse_sri(value: &str) -> Result<Vec<u8>> {
 	let refuse = || AppError::BadRequest(format!("{value:?} is not a sha256 SRI digest"));
@@ -206,12 +202,6 @@ impl Artifact {
 
 	/// The artifacts of a sorted match set that `scope` is actually served:
 	/// the most specific of each type and platform it can see.
-	///
-	/// Not `dedup_by_key`: that only drops *consecutive* duplicates, and the
-	/// specificity sort has destroyed the adjacency the SQL `ORDER BY` gave us
-	/// — every exact artifact now precedes every range one, so two artifacts of
-	/// the same type+platform are only neighbours when they happen to be
-	/// equally specific.
 	// spec: ART#what-a-version-offers
 	fn offered(artifacts: Vec<Self>, scope: Scope) -> Vec<Self> {
 		let offered = Self::offered_ids(&artifacts, scope);
@@ -531,9 +521,9 @@ impl Artifact {
 			_ => {}
 		}
 
-		// A digest describes the bytes at a location, so it does not survive
-		// the location changing: kept, it has every device that honours it
-		// refuse a file that is the right one.
+		// The digest describes the bytes at the old URL, so a new URL clears
+		// it rather than carrying a checksum for a file that is no longer
+		// there.
 		// spec: ART#digests
 		let moved = new_url != current_url;
 
