@@ -775,10 +775,11 @@ struct TextRow {
 	value: String,
 }
 
-/// Reverting drops the artifacts Canopy holds, since the bytes have nowhere to
-/// go once the column does, and leaves the unscoped ones as they were. Nothing
-/// else runs these migrations backwards, so a `down.sql` that cannot reverse
-/// would only be found on the box it was needed on.
+/// Reverting drops the artifacts Canopy holds, since a schema with no group has
+/// nowhere to record one, and leaves the unscoped ones as they were. The bytes
+/// outlive the rows that named them, so a revert leaves the store to be swept by
+/// hand. Nothing else runs these migrations backwards, so a `down.sql` that
+/// cannot reverse would only be found on the box it was needed on.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_group_scope_migration_reverses() {
 	TestDb::run(|mut conn, _url| async move {
@@ -811,13 +812,13 @@ async fn the_group_scope_migration_reverses() {
 				.map(|r| r.value.as_str())
 				.collect::<Vec<_>>(),
 			vec!["https://example.com/x.exe"],
-			"the held artifact goes with the column that held it"
+			"the held artifact goes with the group column that scoped it"
 		);
 
 		let columns: Vec<TextRow> = diesel::sql_query(
 			"SELECT column_name AS value FROM information_schema.columns \
 			 WHERE table_name = 'artifacts' \
-			 AND column_name IN ('group_id', 'content', 'content_type', 'digest', 'run_id')",
+			 AND column_name IN ('group_id', 'content_type', 'digest', 'run_id')",
 		)
 		.load(&mut conn)
 		.await
