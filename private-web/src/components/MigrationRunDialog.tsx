@@ -18,6 +18,7 @@ import {
 	alpha,
 } from "@mui/material";
 import type { ReactNode } from "react";
+import { readableError } from "../lib/errorText";
 import { formatDuration } from "../lib/migrationTests";
 import type { ApiResponse, ServerRank } from "../types";
 import ServerRankChip from "./ServerRankChip";
@@ -126,7 +127,7 @@ export default function MigrationRunDialog({
 									overflowWrap: "anywhere",
 								}}
 							>
-								{latest.error}
+								{readableError(latest.error)}
 							</Box>
 						) : (
 							"The runner did not say what went wrong."
