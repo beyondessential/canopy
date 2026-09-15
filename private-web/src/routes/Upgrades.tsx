@@ -54,6 +54,7 @@ import ServerRankChip from "../components/ServerRankChip";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { errorPreview } from "../lib/errorText";
 import { environmentName } from "../types";
 import type { ApiResponse, MaintenanceWindow, ServerRank } from "../types";
 
@@ -1426,7 +1427,11 @@ function VerdictChip({
 								{failedTest.application}
 								{failedTest.migration ? `: ${failedTest.migration}` : ""}
 							</Box>
-							{failedTest.error && <Box sx={{ mt: 0.5 }}>{failedTest.error}</Box>}
+							{failedTest.error && (
+								<Box sx={{ mt: 0.5, fontFamily: "monospace", whiteSpace: "pre-wrap" }}>
+									{errorPreview(failedTest.error)}
+								</Box>
+							)}
 						</>
 					) : (
 						"an application's data broke the migrations; the version is held back"
