@@ -16,6 +16,7 @@ import {
 } from "@mui/material";
 import { Link as RouterLink, useSearchParams } from "react-router-dom";
 import { useApi } from "../api";
+import { errorPreview } from "../lib/errorText";
 import { formatDuration } from "../lib/migrationTests";
 import type { ApiResponse, ServerInfo } from "../types";
 
@@ -182,7 +183,11 @@ function VerdictChip({
 			title={
 				<>
 					<Box>{failedMigration ?? "no migration named"}</Box>
-					{error && <Box sx={{ mt: 0.5 }}>{error}</Box>}
+					{error && (
+						<Box sx={{ mt: 0.5, fontFamily: "monospace", whiteSpace: "pre-wrap" }}>
+							{errorPreview(error)}
+						</Box>
+					)}
 				</>
 			}
 		>
