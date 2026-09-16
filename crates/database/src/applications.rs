@@ -810,6 +810,7 @@ impl Application {
 		applications
 			.select(Self::as_select())
 			.filter(group_id.eq(group_id_))
+			.filter(id.ne(Uuid::nil()))
 			.filter(deleted_at.is_null())
 			.order(name.asc())
 			.load(db)

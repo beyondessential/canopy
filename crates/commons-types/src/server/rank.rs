@@ -2,7 +2,7 @@ use std::{fmt::Display, str::FromStr};
 
 use diesel::{
 	backend::Backend,
-	deserialize::{self, FromSql},
+	deserialize::{self, FromSql, FromSqlRow},
 	expression::AsExpression,
 	serialize::{self, Output, ToSql},
 	sql_types::Text,
@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 	Serialize,
 	Deserialize,
 	AsExpression,
+	FromSqlRow,
 	utoipa::ToSchema,
 )]
 #[diesel(sql_type = Text)]

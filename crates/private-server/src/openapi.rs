@@ -25,6 +25,7 @@ use utoipa::{
 		(name = "domains", description = "Managed DNS zones and the domains each group controls."),
 		(name = "healthchecks", description = "Healthcheck catalog: severities, conditional rules, and sample data."),
 		(name = "incidents", description = "Operational incidents (groups of issues against a server)."),
+		(name = "inventory", description = "An environment's applications and the variables that configure them, for the tooling that configures them."),
 		(name = "issues", description = "Per-server issues raised from device events."),
 		(name = "machines", description = "The hosts applications run on: their group, location, and monitoring."),
 		(name = "maintenance", description = "Windows declaring that a server or a group is being worked on."),

@@ -10,7 +10,37 @@ const UNMONITORED_TOOLTIP =
 	"This server is unmonitored — its checks are recorded and shown, but nothing alerts on them.";
 
 const MAINTAINED_TOOLTIP =
-	"Someone is working on this server. Checks are still recorded and shown, and raise nothing until the maintenance window ends.";
+	"Someone is working here. Checks are still recorded and shown, and raise nothing until the maintenance window ends.";
+
+const SETTLING_TOOLTIP =
+	"The maintenance window has ended. Checks are still recorded and shown, and alerting resumes once things have settled.";
+
+/// The mark a suspended target carries beside its health, wherever that health
+/// is presented. One component, so a group's title and a server's chip draw the
+/// same mark and say the same thing.
+// spec: MNT#presentation
+export function MaintenanceMarker({
+	settling,
+	href,
+}: {
+	settling: boolean;
+	/** Where the window is amended or lifted, for a mark that leads there. */
+	href?: string;
+}) {
+	return (
+		<Tooltip title={settling ? SETTLING_TOOLTIP : MAINTAINED_TOOLTIP}>
+			<Chip
+				size="small"
+				variant="outlined"
+				color="info"
+				icon={<BuildOutlinedIcon />}
+				label={settling ? "Maintenance just ended" : "Under maintenance"}
+				{...(href && { component: "a", href, clickable: true })}
+				data-testid="maintenance-marker"
+			/>
+		</Tooltip>
+	);
+}
 
 const LABEL: Record<HealthState, string> = {
 	healthy: "Healthy",
@@ -98,25 +128,7 @@ export default function HealthChip({
 		<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
 			<Box sx={{ opacity: 0.5, display: "inline-flex" }}>{chip}</Box>
 			{maintained && (
-				<Tooltip title={MAINTAINED_TOOLTIP}>
-					<Chip
-						size="small"
-						variant="outlined"
-						color="info"
-						icon={<BuildOutlinedIcon />}
-						label={
-							maintenanceSettling
-								? "Maintenance just ended"
-								: "Under maintenance"
-						}
-						{...(maintenanceHref && {
-							component: "a",
-							href: maintenanceHref,
-							clickable: true,
-						})}
-						data-testid="maintenance-marker"
-					/>
-				</Tooltip>
+				<MaintenanceMarker settling={maintenanceSettling} href={maintenanceHref} />
 			)}
 			{!monitored && (
 				<Tooltip title={UNMONITORED_TOOLTIP}>
