@@ -15218,6 +15218,17 @@
             "$ref": "#/components/schemas/ServerRank",
             "description": "The rank of the environment this concerns: the group's applications at\nthat rank."
           },
+          "tally": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Tally",
+                "description": "How many of the environment's applications have passed, out of how many\nare under test. `null` without a plan, or where the environment has no\napplication the migrations apply to."
+              }
+            ]
+          },
           "target_version": {
             "type": [
               "string",
@@ -18751,6 +18762,26 @@
           }
         ],
         "description": "Take the lease on an environment, which a run holds while it runs."
+      },
+      "Tally": {
+        "type": "object",
+        "description": "How many of an environment's applications have passed, out of how many the\nmigrations apply to.",
+        "required": [
+          "passed",
+          "total"
+        ],
+        "properties": {
+          "passed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many have a passing verdict against the planned version."
+          },
+          "total": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many the migrations apply to, passed or not."
+          }
+        }
       },
       "TargetArgs": {
         "type": "object",

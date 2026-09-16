@@ -162,6 +162,7 @@ export default function Upgrades() {
 													testable={row.testable}
 													groupId={row.group_id}
 													failedTest={row.failed_test}
+													tally={row.tally}
 												/>
 												<AttemptChip attempt={row.attempt} />
 											</Stack>
@@ -1396,11 +1397,13 @@ function VerdictChip({
 	testable,
 	groupId,
 	failedTest,
+	tally,
 }: {
 	verdict: string | null | undefined;
 	testable: boolean | null | undefined;
 	groupId: string;
 	failedTest: FailedTest | null | undefined;
+	tally?: { passed: number; total: number } | null;
 }) {
 	const linked = (chip: ReactElement) => (
 		<MuiLink
@@ -1415,6 +1418,23 @@ function VerdictChip({
 	if (verdict === "passed") {
 		return linked(
 			<Chip size="small" color="success" label="passed" clickable />,
+		);
+	}
+	if (verdict === "partial") {
+		return (
+			<Tooltip title="some of this environment's applications have passed and the rest have not been tested yet">
+				{linked(
+					<Chip
+						size="small"
+						color="success"
+						variant="outlined"
+						label={
+							tally ? `${tally.passed} of ${tally.total} passed` : "partly passed"
+						}
+						clickable
+					/>,
+				)}
+			</Tooltip>
 		);
 	}
 	if (verdict === "failed") {
