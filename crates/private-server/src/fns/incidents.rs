@@ -3,7 +3,7 @@ use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
-use commons_types::{Uuid, issue::ResolvedReason};
+use commons_types::{Uuid, issue::ResolvedReason, server::rank::ServerRank};
 use database::issues::{Incident, IncidentIssue, IncidentStats};
 use database::notes::IncidentNote;
 use database::server_groups::ServerGroup;
@@ -17,23 +17,29 @@ use crate::state::AppState;
 
 const DEFAULT_LIMIT: i64 = 100;
 
-/// An operational incident: a group-scoped roll-up of related issues.
+/// An operational incident: a roll-up of the related issues on one target,
+/// which is one of a group's environments, the group itself, or canopy.
 ///
-/// An incident opens when an issue on a server in the group crosses the
-/// severity threshold, gathers further contributing issues while open, and
-/// closes automatically once the last serious contributor clears. Operators
-/// can additionally mark an incident resolved with a reason.
+/// An incident opens when an issue on its target crosses the severity
+/// threshold, gathers further contributing issues while open, and closes
+/// automatically once the last serious contributor clears. Operators can
+/// additionally mark an incident resolved with a reason.
+// spec: INC#targets
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IncidentData {
 	/// Unique identifier of the incident.
 	pub id: Uuid,
-	/// Identifier of the server group the incident belongs to, or null for
+	/// Identifier of the group the incident belongs to, or null for
 	/// a canopy-wide incident (aggregating canopy's self-alerts).
 	pub server_group_id: Option<Uuid>,
 	/// Display name of the group this incident rolls up to — `Canopy` for
 	/// a canopy-wide incident. Empty only if the group no longer exists,
 	/// which should not happen in normal operation.
 	pub server_group_name: String,
+	/// Which of the group's environments the incident targets. Null with a
+	/// group means the group itself: its own checks, and the members of a
+	/// group with no ranked application.
+	pub rank: Option<ServerRank>,
 	/// When the incident opened.
 	pub opened_at: Timestamp,
 	/// When the incident closed (all serious contributing issues cleared);
@@ -94,6 +100,7 @@ impl IncidentData {
 			id: i.id,
 			server_group_id: i.server_group_id,
 			server_group_name,
+			rank: i.rank,
 			opened_at: i.opened_at,
 			closed_at: i.closed_at,
 			resolved_at: i.resolved_at,
@@ -235,9 +242,9 @@ pub struct IncidentListForServerArgs {
 
 /// List incidents involving a server.
 ///
-/// Returns incidents that issues on the given server have contributed to.
-/// By default only open incidents are returned; set `include_closed` to
-/// also include closed ones.
+/// Returns the incidents on the environment the application is in, and the
+/// group's own where it belongs to no environment. By default only open
+/// incidents are returned; set `include_closed` to also include closed ones.
 #[utoipa::path(
 	post,
 	path = "/list_for_server",
@@ -282,8 +289,9 @@ pub struct ListForGroupArgs {
 
 /// List incidents for a server group.
 ///
-/// Returns the group's incidents. By default only open incidents are
-/// returned; set `include_closed` to also include closed ones.
+/// Returns the group's own incidents and those of every environment in it. By
+/// default only open incidents are returned; set `include_closed` to also
+/// include closed ones.
 #[utoipa::path(
 	post,
 	path = "/list_for_group",

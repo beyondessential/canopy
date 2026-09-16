@@ -29,9 +29,10 @@ pub struct Candidate {
 
 /// The version `server` should be tested against, if any.
 ///
-/// Its group's open plan names it (see [`crate::upgrade_plans`]), and a group
-/// with no plan has no candidate: a restore costs hours, and it is only worth
-/// spending on a version a group has said it intends to apply.
+/// Its own environment's open plan names it (see [`crate::upgrade_plans`]), and
+/// an environment with no plan has no candidate: a restore costs hours, and it
+/// is only worth spending on a version an environment has said it intends to
+/// apply. An application with no rank follows its group's headline environment.
 ///
 /// Tamanu applications only: the migrations under test are Tamanu's, so no other
 /// product's server has an upgrade path through them.
@@ -50,34 +51,98 @@ pub async fn candidate_for(
 	let Some(group_id) = server.group_id else {
 		return Ok(None);
 	};
+	let Some(rank) = crate::server_groups::ServerGroup::environment_of(db, server).await? else {
+		return Ok(None);
+	};
 
-	crate::upgrade_plans::planned_target(db, group_id).await
+	crate::upgrade_plans::planned_target(db, group_id, rank).await
+}
+
+/// The version each of `applications` should be tested against, by application
+/// id, resolving each group's environment and open plans once for the whole
+/// set rather than once per application.
+///
+/// The answer [`candidate_for`] gives one at a time.
+// spec: RST#candidate-versions
+async fn candidates_for(
+	db: &mut AsyncPgConnection,
+	applications: &[Application],
+) -> Result<HashMap<Uuid, Version>> {
+	use commons_types::server::rank::ServerRank;
+	use std::collections::{HashMap, HashSet, hash_map::Entry};
+
+	let unranked: HashSet<Uuid> = applications
+		.iter()
+		.filter(|application| application.rank.is_none())
+		.filter_map(|application| application.group_id)
+		.collect();
+	let unranked: Vec<Uuid> = unranked.into_iter().collect();
+	let headline = crate::server_groups::ServerGroup::highest_member_ranks(db, &unranked).await?;
+
+	let mut open: HashMap<(Uuid, ServerRank), crate::upgrade_plans::UpgradePlan> = HashMap::new();
+	for plan in crate::upgrade_plans::UpgradePlan::all_open(db).await? {
+		open.insert((plan.group_id, plan.rank), plan);
+	}
+
+	let mut targets: HashMap<Uuid, Option<Version>> = HashMap::new();
+	let mut out = HashMap::new();
+	for application in applications {
+		// The migrations under test are Tamanu's, so only Tamanu has candidates.
+		if application.r#type.software() != "tamanu" {
+			continue;
+		}
+		let Some(group_id) = application.group_id else {
+			continue;
+		};
+		let rank = application
+			.rank
+			.or_else(|| headline.get(&group_id).copied())
+			.unwrap_or(crate::server_groups::UNRANKED_ENVIRONMENT);
+		let Some(plan) = open.get(&(group_id, rank)) else {
+			continue;
+		};
+		let target = match targets.entry(plan.target_version_id) {
+			Entry::Occupied(held) => held.into_mut(),
+			Entry::Vacant(slot) => slot.insert(crate::upgrade_plans::target_of(db, plan).await?),
+		};
+		if let Some(version) = target {
+			out.insert(application.id, version.clone());
+		}
+	}
+
+	Ok(out)
 }
 
 /// Every candidate across the fleet, at most one per server.
 // spec: RST#candidate-versions
 pub async fn candidates(db: &mut AsyncPgConnection) -> Result<Vec<Candidate>> {
-	let mut candidates = Vec::new();
+	let applications = Application::get_all(db, 0, None).await?;
+	let candidates = candidates_for(db, &applications).await?;
 
-	for server in Application::get_all(db, 0, None).await? {
-		if let Some(version) = candidate_for(db, &server).await? {
-			candidates.push(Candidate {
+	Ok(applications
+		.iter()
+		.filter_map(|server| {
+			candidates.get(&server.id).map(|version| Candidate {
 				server_id: server.id,
 				version_id: version.id,
-			});
-		}
-	}
-
-	Ok(candidates)
+			})
+		})
+		.collect())
 }
 
 /// How long one migration took, in the order it ran.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Queryable, Selectable)]
+#[derive(
+	Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema,
+)]
 #[diesel(table_name = crate::schema::migration_timings)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct MigrationTiming {
+	/// Where it fell in the run, counting from zero.
 	pub ordinal: i32,
+	/// The migration's name, as the migration runner reports it.
 	pub name: String,
+	/// Whole seconds this migration took.
+	#[schema(value_type = i64)]
 	pub elapsed: PgDuration,
 }
 
@@ -92,6 +157,7 @@ pub struct MigrationTest {
 	pub failed_migration: Option<String>,
 	pub data_bytes_before: i64,
 	pub data_bytes_after: i64,
+	pub error: Option<String>,
 }
 
 /// What a consumer reports for one migration test, beyond the report's own
@@ -106,6 +172,9 @@ pub struct NewMigrationTest {
 	pub target_version_id: Uuid,
 	pub total_elapsed: PgDuration,
 	pub failed_migration: Option<String>,
+	/// What the migration runner said: the message, and the DETAIL naming the
+	/// row it refused. Absent from consumers that do not send it yet.
+	pub error: Option<String>,
 	pub data_bytes_before: i64,
 	pub data_bytes_after: i64,
 	/// One entry per migration that ran, in the order they ran.
@@ -115,8 +184,10 @@ pub struct NewMigrationTest {
 /// One joined row behind [`latest_test`].
 #[derive(Queryable)]
 struct LatestRow {
+	check_id: i64,
 	outcome: RunOutcome,
 	failed_migration: Option<String>,
+	error: Option<String>,
 	snapshot_id: Option<String>,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp)]
 	reported_at: Timestamp,
@@ -132,6 +203,9 @@ pub struct LatestTest {
 	pub verdict: Verdict,
 	/// The migration that failed, when one did.
 	pub failed_migration: Option<String>,
+	/// What the migration runner said about that failure, when the consumer
+	/// sent it.
+	pub error: Option<String>,
 	/// The snapshot the verdict was reached against.
 	pub snapshot_id: Option<String>,
 	/// When the consumer reported it.
@@ -144,6 +218,8 @@ pub struct LatestTest {
 	pub data_bytes_before: i64,
 	/// Size of it afterwards; the growth is what a heavy backfill shows up as.
 	pub data_bytes_after: i64,
+	/// Each migration that ran, in the order they ran.
+	pub timings: Vec<MigrationTiming>,
 }
 
 /// Where one of a group's applications stands against the version it would take
@@ -169,6 +245,17 @@ pub enum Verdict {
 	NotTested,
 	Passed,
 	Failed,
+}
+
+/// Longest error kept: a migration runner can hand back a whole failing
+/// statement.
+const MAX_ERROR_CHARS: usize = 2000;
+
+fn truncate_error(error: String) -> String {
+	if error.chars().count() <= MAX_ERROR_CHARS {
+		return error;
+	}
+	error.chars().take(MAX_ERROR_CHARS).collect()
 }
 
 impl MigrationTest {
@@ -202,6 +289,7 @@ impl MigrationTest {
 				crate::schema::migration_tests::target_version_id.eq(test.target_version_id),
 				crate::schema::migration_tests::total_elapsed.eq(test.total_elapsed),
 				crate::schema::migration_tests::failed_migration.eq(test.failed_migration),
+				crate::schema::migration_tests::error.eq(test.error.map(truncate_error)),
 				crate::schema::migration_tests::data_bytes_before.eq(test.data_bytes_before),
 				crate::schema::migration_tests::data_bytes_after.eq(test.data_bytes_after),
 			))
@@ -275,8 +363,10 @@ pub async fn latest_test(
 	let row: Option<LatestRow> = migration_tests::table
 		.inner_join(backup_restore_checks::table)
 		.select((
+			migration_tests::check_id,
 			backup_restore_checks::outcome,
 			migration_tests::failed_migration,
+			migration_tests::error,
 			backup_restore_checks::snapshot_id,
 			backup_restore_checks::reported_at,
 			migration_tests::total_elapsed,
@@ -290,17 +380,24 @@ pub async fn latest_test(
 		.await
 		.optional()?;
 
-	Ok(row.map(|row| LatestTest {
+	let Some(row) = row else {
+		return Ok(None);
+	};
+	let timings = MigrationTest::timings(db, row.check_id).await?;
+
+	Ok(Some(LatestTest {
 		verdict: match (row.outcome, &row.failed_migration) {
 			(RunOutcome::Success, None) => Verdict::Passed,
 			_ => Verdict::Failed,
 		},
 		failed_migration: row.failed_migration,
+		error: row.error,
 		snapshot_id: row.snapshot_id,
 		reported_at: row.reported_at,
 		total_elapsed: row.total_elapsed,
 		data_bytes_before: row.data_bytes_before,
 		data_bytes_after: row.data_bytes_after,
+		timings,
 	}))
 }
 
@@ -483,11 +580,15 @@ async fn file_outcome(
 	let version = Version::get_by_id(db, target_version_id).await?;
 	let affected = (version.major, version.minor, version.patch);
 	if !VersionKnownIssue::unresolved_for_server(db, affected, application_id).await? {
+		let application = Application::get_by_id(db, application_id).await?;
 		VersionKnownIssue::add(
 			db,
 			affected,
 			refs::MIGRATION_TEST,
-			&format!("Migration {migration} failed against {application_id}'s data."),
+			&format!(
+				"Migration {migration} failed against {}'s data.",
+				application.display_name()
+			),
 			Some(application_id),
 		)
 		.await?;
@@ -506,24 +607,94 @@ pub async fn verdicts_for_group(
 	db: &mut AsyncPgConnection,
 	group_id: Uuid,
 ) -> Result<Vec<GroupVerdict>> {
-	let mut out = Vec::new();
+	let applications = Application::list_live_in_group(db, group_id).await?;
+	verdicts(db, applications).await
+}
 
-	for server in Application::list_live_in_group(db, group_id).await? {
-		let Some(version) = candidate_for(db, &server).await? else {
+/// Where each of `applications` stands against the version it would take next,
+/// for a caller that has already picked out an environment's applications.
+// spec: RST#verdicts
+pub async fn verdicts(
+	db: &mut AsyncPgConnection,
+	applications: Vec<Application>,
+) -> Result<Vec<GroupVerdict>> {
+	let candidates = candidates_for(db, &applications).await?;
+
+	let mut out = Vec::new();
+	for server in &applications {
+		let Some(version) = candidates.get(&server.id) else {
 			continue;
 		};
-		let latest = latest_test(db, server.machine_id, version.id).await?;
-
-		out.push(GroupVerdict {
-			server_id: server.id,
-			target_version_id: version.id,
-			target_version: version.as_semver().to_string(),
-			verdict: latest
-				.as_ref()
-				.map_or(Verdict::NotTested, |test| test.verdict),
-			latest,
-		});
+		out.push(verdict_row(db, server, version).await?);
 	}
 
 	Ok(out)
+}
+
+/// Where each of `applications` stands against `target`, for a caller that has
+/// already resolved the environment's plan and the version it names.
+///
+/// The same answer [`verdicts`] gives, without re-deriving that version once
+/// per application. A target that is not published steers no testing, so it
+/// leaves every application without a verdict, as having no plan at all does.
+// spec: RST#verdicts
+pub async fn verdicts_against(
+	db: &mut AsyncPgConnection,
+	applications: Vec<Application>,
+	target: Option<&Version>,
+) -> Result<Vec<GroupVerdict>> {
+	let Some(target) = target else {
+		return Ok(Vec::new());
+	};
+	if target.status != commons_types::version::VersionStatus::Published {
+		return Ok(Vec::new());
+	}
+
+	let mut out = Vec::new();
+	for server in applications {
+		// The migrations under test are Tamanu's, so only Tamanu has
+		// candidates.
+		// spec: RST#candidate-versions
+		if server.r#type.software() != "tamanu" {
+			continue;
+		}
+		out.push(verdict_row(db, &server, target).await?);
+	}
+
+	Ok(out)
+}
+
+async fn verdict_row(
+	db: &mut AsyncPgConnection,
+	server: &Application,
+	version: &Version,
+) -> Result<GroupVerdict> {
+	let latest = latest_test(db, server.machine_id, version.id).await?;
+	Ok(GroupVerdict {
+		server_id: server.id,
+		target_version_id: version.id,
+		target_version: version.as_semver().to_string(),
+		verdict: latest
+			.as_ref()
+			.map_or(Verdict::NotTested, |test| test.verdict),
+		latest,
+	})
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn a_long_error_is_capped_on_a_character_boundary() {
+		let long = "é".repeat(MAX_ERROR_CHARS + 500);
+		let kept = truncate_error(long);
+		assert_eq!(kept.chars().count(), MAX_ERROR_CHARS);
+	}
+
+	#[test]
+	fn a_short_error_is_kept_whole() {
+		let error = "column \"note_type_id\" does not exist".to_string();
+		assert_eq!(truncate_error(error.clone()), error);
+	}
 }

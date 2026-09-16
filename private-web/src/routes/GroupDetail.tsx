@@ -9,13 +9,15 @@ import {
 	Typography,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
-import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
 import BackupIcon from "@mui/icons-material/Backup";
 import EditIcon from "@mui/icons-material/Edit";
 import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
+import { useState } from "react";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import GroupDomainsSection from "../components/GroupDomainsSection";
+import { MaintenanceMarker } from "../components/HealthChip";
+import GroupInventorySection from "../components/GroupInventorySection";
 import MigrationTestsSection from "../components/MigrationTestsSection";
 import { OperatorAvatar, connectedFor } from "../components/OperatorAvatars";
 import ActiveIncidentCard from "../components/ActiveIncidentCard";
@@ -36,15 +38,23 @@ import {
 export default function GroupDetail() {
 	const { id = "" } = useParams<{ id: string }>();
 	const navigate = useNavigate();
-	const detail = useApi("fleet/groups", "get", { server_group_id: id }, [id]);
+	// A window declared or lifted below changes what a run on this group's
+	// inventory would be served, and which environments the tree marks, so the
+	// page reads one state.
+	const [maintenanceTick, setMaintenanceTick] = useState(0);
+	const detail = useApi("fleet/groups", "get", { server_group_id: id }, [
+		id,
+		maintenanceTick,
+	]);
 	const admin = useIsAdmin() === true;
 	const archive = useApiAction("fleet/groups", "delete");
-	// Only the currently-open incident matters for the active-incident
-	// section; closed ones live behind the /incidents filter route.
+	// Only currently-open incidents matter for the active-incident section;
+	// closed ones live behind the /incidents filter route. A group holds one
+	// per environment plus its own, so there can be several at once.
 	const activeIncidents = useApi(
 		"incidents",
 		"list_for_group",
-		{ server_group_id: id, include_closed: false, limit: 1 },
+		{ server_group_id: id, include_closed: false },
 		[id],
 	);
 	// Same payload the status-page card uses, so the operator list here
@@ -70,10 +80,8 @@ export default function GroupDetail() {
 		groupStatuses.status === "ok"
 			? aggregateOperators(groupStatuses.data.members)
 			: [];
-	const openIncident =
-		activeIncidents.status === "ok" && activeIncidents.data.length > 0
-			? activeIncidents.data[0]
-			: null;
+	const openIncidents =
+		activeIncidents.status === "ok" ? activeIncidents.data : [];
 
 	// A group archives when empty, or when every member has gone quiet, in
 	// which case archiving cascades to those servers. The card carries that
@@ -113,20 +121,9 @@ export default function GroupDetail() {
 						{group.name}
 					</Typography>
 					{detail.data.maintained && (
-						<Chip
-							size="small"
-							variant="outlined"
-							color="info"
-							icon={<BuildOutlinedIcon />}
-							label={
-								detail.data.maintenance_settling
-									? "Maintenance just ended"
-									: "Under maintenance"
-							}
-							component="a"
+						<MaintenanceMarker
+							settling={detail.data.maintenance_settling}
 							href="#maintenance"
-							clickable
-							data-testid="maintenance-marker"
 						/>
 					)}
 				</Stack>
@@ -175,7 +172,13 @@ export default function GroupDetail() {
 				/>
 			)}
 
-			{openIncident && <ActiveIncidentCard incident={openIncident} />}
+			{openIncidents.map((incident) => (
+				<ActiveIncidentCard
+					key={incident.id}
+					incident={incident}
+					targetName={incident.rank}
+				/>
+			))}
 
 			{operators.length > 0 && <OperatorsSection operators={operators} />}
 
@@ -234,13 +237,26 @@ export default function GroupDetail() {
 						arrive by report.
 					</Alert>
 				) : (
-					<GroupTree machines={machines} applications={applications} />
+					<GroupTree
+						machines={machines}
+						applications={applications}
+						environments={detail.data.environments}
+					/>
 				)}
 			</Box>
 
 			<BackupsCard groupId={group.id} isAdmin={admin} />
 
 			<MigrationTestsSection groupId={group.id} servers={applications} />
+
+			<GroupInventorySection
+				groupId={group.id}
+				groupName={group.name}
+				applications={applications}
+				machines={machines}
+				maintenanceTick={maintenanceTick}
+				onMaintenanceChange={() => setMaintenanceTick((n) => n + 1)}
+			/>
 
 			<GroupDomainsSection groupId={group.id} />
 
@@ -249,6 +265,9 @@ export default function GroupDetail() {
 				anchor="maintenance"
 				id={group.id}
 				targetLabel={group.name}
+				environments={detail.data.environments.map((e) => e.rank)}
+				reloadKey={maintenanceTick}
+				onChanged={() => setMaintenanceTick((n) => n + 1)}
 			/>
 			<SilencedRefsSection scope="group" id={group.id} />
 		</Stack>

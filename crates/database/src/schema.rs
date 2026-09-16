@@ -53,6 +53,7 @@ diesel::table! {
 		extra -> Jsonb,
 		version -> Nullable<Text>,
 		reported_at -> Timestamptz,
+		version_reported_at -> Nullable<Timestamptz>,
 	}
 }
 
@@ -381,6 +382,21 @@ diesel::table! {
 }
 
 diesel::table! {
+	inventory_variables (id) {
+		id -> Uuid,
+		server_group_id -> Nullable<Uuid>,
+		rank -> Nullable<Text>,
+		machine_id -> Nullable<Uuid>,
+		name -> Text,
+		value -> Nullable<Jsonb>,
+		is_secret -> Bool,
+		set_by -> Nullable<Text>,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	devices (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -431,6 +447,7 @@ diesel::table! {
 		server_group_id -> Nullable<Uuid>,
 		escalated_at -> Nullable<Timestamptz>,
 		closing_at -> Nullable<Timestamptz>,
+		rank -> Nullable<Text>,
 	}
 }
 
@@ -441,6 +458,21 @@ diesel::table! {
 		issue_id -> Uuid,
 		author -> Text,
 		body -> Text,
+	}
+}
+
+diesel::table! {
+	inventory_leases (id) {
+		id -> Uuid,
+		server_group_id -> Uuid,
+		rank -> Text,
+		intent -> Text,
+		held_by -> Nullable<Text>,
+		note -> Nullable<Text>,
+		taken_at -> Timestamptz,
+		expires_at -> Timestamptz,
+		released_at -> Nullable<Timestamptz>,
+		released_by -> Nullable<Text>,
 	}
 }
 
@@ -555,6 +587,8 @@ diesel::table! {
 		settled_at -> Nullable<Timestamptz>,
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
+		rank -> Nullable<Text>,
+		application_id -> Nullable<Uuid>,
 	}
 }
 
@@ -580,6 +614,7 @@ diesel::table! {
 		data_bytes_before -> Int8,
 		data_bytes_after -> Int8,
 		application_id -> Nullable<Uuid>,
+		error -> Nullable<Text>,
 	}
 }
 
@@ -791,6 +826,7 @@ diesel::table! {
 		planned_time -> Nullable<Time>,
 		planned_zone -> Nullable<Text>,
 		planned_end_time -> Nullable<Time>,
+		rank -> Text,
 	}
 }
 
@@ -859,7 +895,10 @@ diesel::joinable!(incident_issues -> incidents (incident_id));
 diesel::joinable!(incident_issues -> issues (issue_id));
 diesel::joinable!(incident_notes -> incidents (incident_id));
 diesel::joinable!(incident_reeval_queue -> applications (application_id));
+diesel::joinable!(inventory_variables -> machines (machine_id));
+diesel::joinable!(inventory_variables -> server_groups (server_group_id));
 diesel::joinable!(incidents -> server_groups (server_group_id));
+diesel::joinable!(inventory_leases -> server_groups (server_group_id));
 diesel::joinable!(issue_notes -> issues (issue_id));
 diesel::joinable!(issues -> applications (application_id));
 diesel::joinable!(issues -> devices (device_id));
@@ -871,6 +910,7 @@ diesel::joinable!(machine_enrollment_tokens -> machines (machine_id));
 diesel::joinable!(machine_reported_detail -> machines (machine_id));
 diesel::joinable!(machines -> devices (device_id));
 diesel::joinable!(machines -> server_groups (group_id));
+diesel::joinable!(maintenance_windows -> applications (application_id));
 diesel::joinable!(maintenance_windows -> machines (machine_id));
 diesel::joinable!(maintenance_windows -> server_groups (server_group_id));
 diesel::joinable!(migration_tests -> applications (application_id));
@@ -924,11 +964,13 @@ diesel::allow_tables_to_appear_in_same_query!(
 	compromised_keys,
 	device_connections,
 	device_keys,
+	inventory_variables,
 	devices,
 	incident_issues,
 	incident_notes,
 	incident_reeval_queue,
 	incidents,
+	inventory_leases,
 	issue_notes,
 	issues,
 	machine_backup_capabilities,

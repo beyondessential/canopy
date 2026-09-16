@@ -23,14 +23,23 @@ export interface ServerInfo {
 	is_monitored?: boolean;
 	up?: ShortStatus | null;
 	health?: HealthState | null;
+	/// Whether a window reaches it, and whether that window is its own. A window
+	/// over the box it runs on suspends it without being declared over it.
+	// spec: MNT#presentation
+	maintained?: boolean | null;
+	own_window?: boolean | null;
 }
 
 export default function ServerShorty({
 	server,
+	heldBy,
 	current = false,
 	withGroup = true,
 }: {
 	server: ServerInfo;
+	/// What holds a window this application did not have declared over it.
+	// spec: MNT#presentation
+	heldBy?: string | null;
 	/// Whether this row is the page the operator is already on. It is marked in
 	/// place rather than omitted, so a tree reads as a map rather than as a list
 	/// of everything else, and its name doesn't link back to where they are.
@@ -66,6 +75,10 @@ export default function ServerShorty({
 					up={server.up}
 					health={server.health ?? undefined}
 					monitored={!unmonitored}
+					maintained={server.own_window ?? false}
+					suspended={server.maintained ?? false}
+					heldBy={heldBy}
+					title={name}
 				/>
 			)}
 			{current ? (

@@ -1813,10 +1813,11 @@ export interface paths {
         /**
          * Update a server's fields.
          * @description Applies a partial update — only the fields present in `data` are
-         *     changed. Moving a previously-ungrouped server into a group, or toggling
-         *     `is_monitored`, re-evaluates the server's open issues so incidents catch
-         *     up with the new state. Returns 400 if the update is rejected (e.g. an
-         *     invalid host value, or a role the target product doesn't define).
+         *     changed. Moving a previously-ungrouped server into a group, toggling
+         *     `is_monitored`, or changing the rank re-evaluates the server's open issues
+         *     so incidents catch up with the new state. Returns 400 if the update is
+         *     rejected (e.g. an invalid host value, or a role the target product doesn't
+         *     define).
          */
         post: operations["server_update"];
         delete?: never;
@@ -2576,8 +2577,9 @@ export interface paths {
         put?: never;
         /**
          * List incidents for a server group.
-         * @description Returns the group's incidents. By default only open incidents are
-         *     returned; set `include_closed` to also include closed ones.
+         * @description Returns the group's own incidents and those of every environment in it. By
+         *     default only open incidents are returned; set `include_closed` to also
+         *     include closed ones.
          */
         post: operations["incident_list_for_group"];
         delete?: never;
@@ -2597,9 +2599,9 @@ export interface paths {
         put?: never;
         /**
          * List incidents involving a server.
-         * @description Returns incidents that issues on the given server have contributed to.
-         *     By default only open incidents are returned; set `include_closed` to
-         *     also include closed ones.
+         * @description Returns the incidents on the environment the application is in, and the
+         *     group's own where it belongs to no environment. By default only open
+         *     incidents are returned; set `include_closed` to also include closed ones.
          */
         post: operations["incident_list_for_server"];
         delete?: never;
@@ -2667,6 +2669,184 @@ export interface paths {
          *     allow-list.
          */
         post: operations["incident_unresolve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory/extend_lease": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Push a held lease's expiry out, so a run still going keeps the environment.
+         * @description Only the holder can extend, and only while the lease is unreleased: one that
+         *     has been released is gone, and taking a fresh one goes through the same
+         *     refusals a first one does.
+         */
+        post: operations["inventory_extend_lease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory/for_group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Serve the inventory of the environment the caller holds the lease on.
+         * @description Refuses a lease that is not the caller's or no longer holds, and a secret
+         *     variable whose value cannot be read: a run receiving a machine that looks
+         *     configured and is missing a value is worse than one that does not run.
+         */
+        post: operations["inventory_for_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory/release_lease": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Give the environment back when the run ends.
+         * @description Releasing is audited with who did it, since it can be another operator
+         *     taking work over rather than the holder finishing.
+         */
+        post: operations["inventory_release_lease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory/run_state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What a run on this environment would meet: the lease holding it and the
+         *     maintenance window over it, read the way taking a lease reads them so the
+         *     group page and the refusal agree.
+         * @description Available to any operator: it names who is running and until when, and
+         *     carries nothing a run receives.
+         */
+        post: operations["inventory_run_state"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory/take_lease": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Take the environment's run lease.
+         * @description Refuses a group canopy does not have, one that has been archived, one
+         *     holding several environments with no rank named, a rank with no live
+         *     application to configure, an environment another operator holds or has
+         *     declared maintenance over, and an upgrade of production with no plan
+         *     recorded, saying which it was so an operator knows what to do or who to
+         *     wait for.
+         */
+        post: operations["inventory_take_lease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory_variables/for_group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Everything set under a group: its own, its environments', and those of the
+         *     machines in it.
+         * @description A secret's value is not among them; it is served only as part of an
+         *     inventory, and only to an administrator.
+         */
+        post: operations["inventory_variables_for_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory_variables/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Forget a variable, value and all.
+         * @description The row goes first, so a value the secret store will not let go of leaves
+         *     nothing behind that would refuse every later read of the inventory.
+         */
+        post: operations["inventory_variables_remove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory_variables/set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set or replace a variable.
+         * @description A secret's value goes to the secret store keyed by name, and the row holds
+         *     no value at all. Turning a secret into a plain variable forgets the stored
+         *     value, so a later switch back never resurrects a stale one.
+         */
+        post: operations["inventory_variables_set"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2919,12 +3099,15 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Declare that a server or a group is being worked on.
+         * Declare that an application, a machine, a group, or one of a group's
+         *     environments is being worked on.
          * @description Every check on the target grades to skipped while the window holds and
          *     for a settle period after it ends, so nothing on it opens or joins an
-         *     incident. Issues already in an open incident leave it, closing the
-         *     incident where nothing else holds it open. A target that already has an
-         *     open window has that window amended rather than a second opened.
+         *     incident. A window over one application leaves the rest of the box watched;
+         *     one over the machine covers everything on it. Issues already in an open
+         *     incident leave it, closing the incident where nothing else holds it open. A
+         *     target that already has an open window has that window amended rather than
+         *     a second opened.
          *     Requires admin access.
          */
         post: operations["declare"];
@@ -3840,9 +4023,9 @@ export interface paths {
         put?: never;
         /**
          * Planned upgrades across the fleet.
-         * @description Every live group, whether or not it has a plan. A group several minors
-         *     behind with no plan is the thing this view exists to surface, so it is listed
-         *     rather than omitted.
+         * @description Every environment of every live group, whether or not it has a plan. A
+         *     group several minors behind with no plan is the thing this view exists to
+         *     surface, so its environments are listed rather than omitted.
          */
         post: operations["upgrade_plans_fleet"];
         delete?: never;
@@ -3903,9 +4086,9 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Record where a group is going, retiring any plan it already had.
-         * @description A group goes one place next, so this replaces rather than queues. The target
-         *     must be published and ahead of what the group runs.
+         * Record where an environment is going, retiring any plan it already had.
+         * @description An environment goes one place next, so this replaces rather than queues. The
+         *     target must be published and ahead of what the environment runs.
          */
         post: operations["upgrade_plans_record"];
         delete?: never;
@@ -3924,8 +4107,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * The versions a group could be planned onto: published, and ahead of what it
-         *     runs.
+         * The versions an environment could be planned onto: published, and ahead of
+         *     what it runs.
          * @description Offering only valid targets is what keeps the operator from picking one
          *     `record` would refuse.
          */
@@ -5438,6 +5621,12 @@ export interface components {
         /** @description Declare a window over a target, or amend the one it already has. */
         DeclareArgs: {
             /**
+             * Format: uuid
+             * @description The application, for a window over one workload. Covers that
+             *     application and nothing else on the box it runs on.
+             */
+            application_id?: string | null;
+            /**
              * Format: date-time
              * @description When the work is expected to finish. The window ends itself then.
              */
@@ -5449,9 +5638,10 @@ export interface components {
             machine_id?: string | null;
             /** @description What is being done. */
             note?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: uuid
-             * @description The group, for a window over a whole group.
+             * @description The group, for a window over a whole group or one of its environments.
              */
             server_group_id?: string | null;
         };
@@ -5710,6 +5900,20 @@ export interface components {
              */
             ticket: string;
         };
+        /**
+         * @description Which environment to act on: exactly one of the group's identifier or its
+         *     name, and the rank where the group holds more than one environment.
+         */
+        EnvironmentArgs: {
+            /** @description Name of the server group, matched exactly. */
+            group?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
+            /**
+             * Format: uuid
+             * @description Identifier of the server group.
+             */
+            server_group_id?: string | null;
+        };
         /** @description Request body for running a query in the SQL playground. */
         ExecuteArgs: {
             /** @description The query to execute. */
@@ -5744,20 +5948,41 @@ export interface components {
              */
             machine_id: string;
             /**
-             * @description Whether a maintenance window suspends this box — its own or its
-             *     group's. A window is declared over a machine and never over an
-             *     application, so this is the box's fact and the applications on it are
-             *     suspended by it rather than carrying one of their own.
+             * @description Whether a maintenance window suspends the box this runs on, its own or
+             *     one reaching it through its environment or its group.
              */
             machine_maintained: boolean;
+            /**
+             * @description Whether every window over the box has ended and it is serving out the
+             *     settle period, so a lift reads as taken effect rather than as a window
+             *     that is still holding.
+             */
+            machine_maintenance_settling: boolean;
             /** @description The box's name, where an operator gave it one. */
             machine_name?: string | null;
+            /**
+             * @description Whether the window covering this box was declared over the box itself,
+             *     as against one it falls under through its environment or its group. A
+             *     reader marks at the grain the operator declared at, so an environment's
+             *     window is not drawn as every box in it having its own.
+             */
+            machine_own_window: boolean;
             /**
              * @description The box's own reachability, which is not this application's: a machine
              *     that has gone quiet takes everything on it with it, and one that is fine
              *     says nothing about whether the software on it is.
              */
             machine_up: components["schemas"]["ShortStatus"];
+            /**
+             * @description Whether a maintenance window suspends this application, by naming it or
+             *     by covering the box it runs on.
+             */
+            maintained: boolean;
+            /**
+             * @description Whether every window covering this application has ended and it is
+             *     serving out the settle period.
+             */
+            maintenance_settling: boolean;
             /** @description Name of the server. */
             name: string;
             /**
@@ -5767,6 +5992,12 @@ export interface components {
              *     connected right now.
              */
             operators: components["schemas"]["OperatorPresence"][];
+            /**
+             * @description Whether the window suspending it was declared over this application in
+             *     particular. A window reaching it through its box is marked at that
+             *     grain, so the dot stays plain.
+             */
+            own_window: boolean;
             rank?: null | components["schemas"]["ServerRank"];
             /** @description The application the server runs, presented alongside its role. */
             type: components["schemas"]["ApplicationType"];
@@ -5775,6 +6006,18 @@ export interface components {
              *     status update.
              */
             up: components["schemas"]["ShortStatus"];
+        };
+        /**
+         * @description The failing test behind a `failed` verdict, so the fleet view can say what
+         *     broke without a second lookup.
+         */
+        FailedTest: {
+            /** @description The application whose data broke, since the verdict rolls up several. */
+            application: string;
+            /** @description Why it stopped, redacted by the runner that reported it. */
+            error?: string | null;
+            /** @description The migration it stopped at, absent when the runner named none. */
+            migration?: string | null;
         };
         /** @description Both populations the fleet view spreads its figures over. */
         FleetDetailData: {
@@ -5949,6 +6192,11 @@ export interface components {
             applications: components["schemas"]["ServerInfo"][];
             /** @description The group's effective `billing.*` labels (product/deployment/stage). */
             billing_labels: components["schemas"]["BillingTag"][];
+            /**
+             * @description The environments the group has, production first: the ranks its live
+             *     applications sit at. Each is a maintenance target of its own.
+             */
+            environments: components["schemas"]["GroupEnvironment"][];
             /** @description The group itself. */
             group: components["schemas"]["ServerGroup"];
             /**
@@ -6000,6 +6248,22 @@ export interface components {
              */
             zone?: string | null;
         };
+        /**
+         * @description One of a group's environments: its applications at one rank, and a
+         *     maintenance target of its own, so the tree can mark the row a window was
+         *     declared over rather than only the boxes it caught.
+         */
+        GroupEnvironment: {
+            /** @description Whether a window over this environment (or its settle period) suspends it. */
+            maintained: boolean;
+            /**
+             * @description Whether that window has ended and watching resumes when the settle
+             *     period elapses.
+             */
+            maintenance_settling: boolean;
+            /** @description The rank its applications sit at. */
+            rank: components["schemas"]["ServerRank"];
+        };
         /** @description Identifies the server group to operate on. */
         GroupIdArgs: {
             /**
@@ -6029,8 +6293,18 @@ export interface components {
             id: string;
             /** @description Whether a maintenance window suspends this box, its own or its group's. */
             maintained: boolean;
+            /**
+             * @description Whether every window over the box has ended and it is serving out the
+             *     settle period.
+             */
+            maintenance_settling: boolean;
             /** @description The operator-assigned name, where it has one. */
             name?: string | null;
+            /**
+             * @description Whether the window covering this box was declared over the box itself,
+             *     as against one reaching it through its environment or its group.
+             */
+            own_window: boolean;
             /**
              * @description The platform the box reports, where it reports one. The one machine
              *     figure the tree shows: it is what distinguishes two otherwise
@@ -6259,12 +6533,13 @@ export interface components {
             incident_id: string;
         };
         /**
-         * @description An operational incident: a group-scoped roll-up of related issues.
+         * @description An operational incident: a roll-up of the related issues on one target,
+         *     which is one of a group's environments, the group itself, or canopy.
          *
-         *     An incident opens when an issue on a server in the group crosses the
-         *     severity threshold, gathers further contributing issues while open, and
-         *     closes automatically once the last serious contributor clears. Operators
-         *     can additionally mark an incident resolved with a reason.
+         *     An incident opens when an issue on its target crosses the severity
+         *     threshold, gathers further contributing issues while open, and closes
+         *     automatically once the last serious contributor clears. Operators can
+         *     additionally mark an incident resolved with a reason.
          */
         IncidentData: {
             /**
@@ -6319,6 +6594,7 @@ export interface components {
              * @description When the incident opened.
              */
             opened_at: string;
+            rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: date-time
              * @description When an operator marked the incident resolved; null if it has not
@@ -6338,7 +6614,7 @@ export interface components {
             resolved_reason?: string | null;
             /**
              * Format: uuid
-             * @description Identifier of the server group the incident belongs to, or null for
+             * @description Identifier of the group the incident belongs to, or null for
              *     a canopy-wide incident (aggregating canopy's self-alerts).
              */
             server_group_id?: string | null;
@@ -6489,6 +6765,159 @@ export interface components {
              *     to it). Unrecognised values are stored but have no effect.
              */
             semantics?: string[];
+        };
+        /** @description One application on a machine, so a run knows what it is configuring there. */
+        InventoryApplication: {
+            /**
+             * Format: uuid
+             * @description Identifier of the application.
+             */
+            id: string;
+            /**
+             * @description The application's name within its group, falling back to its host and
+             *     then its identifier.
+             */
+            name: string;
+            /** @description What the application is: the software and the role it plays together. */
+            type: components["schemas"]["ApplicationType"];
+        };
+        /** @description Read an environment's inventory under a lease held on it. */
+        InventoryArgs: {
+            /**
+             * Format: uuid
+             * @description Identifier of the lease the run holds, from `take_lease`.
+             */
+            lease_id: string;
+        };
+        /** @description One machine in an environment. */
+        InventoryHost: {
+            /**
+             * @description The address to reach it at: an `ansible_host` variable, the tailnet name
+             *     of the device bound to it, or the recorded host of an application on it.
+             *     Null where canopy holds none of those.
+             */
+            address?: string | null;
+            /** @description The applications the machine carries in this environment, by name. */
+            applications: components["schemas"]["InventoryApplication"][];
+            /**
+             * Format: uuid
+             * @description Identifier of the machine.
+             */
+            id: string;
+            /** @description The machine's name, falling back to its identifier. */
+            name: string;
+            /**
+             * @description The variables the machine sets itself, so a value inherited from a wider
+             *     scope can be told from one set here even where the two agree.
+             */
+            own_vars: components["schemas"]["VarMap"];
+            /** @description Which of `vars` are secret. */
+            secret_vars: string[];
+            /**
+             * @description The effective variables: the machine's over the environment's over the
+             *     group's. This is what a run acts on.
+             */
+            vars: components["schemas"]["VarMap"];
+        };
+        /** @description A run's hold on one environment. */
+        InventoryLease: {
+            /**
+             * Format: date-time
+             * @description When it stops holding unless extended.
+             */
+            expires_at: string;
+            /** @description The login the lease is held by. */
+            held_by?: string | null;
+            /**
+             * Format: uuid
+             * @description Unique identifier of this lease, which a run names to read the
+             *     inventory.
+             */
+            id: string;
+            /** @description What the run holding it intends. */
+            intent: components["schemas"]["RunIntent"];
+            /** @description What the holder said they are doing. */
+            note?: string | null;
+            /** @description The rank of the environment within it. */
+            rank: components["schemas"]["ServerRank"];
+            /**
+             * Format: date-time
+             * @description When it was released, and `None` while it is still held.
+             */
+            released_at?: string | null;
+            /** @description Who released it. */
+            released_by?: string | null;
+            /**
+             * Format: uuid
+             * @description The group the environment belongs to.
+             */
+            server_group_id: string;
+            /**
+             * Format: date-time
+             * @description When it was taken.
+             */
+            taken_at: string;
+        };
+        /**
+         * @description One variable: where it is set, its name, and its value where it is not a
+         *     secret.
+         */
+        InventoryVariable: {
+            /**
+             * Format: date-time
+             * @description When the name was first set here.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Unique identifier of this variable.
+             */
+            id: string;
+            /** @description Whether the value is a secret. Applies to the whole value. */
+            is_secret: boolean;
+            /**
+             * Format: uuid
+             * @description Set for a variable belonging to one machine.
+             */
+            machine_id?: string | null;
+            /** @description The variable's name, unique within its scope. */
+            name: string;
+            rank?: null | components["schemas"]["ServerRank"];
+            /**
+             * Format: uuid
+             * @description Set for a variable belonging to a group or to one of its environments.
+             */
+            server_group_id?: string | null;
+            /** @description The login that last set the value. */
+            set_by?: string | null;
+            /**
+             * Format: date-time
+             * @description When its value was last replaced.
+             */
+            updated_at: string;
+            /** @description The value, and `None` for a secret, whose value is in the secret store. */
+            value?: unknown;
+        };
+        /** @description An environment's inventory. */
+        InventoryView: {
+            /** @description Name of the server group. */
+            group: string;
+            /**
+             * Format: uuid
+             * @description Identifier of the server group the inventory covers.
+             */
+            group_id: string;
+            /** @description The environment's machines, ordered by name. */
+            hosts: components["schemas"]["InventoryHost"][];
+            /** @description Rank of the environment served. */
+            rank: components["schemas"]["ServerRank"];
+            /** @description Which of `vars` are secret. */
+            secret_vars: string[];
+            /**
+             * @description The group's and the environment's variables, merged. Every machine
+             *     below carries these too, under its own overrides.
+             */
+            vars: components["schemas"]["VarMap"];
         };
         /** @description A note to add to an issue. */
         IssueAddNoteArgs: {
@@ -6859,12 +7288,19 @@ export interface components {
              * @description Size of the data the migrations ran against.
              */
             data_bytes_before: number;
+            /**
+             * @description What the migration runner said about that failure, when the consumer
+             *     sent it.
+             */
+            error?: string | null;
             /** @description The migration that failed, when one did. */
             failed_migration?: string | null;
             /** @description When the consumer reported it. */
             reported_at: string;
             /** @description The snapshot the verdict was reached against. */
             snapshot_id?: string | null;
+            /** @description Each migration that ran, in the order they ran. */
+            timings: components["schemas"]["MigrationTiming"][];
             /**
              * Format: int64
              * @description Whole seconds the migration run took.
@@ -6872,6 +7308,14 @@ export interface components {
             total_elapsed: number;
             /** @description Whether the migrations applied. */
             verdict: components["schemas"]["Verdict"];
+        };
+        /** @description Name a lease. */
+        LeaseArgs: {
+            /**
+             * Format: uuid
+             * @description Identifier of the lease.
+             */
+            lease_id: string;
         };
         /** @description The window to lift. */
         LiftArgs: {
@@ -7281,6 +7725,12 @@ export interface components {
              */
             group_applications: components["schemas"]["ServerInfo"][];
             /**
+             * @description The group's environments and whether a window holds over each, so the
+             *     group summary marks the row a window was declared over rather than
+             *     leaving it to be inferred from the boxes it caught.
+             */
+            group_environments: components["schemas"]["GroupEnvironment"][];
+            /**
              * @description Every machine in this box's group, for the same tree. Empty when the
              *     machine is ungrouped.
              */
@@ -7316,6 +7766,13 @@ export interface components {
              *     cannot say who is on it now.
              */
             operators: components["schemas"]["OperatorPresence"][];
+            /**
+             * @description Whether that window was declared over this box, rather than reaching it
+             *     through its environment or its group. The mark is drawn at the grain it
+             *     was declared over, and what a box's applications are held by follows
+             *     from it.
+             */
+            own_window: boolean;
             /** @description Whether the box is currently reporting, on its own threshold. */
             up: components["schemas"]["ShortStatus"];
         };
@@ -7403,7 +7860,10 @@ export interface components {
          * @enum {string}
          */
         MaintenanceKind: "quick" | "full";
-        /** @description A declaration that a machine or a group is being worked on. */
+        /**
+         * @description A declaration that an application, a machine, a group, or one of a group's
+         *     environments is being worked on.
+         */
         MaintenanceWindow: {
             /**
              * Format: date-time
@@ -7412,6 +7872,12 @@ export interface components {
             amended_at?: string | null;
             /** @description The operator who last amended the window, where one has. */
             amended_by?: string | null;
+            /**
+             * Format: uuid
+             * @description Set for a window over one application, covering that application's
+             *     checks and nothing else on the box it runs on.
+             */
+            application_id?: string | null;
             /**
              * Format: date-time
              * @description When this record was created.
@@ -7453,6 +7919,7 @@ export interface components {
             machine_id?: string | null;
             /** @description What is being done, where the operator said. */
             note?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: uuid
              * @description Set for a window over a group, covering the group's own checks and
@@ -7546,6 +8013,21 @@ export interface components {
              *     history.
              */
             target_id: string;
+        };
+        /** @description How long one migration took, in the order it ran. */
+        MigrationTiming: {
+            /**
+             * Format: int64
+             * @description Whole seconds this migration took.
+             */
+            elapsed: number;
+            /** @description The migration's name, as the migration runner reports it. */
+            name: string;
+            /**
+             * Format: int32
+             * @description Where it fell in the run, counting from zero.
+             */
+            ordinal: number;
         };
         /**
          * @description A group of versions sharing the same major.minor release line, with a
@@ -7789,9 +8271,9 @@ export interface components {
                  */
                 machine_id: string;
                 /**
-                 * @description Whether a maintenance window suspends this server, its own or its
-                 *     group's. Set alongside `up` and `health` by the endpoints that
-                 *     decorate listings; `None` where they aren't.
+                 * @description Whether a maintenance window suspends this server, its own or one over
+                 *     the box it runs on. Set alongside `up` and `health` by the endpoints
+                 *     that decorate listings; `None` where they aren't.
                  */
                 maintained?: boolean | null;
                 /**
@@ -7808,6 +8290,11 @@ export interface components {
                 name?: string | null;
                 /** @description Free-text operator notes about the server. */
                 notes: string;
+                /**
+                 * @description Whether that window was declared over this application in particular.
+                 *     One reaching it through its box is marked on the box.
+                 */
+                own_window?: boolean | null;
                 /**
                  * @description Name this server appears under in the public mobile-app server list.
                  *     `None` means the server is not listed publicly.
@@ -7960,7 +8447,8 @@ export interface components {
             type: string;
         };
         /**
-         * @description How a plan stands: still where the group is going, or the way it closed.
+         * @description How a plan stands: still where the environment is going, or the way it
+         *     closed.
          * @enum {string}
          */
         PlanOutcome: "open" | "met" | "replaced" | "withdrawn";
@@ -7980,11 +8468,19 @@ export interface components {
             /** @description Its semver. */
             version: string;
         };
-        /** @description One row of the planned-upgrades view. */
+        /** @description One row of the planned-upgrades view: one of a group's environments. */
         PlannedUpgrade: {
             attempt?: null | components["schemas"]["AttemptState"];
-            /** @description The version the group runs now, where it has reported one. */
+            /**
+             * Format: int64
+             * @description How far that is behind the newest published version, as majors times a
+             *     thousand plus minors. Zero where it is current; `null` where it has
+             *     reported no version.
+             */
+            behind?: number | null;
+            /** @description The version the environment runs now, where it has reported one. */
             current_version?: string | null;
+            failed_test?: null | components["schemas"]["FailedTest"];
             /**
              * Format: uuid
              * @description The group this concerns.
@@ -7993,11 +8489,24 @@ export interface components {
             /** @description Its name, so the view reads without a second lookup. */
             group_name: string;
             /**
+             * @description Whether this is the group's highest-ranked environment, the one the
+             *     group's own version is read from.
+             */
+            headline: boolean;
+            /**
              * @description Whether the planned date has passed without the upgrade happening.
              *     Presentational: a slipping upgrade is normal operational reality.
              */
             late: boolean;
+            maintenance_window?: null | components["schemas"]["MaintenanceWindow"];
             plan?: null | components["schemas"]["UpgradePlan"];
+            planned_window?: null | components["schemas"]["PlannedWindow"];
+            /**
+             * @description The rank of the environment this concerns: the group's applications at
+             *     that rank.
+             */
+            rank: components["schemas"]["ServerRank"];
+            tally?: null | components["schemas"]["Tally"];
             /** @description The plan's target as semver. */
             target_version?: string | null;
             /**
@@ -8008,11 +8517,22 @@ export interface components {
              */
             testable?: boolean | null;
             /**
-             * @description Where the group's data stands against the planned version, rolled up from
-             *     its applications: any failure makes the group a failure, since one server
-             *     whose data breaks is enough to stop the upgrade. `null` without a plan.
+             * @description Where the environment's data stands against the planned version, rolled
+             *     up from its applications: any failure makes the environment a failure,
+             *     since one application whose data breaks is enough to stop the upgrade.
+             *     `null` without a plan.
              */
             verdict?: string | null;
+        };
+        /** @description The hours a plan says its work runs, resolved to instants. */
+        PlannedWindow: {
+            /**
+             * @description When it is planned to be over. A window closing earlier in the day than
+             *     it opened runs into the next morning.
+             */
+            ends_at: string;
+            /** @description When the work is planned to start. */
+            starts_at: string;
         };
         /**
          * @description Request body for reading one group's plans. Named apart from the
@@ -8270,7 +8790,7 @@ export interface components {
         RecordArgs: {
             /**
              * Format: uuid
-             * @description The group that intends to move.
+             * @description The group whose environment intends to move.
              */
             group_id: string;
             /** @description Anything the next reader needs to know. Optional. */
@@ -8292,6 +8812,8 @@ export interface components {
              *     `Pacific/Fiji`. Required alongside a time.
              */
             planned_zone?: string | null;
+            /** @description The rank of the environment within it that intends to move. */
+            rank: components["schemas"]["ServerRank"];
             /**
              * Format: uuid
              * @description The published version it intends to move to.
@@ -8440,6 +8962,11 @@ export interface components {
              * @description Patch version number.
              */
             patch: number;
+        };
+        /** @description Name one variable to forget. */
+        RemoveArgs: components["schemas"]["ScopeArgs"] & {
+            /** @description The variable's name. */
+            name: string;
         };
         /** @description Identifies a one-off backup or restore request for a server. */
         RequestArgs: {
@@ -8931,6 +9458,11 @@ export interface components {
             id: string;
         };
         /**
+         * @description What a run intends to do to the environment it holds.
+         * @enum {string}
+         */
+        RunIntent: "configure" | "upgrade";
+        /**
          * @description Outcome of a reported backup or restore run.
          * @enum {string}
          */
@@ -9003,6 +9535,13 @@ export interface components {
              */
             s3_sent_raw_bytes?: number | null;
         };
+        /** @description The lease and the maintenance window a run on an environment would meet. */
+        RunState: {
+            lease?: null | components["schemas"]["InventoryLease"];
+            /** @description Whether that window is someone else's, which is what refuses a take. */
+            refuses: boolean;
+            window?: null | components["schemas"]["MaintenanceWindow"];
+        };
         /**
          * @description State of an activity row: a device-reported run, or a run inferred from a
          *     credential issuance that never matched a report.
@@ -9060,6 +9599,24 @@ export interface components {
             retention?: null | components["schemas"]["RetentionPolicy"];
             /** @description Backup type this override applies to. */
             type: string;
+        };
+        /**
+         * @description Which scope a request addresses: a group, one of its environments, or one
+         *     machine.
+         */
+        ScopeArgs: {
+            /**
+             * Format: uuid
+             * @description Identifier of the machine, for a variable one machine carries.
+             */
+            machine_id?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
+            /**
+             * Format: uuid
+             * @description Identifier of the server group, for a variable a whole group carries
+             *     or one of its environments does.
+             */
+            server_group_id?: string | null;
         };
         /**
          * @description A self-alert: a problem with canopy's own operation, such as an
@@ -9217,6 +9774,12 @@ export interface components {
              */
             group_applications: components["schemas"]["ServerInfo"][];
             /**
+             * @description The group's environments and whether a window holds over each, so the
+             *     group summary marks the row a window was declared over rather than
+             *     leaving it to be inferred from the boxes it caught.
+             */
+            group_environments: components["schemas"]["GroupEnvironment"][];
+            /**
              * @description Every machine in the group, for the same tree: the boxes the
              *     applications above are arranged under. Empty when the application is
              *     ungrouped.
@@ -9234,6 +9797,7 @@ export interface components {
              *     `group_machines`.
              */
             machine_name?: string | null;
+            machine_rank?: null | components["schemas"]["ServerRank"];
             /**
              * @description Whether a maintenance window suspends this server, its own or its
              *     group's: its checks are recorded and shown, and raise nothing.
@@ -9332,12 +9896,29 @@ export interface components {
              * @description Unique identifier of the group.
              */
             id: string;
+            /**
+             * @description Whether a window is declared over the group itself, covering every box
+             *     in it whatever its rank.
+             */
+            maintained: boolean;
+            /**
+             * @description The group's environments under a window of their own, so a reader marks
+             *     the environment's row rather than each box in it.
+             */
+            maintained_ranks: components["schemas"]["ServerRank"][];
+            /**
+             * @description Whether the group's own window has ended and it is serving out the
+             *     settle period.
+             */
+            maintenance_settling: boolean;
             /** @description Status of each server belonging to this group. */
             members: components["schemas"]["FacilityServerStatus"][];
             /** @description Name of the group. */
             name: string;
             /** @description Free-text notes about the group. */
             notes: string;
+            /** @description Of those, the ones serving out the settle period. */
+            settling_ranks: components["schemas"]["ServerRank"][];
             version?: null | components["schemas"]["VersionStr"];
             /**
              * Format: int64
@@ -9493,9 +10074,9 @@ export interface components {
              */
             machine_id: string;
             /**
-             * @description Whether a maintenance window suspends this server, its own or its
-             *     group's. Set alongside `up` and `health` by the endpoints that
-             *     decorate listings; `None` where they aren't.
+             * @description Whether a maintenance window suspends this server, its own or one over
+             *     the box it runs on. Set alongside `up` and `health` by the endpoints
+             *     that decorate listings; `None` where they aren't.
              */
             maintained?: boolean | null;
             /**
@@ -9512,6 +10093,11 @@ export interface components {
             name?: string | null;
             /** @description Free-text operator notes about the server. */
             notes: string;
+            /**
+             * @description Whether that window was declared over this application in particular.
+             *     One reaching it through its box is marked on the box.
+             */
+            own_window?: boolean | null;
             /**
              * @description Name this server appears under in the public mobile-app server list.
              *     `None` means the server is not listed publicly.
@@ -9649,6 +10235,18 @@ export interface components {
              * @description The server to update.
              */
             server_id: string;
+        };
+        /** @description Set or replace one variable. */
+        SetArgs: components["schemas"]["ScopeArgs"] & {
+            /** @description The variable's name. */
+            name: string;
+            /**
+             * @description Whether the value is a secret, held in the secret store and served only
+             *     as part of an inventory.
+             */
+            secret?: boolean;
+            /** @description The value, as JSON. */
+            value: unknown;
         };
         /** @description Request to enable or disable a server's backup capability for one type. */
         SetCapabilityArgs: {
@@ -10173,8 +10771,39 @@ export interface components {
             /** @description The tailnet (Tailscale network) this node belongs to. */
             tailnet: string;
         };
-        /** @description The target a window covers: exactly one of the two is set. */
+        /** @description Take the lease on an environment, which a run holds while it runs. */
+        TakeLeaseArgs: components["schemas"]["EnvironmentArgs"] & {
+            /** @description What the run intends. Configuring where not named. */
+            intent?: components["schemas"]["RunIntent"];
+            /** @description What the holder is doing, shown to whoever is refused meanwhile. */
+            note?: string | null;
+            /** @description Take over a lease another operator holds, which is audited. */
+            take_over?: boolean;
+        };
+        /**
+         * @description How many of an environment's applications have passed, out of how many the
+         *     migrations apply to.
+         */
+        Tally: {
+            /**
+             * Format: int32
+             * @description How many have a passing verdict against the planned version.
+             */
+            passed: number;
+            /**
+             * Format: int32
+             * @description How many the migrations apply to, passed or not.
+             */
+            total: number;
+        };
+        /** @description The target a window covers: exactly one of the ids is set. */
         TargetArgs: {
+            /**
+             * Format: uuid
+             * @description The application, for a window over one workload. Covers that
+             *     application and nothing else on the box it runs on.
+             */
+            application_id?: string | null;
             /**
              * Format: uuid
              * @description The machine, for a window over one box. Covers every application on it.
@@ -10182,9 +10811,19 @@ export interface components {
             machine_id?: string | null;
             /**
              * Format: uuid
-             * @description The group, for a window over a whole group.
+             * @description The group, for a window over a whole group or one of its environments.
              */
             server_group_id?: string | null;
+        };
+        /** @description Request body for the versions an environment could be planned onto. */
+        TargetsArgs: {
+            /**
+             * Format: uuid
+             * @description The group.
+             */
+            group_id: string;
+            /** @description The rank of the environment within it. */
+            rank: components["schemas"]["ServerRank"];
         };
         /**
          * @description One healthy↔degraded transition: the state became (or was first
@@ -10323,7 +10962,7 @@ export interface components {
             /** @description Exact version string to update (e.g. `"1.2.3"`). */
             version: string;
         };
-        /** @description A group's recorded intention to move to a version. */
+        /** @description An environment's recorded intention to move to a version. */
         UpgradePlan: {
             /** @description When it was last amended. */
             amended_at?: string | null;
@@ -10335,7 +10974,7 @@ export interface components {
             created_by?: string | null;
             /**
              * Format: uuid
-             * @description The group that intends to move.
+             * @description The group whose environment intends to move.
              */
             group_id: string;
             /**
@@ -10343,7 +10982,7 @@ export interface components {
              * @description Unique identifier for this plan.
              */
             id: string;
-            /** @description When the group's reported version reached the target. */
+            /** @description When the environment's reported version reached the target. */
             met_at?: string | null;
             /** @description Whatever the operator needs the next reader to know. */
             note?: string | null;
@@ -10358,6 +10997,11 @@ export interface components {
             planned_time?: string | null;
             /** @description The IANA zone the planned time is a wall clock in. */
             planned_zone?: string | null;
+            /**
+             * @description The rank of the environment that intends to move: the group's
+             *     applications at that rank.
+             */
+            rank: components["schemas"]["ServerRank"];
             /** @description When a newer plan replaced this one. */
             superseded_at?: string | null;
             /**
@@ -10418,6 +11062,18 @@ export interface components {
          */
         UrlField: string;
         Value: unknown;
+        /** @description Variables as a JSON object. */
+        VarMap: {
+            [key: string]: unknown;
+        };
+        /** @description Which group's variables to list. */
+        VariablesForGroupArgs: {
+            /**
+             * Format: uuid
+             * @description Identifier of the server group.
+             */
+            server_group_id: string;
+        };
         /**
          * @description Where a (server, version) pair stands.
          * @enum {string}
@@ -14215,6 +14871,354 @@ export interface operations {
             };
         };
     };
+    inventory_extend_lease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeaseArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryLease"];
+                };
+            };
+            /** @description No such lease */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description Held by someone else, or no longer held */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    inventory_for_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InventoryArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryView"];
+                };
+            };
+            /** @description No such lease */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The lease is someone else's, no longer holds, the environment is gone, or two machines share an address */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description A secret variable could not be read */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    inventory_release_lease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeaseArgs"];
+            };
+        };
+        responses: {
+            /** @description Released */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description No such lease, or it was already released */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    inventory_run_state: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnvironmentArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunState"];
+                };
+            };
+            /** @description No such server group */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description Archived, empty, or ambiguously named */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    inventory_take_lease: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TakeLeaseArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryLease"];
+                };
+            };
+            /** @description Neither or both of the group arguments */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description No such server group */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description Archived, empty, ambiguously named, spanning environments, held by someone else, under someone else's maintenance, or an unplanned upgrade of production */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    inventory_variables_for_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VariablesForGroupArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryVariable"][];
+                };
+            };
+            /** @description No such server group */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    inventory_variables_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemoveArgs"];
+            };
+        };
+        responses: {
+            /** @description Removed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Not one scope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description No variable of that name in that scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The secret store is unavailable */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    inventory_variables_set: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryVariable"];
+                };
+            };
+            /** @description Not one scope, not a usable variable name, or an `ansible_host` outside machine scope or not a string */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description No such server group or machine */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The secret store is unavailable */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     issue_add_note: {
         parameters: {
             query?: never;
@@ -15646,7 +16650,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description One row per live group. */
+            /** @description One row per environment of each live group. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -15771,7 +16775,7 @@ export interface operations {
                     "application/json": components["schemas"]["UpgradePlan"];
                 };
             };
-            /** @description The target is unpublished, or not ahead of the group. */
+            /** @description The target is unpublished, or not ahead of the environment. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -15807,7 +16811,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PlansForGroupArgs"];
+                "application/json": components["schemas"]["TargetsArgs"];
             };
         };
         responses: {

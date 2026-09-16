@@ -1113,16 +1113,19 @@ async fn upgrade_plans_list_the_open_ones_and_keep_the_withdrawn_in_history() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		seed(&mut conn).await;
 		conn.batch_execute(&format!(
-			"UPDATE server_groups SET effective_version = '2.34.1' WHERE id = '{GROUP}'; \
-			 INSERT INTO server_groups (id, name, effective_version) VALUES \
-				('44444444-4444-4444-4444-444444444444', 'Drifting', '2.34.1'); \
+			"INSERT INTO server_groups (id, name) VALUES \
+				('44444444-4444-4444-4444-444444444444', 'Drifting'); \
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('44444444-4444-4444-4444-4444444444a1', '44444444-4444-4444-4444-444444444444') RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES \
+				('44444444-4444-4444-4444-4444444444a1', 'https://drifting', 'tamanu-central', 'production', '44444444-4444-4444-4444-444444444444', '44444444-4444-4444-4444-4444444444a1'); \
+			 INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES \
+				('44444444-4444-4444-4444-4444444444a1', 'test', '{{}}'::jsonb, '2.34.1'); \
 			 INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES \
 				('55555555-5555-5555-5555-555555555555', 2, 36, 0, 'x', 'published'), \
 				('66666666-6666-6666-6666-666666666666', 2, 40, 0, 'x', 'published'); \
-			 INSERT INTO upgrade_plans (group_id, target_version_id, created_by, withdrawn_at, withdrawn_by) VALUES \
-				('{GROUP}', '66666666-6666-6666-6666-666666666666', 'someone@example.com', NOW(), 'someone@example.com'); \
-			 INSERT INTO upgrade_plans (group_id, target_version_id, planned_for, note, created_by) VALUES \
-				('{GROUP}', '55555555-5555-5555-5555-555555555555', DATE '2020-01-01', 'site can absorb 2.36 only', 'someone@example.com');"
+			 INSERT INTO upgrade_plans (group_id, rank, target_version_id, created_by, withdrawn_at, withdrawn_by) VALUES \
+				('{GROUP}', 'production', '66666666-6666-6666-6666-666666666666', 'someone@example.com', NOW(), 'someone@example.com'); \
+			 INSERT INTO upgrade_plans (group_id, rank, target_version_id, planned_for, note, created_by) VALUES \
+				('{GROUP}', 'production', '55555555-5555-5555-5555-555555555555', DATE '2020-01-01', 'site can absorb 2.36 only', 'someone@example.com');"
 		))
 		.await
 		.expect("seed plans");
@@ -1131,17 +1134,18 @@ async fn upgrade_plans_list_the_open_ones_and_keep_the_withdrawn_in_history() {
 		let plans = list["plans"].as_array().expect("plans");
 		assert_eq!(plans.len(), 1, "one group has an open plan: {list}");
 		assert_eq!(plans[0]["group_name"], "Prod Group");
+		assert_eq!(plans[0]["rank"], "production");
 		assert_eq!(plans[0]["current_version"], "2.34.1");
 		assert_eq!(plans[0]["target_version"], "2.36.0");
 		assert_eq!(plans[0]["planned_for"], "2020-01-01");
 		assert_eq!(plans[0]["late"], true, "the planned day has passed unmet");
 		assert_eq!(plans[0]["note"], "site can absorb 2.36 only");
 
-		// A group with nothing recorded gets no pre-upgrade testing, so it is
-		// returned rather than omitted.
-		let unplanned = list["groups_without_a_plan"]
+		// A production with nothing recorded gets no pre-upgrade testing, so it
+		// is returned rather than omitted.
+		let unplanned = list["environments_without_a_plan"]
 			.as_array()
-			.expect("unplanned groups");
+			.expect("unplanned environments");
 		assert!(
 			unplanned.iter().any(|g| g["group_name"] == "Drifting"),
 			"missing the unplanned group: {list}"
@@ -1159,6 +1163,7 @@ async fn upgrade_plans_list_the_open_ones_and_keep_the_withdrawn_in_history() {
 			.find(|p| p["outcome"] == "withdrawn")
 			.unwrap_or_else(|| panic!("no withdrawn plan in {history}"));
 		assert_eq!(withdrawn["target_version"], "2.40.0");
+		assert_eq!(withdrawn["rank"], "production");
 		assert_eq!(withdrawn["withdrawn_by"], "someone@example.com");
 		assert!(!withdrawn["ended_at"].is_null());
 		assert!(plans.iter().any(|p| p["outcome"] == "open"));
@@ -1452,6 +1457,71 @@ async fn mcp_health_matches_what_the_ui_presents() {
 			.find(|a| a["id"] == SRV_GROUPED)
 			.expect("the workload");
 		assert_eq!(on_box["health"], member["health"]);
+	})
+	.await
+}
+
+const ENV_GROUP: &str = "aaaaaaaa-0000-0000-0000-0000000000e0";
+const ENV_TEST_APP: &str = "aaaaaaaa-0000-0000-0000-0000000000e1";
+const ENV_TEST_INC: &str = "aaaaaaaa-0000-0000-0000-0000000000e2";
+const ENV_GROUP_INC: &str = "aaaaaaaa-0000-0000-0000-0000000000e3";
+
+/// An incident targets one of a group's environments, and both tools report
+/// which. An agent summarising the fleet reads these, and a site's test box
+/// counted as the site's production trouble is a wrong answer with no way for
+/// the reader to tell.
+///
+/// spec: INC#targets
+#[tokio::test(flavor = "multi_thread")]
+async fn incidents_name_the_environment_they_target() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		conn.batch_execute(&format!(
+			"INSERT INTO server_groups (id, name) VALUES ('{ENV_GROUP}', 'kamaka'); \
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{ENV_TEST_APP}', '{ENV_GROUP}') RETURNING id) \
+			 INSERT INTO applications (id, host, name, type, rank, group_id, is_monitored, machine_id) VALUES \
+				('{ENV_TEST_APP}', 'https://test.kamaka', 'kamaka test', 'tamanu-central', 'test', '{ENV_GROUP}', true, '{ENV_TEST_APP}'); \
+			 INSERT INTO incidents (id, created_at, updated_at, server_group_id, rank, opened_at) VALUES \
+				('{ENV_TEST_INC}', NOW(), NOW(), '{ENV_GROUP}', 'test', NOW() - interval '1 hour'), \
+				('{ENV_GROUP_INC}', NOW(), NOW(), '{ENV_GROUP}', NULL, NOW() - interval '1 hour');"
+		))
+		.await
+		.expect("seed an environment incident beside a group one");
+
+		let found = call_tool!(private, "find_incidents", serde_json::json!({}));
+		let by_id = |id: &str| {
+			found["incidents"]
+				.as_array()
+				.unwrap()
+				.iter()
+				.find(|i| i["id"] == id)
+				.unwrap_or_else(|| panic!("{id} missing from find_incidents"))
+				.clone()
+		};
+		assert_eq!(
+			by_id(ENV_TEST_INC)["rank"], "test",
+			"the environment's incident says which environment"
+		);
+		assert!(
+			by_id(ENV_GROUP_INC)["rank"].is_null(),
+			"and the group's own carries no rank, which is how a reader tells them apart"
+		);
+		assert_eq!(by_id(ENV_TEST_INC)["group_name"], "kamaka");
+
+		let detail = call_tool!(
+			private,
+			"get_incident",
+			serde_json::json!({ "incident_id": ENV_TEST_INC })
+		);
+		assert_eq!(
+			detail["rank"], "test",
+			"the detail carries it too, since an agent may fetch one without listing"
+		);
+		let group_detail = call_tool!(
+			private,
+			"get_incident",
+			serde_json::json!({ "incident_id": ENV_GROUP_INC })
+		);
+		assert!(group_detail["rank"].is_null());
 	})
 	.await
 }

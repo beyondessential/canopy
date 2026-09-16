@@ -167,7 +167,7 @@ async function applicationTypeOf(sql: Sql, applicationId: string): Promise<strin
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, machine_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, upgrade_plans, maintenance_windows, version_known_issues, recovery_vault_writes, application_names, application_certificates, compromised_keys RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, machine_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, upgrade_plans, maintenance_windows, inventory_variables, inventory_leases, version_known_issues, recovery_vault_writes, application_names, application_certificates, compromised_keys RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" application with
 	// it; self-alerts attach to that row, so put it back.
@@ -253,7 +253,7 @@ export interface SeededServer {
 	host: string;
 	type: ApplicationType;
 	rank: ServerRank | null;
-	/** The box this workload runs on. Maintenance is declared over it. */
+	/** The box this workload runs on. */
 	machineId: string;
 }
 
@@ -924,6 +924,8 @@ export async function seedIncident(
 	opts: {
 		/** Group the incident targets; null/absent seeds a canopy-wide one. */
 		serverGroupId?: string | null;
+		/** Which of the group's environments; absent targets the group itself. */
+		rank?: ServerRank | null;
 		/** ISO 8601; defaults to NOW(). */
 		openedAt?: string;
 		/** ISO 8601; sets the incident lingering since this time. */
@@ -938,9 +940,15 @@ export async function seedIncident(
 ): Promise<SeededIncident> {
 	const id = randomUUID();
 	await sql.query(
-		`INSERT INTO incidents (id, server_group_id, opened_at, closing_at)
-		 VALUES ($1, $2, COALESCE($3::timestamptz, NOW()), $4::timestamptz)`,
-		[id, opts.serverGroupId ?? null, opts.openedAt ?? null, opts.closingAt ?? null],
+		`INSERT INTO incidents (id, server_group_id, rank, opened_at, closing_at)
+		 VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5::timestamptz)`,
+		[
+			id,
+			opts.serverGroupId ?? null,
+			opts.rank ?? null,
+			opts.openedAt ?? null,
+			opts.closingAt ?? null,
+		],
 	);
 	for (const link of opts.issues ?? []) {
 		await sql.query(
@@ -1555,6 +1563,7 @@ export async function seedMigrationTest(
 		targetVersionId: string;
 		snapshotId?: string;
 		failedMigration?: string | null;
+		error?: string | null;
 		totalElapsedSecs?: number;
 		dataBytesBefore?: number;
 		dataBytesAfter?: number;
@@ -1573,15 +1582,16 @@ export async function seedMigrationTest(
 
 	await sql.query(
 		`INSERT INTO migration_tests
-		 (check_id, application_id, target_version_id, total_elapsed, failed_migration,
+		 (check_id, application_id, target_version_id, total_elapsed, failed_migration, error,
 		  data_bytes_before, data_bytes_after)
-		 VALUES ($1, $2, $3, make_interval(secs => $4), $5, $6, $7)`,
+		 VALUES ($1, $2, $3, make_interval(secs => $4), $5, $6, $7, $8)`,
 		[
 			checkId,
 			opts.applicationId,
 			opts.targetVersionId,
 			opts.totalElapsedSecs ?? 60,
 			opts.failedMigration ?? null,
+			opts.error ?? null,
 			opts.dataBytesBefore ?? 0,
 			opts.dataBytesAfter ?? 0,
 		],
@@ -1607,8 +1617,12 @@ export interface SeededMaintenanceWindow {
 export async function seedMaintenanceWindow(
 	sql: Sql,
 	opts: {
+		applicationId?: string;
 		machineId?: string;
 		serverGroupId?: string;
+		/** With `serverGroupId`, covers only that group's applications at this
+		 * rank rather than the whole group. */
+		rank?: ServerRank;
 		endsInHours?: number;
 		/** Seed the window already ended this many minutes ago (still inside
 		 * the settle period when under 10). */
@@ -1619,14 +1633,16 @@ export async function seedMaintenanceWindow(
 ): Promise<SeededMaintenanceWindow> {
 	const rows = await sql.query<{ id: string }>(
 		`INSERT INTO maintenance_windows
-		   (machine_id, server_group_id, expected_end, ended_at, note, declared_by)
-		 VALUES ($1, $2, NOW() + make_interval(mins => $3),
-		         CASE WHEN $4::int IS NULL THEN NULL ELSE NOW() - make_interval(mins => $4::int) END,
-		         $5, $6)
+		   (application_id, machine_id, server_group_id, rank, expected_end, ended_at, note, declared_by)
+		 VALUES ($1, $2, $3, $4, NOW() + make_interval(mins => $5),
+		         CASE WHEN $6::int IS NULL THEN NULL ELSE NOW() - make_interval(mins => $6::int) END,
+		         $7, $8)
 		 RETURNING id`,
 		[
+			opts.applicationId ?? null,
 			opts.machineId ?? null,
 			opts.serverGroupId ?? null,
+			opts.rank ?? null,
 			opts.endedMinutesAgo != null
 				? -opts.endedMinutesAgo
 				: Math.round((opts.endsInHours ?? 2) * 60),
@@ -1642,6 +1658,8 @@ export async function seedUpgradePlan(
 	sql: Sql,
 	opts: {
 		groupId: string;
+		/** The environment the plan is for. Defaults to production. */
+		rank?: ServerRank;
 		targetVersionId: string;
 		plannedFor?: string | null;
 		plannedTime?: string | null;
@@ -1649,27 +1667,29 @@ export async function seedUpgradePlan(
 		plannedZone?: string | null;
 		note?: string | null;
 		createdBy?: string;
-		/** Retire the group's open plan first, as recording a second one does.
-		 * A group holds one open plan at a time, so a second insert without this
-		 * breaks the unique index. */
+		/** Retire the environment's open plan first, as recording a second one
+		 * does. An environment holds one open plan at a time, so a second insert
+		 * without this breaks the unique index. */
 		supersedes?: boolean;
 	},
 ): Promise<void> {
+	const rank = opts.rank ?? "production";
 	if (opts.supersedes) {
 		await sql.query(
 			`UPDATE upgrade_plans SET superseded_at = NOW()
-			 WHERE group_id = $1
+			 WHERE group_id = $1 AND rank = $2
 			   AND met_at IS NULL AND superseded_at IS NULL AND withdrawn_at IS NULL`,
-			[opts.groupId],
+			[opts.groupId, rank],
 		);
 	}
 	await sql.query(
 		`INSERT INTO upgrade_plans
-		   (group_id, target_version_id, planned_for, planned_time, planned_end_time,
+		   (group_id, rank, target_version_id, planned_for, planned_time, planned_end_time,
 		    planned_zone, note, created_by)
-		 VALUES ($1, $2, $3::date, $4::time, $5::time, $6, $7, $8)`,
+		 VALUES ($1, $2, $3, $4::date, $5::time, $6::time, $7, $8, $9)`,
 		[
 			opts.groupId,
+			rank,
 			opts.targetVersionId,
 			opts.plannedFor ?? null,
 			opts.plannedTime ?? null,

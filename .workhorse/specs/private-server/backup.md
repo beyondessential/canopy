@@ -5,11 +5,11 @@ id: BKO
 # Operator backup control
 
 An operator configures, through Canopy, how a server group backs up: where its repo lives, on what cadence, with what retention, and which machines and types participate.
-Canopy owns the repo passphrase throughout — it is generated or accepted once, stored in Canopy's secret store, and never handed back except through the audited recovery ceremony.
+Canopy owns the repo passphrase throughout — it is generated or accepted once, stored in Canopy's secret store, and never handed back except through the audited recovery ceremony (see [ESC](../jobs/escrow.md)).
 
 ## Scope
 
-This spec covers the operator-facing control surface: per-group backup configuration and its lifecycle, scheduling and retention, per-machine participation, on-demand backups, the status view, and passphrase recovery.
+This spec covers the operator-facing control surface: per-group backup configuration and its lifecycle, scheduling and retention, per-machine participation, on-demand backups, and the status view.
 
 It does not cover the device contract (see [BAK](../public-server/backup.md)) or Canopy's autonomous maintenance, inspection, detection, and alerting (see [BKJ](../jobs/backup.md)).
 
@@ -86,9 +86,3 @@ A run whose device reports no progress is still shown as in progress, unchanged 
 The rate over a run's life is available as a series, for a run in flight or a finished one, for as long as its progress is retained.
 The backup engine's own transferred figure and the object-storage traffic Canopy's proxy tallied are shown against each other, so a divergence between what a run believes it sent and what crossed the wire is visible.
 Engine-specific detail a device reported that Canopy does not model is available verbatim for inspection.
-
-## Passphrase recovery
-
-Because Canopy owns the only copy of each passphrase, the ability to recover it without Canopy is verified, not assumed.
-Recovery is a ceremony: a passphrase is escrowed encrypted to a set of offline recipient keys, and an operator periodically proves the recipients can still decrypt it.
-The ceremony is recorded so staleness — too long since the last successful proof — is visible.

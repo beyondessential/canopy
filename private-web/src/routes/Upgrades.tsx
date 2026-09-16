@@ -28,6 +28,7 @@ import {
 	Table,
 	TableBody,
 	TableCell,
+	TableContainer,
 	TableHead,
 	TableRow,
 	TextField,
@@ -36,6 +37,7 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
+import { Link as MuiLink } from "@mui/material";
 import { alpha, type Theme } from "@mui/material/styles";
 import {
 	type ReactElement,
@@ -48,12 +50,17 @@ import {
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import DeclareMaintenanceDialog from "../components/DeclareMaintenanceDialog";
+import ServerRankChip from "../components/ServerRankChip";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
-import type { ApiResponse } from "../types";
+import { errorPreview } from "../lib/errorText";
+import { environmentName } from "../types";
+import type { ApiResponse, MaintenanceWindow, ServerRank } from "../types";
 
 type PastPlan = ApiResponse<"upgrade_plans", "history">[number];
+type PlannedUpgrade = ApiResponse<"upgrade_plans", "fleet">[number];
+type FailedTest = NonNullable<PlannedUpgrade["failed_test"]>;
 type PlannableVersion = ApiResponse<"upgrade_plans", "targets">[number];
 
 /// Where every group is going. A group with no plan is listed too: one
@@ -75,7 +82,11 @@ export default function Upgrades() {
 	}
 
 	const planned = fleet.data.filter((row) => row.plan);
-	const unplanned = fleet.data.filter((row) => !row.plan);
+	// The gap this list is for: a group's headline environment, behind the
+	// newest version, with nothing recorded.
+	const unplanned = fleet.data.filter(
+		(row) => !row.plan && row.headline && (row.behind ?? 0) > 0,
+	);
 
 	return (
 		<Stack spacing={2}>
@@ -85,9 +96,10 @@ export default function Upgrades() {
 				</Typography>
 				{isAdmin && (
 					<RecordPlan
-						groups={fleet.data.map((row) => ({
-							id: row.group_id,
-							name: row.group_name,
+						environments={fleet.data.map((row) => ({
+							groupId: row.group_id,
+							groupName: row.group_name,
+							rank: row.rank,
 						}))}
 						onRecorded={() => setTick((t) => t + 1)}
 					/>
@@ -110,10 +122,11 @@ export default function Upgrades() {
 						No group has a recorded plan.
 					</Typography>
 				) : (
-					<Table size="small" sx={TIGHT_TABLE}>
+					<TableContainer>
+						<Table size="small" sx={TIGHT_TABLE}>
 						<TableHead>
 							<TableRow>
-								<TableCell>Group</TableCell>
+								<TableCell>Environment</TableCell>
 								<TableCell>Running</TableCell>
 								<TableCell>Going to</TableCell>
 								<TableCell>Data survives it</TableCell>
@@ -126,13 +139,15 @@ export default function Upgrades() {
 						<TableBody>
 							{planned.map((row) => (
 								<TableRow
-									key={row.group_id}
+									key={`${row.group_id}:${row.rank}`}
 									data-testid="planned-upgrade-row"
 								>
 										<TableCell>
-											<RouterLink to={`/fleet/groups/${row.group_id}`}>
-												{row.group_name}
-											</RouterLink>
+											<EnvironmentName
+												groupId={row.group_id}
+												groupName={row.group_name}
+												rank={row.rank}
+											/>
 										</TableCell>
 										<TableCell>{row.current_version ?? "unknown"}</TableCell>
 										<TableCell>{row.target_version}</TableCell>
@@ -145,6 +160,9 @@ export default function Upgrades() {
 												<VerdictChip
 													verdict={row.verdict}
 													testable={row.testable}
+													groupId={row.group_id}
+													failedTest={row.failed_test}
+													tally={row.tally}
 												/>
 												<AttemptChip attempt={row.attempt} />
 											</Stack>
@@ -156,11 +174,14 @@ export default function Upgrades() {
 											/>
 										</TableCell>
 										<TableCell>
-											<PlannedTime
-												time={row.plan?.planned_time ?? null}
-												end={row.plan?.planned_end_time ?? null}
-												zone={row.plan?.planned_zone ?? null}
-											/>
+											<Stack spacing={0.25}>
+												<PlannedTime
+													time={row.plan?.planned_time ?? null}
+													end={row.plan?.planned_end_time ?? null}
+													zone={row.plan?.planned_zone ?? null}
+												/>
+												<UnderMaintenance held={row.maintenance_window} />
+											</Stack>
 										</TableCell>
 										<TableCell>
 											<PlanNote
@@ -172,7 +193,7 @@ export default function Upgrades() {
 											<TableCell align="right">
 												<EditPlan
 													planId={row.plan?.id ?? ""}
-													groupName={row.group_name}
+													groupName={environmentName(row.group_name, row.rank)}
 													targetVersion={row.target_version ?? ""}
 													plannedFor={row.plan?.planned_for ?? null}
 													plannedTime={row.plan?.planned_time ?? null}
@@ -183,16 +204,17 @@ export default function Upgrades() {
 												/>
 												<WithdrawPlan
 													planId={row.plan?.id ?? ""}
-													groupName={row.group_name}
+													groupName={environmentName(row.group_name, row.rank)}
 													targetVersion={row.target_version ?? ""}
 													onWithdrawn={() => setTick((t) => t + 1)}
 												/>
 												<DeclareFromPlan
 													groupId={row.group_id}
-													groupName={row.group_name}
-													plannedTime={row.plan?.planned_time ?? null}
-													plannedEnd={row.plan?.planned_end_time ?? null}
+													rank={row.rank}
+													groupName={environmentName(row.group_name, row.rank)}
 													note={row.plan?.note ?? null}
+													held={row.maintenance_window}
+													planned={row.planned_window}
 													onDeclared={() => setTick((t) => t + 1)}
 												/>
 											</TableCell>
@@ -201,47 +223,54 @@ export default function Upgrades() {
 							))}
 						</TableBody>
 					</Table>
+				</TableContainer>
 				)}
 			</Paper>
 
 			<Disclosure
 				title="No plan recorded"
-				subject="groups with no plan"
+				subject="environments with no plan"
 				caption={
 					unplanned.length === 1
-						? "1 group gets no pre-upgrade testing until a plan says where it is going"
-						: `${unplanned.length} groups get no pre-upgrade testing until a plan says where they are going`
+						? "1 environment is behind with no plan, so it gets no pre-upgrade testing"
+						: `${unplanned.length} environments are behind with no plan, so they get no pre-upgrade testing`
 				}
 				testId="unplanned-upgrades"
 			>
 					{unplanned.length === 0 ? (
 						<Typography variant="body2" color="text.secondary">
-							Every group has a plan.
+							Every environment that is behind has a plan.
 						</Typography>
 					) : (
-						<Table size="small" sx={TIGHT_TABLE}>
+						<TableContainer>
+							<Table size="small" sx={TIGHT_TABLE}>
 							<TableHead>
 								<TableRow>
-									<TableCell>Group</TableCell>
+									<TableCell>Environment</TableCell>
 									<TableCell>Running</TableCell>
+									<TableCell>Behind by</TableCell>
 								</TableRow>
 							</TableHead>
 							<TableBody>
 								{unplanned.map((row) => (
 									<TableRow
-										key={row.group_id}
+										key={`${row.group_id}:${row.rank}`}
 										data-testid="unplanned-upgrade-row"
 									>
 										<TableCell>
-											<RouterLink to={`/fleet/groups/${row.group_id}`}>
-												{row.group_name}
-											</RouterLink>
+											<EnvironmentName
+												groupId={row.group_id}
+												groupName={row.group_name}
+												rank={row.rank}
+											/>
 										</TableCell>
 										<TableCell>{row.current_version ?? "unknown"}</TableCell>
+										<TableCell>{behindLabel(row.behind ?? 0)}</TableCell>
 									</TableRow>
 								))}
 							</TableBody>
 						</Table>
+					</TableContainer>
 					)}
 			</Disclosure>
 
@@ -251,6 +280,32 @@ export default function Upgrades() {
 }
 
 type FleetRow = ApiResponse<"upgrade_plans", "fleet">[number];
+
+/// The fleet's distance is majors times a thousand plus minors; a major behind
+/// is far enough that the minors no longer matter.
+function behindLabel(behind: number): string {
+	const majors = Math.floor(behind / 1000);
+	const minors = behind % 1000;
+	if (majors > 0) return `${majors} major${majors === 1 ? "" : "s"}`;
+	return `${minors} minor${minors === 1 ? "" : "s"}`;
+}
+
+function EnvironmentName({
+	groupId,
+	groupName,
+	rank,
+}: {
+	groupId: string;
+	groupName: string;
+	rank: ServerRank;
+}) {
+	return (
+		<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+			<RouterLink to={`/fleet/groups/${groupId}`}>{groupName}</RouterLink>
+			{rank !== "production" && <ServerRankChip rank={rank} />}
+		</Stack>
+	);
+}
 
 type View = "month" | "week" | "day";
 
@@ -335,7 +390,7 @@ function PlanCalendar({
 				planId: row.plan.id,
 				date: row.plan.planned_for,
 				groupId: row.group_id,
-				group: row.group_name,
+				group: environmentName(row.group_name, row.rank),
 				version: row.target_version ?? "",
 				time: row.plan.planned_time,
 				end: row.plan.planned_end_time,
@@ -352,7 +407,7 @@ function PlanCalendar({
 				planId: row.plan.id,
 				date: row.plan.planned_for,
 				groupId: row.group_id,
-				group: row.group_name,
+				group: environmentName(row.group_name, row.plan.rank),
 				version: row.target_version,
 				time: row.plan.planned_time,
 				end: row.plan.planned_end_time,
@@ -1242,10 +1297,11 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 			caption="where each group was going before, and how it ended"
 			testId="past-plans"
 		>
-			<Table size="small" sx={TIGHT_TABLE}>
+			<TableContainer>
+				<Table size="small" sx={TIGHT_TABLE}>
 				<TableHead>
 					<TableRow>
-						<TableCell>Group</TableCell>
+						<TableCell>Environment</TableCell>
 						<TableCell>Was going to</TableCell>
 						<TableCell>Planned for</TableCell>
 						<TableCell>Window</TableCell>
@@ -1257,9 +1313,11 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 					{plans.map((row) => (
 						<TableRow key={row.plan.id} data-testid="past-plan-row">
 								<TableCell>
-									<RouterLink to={`/fleet/groups/${row.group_id}`}>
-										{row.group_name}
-									</RouterLink>
+									<EnvironmentName
+										groupId={row.group_id}
+										groupName={row.group_name}
+										rank={row.plan.rank}
+									/>
 								</TableCell>
 								<TableCell>{row.target_version}</TableCell>
 								<TableCell>{row.plan.planned_for ?? ""}</TableCell>
@@ -1295,6 +1353,7 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 					))}
 				</TableBody>
 			</Table>
+		</TableContainer>
 		</Disclosure>
 	);
 }
@@ -1331,38 +1390,96 @@ function OutcomeChip({
 	);
 }
 
-/// Whether the group's own data survives the planned version, rolled up
-/// from its servers. Pairing it with the plan is the point of this view.
+/// Whether the environment's own data survives the planned version, rolled up
+/// from its applications. Pairing it with the plan is the point of this view.
 function VerdictChip({
 	verdict,
 	testable,
+	groupId,
+	failedTest,
+	tally,
 }: {
 	verdict: string | null | undefined;
 	testable: boolean | null | undefined;
+	groupId: string;
+	failedTest: FailedTest | null | undefined;
+	tally?: { passed: number; total: number } | null;
 }) {
+	const linked = (chip: ReactElement) => (
+		<MuiLink
+			component={RouterLink}
+			to={`/fleet/groups/${groupId}#migration-tests`}
+			underline="none"
+		>
+			{chip}
+		</MuiLink>
+	);
+
 	if (verdict === "passed") {
-		return <Chip size="small" color="success" label="passed" />;
+		return linked(
+			<Chip size="small" color="success" label="passed" clickable />,
+		);
+	}
+	if (verdict === "partial") {
+		return (
+			<Tooltip title="some of this environment's applications have passed and the rest have not been tested yet">
+				{linked(
+					<Chip
+						size="small"
+						color="success"
+						variant="outlined"
+						label={
+							tally ? `${tally.passed} of ${tally.total} passed` : "partly passed"
+						}
+						clickable
+					/>,
+				)}
+			</Tooltip>
+		);
 	}
 	if (verdict === "failed") {
 		return (
-			<Tooltip title="a server's data broke the migrations; the version is held back">
-				<Chip size="small" color="warning" label="failed" />
+			<Tooltip
+				title={
+					failedTest ? (
+						<>
+							<Box>
+								{failedTest.application}
+								{failedTest.migration ? `: ${failedTest.migration}` : ""}
+							</Box>
+							{failedTest.error && (
+								<Box sx={{ mt: 0.5, fontFamily: "monospace", whiteSpace: "pre-wrap" }}>
+									{errorPreview(failedTest.error)}
+								</Box>
+							)}
+						</>
+					) : (
+						"an application's data broke the migrations; the version is held back"
+					)
+				}
+			>
+				{linked(<Chip size="small" color="warning" label="failed" clickable />)}
 			</Tooltip>
 		);
 	}
 	if (testable === false) {
 		return (
 			<Tooltip title="nothing is declared to migrate this group's data, so no test will run: declare a restore replica for it on the group's page">
-				<Chip
-					size="small"
-					color="warning"
-					variant="outlined"
-					label="not set up"
-				/>
+				{linked(
+					<Chip
+						size="small"
+						color="warning"
+						variant="outlined"
+						label="not set up"
+						clickable
+					/>,
+				)}
 			</Tooltip>
 		);
 	}
-	return <Chip size="small" variant="outlined" label="not yet tested" />;
+	return linked(
+		<Chip size="small" variant="outlined" label="not yet tested" clickable />,
+	);
 }
 
 /// An attempt under way, beside the verdict rather than replacing it: a row can
@@ -1476,6 +1593,47 @@ function PlanNote({ note, testId }: { note: string | null; testId: string }) {
 /// The window a group moves in, as the wall clocks it was recorded as.
 /// Canopy holds no timezone for a group, so the zone travels with the time or
 /// the reader cannot tell whose midnight it is.
+/// Work declared over the environment, which is what holds an open plan open.
+/// Sits with the window because that is the shape of it: hours the environment
+/// is not being alerted on.
+// spec: UPG#when-a-plan-is-met
+function UnderMaintenance({
+	held,
+}: {
+	held: MaintenanceWindow | null | undefined;
+}) {
+	if (!held) {
+		return null;
+	}
+	// A window with no rank covers the whole group, so say so rather than let it
+	// read as this environment's alone.
+	const whole = held.rank === null;
+	const until = held.expected_end
+		? ` until ${new Date(held.expected_end).toLocaleTimeString(undefined, {
+				hour: "2-digit",
+				minute: "2-digit",
+			})}`
+		: "";
+	return (
+		<Tooltip
+			title={
+				whole
+					? "maintenance is declared over the whole group, so this plan stays open until that work is over"
+					: "maintenance is declared over this environment, so its plan stays open until the work is over"
+			}
+		>
+			<Typography
+				variant="caption"
+				sx={{ color: "info.main" }}
+				data-testid="plan-under-maintenance"
+			>
+				{whole ? "group in maintenance" : "in maintenance"}
+				{until}
+			</Typography>
+		</Tooltip>
+	);
+}
+
 function PlannedTime({
 	time,
 	end,
@@ -1593,7 +1751,7 @@ function zonePart(
 
 const GOING_FIELDS = {
 	display: "grid",
-	gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+	gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
 	columnGap: 1.5,
 	alignItems: "start",
 };
@@ -1666,24 +1824,30 @@ function recentMinors(options: PlannableVersion[]): PlannableVersion[] {
 }
 
 function helperText(
-	groupId: string,
+	chosen: boolean,
 	options: PlannableVersion[],
 	shortlist: PlannableVersion[],
 ): string | undefined {
-	if (!groupId) return undefined;
+	if (!chosen) return undefined;
 	if (options.length === 0) return "already on the newest";
 	if (options.length > shortlist.length) return "type for older";
 	return undefined;
 }
 
-/// Record where a group is going. The version picker offers only valid
+type EnvironmentOption = {
+	groupId: string;
+	groupName: string;
+	rank: ServerRank;
+};
+
+/// Record where an environment is going. The version picker offers only valid
 /// targets, so the operator cannot pick one the API would refuse.
 // spec: UPG#a-plan
 function RecordPlan({
-	groups,
+	environments,
 	onRecorded,
 }: {
-	groups: Array<{ id: string; name: string }>;
+	environments: EnvironmentOption[];
 	onRecorded: () => void;
 }) {
 	const [open, setOpen] = useState(false);
@@ -1699,7 +1863,7 @@ function RecordPlan({
 			</Button>
 			{open && (
 				<RecordPlanDialog
-					groups={groups}
+					environments={environments}
 					onClose={() => setOpen(false)}
 					onRecorded={() => {
 						setOpen(false);
@@ -1714,15 +1878,16 @@ function RecordPlan({
 /// Mounted only while it is open, so it opens empty rather than holding what
 /// was typed the last time.
 function RecordPlanDialog({
-	groups,
+	environments,
 	onClose,
 	onRecorded,
 }: {
-	groups: Array<{ id: string; name: string }>;
+	environments: EnvironmentOption[];
 	onClose: () => void;
 	onRecorded: () => void;
 }) {
 	const [groupId, setGroupId] = useState("");
+	const [rank, setRank] = useState<ServerRank | "">("");
 	const [versionId, setVersionId] = useState("");
 	const [plannedFor, setPlannedFor] = useState("");
 	const [plannedTime, setPlannedTime] = useState("");
@@ -1731,20 +1896,32 @@ function RecordPlanDialog({
 	const [zone, setZone] = useState(DEFAULT_ZONE);
 	const [note, setNote] = useState("");
 	const record = useApiAction("upgrade_plans", "record");
+	const groups = useMemo(() => {
+		const seen = new Map<string, string>();
+		for (const env of environments) {
+			if (!seen.has(env.groupId)) seen.set(env.groupId, env.groupName);
+		}
+		return [...seen].map(([id, name]) => ({ id, name }));
+	}, [environments]);
+	const ranks = environments
+		.filter((env) => env.groupId === groupId)
+		.map((env) => env.rank);
+	const chosen = groupId !== "" && rank !== "";
 	const targets = useApi(
 		"upgrade_plans",
 		"targets",
-		groupId ? { group_id: groupId } : undefined,
-		[groupId],
+		chosen ? { group_id: groupId, rank } : undefined,
+		[groupId, rank],
 	);
 
 	const options = targets.status === "ok" ? targets.data : [];
 	const shortlist = useMemo(() => recentMinors(options), [options]);
 
 	const submit = async () => {
-		if (!groupId || !versionId) return;
+		if (!groupId || rank === "" || !versionId) return;
 		await record.call({
 			group_id: groupId,
+			rank,
 			target_version_id: versionId,
 			planned_for: plannedFor || null,
 			planned_time: plannedTime || null,
@@ -1773,7 +1950,13 @@ function RecordPlanDialog({
 							label="Group"
 							value={groupId}
 							onChange={(e) => {
-								setGroupId(e.target.value);
+								const id = e.target.value;
+								const offered = environments.filter(
+									(env) => env.groupId === id,
+								);
+								setGroupId(id);
+								// One environment needs no second choice.
+								setRank(offered.length === 1 ? offered[0].rank : "");
 								setVersionId("");
 							}}
 						>
@@ -1783,9 +1966,30 @@ function RecordPlanDialog({
 								</MenuItem>
 							))}
 						</TextField>
+						<TextField
+							select
+							size="small"
+							label="Environment"
+							value={rank}
+							disabled={!groupId}
+							onChange={(e) => {
+								setRank(e.target.value as ServerRank);
+								setVersionId("");
+							}}
+						>
+							{ranks.map((option) => (
+								<MenuItem
+									key={option}
+									value={option}
+									sx={{ textTransform: "capitalize" }}
+								>
+									{option}
+								</MenuItem>
+							))}
+						</TextField>
 						<Autocomplete<PlannableVersion, false, false, false>
 							size="small"
-							disabled={!groupId || options.length === 0}
+							disabled={!chosen || options.length === 0}
 							options={options}
 							value={options.find((option) => option.id === versionId) ?? null}
 							onChange={(_, option) => setVersionId(option?.id ?? "")}
@@ -1817,7 +2021,7 @@ function RecordPlanDialog({
 								<TextField
 									{...params}
 									label="Going to"
-									helperText={helperText(groupId, options, shortlist)}
+									helperText={helperText(chosen, options, shortlist)}
 								/>
 							)}
 						/>
@@ -1827,7 +2031,7 @@ function RecordPlanDialog({
 							size="small"
 							type="date"
 							label="Planned for"
-							disabled={!groupId}
+							disabled={!chosen}
 							value={plannedFor}
 							onChange={(e) => {
 								setPlannedFor(e.target.value);
@@ -1873,7 +2077,7 @@ function RecordPlanDialog({
 					<TextField
 						size="small"
 						label="Note"
-						disabled={!groupId}
+						disabled={!chosen}
 						value={note}
 						onChange={(e) => setNote(e.target.value)}
 						multiline
@@ -1888,7 +2092,7 @@ function RecordPlanDialog({
 				<Button onClick={onClose}>Cancel</Button>
 				<Button
 					variant="contained"
-					disabled={!groupId || !versionId || record.pending}
+					disabled={!chosen || !versionId || record.pending}
 					onClick={submit}
 				>
 					Record
@@ -2114,64 +2318,168 @@ function WithdrawPlan({
 	);
 }
 
-/** How long the plan says the group is down, from its window's two
- * wall clocks. A close earlier in the day than the open is the following
- * morning, as the plan reads it. Two hours where the plan names no window,
- * which is what a declaration otherwise starts from. */
-function plannedHours(time: string | null, end: string | null): number {
-	if (!time || !end) return 2;
-	const minutes = (clock: string) => {
-		const [h, m] = clock.split(":");
-		return Number(h) * 60 + Number(m ?? 0);
-	};
-	const span = minutes(end) - minutes(time);
-	return (span > 0 ? span : span + 24 * 60) / 60;
+/// When the plan's window closes, as a reader would say it. A declaration runs
+/// from now, so its end is the only part of the window that bounds it.
+function planWindowLabel(planned: { ends_at: string }): string {
+	return new Date(planned.ends_at).toLocaleString(undefined, {
+		hour: "2-digit",
+		minute: "2-digit",
+		day: "numeric",
+		month: "short",
+	});
 }
 
-/** Declare maintenance for a group from its open plan, carrying the plan's
- * window length and note. The plan supplies the prefill and triggers
+/// How long a declaration should run, in milliseconds: the length of the plan's
+/// own window where it named one. A declaration opens now, so the plan supplies
+/// how long the work takes and not when it starts.
+// spec: MNT#declaring
+const DEFAULT_LENGTH_MS = 2 * 3600_000;
+function plannedLength(
+	planned: { starts_at: string; ends_at: string } | null | undefined,
+): number {
+	if (!planned) {
+		return DEFAULT_LENGTH_MS;
+	}
+	const span =
+		new Date(planned.ends_at).getTime() - new Date(planned.starts_at).getTime();
+	return span > 0 ? span : DEFAULT_LENGTH_MS;
+}
+
+/** Declare maintenance over an environment from its open plan, carrying the
+ * plan's window length and note. The plan supplies the prefill and triggers
  * nothing: this is an operator saying the work is starting now. */
 // spec: MNT#declaring
 function DeclareFromPlan({
 	groupId,
+	rank,
 	groupName,
-	plannedTime,
-	plannedEnd,
 	note,
+	held,
+	planned,
 	onDeclared,
 }: {
 	groupId: string;
+	rank: ServerRank;
 	groupName: string;
-	plannedTime: string | null;
-	plannedEnd: string | null;
 	note: string | null;
+	/// The window holding over this environment, where work is already declared.
+	/// The control then amends that work rather than declaring over it again.
+	// spec: UPG#when-a-plan-is-met
+	held: MaintenanceWindow | null | undefined;
+	/// The hours the plan says the work runs. Declaring over a plan that named
+	/// them is a confirmation rather than a form: the operator already said when.
+	// spec: MNT#declaring
+	planned: { starts_at: string; ends_at: string } | null | undefined;
 	onDeclared: () => void;
 }) {
 	const [open, setOpen] = useState(false);
-	const hours = plannedHours(plannedTime, plannedEnd);
+	const [adjusting, setAdjusting] = useState(false);
+	const declare = useApiAction("maintenance", "declare");
+	// A window over the whole group is not this row's to amend or lift: ending it
+	// would un-suspend every other environment in the group.
+	const ownWindow = held && held.rank ? held : null;
+	// Declaring opens the window now, so only a plan whose own hours are under
+	// way can be confirmed as they stand. One still ahead, or already past, falls
+	// back to the form.
+	const confirmable =
+		!ownWindow &&
+		!!planned &&
+		new Date(planned.starts_at).getTime() <= Date.now() &&
+		new Date(planned.ends_at).getTime() > Date.now();
 	return (
 		<>
-			<Tooltip title="Declare maintenance: suspend this group's alerting while the upgrade runs">
+			<Tooltip
+				title={
+					ownWindow
+						? "Maintenance is declared over this environment, so its plan stays open until the work is over; amend it here"
+						: "Declare maintenance: suspend this environment's alerting while the upgrade runs"
+				}
+			>
 				<IconButton
 					size="small"
-					aria-label={`Declare maintenance for ${groupName}`}
-					onClick={() => setOpen(true)}
+					aria-label={`${ownWindow ? "Amend" : "Declare"} maintenance for ${groupName}`}
+					onClick={() => {
+						setAdjusting(false);
+						setOpen(true);
+					}}
+					data-testid={ownWindow ? "amend-maintenance" : undefined}
 				>
 					<BuildOutlinedIcon fontSize="small" />
 				</IconButton>
 			</Tooltip>
+			{confirmable && planned && (
+				<Dialog
+					open={open && !adjusting}
+					onClose={() => setOpen(false)}
+					data-testid="confirm-declare"
+				>
+					<DialogTitle>Declare maintenance — {groupName}</DialogTitle>
+					<DialogContent>
+						<Typography variant="body2">
+							Suspends this environment's alerting from now until{" "}
+							{planWindowLabel(planned)}, the end of the plan's window.
+						</Typography>
+						{note && (
+							<Typography
+								variant="body2"
+								sx={{ mt: 1, fontStyle: "italic" }}
+							>
+								{note}
+							</Typography>
+						)}
+						{declare.error && (
+							<Alert severity="error" sx={{ mt: 2 }}>
+								{declare.error.message}
+							</Alert>
+						)}
+					</DialogContent>
+					<DialogActions>
+						<Button onClick={() => setAdjusting(true)} sx={{ mr: "auto" }}>
+							Adjust
+						</Button>
+						<Button onClick={() => setOpen(false)}>Cancel</Button>
+						<Button
+							variant="contained"
+							disabled={declare.pending}
+							onClick={async () => {
+								try {
+									await declare.call({
+										server_group_id: groupId,
+										rank,
+										expected_end: planned.ends_at,
+										note: note ?? undefined,
+									});
+									setOpen(false);
+									onDeclared();
+								} catch {
+									/* surfaced above */
+								}
+							}}
+						>
+							Declare
+						</Button>
+					</DialogActions>
+				</Dialog>
+			)}
 			<DeclareMaintenanceDialog
-				open={open}
+				open={open && (!confirmable || adjusting)}
 				onClose={() => setOpen(false)}
 				scope="group"
 				id={groupId}
+				rank={ownWindow ? (ownWindow.rank ?? undefined) : rank}
 				targetLabel={groupName}
-				prefill={{
-					expectedEnd: new Date(
-						Date.now() + hours * 3600_000,
-					).toISOString(),
-					note: note ?? undefined,
-				}}
+				existing={ownWindow}
+				offerLift
+				prefill={
+					ownWindow
+						? undefined
+						: {
+								expectedEnd: new Date(
+									Date.now() + plannedLength(planned),
+								).toISOString(),
+								note: note ?? undefined,
+							}
+				}
 				onDone={onDeclared}
 			/>
 		</>
