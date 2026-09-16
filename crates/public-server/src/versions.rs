@@ -693,9 +693,10 @@ async fn download_artifact(
 			return Err(AppError::ArtifactNotFound);
 		};
 
-		// Hashing the whole artifact is tens of milliseconds with no await in
-		// it, and a fleet fetching one schema at once would spend that on the
-		// runtime's own threads.
+		// The artifact is here in memory whole, which registration caps, and
+		// hashing it is tens of milliseconds with no await in it: a fleet
+		// fetching one schema at once would spend that on the runtime's own
+		// threads.
 		let bytes = tokio::task::spawn_blocking(move || {
 			(database::artifacts::digest_of(&bytes) == recorded).then_some(bytes)
 		})

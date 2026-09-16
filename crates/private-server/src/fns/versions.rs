@@ -25,6 +25,11 @@ use crate::state::AppState;
 /// Cap on the bytes Canopy will hold for one artifact. A reporting schema is a
 /// SQL file; anything approaching this is not one, and the whole of it is held
 /// in memory to be digested before it is stored.
+///
+/// Raising it takes streaming first, end to end: the upload buffers the body,
+/// the store puts and gets whole `Vec`s, and the download reads and digests the
+/// whole artifact before it answers. Until then a larger cap is what a handful
+/// of concurrent fetches spend the server's memory on.
 const MAX_HELD_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
 
 /// Header the SPA sets on an upload, which no cross-origin page can send
