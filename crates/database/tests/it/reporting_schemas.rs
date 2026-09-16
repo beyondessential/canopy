@@ -850,8 +850,8 @@ async fn an_open_plan_s_target_is_a_pair_and_a_closed_one_is_not() {
 		conn.batch_execute(&format!(
 			"UPDATE application_reported_detail SET version = '2.59.0';
 
-			 INSERT INTO upgrade_plans (group_id, target_version_id, created_by)
-			 VALUES ('{GROUP}', '{newer}', 'seed@bes.au')"
+			 INSERT INTO upgrade_plans (group_id, rank, target_version_id, created_by)
+			 VALUES ('{GROUP}', 'production', '{newer}', 'seed@bes.au')"
 		))
 		.await
 		.expect("plan the upgrade");
@@ -986,8 +986,8 @@ async fn a_planned_pair_names_no_applications() {
 		conn.batch_execute(&format!(
 			"UPDATE application_reported_detail SET version = '2.59.0';
 
-			 INSERT INTO upgrade_plans (group_id, target_version_id, created_by)
-			 VALUES ('{GROUP}', '{newer}', 'seed@bes.au')"
+			 INSERT INTO upgrade_plans (group_id, rank, target_version_id, created_by)
+			 VALUES ('{GROUP}', 'production', '{newer}', 'seed@bes.au')"
 		))
 		.await
 		.expect("plan the upgrade");
