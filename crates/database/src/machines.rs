@@ -498,6 +498,65 @@ impl Machine {
 			.map_err(AppError::from)
 	}
 
+	/// The environment this machine serves: the highest rank among the live
+	/// applications on it, and none where they are all unranked.
+	///
+	/// A box is not given a production workload and a demo one, so deriving
+	/// the rank leaves a mixed box well-defined without anyone keeping a
+	/// machine's rank in step with what runs on it.
+	// spec: FLT#environments
+	pub async fn rank(
+		db: &mut AsyncPgConnection,
+		machine: Uuid,
+	) -> Result<Option<commons_types::server::rank::ServerRank>> {
+		Ok(Self::ranks(db, &[machine]).await?.get(&machine).copied())
+	}
+
+	/// The rank each of `machines` serves, by the same rule as [`Self::rank`].
+	///
+	/// A box carrying nothing ranked is absent from the map rather than
+	/// present with a default: it serves no environment.
+	// spec: FLT#environments
+	pub async fn ranks(
+		db: &mut AsyncPgConnection,
+		machines: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, commons_types::server::rank::ServerRank>> {
+		use crate::schema::applications::dsl;
+		use std::collections::HashMap;
+
+		if machines.is_empty() {
+			return Ok(HashMap::new());
+		}
+		// `applications.rank` is unconstrained text, so an unknown spelling
+		// leaves its application unranked and the rest of the read intact.
+		let rows: Vec<(Uuid, Option<String>)> = dsl::applications
+			.select((dsl::machine_id, dsl::rank))
+			.filter(dsl::machine_id.eq_any(machines))
+			.filter(dsl::deleted_at.is_null())
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		let mut out = HashMap::new();
+		for (machine, rank) in rows {
+			let Some(rank): Option<commons_types::server::rank::ServerRank> =
+				rank.and_then(|rank| rank.parse().ok())
+			else {
+				continue;
+			};
+			out.entry(machine)
+				.and_modify(|held: &mut commons_types::server::rank::ServerRank| {
+					if crate::server_groups::rank_priority(Some(rank))
+						< crate::server_groups::rank_priority(Some(*held))
+					{
+						*held = rank;
+					}
+				})
+				.or_insert(rank);
+		}
+		Ok(out)
+	}
+
 	/// This machine's tags over its group's, so a check filed against a
 	/// machine is graded by policy against the tags of its own target rather
 	/// than against some application that happens to run on it.

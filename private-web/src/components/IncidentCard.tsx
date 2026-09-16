@@ -4,7 +4,11 @@ import NotesIcon from "@mui/icons-material/StickyNote2";
 import { Link as RouterLink } from "react-router-dom";
 import TimeAgo from "./TimeAgo";
 import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
-import { type IncidentData, isIncidentLingering } from "../types";
+import {
+	type IncidentData,
+	incidentTargetName,
+	isIncidentLingering,
+} from "../types";
 
 /** Compact view of an open incident; click-through goes to the incident
  * detail page. The body has a stats row (bottom-right) with issue / event
@@ -38,7 +42,7 @@ export default function IncidentCard({ incident }: { incident: IncidentData }) {
 		>
 			<Box>
 				<Typography variant="subtitle1" sx={{ fontWeight: 500 }} noWrap>
-					{incident.server_group_name || "(unknown group)"}
+					{incidentTargetName(incident) || "(unknown group)"}
 				</Typography>
 				<Typography variant="body2" color="text.secondary">
 					opened <TimeAgo timestamp={incident.opened_at} />

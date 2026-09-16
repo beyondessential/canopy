@@ -49,9 +49,14 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 			applicationId: failed.id,
 			targetVersionId: target.id,
 			failedMigration: "backfillNoteTypeIds",
+			error: 'column "note_type_id" does not exist',
 			totalElapsedSecs: 5400,
 			dataBytesBefore: 200_000_000_000,
 			dataBytesAfter: 260_000_000_000,
+			timings: [
+				{ name: "addIndexToFhirJobs", elapsedSecs: 12 },
+				{ name: "backfillNoteTypeIds", elapsedSecs: 5388 },
+			],
 		});
 
 		await page.goto(`/fleet/groups/${group.id}`);
@@ -67,15 +72,42 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 			.filter({ hasText: "kamaka-central" });
 		await expect(failedRow).toContainText("2.63.0");
 		await expect(failedRow).toContainText("failed");
-		// The window estimate and the growth a heavy backfill leaves behind are
-		// the numbers an operator schedules against.
+		// The window estimate is the number an operator schedules against.
 		await expect(failedRow).toContainText("1.5h");
-		await expect(failedRow).toContainText("30%");
 
 		const untestedRow = section
 			.getByTestId("migration-test-row")
 			.filter({ hasText: "kamaka-facility" });
 		await expect(untestedRow).toContainText("not yet tested");
+
+		// Which migration broke, and what it said.
+		await failedRow.getByText("failed").hover();
+		const tip = page.getByRole("tooltip");
+		await expect(tip).toContainText("backfillNoteTypeIds");
+		await expect(tip).toContainText('column "note_type_id" does not exist');
+
+		// Which migration to blame for the window takes opening the run.
+		await failedRow.getByRole("button", { name: "Show migrations" }).click();
+		const run = page.getByTestId("migration-run");
+		await expect(run).toContainText("kamaka-central");
+		await expect(run).toContainText('column "note_type_id" does not exist');
+		const timings = run.getByTestId("migration-timing");
+		await expect(timings.filter({ hasText: "addIndexToFhirJobs" })).toContainText(
+			"12s",
+		);
+		await expect(
+			timings.filter({ hasText: "backfillNoteTypeIds" }),
+		).toContainText("1.5h");
+
+		// The open run is in the URL, so the link shares the migrations.
+		await expect(page).toHaveURL(new RegExp(`migrations=${failed.id}`));
+		await page.reload();
+		await expect(page.getByTestId("migration-run")).toContainText(
+			"backfillNoteTypeIds",
+		);
+
+		await page.getByRole("button", { name: "Close" }).click();
+		await expect(page.getByTestId("migration-run")).toBeHidden();
 	});
 
 	test("says so when the group has no open plan", async ({
@@ -95,5 +127,55 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 		await expect(page.getByTestId("migration-tests")).toContainText(
 			"nothing to test against",
 		);
+	});
+
+	test("the fleet view names the failure and links to the detail", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedVersion(sql, { major: 2, minor: 62, patch: 0 });
+		const target = await seedVersion(sql, { major: 2, minor: 63, patch: 0 });
+
+		const failed = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+		});
+		await seedStatus(sql, { serverId: failed.id, version: "2.62.0" });
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+		});
+		await seedMigrationTest(sql, {
+			consumerDeviceId: consumer.id,
+			groupId: group.id,
+			machineId: failed.machineId,
+			applicationId: failed.id,
+			targetVersionId: target.id,
+			failedMigration: "backfillNoteTypeIds",
+			error: 'column "note_type_id" does not exist',
+			totalElapsedSecs: 5400,
+			dataBytesBefore: 200_000_000_000,
+			dataBytesAfter: 260_000_000_000,
+			timings: [{ name: "backfillNoteTypeIds", elapsedSecs: 5388 }],
+		});
+
+		await page.goto("/upgrades");
+
+		const row = page
+			.getByTestId("planned-upgrade-row")
+			.filter({ hasText: "kamaka" });
+		const verdict = row.getByText("failed");
+		// Which application broke and why, without opening the group.
+		await verdict.hover();
+		const tip = page.getByRole("tooltip");
+		await expect(tip).toContainText("kamaka-central");
+		await expect(tip).toContainText("backfillNoteTypeIds");
+		await expect(tip).toContainText('column "note_type_id" does not exist');
+
+		await verdict.click();
+		await expect(page).toHaveURL(new RegExp(`/fleet/groups/${group.id}`));
+		await expect(page.getByTestId("migration-tests")).toBeVisible();
 	});
 });

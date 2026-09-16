@@ -1,14 +1,15 @@
 //! Maintenance windows: an operator's declaration that a target is being
-//! worked on. While one suspends a target every check on it grades to
-//! skipped, its issues leave their incident, and suspension outlasts the
-//! window by the settle period so a machine that is back but has not
-//! reported yet is not called unreachable.
+//! worked on. While one suspends a target its checks grade exactly as they
+//! would without it, its issues leave their incident and open none, and
+//! suspension outlasts the window by the settle period so a machine that is
+//! back but has not reported yet is not paged for.
 //!
-//! A window is over a machine, and the checks it suspends are those of the
-//! applications running on it: these tests declare over the machine and assert
-//! against an application's issues, which is the coverage that matters.
+//! A window over a machine suspends the checks of every application running on
+//! it, and a window over one application suspends that application's alone:
+//! these tests declare at each grain and assert against an application's
+//! issues, which is the coverage that matters.
 
-use commons_types::status::CheckResult;
+use commons_types::{server::rank::ServerRank, status::CheckResult};
 use database::{
 	issues::{CheckFiling, Issue, Scope, file_check},
 	maintenance_windows::{MaintenanceWindow, SETTLE},
@@ -54,6 +55,32 @@ async fn insert_server(
 		 VALUES ('tamanu-central', 'http://maint.invalid/', $1, $2) RETURNING id",
 	)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)
+	.bind::<sql_types::Uuid, _>(machine.id)
+	.get_result(conn)
+	.await
+	.expect("insert application");
+	(machine.id, application.id)
+}
+
+/// A machine and the one ranked application on it, as `(machine,
+/// application)`. The machine takes the application's rank, which is the rank
+/// an environment's window has to match.
+async fn insert_ranked_server(
+	conn: &mut diesel_async::AsyncPgConnection,
+	group_id: Uuid,
+	rank: &str,
+) -> (Uuid, Uuid) {
+	let machine: RowId = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
+		.bind::<sql_types::Uuid, _>(group_id)
+		.get_result(conn)
+		.await
+		.expect("insert machine");
+	let application: RowId = sql_query(
+		"INSERT INTO applications (type, host, group_id, rank, machine_id) VALUES ('tamanu-central', $1, $2, $3, $4) RETURNING id",
+	)
+	.bind::<sql_types::Text, _>(format!("http://maint-{rank}.invalid/"))
+	.bind::<sql_types::Uuid, _>(group_id)
+	.bind::<sql_types::Text, _>(rank)
 	.bind::<sql_types::Uuid, _>(machine.id)
 	.get_result(conn)
 	.await
@@ -135,12 +162,14 @@ fn in_an_hour() -> Timestamp {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_window_grades_every_check_on_its_target_to_skipped() {
+async fn a_window_grades_a_check_as_it_stands_and_opens_no_incident() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let (machine_id, server_id) = insert_server(&mut conn, None).await;
+		let group_id = insert_group(&mut conn).await;
+		let (machine_id, server_id) = insert_server(&mut conn, Some(group_id)).await;
 		MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Machine(machine_id),
+			None,
 			in_an_hour(),
 			Some("upgrading"),
 			Some("op"),
@@ -163,10 +192,14 @@ async fn a_window_grades_every_check_on_its_target_to_skipped() {
 		);
 		assert_eq!(
 			state.effective_result,
-			Some(CheckResult::Skipped),
-			"a window grades the check to skipped, as a silence does"
+			Some(CheckResult::Failed),
+			"and graded as it stands, so an operator watches what they are fixing"
 		);
-		assert!(!state.active);
+		assert_eq!(
+			open_incidents(&mut conn, group_id).await,
+			0,
+			"the window stops it opening an incident, which is all it stops"
+		);
 	})
 	.await
 }
@@ -192,6 +225,7 @@ async fn declaring_takes_the_target_out_of_its_open_incident() {
 		MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Machine(machine_id),
+			None,
 			in_an_hour(),
 			None,
 			Some("op"),
@@ -221,6 +255,7 @@ async fn a_group_window_covers_its_servers_and_the_group_itself() {
 		MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Group(group_id),
+			None,
 			in_an_hour(),
 			None,
 			Some("op"),
@@ -235,10 +270,8 @@ async fn a_group_window_covers_its_servers_and_the_group_itself() {
 		.await
 		.expect("file server check");
 		assert_eq!(
-			state_for(&mut conn, server_id, "reachability")
-				.await
-				.effective_result,
-			Some(CheckResult::Skipped),
+			open_incidents(&mut conn, group_id).await,
+			0,
 			"a group's window covers the checks of every server in it"
 		);
 
@@ -263,6 +296,7 @@ async fn the_window_ends_at_its_expected_end_and_suspension_outlasts_it() {
 		let window = MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Machine(machine_id),
+			None,
 			in_an_hour(),
 			None,
 			Some("op"),
@@ -285,7 +319,7 @@ async fn the_window_ends_at_its_expected_end_and_suspension_outlasts_it() {
 			"nobody lifted it; its expected end passed"
 		);
 		assert!(
-			MaintenanceWindow::suspends(&mut conn, Some(machine_id), None)
+			MaintenanceWindow::suspends(&mut conn, None, Some(machine_id), None)
 				.await
 				.expect("suspends"),
 			"suspension runs on through the settle period"
@@ -299,7 +333,7 @@ async fn the_window_ends_at_its_expected_end_and_suspension_outlasts_it() {
 			.await
 			.expect("backdate end");
 		assert!(
-			!MaintenanceWindow::suspends(&mut conn, Some(machine_id), None)
+			!MaintenanceWindow::suspends(&mut conn, None, Some(machine_id), None)
 				.await
 				.expect("suspends"),
 			"the settle period has elapsed, so the target is watched again"
@@ -321,6 +355,7 @@ async fn a_failure_after_the_settle_period_opens_an_incident_again() {
 		let window = MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Machine(machine_id),
+			None,
 			in_an_hour(),
 			None,
 			Some("op"),
@@ -368,6 +403,7 @@ async fn declaring_over_an_open_window_amends_it() {
 		let first = MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Machine(machine_id),
+			None,
 			in_an_hour(),
 			Some("upgrading"),
 			Some("op"),
@@ -379,6 +415,7 @@ async fn declaring_over_an_open_window_amends_it() {
 		let second = MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Machine(machine_id),
+			None,
 			later,
 			Some("still upgrading"),
 			Some("other"),
@@ -411,6 +448,7 @@ async fn lifting_records_the_operator_and_is_idempotent() {
 		let window = MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Machine(machine_id),
+			None,
 			in_an_hour(),
 			None,
 			Some("op"),
@@ -463,6 +501,7 @@ async fn declaring_and_ending_notify_operators() {
 		let window = MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Machine(machine_id),
+			None,
 			in_an_hour(),
 			Some("swapping the disk"),
 			Some("op"),
@@ -492,6 +531,7 @@ async fn a_window_expiring_notifies_as_the_expected_end_passing() {
 		let window = MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Machine(machine_id),
+			None,
 			in_an_hour(),
 			None,
 			Some("op"),
@@ -536,6 +576,7 @@ async fn an_incident_closed_by_a_declaration_says_so() {
 		MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Machine(machine_id),
+			None,
 			in_an_hour(),
 			None,
 			Some("op"),
@@ -567,9 +608,16 @@ async fn an_incident_closed_by_a_declaration_says_so() {
 async fn a_server_joining_a_group_under_a_window_is_covered() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn).await;
-		MaintenanceWindow::declare(&mut conn, Scope::Group(group_id), in_an_hour(), None, None)
-			.await
-			.expect("declare");
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			None,
+			in_an_hour(),
+			None,
+			None,
+		)
+		.await
+		.expect("declare");
 
 		// Joins while the window holds.
 		let (_machine_id, server_id) = insert_server(&mut conn, Some(group_id)).await;
@@ -584,10 +632,14 @@ async fn a_server_joining_a_group_under_a_window_is_covered() {
 			state_for(&mut conn, server_id, "reachability")
 				.await
 				.effective_result,
-			Some(CheckResult::Skipped),
-			"a group's window covers servers that join while it holds"
+			Some(CheckResult::Failed),
+			"the failure grades as it stands"
 		);
-		assert_eq!(open_incidents(&mut conn, group_id).await, 0);
+		assert_eq!(
+			open_incidents(&mut conn, group_id).await,
+			0,
+			"and a group's window covers servers that join while it holds"
+		);
 	})
 	.await
 }
@@ -597,12 +649,20 @@ async fn canopy_wide_checks_are_never_suspended() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn).await;
 		let (machine_id, server_id) = insert_server(&mut conn, Some(group_id)).await;
-		MaintenanceWindow::declare(&mut conn, Scope::Group(group_id), in_an_hour(), None, None)
-			.await
-			.expect("declare group window");
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			None,
+			in_an_hour(),
+			None,
+			None,
+		)
+		.await
+		.expect("declare group window");
 		MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Machine(machine_id),
+			None,
 			in_an_hour(),
 			None,
 			None,
@@ -630,7 +690,7 @@ async fn canopy_wide_checks_are_never_suspended() {
 		assert_eq!(
 			row.effective_result.as_deref(),
 			Some("failed"),
-			"a window over a server or a group never suspends canopy's own checks"
+			"a window over a machine or a group never suspends canopy's own checks"
 		);
 	})
 	.await
@@ -660,12 +720,13 @@ async fn a_machine_window_covers_every_application_on_the_box() {
 		MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Machine(machine_id),
+			None,
 			in_an_hour(),
 			Some("patching the host"),
 			None,
 		)
 		.await
-		.expect("declare");
+		.expect("declare machine window");
 
 		for (label, application) in [("first", first), ("second", second.id)] {
 			file_check(
@@ -674,10 +735,9 @@ async fn a_machine_window_covers_every_application_on_the_box() {
 			)
 			.await
 			.expect("file");
-			let state = state_for(&mut conn, application, "reachability").await;
 			assert_eq!(
-				state.effective_result,
-				Some(CheckResult::Skipped),
+				open_incidents(&mut conn, group_id).await,
+				0,
 				"the {label} application on the box is covered by its machine's window"
 			);
 		}
@@ -691,12 +751,581 @@ async fn a_machine_window_covers_every_application_on_the_box() {
 		.await
 		.expect("file");
 		assert_eq!(
-			state_for(&mut conn, other, "reachability")
-				.await
-				.effective_result,
-			Some(CheckResult::Failed),
+			open_incidents(&mut conn, group_id).await,
+			1,
 			"a window covers the box it names and no other"
+		);
+		assert_eq!(
+			live_members(&mut conn, group_id).await,
+			1,
+			"and only the uncovered box's failure is in the incident"
 		);
 	})
 	.await;
+}
+
+/// A box serving two products is worked on one product at a time, so a window
+/// over one leaves the other alerting. This is the assertion the application
+/// grain exists for: the machine's window is the only one that quiets the box.
+// spec: MNT#declaring
+#[tokio::test(flavor = "multi_thread")]
+async fn an_application_window_leaves_the_rest_of_the_box_alerting() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let (machine_id, worked_on) = insert_server(&mut conn, Some(group_id)).await;
+
+		// The other product on the same box, which nobody declared over.
+		let beside: RowId = sql_query(
+			"INSERT INTO applications (type, host, group_id, machine_id) \
+			 VALUES ('tamanu-central', 'http://beside.invalid/', $1, $2) RETURNING id",
+		)
+		.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(group_id))
+		.bind::<sql_types::Uuid, _>(machine_id)
+		.get_result(&mut conn)
+		.await
+		.expect("second application");
+
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Application(worked_on),
+			None,
+			in_an_hour(),
+			Some("upgrading the one product"),
+			Some("op"),
+		)
+		.await
+		.expect("declare application window");
+
+		file_check(
+			&mut conn,
+			filing(worked_on, "reachability", CheckResult::Failed),
+		)
+		.await
+		.expect("file");
+		assert_eq!(
+			open_incidents(&mut conn, group_id).await,
+			0,
+			"the application under the window raises nothing"
+		);
+
+		file_check(
+			&mut conn,
+			filing(beside.id, "reachability", CheckResult::Failed),
+		)
+		.await
+		.expect("file");
+		assert_eq!(
+			open_incidents(&mut conn, group_id).await,
+			1,
+			"the product beside it on the same box still alerts"
+		);
+		assert_eq!(
+			live_members(&mut conn, group_id).await,
+			1,
+			"and it is the only failure in the incident"
+		);
+
+		let targets = MaintenanceWindow::suspended_targets(&mut conn)
+			.await
+			.expect("suspended");
+		assert!(
+			targets.application_window(worked_on),
+			"the window is the application's, which is the grain a reader marks at"
+		);
+		assert!(
+			!targets.machine_window(machine_id) && !targets.suspends(machine_id, Some(group_id)),
+			"the box is not being taken down, so its own checks stay watched"
+		);
+		assert!(
+			!targets.suspends_application(beside.id, machine_id, Some(group_id)),
+			"nor is the workload beside it suspended"
+		);
+	})
+	.await;
+}
+
+/// An upgrade rehearsed on a site's clone leaves its production, and the
+/// group's own checks, watched.
+// spec: MNT#declaring
+#[tokio::test(flavor = "multi_thread")]
+async fn an_environment_window_covers_only_its_rank() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let (production_box, production) =
+			insert_ranked_server(&mut conn, group_id, "production").await;
+		let (clone_box, clone) = insert_ranked_server(&mut conn, group_id, "clone").await;
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			Some(ServerRank::Clone),
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare");
+
+		file_check(
+			&mut conn,
+			filing(clone, "reachability", CheckResult::Failed),
+		)
+		.await
+		.expect("file clone check");
+		assert_eq!(
+			live_members(&mut conn, group_id).await,
+			0,
+			"the clone is under the window"
+		);
+
+		file_check(
+			&mut conn,
+			filing(production, "reachability", CheckResult::Failed),
+		)
+		.await
+		.expect("file production check");
+		assert_eq!(
+			live_members(&mut conn, group_id).await,
+			1,
+			"production is not"
+		);
+
+		let mut group_filing = filing(production, "backup-staleness", CheckResult::Failed);
+		group_filing.scope = Scope::Group(group_id);
+		file_check(&mut conn, group_filing)
+			.await
+			.expect("file group check");
+		assert_eq!(
+			live_members(&mut conn, group_id).await,
+			2,
+			"the group's own checks are watched through a clone's window"
+		);
+
+		let targets = MaintenanceWindow::suspended_targets(&mut conn)
+			.await
+			.expect("suspended");
+		assert!(
+			targets.suspends(clone_box, Some(group_id))
+				&& !targets.suspends(production_box, Some(group_id)),
+			"the clone's box is suspended and production's is not"
+		);
+		assert!(
+			targets.environment_window(group_id, ServerRank::Clone),
+			"and the window is the environment's, which is the grain a reader marks at"
+		);
+		assert!(
+			!targets.machine_window(clone_box),
+			"the box has no window of its own, so its icon is not the thing marked"
+		);
+		assert!(
+			!targets.group_window(group_id),
+			"an environment's window is not the group's"
+		);
+
+		// The group's own window is a distinct target beside the clone's.
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			None,
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare group-wide");
+		assert!(
+			MaintenanceWindow::open_for(&mut conn, Scope::Group(group_id), Some(ServerRank::Clone))
+				.await
+				.expect("open")
+				.is_some(),
+			"declaring over the group does not amend the clone's window"
+		);
+	})
+	.await
+}
+
+/// Ranks were spelled `live` and `prod` before the canonical set, and such an
+/// application is production: a production window must still cover it.
+// spec: MNT#declaring
+#[tokio::test(flavor = "multi_thread")]
+async fn a_legacy_rank_spelling_falls_under_its_environment_window() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let (_box, legacy) = insert_ranked_server(&mut conn, group_id, "live").await;
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			Some(ServerRank::Production),
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare");
+
+		file_check(
+			&mut conn,
+			filing(legacy, "reachability", CheckResult::Failed),
+		)
+		.await
+		.expect("file check");
+		assert_eq!(
+			live_members(&mut conn, group_id).await,
+			0,
+			"an application stored as live is under its group's production window"
+		);
+	})
+	.await
+}
+
+/// An application with no rank serves no environment, so an environment's
+/// window says nothing about it: only the group's own window covers it.
+// spec: MNT#declaring
+#[tokio::test(flavor = "multi_thread")]
+async fn an_environment_window_does_not_suspend_an_unranked_member() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let (unranked_box, unranked) = insert_server(&mut conn, Some(group_id)).await;
+		let (production_box, production) =
+			insert_ranked_server(&mut conn, group_id, "production").await;
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			Some(ServerRank::Production),
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare");
+
+		for application in [production, unranked] {
+			file_check(
+				&mut conn,
+				filing(application, "reachability", CheckResult::Failed),
+			)
+			.await
+			.expect("file check");
+		}
+		assert_eq!(
+			open_incidents(&mut conn, group_id).await,
+			1,
+			"the unranked application's failure opens an incident"
+		);
+		assert_eq!(
+			live_members(&mut conn, group_id).await,
+			1,
+			"and is the only issue in it: production is under the window"
+		);
+
+		assert!(
+			!MaintenanceWindow::suspends(&mut conn, None, Some(unranked_box), Some(group_id))
+				.await
+				.expect("suspends"),
+			"an unranked application is in no environment's window"
+		);
+		assert!(
+			MaintenanceWindow::suspends(&mut conn, None, Some(production_box), Some(group_id))
+				.await
+				.expect("suspends"),
+			"the environment's own members are"
+		);
+
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			None,
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare group-wide");
+		assert!(
+			MaintenanceWindow::suspends(&mut conn, None, Some(unranked_box), Some(group_id))
+				.await
+				.expect("suspends"),
+			"the group's own window covers every member, ranked or not"
+		);
+	})
+	.await
+}
+
+/// The Slack notice for an environment's window names the environment, so a
+/// reader can tell that a site's clone went quiet from the site itself going
+/// quiet. Only the group's and the machine's forms were covered.
+// spec: MNT#notification
+#[tokio::test(flavor = "multi_thread")]
+async fn an_environment_windows_notice_names_the_environment() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		insert_ranked_server(&mut conn, group_id, "clone").await;
+		insert_ranked_server(&mut conn, group_id, "production").await;
+
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			Some(ServerRank::Clone),
+			in_an_hour(),
+			Some("refreshing from production"),
+			Some("op"),
+		)
+		.await
+		.expect("declare over the clone");
+
+		let declared = outbox_vars(&mut conn, "maintenance_declared").await;
+		assert_eq!(declared.len(), 1, "declaring notifies once");
+		assert_eq!(
+			declared[0].target, "g clone",
+			"the notice names the environment, not the bare group"
+		);
+	})
+	.await
+}
+
+/// An application's window has to say which workload on which box, or a reader
+/// of the notice cannot tell it from a window over the whole environment.
+// spec: MNT#notification
+#[tokio::test(flavor = "multi_thread")]
+async fn an_application_windows_notice_names_the_application() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let (_machine, application) = insert_ranked_server(&mut conn, group_id, "clone").await;
+
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Application(application),
+			None,
+			in_an_hour(),
+			Some("upgrading the one product"),
+			Some("op"),
+		)
+		.await
+		.expect("declare over the application");
+
+		let declared = outbox_vars(&mut conn, "maintenance_declared").await;
+		assert_eq!(declared.len(), 1, "declaring notifies once");
+		assert_eq!(
+			declared[0].target, "g clone Tamanu central",
+			"the notice names the environment and the workload in it"
+		);
+	})
+	.await
+}
+
+/// A production environment's window reads as the group's name alone, the way
+/// production trouble does everywhere else, so the two forms are worth pinning
+/// together.
+// spec: MNT#notification
+#[tokio::test(flavor = "multi_thread")]
+async fn a_production_windows_notice_names_the_group_alone() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		insert_ranked_server(&mut conn, group_id, "production").await;
+
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			Some(ServerRank::Production),
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare over production");
+
+		let declared = outbox_vars(&mut conn, "maintenance_declared").await;
+		assert_eq!(declared[0].target, "g", "production reads as the site");
+	})
+	.await
+}
+
+/// Suspension outlasts a window by the settle period, and the status surfaces
+/// mark those two states apart. An environment's window has to resolve to its
+/// machines for either mark to land on a box, which is the branch nothing
+/// exercised.
+// spec: MNT#settling
+#[tokio::test(flavor = "multi_thread")]
+async fn an_environment_window_settles_over_the_machines_it_covered() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let (clone_box, _) = insert_ranked_server(&mut conn, group_id, "clone").await;
+		let (production_box, _) = insert_ranked_server(&mut conn, group_id, "production").await;
+
+		let window = MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			Some(ServerRank::Clone),
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare over the clone");
+
+		let holding = MaintenanceWindow::suspended_targets(&mut conn)
+			.await
+			.expect("suspended");
+		assert!(
+			holding.suspends(clone_box, Some(group_id))
+				&& !holding.settling(clone_box, Some(group_id)),
+			"while it holds, the clone's box reads as being worked on"
+		);
+		assert!(
+			!holding.suspends(production_box, Some(group_id)),
+			"and production's box is not covered at all"
+		);
+
+		MaintenanceWindow::lift(&mut conn, window.id, Some("op"))
+			.await
+			.expect("lift");
+
+		let settling = MaintenanceWindow::suspended_targets(&mut conn)
+			.await
+			.expect("suspended");
+		assert!(
+			settling.suspends(clone_box, Some(group_id)),
+			"lifting does not end suspension, the settle period does"
+		);
+		assert!(
+			settling.settling(clone_box, Some(group_id)),
+			"and the box reads as settling rather than as still being worked on"
+		);
+	})
+	.await
+}
+
+/// A box under two windows is being worked on for as long as either holds, so
+/// its own window ending does not make it settling while its group's still
+/// stands. Getting this wrong marks a box as handed back while an operator is
+/// still in it.
+// spec: MNT#settling
+#[tokio::test(flavor = "multi_thread")]
+async fn a_box_whose_group_window_still_holds_is_not_settling() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let (machine_id, _) = insert_server(&mut conn, Some(group_id)).await;
+
+		let own = MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Machine(machine_id),
+			None,
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare over the box");
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			None,
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare over the group");
+
+		MaintenanceWindow::lift(&mut conn, own.id, Some("op"))
+			.await
+			.expect("lift the box's own");
+
+		let targets = MaintenanceWindow::suspended_targets(&mut conn)
+			.await
+			.expect("suspended");
+		assert!(
+			!targets.settling(machine_id, Some(group_id)),
+			"the group's window still holds over it"
+		);
+	})
+	.await
+}
+
+/// A box also carrying an application of another group, or of none, serves the
+/// highest rank on it, so a window over a lesser environment does not reach it.
+/// Reading the box two ways would mark it as handed over on the status page
+/// while its checks still page.
+// spec: MNT#declaring
+#[tokio::test(flavor = "multi_thread")]
+async fn a_box_serving_a_higher_rank_is_outside_a_lesser_environment_s_window() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let (machine_id, _) = insert_ranked_server(&mut conn, group_id, "test").await;
+		sql_query(
+			"INSERT INTO applications (type, host, rank, machine_id) \
+			 VALUES ('tamanu-central', 'http://neighbour.invalid/', 'production', $1)",
+		)
+		.bind::<sql_types::Uuid, _>(machine_id)
+		.execute(&mut conn)
+		.await
+		.expect("a production application of no group on the same box");
+
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			Some(ServerRank::Test),
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare over the test environment");
+
+		let targets = MaintenanceWindow::suspended_targets(&mut conn)
+			.await
+			.expect("suspended");
+		assert!(
+			!targets.suspends(machine_id, Some(group_id)),
+			"the box serves production, which no window is over"
+		);
+		assert!(
+			!MaintenanceWindow::suspends(&mut conn, None, Some(machine_id), Some(group_id))
+				.await
+				.expect("suspends"),
+			"and an incident reads the box the same way"
+		);
+	})
+	.await
+}
+
+/// Once the settle period elapses the box is no longer suspended at all, which
+/// is what takes the mark off it rather than leaving it marked for good.
+// spec: MNT#settling
+#[tokio::test(flavor = "multi_thread")]
+async fn a_box_past_the_settle_period_is_no_longer_suspended() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let (clone_box, _) = insert_ranked_server(&mut conn, group_id, "clone").await;
+
+		let window = MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			Some(ServerRank::Clone),
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare");
+		MaintenanceWindow::lift(&mut conn, window.id, Some("op"))
+			.await
+			.expect("lift");
+		sql_query("UPDATE maintenance_windows SET ended_at = $2 WHERE id = $1")
+			.bind::<sql_types::Uuid, _>(window.id)
+			.bind::<sql_types::Timestamptz, _>(jiff_diesel::Timestamp::from(
+				Timestamp::now() - SETTLE - SignedDuration::from_mins(1),
+			))
+			.execute(&mut conn)
+			.await
+			.expect("age the end past the settle period");
+
+		let targets = MaintenanceWindow::suspended_targets(&mut conn)
+			.await
+			.expect("suspended");
+		assert!(
+			!targets.suspends(clone_box, Some(group_id)),
+			"nothing is held back once the settle period is out"
+		);
+	})
+	.await
 }

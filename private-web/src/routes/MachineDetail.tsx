@@ -16,7 +16,11 @@ import ActionButton from "../components/ActionButton";
 import ActiveIncidentCard from "../components/ActiveIncidentCard";
 import { ChecksTable, HealthIndicator } from "../components/ChecksTable";
 import IncidentsLink from "../components/IncidentsLink";
-import { HealthLegend, StatusLegend } from "../components/Legends";
+import {
+	HealthLegend,
+	MaintenanceLegend,
+	StatusLegend,
+} from "../components/Legends";
 import MachineBackupSection from "../components/MachineBackupSection";
 import MachineIdentitySection from "../components/MachineIdentitySection";
 import MachineSetupInstructions from "../components/MachineSetupInstructions";
@@ -32,10 +36,12 @@ import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { humanSeconds } from "../lib/humanDuration";
 import {
+	incidentTargetName,
 	type MachineDetailData,
 	SERVER_RANK_ORDER,
 	type ServerInfo,
 	type ServerRank,
+	heldByLabel,
 } from "../types";
 
 /// A machine's own page: the box, what it reports about itself, its health,
@@ -182,7 +188,7 @@ export default function MachineDetail() {
 			{openIncident && (
 				<ActiveIncidentCard
 					incident={openIncident}
-					groupName={data.group?.name ?? null}
+					targetName={incidentTargetName(openIncident)}
 				/>
 			)}
 
@@ -238,13 +244,19 @@ export default function MachineDetail() {
 					operators={data.operators}
 					target={{ kind: "machine", id: data.machine.id }}
 					groupId={data.group?.id ?? null}
-					maintained={data.maintained}
 					refreshTick={refreshTick}
 					onSilenced={bumpRefresh}
 				/>
 			</Paper>
 
-			<ApplicationsOnThisBox applications={data.applications} />
+			<ApplicationsOnThisBox
+				applications={data.applications}
+				heldBy={
+					data.own_window
+						? heldByLabel({ kind: "machine", name: data.machine.name })
+						: null
+				}
+			/>
 
 			<MachineBackupSection
 				machineId={data.machine.id}
@@ -313,6 +325,7 @@ export default function MachineDetail() {
 				targetLabel={machineLabel(data) ?? undefined}
 				groupId={data.group?.id ?? null}
 				groupName={data.group?.name ?? null}
+				rank={rank}
 				onChanged={bumpRefresh}
 			/>
 
@@ -323,6 +336,7 @@ export default function MachineDetail() {
 					</Typography>
 					<GroupTree
 						machines={data.group_machines}
+						environments={data.group_environments}
 						applications={data.group_applications}
 						currentMachineId={data.machine.id}
 					/>
@@ -333,6 +347,9 @@ export default function MachineDetail() {
 				<StatusLegend />
 				<Box sx={{ mt: 1 }}>
 					<HealthLegend />
+				</Box>
+				<Box sx={{ mt: 1 }}>
+					<MaintenanceLegend />
 				</Box>
 			</Box>
 		</Stack>
@@ -423,8 +440,13 @@ function gibibytes(bytes: number): string {
 /// it answers. The group is left off — every one of them is in this box's.
 function ApplicationsOnThisBox({
 	applications,
+	heldBy,
 }: {
 	applications: ServerInfo[];
+	/// What holds a window the box's applications did not have declared over
+	/// them, where the box's own window is what caught them.
+	// spec: MNT#presentation
+	heldBy?: string | null;
 }) {
 	return (
 		<Box data-testid="applications-on-box">
@@ -442,6 +464,7 @@ function ApplicationsOnThisBox({
 							key={application.id}
 							server={application}
 							withGroup={false}
+							heldBy={heldBy}
 						/>
 					))}
 				</Stack>

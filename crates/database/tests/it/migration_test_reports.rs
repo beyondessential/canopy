@@ -38,7 +38,7 @@ async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> (Uuid, U
 		.await
 		.expect("machine");
 	let row: RowId = sql_query(
-		"INSERT INTO applications (type, host, group_id, machine_id) VALUES ('tamanu-central', $1, $2, $3) RETURNING id",
+		"INSERT INTO applications (type, host, rank, group_id, machine_id) VALUES ('tamanu-central', $1, 'production', $2, $3) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>("https://central.kamaka.example")
 	.bind::<sql_types::Uuid, _>(group_id)
@@ -127,6 +127,7 @@ async fn a_passing_test_records_timings_in_order() {
 				target_version_id: target.id,
 				total_elapsed: secs(900),
 				failed_migration: None,
+				error: None,
 				data_bytes_before: 200_000_000_000,
 				data_bytes_after: 260_000_000_000,
 				timings: vec![
@@ -179,6 +180,7 @@ async fn a_named_failing_migration_is_a_failed_verdict() {
 				target_version_id: target.id,
 				total_elapsed: secs(45),
 				failed_migration: Some("backfillNoteTypeIds".into()),
+				error: None,
 				data_bytes_before: 200_000_000_000,
 				data_bytes_after: 200_000_000_000,
 				timings: vec![("backfillNoteTypeIds".into(), secs(45))],
@@ -222,6 +224,7 @@ async fn an_untested_pair_and_an_untested_version() {
 				target_version_id: tested.id,
 				total_elapsed: secs(10),
 				failed_migration: None,
+				error: None,
 				data_bytes_before: 1,
 				data_bytes_after: 1,
 				timings: vec![],
@@ -305,6 +308,7 @@ async fn a_failure_warns_on_the_server_and_holds_the_version_back() {
 				target_version_id: target.id,
 				total_elapsed: secs(45),
 				failed_migration: Some("backfillNoteTypeIds".into()),
+				error: None,
 				data_bytes_before: 10,
 				data_bytes_after: 10,
 				timings: vec![],
@@ -358,6 +362,7 @@ async fn tomorrows_snapshot_does_not_file_the_issue_twice() {
 					target_version_id: target.id,
 					total_elapsed: secs(45),
 					failed_migration: Some("backfillNoteTypeIds".into()),
+					error: None,
 					data_bytes_before: 10,
 					data_bytes_after: 10,
 					timings: vec![],
@@ -394,6 +399,7 @@ async fn a_later_pass_recovers_the_check() {
 				target_version_id: target.id,
 				total_elapsed: secs(45),
 				failed_migration: Some("backfillNoteTypeIds".into()),
+				error: None,
 				data_bytes_before: 10,
 				data_bytes_after: 10,
 				timings: vec![],
@@ -413,6 +419,7 @@ async fn a_later_pass_recovers_the_check() {
 				target_version_id: target.id,
 				total_elapsed: secs(50),
 				failed_migration: None,
+				error: None,
 				data_bytes_before: 10,
 				data_bytes_after: 12,
 				timings: vec![],
@@ -487,11 +494,12 @@ async fn record_snapshot(
 	.expect("record backup run");
 }
 
-/// The group's open plan, which is what names the version to migrate to.
+/// The production environment's open plan, which is what names the version to
+/// migrate to.
 async fn plan_upgrade(conn: &mut AsyncPgConnection, group: Uuid, target: &Version) {
 	sql_query(
-		"INSERT INTO upgrade_plans (group_id, target_version_id, created_by)
-		 VALUES ($1, $2, 'test@example.com')",
+		"INSERT INTO upgrade_plans (group_id, rank, target_version_id, created_by)
+		 VALUES ($1, 'production', $2, 'test@example.com')",
 	)
 	.bind::<sql_types::Uuid, _>(group)
 	.bind::<sql_types::Uuid, _>(target.id)
@@ -532,6 +540,7 @@ async fn an_untried_candidate_goes_overdue_and_a_tested_one_does_not() {
 				target_version_id: target.id,
 				total_elapsed: secs(10),
 				failed_migration: None,
+				error: None,
 				data_bytes_before: 1,
 				data_bytes_after: 1,
 				timings: vec![],
@@ -571,9 +580,13 @@ async fn a_group_shows_where_each_server_stands() {
 				target_version_id: target.id,
 				total_elapsed: secs(3600),
 				failed_migration: Some("backfillNoteTypeIds".into()),
+				error: None,
 				data_bytes_before: 200,
 				data_bytes_after: 260,
-				timings: vec![],
+				timings: vec![
+					("addIndexToFhirJobs".into(), secs(12)),
+					("backfillNoteTypeIds".into(), secs(3588)),
+				],
 			},
 		)
 		.await
@@ -601,6 +614,13 @@ async fn a_group_shows_where_each_server_stands() {
 			60,
 			"growth is readable from the verdict"
 		);
+		let names: Vec<&str> = latest.timings.iter().map(|t| t.name.as_str()).collect();
+		assert_eq!(
+			names,
+			vec!["addIndexToFhirJobs", "backfillNoteTypeIds"],
+			"the breakdown comes back in the order the migrations ran"
+		);
+		assert_eq!(latest.timings[1].elapsed, secs(3588));
 
 		let pending = &by_server[&untested_app];
 		assert_eq!(
@@ -646,6 +666,7 @@ async fn one_report_keeps_backup_health_and_version_readiness_apart() {
 				target_version_id: target.id,
 				total_elapsed: secs(45),
 				failed_migration: Some("backfillNoteTypeIds".into()),
+				error: None,
 				data_bytes_before: 10,
 				data_bytes_after: 10,
 				timings: vec![],
@@ -692,6 +713,7 @@ async fn a_failed_restore_leaves_the_version_unjudged() {
 				target_version_id: target.id,
 				total_elapsed: secs(0),
 				failed_migration: None,
+				error: None,
 				data_bytes_before: 0,
 				data_bytes_after: 0,
 				timings: vec![],
@@ -740,6 +762,7 @@ async fn a_verdict_with_no_declaration_still_surfaces() {
 				target_version_id: target.id,
 				total_elapsed: secs(45),
 				failed_migration: Some("backfillNoteTypeIds".into()),
+				error: None,
 				data_bytes_before: 10,
 				data_bytes_after: 10,
 				timings: vec![],

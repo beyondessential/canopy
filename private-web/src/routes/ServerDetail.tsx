@@ -37,7 +37,12 @@ import {
 	useApplicationTypeCaps,
 	useApplicationTypeLabel,
 } from "../hooks/useApplicationTypes";
-import { HealthLegend, StatusLegend, VersionLegend } from "../components/Legends";
+import {
+	HealthLegend,
+	MaintenanceLegend,
+	StatusLegend,
+	VersionLegend,
+} from "../components/Legends";
 import ServerRankChip from "../components/ServerRankChip";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
@@ -47,6 +52,7 @@ import TargetName from "../components/TargetName";
 import {
 	applicationName,
 	type ConsolidatedChecks,
+	incidentTargetName,
 	type HealthState,
 	type ServerDetailData,
 	type ServerGroup,
@@ -119,7 +125,7 @@ export default function ServerDetail() {
 			{openIncident && (
 				<ActiveIncidentCard
 					incident={openIncident}
-					groupName={data.group?.name ?? null}
+					targetName={incidentTargetName(openIncident)}
 				/>
 			)}
 			{archived ? (
@@ -178,12 +184,15 @@ export default function ServerDetail() {
 				</Paper>
 			)}
 			<MaintenanceSection
-				scope="machine"
+				scope="application"
 				anchor="maintenance"
-				id={data.server.machine_id}
+				id={data.server.id}
 				targetLabel={applicationName(data.server)}
+				machineId={data.server.machine_id}
+				machineName={data.machine_name ?? null}
 				groupId={data.group?.id ?? null}
 				groupName={data.group?.name ?? null}
+				rank={data.machine_rank ?? null}
 				onChanged={() => detail.reload()}
 			/>
 			<SilencedRefsSection
@@ -199,6 +208,7 @@ export default function ServerDetail() {
 					</Typography>
 					<GroupTree
 						machines={data.group_machines}
+						environments={data.group_environments}
 						applications={data.group_applications}
 						currentApplicationId={data.server.id}
 					/>
@@ -211,6 +221,9 @@ export default function ServerDetail() {
 				</Box>
 				<Box sx={{ mt: 1 }}>
 					<HealthLegend />
+				</Box>
+				<Box sx={{ mt: 1 }}>
+					<MaintenanceLegend />
 				</Box>
 			</Box>
 		</Stack>
@@ -458,16 +471,17 @@ function InfoSection({
 	const caps = useApplicationTypeCaps(server.type);
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
-			{status && (
-				<HealthIndicator
-					health={health}
-					up={up}
-					monitored={server.is_monitored !== false}
-					maintained={maintained}
-					maintenanceSettling={maintenanceSettling}
-					operators={status.operators}
-				/>
-			)}
+			{/* Not behind a status: an application under maintenance is under it
+			    whether or not it has ever reported, and the chip is where that is
+			    said. */}
+			<HealthIndicator
+				health={health}
+				up={up}
+				monitored={server.is_monitored !== false}
+				maintained={maintained}
+				maintenanceSettling={maintenanceSettling}
+				operators={status?.operators ?? []}
+			/>
 			<Stack
 				direction="row"
 				spacing={4}
@@ -525,7 +539,6 @@ function InfoSection({
 				target={{ kind: "application", id: server.id }}
 				machineId={server.machine_id}
 				groupId={server.group_id}
-				maintained={maintained}
 				refreshTick={refreshTick}
 				onSilenced={onSilenced}
 			/>

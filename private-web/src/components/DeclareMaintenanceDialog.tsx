@@ -13,7 +13,7 @@ import {
 } from "@mui/material";
 import { useEffect, useState } from "react";
 import { useApiAction } from "../api";
-import type { MaintenanceWindow } from "../types";
+import type { MaintenanceScope, MaintenanceWindow, ServerRank } from "../types";
 
 const PRESETS = [1, 2, 4, 8];
 
@@ -28,32 +28,43 @@ function hoursFromNow(hours: number): string {
 	return toLocalInput(new Date(Date.now() + hours * 3600_000));
 }
 
-/** Declare a maintenance window over a server or a group, or amend the one
- * it already has. Everything on the target grades to skipped while the
- * window holds, so nothing on it opens or joins an incident. */
+/** Declare a maintenance window over an application, a machine, a group, or one
+ * of a group's environments, or amend the one it already has. Everything on the
+ * target grades to skipped while the window holds, so nothing on it opens or
+ * joins an incident. */
 export default function DeclareMaintenanceDialog({
 	open,
 	onClose,
 	scope,
 	id,
+	rank,
 	targetLabel,
 	existing,
 	prefill,
+	offerLift,
 	onDone,
 }: {
 	open: boolean;
 	onClose: () => void;
-	scope: "machine" | "group";
+	scope: MaintenanceScope;
 	id: string;
+	/** With a group, narrows the window to the machines serving the group's
+	 * applications at this rank. */
+	rank?: ServerRank;
 	targetLabel?: string;
 	/** The target's open window, when this is an amendment. */
 	existing?: MaintenanceWindow | null;
 	/** Starting values where something else knows them, such as an upgrade
 	 * plan's window and note. */
 	prefill?: { expectedEnd?: string; note?: string };
+	/** Offer to end the work from in here, for a surface with no room to carry
+	 * a lift of its own. Where the caller already shows one, this stays off so
+	 * the same action is not in two places. */
+	offerLift?: boolean;
 	onDone: () => void;
 }) {
 	const declare = useApiAction("maintenance", "declare");
+	const lift = useApiAction("maintenance", "lift");
 	const [endsAt, setEndsAt] = useState(() => hoursFromNow(2));
 	const [note, setNote] = useState("");
 
@@ -63,6 +74,7 @@ export default function DeclareMaintenanceDialog({
 		setEndsAt(end ? toLocalInput(new Date(end)) : hoursFromNow(2));
 		setNote(existing?.note ?? prefill?.note ?? "");
 		declare.reset();
+		lift.reset();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [open, existing?.id]);
 
@@ -71,7 +83,11 @@ export default function DeclareMaintenanceDialog({
 		if (Number.isNaN(at.getTime())) return;
 		try {
 			await declare.call({
-				...(scope === "machine" ? { machine_id: id } : { server_group_id: id }),
+				...(scope === "application"
+					? { application_id: id }
+					: scope === "machine"
+						? { machine_id: id }
+						: { server_group_id: id, rank: rank ?? existing?.rank ?? null }),
 				expected_end: at.toISOString(),
 				note: note.trim() === "" ? null : note.trim(),
 			});
@@ -91,9 +107,13 @@ export default function DeclareMaintenanceDialog({
 			</DialogTitle>
 			<DialogContent>
 				<DialogContentText sx={{ mb: 2 }}>
-					{scope === "group"
-						? "Every check on this group and its machines is suspended: nothing opens or joins an incident, and nothing notifies."
-						: "Every check on this machine and the applications on it is suspended: nothing opens or joins an incident, and nothing notifies."}{" "}
+					{scope === "group" && rank
+						? `Every check on the group's ${rank} machines is suspended: nothing opens or joins an incident, and nothing notifies. The rest of the group stays watched.`
+						: scope === "group"
+							? "Every check on this group and its machines is suspended: nothing opens or joins an incident, and nothing notifies."
+							: scope === "machine"
+								? "Every check on this machine and the applications on it is suspended: nothing opens or joins an incident, and nothing notifies."
+								: "Every check on this application is suspended: nothing opens or joins an incident, and nothing notifies. The machine it runs on, and anything else on it, stays watched."}{" "}
 					The window ends itself at the time below, and watching resumes a
 					few minutes later once the reporters have been heard from.
 				</DialogContentText>
@@ -132,14 +152,33 @@ export default function DeclareMaintenanceDialog({
 					{declare.error && (
 						<Alert severity="error">{declare.error.message}</Alert>
 					)}
+					{lift.error && <Alert severity="error">{lift.error.message}</Alert>}
 				</Stack>
 			</DialogContent>
 			<DialogActions>
+				{offerLift && amending && existing && (
+					<Button
+						color="error"
+						disabled={lift.pending || declare.pending}
+						onClick={async () => {
+							try {
+								await lift.call({ id: existing.id });
+								onDone();
+								onClose();
+							} catch {
+								/* surfaced above */
+							}
+						}}
+						sx={{ mr: "auto" }}
+					>
+						Lift
+					</Button>
+				)}
 				<Button onClick={onClose}>Cancel</Button>
 				<Button
 					variant="contained"
 					onClick={submit}
-					disabled={declare.pending || endsAt === ""}
+					disabled={declare.pending || lift.pending || endsAt === ""}
 				>
 					{amending ? "Amend" : "Declare"}
 				</Button>

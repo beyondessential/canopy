@@ -1057,9 +1057,6 @@ async fn file_health_events(
 				application_id: (!on_machine).then_some(server_id).flatten(),
 				machine_id: on_machine.then_some(machine_id),
 				group_id,
-				// Both grains are covered by the window over the box: taking
-				// it down stops its machine checks and its workloads alike.
-				covering_machine: Some(machine_id),
 			},
 		)
 		.await?;

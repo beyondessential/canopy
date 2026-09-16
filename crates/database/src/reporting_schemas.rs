@@ -484,10 +484,21 @@ async fn versions_and_applications(
 		}
 	}
 
+	// A plan is opened against an environment, and the group's central is the
+	// application whose database a schema follows from.
+	let planned = match crate::server_groups::ServerGroup::canonical_central(applications) {
+		Some(central) => {
+			match crate::server_groups::ServerGroup::environment_of(db, central).await? {
+				Some(rank) => crate::upgrade_plans::planned_target(db, group, rank).await?,
+				None => None,
+			}
+		}
+		None => None,
+	};
 	// A plan moving a group to a version something already runs adds no pair.
 	// Dispatch counts a restore and a migrate per entry, so a duplicate here is
 	// paid for rather than merely untidy.
-	if let Some(target) = crate::upgrade_plans::planned_target(db, group).await?
+	if let Some(target) = planned
 		&& !pairs.iter().any(|(v, _)| v.id == target.id)
 	{
 		pairs.push((target, Vec::new()));

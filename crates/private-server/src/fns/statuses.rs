@@ -277,7 +277,7 @@ pub async fn group_details(
 	// One read for the whole card: a window is over a machine or a group, and
 	// a box is suspended by either.
 	// spec: MNT#presentation
-	let (maintained_machines, maintained_groups) =
+	let suspended =
 		database::maintenance_windows::MaintenanceWindow::suspended_targets(&mut conn).await?;
 
 	// The card's headline version is the cached last reported version of the
@@ -325,9 +325,16 @@ pub async fn group_details(
 					.get(&s.machine_id)
 					.copied()
 					.unwrap_or_default(),
-				machine_maintained: maintained_machines.contains(&s.machine_id)
-					|| s.group_id
-						.is_some_and(|gid| maintained_groups.contains(&gid)),
+				maintained: suspended.suspends_application(s.id, s.machine_id, s.group_id),
+				own_window: suspended.application_window(s.id),
+				maintenance_settling: suspended.settling_application(
+					s.id,
+					s.machine_id,
+					s.group_id,
+				),
+				machine_maintained: suspended.suspends(s.machine_id, s.group_id),
+				machine_maintenance_settling: suspended.settling(s.machine_id, s.group_id),
+				machine_own_window: suspended.machine_window(s.machine_id),
 			}
 		})
 		.collect();
@@ -337,6 +344,21 @@ pub async fn group_details(
 	)
 	.await?;
 
+	// The environments of this group under a window of their own, so the card
+	// marks the rank's row rather than each box in it.
+	// spec: MNT#presentation
+	let ranks: std::collections::BTreeSet<ServerRank> =
+		members.iter().filter_map(|m| m.rank).collect();
+	let maintained_ranks: Vec<ServerRank> = ranks
+		.into_iter()
+		.filter(|rank| suspended.environment_window(group.id, *rank))
+		.collect();
+	let settling_ranks: Vec<ServerRank> = maintained_ranks
+		.iter()
+		.copied()
+		.filter(|rank| suspended.environment_window_settling(group.id, *rank))
+		.collect();
+
 	Ok(Json(ServerGroupCard {
 		id: group.id,
 		name: group.name,
@@ -345,6 +367,10 @@ pub async fn group_details(
 		version_distance,
 		members,
 		all_members_quiet,
+		maintained_ranks,
+		settling_ranks,
+		maintained: suspended.group_window(group.id),
+		maintenance_settling: suspended.group_window_settling(group.id),
 	}))
 }
 
@@ -962,7 +988,6 @@ async fn consolidated_checks_at(
 		database::check_policies::FilingScope {
 			application_id: Some(server.id),
 			group_id: server.group_id,
-			covering_machine: Some(server.machine_id),
 			..Default::default()
 		},
 	)
@@ -972,7 +997,6 @@ async fn consolidated_checks_at(
 		database::check_policies::FilingScope {
 			machine_id: Some(machine.id),
 			group_id: machine.group_id,
-			covering_machine: Some(machine.id),
 			..Default::default()
 		},
 	)

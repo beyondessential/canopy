@@ -3,7 +3,7 @@ use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
-use commons_types::Uuid;
+use commons_types::{Uuid, server::rank::ServerRank};
 use database::issues::Scope;
 use database::maintenance_windows::MaintenanceWindow;
 use jiff::Timestamp;
@@ -23,22 +23,26 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(lift))
 }
 
-/// The target a window covers: exactly one of the two is set.
+/// The target a window covers: exactly one of the ids is set.
 #[derive(Deserialize, ToSchema)]
 pub struct TargetArgs {
+	/// The application, for a window over one workload. Covers that
+	/// application and nothing else on the box it runs on.
+	pub application_id: Option<Uuid>,
 	/// The machine, for a window over one box. Covers every application on it.
 	pub machine_id: Option<Uuid>,
-	/// The group, for a window over a whole group.
+	/// The group, for a window over a whole group or one of its environments.
 	pub server_group_id: Option<Uuid>,
 }
 
 impl TargetArgs {
 	fn scope(&self) -> Result<Scope> {
-		match (self.machine_id, self.server_group_id) {
-			(Some(id), None) => Ok(Scope::Machine(id)),
-			(None, Some(id)) => Ok(Scope::Group(id)),
+		match (self.application_id, self.machine_id, self.server_group_id) {
+			(Some(id), None, None) => Ok(Scope::Application(id)),
+			(None, Some(id), None) => Ok(Scope::Machine(id)),
+			(None, None, Some(id)) => Ok(Scope::Group(id)),
 			_ => Err(AppError::BadRequest(
-				"a maintenance window covers one machine or one group".into(),
+				"a maintenance window covers one application, one machine or one group".into(),
 			)),
 		}
 	}
@@ -47,10 +51,17 @@ impl TargetArgs {
 /// Declare a window over a target, or amend the one it already has.
 #[derive(Deserialize, ToSchema)]
 pub struct DeclareArgs {
+	/// The application, for a window over one workload. Covers that
+	/// application and nothing else on the box it runs on.
+	pub application_id: Option<Uuid>,
 	/// The machine, for a window over one box. Covers every application on it.
 	pub machine_id: Option<Uuid>,
-	/// The group, for a window over a whole group.
+	/// The group, for a window over a whole group or one of its environments.
 	pub server_group_id: Option<Uuid>,
+	/// With the group, the rank of the environment the window covers: the
+	/// machines serving the group's applications at that rank, and nothing else
+	/// of the group. Absent for a window over the whole group.
+	pub rank: Option<ServerRank>,
 	/// When the work is expected to finish. The window ends itself then.
 	#[schema(value_type = String, format = DateTime)]
 	pub expected_end: Timestamp,
@@ -98,7 +109,9 @@ pub async fn list_open(
 	let windows = MaintenanceWindow::list_open(&mut conn).await?;
 	let mut out = Vec::with_capacity(windows.len());
 	for window in windows {
-		let target = database::maintenance_windows::target_label(&mut conn, window.scope()).await?;
+		let target =
+			database::maintenance_windows::target_label(&mut conn, window.scope(), window.rank)
+				.await?;
 		out.push(OpenWindow { window, target });
 	}
 	Ok(Json(out))
@@ -129,13 +142,16 @@ pub async fn for_target(
 	Ok(Json(rows))
 }
 
-/// Declare that a server or a group is being worked on.
+/// Declare that an application, a machine, a group, or one of a group's
+/// environments is being worked on.
 ///
 /// Every check on the target grades to skipped while the window holds and
 /// for a settle period after it ends, so nothing on it opens or joins an
-/// incident. Issues already in an open incident leave it, closing the
-/// incident where nothing else holds it open. A target that already has an
-/// open window has that window amended rather than a second opened.
+/// incident. A window over one application leaves the rest of the box watched;
+/// one over the machine covers everything on it. Issues already in an open
+/// incident leave it, closing the incident where nothing else holds it open. A
+/// target that already has an open window has that window amended rather than
+/// a second opened.
 /// Requires admin access.
 #[utoipa::path(
 	post,
@@ -155,6 +171,7 @@ pub async fn declare(
 ) -> Result<Json<MaintenanceWindow>> {
 	let mut conn = state.db.get().await?;
 	let scope = TargetArgs {
+		application_id: args.application_id,
 		machine_id: args.machine_id,
 		server_group_id: args.server_group_id,
 	}
@@ -162,6 +179,7 @@ pub async fn declare(
 	let window = MaintenanceWindow::declare(
 		&mut conn,
 		scope,
+		args.rank,
 		args.expected_end,
 		args.note.as_deref(),
 		Some(&admin.0.login),

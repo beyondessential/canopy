@@ -2,13 +2,29 @@ import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
 	seedDevice,
+	seedMaintenanceWindow,
 	seedRestoreConsumerCapability,
 	seedRestoreReplica,
+	seedServer,
 	seedServerGroup,
+	seedStatus,
 	seedUpgradePlan,
 	seedVersion,
 	seedVersionKnownIssue,
+	type ServerRank,
 } from "./seed";
+
+/** A server of the group at `rank` reporting `version`, which is what that
+ * environment reads as running. */
+async function runningAt(
+	sql: Parameters<typeof seedServer>[0],
+	groupId: string,
+	version: string,
+	rank: ServerRank = "production",
+): Promise<void> {
+	const server = await seedServer(sql, { groupId, rank });
+	await seedStatus(sql, { serverId: server.id, version });
+}
 
 /** Declare a replica on an intent that migrates, which is what makes a plan
  * something the pipeline will act on. */
@@ -40,10 +56,10 @@ test.describe("upgrades dashboard", () => {
 	}) => {
 		const planned = await seedServerGroup(sql, { name: "kamaka" });
 		const unplanned = await seedServerGroup(sql, { name: "drifting" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = ANY($1)",
-			[[planned.id, unplanned.id]],
-		);
+		const current = await seedServerGroup(sql, { name: "settled" });
+		await runningAt(sql, planned.id, "2.60.0");
+		await runningAt(sql, unplanned.id, "2.60.0");
+		await runningAt(sql, current.id, "2.61.0");
 		const target = await seedVersion(sql, {
 			major: 2,
 			minor: 61,
@@ -77,15 +93,19 @@ test.describe("upgrades dashboard", () => {
 		// The group with nothing recorded is the one this view exists to
 		// surface, so it is listed rather than omitted, behind a disclosure.
 		await page
-			.getByRole("button", { name: "Show groups with no plan" })
+			.getByRole("button", { name: "Show environments with no plan" })
 			.click();
-		await expect(
-			page
-				.getByTestId("unplanned-upgrade-row")
-				.filter({ hasText: "drifting" }),
-		).toBeVisible();
+		const drifting = page
+			.getByTestId("unplanned-upgrade-row")
+			.filter({ hasText: "drifting" });
+		await expect(drifting).toBeVisible();
+		await expect(drifting).toContainText("1 minor");
 		await expect(page.getByTestId("unplanned-upgrades")).not.toContainText(
 			"kamaka",
+		);
+		// A group already on the newest version has nothing to plan.
+		await expect(page.getByTestId("unplanned-upgrades")).not.toContainText(
+			"settled",
 		);
 	});
 
@@ -94,6 +114,7 @@ test.describe("upgrades dashboard", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 		await seedUpgradePlan(sql, {
 			groupId: group.id,
@@ -114,7 +135,8 @@ test.describe("upgrades dashboard", () => {
 	});
 
 	test("says so when nothing is planned", async ({ page, sql }) => {
-		await seedServerGroup(sql, { name: "quiet" });
+		const group = await seedServerGroup(sql, { name: "quiet" });
+		await runningAt(sql, group.id, "2.60.0");
 
 		await page.goto("/upgrades");
 
@@ -128,10 +150,7 @@ test.describe("upgrades dashboard", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, {
 			major: 2,
 			minor: 61,
@@ -159,7 +178,7 @@ test.describe("upgrades dashboard", () => {
 			"No group has a recorded plan",
 		);
 		await page
-			.getByRole("button", { name: "Show groups with no plan" })
+			.getByRole("button", { name: "Show environments with no plan" })
 			.click();
 		await expect(
 			page
@@ -181,10 +200,7 @@ test.describe("upgrades dashboard", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		const first = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 		const second = await seedVersion(sql, { major: 2, minor: 63, patch: 0 });
 		await seedUpgradePlan(sql, {
@@ -220,10 +236,7 @@ test.describe("upgrades dashboard", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, {
 			major: 2,
 			minor: 61,
@@ -266,10 +279,7 @@ test.describe("upgrades dashboard", () => {
 
 	test("a date no longer expected can be cleared", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, {
 			major: 2,
 			minor: 61,
@@ -301,15 +311,55 @@ test.describe("upgrades dashboard", () => {
 		await expect(row).not.toContainText("FJT");
 	});
 
+	test("a clone is planned apart from its production", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await runningAt(sql, group.id, "2.60.0");
+		await runningAt(sql, group.id, "2.60.0", "clone");
+		await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+
+		await page.goto("/upgrades");
+		await page.getByRole("button", { name: "Record a plan" }).click();
+		const form = page.getByTestId("record-plan");
+		await form.getByLabel("Group").click();
+		await page.getByRole("option", { name: "kamaka" }).click();
+		// Two environments, so the form does not guess which one is moving.
+		await expect(form.getByLabel("Going to")).toBeDisabled();
+		await form.getByLabel("Environment").click();
+		await page.getByRole("option", { name: /clone/i }).click();
+		await form.getByLabel("Going to").click();
+		await page.getByRole("option", { name: "2.61.0" }).click();
+		await form.getByRole("button", { name: "Record" }).click();
+
+		// The clone's row names its rank; production, still unplanned, stays
+		// in the list of gaps.
+		const row = page
+			.getByTestId("planned-upgrade-row")
+			.filter({ hasText: "kamaka" });
+		await expect(row).toHaveCount(1);
+		await expect(row).toContainText("clone");
+		await expect(row).toContainText("2.61.0");
+		await expect(
+			page.getByRole("button", { name: "Withdraw kamaka clone's plan" }),
+		).toBeVisible();
+		await page
+			.getByRole("button", { name: "Show environments with no plan" })
+			.click();
+		await expect(
+			page
+				.getByTestId("unplanned-upgrade-row")
+				.filter({ hasText: "kamaka" }),
+		).toBeVisible();
+	});
+
 	test("a version far behind the newest can still be planned", async ({
 		page,
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.53.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.53.0");
 		// Ten minors of patch releases sit between the group and the newest, so the
 		// version it is going to is a long way down the list.
 		await seedVersion(sql, { major: 2, minor: 54, patch: 0 });
@@ -347,10 +397,7 @@ test.describe("upgrades dashboard", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 		await seedVersion(sql, { major: 2, minor: 61, patch: 1 });
 		await seedVersion(sql, { major: 2, minor: 61, patch: 2 });
@@ -380,10 +427,7 @@ test.describe("upgrades dashboard", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, {
 			major: 2,
 			minor: 61,
@@ -422,10 +466,7 @@ test.describe("upgrades dashboard", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 
 		await page.goto("/upgrades");
@@ -463,6 +504,97 @@ test.describe("upgrades dashboard", () => {
 		await expect(row).toContainText("2030-04-05");
 		await expect(row).not.toContainText("FJT");
 	});
+
+	/// An environment that has reported no version cannot be placed against the
+	/// newest one, so it has no distance and nothing to plan towards. The list
+	/// exists to name what is behind, and a row that cannot say how far behind
+	/// it is would sit there permanently with nothing anyone can do about it.
+	///
+	/// spec: UPG#the-dashboard
+	test("an environment that has reported no version is not listed as behind", async ({
+		page,
+		sql,
+	}) => {
+		const behind = await seedServerGroup(sql, { name: "drifting" });
+		const silent = await seedServerGroup(sql, { name: "silent" });
+		await runningAt(sql, behind.id, "2.60.0");
+		// A server with no status row has reported nothing.
+		await seedServer(sql, { groupId: silent.id, rank: "production" });
+		await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+
+		await page.goto("/upgrades");
+		await page
+			.getByRole("button", { name: "Show environments with no plan" })
+			.click();
+
+		await expect(
+			page.getByTestId("unplanned-upgrade-row").filter({ hasText: "drifting" }),
+		).toBeVisible();
+		await expect(page.getByTestId("unplanned-upgrades")).not.toContainText(
+			"silent",
+		);
+	});
+
+	/// The tables carry seven columns and a note, so at a narrow width they have
+	/// to scroll inside their own card. Before this they ran out past the card's
+	/// border and under the edge of the window, with the last columns
+	/// unreachable.
+	///
+	/// spec: UPG#the-dashboard
+	test("the plan tables scroll inside their card at a narrow width", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await runningAt(sql, group.id, "2.58.0");
+		await runningAt(sql, group.id, "2.60.0", "clone");
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		// Every column filled, so the table is as wide as it gets in practice.
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+			plannedFor: "2020-01-01",
+			plannedTime: "22:00",
+			plannedEndTime: "02:00",
+			plannedZone: "Pacific/Fiji",
+			note: "site can absorb 2.61 only, and the window is tight",
+		});
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			rank: "clone",
+			targetVersionId: target.id,
+			plannedFor: "2020-02-01",
+			note: "clone goes first",
+		});
+		await declareUpgradeReplica(sql, group.id);
+
+		await page.setViewportSize({ width: 900, height: 900 });
+		await page.goto("/upgrades");
+		await expect(page.getByTestId("planned-upgrade-row")).toHaveCount(2);
+
+		const card = page.getByTestId("planned-upgrades");
+		const scroller = card.locator(".MuiTableContainer-root").first();
+		const overflow = await scroller.evaluate((el) => ({
+			scrollWidth: el.scrollWidth,
+			clientWidth: el.clientWidth,
+		}));
+		expect(
+			overflow.scrollWidth,
+			`the table is wider than its scroller, so it scrolls: ${JSON.stringify(overflow)}`,
+		).toBeGreaterThan(overflow.clientWidth);
+
+		// And the card itself stays inside the window: the overflow is absorbed
+		// by the scroller rather than pushing the layout wide.
+		const box = await card.boundingBox();
+		expect(box).not.toBeNull();
+		expect(box!.x + box!.width).toBeLessThanOrEqual(900);
+
+		// Scrolling the container reaches the far side rather than clipping it.
+		await scroller.evaluate((el) => {
+			el.scrollLeft = el.scrollWidth;
+		});
+		expect(await scroller.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0);
+	});
 });
 
 test.describe("upgrade calendar", () => {
@@ -472,10 +604,7 @@ test.describe("upgrade calendar", () => {
 
 	test("shows a dated plan on the day it lands", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 
 		const now = new Date();
@@ -521,10 +650,7 @@ test.describe("upgrade calendar hours", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 
 		const now = new Date();
@@ -563,10 +689,7 @@ test.describe("upgrade calendar editing", () => {
 
 	test("clicking an entry amends the plan in place", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 
 		const now = new Date();
@@ -601,10 +724,7 @@ test.describe("upgrade windows", () => {
 
 	test("a window recorded by hand reads as a range", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 
 		await page.goto("/upgrades");
@@ -631,10 +751,7 @@ test.describe("upgrade windows", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 
 		// The Monday of the week on screen, so the morning the window runs into
@@ -676,10 +793,7 @@ test.describe("upgrade windows", () => {
 
 	test("a day number opens that day on its own", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 
 		const now = new Date();
@@ -704,7 +818,160 @@ test.describe("upgrade windows", () => {
 			"9am-11:30am",
 		);
 	});
+
+
+	// spec: UPG#when-a-plan-is-met
+	test("a plan held open by maintenance says so", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const production = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		await seedStatus(sql, { serverId: production.id, version: "2.60.0" });
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			rank: "production",
+			targetVersionId: target.id,
+		});
+		await seedMaintenanceWindow(sql, {
+			serverGroupId: group.id,
+			rank: "production",
+			endsInHours: 2,
+		});
+
+		await page.goto("/upgrades");
+		const mark = page.getByTestId("plan-under-maintenance");
+		await expect(mark).toBeVisible();
+
+		// The operator reading the row is the one in the work, so the mark is the
+		// way back into it.
+		await page.getByTestId("amend-maintenance").click();
+		await expect(
+			page.getByRole("heading", { name: "Amend maintenance" }),
+		).toBeVisible();
+
+		// And the work can be ended from the same place it is read.
+		await page.getByRole("button", { name: "Lift", exact: true }).click();
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ ended_at: string | null }>(
+					"SELECT ended_at FROM maintenance_windows WHERE server_group_id = $1",
+					[group.id],
+				);
+				return rows.every((r) => r.ended_at !== null);
+			})
+			.toBe(true);
+		await expect(page.getByTestId("plan-under-maintenance")).toHaveCount(0);
+	});
+
+	/// Declaring opens the window now, so a plan whose hours are still ahead
+	/// cannot be confirmed as they stand: confirming it would silence the
+	/// environment from this moment to a distant end.
+	// spec: MNT#declaring
+	test("a plan whose window has not started falls through to the form", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const production = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		await seedStatus(sql, { serverId: production.id, version: "2.60.0" });
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		const ahead = new Date(Date.now() + 21 * 24 * 3600_000);
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			rank: "production",
+			targetVersionId: target.id,
+			plannedFor: ahead.toISOString().slice(0, 10),
+			plannedTime: "22:00",
+			plannedEndTime: "02:00",
+			plannedZone: "UTC",
+		});
+
+		await page.goto("/upgrades");
+		await page
+			.getByRole("button", { name: "Declare maintenance for kamaka" })
+			.click();
+
+		await expect(page.getByTestId("confirm-declare")).toHaveCount(0);
+		await expect(page.getByLabel("Expected to end")).toBeVisible();
+	});
+
+	/// The incident: an upgrade runs with nothing declared. The plan already
+	/// carries the hours, so declaring over it is a confirmation.
+	// spec: MNT#declaring
+	test("declaring from a plan offers the hours the plan named", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const production = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		await seedStatus(sql, { serverId: production.id, version: "2.60.0" });
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			rank: "production",
+			targetVersionId: target.id,
+			...startedWindow(),
+			plannedZone: "UTC",
+			note: "site can absorb 2.61",
+		});
+
+		await page.goto("/upgrades");
+		await page
+			.getByRole("button", { name: "Declare maintenance for kamaka" })
+			.click();
+
+		// A confirmation, not the form: the hours are already known, and they
+		// are under way, which is what a declaration opening now can stand for.
+		const confirm = page.getByTestId("confirm-declare");
+		await expect(confirm).toBeVisible();
+		await expect(confirm).toContainText("site can absorb 2.61");
+		await confirm.getByRole("button", { name: "Declare" }).click();
+
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ expected_end: string }>(
+					"SELECT expected_end FROM maintenance_windows \
+					 WHERE server_group_id = $1 AND ended_at IS NULL",
+					[group.id],
+				);
+				return rows.length;
+			})
+			.toBe(1);
+		await expect(page.getByTestId("plan-under-maintenance")).toBeVisible();
+	});
 });
+
+/// A plan window that opened an hour ago and runs for another two, in UTC: a
+/// declaration opens now, so only hours already under way can be confirmed as
+/// they stand.
+function startedWindow(): {
+	plannedFor: string;
+	plannedTime: string;
+	plannedEndTime: string;
+} {
+	const clock = (at: Date) =>
+		`${String(at.getUTCHours()).padStart(2, "0")}:${String(
+			at.getUTCMinutes(),
+		).padStart(2, "0")}`;
+	const started = new Date(Date.now() - 3600_000);
+	return {
+		plannedFor: started.toISOString().slice(0, 10),
+		plannedTime: clock(started),
+		plannedEndTime: clock(new Date(Date.now() + 2 * 3600_000)),
+	};
+}
+
 
 /** The local calendar day, as the API and the grid both write it. */
 function localIso(at: Date): string {
