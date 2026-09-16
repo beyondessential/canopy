@@ -8506,6 +8506,7 @@ export interface components {
              *     that rank.
              */
             rank: components["schemas"]["ServerRank"];
+            tally?: null | components["schemas"]["Tally"];
             /** @description The plan's target as semver. */
             target_version?: string | null;
             /**
@@ -10778,6 +10779,22 @@ export interface components {
             note?: string | null;
             /** @description Take over a lease another operator holds, which is audited. */
             take_over?: boolean;
+        };
+        /**
+         * @description How many of an environment's applications have passed, out of how many the
+         *     migrations apply to.
+         */
+        Tally: {
+            /**
+             * Format: int32
+             * @description How many have a passing verdict against the planned version.
+             */
+            passed: number;
+            /**
+             * Format: int32
+             * @description How many the migrations apply to, passed or not.
+             */
+            total: number;
         };
         /** @description The target a window covers: exactly one of the ids is set. */
         TargetArgs: {

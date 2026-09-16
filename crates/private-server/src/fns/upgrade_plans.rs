@@ -81,6 +81,10 @@ pub struct PlannedUpgrade {
 	pub attempt: Option<crate::fns::migration_tests::AttemptState>,
 	/// The failing test behind a `failed` verdict. `null` for any other verdict.
 	pub failed_test: Option<FailedTest>,
+	/// How many of the environment's applications have passed, out of how many
+	/// are under test. `null` without a plan, or where the environment has no
+	/// application the migrations apply to.
+	pub tally: Option<Tally>,
 	/// Whether anything is declared to migrate this group's data. A plan on a
 	/// group with nothing declared is never dispatched, so its verdict would sit
 	/// at "not tested" indefinitely with nothing on its way. `null` without a
@@ -208,6 +212,7 @@ pub async fn fleet(
 		// its data survives getting there. Pairing them is what makes this view
 		// worth reading.
 		let mut failed_test = None;
+		let mut tally = None;
 		let verdict = match &plan {
 			None => None,
 			Some(_) => {
@@ -244,6 +249,7 @@ pub async fn fleet(
 						.and_then(|application| application.name.clone())
 						.unwrap_or_else(|| server_id.to_string())
 				});
+				tally = tested_tally(&per_server);
 				Some(roll_up(&per_server).to_owned())
 			}
 		};
@@ -295,6 +301,7 @@ pub async fn fleet(
 			late,
 			verdict,
 			failed_test,
+			tally,
 			attempt,
 			testable,
 			planned_window,
@@ -311,7 +318,10 @@ pub async fn fleet(
 /// The group's standing against its planned version: the worst of its applications'.
 ///
 /// One server whose data breaks the migrations is enough to stop the upgrade, so
-/// a failure anywhere is the group's answer.
+/// a failure anywhere is the group's answer. Short of that, an environment part
+/// way through is its own answer rather than the untested one: a central that
+/// passed is most of what an operator wants to know before the window opens,
+/// and reading it as untested hides work that has already been done.
 fn roll_up(per_server: &[database::migration_tests::GroupVerdict]) -> &'static str {
 	use database::migration_tests::Verdict;
 
@@ -322,9 +332,40 @@ fn roll_up(per_server: &[database::migration_tests::GroupVerdict]) -> &'static s
 		return "failed";
 	}
 	if per_server.iter().any(|v| v.verdict == Verdict::NotTested) {
-		return "nottested";
+		return if per_server.iter().any(|v| v.verdict == Verdict::Passed) {
+			"partial"
+		} else {
+			"nottested"
+		};
 	}
 	"passed"
+}
+
+/// How far through an environment's applications the testing has got, so a
+/// partial verdict can say so rather than leaving the reader to guess.
+fn tested_tally(per_server: &[database::migration_tests::GroupVerdict]) -> Option<Tally> {
+	use database::migration_tests::Verdict;
+
+	if per_server.is_empty() {
+		return None;
+	}
+	Some(Tally {
+		passed: per_server
+			.iter()
+			.filter(|v| v.verdict == Verdict::Passed)
+			.count() as i32,
+		total: per_server.len() as i32,
+	})
+}
+
+/// How many of an environment's applications have passed, out of how many the
+/// migrations apply to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+pub struct Tally {
+	/// How many have a passing verdict against the planned version.
+	pub passed: i32,
+	/// How many the migrations apply to, passed or not.
+	pub total: i32,
 }
 
 /// The failing test behind a `failed` verdict, so the fleet view can say what
@@ -818,5 +859,71 @@ mod failure_tests {
 			"",
 		);
 		assert_eq!(newest_failure(&[passed], |_| "Central".to_owned()), None);
+	}
+}
+
+#[cfg(test)]
+mod rollup_tests {
+	use super::*;
+	use database::migration_tests::{GroupVerdict, Verdict};
+
+	fn at(verdict: Verdict) -> GroupVerdict {
+		GroupVerdict {
+			server_id: Uuid::nil(),
+			target_version_id: Uuid::nil(),
+			target_version: "2.63.0".to_owned(),
+			verdict,
+			latest: None,
+		}
+	}
+
+	/// An environment part way through says so. A central that passed is most of
+	/// what an operator wants to know before the window opens, and rolling it up
+	/// as untested hides testing that has already happened.
+	#[test]
+	fn some_passed_and_some_untested_is_partial() {
+		let per_server = [at(Verdict::Passed), at(Verdict::NotTested)];
+		assert_eq!(roll_up(&per_server), "partial");
+		assert_eq!(
+			tested_tally(&per_server),
+			Some(Tally {
+				passed: 1,
+				total: 2
+			})
+		);
+	}
+
+	/// One application whose data breaks the migrations is enough to stop the
+	/// upgrade, so a failure outranks anything that passed alongside it.
+	#[test]
+	fn a_failure_outranks_a_pass() {
+		assert_eq!(
+			roll_up(&[
+				at(Verdict::Passed),
+				at(Verdict::Failed),
+				at(Verdict::NotTested)
+			]),
+			"failed"
+		);
+	}
+
+	/// Nothing tested at all is still untested: partial is about work done, not
+	/// about how many applications there are.
+	#[test]
+	fn nothing_tested_is_not_partial() {
+		assert_eq!(
+			roll_up(&[at(Verdict::NotTested), at(Verdict::NotTested)]),
+			"nottested"
+		);
+		assert_eq!(roll_up(&[]), "nottested");
+		assert_eq!(tested_tally(&[]), None);
+	}
+
+	#[test]
+	fn every_application_passing_is_a_pass() {
+		assert_eq!(
+			roll_up(&[at(Verdict::Passed), at(Verdict::Passed)]),
+			"passed"
+		);
 	}
 }

@@ -12,6 +12,7 @@ import {
 	Table,
 	TableBody,
 	TableCell,
+	TableContainer,
 	TableHead,
 	TableRow,
 	Typography,
@@ -135,47 +136,49 @@ export default function MigrationRunDialog({
 					</Alert>
 				)}
 
-				<Table size="small" stickyHeader sx={{ tableLayout: "fixed" }}>
-					<TableHead>
-						<TableRow>
-							<TableCell sx={{ width: 48 }}>#</TableCell>
-							<TableCell>Migration</TableCell>
-							<TableCell align="right" sx={{ width: 90 }}>
-								Took
-							</TableCell>
-						</TableRow>
-					</TableHead>
-					<TableBody>
-						{timings.map((timing) => {
-							const failed = timing.name === latest.failed_migration;
-							return (
-								<TableRow
-									key={timing.ordinal}
-									data-testid="migration-timing"
-									sx={
-										failed
-											? (theme) => ({
-													bgcolor: alpha(theme.palette.warning.main, 0.12),
-												})
-											: undefined
-									}
-								>
-									<TableCell sx={{ color: "text.secondary" }}>
-										{timing.ordinal + 1}
-									</TableCell>
-									<TableCell
-										sx={{ fontFamily: "monospace", overflowWrap: "anywhere" }}
+				<TableContainer sx={{ maxHeight: "50vh" }}>
+					<Table size="small" stickyHeader sx={{ tableLayout: "fixed" }}>
+						<TableHead>
+							<TableRow>
+								<TableCell sx={{ width: 48 }}>#</TableCell>
+								<TableCell>Migration</TableCell>
+								<TableCell align="right" sx={{ width: 90 }}>
+									Took
+								</TableCell>
+							</TableRow>
+						</TableHead>
+						<TableBody>
+							{timings.map((timing) => {
+								const failed = timing.name === latest.failed_migration;
+								return (
+									<TableRow
+										key={timing.ordinal}
+										data-testid="migration-timing"
+										sx={
+											failed
+												? (theme) => ({
+														bgcolor: alpha(theme.palette.warning.main, 0.12),
+													})
+												: undefined
+										}
 									>
-										<MigrationName name={timing.name} />
-									</TableCell>
-									<TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
-										{formatDuration(timing.elapsed)}
-									</TableCell>
-								</TableRow>
-							);
-						})}
-					</TableBody>
-				</Table>
+										<TableCell sx={{ color: "text.secondary" }}>
+											{timing.ordinal + 1}
+										</TableCell>
+										<TableCell
+											sx={{ fontFamily: "monospace", overflowWrap: "anywhere" }}
+										>
+											<MigrationName name={timing.name} />
+										</TableCell>
+										<TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+											{formatDuration(timing.elapsed)}
+										</TableCell>
+									</TableRow>
+								);
+							})}
+						</TableBody>
+					</Table>
+				</TableContainer>
 			</DialogContent>
 		</Dialog>
 	);
