@@ -111,6 +111,11 @@ pub struct NewArtifact {
 
 /// Cap on the bytes Canopy will hold for one artifact. A reporting schema is a
 /// SQL file, and anything approaching this is not one.
+///
+/// Raising it takes streaming first, end to end: an upload buffers the body,
+/// the store puts and gets whole `Vec`s, and a download reads and digests the
+/// whole artifact before it answers. Until then a larger cap is what a handful
+/// of concurrent fetches spend the server's memory on.
 pub const MAX_HELD_ARTIFACT_BYTES: usize = 32 * 1024 * 1024;
 
 /// The digest Canopy records and verifies bytes against.
