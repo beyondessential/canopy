@@ -422,11 +422,14 @@ async fn an_application_presents_its_machines_checks_as_the_machines() {
 	.await
 }
 
+/// A box in trouble is the box's trouble. The application presents its
+/// machine's checks so an operator reads them where they matter, and is graded
+/// on its own, so a warning on the box does not read as a warning in every
+/// workload on it.
+// spec: CHK#health-rollup
 #[tokio::test(flavor = "multi_thread")]
-async fn an_applications_rollup_takes_in_its_machines_checks() {
+async fn an_applications_rollup_leaves_out_its_machines_checks() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		// Nothing wrong with the application itself: the only thing failing is
-		// the box under it, and that is enough to grade the application down.
 		let server_id = insert_server(&mut conn).await;
 		let machine_id = machine_of(&mut conn, server_id).await;
 		file_check(
@@ -445,15 +448,39 @@ async fn an_applications_rollup_takes_in_its_machines_checks() {
 		let health = database::issues::health_from_check_state(&mut conn, &[(server_id, None)])
 			.await
 			.expect("rollup");
+		// Absent from the rollup is how "nothing against it" reads; callers
+		// default that healthy, as the consolidated read below does.
 		assert_eq!(
-			health.get(&server_id).copied(),
-			Some(HealthState::Unhealthy)
+			health
+				.get(&server_id)
+				.copied()
+				.unwrap_or(HealthState::Healthy),
+			HealthState::Healthy,
 		);
 
 		let consolidated = consolidated_checks_latest(&mut conn, server_id, None)
 			.await
 			.expect("consolidated");
-		assert_eq!(consolidated.health_state, HealthState::Unhealthy);
+		assert_eq!(consolidated.health_state, HealthState::Healthy);
+		// The box's check is still on the application's list, marked as the
+		// box's, so nothing is hidden by not being counted.
+		let boxs = consolidated
+			.checks
+			.iter()
+			.find(|c| c.check == "disk_free")
+			.expect("the machine's check on the application's list");
+		assert_eq!(boxs.subject, commons_types::subject::CheckSubject::Machine);
+		assert_eq!(boxs.effective, CheckResult::Failed);
+
+		// And the box itself is graded down by it.
+		let machine_health =
+			database::issues::machine_health_from_check_state(&mut conn, &[(machine_id, None)])
+				.await
+				.expect("machine rollup");
+		assert_eq!(
+			machine_health.get(&machine_id).copied(),
+			Some(HealthState::Unhealthy),
+		);
 	})
 	.await
 }

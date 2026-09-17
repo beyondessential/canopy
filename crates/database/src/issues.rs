@@ -1612,51 +1612,17 @@ pub async fn health_from_check_state(
 		contributing.entry(application_id).or_default().push(result);
 	}
 
-	let mut health: HashMap<Uuid, HealthState> = contributing
+	let health: HashMap<Uuid, HealthState> = contributing
 		.into_iter()
 		.map(|(application_id, results)| (application_id, HealthState::from_results(results)))
 		.collect();
 
-	// An application's contributing checks include its machine's, so a box
-	// whose disk is filling makes every application on it degraded.
-	//
-	// The two rollups combine by taking the worse of the pair, which is the
-	// same answer as classifying the union: `HealthState::from_results` is the
-	// worst result over its input, and worst-of is associative. So the box's
-	// checks are graded once for the box and read from each application on it,
-	// rather than counted once per workload.
+	// A check is graded against the target it is filed on and no other, so a
+	// box's own checks make the box degraded and leave the workloads on it
+	// graded on theirs. The machine's checks are presented alongside an
+	// application's (see `consolidated_checks_for`), marked as the machine's,
+	// and counted towards the machine's health rather than this one's.
 	// spec: CHK#health-rollup
-	let machine_of = Application::machines_by_id(conn, &server_ids).await?;
-	let mut machine_groups: Vec<(Uuid, Option<Uuid>)> = Vec::new();
-	if !machine_of.is_empty() {
-		let machine_ids: Vec<Uuid> = {
-			let mut ids: Vec<Uuid> = machine_of.values().copied().collect();
-			ids.sort_unstable();
-			ids.dedup();
-			ids
-		};
-		// A machine carries its own group, which is the group its silences are
-		// read against; an application's need not be the same one.
-		let rows: Vec<(Uuid, Option<Uuid>)> = crate::schema::machines::table
-			.select((
-				crate::schema::machines::id,
-				crate::schema::machines::group_id,
-			))
-			.filter(crate::schema::machines::id.eq_any(&machine_ids))
-			.load(conn)
-			.await?;
-		machine_groups = rows;
-	}
-	let machine_health = machine_health_rollup(conn, &machine_groups, false).await?;
-	for (application_id, machine_id) in machine_of {
-		let Some(from_machine) = machine_health.get(&machine_id).copied() else {
-			continue;
-		};
-		health
-			.entry(application_id)
-			.and_modify(|held| *held = held.worse_of(from_machine))
-			.or_insert(from_machine);
-	}
 
 	Ok(health)
 }
@@ -1665,30 +1631,13 @@ pub async fn health_from_check_state(
 ///
 /// A sibling of [`health_from_check_state`] rather than a generalisation of it:
 /// the query differs only in which column names the target, and both end at
-/// `HealthState::from_results`, so the two grains classify identically. A
-/// machine's own health is its own checks; what an application makes of its
-/// machine's checks is the application's rollup (see CHK, "Health rollup").
+/// `HealthState::from_results`, so the two grains classify identically. Each
+/// grain is graded on its own checks, so a box's trouble is the box's and the
+/// applications on it are answered for separately.
 // spec: CHK#health-rollup
 pub async fn machine_health_from_check_state(
 	conn: &mut AsyncPgConnection,
 	machines: &[(Uuid, Option<Uuid>)],
-) -> Result<std::collections::HashMap<Uuid, commons_types::status::HealthState>> {
-	machine_health_rollup(conn, machines, true).await
-}
-
-/// The machine rollup, with a say over whether the box's own reachability
-/// counts.
-///
-/// It counts when the box is being graded, and does not when an application on
-/// it is: each grain has its own reachability, and a box that goes quiet has
-/// already made every application on it unreachable on its own account. Adding
-/// the box's to theirs would say the same thing twice from the one silence
-/// control. See CHK, "A machine's checks present on its applications".
-// spec: CHK#a-machines-checks-present-on-its-applications
-async fn machine_health_rollup(
-	conn: &mut AsyncPgConnection,
-	machines: &[(Uuid, Option<Uuid>)],
-	include_reachability: bool,
 ) -> Result<std::collections::HashMap<Uuid, commons_types::status::HealthState>> {
 	use crate::schema::{issues, scoped_check_policies};
 	use commons_types::status::HealthState;
@@ -1753,9 +1702,6 @@ async fn machine_health_rollup(
 			continue;
 		};
 		let key = (machine_id, source, check_name);
-		if !include_reachability && is_reachability(&key.1, &key.2) {
-			continue;
-		}
 		// A machine's checks are in the machine namespace or a curated source's
 		// flat one; no application type bears on either.
 		if !crate::check_policies::CheckPolicy::live_for(&cataloged, &key.1, &key.2, None) {

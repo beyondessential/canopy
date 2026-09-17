@@ -130,7 +130,7 @@ An application's last known version is retained without that window, so a long-o
 
 The health classifications this interface reports — a healthy / warning / unhealthy / unreachable state, and a backup's overdue, never-reported, failed, or stuck classifications — are the same classifications the operator web UI presents for the same data.
 A client and an operator looking at the same machine, application or group reach the same conclusion about whether it is healthy and whether its backups are in good order.
-An application's health includes its machine's checks, so a client and the UI agree on a box's disk filling making the software on it degraded.
+An application's health is its own checks and a machine's is the box's, so a client and the UI agree on which of the two a box's disk filling is trouble for.
 
 Version adoption counts and the version distribution count live applications by the version each currently reports, so they reflect what is deployed now rather than what has ever been seen.
 
