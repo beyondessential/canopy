@@ -33,7 +33,7 @@ import { useParams } from "react-router-dom";
 import Markdown from "../components/Markdown";
 import TimeAgo from "../components/TimeAgo";
 import VersionStatusChip from "../components/VersionStatusChip";
-import { useApi, useApiAction } from "../api";
+import { useApi, useApiAction, useApiUpload } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { prettifyVersionRange } from "../lib/versionRange";
@@ -410,6 +410,13 @@ function ArtifactsSection({
 	);
 }
 
+// A version can hold several artifacts of one type and platform, one per group,
+// so the type alone does not name a row.
+function artifactLabel(artifact: ArtifactData): string {
+	const scope = artifact.group_name ?? (artifact.group_id ? "a group" : "every group");
+	return `${artifact.artifact_type} ${artifact.platform} for ${scope}`;
+}
+
 function ArtifactRow({
 	artifact,
 	unlocked,
@@ -476,7 +483,22 @@ function ArtifactRow({
 				{artifact.platform}
 			</TableCell>
 			<TableCell sx={{ wordBreak: "break-all" }}>
-				{artifact.download_url.startsWith("https://") ? (
+				{artifact.canopy_holds_bytes ? (
+					<Stack spacing={0.25}>
+						<Typography variant="body2">
+							Held by Canopy for {artifact.group_name ?? "a group"}
+						</Typography>
+						{artifact.digest && (
+							<Typography
+								variant="caption"
+								color="text.secondary"
+								sx={{ fontFamily: "monospace" }}
+							>
+								{artifact.digest}
+							</Typography>
+						)}
+					</Stack>
+				) : artifact.download_url?.startsWith("https://") ? (
 					<a
 						href={artifact.download_url}
 						target="_blank"
@@ -513,14 +535,14 @@ function ArtifactRow({
 					) : (
 						<Stack direction="row" spacing={0.5} sx={{ justifyContent: "flex-end" }}>
 							<IconButton
-								aria-label={`edit ${artifact.artifact_type}`}
+								aria-label={`edit ${artifactLabel(artifact)}`}
 								size="small"
 								onClick={() => setEditing(true)}
 							>
 								<EditIcon fontSize="small" />
 							</IconButton>
 							<IconButton
-								aria-label={`delete ${artifact.artifact_type}`}
+								aria-label={`delete ${artifactLabel(artifact)}`}
 								size="small"
 								color="error"
 								onClick={() => setConfirmDelete(true)}
@@ -553,7 +575,7 @@ function EditArtifactRow({
 				artifact_id: artifact.id,
 				artifact_type: type,
 				platform,
-				download_url: url,
+				download_url: artifact.canopy_holds_bytes ? null : url,
 			});
 			onClose(true);
 		} catch {
@@ -582,14 +604,21 @@ function EditArtifactRow({
 				/>
 			</TableCell>
 			<TableCell>
-				<TextField
-					size="small"
-					fullWidth
-					value={url}
-					onChange={(e) => setUrl(e.target.value)}
-					disabled={action.pending}
-					required
-				/>
+				{artifact.canopy_holds_bytes ? (
+					<Typography variant="body2" color="text.secondary">
+						Held by Canopy for {artifact.group_name ?? "a group"}. Register
+						it again to replace the bytes.
+					</Typography>
+				) : (
+					<TextField
+						size="small"
+						fullWidth
+						value={url ?? ""}
+						onChange={(e) => setUrl(e.target.value)}
+						disabled={action.pending}
+						required
+					/>
+				)}
 			</TableCell>
 			<TableCell align="right">
 				<Stack direction="row" spacing={0.5} sx={{ justifyContent: "flex-end" }}>
@@ -597,7 +626,12 @@ function EditArtifactRow({
 						size="small"
 						variant="contained"
 						onClick={save}
-						disabled={action.pending}
+						// `required` on the field never fires: the row is not a
+						// form and Save is not a submit, so nothing validates it.
+						disabled={
+							action.pending ||
+							(!artifact.canopy_holds_bytes && !url?.trim())
+						}
 					>
 						{action.pending ? "Saving…" : "Save"}
 					</Button>
@@ -615,6 +649,18 @@ function EditArtifactRow({
 	);
 }
 
+/// The digest travels with the bytes: Canopy checks what it received against
+/// it and refuses the registration on a mismatch.
+async function digestOf(file: File): Promise<string> {
+	const hash = new Uint8Array(
+		await crypto.subtle.digest("SHA-256", await file.arrayBuffer()),
+	);
+	return `sha256-${btoa(String.fromCharCode(...hash))}`;
+}
+
+const MAX_HELD_ARTIFACT_BYTES = 32 * 1024 * 1024;
+const OVER_LIMIT_MESSAGE = `Artifact is larger than the ${MAX_HELD_ARTIFACT_BYTES / (1024 * 1024)} MiB limit`;
+
 function CreateArtifactForm({
 	versionId,
 	onCreated,
@@ -625,20 +671,57 @@ function CreateArtifactForm({
 	const [type, setType] = useState("");
 	const [platform, setPlatform] = useState("");
 	const [url, setUrl] = useState("");
-	const action = useApiAction("versions", "create_artifact");
+	const [groupId, setGroupId] = useState("");
+	const [file, setFile] = useState<File | null>(null);
+	const [fileError, setFileError] = useState<string | null>(null);
+	const create = useApiAction("versions", "create_artifact");
+	const upload = useApiUpload("versions", "upload_artifact");
+	const groups = useApi("fleet/groups", "list", {}, []);
+
+	const scoped = groupId !== "";
+	const action = scoped ? upload : create;
 
 	const submit = async (e: React.FormEvent) => {
 		e.preventDefault();
 		try {
-			await action.call({
-				version_id: versionId,
-				artifact_type: type,
-				platform,
-				download_url: url,
-			});
+			if (scoped && file) {
+				// Digesting the file is the browser's own work rather than the
+				// upload's, so a failure here reaches no hook and would leave
+				// the form sitting there having done nothing.
+				let digest: string;
+				try {
+					digest = await digestOf(file);
+				} catch (err) {
+					setFileError(
+						err instanceof Error ? err.message : "could not read the file",
+					);
+					return;
+				}
+
+				await upload.call(
+					{
+						version_id: versionId,
+						artifact_type: type,
+						platform,
+						group_id: groupId,
+						digest,
+					},
+					file,
+				);
+			} else {
+				await create.call({
+					version_id: versionId,
+					artifact_type: type,
+					platform,
+					download_url: url,
+				});
+			}
 			setType("");
 			setPlatform("");
 			setUrl("");
+			setGroupId("");
+			setFile(null);
+			setFileError(null);
 			onCreated();
 		} catch {
 			/* surfaced via action.error */
@@ -671,24 +754,78 @@ function CreateArtifactForm({
 					/>
 					<TextField
 						size="small"
-						label="Download URL"
-						value={url}
-						onChange={(e) => setUrl(e.target.value)}
-						disabled={action.pending}
-						fullWidth
-						required
-					/>
+						select
+						label="Group"
+						value={groupId}
+						onChange={(e) => {
+							setGroupId(e.target.value);
+							// The file input is only rendered for a group, so
+							// an over-limit file left behind disables Create
+							// with nothing on screen to clear.
+							setFile(null);
+							setFileError(null);
+						}}
+						disabled={action.pending || groups.status === "error"}
+						// Falling back to an empty list silently offers only
+						// "Every group", which reads as a fleet with no groups
+						// rather than as a list that failed to load.
+						error={groups.status === "error"}
+						helperText={
+							groups.status === "error" ? "Could not load groups" : undefined
+						}
+						sx={{ minWidth: 160 }}
+					>
+						<MenuItem value="">Every group</MenuItem>
+						{(groups.status === "ok" ? groups.data : []).map((g) => (
+							<MenuItem key={g.id} value={g.id}>
+								{g.name}
+							</MenuItem>
+						))}
+					</TextField>
+					{scoped ? (
+						<Button
+							component="label"
+							variant="outlined"
+							disabled={action.pending}
+							sx={{ flexGrow: 1, justifyContent: "flex-start" }}
+						>
+							{file ? file.name : "Choose file…"}
+							<input
+								type="file"
+								hidden
+								onChange={(e) => {
+									const chosen = e.target.files?.[0] ?? null;
+									setFile(chosen);
+									setFileError(
+										chosen && chosen.size > MAX_HELD_ARTIFACT_BYTES
+											? OVER_LIMIT_MESSAGE
+											: null,
+									);
+								}}
+							/>
+						</Button>
+					) : (
+						<TextField
+							size="small"
+							label="Download URL"
+							value={url}
+							onChange={(e) => setUrl(e.target.value)}
+							disabled={action.pending}
+							fullWidth
+							required
+						/>
+					)}
 					<Button
 						type="submit"
 						variant="contained"
-						disabled={action.pending}
+						disabled={action.pending || (scoped && !file) || fileError !== null}
 					>
 						{action.pending ? "Creating…" : "Create"}
 					</Button>
 				</Stack>
-				{action.error && (
+				{(fileError ?? action.error?.message) && (
 					<Alert severity="error" sx={{ mt: 1 }}>
-						{action.error.message}
+						{fileError ?? action.error?.message}
 					</Alert>
 				)}
 			</Box>

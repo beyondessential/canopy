@@ -29,14 +29,20 @@ A publisher sends the bytes on the connection it registers over and is issued no
 Canopy holds such an artifact in storage of its own, apart from any group's backup repo, so an artifact carries the retention, access, and cost basis of an artifact rather than those a backup repo is kept under (see [BAK](../public-server/backup.md)).
 Where Canopy puts them is its own, and no caller addresses them there.
 Canopy holds an artifact's bytes for as long as that artifact is registered, and keeps none of what it has stopped serving.
+A registration or a deregistration that fails once the bytes have moved can leave bytes no artifact reaches, and Canopy drops those as well rather than letting them accumulate.
+It does not expire bytes by age: an artifact's bytes are kept as long as it is registered however long that is, so age alone never says an artifact is finished with.
 
 Canopy serves the bytes only to a caller the artifact is offered to.
 The boundary is therefore enforced on the read rather than resting on a location being hard to guess.
+An artifact whose bytes Canopy cannot produce is answered as one that does not exist, identically to an artifact the caller is not offered, so what Canopy has failed to keep is not discoverable through the read.
 
 An artifact Canopy holds and an artifact Canopy records a location for are one thing to whoever is offered it.
 It is offered one artifact per type and platform, and where the bytes rest is not part of what it is offered.
 
 ## What a version offers
+
+A read names a version range, and an exact version is a valid one.
+An exact version is answered for itself; a range is answered for the latest published version it covers that no known issue covers.
 
 Canopy offers a caller one artifact per type and platform, chosen from the artifacts that caller may see: those belonging to no group, and those scoped to the caller's group where that group is known.
 Where several match, the most specific is offered.
@@ -59,7 +65,9 @@ Canopy passes a group-scoped artifact's bytes only to a caller it is offered to.
 
 ## Registration
 
-A registration names the version or range, the type, the platform, and the group where the artifact has one, and carries either the location of an unscoped artifact or the bytes of a group-scoped one.
+Registering an unscoped artifact and registering a group's are separate: they name different things, carry different bodies, and are authorised differently, so each is its own path rather than one path that changes shape on a parameter.
+An unscoped registration names the version or range, the type and the platform, and carries the artifact's location.
+A group-scoped one names the group as well, carries the artifact's bytes, and names an exact version Canopy already holds rather than drafting one.
 The group is named on the registration rather than inferred from the caller.
 
 A releaser device registers unscoped artifacts, and carries no authorisation for any group.
@@ -72,7 +80,9 @@ Canopy records which device registered an artifact and, where the registration n
 
 ## Digests
 
-An artifact carries a digest where whoever registers it records one, and a group-scoped artifact carries one always.
-Canopy verifies a group-scoped artifact's bytes against its digest as they arrive and refuses the registration on a mismatch, so a corrupted upload is refused while whoever sent it is still there to send it again.
+An artifact carries a digest where whoever registers it records one, and an artifact Canopy holds carries one always.
+A digest is expressed in Subresource Integrity format, using SHA-256.
+A registration naming anything else is refused.
+Canopy verifies the bytes it holds against their digest as they arrive and refuses the registration on a mismatch, so a corrupted upload is refused while whoever sent it is still there to send it again.
 It verifies them again as it serves them and refuses them on a mismatch, so an artifact corrupted after it was taken in fails the read rather than reaching a server as the artifact it is not.
 An unscoped artifact is read from its location by the caller rather than by Canopy, so its digest is what that caller checks what it fetched against, and an artifact registered without one is fetched unchecked.

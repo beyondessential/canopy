@@ -96,9 +96,13 @@ diesel::table! {
 		version_id -> Nullable<Uuid>,
 		artifact_type -> Text,
 		platform -> Text,
-		download_url -> Text,
+		download_url -> Nullable<Text>,
 		device_id -> Nullable<Uuid>,
 		version_range_pattern -> Nullable<Text>,
+		group_id -> Nullable<Uuid>,
+		content_type -> Nullable<Text>,
+		digest -> Nullable<Bytea>,
+		run_id -> Nullable<Uuid>,
 	}
 }
 
@@ -636,6 +640,28 @@ diesel::table! {
 }
 
 diesel::table! {
+	reporting_schema_builds (check_id) {
+		check_id -> Int8,
+		group_id -> Uuid,
+		version_id -> Uuid,
+		application_id -> Nullable<Uuid>,
+		built -> Bool,
+		error -> Nullable<Text>,
+		artifact_ids -> Array<Nullable<Uuid>>,
+		built_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
+	reporting_schema_requests (group_id, version_id) {
+		group_id -> Uuid,
+		version_id -> Uuid,
+		requested_at -> Timestamptz,
+		requested_by -> Nullable<Text>,
+	}
+}
+
+diesel::table! {
 	restore_consumer_capabilities (consumer_device_id, intent) {
 		consumer_device_id -> Uuid,
 		intent -> Text,
@@ -663,6 +689,7 @@ diesel::table! {
 		updated_at -> Timestamptz,
 		params -> Jsonb,
 		redacts -> Bool,
+		publishes_schemas -> Bool,
 	}
 }
 
@@ -868,6 +895,7 @@ diesel::joinable!(application_names -> applications (application_id));
 diesel::joinable!(application_reported_detail -> applications (application_id));
 diesel::joinable!(applications -> machines (machine_id));
 diesel::joinable!(artifacts -> devices (device_id));
+diesel::joinable!(artifacts -> server_groups (group_id));
 diesel::joinable!(artifacts -> versions (version_id));
 diesel::joinable!(backup_credential_issuances -> devices (device_id));
 diesel::joinable!(backup_credential_issuances -> server_groups (group_id));
@@ -917,6 +945,12 @@ diesel::joinable!(migration_tests -> applications (application_id));
 diesel::joinable!(migration_tests -> backup_restore_checks (check_id));
 diesel::joinable!(migration_tests -> versions (target_version_id));
 diesel::joinable!(migration_timings -> migration_tests (check_id));
+diesel::joinable!(reporting_schema_builds -> applications (application_id));
+diesel::joinable!(reporting_schema_builds -> backup_restore_checks (check_id));
+diesel::joinable!(reporting_schema_builds -> server_groups (group_id));
+diesel::joinable!(reporting_schema_builds -> versions (version_id));
+diesel::joinable!(reporting_schema_requests -> server_groups (group_id));
+diesel::joinable!(reporting_schema_requests -> versions (version_id));
 diesel::joinable!(restore_consumer_capabilities -> devices (consumer_device_id));
 diesel::joinable!(restore_replicas -> devices (consumer_device_id));
 diesel::joinable!(restore_replicas -> machines (machine_id));
@@ -983,6 +1017,8 @@ diesel::allow_tables_to_appear_in_same_query!(
 	migration_tests,
 	migration_timings,
 	recovery_vault_writes,
+	reporting_schema_builds,
+	reporting_schema_requests,
 	restore_consumer_capabilities,
 	restore_replicas,
 	scoped_check_policies,

@@ -37,6 +37,14 @@ Issued when a database resource (such as a version, server, or other entity) can
 
 Issued when a version range is valid, but does not match any of the available versions.
 
+## Artifact not found
+
+Issued when the version has no artifact with the given id that the caller is offered. An artifact scoped to a group the caller is not in is reported the same way as one that does not exist, so which groups hold an artifact cannot be discovered through this endpoint.
+
+## Artifact digest mismatch
+
+Issued when the bytes Canopy holds for an artifact do not match the digest recorded for it. The artifact is not served: a corrupted artifact fails the read rather than reaching a server as the artifact it is not.
+
 ## Unusable range
 
 Issued when a version range is syntactically valid, but not usable to obtain concrete versions.

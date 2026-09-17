@@ -66,6 +66,7 @@ aws-sdk-sts = { workspace = true, features = ["test-util"] }
 aws-smithy-mocks.workspace = true
 axum-test.workspace = true
 commons-tests = { path = "../commons-tests" }
+hex = "0.4.3"
 http.workspace = true
 percent-encoding = "2.3.2"
 rcgen = "0.14.8"

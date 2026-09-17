@@ -1,0 +1,1 @@
+DROP INDEX restore_replicas_one_schema_publisher;

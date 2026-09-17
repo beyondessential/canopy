@@ -11,7 +11,7 @@
 // often don't want in setup (e.g. submitting a status fires events
 // and opens incidents).
 
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Client } from "pg";
 
 export interface Sql {
@@ -167,7 +167,7 @@ async function applicationTypeOf(sql: Sql, applicationId: string): Promise<strin
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, machine_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, upgrade_plans, maintenance_windows, inventory_variables, inventory_leases, version_known_issues, recovery_vault_writes, application_names, application_certificates, compromised_keys RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, machine_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, reporting_schema_builds, reporting_schema_requests, upgrade_plans, maintenance_windows, inventory_variables, inventory_leases, version_known_issues, recovery_vault_writes, application_names, application_certificates, compromised_keys RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" application with
 	// it; self-alerts attach to that row, so put it back.
@@ -1044,6 +1044,48 @@ export async function seedVersion(
 	return { id, major, minor, patch };
 }
 
+/** Seed an artifact for a version. Naming a group makes Canopy hold the bytes
+ * rather than record a location; `content` is what its digest is taken of, the
+ * bytes themselves resting in the store rather than the row. */
+export async function seedArtifact(
+	sql: Sql,
+	opts: {
+		versionId?: string | null;
+		artifactType?: string;
+		platform?: string;
+		downloadUrl?: string;
+		rangePattern?: string | null;
+		groupId?: string | null;
+		content?: string;
+	},
+): Promise<string> {
+	const id = randomUUID();
+	const scoped = opts.groupId != null;
+	const content = opts.content ?? "held bytes";
+	const digest = scoped
+		? createHash("sha256").update(content).digest()
+		: null;
+
+	await sql.query(
+		`INSERT INTO artifacts
+			(id, version_id, artifact_type, platform, download_url, version_range_pattern,
+			 group_id, content_type, digest)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		[
+			id,
+			opts.versionId ?? null,
+			opts.artifactType ?? "installer",
+			opts.platform ?? "windows",
+			scoped ? null : (opts.downloadUrl ?? "https://example.com/installer.exe"),
+			opts.rangePattern ?? null,
+			opts.groupId ?? null,
+			scoped ? "application/sql" : null,
+			digest,
+		],
+	);
+	return id;
+}
+
 // ── Backup-credentials seeding ──────────────────────────────────────────────
 
 export type BackupConfigStatus = "provisioning" | "ready";
@@ -1441,6 +1483,8 @@ export async function seedRestoreReplica(
 		enabled?: boolean;
 		/** Whether the replica is served de-identified. */
 		redacts?: boolean;
+		/** Whether the operator has made this the group's schema publisher. */
+		publishesSchemas?: boolean;
 	},
 ): Promise<SeededRestoreReplica> {
 	const id = randomUUID();
@@ -1449,8 +1493,8 @@ export async function seedRestoreReplica(
 	if (overdue == null) {
 		await sql.query(
 			`INSERT INTO restore_replicas
-			 (id, consumer_device_id, group_id, machine_id, type, intent, name, params, enabled, redacts)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)`,
+			 (id, consumer_device_id, group_id, machine_id, type, intent, name, params, enabled, redacts, publishes_schemas)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11)`,
 			[
 				id,
 				opts.consumerDeviceId,
@@ -1462,13 +1506,14 @@ export async function seedRestoreReplica(
 				params,
 				opts.enabled ?? true,
 				opts.redacts ?? false,
+				opts.publishesSchemas ?? false,
 			],
 		);
 	} else {
 		await sql.query(
 			`INSERT INTO restore_replicas
-			 (id, consumer_device_id, group_id, machine_id, type, intent, name, overdue_after, params, enabled, redacts)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, make_interval(secs => $8), $9::jsonb, $10, $11)`,
+			 (id, consumer_device_id, group_id, machine_id, type, intent, name, overdue_after, params, enabled, redacts, publishes_schemas)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, make_interval(secs => $8), $9::jsonb, $10, $11, $12)`,
 			[
 				id,
 				opts.consumerDeviceId,
@@ -1481,6 +1526,7 @@ export async function seedRestoreReplica(
 				params,
 				opts.enabled ?? true,
 				opts.redacts ?? false,
+				opts.publishesSchemas ?? false,
 			],
 		);
 	}
@@ -1604,6 +1650,54 @@ export async function seedMigrationTest(
 			[checkId, ordinal, timing.name, timing.elapsedSecs],
 		);
 	}
+}
+
+/** Seed a reporting-schema build: the restore-health report that carries the
+ * common fields, plus the build outcome hung off it. `built: false` with an
+ * `error` is what makes the pair read as failed; a build settles the pair
+ * either way. */
+export async function seedReportingSchemaBuild(
+	sql: Sql,
+	opts: {
+		consumerDeviceId: string;
+		groupId: string;
+		/** The machine whose snapshot the schema was built from. */
+		machineId: string;
+		/** The group's central, which the build is held against. */
+		applicationId?: string | null;
+		versionId: string;
+		snapshotId?: string;
+		built?: boolean;
+		error?: string | null;
+		/** Artifact ids the build registered, of which the schema is one. */
+		artifactIds?: string[];
+	},
+): Promise<void> {
+	const built = opts.built ?? true;
+	const rows = await sql.query<{ id: string }>(
+		`INSERT INTO backup_restore_checks
+		 (consumer_device_id, group_id, machine_id, type, intent, snapshot_id, outcome,
+		  replica_healthy, observed_at)
+		 VALUES ($1, $2, $3, 'tamanu-postgres', 'reporting-schema', $4, 'success', true, NOW())
+		 RETURNING id`,
+		[opts.consumerDeviceId, opts.groupId, opts.machineId, opts.snapshotId ?? "snap-1"],
+	);
+	const checkId = rows[0]!.id;
+
+	await sql.query(
+		`INSERT INTO reporting_schema_builds
+		 (check_id, group_id, version_id, application_id, built, error, artifact_ids)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7::uuid[])`,
+		[
+			checkId,
+			opts.groupId,
+			opts.versionId,
+			opts.applicationId ?? null,
+			built,
+			built ? null : (opts.error ?? "the build failed"),
+			opts.artifactIds ?? [],
+		],
+	);
 }
 
 /** Record where a group is going. `plannedFor` is `YYYY-MM-DD`; omit for a plan

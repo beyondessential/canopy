@@ -6667,6 +6667,126 @@
         ]
       }
     },
+    "/api/reporting_schemas/build": {
+      "post": {
+        "tags": [
+          "reporting_schemas"
+        ],
+        "summary": "Ask for a pair's schema to be built.",
+        "description": "This is how a schema is refreshed after the group's configuration changes,\nand how a settled pair is put back on the worklist: a build against a fixed\nversion and configuration fails the same way every time, so a failed pair\nwaits for this rather than retrying on its own.",
+        "operationId": "reporting_schemas_build",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildPairArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/reporting_schemas/for_group": {
+      "post": {
+        "tags": [
+          "reporting_schemas"
+        ],
+        "summary": "Where each of a group's pairs of group and Tamanu version stands.",
+        "description": "One entry per published version the group's Tamanu applications report\nrunning, plus the version its open plan moves it to, so whether a group's\napplications can be offered the schema for the version they run or are\nmoving to is answered in one place.",
+        "operationId": "reporting_schemas_for_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PairsForGroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Pairs, one per version the group runs or is moving to.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Pair"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/restore_replicas/checks": {
       "post": {
         "tags": [
@@ -8345,6 +8465,16 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -8360,7 +8490,7 @@
           "versions"
         ],
         "summary": "Permanently delete an artifact.",
-        "description": "The artifact record is removed outright; the file it pointed to is not\ntouched. There is no undo.",
+        "description": "An artifact Canopy holds loses its bytes along with its record. One that\nrecords a location keeps whatever is at that location. There is no undo.",
         "operationId": "delete_artifact",
         "requestBody": {
           "content": {
@@ -8461,7 +8591,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
       }
     },
     "/api/versions/get_version_detail": {
@@ -8694,6 +8829,117 @@
         "responses": {
           "200": {
             "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/versions/upload_artifact": {
+      "post": {
+        "tags": [
+          "versions"
+        ],
+        "summary": "Register an artifact whose bytes Canopy holds, for one group.",
+        "description": "The body is the artifact itself and its `Content-Type` is what the bytes\nare served back as. Returns the created artifact.",
+        "operationId": "upload_artifact",
+        "parameters": [
+          {
+            "name": "version_id",
+            "in": "query",
+            "description": "Id of the version to attach the new artifact to.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "artifact_type",
+            "in": "query",
+            "description": "Artifact type.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "platform",
+            "in": "query",
+            "description": "Target platform.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group_id",
+            "in": "query",
+            "description": "The group this artifact is for.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "digest",
+            "in": "query",
+            "description": "Subresource Integrity digest of the body, e.g. `sha256-LCTbqp…`.\nCanopy checks the bytes against it as they arrive and refuses the\nregistration on a mismatch, so a corrupted upload is refused while\nwhoever sent it is still there to send it again.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-canopy-upload",
+            "in": "header",
+            "description": "Any value. Required: it makes a browser preflight the request, so a cross-origin page cannot spend an operator's session on this endpoint.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The artifact's bytes.",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactData"
+                }
+              }
+            }
           },
           "400": {
             "description": "",
@@ -9120,7 +9366,7 @@
           "id",
           "artifact_type",
           "platform",
-          "download_url",
+          "canopy_holds_bytes",
           "is_exact",
           "has_range_override",
           "is_used_in_public_api"
@@ -9130,9 +9376,38 @@
             "type": "string",
             "description": "Kind of artifact (for example, an installer or update package)."
           },
+          "canopy_holds_bytes": {
+            "type": "boolean",
+            "description": "`true` when Canopy holds this artifact's bytes rather than a location."
+          },
+          "digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Subresource Integrity digest recorded for the artifact, where there is\none."
+          },
           "download_url": {
-            "type": "string",
-            "description": "URL clients use to download this artifact."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "URL clients use to download this artifact. `null` when Canopy holds\nthe bytes itself."
+          },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The group this artifact is for, when it is for one alone."
+          },
+          "group_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name of that group, for display."
           },
           "has_range_override": {
             "type": "boolean",
@@ -9734,6 +10009,26 @@
           "value": {
             "type": "string",
             "description": "Label value."
+          }
+        }
+      },
+      "BuildPairArgs": {
+        "type": "object",
+        "description": "Which pair to build.",
+        "required": [
+          "group_id",
+          "version_id"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group whose schema to build."
+          },
+          "version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Tamanu version to build it for."
           }
         }
       },
@@ -10428,7 +10723,7 @@
       },
       "CreateArtifactArgs": {
         "type": "object",
-        "description": "A new artifact to register against a version.",
+        "description": "A new artifact to register against a version, at a location Canopy records.\n\nAn artifact whose bytes Canopy holds is registered through\n`upload_artifact` instead, since the bytes are the body there.",
         "required": [
           "version_id",
           "artifact_type",
@@ -10440,9 +10735,16 @@
             "type": "string",
             "description": "Artifact type."
           },
+          "digest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Subresource Integrity digest of the bytes at that URL, e.g.\n`sha256-LCTbqp…`, where one is recorded. Whoever fetches the artifact\nchecks what it got against this."
+          },
           "download_url": {
             "type": "string",
-            "description": "Download URL for the artifact."
+            "description": "URL the artifact is downloaded from."
           },
           "platform": {
             "type": "string",
@@ -12335,7 +12637,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Behaviours this intent opts into. Recognised values are `check` (a\nhealth report is expected for each replica), `once` (a given snapshot\nis only ever dispatched to a replica once, rather than repeatedly\nuntil overdue), and `url` (a replica's health report includes a link\nto it). Unrecognised values are stored but have no effect."
+            "description": "Behaviours this intent opts into. Recognised values are `check` (a\nhealth report is expected for each replica), `once` (a given snapshot\nis only ever dispatched to a replica once, rather than repeatedly until\noverdue), `url` (a replica's health report includes a link to it),\n`migrate` (Canopy names a target version and the replica applies that\nversion's migrations), `redact` (the replica de-identifies the restored\ndata before serving it), and `reporting-schema` (the replica builds a\nTamanu reporting schema and registers it for the group). Unrecognised\nvalues are stored but have no effect, so a consumer may advertise ahead\nof Canopy support."
           }
         }
       },
@@ -14928,6 +15230,79 @@
           }
         }
       },
+      "Pair": {
+        "type": "object",
+        "description": "One pair of group and Tamanu version, and where it stands.",
+        "required": [
+          "group_id",
+          "version_id",
+          "version",
+          "state",
+          "requested",
+          "applications"
+        ],
+        "properties": {
+          "applications": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The group's Tamanu applications reporting this version, by name. Empty\nwhere the pair comes from the open plan rather than from something\nrunning it."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What went wrong, where a build failed."
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group this pair is for."
+          },
+          "requested": {
+            "type": "boolean",
+            "description": "Whether an operator has asked for this pair to be built again."
+          },
+          "state": {
+            "$ref": "#/components/schemas/PairState",
+            "description": "Whether the pair has a schema, failed to build one, or is awaiting one."
+          },
+          "version": {
+            "type": "string",
+            "description": "That version as semver, for display."
+          },
+          "version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The Tamanu version this pair is for."
+          }
+        }
+      },
+      "PairState": {
+        "type": "string",
+        "description": "Where a pair stands, for the operator view.",
+        "enum": [
+          "awaiting",
+          "built",
+          "failed"
+        ]
+      },
+      "PairsForGroupArgs": {
+        "type": "object",
+        "description": "Request body for reading a group's pairs.",
+        "required": [
+          "group_id"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group to report on."
+          }
+        }
+      },
       "ParamType": {
         "type": "string",
         "description": "The data type of a restore-replica configuration parameter, which\ndetermines how its value is validated. `duration` and `bytes` values must\nbe non-negative integers (a count of seconds and of bytes, respectively);\n`integer` accepts any whole number, positive or negative; `boolean` is a\nJSON boolean; `text` is a JSON string.",
@@ -16259,6 +16634,8 @@
           "params",
           "redacts",
           "can_redact",
+          "publishes_schemas",
+          "can_publish_schemas",
           "redaction_gaps",
           "enabled",
           "gap",
@@ -16266,6 +16643,10 @@
           "updated_at"
         ],
         "properties": {
+          "can_publish_schemas": {
+            "type": "boolean",
+            "description": "True when the intent carries the `reporting-schema` semantic, so the\ndeclaration can be made the group's publisher."
+          },
           "can_redact": {
             "type": "boolean",
             "description": "True when the intent carries the `redact` semantic, so the declaration\ncan be switched to redacting."
@@ -16338,6 +16719,10 @@
             "type": "object",
             "description": "Operator-supplied parameter values (name → value). Values of\n`duration` and `bytes` parameters are formatted as human-friendly\nstrings (e.g. `2h 30m`, `20Gi`) when the intent's schema is known;\n`create` and `update` accept these strings back."
           },
+          "publishes_schemas": {
+            "type": "boolean",
+            "description": "Whether this declaration's consumer may publish the group's reporting\nschema. Only an operator sets it."
+          },
           "redaction_gaps": {
             "type": "array",
             "items": {
@@ -16406,6 +16791,10 @@
           "params": {
             "type": "object",
             "description": "Parameter values for the intent (name → value), validated against the\nconsumer's advertised parameter schema. `duration` and `bytes`\nparameters accept human-unit strings (e.g. `2h 30m`, `20Gi`) as well\nas raw integer seconds/bytes. Defaults to empty."
+          },
+          "publishes_schemas": {
+            "type": "boolean",
+            "description": "Whether this consumer may publish the group's reporting schema.\nAccepted only for a group-wide, non-redacting declaration whose intent\ncarries the `reporting-schema` semantic. Defaults to false, so a\nconsumer publishes only where an operator has said it may."
           },
           "redacts": {
             "type": "boolean",
@@ -16489,6 +16878,10 @@
           "params": {
             "type": "object",
             "description": "New parameter values (name → value), validated against the intent's\nadvertised parameter schema. `duration` and `bytes` parameters accept\nhuman-unit strings (e.g. `2h 30m`, `20Gi`) as well as raw integer\nseconds/bytes. Defaults to empty."
+          },
+          "publishes_schemas": {
+            "type": "boolean",
+            "description": "Whether this consumer may publish the group's reporting schema.\nAccepted only for a group-wide, non-redacting declaration whose intent\ncarries the `reporting-schema` semantic. Defaults to false."
           },
           "redacts": {
             "type": "boolean",
@@ -18918,8 +19311,7 @@
         "required": [
           "artifact_id",
           "artifact_type",
-          "platform",
-          "download_url"
+          "platform"
         ],
         "properties": {
           "artifact_id": {
@@ -18932,8 +19324,11 @@
             "description": "New artifact type."
           },
           "download_url": {
-            "type": "string",
-            "description": "New download URL."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New download URL. Leave unset for an artifact whose bytes Canopy holds."
           },
           "platform": {
             "type": "string",
@@ -19542,6 +19937,10 @@
     {
       "name": "migration_tests",
       "description": "Where each server stands against the version it would take next."
+    },
+    {
+      "name": "reporting_schemas",
+      "description": "Which of a group's versions have a reporting schema built for them."
     },
     {
       "name": "restore_replicas",
