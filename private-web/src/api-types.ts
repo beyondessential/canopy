@@ -5523,7 +5523,7 @@ export interface components {
              *     An application presents its machine's checks among its own, and this is
              *     what marks them: a `machine` entry in an application's list is the
              *     box's, one filing seen from each workload the box carries rather than a
-             *     copy per workload.
+             *     copy per workload, and graded against the box rather than the workload.
              */
             subject: components["schemas"]["CheckSubject"];
         };
