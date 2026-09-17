@@ -29,6 +29,9 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<usize> {
 	let mut filed = staleness::sweep(db, &rows).await?;
 	filed += reconcile::sweep(db, &rows).await?;
 	filed += crate::restore::sweep_restore_checks(db).await?;
+	// Not counted in `filed`: this one files per group rather than per event,
+	// and its own instances are pairs.
+	crate::reporting_schemas::sweep(db).await?;
 	// Not an event, but the same cadence: a plan closes once its group reports
 	// the target, and this sweep is what notices.
 	crate::upgrade_plans::close_met_plans(db).await?;

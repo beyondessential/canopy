@@ -131,6 +131,7 @@ export default function RestoreReplicasSection({
 				overdue_after: r.overdue_after,
 				params: r.params as Record<string, unknown>,
 				redacts: r.redacts,
+				publishes_schemas: r.publishes_schemas,
 				enabled,
 			});
 			reload();
@@ -215,6 +216,15 @@ export default function RestoreReplicasSection({
 											{r.gap && (
 												<Tooltip title="The consumer does not currently advertise this intent, so Canopy is not dispatching it.">
 													<Chip label="gap" color="warning" size="small" />
+												</Tooltip>
+											)}
+											{r.publishes_schemas && (
+												<Tooltip title="This consumer may publish the group's reporting schema, which every application in the group is offered.">
+													<Chip
+														label="publishes schema"
+														color="info"
+														size="small"
+													/>
 												</Tooltip>
 											)}
 										</Stack>
@@ -527,6 +537,46 @@ function RedactionField({
 	);
 }
 
+/** The publishing switch, shown only for an intent that builds reporting
+ * schemas. A build is per group from data the masking manifest has not
+ * altered, so a machine-scoped or redacting declaration cannot carry it. */
+function PublishesSchemasField({
+	value,
+	onChange,
+	disabled,
+	why,
+}: {
+	value: boolean;
+	onChange: (value: boolean) => void;
+	disabled: boolean;
+	why: string;
+}) {
+	return (
+		<FormControlLabel
+			disabled={disabled}
+			control={
+				<Switch
+					size="small"
+					checked={value}
+					onChange={(e) => onChange(e.target.checked)}
+				/>
+			}
+			label={
+				<Stack>
+					<Typography variant="body2">
+						Publish this group's reporting schema
+					</Typography>
+					<Typography variant="caption" color="text.secondary">
+						{disabled
+							? why
+							: "Lets this consumer register the schema every application in the group is offered."}
+					</Typography>
+				</Stack>
+			}
+		/>
+	);
+}
+
 /** Convert the typed form fields into the wire params object, omitting any the
  * operator left unset (the consumer resolves those to their default or null).
  * Returns an error message string if a numeric field doesn't parse. */
@@ -616,6 +666,8 @@ function useIntentSchema(
 	const advertised =
 		(selectedDescriptor?.params as Record<string, ParamSpec> | undefined) ?? {};
 	const canRedact = selectedDescriptor?.semantics?.includes("redact") ?? false;
+	const canPublishSchemas =
+		selectedDescriptor?.semantics?.includes("reporting-schema") ?? false;
 	// Canopy owns the masking parameters for a `redact` intent in both states,
 	// so they get no field: the redaction switch is the whole of the operator's
 	// say in it.
@@ -626,7 +678,13 @@ function useIntentSchema(
 				),
 			)
 		: advertised;
-	return { intentOptions, selectedDescriptor, paramSchema, canRedact };
+	return {
+		intentOptions,
+		selectedDescriptor,
+		paramSchema,
+		canRedact,
+		canPublishSchemas,
+	};
 }
 
 /** Consumer, server (or whole-group), type, and intent selects, shared by the
@@ -781,11 +839,17 @@ function CreateReplicaDialog({
 	const [overdue, setOverdue] = useState("");
 	const [paramValues, setParamValues] = useState<Record<string, string>>({});
 	const [redacts, setRedacts] = useState(false);
+	const [publishesSchemas, setPublishesSchemas] = useState(false);
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	const { intentOptions, selectedDescriptor, paramSchema, canRedact } =
-		useIntentSchema(consumers, consumerId, intent);
+	const {
+		intentOptions,
+		selectedDescriptor,
+		paramSchema,
+		canRedact,
+		canPublishSchemas,
+	} = useIntentSchema(consumers, consumerId, intent);
 
 	// Auto-select the sole consumer, if there's only one to choose from.
 	useEffect(() => {
@@ -813,6 +877,12 @@ function CreateReplicaDialog({
 	useEffect(() => {
 		if (!canRedact) setRedacts(false);
 	}, [canRedact]);
+
+	// A build is dispatched per group from unmasked data, so narrowing the
+	// declaration to a machine or turning redaction on drops the flag with it.
+	useEffect(() => {
+		if (!canPublishSchemas || redacts || serverId) setPublishesSchemas(false);
+	}, [canPublishSchemas, redacts, serverId]);
 
 	// Suggest a name from the group, (if picked) server, and intent, until the
 	// operator types their own. The intent is part of it because names are
@@ -863,6 +933,7 @@ function CreateReplicaDialog({
 				overdue_after,
 				params,
 				redacts,
+				publishes_schemas: publishesSchemas,
 			});
 			onCreated();
 		} catch (err) {
@@ -918,6 +989,19 @@ function CreateReplicaDialog({
 
 					{canRedact && (
 						<RedactionField value={redacts} onChange={setRedacts} />
+					)}
+
+					{canPublishSchemas && (
+						<PublishesSchemasField
+							value={publishesSchemas}
+							onChange={setPublishesSchemas}
+							disabled={redacts || Boolean(serverId)}
+							why={
+								redacts
+									? "A redacting replica builds no schema: masking alters the configuration a schema follows from."
+									: "A build is per group: pick every machine in the group to publish its schema."
+							}
+						/>
 					)}
 
 					<ParamFieldsEditor
@@ -976,6 +1060,9 @@ function EditReplicaDialog({
 	const [overdue, setOverdue] = useState(replica.overdue_after ?? "");
 	const [enabled, setEnabled] = useState(replica.enabled);
 	const [redacts, setRedacts] = useState(replica.redacts);
+	const [publishesSchemas, setPublishesSchemas] = useState(
+		replica.publishes_schemas,
+	);
 	const [paramValues, setParamValues] = useState<Record<string, string>>(() => {
 		const initialDescriptor = consumers
 			.find((c) => c.device_id === replica.consumer_device_id)
@@ -987,14 +1074,25 @@ function EditReplicaDialog({
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	const { intentOptions, selectedDescriptor, paramSchema, canRedact } =
-		useIntentSchema(consumers, consumerId, intent);
+	const {
+		intentOptions,
+		selectedDescriptor,
+		paramSchema,
+		canRedact,
+		canPublishSchemas,
+	} = useIntentSchema(consumers, consumerId, intent);
 
 	// Retargeting to an intent that can't redact drops the flag with it, so the
 	// declaration doesn't carry an intent the new consumer can't honour.
 	useEffect(() => {
 		if (!canRedact) setRedacts(false);
 	}, [canRedact]);
+
+	// A build is dispatched per group from unmasked data, so narrowing the
+	// declaration to a machine or turning redaction on drops the flag with it.
+	useEffect(() => {
+		if (!canPublishSchemas || redacts || serverId) setPublishesSchemas(false);
+	}, [canPublishSchemas, redacts, serverId]);
 
 	// Re-derive parameter values whenever the consumer or intent changes: keep
 	// values for parameter names the new schema still has, drop the rest.
@@ -1038,6 +1136,7 @@ function EditReplicaDialog({
 				overdue_after,
 				params,
 				redacts,
+				publishes_schemas: publishesSchemas,
 				enabled,
 			});
 			onUpdated();
@@ -1101,6 +1200,19 @@ function EditReplicaDialog({
 
 					{canRedact && (
 						<RedactionField value={redacts} onChange={setRedacts} />
+					)}
+
+					{canPublishSchemas && (
+						<PublishesSchemasField
+							value={publishesSchemas}
+							onChange={setPublishesSchemas}
+							disabled={redacts || Boolean(serverId)}
+							why={
+								redacts
+									? "A redacting replica builds no schema: masking alters the configuration a schema follows from."
+									: "A build is per group: pick every machine in the group to publish its schema."
+							}
+						/>
 					)}
 
 					<ParamFieldsEditor
