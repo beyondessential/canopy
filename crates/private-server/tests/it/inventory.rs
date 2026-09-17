@@ -465,6 +465,39 @@ async fn takes_a_lease_over_when_asked_to() {
 	.await
 }
 
+/// Every row canopy writes against a group holds `FOR KEY SHARE` on it until
+/// that transaction commits, and the backup work writes them continuously, so
+/// a take must not wait on a lock those conflict with.
+#[tokio::test(flavor = "multi_thread")]
+async fn takes_a_lease_while_another_transaction_writes_against_the_group() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+
+		let machine = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"BEGIN;
+			 INSERT INTO machines (id, name, group_id)
+			 VALUES ('{machine}', 'kamaka-facility', '{group}')"
+		))
+		.await
+		.expect("open a writer against the group");
+
+		let response = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+			private
+				.post("/api/inventory/take_lease")
+				.json(&json!({ "server_group_id": group }))
+				.await
+		})
+		.await
+		.expect("take_lease queued behind the open writer");
+		response.assert_status_ok();
+
+		conn.batch_execute("ROLLBACK").await.expect("rollback");
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_the_inventory_to_someone_who_holds_no_lease() {
 	commons_tests::server::run(async move |mut conn, _public, private| {

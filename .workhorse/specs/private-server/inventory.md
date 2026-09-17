@@ -57,6 +57,8 @@ Its holder extends it while the run is still going and releases it when the run 
 An attempt to take a lease another operator holds is refused, naming who holds it and when it expires.
 Taking one over is a deliberate, audited step, so a run never proceeds over another operator's work by accident.
 
+Taking a lease waits only on another take of the same environment. Canopy's own work against the group, its backups and status among it, never holds a run's start up.
+
 ### Work under way
 
 Taking a lease is refused while another operator's maintenance window holds over the environment: over its group, or over any of its machines (see [MNT](../monitoring/maintenance.md)).
