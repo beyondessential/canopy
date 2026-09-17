@@ -243,12 +243,14 @@ If a decommissioned check is reported again it is treated as newly registered �
 A target's health is derived from the checks currently contributing across all its sources: any effective failure makes it unhealthy; otherwise any effective warning or brokenness makes it degraded; otherwise it is healthy.
 Passed and skipped checks, and states that are resolved, snoozed, or decommissioned, do not count against a target.
 
-An application's contributing checks include its machine's, so a box whose disk is filling makes every application on it degraded.
+A check is graded against the target it is filed on and no other.
+A machine's checks make the machine degraded or unhealthy and leave the applications on it graded on their own checks alone, so a box whose disk is filling reads as the box being in trouble rather than as every workload on it being in trouble.
 
 ## Presentation
 
 Wherever a target's checks are presented — as they stand now, or as they stood at a past time — all of its sources' checks are shown together, each by its effective result and rolled into the target's health by the same rules used everywhere else.
 An application presents its machine's checks among its own, each marked as the machine's.
+They are shown there so a box's trouble is read where its workload is read, and they count towards the machine's health rather than the application's.
 The detail a source attached to a check is presented with it, attributed to its source.
 A past state is reconstructed from the status history.
 No surface presents one source's checks in isolation, and none exposes a source's report other than as classified check state.
