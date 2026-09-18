@@ -200,6 +200,44 @@ impl ServerGroup {
 			.map_err(AppError::from)
 	}
 
+	/// The named groups' names by id, including archived ones, so a reference
+	/// to a group can be shown by name whatever state the group is in.
+	pub async fn names_by_ids(
+		db: &mut AsyncPgConnection,
+		ids: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, String>> {
+		use crate::schema::server_groups::dsl;
+
+		if ids.is_empty() {
+			return Ok(std::collections::HashMap::new());
+		}
+
+		Ok(dsl::server_groups
+			.select((dsl::id, dsl::name))
+			.filter(dsl::id.eq_any(ids))
+			.load::<(Uuid, String)>(db)
+			.await
+			.map_err(AppError::from)?
+			.into_iter()
+			.collect())
+	}
+
+	/// The group's canonical central application: the highest-ranked one, and
+	/// the lowest id among equals so the choice is stable.
+	///
+	/// There is no fallback. A group with no central has none, because a
+	/// group's version, and the database a reporting schema is built from, are
+	/// things its central has and nothing else stands in for.
+	// spec: APP#capabilities
+	pub fn canonical_central(
+		members: &[crate::applications::Application],
+	) -> Option<&crate::applications::Application> {
+		members
+			.iter()
+			.filter(|s| s.r#type == ApplicationType::TamanuCentral)
+			.min_by_key(|s| (rank_priority(s.rank), s.id))
+	}
+
 	/// Groups carrying this exact name, archived ones included, so a caller
 	/// resolving a group by name can tell an archived group from one that does
 	/// not exist. Names aren't unique, so this can return several.
@@ -699,11 +737,7 @@ impl ServerGroup {
 		// version, because a group's version is a thing its central has
 		// and nothing else stands in for it.
 		// spec: APP#capabilities
-		let canonical = members
-			.iter()
-			.filter(|s| s.r#type == ApplicationType::TamanuCentral)
-			.min_by_key(|s| (rank_priority(s.rank), s.id))
-			.map(|s| s.id);
+		let canonical = Self::canonical_central(&members).map(|s| s.id);
 
 		let (version_application_id, effective_version) = match canonical {
 			None => (None, None),

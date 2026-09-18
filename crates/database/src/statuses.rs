@@ -59,13 +59,6 @@ const GRACE_LOOKBACK_SQL: &str = "NOW() - INTERVAL '30 days'";
 /// caller-supplied point in time rather than to `NOW()`.
 const GRACE_LOOKBACK: SignedDuration = SignedDuration::from_hours(24 * 30);
 
-fn server_label(s: &Application) -> String {
-	s.name
-		.clone()
-		.or_else(|| s.host.as_ref().map(|h| h.0.to_string()))
-		.unwrap_or_else(|| s.id.to_string())
-}
-
 fn machine_label(m: &crate::machines::Machine) -> String {
 	m.name.clone().unwrap_or_else(|| m.id.to_string())
 }
@@ -381,7 +374,7 @@ impl Status {
 		for server in &swept {
 			let graded = grade_reachability(
 				"Application",
-				&server_label(server),
+				&server.label(),
 				server.alert_when_down_for.0,
 				expected.get(&server.id).map(Vec::as_slice).unwrap_or(&[]),
 				status_map.get(&server.id).copied(),

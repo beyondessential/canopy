@@ -66,6 +66,12 @@ pub enum AppError {
 	#[error("no versions match given range")]
 	NoMatchingVersions,
 
+	#[error("no such artifact for this version")]
+	ArtifactNotFound,
+
+	#[error("artifact does not match its digest")]
+	ArtifactDigestMismatch,
+
 	#[error("version range is not usable")]
 	UnusableRange,
 
@@ -249,6 +255,12 @@ impl AppError {
 		match self {
 			Self::NotImplemented => StatusCode::NOT_IMPLEMENTED,
 			Self::NoMatchingVersions => StatusCode::NOT_FOUND,
+			// An artifact a caller is not offered is missing in exactly the
+			// way one that never existed is, so which groups hold an artifact
+			// is not enumerable through this endpoint.
+			// spec: ART#who-is-offered-a-group-scoped-artifact
+			Self::ArtifactNotFound => StatusCode::NOT_FOUND,
+			Self::ArtifactDigestMismatch => StatusCode::INTERNAL_SERVER_ERROR,
 			Self::UnusableRange => StatusCode::BAD_REQUEST,
 			// Both arise purely from what a client sent: a version segment in
 			// a URL path, or the `X-Version` header. Nothing on the server is
@@ -322,6 +334,8 @@ impl AppError {
 						Self::Tera(_) => "render",
 						Self::Io(_) => "io",
 						Self::NoMatchingVersions => "no-matching-versions",
+						Self::ArtifactNotFound => "artifact-not-found",
+						Self::ArtifactDigestMismatch => "artifact-digest-mismatch",
 						Self::UnusableRange => "unusable-range",
 						Self::Timesync(_) => "timesync",
 						Self::AuthMissingHeader(_) => "auth-missing-header",
@@ -374,5 +388,35 @@ impl<'de> Deserialize<'de> for AppError {
 	{
 		let value = ProblemDetails::deserialize(deserializer)?;
 		Ok(AppError::Problem(Box::new(value)))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// Input an operator or a client controls answers as their mistake, not as
+	/// a fault, and carries the slug its documentation is written under.
+	#[test]
+	fn a_client_mistake_is_not_a_fault() {
+		for (error, status, slug) in [
+			(
+				AppError::BadRequest("no".into()),
+				StatusCode::BAD_REQUEST,
+				"/errors/bad-request",
+			),
+			(
+				AppError::Conflict("taken".into()),
+				StatusCode::CONFLICT,
+				"/errors/conflict",
+			),
+		] {
+			let problem = error.to_problem_details();
+			assert_eq!(problem.status, Some(status));
+			assert_eq!(
+				problem.r#type.as_ref().map(ToString::to_string).as_deref(),
+				Some(slug)
+			);
+		}
 	}
 }

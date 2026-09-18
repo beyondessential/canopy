@@ -88,6 +88,48 @@ device_role_struct!(ServerDevice, DeviceRole::Machine);
 device_role_struct!(ReleaserDevice, DeviceRole::Releaser);
 device_role_struct!(BackupRestoreDevice, DeviceRole::BackupRestore);
 
+/// Whether the caller presented no credential at all, as against presenting
+/// one Canopy would not accept.
+///
+/// Only an absent credential is anonymous. A credential that is presented and
+/// rejected propagates, so a stale or unknown certificate is refused rather
+/// than served the unscoped set as though it had identified itself. The
+/// variants are named rather than tested by status, so which callers are served
+/// does not follow from an unrelated mapping and a new variant is a decision
+/// somebody makes.
+fn no_credential(err: &AppError) -> bool {
+	matches!(
+		err,
+		AppError::AuthMissingHeader(_)
+			| AppError::AuthMissingCertificate
+			| AppError::AuthTailnetIdentityMissing
+	)
+}
+
+/// A read that is open to everyone but answers a device for its own group
+/// takes `Option<AuthDevice>`: absent identity is not a refusal, it just
+/// narrows what the caller is offered.
+impl<S> axum::extract::OptionalFromRequestParts<S> for AuthDevice
+where
+	Db: FromRef<S>,
+	Option<TailnetDirectory>: FromRef<S>,
+	mtls::ClientCertHeader: FromRef<S>,
+	S: Send + Sync,
+{
+	type Rejection = AppError;
+
+	async fn from_request_parts(
+		parts: &mut axum::http::request::Parts,
+		state: &S,
+	) -> Result<Option<Self>, Self::Rejection> {
+		match <Self as axum::extract::FromRequestParts<S>>::from_request_parts(parts, state).await {
+			Ok(device) => Ok(Some(device)),
+			Err(err) if no_credential(&err) => Ok(None),
+			Err(err) => Err(err),
+		}
+	}
+}
+
 impl<S> axum::extract::FromRequestParts<S> for AuthDevice
 where
 	Db: FromRef<S>,
@@ -152,5 +194,47 @@ where
 		}
 
 		Ok(Self(device, method))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// A refusal is not an absent credential. Downgrading one to anonymous
+	/// hands a machine that has a group the unscoped set and presents it as
+	/// that machine's answer.
+	#[test]
+	fn a_refusal_is_not_an_absent_credential() {
+		assert!(!no_credential(&AppError::AuthInsufficientPermissions {
+			required: "releaser".into()
+		}));
+		assert!(!no_credential(&AppError::AuthTailnetNodeNotPermitted));
+		assert!(!no_credential(&AppError::AuthTailnetDirectoryUnavailable));
+		assert!(!no_credential(&AppError::DeviceHasNoServer));
+	}
+
+	/// A certificate that is presented and not accepted fails the read. Serving
+	/// it as anonymous would let an expired or revoked credential keep reading
+	/// by losing its identity.
+	#[test]
+	fn a_stale_certificate_fails_rather_than_going_anonymous() {
+		assert!(!no_credential(&AppError::AuthCertificateNotFound));
+		assert!(!no_credential(&AppError::AuthInvalidCertificate(
+			"expired".into()
+		)));
+		assert!(!no_credential(&AppError::AuthTokenNotValid));
+		assert!(!no_credential(&AppError::AuthFailed {
+			reason: "mtls".into()
+		}));
+	}
+
+	/// No credential at all is anonymous: these reads are open, and a caller
+	/// that never identified itself is offered the unscoped set.
+	#[test]
+	fn an_absent_credential_is_anonymous() {
+		assert!(no_credential(&AppError::AuthMissingCertificate));
+		assert!(no_credential(&AppError::AuthMissingHeader("x")));
+		assert!(no_credential(&AppError::AuthTailnetIdentityMissing));
 	}
 }
