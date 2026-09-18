@@ -22,6 +22,7 @@ mod healthchecks;
 mod inventory;
 mod inventory_variables;
 mod issues;
+mod machines;
 mod maintenance;
 mod maintenance_targets;
 mod mcp;

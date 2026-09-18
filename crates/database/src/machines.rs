@@ -198,6 +198,7 @@ impl Machine {
 			.set(updates)
 			.execute(db)
 			.await
+			.optional_empty_changeset()
 			.map_err(AppError::from)?;
 
 		let after = Self::get_by_id(db, machine_id).await?;
