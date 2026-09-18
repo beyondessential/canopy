@@ -5,6 +5,7 @@
 
 mod admins;
 mod application_certificates;
+mod application_empty_update;
 mod application_reported_key;
 mod application_types;
 mod backfill_registered_at_migration;
