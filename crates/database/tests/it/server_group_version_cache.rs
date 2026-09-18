@@ -178,6 +178,48 @@ async fn recompute_picks_canonical_and_trigger_updates_only_it() {
 	.await
 }
 
+async fn updated_at(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	group_id: Uuid,
+) -> jiff::Timestamp {
+	use database::schema::server_groups::dsl;
+	let stamp: jiff_diesel::Timestamp = dsl::server_groups
+		.select(dsl::updated_at)
+		.filter(dsl::id.eq(group_id))
+		.first(conn)
+		.await
+		.expect("load updated_at");
+	stamp.into()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_repeated_version_leaves_the_group_row_alone() {
+	TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn, "Group").await;
+		let central =
+			insert_server(&mut conn, group_id, "tamanu-central", Some("production")).await;
+		insert_status(&mut conn, central, Some("1.0.0"), -60).await;
+		ServerGroup::recompute_version(&mut conn, group_id)
+			.await
+			.unwrap();
+
+		let before = updated_at(&mut conn, group_id).await;
+		insert_status(&mut conn, central, Some("1.0.0"), -30).await;
+		assert_eq!(
+			updated_at(&mut conn, group_id).await,
+			before,
+			"a push carrying the cached version does not write the group row"
+		);
+
+		insert_status(&mut conn, central, Some("1.1.0"), -10).await;
+		assert!(
+			updated_at(&mut conn, group_id).await > before,
+			"a push carrying a new version still writes it"
+		);
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn recompute_clears_cache_when_no_members() {
 	TestDb::run(async |mut conn, _| {

@@ -749,29 +749,6 @@ impl Application {
 			.collect())
 	}
 
-	/// Which box each of these applications runs on.
-	///
-	/// The application's rollup takes in its machine's checks, so every read of
-	/// a set of applications needs their boxes too; asking once beats a lookup
-	/// per application on the fleet list.
-	// spec: CHK#a-machines-checks-present-on-its-applications
-	pub async fn machines_by_id(
-		db: &mut AsyncPgConnection,
-		ids: &[Uuid],
-	) -> Result<std::collections::HashMap<Uuid, Uuid>> {
-		use crate::schema::applications::dsl;
-		if ids.is_empty() {
-			return Ok(Default::default());
-		}
-		let rows: Vec<(Uuid, Uuid)> = dsl::applications
-			.select((dsl::id, dsl::machine_id))
-			.filter(dsl::id.eq_any(ids))
-			.load(db)
-			.await
-			.map_err(AppError::from)?;
-		Ok(rows.into_iter().collect())
-	}
-
 	pub async fn get_by_ids(db: &mut AsyncPgConnection, ids: &[Uuid]) -> Result<Vec<Self>> {
 		use crate::schema::applications::dsl::*;
 		applications

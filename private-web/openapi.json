@@ -10696,7 +10696,7 @@
           },
           "subject": {
             "$ref": "#/components/schemas/CheckSubject",
-            "description": "Which grain this check is filed against.\n\nAn application presents its machine's checks among its own, and this is\nwhat marks them: a `machine` entry in an application's list is the\nbox's, one filing seen from each workload the box carries rather than a\ncopy per workload."
+            "description": "Which grain this check is filed against.\n\nAn application presents its machine's checks among its own, and this is\nwhat marks them: a `machine` entry in an application's list is the\nbox's, one filing seen from each workload the box carries rather than a\ncopy per workload, and graded against the box rather than the workload."
           }
         }
       },

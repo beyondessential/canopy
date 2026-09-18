@@ -157,7 +157,9 @@ impl InventoryLease {
 	/// Refuses one another operator still holds unless `take_over`.
 	///
 	/// Takes the group's row so concurrent takes on one environment queue
-	/// rather than racing the open-lease index into a database error.
+	/// rather than racing the open-lease index into a database error. The
+	/// no-key form is what makes that cheap: `FOR UPDATE` would also queue
+	/// behind every job writing a row that references the group.
 	pub async fn take(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
@@ -174,7 +176,7 @@ impl InventoryLease {
 			let _group: Uuid = crate::schema::server_groups::table
 				.select(crate::schema::server_groups::id)
 				.find(group_id)
-				.for_update()
+				.for_no_key_update()
 				.first(conn)
 				.await
 				.map_err(AppError::from)?;

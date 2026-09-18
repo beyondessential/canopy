@@ -335,8 +335,6 @@ test.describe("machine detail", () => {
 			name: "workload-a",
 			groupId: group.id,
 		});
-		// Reporting, and healthy on its own account: the box's disk is the only
-		// thing wrong, so the rollup below is the machine's showing through.
 		await seedStatus(sql, { serverId: server.id, healthy: true, health: [] });
 		// One fact about the box, one about the workload on it.
 		await seedIssue(sql, {
@@ -362,10 +360,13 @@ test.describe("machine detail", () => {
 			page.getByTestId("check-machine-subject"),
 		).toHaveCount(1);
 
-		// The box's disk makes the workload on it degraded, the application's
-		// contributing checks including its machine's.
+		// The headline is the workload's own: its version check is warning, and
+		// the failing disk under it is the box's to answer for.
 		// spec: CHK#health-rollup
-		await expect(page.getByText("Unhealthy", { exact: true })).toBeVisible();
+		await expect(page.getByText("Warning", { exact: true })).toBeVisible();
+		await expect(
+			page.getByText("Unhealthy", { exact: true }),
+		).toHaveCount(0);
 	});
 
 	/// The box's check is the box's wherever it is presented from, so silencing
