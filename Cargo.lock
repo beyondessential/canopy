@@ -1378,7 +1378,7 @@ version = "0.0.0"
 dependencies = [
  "blake3",
  "prettyplease",
- "schemars 0.8.22",
+ "schemars 1.2.2",
  "serde_json",
  "syn 3.0.3",
  "typify",
