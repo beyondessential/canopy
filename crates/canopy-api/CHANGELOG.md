@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2](https://github.com/beyondessential/canopy/compare/bes-canopy-api-v1.0.1...bes-canopy-api-v1.0.2) - 2026-09-20
+
+### Other
+
+- Merge branch 'feat/group-scoped-artifacts' into feat/reporting-schemas
+- Merge branch 'epic/deployment-artefacts' into feat/group-scoped-artifacts
+
 ## [1.0.1](https://github.com/beyondessential/canopy/compare/bes-canopy-api-v1.0.0...bes-canopy-api-v1.0.1) - 2026-09-14
 
 ### Fixed
