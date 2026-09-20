@@ -29,7 +29,6 @@ pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::rou
 		.layer(middleware::from_fn(mcp::require_tailnet_user));
 
 	let non_public = Router::new()
-		.merge(commons_servers::health::routes())
 		.merge(api_router)
 		.merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", api_spec))
 		.nest("/api/mcp", mcp)

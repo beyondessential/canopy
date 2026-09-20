@@ -65,6 +65,11 @@ pub fn router(routes: Router<()>, client_ip_source: ClientIpSource) -> Router<()
 		.layer(CompressionLayer::new())
 		.layer(RequestDecompressionLayer::new())
 		.layer(ServerTimingLayer::new("srv"))
+		// Merged after the layers, so the probes are the one thing the client-ip
+		// middleware does not see: a kubelet reaches the pod directly, with no
+		// proxy to set `X-Forwarded-For`, and `RightmostXForwardedFor` refuses a
+		// request that carries none.
+		.merge(health::routes())
 }
 
 /// Content-Encodings the [`RequestDecompressionLayer`] applied in [`router`]
@@ -99,4 +104,24 @@ async fn ip_into_response(ip: ClientIp, request: Request, next: Next) -> Respons
 	let mut response = next.run(request).await;
 	response.extensions_mut().insert(ip);
 	response
+}
+
+#[cfg(test)]
+mod tests {
+	use axum_test::TestServer;
+
+	use super::*;
+
+	/// A kubelet probes the pod directly, so its request carries no
+	/// `X-Forwarded-For` for `RightmostXForwardedFor` to read. Behind the layer
+	/// the extraction refuses it, and a startup probe that can never pass kills
+	/// every pod it is attached to.
+	#[tokio::test]
+	async fn a_probe_without_a_forwarded_header_is_answered() {
+		let app = router(Router::new(), ClientIpSource::RightmostXForwardedFor);
+		let server = TestServer::new(app);
+
+		server.get("/livez").await.assert_status_ok();
+		server.get("/healthz").await.assert_status_ok();
+	}
 }

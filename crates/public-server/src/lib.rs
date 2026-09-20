@@ -55,7 +55,6 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		let ui_router: Router<AppState> = Router::new()
 			.route("/", get(index))
 			.route("/errors/{slug}", get(error))
-			.merge(commons_servers::health::routes())
 			.merge(timesync::routes())
 			.merge(password::routes())
 			.nest_service("/static", ServeDir::new("static"))
