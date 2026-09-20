@@ -50,6 +50,7 @@ pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::rou
 					state.tailnet_directory.clone(),
 					state.sts.clone(),
 					state.kube.clone(),
+					state.artifacts.clone(),
 				)?,
 			)),
 		)
