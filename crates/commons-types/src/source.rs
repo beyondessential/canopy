@@ -3,6 +3,15 @@
 
 use serde::{Deserialize, Serialize};
 
+/// The source a relay's substrate checks are filed under: what the cluster
+/// does with an application's workloads, at grains other than one application
+/// (spec `K8S`, "Checks determined about the substrate").
+///
+/// Filed only by a relay, so it is reserved from the device API — no ordinary
+/// device can determine these conditions, and one claiming to would be
+/// reporting something it cannot know.
+pub const SUBSTRATE_SOURCE: &str = "kubernetes";
+
 /// How a source's silence bears on its servers' reachability.
 ///
 /// Stored as text in Postgres, validated as this enum at the edges.

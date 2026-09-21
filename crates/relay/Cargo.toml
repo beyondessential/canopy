@@ -1,0 +1,38 @@
+[package]
+publish = false
+name = "relay"
+description = "The canopy relay that runs in a Kubernetes cluster and monitors the Tamanu deployments there."
+version = "6.6.6"
+edition = "2024"
+resolver = "3"
+license = "GPL-3.0-or-later"
+authors = [
+	"Félix Saparelli <felix@passcod.name>",
+	"BES Developers <contact@bes.au>",
+]
+
+[[bin]]
+name = "relay"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true, features = ["derive", "env"] }
+commons-types = { path = "../commons-types" }
+lloggs = { workspace = true, features = ["miette-7"] }
+miette = { workspace = true, features = ["fancy"] }
+node-semver.workspace = true
+quinn = { version = "0.11.9", default-features = false, features = [
+	"bloom",
+	"log",
+	"runtime-tokio",
+	"rustls-aws-lc-rs",
+] }
+relay-protocol = { path = "../relay-protocol" }
+serde_json = "1.0.150"
+thiserror = "2.0.18"
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
+tracing.workspace = true
+
+[dev-dependencies]
+rcgen = "0.14.8"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

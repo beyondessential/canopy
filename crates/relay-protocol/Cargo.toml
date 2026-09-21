@@ -1,0 +1,43 @@
+[package]
+publish = false
+name = "relay-protocol"
+description = "The wire contract between canopy and the relays it runs in Kubernetes clusters."
+version = "6.6.6"
+edition = "2024"
+resolver = "3"
+license = "GPL-3.0-or-later"
+authors = [
+	"Félix Saparelli <felix@passcod.name>",
+	"BES Developers <contact@bes.au>",
+]
+
+[dependencies]
+commons-types = { path = "../commons-types" }
+# QUIC on the workspace's `aws-lc-rs` provider rather than quinn's default
+# `ring`, so this does not stand up a second rustls provider alongside the one
+# the AWS SDK and kube already use.
+quinn = { version = "0.11.9", default-features = false, features = [
+	"bloom",
+	"log",
+	"runtime-tokio",
+	"rustls-aws-lc-rs",
+] }
+# Mints the throwaway certificate that carries a device key into the
+# handshake. Same version and backend as `commons-servers` uses to mint the
+# keypair at provisioning, so the two agree on the key's encoding.
+rcgen = "0.14.8"
+rustls = { version = "0.23.40", default-features = false, features = [
+	"aws-lc-rs",
+	"logging",
+	"std",
+	"tls12",
+] }
+rustls-pki-types = { version = "1.14.1", features = ["std"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = "1.0.150"
+thiserror = "2.0.18"
+tokio = { workspace = true, features = ["io-util"] }
+x509-parser = "0.18.1"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["io-util", "macros", "rt", "rt-multi-thread", "time"] }

@@ -11137,7 +11137,8 @@
           "admin",
           "releaser",
           "machine",
-          "backup-restore"
+          "backup-restore",
+          "relay"
         ]
       },
       "DeviceSearchArgs": {

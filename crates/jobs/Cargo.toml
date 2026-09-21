@@ -11,6 +11,14 @@ authors = [
 ]
 
 [dependencies]
+relay-protocol = { path = "../relay-protocol" }
+quinn = { version = "0.11.9", default-features = false, features = [
+	"bloom",
+	"log",
+	"runtime-tokio",
+	"rustls-aws-lc-rs",
+] }
+hostname = "0.4.2"
 anyhow.workspace = true
 aws-config.workspace = true
 aws-sdk-cloudwatch.workspace = true
@@ -34,6 +42,7 @@ reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = "1.0.150"
 tokio = { workspace = true, features = ["macros", "net", "process", "rt-multi-thread", "sync"] }
+thiserror = "2.0.18"
 tracing.workspace = true
 uuid = { version = "1.23.1", features = ["v4"] }
 
@@ -41,5 +50,6 @@ uuid = { version = "1.23.1", features = ["v4"] }
 aws-sdk-s3 = { workspace = true, features = ["test-util"] }
 aws-smithy-mocks.workspace = true
 commons-tests = { path = "../commons-tests" }
+relay = { path = "../relay" }
 diesel = { workspace = true }
 uuid = { version = "1.23.1", features = ["v4"] }

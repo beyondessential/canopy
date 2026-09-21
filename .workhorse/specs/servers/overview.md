@@ -10,13 +10,15 @@ Machine-level facts belong to the machine and application-level facts to the app
 
 ## Cardinality
 
-An application runs on exactly one machine.
-A machine hosts any number of applications, including none.
+An application runs on exactly one **host**.
+A host is a machine, or a Kubernetes cluster where the application is scheduled across one rather than run on a box (see [K8S](../monitoring/kubernetes.md)).
+A host of either kind carries any number of applications, including none.
+
+Which kind of host an application has decides what facts it has a place for.
+An application on a machine has the machine's platform, memory and filesystems standing behind it; an application on a cluster has no box of its own, so it reports no machine facts and presents none.
 
 A machine has at most one identity, and an identity belongs to at most one machine.
 Identities that authenticate something other than a machine — an operator's credential, a relay — belong to no machine at all.
-
-How an application scheduled across a cluster rather than run on a box fits this model is being settled in the Kubernetes project, not here.
 
 ## Machines come from operators
 
@@ -66,6 +68,9 @@ An operator sets the group on the machine, and the applications on that machine 
 
 An application's group is never set independently of its machine's, so the two cannot disagree.
 Moving a machine to another group moves the applications on it, and there is no separate move for an application that runs on a machine.
+
+An application hosted by a cluster takes its group from where it is deployed rather than from an operator, a cluster carrying applications of many groups at once (see [K8S](../monitoring/kubernetes.md), "Deployment shape Canopy relies on").
+A cluster therefore belongs to no group itself, unlike a machine.
 
 ### Environments
 
