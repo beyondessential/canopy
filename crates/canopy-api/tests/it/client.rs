@@ -337,46 +337,43 @@ async fn a_path_value_that_is_merely_unusual_still_goes_through() {
 
 #[tokio::test]
 async fn a_body_that_is_present_and_empty_still_says_what_it_is() {
-	let recorder = Recorder::json(200, r#"{"ok":true}"#);
+	let recorder = Recorder::json(200, &an_artifact());
 	let client = CanopyClient::new(recorder);
 
-	// Reaching the plumbing directly: no operation declares a required non-JSON
-	// body yet, and whether a body exists is not inferred from its length.
-	let _: serde_json::Value = client
-		.call_payload_json(
-			http::Method::POST,
-			"/somewhere",
-			Some(bes_canopy_api::bytes::Bytes::new()),
-			"application/octet-stream",
-		)
+	// Whether there is a body is settled where the method is generated, not read
+	// off its length, so a caller who sets an empty one has still set one.
+	let request = bes_canopy_api::schema::RegisterArtifactRequest::builder()
+		.platform("linux")
+		.body("")
+		.build();
+	client
+		.artifacts("2.11.0", "installer", request)
 		.await
-		.expect("a 200 parses");
+		.expect("a 200 carrying an artifact parses");
 
-	let request = client.transport().last();
-	assert!(request.body().is_empty());
+	let sent = client.transport().last();
+	assert!(sent.body().is_empty());
 	assert_eq!(
-		request.headers().get(http::header::CONTENT_TYPE).unwrap(),
-		"application/octet-stream",
+		sent.headers().get(http::header::CONTENT_TYPE).unwrap(),
+		"text/plain",
 		"an empty body is still a body"
 	);
 }
 
 #[tokio::test]
 async fn no_body_at_all_declares_no_content_type() {
-	let recorder = Recorder::json(200, r#"{"ok":true}"#);
+	let recorder = Recorder::json(200, &an_artifact());
 	let client = CanopyClient::new(recorder);
 
-	let _: serde_json::Value = client
-		.call_payload_json(
-			http::Method::POST,
-			"/somewhere",
-			None,
-			"application/octet-stream",
-		)
+	let request = bes_canopy_api::schema::RegisterArtifactRequest::builder()
+		.platform("linux")
+		.build();
+	client
+		.artifacts("2.11.0", "installer", request)
 		.await
-		.expect("a 200 parses");
+		.expect("a 200 carrying an artifact parses");
 
-	let request = client.transport().last();
-	assert!(request.body().is_empty());
-	assert!(request.headers().get(http::header::CONTENT_TYPE).is_none());
+	let sent = client.transport().last();
+	assert!(sent.body().is_empty());
+	assert!(sent.headers().get(http::header::CONTENT_TYPE).is_none());
 }

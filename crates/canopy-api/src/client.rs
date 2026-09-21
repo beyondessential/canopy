@@ -76,9 +76,12 @@ impl<T: CanopyTransport> CanopyClient<T> {
 	/// Send a request whose body is bytes the caller holds rather than JSON, and
 	/// parse a JSON response body into `R`.
 	///
-	/// Used by the generated methods for operations whose body the document
-	/// declares as something other than JSON.
-	pub async fn call_payload_json<R: DeserializeOwned>(
+	/// Reached only by the generated methods, which are in this crate: a consumer
+	/// calls the method for the operation it wants. Keeping it in the crate is
+	/// what lets the media type stay a `&'static str` — the header value is built
+	/// from it without checking, which is safe for the handful of media types the
+	/// generator emits and would not be for a string a consumer composed.
+	pub(crate) async fn call_payload_json<R: DeserializeOwned>(
 		&self,
 		method: http::Method,
 		path: &str,
@@ -96,7 +99,7 @@ impl<T: CanopyTransport> CanopyClient<T> {
 
 	/// Send a request whose body is bytes the caller holds, discarding the
 	/// response body.
-	pub async fn call_payload_empty(
+	pub(crate) async fn call_payload_empty(
 		&self,
 		method: http::Method,
 		path: &str,
