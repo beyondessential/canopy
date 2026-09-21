@@ -109,11 +109,11 @@ async fn the_named_questions_are_answered() {
 	);
 }
 
-/// The restriction `K8S` puts on the relay rather than on canopy: a deployment
+/// The restriction `K8S` puts on the relay rather than on canopy: an environment
 /// with no scheduled expiry cannot be put to sleep, and the relay is what
 /// refuses, because the expiry is a fact of the namespace.
 #[tokio::test]
-async fn sleeping_a_deployment_with_no_expiry_is_refused_by_the_relay() {
+async fn sleeping_an_environment_with_no_expiry_is_refused_by_the_relay() {
 	let response = dispatch(
 		&Request::Sleep {
 			namespace: "nauru-prod".into(),
@@ -124,13 +124,13 @@ async fn sleeping_a_deployment_with_no_expiry_is_refused_by_the_relay() {
 	.await;
 
 	let Response::Refused(refusal) = response else {
-		panic!("a deployment with no expiry must be refused, got {response:?}");
+		panic!("an environment with no expiry must be refused, got {response:?}");
 	};
 	assert_eq!(refusal.kind, RefusalKind::NoScheduledExpiry);
 }
 
 #[tokio::test]
-async fn a_deployment_with_an_expiry_sleeps_and_wakes() {
+async fn an_environment_with_an_expiry_sleeps_and_wakes() {
 	let duties = Cluster::new(true);
 	assert_eq!(
 		dispatch(

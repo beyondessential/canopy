@@ -1,5 +1,5 @@
 //! The canopy relay: the process that runs inside a Kubernetes cluster and
-//! monitors the Tamanu deployments there on canopy's behalf (spec `K8S`).
+//! monitors the Tamanu applications there on canopy's behalf (spec `K8S`).
 //!
 //! One relay per cluster. It holds the cluster's permissions on its own
 //! ServiceAccount and connects to each instance's local Postgres; it opens its

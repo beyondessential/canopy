@@ -1,7 +1,7 @@
 [package]
 publish = false
 name = "relay"
-description = "The canopy relay that runs in a Kubernetes cluster and monitors the Tamanu deployments there."
+description = "The canopy relay that runs in a Kubernetes cluster and monitors the Tamanu applications there."
 version = "6.6.6"
 edition = "2024"
 resolver = "3"

@@ -1,6 +1,6 @@
 //! What a relay has to be told.
 //!
-//! Three things, all of them deployment configuration mounted into the pod:
+//! Three things, all of them configuration mounted into the pod:
 //! its own device key, canopy's public key, and where canopy is. Nothing here
 //! is discovered and nothing is defaulted to something plausible — a relay
 //! that guessed any of the three would either fail to authenticate or, worse,
@@ -63,8 +63,7 @@ impl std::fmt::Debug for Config {
 }
 
 impl Config {
-	/// Assemble a configuration from the files and values a deployment
-	/// supplies.
+	/// Assemble a configuration from the files and values the pod is given.
 	pub fn load(
 		key_file: &PathBuf,
 		canopy_key_hex: &str,

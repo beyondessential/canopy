@@ -3,7 +3,7 @@
 //! Deployed once per cluster from the infrastructure repository — namespace,
 //! ServiceAccount and RBAC, the device-key Secret, and an initial image tag —
 //! after which canopy keeps it current by naming the version it should run.
-//! Standing up a new cluster is that deployment plus creating the relay device
+//! Standing up a new cluster is that install plus creating the relay identity
 //! in canopy; no CI change, and the cluster inventory lives nowhere in this
 //! repository.
 

@@ -33,7 +33,7 @@ use tracing::warn;
 pub enum Placement {
 	/// The application an instance coordinate names.
 	Application(Uuid),
-	/// The group a namespace names — a deployment at a rank.
+	/// The group a namespace names — its applications at one rank.
 	Group(Uuid),
 	/// Canopy-wide, with the relay's cluster as the check's instance.
 	Cluster { label: String },

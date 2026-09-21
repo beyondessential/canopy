@@ -21,7 +21,7 @@ use relay_protocol::{Hello, RosterEntry};
 /// Note what is absent: nothing here returns a Kubernetes object, and there is
 /// no method that reads arbitrary cluster state. That is the boundary the
 /// relay design exists to hold — a compromised canopy can obtain check results
-/// and take the two deployment actions, and cannot obtain the cluster's
+/// and take the two environment actions, and cannot obtain the cluster's
 /// objects or any instance's data, because no method offers them.
 pub trait Duties: Send + Sync + 'static {
 	/// The instances running in a namespace, for the identity picker.
@@ -33,15 +33,15 @@ pub trait Duties: Send + Sync + 'static {
 	/// What this relay is running.
 	fn build(&self) -> Hello;
 
-	/// Put a namespace's deployment to sleep.
+	/// Put a namespace's environment to sleep.
 	///
-	/// The relay is what refuses a deployment carrying no scheduled expiry
+	/// The relay is what refuses an environment carrying no scheduled expiry
 	/// ([`DutyError::NoScheduledExpiry`]), because the expiry is a fact of the
 	/// namespace: enforcing it here means the restriction holds where the fact
 	/// is known rather than resting on canopy asking correctly.
 	fn sleep(&self, namespace: &str) -> impl Future<Output = Result<(), DutyError>> + Send;
 
-	/// Wake a sleeping deployment.
+	/// Wake a sleeping environment.
 	fn wake(&self, namespace: &str) -> impl Future<Output = Result<(), DutyError>> + Send;
 
 	/// Move this relay onto the named version by patching its own Deployment's
@@ -54,7 +54,7 @@ pub trait Duties: Send + Sync + 'static {
 
 #[derive(Debug, thiserror::Error)]
 pub enum DutyError {
-	/// The deployment has no scheduled expiry, so it cannot be put to sleep.
+	/// The environment has no scheduled expiry, so it cannot be put to sleep.
 	#[error("{namespace} has no scheduled expiry, so it cannot be put to sleep")]
 	NoScheduledExpiry { namespace: String },
 
@@ -71,7 +71,7 @@ pub enum DutyError {
 ///
 /// Stands in until the check families and the cluster actions land. It
 /// connects, authenticates, and answers — with a failure, naming what is
-/// missing — so the transport is exercisable and a misconfigured deployment
+/// missing — so the transport is exercisable and a misconfigured relay
 /// reads as "this relay cannot do anything yet" rather than as a silence that
 /// looks like a network fault.
 pub struct Unattached {

@@ -28,15 +28,15 @@ pub enum Request {
 	/// which the skew alert grades, and the relay's own build.
 	Build,
 
-	/// Put a deployment to sleep. A deployment is a namespace, so this covers
-	/// every server in that group together.
+	/// Put an environment to sleep. An environment is a namespace, so this
+	/// covers every application in it together.
 	///
 	/// The relay refuses a namespace carrying no scheduled expiry
 	/// ([`RefusalKind::NoScheduledExpiry`]), so the restriction holds where
 	/// the expiry is known rather than resting on canopy asking correctly.
 	Sleep { namespace: String },
 
-	/// Wake a sleeping deployment.
+	/// Wake a sleeping environment.
 	Wake { namespace: String },
 
 	/// The relay image version this relay should be running.
@@ -63,10 +63,10 @@ pub enum Response {
 	/// What the relay is running.
 	Build(Hello),
 
-	/// The deployment is asleep, or was already.
+	/// The environment is asleep, or was already.
 	Asleep,
 
-	/// The deployment is awake, or was already.
+	/// The environment is awake, or was already.
 	Awake,
 
 	/// The relay accepted the version and has asked Kubernetes to roll it.
@@ -106,7 +106,7 @@ pub struct Refusal {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RefusalKind {
-	/// A deployment with no scheduled expiry cannot be put to sleep. The
+	/// An environment with no scheduled expiry cannot be put to sleep. The
 	/// expiry is a fact of the namespace, so the relay is what knows it.
 	NoScheduledExpiry,
 	/// The named version is below the floor baked into this relay. The floor

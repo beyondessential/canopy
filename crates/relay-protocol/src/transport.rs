@@ -28,7 +28,7 @@
 //! Canopy is verified the same way, in the other direction: the relay pins
 //! canopy's public key. Symmetric, one verification path whether or not an
 //! overlay network is in the way, and nothing that becomes unsafe if a
-//! deployment later drops the overlay — which matters because a peer a relay
+//! install later drops the overlay — which matters because a peer a relay
 //! mistakes for canopy could tell it which image to run.
 
 use std::sync::Arc;

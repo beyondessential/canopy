@@ -63,9 +63,9 @@ pub enum FilingTarget {
 
 /// Which instance within a namespace, in the terms the namespace itself uses.
 ///
-/// A namespace holds one deployment: one central server and its facilities,
+/// A namespace holds one environment: one central application and its facilities,
 /// each with its own Postgres and its own workloads per duty (spec `K8S`,
-/// "Deployment shape Canopy relies on").
+/// "The shape Canopy relies on").
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Instance {

@@ -8,7 +8,7 @@
 //!
 //! Deliberately absent: `kube`, `k8s-openapi`, and the harvest. No message
 //! carries a Kubernetes object — everything crossing the connection is a filed
-//! check, an answer to one named question, or an action on a deployment. This
+//! check, an answer to one named question, or an action on an environment. This
 //! crate is where that stays true.
 //!
 //! ## The shape of an exchange
