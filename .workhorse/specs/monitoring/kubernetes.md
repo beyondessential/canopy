@@ -4,12 +4,12 @@ id: K8S
 
 # Kubernetes monitoring
 
-Canopy monitors Tamanu deployments running on Kubernetes through one relay in each cluster, which determines those deployments' checks and files them, rather than through an agent on each box reporting its own (see [STA](../public-server/statuses.md)).
+Canopy monitors the Tamanu applications running on Kubernetes through one relay in each cluster, which determines their checks and files them, rather than through an agent on each box reporting its own (see [STA](../public-server/statuses.md)).
 An application on a cluster is an ordinary application in the fleet, carrying the same check state, health, incidents, and operator controls as any other (see [CHK](checks.md)), monitored through its cluster rather than by an agent of its own.
 
-## Deployment shape Canopy relies on
+## The shape Canopy relies on
 
-A namespace holds one deployment: a group at a particular rank, so the Nauru group at the demo rank is one namespace, and separate ranks are separate namespaces.
+A namespace holds one environment: a group's applications at one rank, so the Nauru group at the demo rank is one namespace, and separate ranks are separate namespaces (see [GRP](../servers/groups.md), "Environments").
 Within a namespace each central and each facility has its own Postgres instance and its own workloads per duty, with no database or workload shared between duties or between applications.
 So a namespace's contents map onto applications one for one, each with its own set of workloads and its own database.
 
@@ -39,7 +39,7 @@ A relay is enrolled as an identity carrying the relay role and belongs to no mac
 ### What crosses the connection
 
 The relay determines the checks of the cluster and of the applications on it, under both sources, and files the results upward.
-Everything crossing the connection is a filed check, an answer to one named question, or an action on a deployment, so the cluster's objects stay in the cluster and what Canopy learns of a cluster is what its relay has already made a check of.
+Everything crossing the connection is a filed check, an answer to one named question, or an action on an environment, so the cluster's objects stay in the cluster and what Canopy learns of a cluster is what its relay has already made a check of.
 
 The relay holds the current state of what it watches and files a check when that check's result changes, so a condition surfaces when it arises rather than on the next turn of a polling loop.
 It also refiles what it holds periodically, so a check's state is re-established after an observation the relay missed, a relay restart, or a reconnection, rather than resting on a change it may never see.
@@ -57,21 +57,21 @@ The cluster carries out the update, so a version that will not start leaves the 
 A relay refuses a version below the floor it carries, so it cannot be sent back to a release already known to be bad.
 The floor is the relay's own rather than something Canopy supplies, because a floor Canopy could set is a floor Canopy could lower.
 
-### Putting a deployment to sleep
+### Putting an environment to sleep
 
-Canopy can put a deployment to sleep and wake it again.
-A deployment is a namespace and so a group at a rank, so the action covers every application in that group together and there is no sleeping one application within a namespace.
+Canopy can put an environment to sleep and wake it again.
+An environment is a namespace, so the action covers every application in it together and there is no sleeping one application within a namespace.
 
-A deployment that has no scheduled expiry cannot be put to sleep, and its relay is what refuses the request, so the restriction holds where the expiry is known rather than resting on Canopy asking correctly.
-Canopy gates the action by what the deployment is, as it gates any action against production.
+An environment that has no scheduled expiry cannot be put to sleep, and its relay is what refuses the request, so the restriction holds where the expiry is known rather than resting on Canopy asking correctly.
+Canopy gates the action by what the environment is, as it gates any action against production.
 Sleeping and waking are available to admins and are audited.
 
-Whether a deployment is asleep is a fact Canopy presents on the group rather than a check, a deployment asleep on purpose being nothing to grade.
+Whether an environment is asleep is a fact Canopy presents on the environment rather than a check, an environment asleep on purpose being nothing to grade.
 Each of its applications already carries it as the reason that application's checks are skipped (see "Checks that cannot run there").
 
 ## Cluster registry
 
-Clusters are registered in Canopy through a settings page and managed in-app, not through environment configuration.
+Clusters are registered in Canopy through a settings page and managed in-app, not through environment variables the process reads at startup.
 Registering a cluster enrols its relay, and Canopy confirms the relay is connected and answering before the cluster is saved, so a cluster Canopy cannot read is caught as the operator adds it.
 A registered cluster is its relay's identity and a name: Canopy stores no connection credential for a cluster, so it holds no cluster secret to protect or rotate.
 Canopy supports several clusters at once, and reads the cluster it runs in itself through a relay like any other.
@@ -106,7 +106,7 @@ So a database credential and the queries the checks run against it stay within t
 A check that has no meaning for an application on a cluster is absent from what the relay files, rather than reported as anything.
 A check is skipped where it applies to the application but could not be read on this pass, which is a different thing an operator reads differently: absent says the condition does not exist here, skipped says it exists and is currently unknown.
 
-A deployment scaled to zero with its database hibernated is deliberately asleep rather than in trouble, so its applications' checks are skipped for as long as it stays that way.
+An environment scaled to zero with its database hibernated is deliberately asleep rather than in trouble, so its applications' checks are skipped for as long as it stays that way.
 A hibernated namespace is still present and its relay still reports, so its applications stay reachable (see "Reachability").
 
 ### The harvest reports on the application, never on the harvester

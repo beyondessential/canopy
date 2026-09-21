@@ -69,7 +69,7 @@ An operator sets the group on the machine, and the applications on that machine 
 An application's group is never set independently of its machine's, so the two cannot disagree.
 Moving a machine to another group moves the applications on it, and there is no separate move for an application that runs on a machine.
 
-An application hosted by a cluster takes its group from where it is deployed rather than from an operator, a cluster carrying applications of many groups at once (see [K8S](../monitoring/kubernetes.md), "Deployment shape Canopy relies on").
+An application hosted by a cluster takes its group from where it is deployed rather than from an operator, a cluster carrying applications of many groups at once (see [K8S](../monitoring/kubernetes.md), "The shape Canopy relies on").
 A cluster therefore belongs to no group itself, unlike a machine.
 
 ### Environments
