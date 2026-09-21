@@ -470,13 +470,24 @@ struct Operation {
 	verb: String,
 	path: String,
 	params: Vec<String>,
-	/// The body an operation carries directly, for a method that predates the
-	/// envelope and takes its JSON body as an argument of its own.
-	body: Option<String>,
-	envelope: Option<Envelope>,
+	request: Request,
 	response: Option<String>,
 	summary: Option<String>,
 	description: Option<String>,
+}
+
+/// What a method takes beyond its path parameters.
+///
+/// The three are mutually exclusive, so they are one field rather than several
+/// that agree by construction and nowhere else.
+enum Request {
+	/// Nothing: the method takes its path parameters and no more.
+	None,
+	/// A JSON body as an argument of its own, which is how every method with
+	/// one was published.
+	Json(String),
+	/// Everything the operation carries, in one generated struct.
+	Envelope(Envelope),
 }
 
 /// Emit one method per operation on `CanopyClient`, routed through its shared
@@ -506,13 +517,11 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 			// An operation with a plain JSON body and nothing else keeps that body
 			// as its own argument, which is how every such method was published.
 			// Anything else travels in an envelope.
-			let (body, envelope) = if query.is_empty() && matches!(body, None | Some(Body::Json(_)))
-			{
-				let body = match body {
-					Some(Body::Json(ty)) => Some(ty),
-					_ => None,
-				};
-				(body, None)
+			let request = if query.is_empty() && matches!(body, None | Some(Body::Json(_))) {
+				match body {
+					Some(Body::Json(ty)) => Request::Json(ty),
+					_ => Request::None,
+				}
 			} else {
 				let operation_id =
 					op.get("operationId")
@@ -524,33 +533,18 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 								verb.to_uppercase()
 							)
 						})?;
-				let envelope = envelope(
-					operation_id,
-					path,
-					verb,
-					&params,
-					body,
-					query,
-					GRANDFATHERED.contains(&(verb.as_str(), path.as_str())),
-					schema_names,
-				)?;
-				(None, Some(envelope))
+				Request::Envelope(envelope(operation_id, path, verb, &params, body, query)?)
 			};
 
 			// The method names its request argument `body` or `request`; a path
 			// parameter taking that name would be shadowed by it, and the path
 			// would be built from the wrong value.
-			let mut reserved = Vec::new();
-			if body.is_some() {
-				reserved.push("body");
-			}
-			if envelope.is_some() {
-				reserved.push("request");
-			}
-			if let Some(clash) = params
-				.iter()
-				.find(|param| reserved.contains(&param.as_str()))
-			{
+			let reserved = match &request {
+				Request::None => None,
+				Request::Json(_) => Some("body"),
+				Request::Envelope(_) => Some("request"),
+			};
+			if let Some(clash) = params.iter().find(|param| Some(param.as_str()) == reserved) {
 				return Err(format!(
 					"the path parameter {clash} of {} {path} has the name this method gives the \
 					 request it carries, which would shadow it: rename the parameter",
@@ -568,8 +562,7 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 				verb: verb.clone(),
 				path: path.clone(),
 				params,
-				body,
-				envelope,
+				request,
 				response: response(op, path, verb)?,
 				summary: op.get("summary").and_then(Value::as_str).map(str::to_owned),
 				description: op
@@ -601,9 +594,19 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 	// and the generated crate would not compile.
 	let mut envelopes = BTreeMap::<&str, &str>::new();
 	for op in &operations {
-		if let Some(envelope) = &op.envelope
-			&& let Some(first) = envelopes.insert(&envelope.name, &op.path)
-		{
+		let Request::Envelope(envelope) = &op.request else {
+			continue;
+		};
+		if schema_names.contains(&envelope.name) {
+			return Err(format!(
+				"the request envelope for {} {} would be named {}, which the document already \
+				 declares as a schema: rename one of the two",
+				op.verb.to_uppercase(),
+				op.path,
+				envelope.name
+			));
+		}
+		if let Some(first) = envelopes.insert(&envelope.name, &op.path) {
 			return Err(format!(
 				"{first} and {} both generate a request named {}, because their operationIds \
 				 agree: give one of them an operationId of its own",
@@ -626,7 +629,7 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 
 	let mut out = String::new();
 	for op in &operations {
-		if let Some(envelope) = &op.envelope {
+		if let Request::Envelope(envelope) = &op.request {
 			out.push_str(&envelope_type(envelope, &op.verb, &op.path)?);
 		}
 	}
@@ -641,33 +644,27 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 		} else {
 			op.name.clone()
 		};
-		let absorbed = op
-			.envelope
-			.as_ref()
-			.and_then(|envelope| envelope.absorbed.as_deref());
+		let envelope = match &op.request {
+			Request::Envelope(envelope) => Some(envelope),
+			_ => None,
+		};
+		let absorbed = envelope.and_then(|envelope| envelope.absorbed.as_deref());
 
 		let mut args = String::new();
 		for param in &op.params {
-			if Some(param.as_str()) == absorbed {
-				let name = &op
-					.envelope
-					.as_ref()
-					.expect("absorbed implies an envelope")
-					.name;
-				args.push_str(&format!(
-					", {}: impl ::std::convert::Into<{name}>",
-					escape_ident(param)?
-				));
-			} else {
-				args.push_str(&format!(", {}: &str", escape_ident(param)?));
+			match envelope.filter(|_| Some(param.as_str()) == absorbed) {
+				Some(envelope) => args.push_str(&format!(
+					", {}: impl ::std::convert::Into<{}>",
+					escape_ident(param)?,
+					envelope.name
+				)),
+				None => args.push_str(&format!(", {}: &str", escape_ident(param)?)),
 			}
 		}
-		if let Some(body) = &op.body {
-			args.push_str(&format!(", body: &{body}"));
+		if let Request::Json(ty) = &op.request {
+			args.push_str(&format!(", body: &{ty}"));
 		}
-		if let Some(envelope) = &op.envelope
-			&& envelope.absorbed.is_none()
-		{
+		if let Some(envelope) = envelope.filter(|envelope| envelope.absorbed.is_none()) {
 			args.push_str(&format!(", request: {}", envelope.name));
 		}
 
@@ -689,54 +686,62 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 			}
 			format!("&format!({template:?}, {})", filled.join(", "))
 		};
-		let path = match &op.envelope {
-			Some(envelope) if !envelope.query.is_empty() => {
+		let path = match envelope.filter(|envelope| !envelope.query.is_empty()) {
+			Some(envelope) => {
 				format!(
 					"&crate::query({path}, &[{}])",
 					query_pairs(&envelope.query)?
 				)
 			}
-			_ => path,
+			None => path,
 		};
 
-		let sent = match &op.envelope {
-			None if op.body.is_some() => "Some(body)".to_owned(),
-			None => "None::<&()>".to_owned(),
-			Some(envelope) => match &envelope.body {
-				None => "None::<&()>".to_owned(),
-				// An optional JSON body is already an `Option`, which is what the
-				// call plumbing takes: sending `Some(&None)` would put a literal
-				// `null` on the wire under a JSON content type.
-				Some(Body::Json(_)) if envelope.absorbed.is_some() => {
-					"request.body.as_ref()".to_owned()
-				}
-				Some(Body::Json(_)) => "Some(&request.body)".to_owned(),
-				Some(body) => payload(body, envelope.absorbed.is_some()),
-			},
+		let ret = match &op.response {
+			Some(ty) => format!("crate::Result<{ty}>"),
+			None => "crate::Result<()>".to_owned(),
 		};
-		let raw = matches!(
-			&op.envelope,
-			Some(Envelope {
-				body: Some(Body::Text | Body::Octets),
+		// A body the document declares as text or bytes goes up as a payload
+		// under its own media type; everything else routes through the JSON
+		// plumbing the published methods have always used.
+		let (call, tail) = match &op.request {
+			Request::Envelope(Envelope {
+				body: Some(body @ (Body::Text | Body::Octets)),
+				absorbed,
 				..
-			})
-		);
-		let (call, ret) = match (raw, &op.response) {
-			(true, Some(ty)) => ("call_payload_json", format!("crate::Result<{ty}>")),
-			(true, None) => ("call_payload_empty", "crate::Result<()>".to_owned()),
-			(false, Some(ty)) => ("call_json", format!("crate::Result<{ty}>")),
-			(false, None) => ("call_empty", "crate::Result<()>".to_owned()),
-		};
-		let tail = match &op.envelope {
-			Some(envelope) if raw => format!(
-				"{sent}, {:?}",
-				envelope
-					.body
-					.as_ref()
-					.expect("a raw call has a body")
-					.content_type()
+			}) => (
+				if op.response.is_some() {
+					"call_payload_json"
+				} else {
+					"call_payload_empty"
+				},
+				format!(
+					"{}, {:?}",
+					payload(body, absorbed.is_some()),
+					body.content_type()
+				),
 			),
-			_ => sent,
+			request => (
+				if op.response.is_some() {
+					"call_json"
+				} else {
+					"call_empty"
+				},
+				match request {
+					Request::None => "None::<&()>".to_owned(),
+					Request::Json(_) => "Some(body)".to_owned(),
+					Request::Envelope(envelope) => match &envelope.body {
+						None => "None::<&()>".to_owned(),
+						// An optional JSON body is already an `Option`, which is
+						// what the call plumbing takes: `Some(&None)` would put a
+						// literal `null` on the wire under a JSON content type.
+						Some(Body::Json(_)) if envelope.absorbed.is_some() => {
+							"request.body.as_ref()".to_owned()
+						}
+						Some(Body::Json(_)) => "Some(&request.body)".to_owned(),
+						Some(_) => unreachable!("a payload body is handled above"),
+					},
+				},
+			),
 		};
 
 		for text in [&op.summary, &op.description].into_iter().flatten() {
@@ -753,14 +758,10 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 		out.push_str(&format!(
 			"\tpub async fn {method}(&self{args}) -> {ret} {{\n"
 		));
-		if let Some(absorbed) = absorbed {
-			let name = &op
-				.envelope
-				.as_ref()
-				.expect("absorbed implies an envelope")
-				.name;
+		if let Some((envelope, absorbed)) = envelope.zip(absorbed) {
 			out.push_str(&format!(
-				"\t\tlet request: {name} = {}.into();\n",
+				"\t\tlet request: {} = {}.into();\n",
+				envelope.name,
 				escape_ident(absorbed)?
 			));
 		}
@@ -830,7 +831,6 @@ fn query_pairs(query: &[QueryParam]) -> Result<String, String> {
 ///
 /// Everything the operation carries travels in one struct, so that what it
 /// carries can grow without the method's arity moving.
-#[allow(clippy::too_many_arguments)]
 fn envelope(
 	operation_id: &str,
 	path: &str,
@@ -838,19 +838,9 @@ fn envelope(
 	params: &[String],
 	body: Option<Body>,
 	query: Vec<QueryParam>,
-	grandfathered: bool,
-	schema_names: &BTreeSet<String>,
 ) -> Result<Envelope, String> {
 	let name = format!("{}Request", pascal(operation_id));
-	if schema_names.contains(&name) {
-		return Err(format!(
-			"the request envelope for {} {path} would be named {name}, which the document already \
-             declares as a schema: rename one of the two",
-			verb.to_uppercase()
-		));
-	}
-
-	let absorbed = if grandfathered {
+	let absorbed = if GRANDFATHERED.contains(&(verb, path)) {
 		Some(params.last().cloned().ok_or_else(|| {
 			format!(
 				"{} {path} is listed as a method published before its body could be expressed, \
