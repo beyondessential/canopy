@@ -29,6 +29,11 @@ pub enum DeviceRole {
 	/// May run managed restores of backups onto replica servers.
 	#[serde(rename = "backup-restore")]
 	BackupRestore,
+	/// A relay canopy runs in a Kubernetes cluster, monitoring that cluster on
+	/// canopy's behalf. Belongs to no machine: it reports the checks of the
+	/// applications in its cluster rather than of anything it runs on.
+	// spec: DTR
+	Relay,
 }
 
 #[derive(Debug, Clone, Copy, thiserror::Error)]
@@ -49,6 +54,8 @@ impl std::str::FromStr for DeviceRole {
 			// spec: DTR
 			"machine" | "server" => Ok(Self::Machine),
 			"backup-restore" => Ok(Self::BackupRestore),
+			// spec: DTR
+			"relay" => Ok(Self::Relay),
 			_ => Err(DeviceRoleFromStringError),
 		}
 	}
@@ -69,6 +76,7 @@ impl std::fmt::Display for DeviceRole {
 			DeviceRole::Releaser => "releaser",
 			DeviceRole::Machine => "machine",
 			DeviceRole::BackupRestore => "backup-restore",
+			DeviceRole::Relay => "relay",
 		};
 		write!(f, "{}", s)
 	}

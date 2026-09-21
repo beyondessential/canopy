@@ -24,6 +24,7 @@ const TRUSTABLE_ROLES: DeviceRole[] = [
 	"releaser",
 	"admin",
 	"backup-restore",
+	"relay",
 ];
 
 /**

@@ -20,6 +20,7 @@ The current conditions are:
 - One or more catalogued checks have gone unreported across the whole fleet for thirty days (see [CHK](../monitoring/checks.md), "Liveness and decommissioning"); it clears when no such check remains, each having been decommissioned or reported again.
 - A history has less than two weeks of future range left to write into, failing below one week (see [HST](../platform/history-storage.md), "Running short"); it clears once every history is provisioned ahead again.
 - One or more group domains fall outside the DNS zones Canopy is configured with, failing when Canopy can read no zones at all and warning when only some claims are uncovered (see [DOM](../servers/domains.md), "When the zone configuration changes"); it clears when every live group's domains sit within a configured zone again.
+- One or more relays are not running the version of the check suite Canopy has named for them (see [K8S](../monitoring/kubernetes.md), "Keeping a relay current"). Each registered cluster is an instance, its detail carrying the version its relay runs and the version named for it, so a relay whose update did not take is visible before it and the rest of the fleet grade the same condition differently. A relay left on an older version means either an update that did not complete or a relay that will not accept the version named, and both want an operator. It clears when every relay runs the version named for it.
 
 ## Notification
 

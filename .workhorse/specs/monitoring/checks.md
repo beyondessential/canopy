@@ -10,10 +10,11 @@ How device reports arrive is the status contract (see [STA](../public-server/sta
 
 ## Targets
 
-Every check is scoped to exactly one target: an application, a machine, a group, or Canopy as a whole.
+Every check is scoped to exactly one target: an application, a machine, a Kubernetes cluster, a group, or Canopy as a whole.
 
-Application checks and machine checks both come from sources reporting on them, and from Canopy's own determinations such as reachability.
-What separates them is what the check asserts something about: whether the software is serving, or whether the box it runs on has room on its disk (see [FLT](../servers/overview.md)).
+Application checks, machine checks and cluster checks all come from sources reporting on them, and from Canopy's own determinations such as reachability.
+What separates them is what the check asserts something about: whether the software is serving, or whether what it runs on has room on its disk (see [FLT](../servers/overview.md)).
+A machine and a cluster are the two kinds of host an application has, so a check about what an application runs on lands on whichever kind hosts it (see [K8S](kubernetes.md)).
 Group checks are conditions Canopy determines about a group's control plane, such as backup maintenance health (see [BKJ](../jobs/backup.md)).
 Canopy-wide checks are Canopy monitoring its own operation (see [SELF](../private-server/self-alerts.md)).
 
@@ -25,6 +26,8 @@ An operator triaging an application sees every check bearing on it, its own and 
 There is one filing per machine check however many applications present it, so a degraded machine check contributes one issue at machine scope rather than one per application (see [INC](incidents.md)).
 A silence on a machine check is machine-scoped and quiets it everywhere it appears, being one check seen from several places.
 
+A cluster's checks are read on the cluster itself, which is the grain they hold for: a cluster schedules the applications of many groups, where a machine carries the few colocated on one box (see [K8S](kubernetes.md)).
+
 Reachability is not presented this way, each grain having its own (see "Reachability").
 
 ## Sources
@@ -32,8 +35,11 @@ Reachability is not presented this way, each grain having its own (see "Reachabi
 A source is a named reporter of checks, identified by a short string.
 Multiple sources may report on the same target, each concerned with part of the system, and each source's reports are independent: a report from one source says nothing about another source's checks.
 
-Two source names are reserved for Canopy itself: `canopy` for conditions Canopy determines on its own (reachability, backup health, key expiry, self-monitoring), and `manual` for conditions raised by operators.
+Three source names are reserved for Canopy itself: `canopy` for conditions Canopy determines on its own (reachability, backup health, key expiry, self-monitoring), `manual` for conditions raised by operators, and `kubernetes` for what a cluster's relay determines about the substrate it schedules applications on (see [K8S](kubernetes.md)).
 Reports arriving over the device API cannot use the reserved names.
+
+A source is normally populated by a device pushing its reports over the device API, but a cluster's relay also fills sources with what it determines in that cluster: the `kubernetes` source is filled that way and no other, and the `alertd` source, which an application reports for itself on other hosts, is filled that way for a cluster's applications by the relay running the same check suite against them (see [K8S](kubernetes.md)).
+A source filled by a relay carries the same state, policy, and controls as any other.
 
 ### Source policy
 
@@ -191,7 +197,7 @@ A check that goes away has recovered; an application that goes away has stopped 
 ## Reachability
 
 A target is reachable while something is currently reporting about it, and unreachable while nothing is.
-Machines and applications each have reachability, computed the same way at each: a machine is reported on by its agent, and an application by the machine that carries it.
+Machines, clusters and applications each have reachability, computed the same way at each: a machine is reported on by its agent, a cluster by its relay, an application on a machine by that machine, and an application on a cluster by that cluster's relay.
 
 Canopy tracks, for each target, the sources expected to report — those that have reported, are not in reachability mode `off`, and whose checks are not all decommissioned — and when each last reported.
 It keeps one `reachability` check per target, under the `canopy` source, reflecting how many expected sources are currently reporting within that target's down threshold:
@@ -205,6 +211,7 @@ There is no per-source staleness check; the one reachability check carries the f
 
 Nothing derives one grain's reachability from another's.
 A machine that goes quiet stops reporting about the applications on it by the same act, so each of them becomes unreachable on its own account under the same rule, and each recovers the same way.
+A cluster whose relay goes quiet behaves the same, so a relay that stops answering makes its cluster and every application on it unreachable without any rule that reaches from one to the other.
 An application whose machine is reporting normally also becomes unreachable if that machine stops mentioning it, which is the same rule reaching a case no derived one could express.
 
 An unreachable target's checks keep their last observed results.
