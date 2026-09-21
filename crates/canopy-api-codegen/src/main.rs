@@ -411,10 +411,39 @@ const GRANDFATHERED: &[(&str, &str)] = &[
 enum Body {
 	/// A `$ref`-ed schema, sent as JSON.
 	Json(String),
+	/// Something canopy takes as it stands, under its own media type.
+	Payload(Payload),
+}
+
+/// A body that is not JSON, which the client sends as the bytes it is.
+///
+/// Held apart from [`Body::Json`] because the two never travel together: JSON
+/// goes through the call plumbing the published methods have always used, and a
+/// payload goes up under its own media type.
+#[derive(Debug, Clone, Copy)]
+enum Payload {
 	/// Text canopy reads as one value, such as a download URL.
 	Text,
-	/// Bytes canopy holds, sent as they are.
+	/// Bytes canopy holds.
 	Octets,
+}
+
+impl Payload {
+	/// The Rust type of the envelope field carrying it.
+	fn field_type(self) -> &'static str {
+		match self {
+			Self::Text => "::std::string::String",
+			Self::Octets => "::bytes::Bytes",
+		}
+	}
+
+	/// The media type it is sent under.
+	fn content_type(self) -> &'static str {
+		match self {
+			Self::Text => "text/plain",
+			Self::Octets => "application/octet-stream",
+		}
+	}
 }
 
 impl Body {
@@ -422,17 +451,29 @@ impl Body {
 	fn field_type(&self) -> String {
 		match self {
 			Self::Json(ty) => ty.clone(),
-			Self::Text => "::std::string::String".to_owned(),
-			Self::Octets => "::bytes::Bytes".to_owned(),
+			Self::Payload(payload) => payload.field_type().to_owned(),
 		}
 	}
+}
 
-	/// The media type it is sent under.
-	fn content_type(&self) -> &'static str {
-		match self {
-			Self::Json(_) => "application/json",
-			Self::Text => "text/plain",
-			Self::Octets => "application/octet-stream",
+/// A path parameter, and where the emitted method reaches for its value.
+struct PathParam {
+	name: String,
+	ident: String,
+	/// Whether the value comes out of the request the method carries rather than
+	/// an argument of its own, which is how a grandfathered method takes its last
+	/// one. Settled here so that every emission site reads it rather than working
+	/// it out again.
+	from_request: bool,
+}
+
+impl PathParam {
+	/// The expression an emitted method reads this parameter's value from.
+	fn expr(&self) -> String {
+		if self.from_request {
+			format!("request.{}", self.ident)
+		} else {
+			self.ident.clone()
 		}
 	}
 }
@@ -440,11 +481,21 @@ impl Body {
 /// A query parameter, as the envelope field it becomes.
 struct QueryParam {
 	name: String,
+	ident: String,
 	required: bool,
 	ty: String,
 	/// Whether the builder takes the field by conversion, which a string-typed
 	/// parameter does and a parsed one does not.
 	into: bool,
+}
+
+/// A request body as the envelope's field: what it is, and whether a caller may
+/// leave it unset.
+struct EnvelopeBody {
+	body: Body,
+	/// A grandfathered envelope's body is always optional, because the signature
+	/// it holds still could not send one. Otherwise the document decides.
+	optional: bool,
 }
 
 /// The single request argument an operation's method takes.
@@ -456,11 +507,11 @@ struct QueryParam {
 /// optional property, applied to parameters.
 struct Envelope {
 	name: String,
-	/// The path parameter this envelope absorbs, for a grandfathered method.
-	/// That method takes the parameter as `impl Into<…>`, so the envelope has to
-	/// carry it in the parameter's place.
+	/// The field holding the path parameter this envelope absorbs, for a
+	/// grandfathered method. That method takes the parameter as `impl Into<…>`,
+	/// so the envelope carries it in the parameter's place.
 	absorbed: Option<String>,
-	body: Option<Body>,
+	body: Option<EnvelopeBody>,
 	query: Vec<QueryParam>,
 }
 
@@ -469,7 +520,7 @@ struct Operation {
 	name: String,
 	verb: String,
 	path: String,
-	params: Vec<String>,
+	params: Vec<PathParam>,
 	request: Request,
 	response: Option<String>,
 	summary: Option<String>,
@@ -490,11 +541,40 @@ enum Request {
 	Envelope(Envelope),
 }
 
+impl Request {
+	/// The envelope this request travels in, where it travels in one.
+	fn envelope(&self) -> Option<&Envelope> {
+		match self {
+			Self::Envelope(envelope) => Some(envelope),
+			_ => None,
+		}
+	}
+
+	/// The name the emitted method gives the request it carries, which a path
+	/// parameter must not take.
+	fn argument(&self) -> Option<&'static str> {
+		match self {
+			Self::None => None,
+			Self::Json(_) => Some("body"),
+			Self::Envelope(_) => Some("request"),
+		}
+	}
+}
+
 /// Emit one method per operation on `CanopyClient`, routed through its shared
-/// call plumbing, preceded by the request envelopes those methods take. Names
-/// come from the path; where a path is served by more than one verb the verb is
-/// prefixed to tell them apart.
+/// call plumbing, preceded by the request envelopes those methods take.
 fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, String> {
+	let mut operations = collect_operations(spec)?;
+	check_ledger(&operations)?;
+	check_names(&operations, schema_names)?;
+	// So a consumer's call sites depend on the path rather than on the order
+	// operations were read in.
+	operations.sort_by(|a, b| (&a.path, &a.verb).cmp(&(&b.path, &b.verb)));
+	emit(&operations)
+}
+
+/// Read every operation out of the document.
+fn collect_operations(spec: &Value) -> Result<Vec<Operation>, String> {
 	let paths = spec
 		.pointer("/paths")
 		.and_then(Value::as_object)
@@ -507,19 +587,30 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 			if !HTTP_VERBS.contains(&verb.as_str()) {
 				continue;
 			}
-			let params: Vec<String> = path
+
+			let grandfathered = GRANDFATHERED.contains(&(verb.as_str(), path.as_str()));
+			let names: Vec<&str> = path
 				.split('/')
 				.filter_map(|seg| seg.strip_prefix('{').and_then(|s| s.strip_suffix('}')))
-				.map(str::to_owned)
 				.collect();
+			let last = names.len().saturating_sub(1);
+			let mut params = Vec::new();
+			for (at, name) in names.iter().enumerate() {
+				params.push(PathParam {
+					name: (*name).to_owned(),
+					ident: escape_ident(name)?,
+					from_request: grandfathered && at == last,
+				});
+			}
+
 			let body = request_body(op, path, verb)?;
 			let query = query_params(op, item, path, verb)?;
 			// An operation with a plain JSON body and nothing else keeps that body
 			// as its own argument, which is how every such method was published.
 			// Anything else travels in an envelope.
-			let request = if query.is_empty() && matches!(body, None | Some(Body::Json(_))) {
+			let request = if query.is_empty() && matches!(body, None | Some((Body::Json(_), _))) {
 				match body {
-					Some(Body::Json(ty)) => Request::Json(ty),
+					Some((Body::Json(ty), _)) => Request::Json(ty),
 					_ => Request::None,
 				}
 			} else {
@@ -529,25 +620,31 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 						.ok_or_else(|| {
 							format!(
 								"{} {path} declares no operationId, which is what its request envelope \
-						 would be named after",
+                         would be named after",
 								verb.to_uppercase()
 							)
 						})?;
-				Request::Envelope(envelope(operation_id, path, verb, &params, body, query)?)
+				Request::Envelope(envelope(
+					operation_id,
+					path,
+					verb,
+					&params,
+					body,
+					query,
+					grandfathered,
+				)?)
 			};
 
-			// The method names its request argument `body` or `request`; a path
-			// parameter taking that name would be shadowed by it, and the path
-			// would be built from the wrong value.
-			let reserved = match &request {
-				Request::None => None,
-				Request::Json(_) => Some("body"),
-				Request::Envelope(_) => Some("request"),
-			};
-			if let Some(clash) = params.iter().find(|param| Some(param.as_str()) == reserved) {
+			// A path parameter with the name the method gives its request would be
+			// shadowed by it, and the path would be built from the wrong value.
+			if let Some(clash) = params
+				.iter()
+				.find(|param| Some(param.name.as_str()) == request.argument())
+			{
 				return Err(format!(
-					"the path parameter {clash} of {} {path} has the name this method gives the \
-					 request it carries, which would shadow it: rename the parameter",
+					"the path parameter {} of {} {path} has the name this method gives the \
+                     request it carries, which would shadow it: rename the parameter",
+					clash.name,
 					verb.to_uppercase()
 				));
 			}
@@ -572,12 +669,17 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 			});
 		}
 	}
+	Ok(operations)
+}
 
-	// A ledger entry exists to hold one published signature still, so it is not
-	// enough that the path is still there: the operation has to still produce the
-	// request that signature takes. An operation that lost its body and its
-	// parameters would generate the narrow method again, and a consumer building
-	// the request would stop compiling.
+/// Check that every ledger entry still names an operation of the shape it exists
+/// to hold still.
+///
+/// It is not enough that the path is there: the operation has to still produce
+/// the request that signature takes. One that lost its body and its parameters
+/// would generate the narrow method again, and a consumer building the request
+/// would stop compiling.
+fn check_ledger(operations: &[Operation]) -> Result<(), String> {
 	for (verb, path) in GRANDFATHERED {
 		let held = operations
 			.iter()
@@ -585,34 +687,40 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 			.ok_or_else(|| {
 				format!(
 					"{} {path} is listed as a method published before its body could be \
-					 expressed, but the document has no such operation: the path moved, and the \
-					 method it names would change shape",
+                     expressed, but the document has no such operation: the path moved, and the \
+                     method it names would change shape",
 					verb.to_uppercase()
 				)
 			})?;
 		if !matches!(&held.request, Request::Envelope(envelope) if envelope.absorbed.is_some()) {
 			return Err(format!(
 				"{} {path} is listed as a method that widened its last path parameter, but it \
-				 now carries nothing to put there: the method would go back to taking that \
-				 parameter as text, which is narrower than the signature consumers build a \
-				 request for",
+                 now carries nothing to put there: the method would go back to taking that \
+                 parameter as text, which is narrower than the signature consumers build a \
+                 request for",
 				verb.to_uppercase()
 			));
 		}
 	}
+	Ok(())
+}
 
-	// utoipa derives an operationId from the handler's name, so two handlers of
-	// the same name in different modules would generate one request type twice
-	// and the generated crate would not compile.
+/// Check that no two generated request types would claim one name.
+///
+/// utoipa derives an operationId from the handler's name, so two handlers of the
+/// same name in different modules would generate one request type twice. The
+/// generated crate would refuse it, but pointing at the document is the way to
+/// say which two operations disagree.
+fn check_names(operations: &[Operation], schema_names: &BTreeSet<String>) -> Result<(), String> {
 	let mut envelopes = BTreeMap::<&str, &str>::new();
-	for op in &operations {
-		let Request::Envelope(envelope) = &op.request else {
+	for op in operations {
+		let Some(envelope) = op.request.envelope() else {
 			continue;
 		};
 		if schema_names.contains(&envelope.name) {
 			return Err(format!(
 				"the request envelope for {} {} would be named {}, which the document already \
-				 declares as a schema: rename one of the two",
+                 declares as a schema: rename one of the two",
 				op.verb.to_uppercase(),
 				op.path,
 				envelope.name
@@ -621,28 +729,28 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 		if let Some(first) = envelopes.insert(&envelope.name, &op.path) {
 			return Err(format!(
 				"{first} and {} both generate a request named {}, because their operationIds \
-				 agree: give one of them an operationId of its own",
+                 agree: give one of them an operationId of its own",
 				op.path, envelope.name
 			));
 		}
 	}
+	Ok(())
+}
 
+/// Emit the request types and the method per operation.
+///
+/// Names come from the path; where a path is served by more than one verb the
+/// verb is prefixed to tell them apart.
+fn emit(operations: &[Operation]) -> Result<String, String> {
 	let mut counts = BTreeMap::<&str, usize>::new();
-	for op in &operations {
+	for op in operations {
 		*counts.entry(op.name.as_str()).or_default() += 1;
 	}
-	let collides: Vec<String> = operations
-		.iter()
-		.filter(|op| counts[op.name.as_str()] > 1)
-		.map(|op| op.name.clone())
-		.collect();
-
-	operations.sort_by(|a, b| (&a.path, &a.verb).cmp(&(&b.path, &b.verb)));
 
 	let mut out = String::new();
-	for op in &operations {
-		if let Request::Envelope(envelope) = &op.request {
-			out.push_str(&envelope_type(envelope, &op.verb, &op.path)?);
+	for op in operations {
+		if let Some(envelope) = op.request.envelope() {
+			out.push_str(&envelope_type(envelope, &op.verb, &op.path));
 		}
 	}
 
@@ -650,27 +758,22 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 		"/// One method per operation in canopy's OpenAPI document.\n\
          impl<T: crate::CanopyTransport> crate::CanopyClient<T> {\n",
 	);
-	for op in &operations {
-		let method = if collides.contains(&op.name) {
+	for op in operations {
+		let method = if counts[op.name.as_str()] > 1 {
 			format!("{}_{}", op.verb, op.name)
 		} else {
 			op.name.clone()
 		};
-		let envelope = match &op.request {
-			Request::Envelope(envelope) => Some(envelope),
-			_ => None,
-		};
-		let absorbed = envelope.and_then(|envelope| envelope.absorbed.as_deref());
+		let envelope = op.request.envelope();
 
 		let mut args = String::new();
 		for param in &op.params {
-			match envelope.filter(|_| Some(param.as_str()) == absorbed) {
+			match envelope.filter(|_| param.from_request) {
 				Some(envelope) => args.push_str(&format!(
 					", {}: impl ::std::convert::Into<{}>",
-					escape_ident(param)?,
-					envelope.name
+					param.ident, envelope.name
 				)),
-				None => args.push_str(&format!(", {}: &str", escape_ident(param)?)),
+				None => args.push_str(&format!(", {}: &str", param.ident)),
 			}
 		}
 		if let Request::Json(ty) = &op.request {
@@ -685,25 +788,14 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 		} else {
 			let mut template = op.path.clone();
 			for param in &op.params {
-				template = template.replace(&format!("{{{param}}}"), "{}");
+				template = template.replace(&format!("{{{}}}", param.name), "{}");
 			}
-			let mut filled: Vec<String> = Vec::new();
-			for param in &op.params {
-				let ident = escape_ident(param)?;
-				filled.push(if Some(param.as_str()) == absorbed {
-					format!("request.{ident}")
-				} else {
-					ident
-				});
-			}
+			let filled: Vec<String> = op.params.iter().map(PathParam::expr).collect();
 			format!("&format!({template:?}, {})", filled.join(", "))
 		};
 		let path = match envelope.filter(|envelope| !envelope.query.is_empty()) {
 			Some(envelope) => {
-				format!(
-					"&crate::query({path}, &[{}])",
-					query_pairs(&envelope.query)?
-				)
+				format!("&crate::query({path}, &[{}])", query_pairs(&envelope.query))
 			}
 			None => path,
 		};
@@ -715,11 +807,10 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 		// A body the document declares as text or bytes goes up as a payload
 		// under its own media type; everything else routes through the JSON
 		// plumbing the published methods have always used.
-		let (call, tail) = match &op.request {
-			Request::Envelope(Envelope {
-				body: Some(body @ (Body::Text | Body::Octets)),
-				absorbed,
-				..
+		let (call, tail) = match envelope.and_then(|envelope| envelope.body.as_ref()) {
+			Some(EnvelopeBody {
+				body: Body::Payload(payload),
+				optional,
 			}) => (
 				if op.response.is_some() {
 					"call_payload_json"
@@ -728,30 +819,26 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 				},
 				format!(
 					"{}, {:?}",
-					payload(body, absorbed.is_some()),
-					body.content_type()
+					self::payload(*payload, *optional),
+					payload.content_type()
 				),
 			),
-			request => (
+			carried => (
 				if op.response.is_some() {
 					"call_json"
 				} else {
 					"call_empty"
 				},
-				match request {
-					Request::None => "None::<&()>".to_owned(),
-					Request::Json(_) => "Some(body)".to_owned(),
-					Request::Envelope(envelope) => match &envelope.body {
-						None => "None::<&()>".to_owned(),
-						// An optional JSON body is already an `Option`, which is
-						// what the call plumbing takes: `Some(&None)` would put a
-						// literal `null` on the wire under a JSON content type.
-						Some(Body::Json(_)) if envelope.absorbed.is_some() => {
-							"request.body.as_ref()".to_owned()
-						}
-						Some(Body::Json(_)) => "Some(&request.body)".to_owned(),
-						Some(_) => unreachable!("a payload body is handled above"),
-					},
+				match (&op.request, carried) {
+					(Request::Json(_), _) => "Some(body)".to_owned(),
+					// An optional JSON body is already an `Option`, which is what
+					// the call plumbing takes: `Some(&None)` would put a literal
+					// `null` on the wire under a JSON content type.
+					(_, Some(EnvelopeBody { optional: true, .. })) => {
+						"request.body.as_ref()".to_owned()
+					}
+					(_, Some(_)) => "Some(&request.body)".to_owned(),
+					(_, None) => "None::<&()>".to_owned(),
 				},
 			),
 		};
@@ -770,24 +857,27 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 		out.push_str(&format!(
 			"\tpub async fn {method}(&self{args}) -> {ret} {{\n"
 		));
-		if let Some((envelope, absorbed)) = envelope.zip(absorbed) {
+		if let Some(envelope) = envelope
+			&& let Some(param) = op.params.iter().find(|param| param.from_request)
+		{
 			out.push_str(&format!(
 				"\t\tlet request: {} = {}.into();\n",
-				envelope.name,
-				escape_ident(absorbed)?
+				envelope.name, param.ident
 			));
 		}
 		if !op.params.is_empty() {
-			let mut checked = Vec::new();
-			for param in &op.params {
-				let ident = escape_ident(param)?;
-				let value = if Some(param.as_str()) == absorbed {
-					format!("&request.{ident}")
-				} else {
-					ident
-				};
-				checked.push(format!("({param:?}, {value})"));
-			}
+			let checked: Vec<String> = op
+				.params
+				.iter()
+				.map(|param| {
+					let value = if param.from_request {
+						format!("&{}", param.expr())
+					} else {
+						param.expr()
+					};
+					format!("({:?}, {value})", param.name)
+				})
+				.collect();
 			out.push_str(&format!(
 				"\t\tcrate::segments({:?}, &[{}])?;\n",
 				op.path,
@@ -803,40 +893,41 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 	Ok(out)
 }
 
-/// The expression handing an envelope's non-JSON body to the call plumbing,
-/// as the `Option` that says whether there is a body at all.
+/// The expression handing an envelope's payload body to the call plumbing, as
+/// the `Option` that says whether there is a body at all.
 ///
 /// A grandfathered envelope's body is optional, because the signature it holds
 /// still could not send one; absent, the method sends no body and declares no
 /// content type, exactly as that signature always did.
-fn payload(body: &Body, optional: bool) -> String {
-	match (body, optional) {
-		(Body::Text, true) => "request.body.map(::bytes::Bytes::from)".into(),
-		(Body::Text, false) => "Some(::bytes::Bytes::from(request.body))".into(),
-		(Body::Octets, true) => "request.body".into(),
-		(Body::Octets, false) => "Some(request.body)".into(),
-		(Body::Json(_), _) => unreachable!("a JSON body is not sent as a payload"),
+fn payload(payload: Payload, optional: bool) -> String {
+	match (payload, optional) {
+		(Payload::Text, true) => "request.body.map(::bytes::Bytes::from)".into(),
+		(Payload::Text, false) => "Some(::bytes::Bytes::from(request.body))".into(),
+		(Payload::Octets, true) => "request.body".into(),
+		(Payload::Octets, false) => "Some(request.body)".into(),
 	}
 }
 
 /// The `(name, value)` pairs a generated method hands to `crate::query`.
-fn query_pairs(query: &[QueryParam]) -> Result<String, String> {
-	let mut pairs = Vec::new();
-	for param in query {
-		let ident = escape_ident(&param.name)?;
-		pairs.push(if param.required {
-			format!(
-				"({:?}, Some(::std::string::ToString::to_string(&request.{ident})))",
-				param.name
-			)
-		} else {
-			format!(
-				"({:?}, request.{ident}.as_ref().map(::std::string::ToString::to_string))",
-				param.name
-			)
-		});
-	}
-	Ok(pairs.join(", "))
+fn query_pairs(query: &[QueryParam]) -> String {
+	query
+		.iter()
+		.map(|param| {
+			let ident = &param.ident;
+			if param.required {
+				format!(
+					"({:?}, Some(::std::string::ToString::to_string(&request.{ident})))",
+					param.name
+				)
+			} else {
+				format!(
+					"({:?}, request.{ident}.as_ref().map(::std::string::ToString::to_string))",
+					param.name
+				)
+			}
+		})
+		.collect::<Vec<_>>()
+		.join(", ")
 }
 
 /// Build the request argument an operation's method takes.
@@ -847,52 +938,63 @@ fn envelope(
 	operation_id: &str,
 	path: &str,
 	verb: &str,
-	params: &[String],
-	body: Option<Body>,
+	params: &[PathParam],
+	body: Option<(Body, bool)>,
 	query: Vec<QueryParam>,
+	grandfathered: bool,
 ) -> Result<Envelope, String> {
 	let name = format!("{}Request", pascal(operation_id));
-	let absorbed = if GRANDFATHERED.contains(&(verb, path)) {
-		Some(params.last().cloned().ok_or_else(|| {
+	if syn::parse_str::<syn::Ident>(&name).is_err() {
+		return Err(format!(
+			"the request envelope for {} {path} would be named {name}, which is not a Rust \
+             identifier: give the operation an operationId that is one",
+			verb.to_uppercase()
+		));
+	}
+
+	let absorbed = if grandfathered {
+		let param = params.last().ok_or_else(|| {
 			format!(
 				"{} {path} is listed as a method published before its body could be expressed, \
-                 but it has no path parameter to widen, so its published signature has nowhere to \
-                 carry a request",
+                 but it has no path parameter to widen, so its published signature has nowhere \
+                 to carry a request",
 				verb.to_uppercase()
 			)
-		})?)
+		})?;
+		Some(param.ident.clone())
 	} else {
 		None
 	};
 
-	// Compared as the identifiers they become, not as the names they came from:
-	// `body-id` and `body_id` are two names and one field.
 	// The conversion that keeps a published call site compiling supplies the path
 	// value and nothing else, so anything else the envelope carries has to be
 	// optional. A required one would leave that conversion unable to build the
 	// envelope at all.
-	if absorbed.is_some()
-		&& let Some(required) = query.iter().find(|param| param.required)
-	{
+	if grandfathered && let Some(required) = query.iter().find(|param| param.required) {
 		return Err(format!(
 			"the query parameter {} of {} {path} is required, but this method was published \
-			 taking only its last path value and its call sites supply nothing to put there: make \
-			 the parameter optional, or take the break deliberately",
+             taking only its last path value and its call sites supply nothing to put there: make \
+             the parameter optional, or take the break deliberately",
 			required.name,
 			verb.to_uppercase()
 		));
 	}
 
-	let mut fields: Vec<String> = Vec::new();
-	for name in absorbed.iter() {
-		fields.push(escape_ident(name)?);
-	}
+	let body = body.map(|(body, required)| EnvelopeBody {
+		body,
+		// The document decides, except where the published signature has already
+		// decided for it by being unable to send one.
+		optional: grandfathered || !required,
+	});
+
+	// Compared as the identifiers they become, not as the names they came from:
+	// `body-id` and `body_id` are two names and one field.
+	let mut fields: Vec<&str> = Vec::new();
+	fields.extend(absorbed.as_deref());
 	if body.is_some() {
-		fields.push("body".to_owned());
+		fields.push("body");
 	}
-	for param in &query {
-		fields.push(escape_ident(&param.name)?);
-	}
+	fields.extend(query.iter().map(|param| param.ident.as_str()));
 	for (at, field) in fields.iter().enumerate() {
 		if fields[..at].contains(field) {
 			return Err(format!(
@@ -913,44 +1015,34 @@ fn envelope(
 /// Emit an envelope as the struct a consumer builds, and — where it stands in
 /// for a path parameter a published method took — the conversion that keeps that
 /// method's call sites compiling.
-fn envelope_type(envelope: &Envelope, verb: &str, path: &str) -> Result<String, String> {
+fn envelope_type(envelope: &Envelope, verb: &str, path: &str) -> String {
 	let mut out = format!("/// Request for `{} {path}`.\n", verb.to_uppercase());
 	if let Some(absorbed) = &envelope.absorbed {
 		out.push_str("///\n");
 		out.push_str(&format!(
 			"/// Converts from anything string-like, which is what this method took in place of\n\
-			 /// `{absorbed}` before it carried a request, so a call written against that\n\
-			 /// signature compiles unchanged and sends what it always sent.\n"
+             /// `{absorbed}` before it carried a request, so a call written against that\n\
+             /// signature compiles unchanged and sends what it always sent.\n"
 		));
 	}
 	out.push_str("#[derive(Clone, Debug, ::bon::Builder)]\n#[non_exhaustive]\n");
 	out.push_str(&format!("pub struct {} {{\n", envelope.name));
 
 	// (identifier, type, optional, taken by conversion)
-	let mut fields: Vec<(String, String, bool, bool)> = Vec::new();
+	let mut fields: Vec<(&str, String, bool, bool)> = Vec::new();
 	if let Some(absorbed) = &envelope.absorbed {
-		fields.push((
-			escape_ident(absorbed)?,
-			"::std::string::String".to_owned(),
-			false,
-			true,
-		));
+		fields.push((absorbed, "::std::string::String".to_owned(), false, true));
 	}
-	if let Some(body) = &envelope.body {
+	if let Some(carried) = &envelope.body {
 		fields.push((
-			"body".to_owned(),
-			body.field_type(),
-			envelope.absorbed.is_some(),
-			matches!(body, Body::Text | Body::Octets),
+			"body",
+			carried.body.field_type(),
+			carried.optional,
+			matches!(carried.body, Body::Payload(_)),
 		));
 	}
 	for param in &envelope.query {
-		fields.push((
-			escape_ident(&param.name)?,
-			param.ty.clone(),
-			!param.required,
-			param.into,
-		));
+		fields.push((&param.ident, param.ty.clone(), !param.required, param.into));
 	}
 
 	for (ident, ty, optional, into) in &fields {
@@ -969,16 +1061,15 @@ fn envelope_type(envelope: &Envelope, verb: &str, path: &str) -> Result<String, 
 	if let Some(absorbed) = &envelope.absorbed {
 		out.push_str(&format!(
 			"impl<T: ::std::convert::AsRef<str> + ?Sized> ::std::convert::From<&T> for {} {{\n\
-			 \tfn from(value: &T) -> Self {{\n\t\tSelf {{\n",
+             \tfn from(value: &T) -> Self {{\n\t\tSelf {{\n",
 			envelope.name
 		));
-		// Everything but the absorbed value is optional by now, because `envelope`
+		// Everything but the absorbed value is optional here, because `envelope`
 		// refuses a grandfathered envelope carrying a required field. So the
 		// conversion supplies the path value and leaves the rest unset, which is
 		// all the published signature could ever send.
-		let absorbed = escape_ident(absorbed)?;
 		for (ident, ..) in &fields {
-			if *ident == absorbed {
+			if ident == absorbed {
 				out.push_str(&format!("\t\t\t{ident}: value.as_ref().to_owned(),\n"));
 			} else {
 				out.push_str(&format!("\t\t\t{ident}: ::std::option::Option::None,\n"));
@@ -986,7 +1077,7 @@ fn envelope_type(envelope: &Envelope, verb: &str, path: &str) -> Result<String, 
 		}
 		out.push_str("\t\t}\n\t}\n}\n\n");
 	}
-	Ok(out)
+	out
 }
 
 /// A parameter or property name as a Rust identifier: `type` and friends are
@@ -1024,18 +1115,25 @@ fn pascal(name: &str) -> String {
 		.collect()
 }
 
-/// The request body an operation takes, or `None` when it declares none.
+/// The request body an operation takes and whether the document requires it, or
+/// `None` when it declares none.
 ///
 /// Every media type the client can send is named here, and one it cannot is an
 /// error rather than a body quietly left behind: a method that drops the body
 /// its operation requires cannot do the thing it is named for.
-fn request_body(op: &Value, path: &str, verb: &str) -> Result<Option<Body>, String> {
+fn request_body(op: &Value, path: &str, verb: &str) -> Result<Option<(Body, bool)>, String> {
 	let Some(content) = op
 		.pointer("/requestBody/content")
 		.and_then(Value::as_object)
 	else {
 		return Ok(None);
 	};
+	// OpenAPI's default, so a document that says nothing is saying the body may
+	// be left off.
+	let required = op
+		.pointer("/requestBody/required")
+		.and_then(Value::as_bool)
+		.unwrap_or(false);
 	let mut media = content.iter();
 	let (media_type, holder) = match (media.next(), media.next()) {
 		(Some(only), None) => only,
@@ -1065,11 +1163,11 @@ fn request_body(op: &Value, path: &str, verb: &str) -> Result<Option<Body>, Stri
 			schema
 				.get("$ref")
 				.and_then(Value::as_str)
-				.map(|reference| Some(Body::Json(type_name(reference))))
+				.map(|reference| Some((Body::Json(type_name(reference)), required)))
 				.ok_or_else(|| untypeable("request body", path, verb, schema))
 		}
-		"text/plain" => Ok(Some(Body::Text)),
-		"application/octet-stream" => Ok(Some(Body::Octets)),
+		"text/plain" => Ok(Some((Body::Payload(Payload::Text), required))),
+		"application/octet-stream" => Ok(Some((Body::Payload(Payload::Octets), required))),
 		other => Err(format!(
 			"the request body of {} {path} is {other}, which this generator cannot send: teach it \
              the media type, or declare one it knows (application/json, text/plain, \
@@ -1141,6 +1239,7 @@ fn query_params(
 		})?;
 		let param = QueryParam {
 			name: name.to_owned(),
+			ident: escape_ident(name)?,
 			required: param
 				.get("required")
 				.and_then(Value::as_bool)
@@ -1250,7 +1349,7 @@ mod tests {
 
 	use serde_json::{Value, json};
 
-	use super::{Body, escape_ident, methods, pascal, query_type, request_body, stamp};
+	use super::{Body, Payload, escape_ident, methods, pascal, query_type, request_body, stamp};
 
 	const MANIFEST: &str = "\
 [package]
@@ -1340,7 +1439,7 @@ version = \"not-a-real-key\"
 		json!({"paths": paths})
 	}
 
-	fn body_of(media: &str, schema: Value) -> Result<Option<Body>, String> {
+	fn body_of(media: &str, schema: Value) -> Result<Option<(Body, bool)>, String> {
 		let op = json!({"requestBody": {"content": {media: {"schema": schema}}}});
 		request_body(&op, "/a", "post")
 	}
@@ -1349,15 +1448,15 @@ version = \"not-a-real-key\"
 	fn a_body_the_client_can_send_is_typed_by_its_media_type() {
 		assert!(matches!(
 			body_of("application/octet-stream", json!({})),
-			Ok(Some(Body::Octets))
+			Ok(Some((Body::Payload(Payload::Octets), _)))
 		));
 		assert!(matches!(
 			body_of("text/plain", json!({"type": "string"})),
-			Ok(Some(Body::Text))
+			Ok(Some((Body::Payload(Payload::Text), _)))
 		));
 		assert!(matches!(
 			body_of("application/json", json!({"$ref": "#/components/schemas/Args"})),
-			Ok(Some(Body::Json(ty))) if ty == "Args"
+			Ok(Some((Body::Json(ty), _))) if ty == "Args"
 		));
 	}
 
@@ -1551,6 +1650,61 @@ version = \"not-a-real-key\"
 		let op = json!({"requestBody": {"content": {}}});
 		let err = request_body(&op, "/a", "post").unwrap_err();
 		assert!(err.contains("no media type at all"), "{err}");
+	}
+
+	/// A document carrying one operation with a payload body, optionally required.
+	fn spec_with_body(required: Option<bool>) -> Value {
+		let mut body = json!({"content": {"application/octet-stream": {"schema": {}}}});
+		if let Some(required) = required {
+			body["required"] = json!(required);
+		}
+		spec_with(json!({
+			"/widgets": {
+				"post": {
+					"operationId": "make_widget",
+					"parameters": [
+						{"name": "shape", "in": "query", "schema": {"type": "string"}},
+					],
+					"requestBody": body,
+				},
+			},
+		}))
+	}
+
+	#[test]
+	fn the_document_decides_whether_a_body_may_be_left_unset() {
+		let emitted = |required| {
+			methods(&spec_with_body(required), &BTreeSet::new()).expect("the fixture generates")
+		};
+
+		assert!(
+			emitted(Some(true)).contains("pub body: ::bytes::Bytes,"),
+			"a body the document requires is not an option"
+		);
+		assert!(
+			emitted(Some(false)).contains("pub body: ::std::option::Option<::bytes::Bytes>,"),
+			"a body the document leaves optional does not force a caller to supply one"
+		);
+		assert!(
+			emitted(None).contains("pub body: ::std::option::Option<::bytes::Bytes>,"),
+			"a document saying nothing is saying the body may be left off"
+		);
+	}
+
+	#[test]
+	fn an_operation_id_with_no_identifier_form_is_refused() {
+		// An operationId set by hand need not be a Rust identifier, and `pascal`
+		// only splits on `_` and `-`, so this would name a struct `2fa.enrolRequest`.
+		let spec = spec_with(json!({
+			"/widgets": {
+				"post": {
+					"operationId": "2fa.enrol",
+					"parameters": [{"name": "shape", "in": "query", "schema": {"type": "string"}}],
+				},
+			},
+		}));
+		let err = methods(&spec, &BTreeSet::new()).unwrap_err();
+		assert!(err.contains("is not a Rust identifier"), "{err}");
 	}
 
 	#[test]
