@@ -145,6 +145,6 @@ rather than drop a shape it cannot express.
 - [x] Widen the three grandfathered methods' last parameter, driven by an explicit compat list
 - [x] Emit the clean trailing-envelope shape for every other operation
 - [x] Hard-error on any body or parameter shape the generator cannot express
-- [ ] `just gen-openapi && just gen-api`, commit the regenerated document and client
-- [ ] Confirm `just semver-checks` passes against the published baseline, and `just check-generated` is clean
+- [x] `just gen-openapi && just gen-api`, commit the regenerated document and client
+- [x] Confirm `just semver-checks` passes against the published baseline, and `just check-generated` is clean
 - [x] Update the two platform specs above

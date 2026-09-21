@@ -625,10 +625,10 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 		if let Some(body) = &op.body {
 			args.push_str(&format!(", body: &{body}"));
 		}
-		if let Some(envelope) = &op.envelope {
-			if envelope.absorbed.is_none() {
-				args.push_str(&format!(", request: {}", envelope.name));
-			}
+		if let Some(envelope) = &op.envelope
+			&& envelope.absorbed.is_none()
+		{
+			args.push_str(&format!(", request: {}", envelope.name));
 		}
 
 		let path = if op.params.is_empty() {
