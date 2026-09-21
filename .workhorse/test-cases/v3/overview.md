@@ -29,6 +29,7 @@ parameters, and that doing so left every published method's call sites working.
 ## Path values
 
 - [x] A path value carrying `?`, `#`, `/` or a backslash is refused, rather than deciding which endpoint is called or placing parameters ahead of the caller's (verifies spec: APIC)
+- [x] A path value that is a dot segment, an escape, or empty is refused on the same terms, since each resolves a segment away without carrying a delimiter (verifies spec: APIC)
 - [x] A path value that is merely unusual, such as a semver range, is sent as it always was rather than encoded (verifies spec: API)
 
 ## The generator refuses what it cannot express
@@ -45,6 +46,8 @@ parameters, and that doing so left every published method's call sites working.
 - [x] Two operations whose operationIds agree fail generation, rather than emitting one request type twice
 - [x] A name with no Rust identifier form fails generation rather than emitting source that will not parse
 - [x] A request body declaring no media type at all says so, rather than reporting too many
+- [x] A grandfathered method carrying a required field fails generation, rather than emitting a conversion that cannot build the request (verifies spec: APIC)
+- [x] A grandfathered operation that no longer carries a request fails generation, rather than silently narrowing back to the published parameter (verifies spec: APIC)
 
 ## Shape of a method
 

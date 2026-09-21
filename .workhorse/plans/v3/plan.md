@@ -110,11 +110,16 @@ operation with no published method takes its envelope as a trailing argument.
 Which three are grandfathered is an explicit list in the generator: the
 compatibility ledger, small and greppable, with `cargo-semver-checks` as backstop.
 
-This is narrower than "every new operation gets an envelope", which would need
-the twelve JSON methods listed as legacy to keep their shape. The cost is that a
-future JSON-bodied operation which later gains a query parameter has to be
-widened the same way the three were — a mechanism that now exists and is tested,
-rather than one that would have to be invented then.
+The rule is the shape the operation has, not whether its method was published.
+"Every new operation gets an envelope" was the alternative, and it would need the
+twelve JSON methods listed as legacy to keep their shape — a ledger of twelve
+entries maintained to hold still what a rule already holds still. A shape-based
+rule generalises instead: it needs no entry per method, and it says the same
+thing about an operation written next year as about one written last year.
+
+Its one cost is that a JSON-bodied operation which later gains a query parameter
+has to be widened the way the three were. That mechanism now exists and is
+tested, rather than being one that would have to be invented at the time.
 
 ## The guardrail
 

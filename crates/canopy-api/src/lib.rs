@@ -49,15 +49,23 @@ pub mod schema {
 
 /// Check the values a generated method is about to place in its path.
 ///
-/// A path value is the caller's, and canopy's own parameters are appended after
-/// it, so a value carrying `?`, `#` or `/` would not merely look odd: it would
-/// change which endpoint is called, or prepend parameters of its own ahead of
-/// the ones the caller asked for, or cut the query off entirely. Such a value is
-/// refused rather than encoded, because encoding it would change what every
-/// call already in the field puts on the wire.
+/// A path value is the caller's, and it decides which endpoint is called. A
+/// value carrying `?`, `#` or `/` would reroute the request, put parameters of
+/// its own ahead of the ones the caller asked for, or cut the query off. A value
+/// that is a dot segment does the same thing without carrying a delimiter at
+/// all: `..` placed in `/versions/{version}/artifacts` puts `/versions/../artifacts`
+/// on the wire, which resolves to `/artifacts`. A `%` is refused with them,
+/// because a delimiter spelled as an escape reaches a server that decodes before
+/// it resolves, and an empty value collapses a segment away.
+///
+/// Such a value is refused rather than encoded, because encoding it would change
+/// what every call already in the field puts on the wire.
 pub(crate) fn segments(path: &str, values: &[(&str, &str)]) -> Result<()> {
 	for (name, value) in values {
-		if value.contains(['?', '#', '/', '\\']) {
+		if value.is_empty()
+			|| matches!(*value, "." | "..")
+			|| value.contains(['?', '#', '/', '\\', '%'])
+		{
 			return Err(Error::PathValue {
 				path: path.to_owned(),
 				name: (*name).to_owned(),

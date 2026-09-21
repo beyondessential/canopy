@@ -573,17 +573,29 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 		}
 	}
 
-	// A ledger entry matching nothing means a grandfathered path moved, which
-	// would quietly reshape the method that entry exists to hold still.
+	// A ledger entry exists to hold one published signature still, so it is not
+	// enough that the path is still there: the operation has to still produce the
+	// request that signature takes. An operation that lost its body and its
+	// parameters would generate the narrow method again, and a consumer building
+	// the request would stop compiling.
 	for (verb, path) in GRANDFATHERED {
-		if !operations
+		let held = operations
 			.iter()
-			.any(|op| op.verb == *verb && op.path == *path)
-		{
+			.find(|op| op.verb == *verb && op.path == *path)
+			.ok_or_else(|| {
+				format!(
+					"{} {path} is listed as a method published before its body could be \
+					 expressed, but the document has no such operation: the path moved, and the \
+					 method it names would change shape",
+					verb.to_uppercase()
+				)
+			})?;
+		if !matches!(&held.request, Request::Envelope(envelope) if envelope.absorbed.is_some()) {
 			return Err(format!(
-				"{} {path} is listed as a method published before its body could be expressed, \
-                 but the document has no such operation: the path moved, and the method it names \
-                 would change shape",
+				"{} {path} is listed as a method that widened its last path parameter, but it \
+				 now carries nothing to put there: the method would go back to taking that \
+				 parameter as text, which is narrower than the signature consumers build a \
+				 request for",
 				verb.to_uppercase()
 			));
 		}
@@ -855,6 +867,22 @@ fn envelope(
 
 	// Compared as the identifiers they become, not as the names they came from:
 	// `body-id` and `body_id` are two names and one field.
+	// The conversion that keeps a published call site compiling supplies the path
+	// value and nothing else, so anything else the envelope carries has to be
+	// optional. A required one would leave that conversion unable to build the
+	// envelope at all.
+	if absorbed.is_some()
+		&& let Some(required) = query.iter().find(|param| param.required)
+	{
+		return Err(format!(
+			"the query parameter {} of {} {path} is required, but this method was published \
+			 taking only its last path value and its call sites supply nothing to put there: make \
+			 the parameter optional, or take the break deliberately",
+			required.name,
+			verb.to_uppercase()
+		));
+	}
+
 	let mut fields: Vec<String> = Vec::new();
 	for name in absorbed.iter() {
 		fields.push(escape_ident(name)?);
@@ -944,15 +972,16 @@ fn envelope_type(envelope: &Envelope, verb: &str, path: &str) -> Result<String, 
 			 \tfn from(value: &T) -> Self {{\n\t\tSelf {{\n",
 			envelope.name
 		));
-		for (ident, _, optional, _) in &fields {
-			if *optional {
-				out.push_str(&format!("\t\t\t{ident}: ::std::option::Option::None,\n"));
-			} else if Some(ident) == escape_ident(absorbed).ok().as_ref() {
+		// Everything but the absorbed value is optional by now, because `envelope`
+		// refuses a grandfathered envelope carrying a required field. So the
+		// conversion supplies the path value and leaves the rest unset, which is
+		// all the published signature could ever send.
+		let absorbed = escape_ident(absorbed)?;
+		for (ident, ..) in &fields {
+			if *ident == absorbed {
 				out.push_str(&format!("\t\t\t{ident}: value.as_ref().to_owned(),\n"));
 			} else {
-				unreachable!(
-					"a grandfathered method sent nothing else, so nothing else is required"
-				)
+				out.push_str(&format!("\t\t\t{ident}: ::std::option::Option::None,\n"));
 			}
 		}
 		out.push_str("\t\t}\n\t}\n}\n\n");
@@ -1522,6 +1551,41 @@ version = \"not-a-real-key\"
 		let op = json!({"requestBody": {"content": {}}});
 		let err = request_body(&op, "/a", "post").unwrap_err();
 		assert!(err.contains("no media type at all"), "{err}");
+	}
+
+	#[test]
+	fn a_grandfathered_method_carrying_a_required_field_is_refused() {
+		let spec = spec_with(json!({
+			"/versions/{version}": {
+				"post": {
+					"operationId": "create_version",
+					"parameters": [{
+						"name": "channel",
+						"in": "query",
+						"required": true,
+						"schema": {"type": "string"},
+					}],
+					"requestBody": {"content": {"text/plain": {"schema": {}}}},
+				},
+			},
+		}));
+		let err = methods(&spec, &BTreeSet::new()).unwrap_err();
+		assert!(
+			err.contains("its call sites supply nothing to put there"),
+			"a published call site supplies only the path value, so the conversion could not \
+			 build the envelope\n{err}"
+		);
+	}
+
+	#[test]
+	fn a_grandfathered_operation_that_lost_its_request_is_refused() {
+		// The body and parameters are gone, so the operation would generate the
+		// narrow method again and a consumer building the request would break.
+		let spec = spec_with(json!({
+			"/versions/{version}": {"post": {"operationId": "create_version"}},
+		}));
+		let err = methods(&spec, &BTreeSet::new()).unwrap_err();
+		assert!(err.contains("now carries nothing to put there"), "{err}");
 	}
 
 	#[test]

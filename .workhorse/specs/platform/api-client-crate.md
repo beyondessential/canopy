@@ -51,15 +51,18 @@ A parameter is typed as the document describes it rather than as the text it bec
 A value a caller supplies is encoded where it is placed in the query, so a value carrying reserved characters reaches Canopy as the value it was.
 A parameter a caller leaves unset is absent from the request rather than sent empty, because Canopy tells an absent parameter from an empty one.
 
-A value a caller places in the path is refused when it carries a URI delimiter, rather than encoded.
-Such a value would otherwise decide which endpoint is called, or put parameters of its own ahead of the ones the caller asked for, and encoding it instead would change what every call already written puts on the wire.
+A value a caller places in the path is refused when it would decide which endpoint is called, rather than encoded.
+A value carrying a URI delimiter reroutes the request or puts parameters of its own ahead of the ones the caller asked for; a value that is a dot segment resolves a segment away without carrying a delimiter at all; a value carrying an escape reaches a server that decodes before it resolves; and an empty value collapses a segment.
+Encoding such a value instead would change what every call already written puts on the wire.
 
 A request body the document declares as something other than JSON is carried as the text or the bytes it is, and sent under the media type the document names.
 It is sent as it stands rather than compressed, so what Canopy digests is what the caller passed.
 
 A method published before its operation's body could be expressed keeps its name and its arity, widening its last path parameter to accept that operation's request type rather than gaining an argument.
 The widened parameter accepts everything the parameter it replaced accepted, so a call written against the published signature compiles unchanged and sends what it always sent, while a caller that needs the body supplies the request type instead (see [API](api-compatibility.md)).
-The generator holds the ledger of which methods these are, and an entry naming an operation the document no longer carries fails generation rather than reshaping the method that entry exists to hold still.
+The generator holds the ledger of which methods these are.
+An entry naming an operation the document no longer carries, or one that no longer carries a request to widen into, fails generation rather than reshaping the method that entry exists to hold still.
+Such a method carries nothing required beyond that path value, because its published call sites supply nothing else to put there.
 Whether a method carries a body at all is settled where it is generated rather than inferred from the size of what it carries, so a body that is present and empty still declares what it is.
 
 ## The consumer supplies the transport

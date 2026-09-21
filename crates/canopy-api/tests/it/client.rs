@@ -283,11 +283,22 @@ async fn a_text_body_is_sent_as_text_and_an_unset_parameter_is_left_off() {
 }
 
 #[tokio::test]
-async fn a_path_value_carrying_a_uri_delimiter_is_refused() {
-	// Each of these would otherwise change which request is made: `?` prepends
-	// parameters ahead of the caller's own, `#` cuts the query off, and `/`
-	// reroutes to another endpoint.
-	for hostile in ["any?digest=deadbeef", "any#", "../../versions", "any\\.."] {
+async fn a_path_value_that_would_change_which_request_is_made_is_refused() {
+	// A delimiter reroutes outright; a dot segment does the same thing carrying
+	// no delimiter at all, since `..` in `/artifacts/{v}/{t}/{platform}` resolves
+	// away the segment before it; an escape reaches a server that decodes before
+	// it resolves; and an empty value collapses a segment.
+	for hostile in [
+		"any?digest=deadbeef",
+		"any#",
+		"../../versions",
+		"any\\..",
+		"..",
+		".",
+		"%2e%2e",
+		"any%2fversions",
+		"",
+	] {
 		let client = CanopyClient::new(Recorder::json(200, &an_artifact()));
 		let request = bes_canopy_api::schema::RegisterArtifactRequest::builder()
 			.platform(hostile)
@@ -297,7 +308,7 @@ async fn a_path_value_carrying_a_uri_delimiter_is_refused() {
 		let err = client
 			.artifacts("2.11.0", "installer", request)
 			.await
-			.expect_err("a path value carrying a delimiter is refused");
+			.expect_err("a path value that changes the request is refused");
 
 		assert!(
 			matches!(err, Error::PathValue { .. }),
