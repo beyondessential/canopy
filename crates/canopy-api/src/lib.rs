@@ -47,6 +47,38 @@ pub mod schema {
 	include!("generated.rs");
 }
 
+/// Append the query parameters a generated method was given to `path`.
+///
+/// Values are percent-encoded, since a parameter is a string on the wire and
+/// this client does not get to assume what a caller passes. Parameters given as
+/// `None` are left off entirely: the server distinguishes an absent parameter
+/// from an empty one.
+pub fn query(path: &str, params: &[(&str, Option<&str>)]) -> String {
+	let mut out = path.to_owned();
+	let mut first = true;
+	for (name, value) in params {
+		let Some(value) = value else { continue };
+		out.push(if first { '?' } else { '&' });
+		first = false;
+		out.push_str(name);
+		out.push('=');
+		out.extend(percent_encode(value));
+	}
+	out
+}
+
+/// Percent-encode everything a query value may not carry unescaped, keeping the
+/// unreserved set of RFC 3986 as it is.
+fn percent_encode(value: &str) -> impl Iterator<Item = String> + '_ {
+	value.bytes().map(|b| {
+		if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+			(b as char).to_string()
+		} else {
+			format!("%{b:02X}")
+		}
+	})
+}
+
 pub use async_trait::async_trait;
 pub use client::CanopyClient;
 pub use error::{CanopyHttpError, Error, Result};

@@ -73,6 +73,34 @@ impl<T: CanopyTransport> CanopyClient<T> {
 		self.call(method, path, body).await.map(|_| ())
 	}
 
+	/// Send a request whose body is bytes canopy holds rather than JSON, and
+	/// parse a JSON response body into `R`.
+	///
+	/// Used by the generated methods for operations that take an
+	/// `application/octet-stream` body. The bytes go up as they are: canopy
+	/// records their digest, so anything done to them here would have to be
+	/// undone before it could.
+	pub async fn call_octets<R: DeserializeOwned>(
+		&self,
+		method: http::Method,
+		path: &str,
+		body: Bytes,
+	) -> Result<R> {
+		let response = self
+			.send(
+				method,
+				path,
+				body,
+				Some(http::HeaderValue::from_static("application/octet-stream")),
+				None,
+			)
+			.await?;
+		serde_json::from_slice(response.body()).map_err(|source| Error::Decode {
+			path: path.to_owned(),
+			source,
+		})
+	}
+
 	/// Send a request, returning the response only if the status is a success.
 	async fn call<B: Serialize + ?Sized>(
 		&self,
@@ -80,27 +108,49 @@ impl<T: CanopyTransport> CanopyClient<T> {
 		path: &str,
 		body: Option<&B>,
 	) -> Result<http::Response<Bytes>> {
-		let mut request = http::Request::builder().method(method).uri(path);
-
-		let payload = match body {
-			None => Bytes::new(),
+		let (payload, content_type, encoding) = match body {
+			None => (Bytes::new(), None, None),
 			Some(body) => {
 				let json = serde_json::to_vec(body).map_err(|source| Error::Encode {
 					path: path.to_owned(),
 					source,
 				})?;
-				request = request.header(http::header::CONTENT_TYPE, "application/json");
+				let content_type = Some(http::HeaderValue::from_static("application/json"));
 				if json.len() >= COMPRESS_FROM {
-					request = request.header(http::header::CONTENT_ENCODING, "gzip");
-					Bytes::from(gzip(&json).map_err(|source| Error::Compress {
-						path: path.to_owned(),
-						source,
-					})?)
+					(
+						Bytes::from(gzip(&json).map_err(|source| Error::Compress {
+							path: path.to_owned(),
+							source,
+						})?),
+						content_type,
+						Some(http::HeaderValue::from_static("gzip")),
+					)
 				} else {
-					Bytes::from(json)
+					(Bytes::from(json), content_type, None)
 				}
 			}
 		};
+
+		self.send(method, path, payload, content_type, encoding).await
+	}
+
+	/// Send `payload` as it is, returning the response only if the status is a
+	/// success.
+	async fn send(
+		&self,
+		method: http::Method,
+		path: &str,
+		payload: Bytes,
+		content_type: Option<http::HeaderValue>,
+		content_encoding: Option<http::HeaderValue>,
+	) -> Result<http::Response<Bytes>> {
+		let mut request = http::Request::builder().method(method).uri(path);
+		if let Some(content_type) = content_type {
+			request = request.header(http::header::CONTENT_TYPE, content_type);
+		}
+		if let Some(encoding) = content_encoding {
+			request = request.header(http::header::CONTENT_ENCODING, encoding);
+		}
 
 		let request = request.body(payload).map_err(|source| Error::Request {
 			path: path.to_owned(),

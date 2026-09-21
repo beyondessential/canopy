@@ -379,10 +379,26 @@ struct Operation {
 	verb: String,
 	path: String,
 	params: Vec<String>,
-	body: Option<String>,
+	query: Vec<QueryParam>,
+	body: Option<Body>,
 	response: Option<String>,
 	summary: Option<String>,
 	description: Option<String>,
+}
+
+/// What an operation takes as its request body.
+enum Body {
+	/// A `$ref`-ed schema, sent as JSON.
+	Json(String),
+	/// Bytes canopy holds, sent as they are.
+	Octets,
+}
+
+/// A query parameter, which is a string on the wire whatever it is in the
+/// document: the generated client renders it, and the server parses it.
+struct QueryParam {
+	name: String,
+	required: bool,
 }
 
 /// Emit one method per operation on `CanopyClient`, routed through its shared
@@ -415,6 +431,7 @@ fn methods(spec: &Value) -> Result<String, String> {
 					.filter_map(|seg| seg.strip_prefix('{').and_then(|s| s.strip_suffix('}')))
 					.map(str::to_owned)
 					.collect(),
+				query: query_params(op),
 				body: request_body(op, path, verb)?,
 				response: response(op, path, verb)?,
 				summary: op.get("summary").and_then(Value::as_str).map(str::to_owned),
@@ -453,8 +470,18 @@ fn methods(spec: &Value) -> Result<String, String> {
 		for param in &op.params {
 			args.push_str(&format!(", {param}: &str"));
 		}
-		if let Some(body) = &op.body {
-			args.push_str(&format!(", body: &{body}"));
+		match &op.body {
+			Some(Body::Json(ty)) => args.push_str(&format!(", body: &{ty}")),
+			Some(Body::Octets) => args.push_str(", body: ::bytes::Bytes"),
+			None => {}
+		}
+		for param in &op.query {
+			let name = escape_ident(&param.name);
+			if param.required {
+				args.push_str(&format!(", {name}: &str"));
+			} else {
+				args.push_str(&format!(", {name}: Option<&str>"));
+			}
 		}
 
 		let path = if op.params.is_empty() {
@@ -466,10 +493,16 @@ fn methods(spec: &Value) -> Result<String, String> {
 			}
 			format!("&format!({template:?}, {})", op.params.join(", "))
 		};
+		let path = if op.query.is_empty() {
+			path
+		} else {
+			format!("&crate::query(&{path}, &[{}])", query_pairs(&op.query))
+		};
 
-		let (call, ret) = match &op.response {
-			Some(ty) => ("call_json", format!("crate::Result<{ty}>")),
-			None => ("call_empty", "crate::Result<()>".to_owned()),
+		let (call, ret) = match (&op.body, &op.response) {
+			(Some(Body::Octets), Some(ty)) => ("call_octets", format!("crate::Result<{ty}>")),
+			(_, Some(ty)) => ("call_json", format!("crate::Result<{ty}>")),
+			(_, None) => ("call_empty", "crate::Result<()>".to_owned()),
 		};
 
 		for text in [&op.summary, &op.description].into_iter().flatten() {
@@ -483,15 +516,15 @@ fn methods(spec: &Value) -> Result<String, String> {
 			out.push_str("\t///\n");
 		}
 		out.push_str(&format!("\t/// `{} {}`\n", op.verb.to_uppercase(), op.path));
+		let sent = match &op.body {
+			Some(Body::Octets) => "body",
+			Some(Body::Json(_)) => "Some(body)",
+			None => "None::<&()>",
+		};
 		out.push_str(&format!(
 			"\tpub async fn {method}(&self{args}) -> {ret} {{\n\
-			 \t\tself.{call}(::http::Method::{}, {path}, {}).await\n\t}}\n",
+			 \t\tself.{call}(::http::Method::{}, {path}, {sent}).await\n\t}}\n",
 			op.verb.to_uppercase(),
-			if op.body.is_some() {
-				"Some(body)"
-			} else {
-				"None::<&()>"
-			},
 		));
 	}
 	out.push_str("}\n");
@@ -499,15 +532,72 @@ fn methods(spec: &Value) -> Result<String, String> {
 }
 
 /// The Rust type of an operation's JSON request body, or `None` when it has none.
-fn request_body(op: &Value, path: &str, verb: &str) -> Result<Option<String>, String> {
+fn request_body(op: &Value, path: &str, verb: &str) -> Result<Option<Body>, String> {
+	if op
+		.pointer("/requestBody/content/application~1octet-stream")
+		.is_some()
+	{
+		return Ok(Some(Body::Octets));
+	}
+
 	let Some(schema) = op.pointer("/requestBody/content/application~1json/schema") else {
 		return Ok(None);
 	};
 	schema
 		.get("$ref")
 		.and_then(Value::as_str)
-		.map(|reference| Some(type_name(reference)))
+		.map(|reference| Some(Body::Json(type_name(reference))))
 		.ok_or_else(|| untypeable("request body", path, verb, schema))
+}
+
+/// The operation's query parameters, in the order the document lists them so
+/// the generated argument order does not move when an unrelated one is added.
+fn query_params(op: &Value) -> Vec<QueryParam> {
+	op.get("parameters")
+		.and_then(Value::as_array)
+		.map(|params| {
+			params
+				.iter()
+				.filter(|param| param.get("in").and_then(Value::as_str) == Some("query"))
+				.filter_map(|param| {
+					Some(QueryParam {
+						name: param.get("name").and_then(Value::as_str)?.to_owned(),
+						required: param
+							.get("required")
+							.and_then(Value::as_bool)
+							.unwrap_or(false),
+					})
+				})
+				.collect()
+		})
+		.unwrap_or_default()
+}
+
+/// The `(name, value)` pairs a generated method hands to [`crate::query`].
+fn query_pairs(query: &[QueryParam]) -> String {
+	query
+		.iter()
+		.map(|param| {
+			let ident = escape_ident(&param.name);
+			if param.required {
+				format!("({:?}, Some({ident}))", param.name)
+			} else {
+				format!("({:?}, {ident})", param.name)
+			}
+		})
+		.collect::<Vec<_>>()
+		.join(", ")
+}
+
+/// A parameter name as a Rust identifier: `type` and friends are legal names in
+/// a document and reserved here.
+fn escape_ident(name: &str) -> String {
+	let ident = name.replace('-', "_");
+	if syn::parse_str::<syn::Ident>(&ident).is_ok() {
+		ident
+	} else {
+		format!("r#{ident}")
+	}
 }
 
 /// The Rust type of an operation's success response, or `None` when it declares
