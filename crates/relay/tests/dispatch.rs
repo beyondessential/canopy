@@ -11,7 +11,7 @@ use relay::{
 	client::dispatch,
 	duties::{Duties, DutyError},
 };
-use relay_protocol::{Hello, Instance, RefusalKind, Request, Response, RosterEntry};
+use relay_protocol::{Hello, RefusalKind, Request, Response};
 
 /// Duties that answer, so dispatch can be tested against something other than
 /// failure. `expiry` decides whether sleeping is allowed, which is the one
@@ -31,18 +31,6 @@ impl Cluster {
 }
 
 impl Duties for Cluster {
-	async fn roster(&self, namespace: &str) -> Result<Vec<RosterEntry>, DutyError> {
-		if namespace != "nauru-demo" {
-			return Err(DutyError::UnknownNamespace {
-				namespace: namespace.into(),
-			});
-		}
-		Ok(vec![RosterEntry {
-			instance: Instance::Central,
-			label: Some("central".into()),
-		}])
-	}
-
 	fn build(&self) -> Hello {
 		Hello {
 			suite_version: "2.30.1".into(),
@@ -61,7 +49,12 @@ impl Duties for Cluster {
 		}
 	}
 
-	async fn wake(&self, _namespace: &str) -> Result<(), DutyError> {
+	async fn wake(&self, namespace: &str) -> Result<(), DutyError> {
+		if namespace != "nauru-demo" {
+			return Err(DutyError::UnknownNamespace {
+				namespace: namespace.into(),
+			});
+		}
 		Ok(())
 	}
 
@@ -89,24 +82,6 @@ async fn the_named_questions_are_answered() {
 		panic!("a build request must be answered with a build");
 	};
 	assert_eq!(build.suite_version, "2.30.1");
-
-	let roster = dispatch(
-		&Request::NamespaceRoster {
-			namespace: "nauru-demo".into(),
-		},
-		duties,
-		&floor,
-	)
-	.await;
-	assert_eq!(
-		roster,
-		Response::NamespaceRoster {
-			instances: vec![RosterEntry {
-				instance: Instance::Central,
-				label: Some("central".into()),
-			}],
-		},
-	);
 }
 
 /// The restriction `K8S` puts on the relay rather than on canopy: an environment
@@ -208,7 +183,7 @@ async fn a_version_at_or_above_the_floor_is_accepted() {
 #[tokio::test]
 async fn a_namespace_the_relay_does_not_serve_is_a_refusal() {
 	let response = dispatch(
-		&Request::NamespaceRoster {
+		&Request::Wake {
 			namespace: "somewhere-else".into(),
 		},
 		Cluster::new(true),

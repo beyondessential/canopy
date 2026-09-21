@@ -123,7 +123,7 @@ async fn a_real_relay_connects_to_the_real_listener_and_answers_it() {
 		let response = registry
 			.request(
 				device.id,
-				Request::NamespaceRoster {
+				Request::Sleep {
 					namespace: "nauru-demo".into(),
 				},
 			)

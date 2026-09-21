@@ -217,11 +217,6 @@ pub async fn dispatch<D: Duties>(
 
 		Request::Build => Response::Build(duties.build()),
 
-		Request::NamespaceRoster { namespace } => match duties.roster(namespace).await {
-			Ok(instances) => Response::NamespaceRoster { instances },
-			Err(err) => err.into(),
-		},
-
 		Request::Sleep { namespace } => match duties.sleep(namespace).await {
 			Ok(()) => Response::Asleep,
 			Err(err) => err.into(),

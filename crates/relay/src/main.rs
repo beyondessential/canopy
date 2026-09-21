@@ -7,14 +7,26 @@
 //! in canopy; no CI change, and the cluster inventory lives nowhere in this
 //! repository.
 
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{error::Error, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use clap::Parser;
 use lloggs::{LoggingArgs, PreArgs};
-use miette::{Result, miette};
 use relay::{Config, duties::Unattached};
 use relay_protocol::Hello;
 use tracing::info;
+
+/// The relay reports a startup failure as plain text and exits.
+///
+/// Deliberately not a diagnostic-rendering error type: nothing reads this but
+/// a container log, and the crate carries no error framework for the sake of
+/// one `main`.
+type BoxError = Box<dyn Error + Send + Sync>;
+
+/// lloggs' error type follows whichever feature the workspace build settles
+/// on, so this never names it and takes its `Display` instead.
+fn startup(context: &str, e: impl std::fmt::Display) -> BoxError {
+	format!("{context}: {e}").into()
+}
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -43,15 +55,21 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
-	let mut _guard = PreArgs::parse().setup()?;
+async fn main() -> Result<(), BoxError> {
+	let mut _guard = PreArgs::parse()
+		.setup()
+		.map_err(|e| startup("logging setup failed", e))?;
 	let args = Args::parse();
 	if _guard.is_none() {
-		_guard = Some(args.logging.setup(|v| match v {
-			0 => "info",
-			1 => "debug",
-			_ => "trace",
-		})?);
+		_guard = Some(
+			args.logging
+				.setup(|v| match v {
+					0 => "info",
+					1 => "debug",
+					_ => "trace",
+				})
+				.map_err(|e| startup("logging setup failed", e))?,
+		);
 	}
 
 	let config = Config::load(
@@ -60,7 +78,7 @@ async fn main() -> Result<()> {
 		args.canopy_addr,
 		args.server_name,
 	)
-	.map_err(|e| miette!("relay configuration is unusable: {e}"))?;
+	.map_err(|e| startup("relay configuration is unusable", e))?;
 
 	info!(
 		key = %relay_protocol::transport::hex(config.identity.spki()),

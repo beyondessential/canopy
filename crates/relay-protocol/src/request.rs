@@ -8,17 +8,11 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::filing::Instance;
-
 /// A request canopy opens a bidirectional stream to make. Exactly one
 /// [`Response`] comes back on the same stream.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "request", rename_all = "kebab-case")]
 pub enum Request {
-	/// The instances running in a namespace, for the identity picker an
-	/// operator uses when marking a server as running on Kubernetes.
-	NamespaceRoster { namespace: String },
-
 	/// Whether the relay is connected and answering. Canopy confirms this
 	/// before a cluster is saved, so a cluster it cannot read is caught as the
 	/// operator adds it.
@@ -53,10 +47,6 @@ pub enum Request {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "response", rename_all = "kebab-case")]
 pub enum Response {
-	/// The instances found in the namespace. An empty roster is a valid
-	/// answer: the namespace exists and holds nothing yet.
-	NamespaceRoster { instances: Vec<RosterEntry> },
-
 	/// Answering.
 	Pong,
 
@@ -81,16 +71,6 @@ pub enum Response {
 
 	/// The relay tried and failed.
 	Failed { message: String },
-}
-
-/// One instance in a namespace roster.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RosterEntry {
-	pub instance: Instance,
-	/// What an operator should see in the picker, when the instance carries a
-	/// name of its own in the cluster. The identity is [`Self::instance`];
-	/// this is only for reading.
-	pub label: Option<String>,
 }
 
 /// Why the relay will not do what was asked.
@@ -156,10 +136,7 @@ impl Response {
 		matches!(
 			(request, self),
 			(_, Self::Refused(_) | Self::Failed { .. })
-				| (
-					Request::NamespaceRoster { .. },
-					Self::NamespaceRoster { .. }
-				) | (Request::Ping, Self::Pong)
+				| (Request::Ping, Self::Pong)
 				| (Request::Build, Self::Build(_))
 				| (Request::Sleep { .. }, Self::Asleep)
 				| (Request::Wake { .. }, Self::Awake)
@@ -189,9 +166,6 @@ mod tests {
 	#[tokio::test]
 	async fn every_request_round_trips() {
 		let requests = [
-			Request::NamespaceRoster {
-				namespace: "nauru-demo".into(),
-			},
 			Request::Ping,
 			Request::Build,
 			Request::Sleep {
@@ -217,20 +191,6 @@ mod tests {
 			version_floor: "1.0.0".into(),
 		};
 		let responses = [
-			Response::NamespaceRoster {
-				instances: vec![
-					RosterEntry {
-						instance: Instance::Central,
-						label: Some("central".into()),
-					},
-					RosterEntry {
-						instance: Instance::Facility {
-							id: "ward-a".into(),
-						},
-						label: None,
-					},
-				],
-			},
 			Response::Pong,
 			Response::Build(hello),
 			Response::Asleep,

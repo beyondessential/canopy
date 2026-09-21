@@ -18,8 +18,7 @@ path = "src/main.rs"
 [dependencies]
 clap = { workspace = true, features = ["derive", "env"] }
 commons-types = { path = "../commons-types" }
-lloggs = { workspace = true, features = ["miette-7"] }
-miette = { workspace = true, features = ["fancy"] }
+lloggs.workspace = true
 node-semver.workspace = true
 quinn = { version = "0.11.9", default-features = false, features = [
 	"bloom",

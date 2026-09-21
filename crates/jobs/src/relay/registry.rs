@@ -127,7 +127,7 @@ impl Registry {
 			.map_err(|e| AppError::custom(format!("reading relay {device_id}'s answer: {e}")))?;
 
 		// A response of the wrong shape is a protocol failure, not an answer:
-		// a caller must not read "asleep" as the roster it asked for.
+		// a caller must not read "asleep" as the answer it asked for.
 		if !response.answers(&request) {
 			return Err(AppError::custom(format!(
 				"relay {device_id} answered {response:?} to {request:?}",

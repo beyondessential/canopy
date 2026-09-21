@@ -15,7 +15,7 @@
 //!
 //! QUIC streams are cheap and independently delivered, so **the stream is the
 //! correlation**: no request ids, no multiplexing layer, and a cancelled
-//! request is a reset stream. A slow roster query cannot stall a queue of
+//! request is a reset stream. A slow query cannot stall a queue of
 //! filings behind it.
 //!
 //! - The relay opens a **unidirectional** stream per [`Filing`] and writes one
@@ -46,7 +46,7 @@ pub mod transport;
 pub use alpn::{ALPN_V1, ProtocolVersion};
 pub use filing::{Filing, FilingTarget, HarvestFiling, Instance, SubstrateFiling};
 pub use frame::{MAX_FRAME_BYTES, ProtocolError, read_frame, read_required_frame, write_frame};
-pub use request::{Hello, Refusal, RefusalKind, Request, Response, RosterEntry};
+pub use request::{Hello, Refusal, RefusalKind, Request, Response};
 pub use transport::{Identity, TransportError};
 
 /// The reserved source a relay's substrate checks are filed under. Defined in

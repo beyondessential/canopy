@@ -7,14 +7,14 @@
 //!
 //! None of these is a check. Checks are `alertd`'s, both families, and reach
 //! canopy as filings; this is only what canopy asks for by name. The
-//! implementations are cluster work: the roster comes from listing a
-//! namespace, sleep and wake from scaling workloads and hibernating a
-//! database, the version from patching this relay's own Deployment.
+//! implementations are cluster work: sleep and wake from scaling workloads
+//! and hibernating a database, the version from patching this relay's own
+//! Deployment.
 //! [`Unattached`] stands in until they land — it answers every request as a
 //! failure, which is honest about a relay that is connected but cannot yet
 //! read its cluster.
 
-use relay_protocol::{Hello, RosterEntry};
+use relay_protocol::Hello;
 
 /// The cluster work behind canopy's requests.
 ///
@@ -24,12 +24,6 @@ use relay_protocol::{Hello, RosterEntry};
 /// and take the two environment actions, and cannot obtain the cluster's
 /// objects or any instance's data, because no method offers them.
 pub trait Duties: Send + Sync + 'static {
-	/// The instances running in a namespace, for the identity picker.
-	fn roster(
-		&self,
-		namespace: &str,
-	) -> impl Future<Output = Result<Vec<RosterEntry>, DutyError>> + Send;
-
 	/// What this relay is running.
 	fn build(&self) -> Hello;
 
@@ -85,10 +79,6 @@ impl Unattached {
 }
 
 impl Duties for Unattached {
-	async fn roster(&self, _namespace: &str) -> Result<Vec<RosterEntry>, DutyError> {
-		Err(Self::no_cluster_access())
-	}
-
 	fn build(&self) -> Hello {
 		self.build.clone()
 	}

@@ -127,7 +127,7 @@ Per application, the relay determines that the application's workloads can be pl
 
 A check under this source can also be scoped past a single application, at either grain.
 A check about a namespace targets the group, a namespace being a group at a rank (see [CHK](checks.md), "Targets").
-A check about the cluster targets the cluster, which every application on it presents as its host's, the way an application on a box presents its machine's (see [CHK](checks.md), "A host's checks present on its applications").
+A check about the cluster targets the cluster and is read there, that being the grain such a condition holds for (see [CHK](checks.md), "Targets").
 
 ## Reachability
 

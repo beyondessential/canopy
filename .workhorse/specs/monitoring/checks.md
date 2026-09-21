@@ -18,13 +18,15 @@ A machine and a cluster are the two kinds of host an application has, so a check
 Group checks are conditions Canopy determines about a group's control plane, such as backup maintenance health (see [BKJ](../jobs/backup.md)).
 Canopy-wide checks are Canopy monitoring its own operation (see [SELF](../private-server/self-alerts.md)).
 
-### A host's checks present on its applications
+### A machine's checks present on its applications
 
-Every check on a machine or a cluster appears on every application that host carries, marked as belonging to the host.
+Every machine check appears on every application on that machine, marked as belonging to the machine.
 An operator triaging an application sees every check bearing on it, its own and its host's, in one list.
 
-There is one filing per host check however many applications present it, so a degraded host check contributes one issue at its host's scope rather than one per application (see [INC](incidents.md)).
-A silence on a host check is scoped to that host and quiets it everywhere it appears, being one check seen from several places.
+There is one filing per machine check however many applications present it, so a degraded machine check contributes one issue at machine scope rather than one per application (see [INC](incidents.md)).
+A silence on a machine check is machine-scoped and quiets it everywhere it appears, being one check seen from several places.
+
+A cluster's checks are read on the cluster itself, which is the grain they hold for: a cluster schedules the applications of many groups, where a machine carries the few colocated on one box (see [K8S](kubernetes.md)).
 
 Reachability is not presented this way, each grain having its own (see "Reachability").
 
