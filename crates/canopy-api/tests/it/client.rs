@@ -281,3 +281,91 @@ async fn a_text_body_is_sent_as_text_and_an_unset_parameter_is_left_off() {
 		"text/plain"
 	);
 }
+
+#[tokio::test]
+async fn a_path_value_carrying_a_uri_delimiter_is_refused() {
+	// Each of these would otherwise change which request is made: `?` prepends
+	// parameters ahead of the caller's own, `#` cuts the query off, and `/`
+	// reroutes to another endpoint.
+	for hostile in ["any?digest=deadbeef", "any#", "../../versions", "any\\.."] {
+		let client = CanopyClient::new(Recorder::json(200, &an_artifact()));
+		let request = bes_canopy_api::schema::RegisterArtifactRequest::builder()
+			.platform(hostile)
+			.body("https://example.invalid/pkg")
+			.build();
+
+		let err = client
+			.artifacts("2.11.0", "installer", request)
+			.await
+			.expect_err("a path value carrying a delimiter is refused");
+
+		assert!(
+			matches!(err, Error::PathValue { .. }),
+			"{hostile:?} reached the wire as {err:?}"
+		);
+	}
+}
+
+#[tokio::test]
+async fn a_path_value_that_is_merely_unusual_still_goes_through() {
+	let recorder = Recorder::json(200, "[]");
+	let client = CanopyClient::new(recorder);
+
+	// A semver range is an ordinary value for this parameter, and is sent as it
+	// always was rather than encoded into something canopy would have to undo.
+	client
+		.versions_artifacts("^2.10.0")
+		.await
+		.expect("a 200 with an empty list parses");
+
+	assert_eq!(
+		client.transport().last().uri(),
+		"/versions/^2.10.0/artifacts"
+	);
+}
+
+#[tokio::test]
+async fn a_body_that_is_present_and_empty_still_says_what_it_is() {
+	let recorder = Recorder::json(200, r#"{"ok":true}"#);
+	let client = CanopyClient::new(recorder);
+
+	// Reaching the plumbing directly: no operation declares a required non-JSON
+	// body yet, and whether a body exists is not inferred from its length.
+	let _: serde_json::Value = client
+		.call_payload_json(
+			http::Method::POST,
+			"/somewhere",
+			Some(bes_canopy_api::bytes::Bytes::new()),
+			"application/octet-stream",
+		)
+		.await
+		.expect("a 200 parses");
+
+	let request = client.transport().last();
+	assert!(request.body().is_empty());
+	assert_eq!(
+		request.headers().get(http::header::CONTENT_TYPE).unwrap(),
+		"application/octet-stream",
+		"an empty body is still a body"
+	);
+}
+
+#[tokio::test]
+async fn no_body_at_all_declares_no_content_type() {
+	let recorder = Recorder::json(200, r#"{"ok":true}"#);
+	let client = CanopyClient::new(recorder);
+
+	let _: serde_json::Value = client
+		.call_payload_json(
+			http::Method::POST,
+			"/somewhere",
+			None,
+			"application/octet-stream",
+		)
+		.await
+		.expect("a 200 parses");
+
+	let request = client.transport().last();
+	assert!(request.body().is_empty());
+	assert!(request.headers().get(http::header::CONTENT_TYPE).is_none());
+}

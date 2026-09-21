@@ -82,7 +82,7 @@ impl<T: CanopyTransport> CanopyClient<T> {
 		&self,
 		method: http::Method,
 		path: &str,
-		payload: Bytes,
+		payload: Option<Bytes>,
 		content_type: &'static str,
 	) -> Result<R> {
 		let response = self
@@ -100,7 +100,7 @@ impl<T: CanopyTransport> CanopyClient<T> {
 		&self,
 		method: http::Method,
 		path: &str,
-		payload: Bytes,
+		payload: Option<Bytes>,
 		content_type: &'static str,
 	) -> Result<()> {
 		self.call_payload(method, path, payload, content_type)
@@ -118,14 +118,18 @@ impl<T: CanopyTransport> CanopyClient<T> {
 		&self,
 		method: http::Method,
 		path: &str,
-		payload: Bytes,
+		payload: Option<Bytes>,
 		content_type: &'static str,
 	) -> Result<http::Response<Bytes>> {
-		// A request with no body declares no content type, so a generated method
-		// whose envelope carries no payload sends what it sent before the
-		// envelope existed, header for header.
-		let content_type =
-			(!payload.is_empty()).then(|| http::HeaderValue::from_static(content_type));
+		// Whether there is a body at all is settled where the method is
+		// generated, not guessed from the bytes: a method whose envelope carries
+		// no body sends none and declares no content type, which is what its
+		// published signature always sent, while a body that is present and empty
+		// is still a body and still says what it is.
+		let (payload, content_type) = match payload {
+			Some(payload) => (payload, Some(http::HeaderValue::from_static(content_type))),
+			None => (Bytes::new(), None),
+		};
 		self.send(method, path, payload, content_type, None).await
 	}
 

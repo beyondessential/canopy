@@ -47,6 +47,27 @@ pub mod schema {
 	include!("generated.rs");
 }
 
+/// Check the values a generated method is about to place in its path.
+///
+/// A path value is the caller's, and canopy's own parameters are appended after
+/// it, so a value carrying `?`, `#` or `/` would not merely look odd: it would
+/// change which endpoint is called, or prepend parameters of its own ahead of
+/// the ones the caller asked for, or cut the query off entirely. Such a value is
+/// refused rather than encoded, because encoding it would change what every
+/// call already in the field puts on the wire.
+pub(crate) fn segments(path: &str, values: &[(&str, &str)]) -> Result<()> {
+	for (name, value) in values {
+		if value.contains(['?', '#', '/', '\\']) {
+			return Err(Error::PathValue {
+				path: path.to_owned(),
+				name: (*name).to_owned(),
+				value: (*value).to_owned(),
+			});
+		}
+	}
+	Ok(())
+}
+
 /// Append the query parameters a generated method was given to `path`.
 ///
 /// A parameter given as `None` is left off entirely rather than sent empty,

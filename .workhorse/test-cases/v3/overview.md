@@ -14,6 +14,7 @@ parameters, and that doing so left every published method's call sites working.
 ## Carrying a body
 
 - [x] An octet-stream body is sent as the bytes given, under `application/octet-stream`, uncompressed so what canopy digests is what the caller passed (verifies spec: APIC)
+- [x] A body that is present and empty still declares its media type, and a method carrying no body declares none (verifies spec: APIC)
 - [x] A text body is sent as the caller's text under `text/plain`, whatever characters it carries (verifies spec: APIC)
 - [ ] An artifact registered through the client against a running canopy is stored with the digest of the bytes the client sent — the client crate is a cargo project of its own and reaches no test server, so this is manual
 
@@ -25,6 +26,11 @@ parameters, and that doing so left every published method's call sites working.
 - [x] A parameter the document types as a uuid is a uuid on the method, not text (verifies spec: APIC)
 - [x] A required parameter is not an option and is always placed in the query
 
+## Path values
+
+- [x] A path value carrying `?`, `#`, `/` or a backslash is refused, rather than deciding which endpoint is called or placing parameters ahead of the caller's (verifies spec: APIC)
+- [x] A path value that is merely unusual, such as a semver range, is sent as it always was rather than encoded (verifies spec: API)
+
 ## The generator refuses what it cannot express
 
 - [x] A request body whose media type the client cannot send fails generation rather than being left off the method (verifies spec: APIC)
@@ -34,6 +40,11 @@ parameters, and that doing so left every published method's call sites working.
 - [x] A ledger entry naming an operation the document no longer carries fails generation, rather than reshaping a published method (verifies spec: APIC)
 - [x] An envelope whose name collides with a schema in the document fails generation
 - [x] A path parameter named after the request argument fails generation, rather than shadowing it and building the path from the wrong value
+- [x] A parameter reached through a `$ref`, or carried in a header or cookie, fails generation rather than being left off the method
+- [x] A parameter a path item declares reaches every operation under it
+- [x] Two operations whose operationIds agree fail generation, rather than emitting one request type twice
+- [x] A name with no Rust identifier form fails generation rather than emitting source that will not parse
+- [x] A request body declaring no media type at all says so, rather than reporting too many
 
 ## Shape of a method
 

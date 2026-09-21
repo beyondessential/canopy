@@ -4167,7 +4167,8 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
 	/// `POST /artifacts/groups/{group}/{version}/{artifact_type}/{platform}`
 	pub async fn artifacts_groups(&self, group: &str, version: &str, artifact_type: &str, platform: impl ::std::convert::Into<RegisterGroupArtifactRequest>) -> crate::Result<Artifact> {
 		let request: RegisterGroupArtifactRequest = platform.into();
-		self.call_payload_json(::http::Method::POST, &crate::query(&format!("/artifacts/groups/{}/{}/{}/{}", group, version, artifact_type, request.platform), &[("run", request.run.as_ref().map(::std::string::ToString::to_string))]), request.body.unwrap_or_default(), "application/octet-stream").await
+		crate::segments("/artifacts/groups/{group}/{version}/{artifact_type}/{platform}", &[("group", group), ("version", version), ("artifact_type", artifact_type), ("platform", &request.platform)])?;
+		self.call_payload_json(::http::Method::POST, &crate::query(&format!("/artifacts/groups/{}/{}/{}/{}", group, version, artifact_type, request.platform), &[("run", request.run.as_ref().map(::std::string::ToString::to_string))]), request.body, "application/octet-stream").await
 	}
 	/// Register a downloadable artifact for a version or version range.
 	///
@@ -4191,7 +4192,8 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
 	/// `POST /artifacts/{version}/{artifact_type}/{platform}`
 	pub async fn artifacts(&self, version: &str, artifact_type: &str, platform: impl ::std::convert::Into<RegisterArtifactRequest>) -> crate::Result<Artifact> {
 		let request: RegisterArtifactRequest = platform.into();
-		self.call_payload_json(::http::Method::POST, &crate::query(&format!("/artifacts/{}/{}/{}", version, artifact_type, request.platform), &[("group", request.group.as_ref().map(::std::string::ToString::to_string)), ("digest", request.digest.as_ref().map(::std::string::ToString::to_string))]), request.body.map(::bytes::Bytes::from).unwrap_or_default(), "text/plain").await
+		crate::segments("/artifacts/{version}/{artifact_type}/{platform}", &[("version", version), ("artifact_type", artifact_type), ("platform", &request.platform)])?;
+		self.call_payload_json(::http::Method::POST, &crate::query(&format!("/artifacts/{}/{}/{}", version, artifact_type, request.platform), &[("group", request.group.as_ref().map(::std::string::ToString::to_string)), ("digest", request.digest.as_ref().map(::std::string::ToString::to_string))]), request.body.map(::bytes::Bytes::from), "text/plain").await
 	}
 	/// Register the backup types this server can run.
 	///
@@ -4548,6 +4550,7 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
 	///
 	/// `POST /status/{server_id}`
 	pub async fn status(&self, server_id: &str, body: &StatusPayload) -> crate::Result<StatusResponse> {
+		crate::segments("/status/{server_id}", &[("server_id", server_id)])?;
 		self.call_json(::http::Method::POST, &format!("/status/{}", server_id), Some(body)).await
 	}
 	/// Fetch the effective healthcheck severity mapping for a server.
@@ -4571,6 +4574,7 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
 	///
 	/// `GET /status/{server_id}/check-severities`
 	pub async fn status_check_severities(&self, server_id: &str) -> crate::Result<::std::collections::HashMap<::std::string::String, CheckSeverity>> {
+		crate::segments("/status/{server_id}/check-severities", &[("server_id", server_id)])?;
 		self.call_json(::http::Method::GET, &format!("/status/{}/check-severities", server_id), None::<&()>).await
 	}
 	/// Get the tags for the calling device's own server.
@@ -4633,6 +4637,7 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
 	///
 	/// `GET /versions/update-for/{version}`
 	pub async fn versions_update_for(&self, version: &str) -> crate::Result<::std::vec::Vec<ViewVersion>> {
+		crate::segments("/versions/update-for/{version}", &[("version", version)])?;
 		self.call_json(::http::Method::GET, &format!("/versions/update-for/{}", version), None::<&()>).await
 	}
 	/// Yank a version.
@@ -4643,6 +4648,7 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
 	///
 	/// `DELETE /versions/{version}`
 	pub async fn delete_versions(&self, version: &str) -> crate::Result<()> {
+		crate::segments("/versions/{version}", &[("version", version)])?;
 		self.call_empty(::http::Method::DELETE, &format!("/versions/{}", version), None::<&()>).await
 	}
 	/// Publish a version with its changelog.
@@ -4664,7 +4670,8 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
 	/// `POST /versions/{version}`
 	pub async fn post_versions(&self, version: impl ::std::convert::Into<CreateVersionRequest>) -> crate::Result<Version> {
 		let request: CreateVersionRequest = version.into();
-		self.call_payload_json(::http::Method::POST, &format!("/versions/{}", request.version), request.body.map(::bytes::Bytes::from).unwrap_or_default(), "text/plain").await
+		crate::segments("/versions/{version}", &[("version", &request.version)])?;
+		self.call_payload_json(::http::Method::POST, &format!("/versions/{}", request.version), request.body.map(::bytes::Bytes::from), "text/plain").await
 	}
 	/// List the artifacts available for a version or version range.
 	///
@@ -4677,6 +4684,7 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
 	///
 	/// `GET /versions/{version}/artifacts`
 	pub async fn versions_artifacts(&self, version: &str) -> crate::Result<::std::vec::Vec<Artifact>> {
+		crate::segments("/versions/{version}/artifacts", &[("version", version)])?;
 		self.call_json(::http::Method::GET, &format!("/versions/{}/artifacts", version), None::<&()>).await
 	}
 }
