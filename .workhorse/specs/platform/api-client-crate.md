@@ -14,6 +14,9 @@ The document the crate is generated from is held in Canopy's own source, so gene
 The generated source is committed alongside that document, so a change to the client's surface appears in the change that causes it and is reviewable there.
 Regenerating from an unchanged document produces an unchanged crate.
 
+Everything generated is parsed and formatted before it is written, whether it was derived from a schema or written by the generator itself.
+One place decides how a generated struct is constructed, so the builder and the openness that make a schema's growth compatible reach every generated type; and source the generator got wrong fails generation rather than a consumer's build.
+
 ## One version for the document and the crate
 
 The document and the crate carry the same version, because the crate is derived from the document and its surface moves only when the document or the generator moves.
@@ -36,6 +39,7 @@ Method names are derived from the operation's path, with the verb distinguishing
 An operation is reached through its generated types rather than through an untyped JSON body.
 A schema the generator cannot express is a defect in the document or in the generator, resolved there rather than by degrading that operation to untyped JSON.
 A request body or a parameter the generator cannot express is the same defect and fails generation, rather than being left off the method: a method that drops what its operation requires cannot do the thing it is named for.
+So is an operation whose identifier has no Rust form, since the type generated for it would be named after one.
 A parameter reached through a reference, or carried somewhere the client does not send, is refused on the same terms, and a parameter a path item declares for every operation under it reaches each of those operations.
 
 A schema that is a typed object carrying arbitrary further keys generates a struct with its declared fields and a map holding the rest, so a consumer both sends and reads those further keys.
@@ -57,6 +61,7 @@ Encoding such a value instead would change what every call already written puts 
 
 A request body the document declares as something other than JSON is carried as the text or the bytes it is, and sent under the media type the document names.
 It is sent as it stands rather than compressed, so what Canopy digests is what the caller passed.
+Whether a caller may leave that body unset is the document's to say, except on a method whose published signature has already settled it by being unable to send one.
 
 A method published before its operation's body could be expressed keeps its name and its arity, widening its last path parameter to accept that operation's request type rather than gaining an argument.
 The widened parameter accepts everything the parameter it replaced accepted, so a call written against the published signature compiles unchanged and sends what it always sent, while a caller that needs the body supplies the request type instead (see [API](api-compatibility.md)).

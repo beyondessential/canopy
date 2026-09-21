@@ -15,6 +15,7 @@ parameters, and that doing so left every published method's call sites working.
 
 - [x] An octet-stream body is sent as the bytes given, under `application/octet-stream`, uncompressed so what canopy digests is what the caller passed (verifies spec: APIC)
 - [x] A body that is present and empty still declares its media type, and a method carrying no body declares none (verifies spec: APIC)
+- [x] Whether a body may be left unset follows the document, except where a published signature has already settled it (verifies spec: APIC)
 - [x] A text body is sent as the caller's text under `text/plain`, whatever characters it carries (verifies spec: APIC)
 - [ ] An artifact registered through the client against a running canopy is stored with the digest of the bytes the client sent — the client crate is a cargo project of its own and reaches no test server, so this is manual
 
@@ -45,6 +46,8 @@ parameters, and that doing so left every published method's call sites working.
 - [x] A parameter a path item declares reaches every operation under it
 - [x] Two operations whose operationIds agree fail generation, rather than emitting one request type twice
 - [x] A name with no Rust identifier form fails generation rather than emitting source that will not parse
+- [x] An operationId with no Rust identifier form fails generation, rather than naming a type after it (verifies spec: APIC)
+- [x] Everything emitted is parsed before it is written, so source the generator got wrong fails here rather than in a consumer's build (verifies spec: APIC)
 - [x] A request body declaring no media type at all says so, rather than reporting too many
 - [x] A grandfathered method carrying a required field fails generation, rather than emitting a conversion that cannot build the request (verifies spec: APIC)
 - [x] A grandfathered operation that no longer carries a request fails generation, rather than silently narrowing back to the published parameter (verifies spec: APIC)
