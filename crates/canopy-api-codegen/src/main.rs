@@ -890,7 +890,7 @@ fn emit(operations: &[Operation]) -> Result<String, String> {
 		));
 	}
 	out.push_str("}\n");
-	Ok(out)
+	render(&out)
 }
 
 /// The expression handing an envelope's payload body to the call plumbing, as
@@ -1012,6 +1012,21 @@ fn envelope(
 	})
 }
 
+/// Put what this generator wrote through the same parse and formatting as the
+/// types generated from the document's schemas.
+///
+/// One place decides how a generated struct is constructed — [`relax_construction`]
+/// — so the builder and `#[non_exhaustive]` reach every generated struct rather
+/// than the ones typify happened to emit. Parsing here also means source this
+/// generator got wrong is an error here, naming what would not parse, rather
+/// than a compile error in a consumer's build of the generated crate.
+fn render(source: &str) -> Result<String, String> {
+	let mut file: syn::File = syn::parse_str(source)
+		.map_err(|err| format!("parsing the source this generator emitted: {err}"))?;
+	relax_construction(&mut file.items);
+	Ok(prettyplease::unparse(&file))
+}
+
 /// Emit an envelope as the struct a consumer builds, and — where it stands in
 /// for a path parameter a published method took — the conversion that keeps that
 /// method's call sites compiling.
@@ -1025,7 +1040,9 @@ fn envelope_type(envelope: &Envelope, verb: &str, path: &str) -> String {
              /// signature compiles unchanged and sends what it always sent.\n"
 		));
 	}
-	out.push_str("#[derive(Clone, Debug, ::bon::Builder)]\n#[non_exhaustive]\n");
+	// The builder and `#[non_exhaustive]` are `relax_construction`'s to add, as
+	// they are for every type generated from the document.
+	out.push_str("#[derive(Clone, Debug)]\n");
 	out.push_str(&format!("pub struct {} {{\n", envelope.name));
 
 	// (identifier, type, optional, taken by conversion)
@@ -1409,6 +1426,12 @@ version = \"not-a-real-key\"
 		assert!(out.contains("serde = \"1\""), "{out}");
 	}
 
+	/// Emitted source with its line breaks flattened, so a test says what the
+	/// generator produced rather than how the formatter laid it out.
+	fn squashed(source: &str) -> String {
+		source.split_whitespace().collect::<Vec<_>>().join(" ")
+	}
+
 	/// A document carrying the operations the ledger names, so its check passes,
 	/// plus whatever the test is about.
 	fn spec_with(extra: Value) -> Value {
@@ -1523,13 +1546,16 @@ version = \"not-a-real-key\"
 		}));
 		let out = methods(&spec, &BTreeSet::new()).expect("the fixture generates");
 
-		assert!(out.contains("pub struct MakeWidgetRequest"), "{out}");
 		assert!(
-			out.contains("pub shape: ::std::option::Option<::std::string::String>"),
+			squashed(&out).contains("pub struct MakeWidgetRequest"),
+			"{out}"
+		);
+		assert!(
+			squashed(&out).contains("pub shape: ::std::option::Option<::std::string::String>"),
 			"a parameter is a field, so adding another one later is a compatible change\n{out}"
 		);
 		assert!(
-			out.contains("pub async fn widgets(&self, request: MakeWidgetRequest)"),
+			squashed(&out).contains("pub async fn widgets(&self, request: MakeWidgetRequest)"),
 			"an operation with no published method takes its envelope as a trailing argument\n{out}"
 		);
 	}
@@ -1552,11 +1578,12 @@ version = \"not-a-real-key\"
 		let out = methods(&spec, &BTreeSet::new()).expect("the fixture generates");
 
 		assert!(
-			out.contains("pub shape: ::uuid::Uuid"),
+			squashed(&out).contains("pub shape: ::uuid::Uuid"),
 			"a required parameter is not an option\n{out}"
 		);
 		assert!(
-			out.contains("(\"shape\", Some(::std::string::ToString::to_string(&request.shape)))"),
+			squashed(&out)
+				.contains("\"shape\", Some(::std::string::ToString::to_string(&request.shape))"),
 			"and is always placed in the query\n{out}"
 		);
 	}
@@ -1565,14 +1592,15 @@ version = \"not-a-real-key\"
 	fn a_grandfathered_method_widens_its_last_path_parameter() {
 		let out = methods(&spec_with(json!({})), &BTreeSet::new()).expect("the fixture generates");
 		assert!(
-			out.contains(
-				"pub async fn artifacts(&self, version: &str, artifact_type: &str, platform: impl \
-				 ::std::convert::Into<RegisterArtifactRequest>)"
+			squashed(&out).contains(
+				"pub async fn artifacts( &self, version: &str, artifact_type: &str, platform: \
+				 impl ::std::convert::Into<RegisterArtifactRequest>, )"
 			),
 			"the published parameter widens in place, so its arity does not move\n{out}"
 		);
 		assert!(
-			out.contains("impl<T: ::std::convert::AsRef<str> + ?Sized> ::std::convert::From<&T>"),
+			squashed(&out)
+				.contains("impl<T: ::std::convert::AsRef<str> + ?Sized> ::std::convert::From<&T>"),
 			"the conversion is what keeps a published call site compiling\n{out}"
 		);
 	}
@@ -1620,7 +1648,7 @@ version = \"not-a-real-key\"
 		}));
 		let out = methods(&spec, &BTreeSet::new()).expect("the fixture generates");
 		assert!(
-			out.contains("pub shape: ::std::option::Option<::std::string::String>"),
+			squashed(&out).contains("pub shape: ::std::option::Option<::std::string::String>"),
 			"a parameter the path item carries applies to the operation\n{out}"
 		);
 	}
@@ -1674,7 +1702,10 @@ version = \"not-a-real-key\"
 	#[test]
 	fn the_document_decides_whether_a_body_may_be_left_unset() {
 		let emitted = |required| {
-			methods(&spec_with_body(required), &BTreeSet::new()).expect("the fixture generates")
+			squashed(
+				&methods(&spec_with_body(required), &BTreeSet::new())
+					.expect("the fixture generates"),
+			)
 		};
 
 		assert!(

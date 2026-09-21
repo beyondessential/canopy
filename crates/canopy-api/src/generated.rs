@@ -4060,631 +4060,786 @@ same way a server being upgraded does. `null` for every other intent.*/
 /// Converts from anything string-like, which is what this method took in place of
 /// `platform` before it carried a request, so a call written against that
 /// signature compiles unchanged and sends what it always sent.
-#[derive(Clone, Debug, ::bon::Builder)]
+#[derive(Clone, Debug)]
+#[derive(::bon::Builder)]
 #[non_exhaustive]
 pub struct RegisterGroupArtifactRequest {
-	#[builder(into)]
-	pub platform: ::std::string::String,
-	#[builder(into)]
-	pub body: ::std::option::Option<::bytes::Bytes>,
-	pub run: ::std::option::Option<::uuid::Uuid>,
+    #[builder(into)]
+    pub platform: ::std::string::String,
+    #[builder(into)]
+    pub body: ::std::option::Option<::bytes::Bytes>,
+    pub run: ::std::option::Option<::uuid::Uuid>,
 }
-
-impl<T: ::std::convert::AsRef<str> + ?Sized> ::std::convert::From<&T> for RegisterGroupArtifactRequest {
-	fn from(value: &T) -> Self {
-		Self {
-			platform: value.as_ref().to_owned(),
-			body: ::std::option::Option::None,
-			run: ::std::option::Option::None,
-		}
-	}
+impl<T: ::std::convert::AsRef<str> + ?Sized> ::std::convert::From<&T>
+for RegisterGroupArtifactRequest {
+    fn from(value: &T) -> Self {
+        Self {
+            platform: value.as_ref().to_owned(),
+            body: ::std::option::Option::None,
+            run: ::std::option::Option::None,
+        }
+    }
 }
-
 /// Request for `POST /artifacts/{version}/{artifact_type}/{platform}`.
 ///
 /// Converts from anything string-like, which is what this method took in place of
 /// `platform` before it carried a request, so a call written against that
 /// signature compiles unchanged and sends what it always sent.
-#[derive(Clone, Debug, ::bon::Builder)]
+#[derive(Clone, Debug)]
+#[derive(::bon::Builder)]
 #[non_exhaustive]
 pub struct RegisterArtifactRequest {
-	#[builder(into)]
-	pub platform: ::std::string::String,
-	#[builder(into)]
-	pub body: ::std::option::Option<::std::string::String>,
-	pub group: ::std::option::Option<::uuid::Uuid>,
-	#[builder(into)]
-	pub digest: ::std::option::Option<::std::string::String>,
+    #[builder(into)]
+    pub platform: ::std::string::String,
+    #[builder(into)]
+    pub body: ::std::option::Option<::std::string::String>,
+    pub group: ::std::option::Option<::uuid::Uuid>,
+    #[builder(into)]
+    pub digest: ::std::option::Option<::std::string::String>,
 }
-
-impl<T: ::std::convert::AsRef<str> + ?Sized> ::std::convert::From<&T> for RegisterArtifactRequest {
-	fn from(value: &T) -> Self {
-		Self {
-			platform: value.as_ref().to_owned(),
-			body: ::std::option::Option::None,
-			group: ::std::option::Option::None,
-			digest: ::std::option::Option::None,
-		}
-	}
+impl<T: ::std::convert::AsRef<str> + ?Sized> ::std::convert::From<&T>
+for RegisterArtifactRequest {
+    fn from(value: &T) -> Self {
+        Self {
+            platform: value.as_ref().to_owned(),
+            body: ::std::option::Option::None,
+            group: ::std::option::Option::None,
+            digest: ::std::option::Option::None,
+        }
+    }
 }
-
 /// Request for `POST /versions/{version}`.
 ///
 /// Converts from anything string-like, which is what this method took in place of
 /// `version` before it carried a request, so a call written against that
 /// signature compiles unchanged and sends what it always sent.
-#[derive(Clone, Debug, ::bon::Builder)]
+#[derive(Clone, Debug)]
+#[derive(::bon::Builder)]
 #[non_exhaustive]
 pub struct CreateVersionRequest {
-	#[builder(into)]
-	pub version: ::std::string::String,
-	#[builder(into)]
-	pub body: ::std::option::Option<::std::string::String>,
+    #[builder(into)]
+    pub version: ::std::string::String,
+    #[builder(into)]
+    pub body: ::std::option::Option<::std::string::String>,
 }
-
-impl<T: ::std::convert::AsRef<str> + ?Sized> ::std::convert::From<&T> for CreateVersionRequest {
-	fn from(value: &T) -> Self {
-		Self {
-			version: value.as_ref().to_owned(),
-			body: ::std::option::Option::None,
-		}
-	}
+impl<T: ::std::convert::AsRef<str> + ?Sized> ::std::convert::From<&T>
+for CreateVersionRequest {
+    fn from(value: &T) -> Self {
+        Self {
+            version: value.as_ref().to_owned(),
+            body: ::std::option::Option::None,
+        }
+    }
 }
-
 /// One method per operation in canopy's OpenAPI document.
 impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
-	/// List publicly-listed central applications.
-	///
-	/// The `/applications` name for [`list`], answering identically.
-	///
-	/// `GET /applications`
-	pub async fn applications(&self) -> crate::Result<::std::vec::Vec<PublicServer>> {
-		self.call_json(::http::Method::GET, "/applications", None::<&()>).await
-	}
-	/// Get the calling identity and the box it is enrolled as.
-	///
-	/// The `/applications` name for [`self_identity`], answering identically.
-	///
-	/// `GET /applications/self`
-	pub async fn applications_self(&self) -> crate::Result<SelfResponse> {
-		self.call_json(::http::Method::GET, "/applications/self", None::<&()>).await
-	}
-	/// Register a reporting schema for one group, carrying its bytes.
-	///
-	/// Requires a device certificate whose restore declaration for the named group
-	/// advertises that it builds reporting schemas. The bytes travel on this
-	/// connection and Canopy holds them, so the builder is issued no credential to
-	/// any store. The path names the group the artifact is for, the exact version
-	/// it was built against, and the artifact's type and target platform.
-	///
-	/// The version must be one Canopy already holds: a build is dispatched for a
-	/// group and version Canopy knows about, so a version that does not exist is
-	/// refused rather than drafted. A range pattern is refused for the same reason:
-	/// a schema follows the migrations one exact version applies.
-	///
-	/// Returns the created artifact record.
-	///
-	/// `POST /artifacts/groups/{group}/{version}/{artifact_type}/{platform}`
-	pub async fn artifacts_groups(&self, group: &str, version: &str, artifact_type: &str, platform: impl ::std::convert::Into<RegisterGroupArtifactRequest>) -> crate::Result<Artifact> {
-		let request: RegisterGroupArtifactRequest = platform.into();
-		crate::segments("/artifacts/groups/{group}/{version}/{artifact_type}/{platform}", &[("group", group), ("version", version), ("artifact_type", artifact_type), ("platform", &request.platform)])?;
-		self.call_payload_json(::http::Method::POST, &crate::query(&format!("/artifacts/groups/{}/{}/{}/{}", group, version, artifact_type, request.platform), &[("run", request.run.as_ref().map(::std::string::ToString::to_string))]), request.body, "application/octet-stream").await
-	}
-	/// Register a downloadable artifact for a version or version range.
-	///
-	/// Requires a device certificate with the releaser role (or admin). The
-	/// path identifies the version the artifact belongs to — either an exact
-	/// version (e.g. `2.10.5`) or a semver range pattern (e.g. `2.10.x`,
-	/// `^2.10.0`) — followed by the artifact's type and target platform. The
-	/// request body is the plain-text URL clients should download the
-	/// artifact from.
-	///
-	/// When an exact version is given and it doesn't exist yet, it is created
-	/// automatically as an unpublished draft so the artifact has a version to
-	/// attach to; publishing that version later (via the version-creation
-	/// endpoint) is a separate step. When a range pattern is given instead,
-	/// the artifact isn't tied to one version — it matches whichever
-	/// published version currently satisfies the range at lookup time.
-	///
-	/// Returns the created artifact record. Returns 400 if the version or
-	/// range syntax can't be parsed.
-	///
-	/// `POST /artifacts/{version}/{artifact_type}/{platform}`
-	pub async fn artifacts(&self, version: &str, artifact_type: &str, platform: impl ::std::convert::Into<RegisterArtifactRequest>) -> crate::Result<Artifact> {
-		let request: RegisterArtifactRequest = platform.into();
-		crate::segments("/artifacts/{version}/{artifact_type}/{platform}", &[("version", version), ("artifact_type", artifact_type), ("platform", &request.platform)])?;
-		self.call_payload_json(::http::Method::POST, &crate::query(&format!("/artifacts/{}/{}/{}", version, artifact_type, request.platform), &[("group", request.group.as_ref().map(::std::string::ToString::to_string)), ("digest", request.digest.as_ref().map(::std::string::ToString::to_string))]), request.body.map(::bytes::Bytes::from), "text/plain").await
-	}
-	/// Register the backup types this server can run.
-	///
-	/// Declares the set of backup types the calling device is able to execute on
-	/// its server. Types not seen before are added to the server's capability set,
-	/// starting out enabled or disabled according to the fleet-wide default for
-	/// that type (disabled if the type has no default configured). Types already
-	/// registered keep whatever enabled/disabled state an operator has set for
-	/// them, so re-registering on every startup is safe and expected.
-	///
-	/// Only types that are registered here (and enabled) can later be issued
-	/// credentials via `POST /backup-credentials`, outside of explicit
-	/// operator-requested runs.
-	///
-	/// Errors: 412 when the calling device is not bound to a live server; 409 when
-	/// the server is not in a group.
-	///
-	/// `POST /backup-capabilities`
-	pub async fn backup_capabilities(&self, body: &BackupCapabilitiesArgs) -> crate::Result<()> {
-		self.call_empty(::http::Method::POST, "/backup-capabilities", Some(body)).await
-	}
-	/// Mint short-lived S3 credentials for a backup or restore run.
-	///
-	/// Issues temporary AWS credentials scoped to the backup storage of the
-	/// calling server's group, in the `credential_process` output format. With
-	/// `purpose: backup` the credentials can upload and manage backup data but
-	/// cannot destroy existing backups; with `purpose: restore` they are strictly
-	/// read-only. They expire after at most one hour, so request a fresh set for
-	/// each run rather than caching them. Every issuance is recorded for audit.
-	///
-	/// The storage coordinates the credentials apply to (bucket, prefix, region)
-	/// come from `GET /backup-target`.
-	///
-	/// Errors: 409 when the server is not in a group, when the group's backup
-	/// configuration is not ready, when a `backup` type is neither an enabled
-	/// capability of this server nor the subject of a pending "backup now" request,
-	/// or when a `restore` is requested but the server's restore window is not
-	/// open; 412 when the device is not bound to a live server; 502 when the
-	/// credential issuer is unavailable or not configured.
-	///
-	/// `POST /backup-credentials`
-	pub async fn backup_credentials(&self, body: &BackupCredentialsArgs) -> crate::Result<CredentialProcessOutput> {
-		self.call_json(::http::Method::POST, "/backup-credentials", Some(body)).await
-	}
-	/// Report progress for a run that is still in flight.
-	///
-	/// Optional throughout: a run that never reports progress is recorded and
-	/// displayed exactly as it is today. Reporting it lets Canopy show how far a
-	/// long-running backup has got, at what rate, and when it last heard from the
-	/// device — which for a multi-hour backup is the difference between "running"
-	/// and "running, and moving".
-	///
-	/// **Every counter is cumulative from the start of the run**, not an interval
-	/// delta. Send totals-so-far each time. A dropped or repeated report then costs
-	/// only resolution, never the accuracy of a total, and the last report Canopy
-	/// received can stand in for a figure the final report omits. Omit any counter
-	/// you do not measure rather than sending zero.
-	///
-	/// Canopy timestamps each report on receipt, so no clock agreement is needed —
-	/// except for `snapshot_taken_at`, which is necessarily the device's own claim
-	/// about its filesystem.
-	///
-	/// Unlike `POST /backup-credentials`, this does not require the group's backup
-	/// configuration to be ready or the type to be an enabled capability: it
-	/// describes a run already under way, and refusing it would blind Canopy exactly
-	/// when something is misconfigured.
-	///
-	/// A refused report is never a reason to abandon a run — this is telemetry.
-	/// Reporting progress for a run that has already been reported complete is
-	/// accepted rather than refused, so a report racing the completion is not an
-	/// error.
-	///
-	/// Errors: 412 when the calling device is not bound to a live server; 409 when
-	/// the server is not in a group; 429 when reporting faster than Canopy accepts.
-	///
-	/// `POST /backup-progress`
-	pub async fn backup_progress(&self, body: &ProgressArgs) -> crate::Result<()> {
-		self.call_empty(::http::Method::POST, "/backup-progress", Some(body)).await
-	}
-	/// Report the outcome of a backup or restore run.
-	///
-	/// Records the run against the calling server and its group. Send one report
-	/// per run, on success and on failure alike. Reporting also clears any pending
-	/// operator-requested run for the same type and purpose — regardless of
-	/// outcome, since an operator request is for one attempt — so the server's
-	/// status responses stop asking for it (see the `backup_now` field of the
-	/// status-push response).
-	///
-	/// Errors: 409 when the server is not in a group, or when the `run_id` has
-	/// already been reported; 412 when the device is not bound to a live server.
-	///
-	/// `POST /backup-report`
-	pub async fn backup_report(&self, body: &ReportArgs) -> crate::Result<()> {
-		self.call_empty(::http::Method::POST, "/backup-report", Some(body)).await
-	}
-	/// Fetch the backup storage target for this server's group.
-	///
-	/// Returns the bucket, prefix, region, and repository passphrase the device
-	/// needs to connect to its group's backup repository. Call it on every run
-	/// rather than caching the result, as the target can change. S3 credentials
-	/// are obtained separately via `POST /backup-credentials`.
-	///
-	/// Errors: 409 when the server is not in a group or the group's backup
-	/// configuration is not ready; 412 when the device is not bound to a live
-	/// server; 502 when the passphrase store is unavailable or not configured.
-	///
-	/// `GET /backup-target`
-	pub async fn backup_target(&self) -> crate::Result<BackupTarget> {
-		self.call_json(::http::Method::GET, "/backup-target", None::<&()>).await
-	}
-	/// List all current bestool SQL snippets.
-	///
-	/// Returns the library of named SQL snippets that devices running bestool
-	/// fetch and run, keyed by snippet name. Only the current version of each
-	/// snippet is included: if a snippet has been superseded by a newer one
-	/// under the same name, only the newer version is returned, and
-	/// soft-deleted snippets are omitted entirely. This endpoint does not
-	/// require device authentication.
-	///
-	/// `GET /bestool/snippets`
-	pub async fn bestool_snippets(&self) -> crate::Result<::std::collections::HashMap<::std::string::String, SnippetResponse>> {
-		self.call_json(::http::Method::GET, "/bestool/snippets", None::<&()>).await
-	}
-	/// Ask for a certificate, and collect it once there is one.
-	///
-	/// The same call does both, and is safe to repeat: a name and key Canopy already
-	/// holds a certificate for is answered from what it holds rather than ordering
-	/// again, so a server that lost its local copy costs the authority nothing. A
-	/// request naming a different key opens a new order.
-	///
-	/// Proving control of a name through DNS takes far longer than any client waits
-	/// mid-handshake, so a first request records the order and answers `pending`;
-	/// call again to collect. A server is expected to hold a certificate before it
-	/// needs one rather than to obtain one while a client waits.
-	///
-	/// `POST /certificates/request`
-	pub async fn certificates_request(&self, body: &RequestCertificateArgs) -> crate::Result<CertificateResponse> {
-		self.call_json(::http::Method::POST, "/certificates/request", Some(body)).await
-	}
-	/// Report the calling machine's own identity.
-	///
-	/// Resolves the caller from its certificate and returns the box it is enrolled
-	/// as, together with the applications Canopy holds for that box. A machine
-	/// authenticates entirely from its certificate, so it never needs these ids to
-	/// make calls; this endpoint lets one that has lost track of them recover them.
-	///
-	/// An identity belongs to at most one machine, so the answer is never
-	/// ambiguous — unlike `GET /servers/self`, which asks which *application* the
-	/// caller is and cannot answer for a box running more than one.
-	///
-	/// - **401**: no client certificate, or one that matches no known identity.
-	/// - **412**: the identity is registered but is not enrolled as a machine.
-	///
-	/// `GET /machines/self`
-	pub async fn machines_self(&self) -> crate::Result<MachineSelfResponse> {
-		self.call_json(::http::Method::GET, "/machines/self", None::<&()>).await
-	}
-	/// What this server may act on, and what it already holds.
-	///
-	/// Answers the boundary rather than making an agent discover it by being
-	/// refused: the domains its group controls, the grants it holds, whether it is
-	/// paused, and the names and certificates it already has. Enough to request a
-	/// certificate before anything asks for one, and to renew before expiry.
-	///
-	/// A server with no grants, or whose group controls no domain, gets an empty
-	/// answer rather than an error — asking what one may do is not a privileged act.
-	/// The same content rides on the response to a status push.
-	///
-	/// `GET /names/entitlements`
-	pub async fn names_entitlements(&self) -> crate::Result<Entitlements> {
-		self.call_json(::http::Method::GET, "/names/entitlements", None::<&()>).await
-	}
-	/// Register the addresses a name should resolve to.
-	///
-	/// Replaces whatever addresses were registered for the name; an empty list
-	/// withdraws it. Canopy publishes what it is told — it does not verify that an
-	/// address is really this server's, the grant being the trust boundary.
-	///
-	/// Publishing happens in the background, so the response says what Canopy will
-	/// publish and what it has published so far rather than waiting for the zone.
-	///
-	/// `POST /names/register`
-	pub async fn names_register(&self, body: &RegisterNameArgs) -> crate::Result<RegisteredName> {
-		self.call_json(::http::Method::POST, "/names/register", Some(body)).await
-	}
-	/// Register the restore intents this device can satisfy.
-	///
-	/// Declares the restore intents the calling device supports, replacing any
-	/// previously advertised set. Only worklist entries whose intent is currently
-	/// advertised are dispatched to this device via `GET /restore-worklist`, so
-	/// register on startup and whenever the supported set changes.
-	///
-	/// `POST /restore-capabilities`
-	pub async fn restore_capabilities(&self, body: &RestoreCapabilitiesArgs) -> crate::Result<()> {
-		self.call_empty(::http::Method::POST, "/restore-capabilities", Some(body)).await
-	}
-	/// Mint read-only credentials for a group's backup repository.
-	///
-	/// Issues temporary AWS credentials — always strictly read-only, scoped to the
-	/// group's backup storage — together with the repository passphrase, so the
-	/// device can read the snapshot named in a worklist entry. Credentials expire
-	/// after at most one hour; request a fresh set per restore rather than caching
-	/// them. Every issuance is recorded for audit.
-	///
-	/// The device must hold an enabled restore declaration covering the requested
-	/// group and type (i.e. the pair must appear in its worklist configuration);
-	/// otherwise the request is rejected with 403.
-	///
-	/// Errors: 403 when no enabled declaration authorizes this group and type;
-	/// 409 when the group has no ready backup configuration; 502 when the
-	/// credential issuer or the passphrase store is unavailable or not configured.
-	///
-	/// `POST /restore-credentials`
-	pub async fn restore_credentials(&self, body: &RestoreCredentialsArgs) -> crate::Result<RestoreCredentials> {
-		self.call_json(::http::Method::POST, "/restore-credentials", Some(body)).await
-	}
-	/// Report the outcome of a restore attempt and the replica's health.
-	///
-	/// Records a verification report for a restore the device performed from its
-	/// worklist. Send one report per attempt, on success and on failure alike. A
-	/// report with a `success` outcome and `replica_healthy: true` marks the
-	/// snapshot as verified; for run-once intents this is what removes the entry
-	/// from `GET /restore-worklist` until a newer snapshot appears.
-	///
-	/// Authorization matches `POST /restore-credentials`: the device must hold an
-	/// enabled restore declaration covering the reported group and type,
-	/// otherwise the request is rejected with 403.
-	///
-	/// The report names the declaration it is about, and that declaration must
-	/// still exist and belong to the calling consumer. A replica nothing declares
-	/// any more is not one Canopy tracks, so a report naming a retired declaration
-	/// is refused rather than recorded against a replica that could never recover.
-	///
-	/// `POST /restore-verification`
-	pub async fn restore_verification(&self, body: &VerificationArgs) -> crate::Result<()> {
-		self.call_empty(::http::Method::POST, "/restore-verification", Some(body)).await
-	}
-	/// Fetch the full set of replicas this device should maintain.
-	///
-	/// Returns the device's complete desired state, computed fresh on every call:
-	/// each enabled restore declaration whose intent this device currently
-	/// advertises, expanded into one entry per server it covers. A group-wide
-	/// declaration expands to every live server in its group; a server-scoped
-	/// declaration yields a single entry and takes precedence over a group-wide
-	/// one covering the same server, type, and intent. Entries for groups whose
-	/// backup configuration is not ready are omitted, and entries for run-once
-	/// intents disappear once the latest snapshot has a healthy verification
-	/// report, reappearing when a newer snapshot exists.
-	///
-	/// An empty array means there is nothing to do. Poll this endpoint and
-	/// reconcile: create or refresh the replicas listed, and tear down any the
-	/// device is maintaining that no longer appear.
-	///
-	/// `GET /restore-worklist`
-	pub async fn restore_worklist(&self) -> crate::Result<::std::vec::Vec<WorklistEntry>> {
-		self.call_json(::http::Method::GET, "/restore-worklist", None::<&()>).await
-	}
-	/// List publicly-listed central applications.
-	///
-	/// Returns every central server that has both a public display name and a
-	/// reachable host configured, ordered by environment tier (production
-	/// first, then clone, demo, test, dev) and then by name. Used by clients
-	/// to let a user pick which server to connect to.
-	///
-	/// `GET /servers`
-	pub async fn servers(&self) -> crate::Result<::std::vec::Vec<PublicServer>> {
-		self.call_json(::http::Method::GET, "/servers", None::<&()>).await
-	}
-	/// Start device enrollment against a machine.
-	///
-	/// Validates the enrollment token against the given machine and, if valid,
-	/// issues a short-lived (5 minute) signed challenge bound to the machine
-	/// ID, the token, and the caller's public key. The device must sign this
-	/// challenge and submit it to the completion endpoint to finish
-	/// enrollment; the token itself is validated here but not yet consumed.
-	///
-	/// This endpoint is rate-limited per source IP and per target machine; a
-	/// tripped limit returns 429. Any other failure — an unknown or archived
-	/// machine, or an invalid or expired token — is surfaced as a generic 403,
-	/// deliberately not distinguishing which check failed.
-	///
-	/// `POST /servers/register/begin`
-	pub async fn servers_register_begin(&self, body: &BeginArgs) -> crate::Result<BeginResponse> {
-		self.call_json(::http::Method::POST, "/servers/register/begin", Some(body)).await
-	}
-	/// Complete device enrollment by presenting a signed challenge.
-	///
-	/// Verifies the signature over the challenge transcript using the public
-	/// key supplied here, then binds the device to the machine: an existing
-	/// device re-enrolling with the same key is reused as-is; a device
-	/// re-enrolling with a different key replaces the machine's previous
-	/// device (revoking that device's access); otherwise a new device
-	/// identity is created. On success the device is granted the machine
-	/// role, the enrollment token is consumed, and the machine is marked as
-	/// registered.
-	///
-	/// Enrollment is refused if the presented public key is already bound to
-	/// a different live machine. Like the start-enrollment endpoint, this one
-	/// is rate-limited per source IP and per target machine (429 on a tripped
-	/// limit) and reports every other kind of failure as a generic 403.
-	///
-	/// `POST /servers/register/complete`
-	pub async fn servers_register_complete(&self, body: &CompleteArgs) -> crate::Result<CompleteResponse> {
-		self.call_json(::http::Method::POST, "/servers/register/complete", Some(body)).await
-	}
-	/// Report the calling device's own identity.
-	///
-	/// Deprecated in favour of `GET /machines/self`, which says what runs on the box
-	/// as well as which box it is.
-	///
-	/// Resolves the caller from its device certificate and returns the box it is
-	/// enrolled as together with its own device ID — the same pair returned when the
-	/// device completed enrollment. A device authenticates entirely from its
-	/// certificate, so it never needs these IDs to make calls; this endpoint lets
-	/// one that has lost track of them recover them.
-	///
-	/// The id answered is the box's, not any workload's: an identity belongs to a
-	/// box, so the answer stays the same however many applications run on it.
-	///
-	/// - **401**: the request has no client certificate, or the certificate
-	///   doesn't match a known device.
-	/// - **409**: retained for callers that handle it; no longer raised, since an
-	///   identity is enrolled as at most one box.
-	/// - **412**: the device is registered but has not yet been attached to a
-	///   box.
-	///
-	/// `GET /servers/self`
-	pub async fn servers_self(&self) -> crate::Result<SelfResponse> {
-		self.call_json(::http::Method::GET, "/servers/self", None::<&()>).await
-	}
-	/// Submit a status heartbeat for a machine.
-	///
-	/// `server_id` in the path is the id the agent was enrolled with, which
-	/// identifies the machine it runs on. Canopy works out which application on
-	/// that machine the push describes from the push itself.
-	///
-	/// Records a periodic status push against that machine: overall
-	/// self-reported health, a per-check breakdown, and any free-form extra
-	/// data. Machine-subject checks and detail file against the machine and the
-	/// rest against its application. Each failed or warning check opens (or keeps
-	/// open) an issue at that check's operator-configured severity, and each
-	/// passed check closes any issue it previously opened; the application's
-	/// tracked software version is also updated from the payload.
-	///
-	/// The calling device must be the one enrolled for this exact machine (or
-	/// hold the admin role). The response carries only return-path
-	/// instructions: a `backup_now` list of backup types the server should
-	/// back up immediately — devices should treat a non-empty list as a
-	/// prompt to run those backups and report them afterwards — a
-	/// `check_severities` map describing how canopy classifies each known
-	/// healthcheck for this server (`skip`/`warn`/`fail`), and the server's
-	/// effective `tags` (as served by `GET /tags`). The stored status record
-	/// is not echoed back.
-	///
-	/// `POST /status/{server_id}`
-	pub async fn status(&self, server_id: &str, body: &StatusPayload) -> crate::Result<StatusResponse> {
-		crate::segments("/status/{server_id}", &[("server_id", server_id)])?;
-		self.call_json(::http::Method::POST, &format!("/status/{}", server_id), Some(body)).await
-	}
-	/// Fetch the effective healthcheck severity mapping for a server.
-	///
-	/// Returns, for every healthcheck the `alertd` source reports, how that
-	/// check is handled for this server: `skip` (the check is silenced for
-	/// this server — at server or group scope — or its policy ceiling means it
-	/// never alerts), `warn` (graded at most a warning), or `fail` (failures
-	/// count as failures). Keys are check names as reported in
-	/// `health[].check` on status pushes. Only the static policy ceiling is
-	/// reflected; operator-defined conditional rules are evaluated per push
-	/// and not included here. The same mapping also rides along every
-	/// status-push response as `check_severities`, scoped to the pushing
-	/// source.
-	///
-	/// `server_id` in the path is the id the agent was enrolled with, which
-	/// identifies the machine it runs on.
-	///
-	/// The calling device must be the one enrolled for this exact machine (or
-	/// hold the admin role).
-	///
-	/// `GET /status/{server_id}/check-severities`
-	pub async fn status_check_severities(&self, server_id: &str) -> crate::Result<::std::collections::HashMap<::std::string::String, CheckSeverity>> {
-		crate::segments("/status/{server_id}/check-severities", &[("server_id", server_id)])?;
-		self.call_json(::http::Method::GET, &format!("/status/{}/check-severities", server_id), None::<&()>).await
-	}
-	/// Get the tags for the calling device's own server.
-	///
-	/// Returns the effective set of tags for the server the calling device is
-	/// registered as: any tags set on the server itself, overlaid onto any tags
-	/// inherited from its server group (a tag set on the server takes precedence
-	/// over a group tag with the same key). If the server isn't in a group,
-	/// this returns just its own tags.
-	///
-	/// The result also includes a few read-only, synthetic tags describing the
-	/// server, under the reserved `canopy:` key prefix: `canopy:kind`,
-	/// `canopy:rank` (if the server has one set), and `canopy:group-id` /
-	/// `canopy:group-name` (if the server belongs to a group). Operators cannot
-	/// set tags under that prefix, so these never collide with tags you set
-	/// yourself.
-	///
-	/// When the server belongs to a group, the effective `billing.*` labels are
-	/// also included, matching the labels canopy attributes to cloud resources:
-	/// `billing.product`, `billing.deployment`, and `billing.stage` (the last
-	/// derived from *this* server's own rank, and omitted when the server has no
-	/// rank). The stage is per-server, not the group's highest rank, so a `clone`
-	/// server reports `billing.stage=clone` rather than the group's `prod`.
-	///
-	/// These are only defaults: a stored `billing.*` tag is honoured over the
-	/// computed value — the server's own tag first, then the group's. So an
-	/// operator can pin any billing label on a specific server or the whole group.
-	///
-	/// - **401**: the request has no client certificate, or the certificate
-	///   doesn't match a known device.
-	/// - **409**: the calling device is attached to more than one server, which
-	///   should not normally happen; contact support if you see this.
-	/// - **412**: the device is registered but has not yet been attached to a
-	///   server.
-	///
-	/// `GET /tags`
-	pub async fn tags(&self) -> crate::Result<TagMap> {
-		self.call_json(::http::Method::GET, "/tags", None::<&()>).await
-	}
-	/// List published, ready-to-serve versions.
-	///
-	/// Returns every version currently in the published state, excluding any
-	/// version a recorded known-issue range still covers (whether that issue
-	/// is still open or has since been fixed in a later patch). Ordered
-	/// newest first.
-	///
-	/// `GET /versions`
-	pub async fn get_versions(&self) -> crate::Result<::std::vec::Vec<Version>> {
-		self.call_json(::http::Method::GET, "/versions", None::<&()>).await
-	}
-	/// Check for available updates from a given version.
-	///
-	/// The path parameter is the caller's currently-installed exact version.
-	/// For each later minor release line within the same major version,
-	/// returns the latest published version that hasn't been excluded by a
-	/// recorded known-issue range — falling back to an older ready patch
-	/// within that same minor line rather than dropping the line entirely, if
-	/// the newest patch isn't ready. Clients use this to discover and offer
-	/// available updates.
-	///
-	/// `GET /versions/update-for/{version}`
-	pub async fn versions_update_for(&self, version: &str) -> crate::Result<::std::vec::Vec<ViewVersion>> {
-		crate::segments("/versions/update-for/{version}", &[("version", version)])?;
-		self.call_json(::http::Method::GET, &format!("/versions/update-for/{}", version), None::<&()>).await
-	}
-	/// Yank a version.
-	///
-	/// Requires a device certificate with the admin role. Marks the given
-	/// exact version as yanked, hiding it from listings, update checks, and
-	/// artifact lookups without deleting its history.
-	///
-	/// `DELETE /versions/{version}`
-	pub async fn delete_versions(&self, version: &str) -> crate::Result<()> {
-		crate::segments("/versions/{version}", &[("version", version)])?;
-		self.call_empty(::http::Method::DELETE, &format!("/versions/{}", version), None::<&()>).await
-	}
-	/// Publish a version with its changelog.
-	///
-	/// Requires a device certificate with the releaser role (or admin). The
-	/// path parameter is the exact version being published (e.g. `2.10.5`);
-	/// the request body is the changelog for that version, as up to 1 MiB of
-	/// markdown text.
-	///
-	/// If the version already exists in the draft state — for example
-	/// because an artifact was registered against it before its changelog
-	/// was written — the draft is published in place, with this changelog
-	/// replacing whatever it had before. Otherwise a new version is created
-	/// directly in the published state. Publishing a version that already
-	/// exists and is not a draft (already published, or yanked) fails.
-	///
-	/// Returns the resulting version record.
-	///
-	/// `POST /versions/{version}`
-	pub async fn post_versions(&self, version: impl ::std::convert::Into<CreateVersionRequest>) -> crate::Result<Version> {
-		let request: CreateVersionRequest = version.into();
-		crate::segments("/versions/{version}", &[("version", &request.version)])?;
-		self.call_payload_json(::http::Method::POST, &format!("/versions/{}", request.version), request.body.map(::bytes::Bytes::from), "text/plain").await
-	}
-	/// List the artifacts available for a version or version range.
-	///
-	/// The path parameter accepts either an exact version or a semver range
-	/// pattern (e.g. `2.10.x`, `^2.10.0`). It resolves to the latest
-	/// published, ready version satisfying the input, then returns that
-	/// version's artifacts — both ones registered against the exact version
-	/// and ones registered against a range pattern that covers it. Returns
-	/// 404 if no published, ready version matches.
-	///
-	/// `GET /versions/{version}/artifacts`
-	pub async fn versions_artifacts(&self, version: &str) -> crate::Result<::std::vec::Vec<Artifact>> {
-		crate::segments("/versions/{version}/artifacts", &[("version", version)])?;
-		self.call_json(::http::Method::GET, &format!("/versions/{}/artifacts", version), None::<&()>).await
-	}
+    /// List publicly-listed central applications.
+    ///
+    /// The `/applications` name for [`list`], answering identically.
+    ///
+    /// `GET /applications`
+    pub async fn applications(&self) -> crate::Result<::std::vec::Vec<PublicServer>> {
+        self.call_json(::http::Method::GET, "/applications", None::<&()>).await
+    }
+    /// Get the calling identity and the box it is enrolled as.
+    ///
+    /// The `/applications` name for [`self_identity`], answering identically.
+    ///
+    /// `GET /applications/self`
+    pub async fn applications_self(&self) -> crate::Result<SelfResponse> {
+        self.call_json(::http::Method::GET, "/applications/self", None::<&()>).await
+    }
+    /// Register a reporting schema for one group, carrying its bytes.
+    ///
+    /// Requires a device certificate whose restore declaration for the named group
+    /// advertises that it builds reporting schemas. The bytes travel on this
+    /// connection and Canopy holds them, so the builder is issued no credential to
+    /// any store. The path names the group the artifact is for, the exact version
+    /// it was built against, and the artifact's type and target platform.
+    ///
+    /// The version must be one Canopy already holds: a build is dispatched for a
+    /// group and version Canopy knows about, so a version that does not exist is
+    /// refused rather than drafted. A range pattern is refused for the same reason:
+    /// a schema follows the migrations one exact version applies.
+    ///
+    /// Returns the created artifact record.
+    ///
+    /// `POST /artifacts/groups/{group}/{version}/{artifact_type}/{platform}`
+    pub async fn artifacts_groups(
+        &self,
+        group: &str,
+        version: &str,
+        artifact_type: &str,
+        platform: impl ::std::convert::Into<RegisterGroupArtifactRequest>,
+    ) -> crate::Result<Artifact> {
+        let request: RegisterGroupArtifactRequest = platform.into();
+        crate::segments(
+            "/artifacts/groups/{group}/{version}/{artifact_type}/{platform}",
+            &[
+                ("group", group),
+                ("version", version),
+                ("artifact_type", artifact_type),
+                ("platform", &request.platform),
+            ],
+        )?;
+        self.call_payload_json(
+                ::http::Method::POST,
+                &crate::query(
+                    &format!(
+                        "/artifacts/groups/{}/{}/{}/{}", group, version, artifact_type,
+                        request.platform
+                    ),
+                    &[
+                        (
+                            "run",
+                            request.run.as_ref().map(::std::string::ToString::to_string),
+                        ),
+                    ],
+                ),
+                request.body,
+                "application/octet-stream",
+            )
+            .await
+    }
+    /// Register a downloadable artifact for a version or version range.
+    ///
+    /// Requires a device certificate with the releaser role (or admin). The
+    /// path identifies the version the artifact belongs to — either an exact
+    /// version (e.g. `2.10.5`) or a semver range pattern (e.g. `2.10.x`,
+    /// `^2.10.0`) — followed by the artifact's type and target platform. The
+    /// request body is the plain-text URL clients should download the
+    /// artifact from.
+    ///
+    /// When an exact version is given and it doesn't exist yet, it is created
+    /// automatically as an unpublished draft so the artifact has a version to
+    /// attach to; publishing that version later (via the version-creation
+    /// endpoint) is a separate step. When a range pattern is given instead,
+    /// the artifact isn't tied to one version — it matches whichever
+    /// published version currently satisfies the range at lookup time.
+    ///
+    /// Returns the created artifact record. Returns 400 if the version or
+    /// range syntax can't be parsed.
+    ///
+    /// `POST /artifacts/{version}/{artifact_type}/{platform}`
+    pub async fn artifacts(
+        &self,
+        version: &str,
+        artifact_type: &str,
+        platform: impl ::std::convert::Into<RegisterArtifactRequest>,
+    ) -> crate::Result<Artifact> {
+        let request: RegisterArtifactRequest = platform.into();
+        crate::segments(
+            "/artifacts/{version}/{artifact_type}/{platform}",
+            &[
+                ("version", version),
+                ("artifact_type", artifact_type),
+                ("platform", &request.platform),
+            ],
+        )?;
+        self.call_payload_json(
+                ::http::Method::POST,
+                &crate::query(
+                    &format!(
+                        "/artifacts/{}/{}/{}", version, artifact_type, request.platform
+                    ),
+                    &[
+                        (
+                            "group",
+                            request
+                                .group
+                                .as_ref()
+                                .map(::std::string::ToString::to_string),
+                        ),
+                        (
+                            "digest",
+                            request
+                                .digest
+                                .as_ref()
+                                .map(::std::string::ToString::to_string),
+                        ),
+                    ],
+                ),
+                request.body.map(::bytes::Bytes::from),
+                "text/plain",
+            )
+            .await
+    }
+    /// Register the backup types this server can run.
+    ///
+    /// Declares the set of backup types the calling device is able to execute on
+    /// its server. Types not seen before are added to the server's capability set,
+    /// starting out enabled or disabled according to the fleet-wide default for
+    /// that type (disabled if the type has no default configured). Types already
+    /// registered keep whatever enabled/disabled state an operator has set for
+    /// them, so re-registering on every startup is safe and expected.
+    ///
+    /// Only types that are registered here (and enabled) can later be issued
+    /// credentials via `POST /backup-credentials`, outside of explicit
+    /// operator-requested runs.
+    ///
+    /// Errors: 412 when the calling device is not bound to a live server; 409 when
+    /// the server is not in a group.
+    ///
+    /// `POST /backup-capabilities`
+    pub async fn backup_capabilities(
+        &self,
+        body: &BackupCapabilitiesArgs,
+    ) -> crate::Result<()> {
+        self.call_empty(::http::Method::POST, "/backup-capabilities", Some(body)).await
+    }
+    /// Mint short-lived S3 credentials for a backup or restore run.
+    ///
+    /// Issues temporary AWS credentials scoped to the backup storage of the
+    /// calling server's group, in the `credential_process` output format. With
+    /// `purpose: backup` the credentials can upload and manage backup data but
+    /// cannot destroy existing backups; with `purpose: restore` they are strictly
+    /// read-only. They expire after at most one hour, so request a fresh set for
+    /// each run rather than caching them. Every issuance is recorded for audit.
+    ///
+    /// The storage coordinates the credentials apply to (bucket, prefix, region)
+    /// come from `GET /backup-target`.
+    ///
+    /// Errors: 409 when the server is not in a group, when the group's backup
+    /// configuration is not ready, when a `backup` type is neither an enabled
+    /// capability of this server nor the subject of a pending "backup now" request,
+    /// or when a `restore` is requested but the server's restore window is not
+    /// open; 412 when the device is not bound to a live server; 502 when the
+    /// credential issuer is unavailable or not configured.
+    ///
+    /// `POST /backup-credentials`
+    pub async fn backup_credentials(
+        &self,
+        body: &BackupCredentialsArgs,
+    ) -> crate::Result<CredentialProcessOutput> {
+        self.call_json(::http::Method::POST, "/backup-credentials", Some(body)).await
+    }
+    /// Report progress for a run that is still in flight.
+    ///
+    /// Optional throughout: a run that never reports progress is recorded and
+    /// displayed exactly as it is today. Reporting it lets Canopy show how far a
+    /// long-running backup has got, at what rate, and when it last heard from the
+    /// device — which for a multi-hour backup is the difference between "running"
+    /// and "running, and moving".
+    ///
+    /// **Every counter is cumulative from the start of the run**, not an interval
+    /// delta. Send totals-so-far each time. A dropped or repeated report then costs
+    /// only resolution, never the accuracy of a total, and the last report Canopy
+    /// received can stand in for a figure the final report omits. Omit any counter
+    /// you do not measure rather than sending zero.
+    ///
+    /// Canopy timestamps each report on receipt, so no clock agreement is needed —
+    /// except for `snapshot_taken_at`, which is necessarily the device's own claim
+    /// about its filesystem.
+    ///
+    /// Unlike `POST /backup-credentials`, this does not require the group's backup
+    /// configuration to be ready or the type to be an enabled capability: it
+    /// describes a run already under way, and refusing it would blind Canopy exactly
+    /// when something is misconfigured.
+    ///
+    /// A refused report is never a reason to abandon a run — this is telemetry.
+    /// Reporting progress for a run that has already been reported complete is
+    /// accepted rather than refused, so a report racing the completion is not an
+    /// error.
+    ///
+    /// Errors: 412 when the calling device is not bound to a live server; 409 when
+    /// the server is not in a group; 429 when reporting faster than Canopy accepts.
+    ///
+    /// `POST /backup-progress`
+    pub async fn backup_progress(&self, body: &ProgressArgs) -> crate::Result<()> {
+        self.call_empty(::http::Method::POST, "/backup-progress", Some(body)).await
+    }
+    /// Report the outcome of a backup or restore run.
+    ///
+    /// Records the run against the calling server and its group. Send one report
+    /// per run, on success and on failure alike. Reporting also clears any pending
+    /// operator-requested run for the same type and purpose — regardless of
+    /// outcome, since an operator request is for one attempt — so the server's
+    /// status responses stop asking for it (see the `backup_now` field of the
+    /// status-push response).
+    ///
+    /// Errors: 409 when the server is not in a group, or when the `run_id` has
+    /// already been reported; 412 when the device is not bound to a live server.
+    ///
+    /// `POST /backup-report`
+    pub async fn backup_report(&self, body: &ReportArgs) -> crate::Result<()> {
+        self.call_empty(::http::Method::POST, "/backup-report", Some(body)).await
+    }
+    /// Fetch the backup storage target for this server's group.
+    ///
+    /// Returns the bucket, prefix, region, and repository passphrase the device
+    /// needs to connect to its group's backup repository. Call it on every run
+    /// rather than caching the result, as the target can change. S3 credentials
+    /// are obtained separately via `POST /backup-credentials`.
+    ///
+    /// Errors: 409 when the server is not in a group or the group's backup
+    /// configuration is not ready; 412 when the device is not bound to a live
+    /// server; 502 when the passphrase store is unavailable or not configured.
+    ///
+    /// `GET /backup-target`
+    pub async fn backup_target(&self) -> crate::Result<BackupTarget> {
+        self.call_json(::http::Method::GET, "/backup-target", None::<&()>).await
+    }
+    /// List all current bestool SQL snippets.
+    ///
+    /// Returns the library of named SQL snippets that devices running bestool
+    /// fetch and run, keyed by snippet name. Only the current version of each
+    /// snippet is included: if a snippet has been superseded by a newer one
+    /// under the same name, only the newer version is returned, and
+    /// soft-deleted snippets are omitted entirely. This endpoint does not
+    /// require device authentication.
+    ///
+    /// `GET /bestool/snippets`
+    pub async fn bestool_snippets(
+        &self,
+    ) -> crate::Result<
+        ::std::collections::HashMap<::std::string::String, SnippetResponse>,
+    > {
+        self.call_json(::http::Method::GET, "/bestool/snippets", None::<&()>).await
+    }
+    /// Ask for a certificate, and collect it once there is one.
+    ///
+    /// The same call does both, and is safe to repeat: a name and key Canopy already
+    /// holds a certificate for is answered from what it holds rather than ordering
+    /// again, so a server that lost its local copy costs the authority nothing. A
+    /// request naming a different key opens a new order.
+    ///
+    /// Proving control of a name through DNS takes far longer than any client waits
+    /// mid-handshake, so a first request records the order and answers `pending`;
+    /// call again to collect. A server is expected to hold a certificate before it
+    /// needs one rather than to obtain one while a client waits.
+    ///
+    /// `POST /certificates/request`
+    pub async fn certificates_request(
+        &self,
+        body: &RequestCertificateArgs,
+    ) -> crate::Result<CertificateResponse> {
+        self.call_json(::http::Method::POST, "/certificates/request", Some(body)).await
+    }
+    /// Report the calling machine's own identity.
+    ///
+    /// Resolves the caller from its certificate and returns the box it is enrolled
+    /// as, together with the applications Canopy holds for that box. A machine
+    /// authenticates entirely from its certificate, so it never needs these ids to
+    /// make calls; this endpoint lets one that has lost track of them recover them.
+    ///
+    /// An identity belongs to at most one machine, so the answer is never
+    /// ambiguous — unlike `GET /servers/self`, which asks which *application* the
+    /// caller is and cannot answer for a box running more than one.
+    ///
+    /// - **401**: no client certificate, or one that matches no known identity.
+    /// - **412**: the identity is registered but is not enrolled as a machine.
+    ///
+    /// `GET /machines/self`
+    pub async fn machines_self(&self) -> crate::Result<MachineSelfResponse> {
+        self.call_json(::http::Method::GET, "/machines/self", None::<&()>).await
+    }
+    /// What this server may act on, and what it already holds.
+    ///
+    /// Answers the boundary rather than making an agent discover it by being
+    /// refused: the domains its group controls, the grants it holds, whether it is
+    /// paused, and the names and certificates it already has. Enough to request a
+    /// certificate before anything asks for one, and to renew before expiry.
+    ///
+    /// A server with no grants, or whose group controls no domain, gets an empty
+    /// answer rather than an error — asking what one may do is not a privileged act.
+    /// The same content rides on the response to a status push.
+    ///
+    /// `GET /names/entitlements`
+    pub async fn names_entitlements(&self) -> crate::Result<Entitlements> {
+        self.call_json(::http::Method::GET, "/names/entitlements", None::<&()>).await
+    }
+    /// Register the addresses a name should resolve to.
+    ///
+    /// Replaces whatever addresses were registered for the name; an empty list
+    /// withdraws it. Canopy publishes what it is told — it does not verify that an
+    /// address is really this server's, the grant being the trust boundary.
+    ///
+    /// Publishing happens in the background, so the response says what Canopy will
+    /// publish and what it has published so far rather than waiting for the zone.
+    ///
+    /// `POST /names/register`
+    pub async fn names_register(
+        &self,
+        body: &RegisterNameArgs,
+    ) -> crate::Result<RegisteredName> {
+        self.call_json(::http::Method::POST, "/names/register", Some(body)).await
+    }
+    /// Register the restore intents this device can satisfy.
+    ///
+    /// Declares the restore intents the calling device supports, replacing any
+    /// previously advertised set. Only worklist entries whose intent is currently
+    /// advertised are dispatched to this device via `GET /restore-worklist`, so
+    /// register on startup and whenever the supported set changes.
+    ///
+    /// `POST /restore-capabilities`
+    pub async fn restore_capabilities(
+        &self,
+        body: &RestoreCapabilitiesArgs,
+    ) -> crate::Result<()> {
+        self.call_empty(::http::Method::POST, "/restore-capabilities", Some(body)).await
+    }
+    /// Mint read-only credentials for a group's backup repository.
+    ///
+    /// Issues temporary AWS credentials — always strictly read-only, scoped to the
+    /// group's backup storage — together with the repository passphrase, so the
+    /// device can read the snapshot named in a worklist entry. Credentials expire
+    /// after at most one hour; request a fresh set per restore rather than caching
+    /// them. Every issuance is recorded for audit.
+    ///
+    /// The device must hold an enabled restore declaration covering the requested
+    /// group and type (i.e. the pair must appear in its worklist configuration);
+    /// otherwise the request is rejected with 403.
+    ///
+    /// Errors: 403 when no enabled declaration authorizes this group and type;
+    /// 409 when the group has no ready backup configuration; 502 when the
+    /// credential issuer or the passphrase store is unavailable or not configured.
+    ///
+    /// `POST /restore-credentials`
+    pub async fn restore_credentials(
+        &self,
+        body: &RestoreCredentialsArgs,
+    ) -> crate::Result<RestoreCredentials> {
+        self.call_json(::http::Method::POST, "/restore-credentials", Some(body)).await
+    }
+    /// Report the outcome of a restore attempt and the replica's health.
+    ///
+    /// Records a verification report for a restore the device performed from its
+    /// worklist. Send one report per attempt, on success and on failure alike. A
+    /// report with a `success` outcome and `replica_healthy: true` marks the
+    /// snapshot as verified; for run-once intents this is what removes the entry
+    /// from `GET /restore-worklist` until a newer snapshot appears.
+    ///
+    /// Authorization matches `POST /restore-credentials`: the device must hold an
+    /// enabled restore declaration covering the reported group and type,
+    /// otherwise the request is rejected with 403.
+    ///
+    /// The report names the declaration it is about, and that declaration must
+    /// still exist and belong to the calling consumer. A replica nothing declares
+    /// any more is not one Canopy tracks, so a report naming a retired declaration
+    /// is refused rather than recorded against a replica that could never recover.
+    ///
+    /// `POST /restore-verification`
+    pub async fn restore_verification(
+        &self,
+        body: &VerificationArgs,
+    ) -> crate::Result<()> {
+        self.call_empty(::http::Method::POST, "/restore-verification", Some(body)).await
+    }
+    /// Fetch the full set of replicas this device should maintain.
+    ///
+    /// Returns the device's complete desired state, computed fresh on every call:
+    /// each enabled restore declaration whose intent this device currently
+    /// advertises, expanded into one entry per server it covers. A group-wide
+    /// declaration expands to every live server in its group; a server-scoped
+    /// declaration yields a single entry and takes precedence over a group-wide
+    /// one covering the same server, type, and intent. Entries for groups whose
+    /// backup configuration is not ready are omitted, and entries for run-once
+    /// intents disappear once the latest snapshot has a healthy verification
+    /// report, reappearing when a newer snapshot exists.
+    ///
+    /// An empty array means there is nothing to do. Poll this endpoint and
+    /// reconcile: create or refresh the replicas listed, and tear down any the
+    /// device is maintaining that no longer appear.
+    ///
+    /// `GET /restore-worklist`
+    pub async fn restore_worklist(
+        &self,
+    ) -> crate::Result<::std::vec::Vec<WorklistEntry>> {
+        self.call_json(::http::Method::GET, "/restore-worklist", None::<&()>).await
+    }
+    /// List publicly-listed central applications.
+    ///
+    /// Returns every central server that has both a public display name and a
+    /// reachable host configured, ordered by environment tier (production
+    /// first, then clone, demo, test, dev) and then by name. Used by clients
+    /// to let a user pick which server to connect to.
+    ///
+    /// `GET /servers`
+    pub async fn servers(&self) -> crate::Result<::std::vec::Vec<PublicServer>> {
+        self.call_json(::http::Method::GET, "/servers", None::<&()>).await
+    }
+    /// Start device enrollment against a machine.
+    ///
+    /// Validates the enrollment token against the given machine and, if valid,
+    /// issues a short-lived (5 minute) signed challenge bound to the machine
+    /// ID, the token, and the caller's public key. The device must sign this
+    /// challenge and submit it to the completion endpoint to finish
+    /// enrollment; the token itself is validated here but not yet consumed.
+    ///
+    /// This endpoint is rate-limited per source IP and per target machine; a
+    /// tripped limit returns 429. Any other failure — an unknown or archived
+    /// machine, or an invalid or expired token — is surfaced as a generic 403,
+    /// deliberately not distinguishing which check failed.
+    ///
+    /// `POST /servers/register/begin`
+    pub async fn servers_register_begin(
+        &self,
+        body: &BeginArgs,
+    ) -> crate::Result<BeginResponse> {
+        self.call_json(::http::Method::POST, "/servers/register/begin", Some(body)).await
+    }
+    /// Complete device enrollment by presenting a signed challenge.
+    ///
+    /// Verifies the signature over the challenge transcript using the public
+    /// key supplied here, then binds the device to the machine: an existing
+    /// device re-enrolling with the same key is reused as-is; a device
+    /// re-enrolling with a different key replaces the machine's previous
+    /// device (revoking that device's access); otherwise a new device
+    /// identity is created. On success the device is granted the machine
+    /// role, the enrollment token is consumed, and the machine is marked as
+    /// registered.
+    ///
+    /// Enrollment is refused if the presented public key is already bound to
+    /// a different live machine. Like the start-enrollment endpoint, this one
+    /// is rate-limited per source IP and per target machine (429 on a tripped
+    /// limit) and reports every other kind of failure as a generic 403.
+    ///
+    /// `POST /servers/register/complete`
+    pub async fn servers_register_complete(
+        &self,
+        body: &CompleteArgs,
+    ) -> crate::Result<CompleteResponse> {
+        self.call_json(::http::Method::POST, "/servers/register/complete", Some(body))
+            .await
+    }
+    /// Report the calling device's own identity.
+    ///
+    /// Deprecated in favour of `GET /machines/self`, which says what runs on the box
+    /// as well as which box it is.
+    ///
+    /// Resolves the caller from its device certificate and returns the box it is
+    /// enrolled as together with its own device ID — the same pair returned when the
+    /// device completed enrollment. A device authenticates entirely from its
+    /// certificate, so it never needs these IDs to make calls; this endpoint lets
+    /// one that has lost track of them recover them.
+    ///
+    /// The id answered is the box's, not any workload's: an identity belongs to a
+    /// box, so the answer stays the same however many applications run on it.
+    ///
+    /// - **401**: the request has no client certificate, or the certificate
+    ///   doesn't match a known device.
+    /// - **409**: retained for callers that handle it; no longer raised, since an
+    ///   identity is enrolled as at most one box.
+    /// - **412**: the device is registered but has not yet been attached to a
+    ///   box.
+    ///
+    /// `GET /servers/self`
+    pub async fn servers_self(&self) -> crate::Result<SelfResponse> {
+        self.call_json(::http::Method::GET, "/servers/self", None::<&()>).await
+    }
+    /// Submit a status heartbeat for a machine.
+    ///
+    /// `server_id` in the path is the id the agent was enrolled with, which
+    /// identifies the machine it runs on. Canopy works out which application on
+    /// that machine the push describes from the push itself.
+    ///
+    /// Records a periodic status push against that machine: overall
+    /// self-reported health, a per-check breakdown, and any free-form extra
+    /// data. Machine-subject checks and detail file against the machine and the
+    /// rest against its application. Each failed or warning check opens (or keeps
+    /// open) an issue at that check's operator-configured severity, and each
+    /// passed check closes any issue it previously opened; the application's
+    /// tracked software version is also updated from the payload.
+    ///
+    /// The calling device must be the one enrolled for this exact machine (or
+    /// hold the admin role). The response carries only return-path
+    /// instructions: a `backup_now` list of backup types the server should
+    /// back up immediately — devices should treat a non-empty list as a
+    /// prompt to run those backups and report them afterwards — a
+    /// `check_severities` map describing how canopy classifies each known
+    /// healthcheck for this server (`skip`/`warn`/`fail`), and the server's
+    /// effective `tags` (as served by `GET /tags`). The stored status record
+    /// is not echoed back.
+    ///
+    /// `POST /status/{server_id}`
+    pub async fn status(
+        &self,
+        server_id: &str,
+        body: &StatusPayload,
+    ) -> crate::Result<StatusResponse> {
+        crate::segments("/status/{server_id}", &[("server_id", server_id)])?;
+        self.call_json(
+                ::http::Method::POST,
+                &format!("/status/{}", server_id),
+                Some(body),
+            )
+            .await
+    }
+    /// Fetch the effective healthcheck severity mapping for a server.
+    ///
+    /// Returns, for every healthcheck the `alertd` source reports, how that
+    /// check is handled for this server: `skip` (the check is silenced for
+    /// this server — at server or group scope — or its policy ceiling means it
+    /// never alerts), `warn` (graded at most a warning), or `fail` (failures
+    /// count as failures). Keys are check names as reported in
+    /// `health[].check` on status pushes. Only the static policy ceiling is
+    /// reflected; operator-defined conditional rules are evaluated per push
+    /// and not included here. The same mapping also rides along every
+    /// status-push response as `check_severities`, scoped to the pushing
+    /// source.
+    ///
+    /// `server_id` in the path is the id the agent was enrolled with, which
+    /// identifies the machine it runs on.
+    ///
+    /// The calling device must be the one enrolled for this exact machine (or
+    /// hold the admin role).
+    ///
+    /// `GET /status/{server_id}/check-severities`
+    pub async fn status_check_severities(
+        &self,
+        server_id: &str,
+    ) -> crate::Result<
+        ::std::collections::HashMap<::std::string::String, CheckSeverity>,
+    > {
+        crate::segments(
+            "/status/{server_id}/check-severities",
+            &[("server_id", server_id)],
+        )?;
+        self.call_json(
+                ::http::Method::GET,
+                &format!("/status/{}/check-severities", server_id),
+                None::<&()>,
+            )
+            .await
+    }
+    /// Get the tags for the calling device's own server.
+    ///
+    /// Returns the effective set of tags for the server the calling device is
+    /// registered as: any tags set on the server itself, overlaid onto any tags
+    /// inherited from its server group (a tag set on the server takes precedence
+    /// over a group tag with the same key). If the server isn't in a group,
+    /// this returns just its own tags.
+    ///
+    /// The result also includes a few read-only, synthetic tags describing the
+    /// server, under the reserved `canopy:` key prefix: `canopy:kind`,
+    /// `canopy:rank` (if the server has one set), and `canopy:group-id` /
+    /// `canopy:group-name` (if the server belongs to a group). Operators cannot
+    /// set tags under that prefix, so these never collide with tags you set
+    /// yourself.
+    ///
+    /// When the server belongs to a group, the effective `billing.*` labels are
+    /// also included, matching the labels canopy attributes to cloud resources:
+    /// `billing.product`, `billing.deployment`, and `billing.stage` (the last
+    /// derived from *this* server's own rank, and omitted when the server has no
+    /// rank). The stage is per-server, not the group's highest rank, so a `clone`
+    /// server reports `billing.stage=clone` rather than the group's `prod`.
+    ///
+    /// These are only defaults: a stored `billing.*` tag is honoured over the
+    /// computed value — the server's own tag first, then the group's. So an
+    /// operator can pin any billing label on a specific server or the whole group.
+    ///
+    /// - **401**: the request has no client certificate, or the certificate
+    ///   doesn't match a known device.
+    /// - **409**: the calling device is attached to more than one server, which
+    ///   should not normally happen; contact support if you see this.
+    /// - **412**: the device is registered but has not yet been attached to a
+    ///   server.
+    ///
+    /// `GET /tags`
+    pub async fn tags(&self) -> crate::Result<TagMap> {
+        self.call_json(::http::Method::GET, "/tags", None::<&()>).await
+    }
+    /// List published, ready-to-serve versions.
+    ///
+    /// Returns every version currently in the published state, excluding any
+    /// version a recorded known-issue range still covers (whether that issue
+    /// is still open or has since been fixed in a later patch). Ordered
+    /// newest first.
+    ///
+    /// `GET /versions`
+    pub async fn get_versions(&self) -> crate::Result<::std::vec::Vec<Version>> {
+        self.call_json(::http::Method::GET, "/versions", None::<&()>).await
+    }
+    /// Check for available updates from a given version.
+    ///
+    /// The path parameter is the caller's currently-installed exact version.
+    /// For each later minor release line within the same major version,
+    /// returns the latest published version that hasn't been excluded by a
+    /// recorded known-issue range — falling back to an older ready patch
+    /// within that same minor line rather than dropping the line entirely, if
+    /// the newest patch isn't ready. Clients use this to discover and offer
+    /// available updates.
+    ///
+    /// `GET /versions/update-for/{version}`
+    pub async fn versions_update_for(
+        &self,
+        version: &str,
+    ) -> crate::Result<::std::vec::Vec<ViewVersion>> {
+        crate::segments("/versions/update-for/{version}", &[("version", version)])?;
+        self.call_json(
+                ::http::Method::GET,
+                &format!("/versions/update-for/{}", version),
+                None::<&()>,
+            )
+            .await
+    }
+    /// Yank a version.
+    ///
+    /// Requires a device certificate with the admin role. Marks the given
+    /// exact version as yanked, hiding it from listings, update checks, and
+    /// artifact lookups without deleting its history.
+    ///
+    /// `DELETE /versions/{version}`
+    pub async fn delete_versions(&self, version: &str) -> crate::Result<()> {
+        crate::segments("/versions/{version}", &[("version", version)])?;
+        self.call_empty(
+                ::http::Method::DELETE,
+                &format!("/versions/{}", version),
+                None::<&()>,
+            )
+            .await
+    }
+    /// Publish a version with its changelog.
+    ///
+    /// Requires a device certificate with the releaser role (or admin). The
+    /// path parameter is the exact version being published (e.g. `2.10.5`);
+    /// the request body is the changelog for that version, as up to 1 MiB of
+    /// markdown text.
+    ///
+    /// If the version already exists in the draft state — for example
+    /// because an artifact was registered against it before its changelog
+    /// was written — the draft is published in place, with this changelog
+    /// replacing whatever it had before. Otherwise a new version is created
+    /// directly in the published state. Publishing a version that already
+    /// exists and is not a draft (already published, or yanked) fails.
+    ///
+    /// Returns the resulting version record.
+    ///
+    /// `POST /versions/{version}`
+    pub async fn post_versions(
+        &self,
+        version: impl ::std::convert::Into<CreateVersionRequest>,
+    ) -> crate::Result<Version> {
+        let request: CreateVersionRequest = version.into();
+        crate::segments("/versions/{version}", &[("version", &request.version)])?;
+        self.call_payload_json(
+                ::http::Method::POST,
+                &format!("/versions/{}", request.version),
+                request.body.map(::bytes::Bytes::from),
+                "text/plain",
+            )
+            .await
+    }
+    /// List the artifacts available for a version or version range.
+    ///
+    /// The path parameter accepts either an exact version or a semver range
+    /// pattern (e.g. `2.10.x`, `^2.10.0`). It resolves to the latest
+    /// published, ready version satisfying the input, then returns that
+    /// version's artifacts — both ones registered against the exact version
+    /// and ones registered against a range pattern that covers it. Returns
+    /// 404 if no published, ready version matches.
+    ///
+    /// `GET /versions/{version}/artifacts`
+    pub async fn versions_artifacts(
+        &self,
+        version: &str,
+    ) -> crate::Result<::std::vec::Vec<Artifact>> {
+        crate::segments("/versions/{version}/artifacts", &[("version", version)])?;
+        self.call_json(
+                ::http::Method::GET,
+                &format!("/versions/{}/artifacts", version),
+                None::<&()>,
+            )
+            .await
+    }
 }

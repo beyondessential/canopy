@@ -99,6 +99,11 @@ impl<T: CanopyTransport> CanopyClient<T> {
 
 	/// Send a request whose body is bytes the caller holds, discarding the
 	/// response body.
+	///
+	/// Whether anything calls this is the document's to decide: it is reached
+	/// when an operation carries a payload body and declares no response, and
+	/// none does today. Remove the expectation when one does.
+	#[expect(dead_code, reason = "no operation in the document has this shape yet")]
 	pub(crate) async fn call_payload_empty(
 		&self,
 		method: http::Method,
