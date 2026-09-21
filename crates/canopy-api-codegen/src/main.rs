@@ -534,6 +534,27 @@ fn methods(spec: &Value, schema_names: &BTreeSet<String>) -> Result<String, Stri
 				(None, Some(envelope))
 			};
 
+			// The method names its request argument `body` or `request`; a path
+			// parameter taking that name would be shadowed by it, and the path
+			// would be built from the wrong value.
+			let mut reserved = Vec::new();
+			if body.is_some() {
+				reserved.push("body");
+			}
+			if envelope.is_some() {
+				reserved.push("request");
+			}
+			if let Some(clash) = params
+				.iter()
+				.find(|param| reserved.contains(&param.as_str()))
+			{
+				return Err(format!(
+					"the path parameter {clash} of {} {path} has the name this method gives the \
+					 request it carries, which would shadow it: rename the parameter",
+					verb.to_uppercase()
+				));
+			}
+
 			operations.push(Operation {
 				name: path
 					.split('/')
@@ -1324,6 +1345,20 @@ version = \"not-a-real-key\"
 			out.contains("impl<T: ::std::convert::AsRef<str> + ?Sized> ::std::convert::From<&T>"),
 			"the conversion is what keeps a published call site compiling\n{out}"
 		);
+	}
+
+	#[test]
+	fn a_path_parameter_shadowing_the_request_argument_is_refused() {
+		let spec = spec_with(json!({
+			"/widgets/{request}": {
+				"post": {
+					"operationId": "make_widget",
+					"parameters": [{"name": "shape", "in": "query", "schema": {"type": "string"}}],
+				},
+			},
+		}));
+		let err = methods(&spec, &BTreeSet::new()).unwrap_err();
+		assert!(err.contains("would shadow it"), "{err}");
 	}
 
 	#[test]

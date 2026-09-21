@@ -33,6 +33,7 @@ parameters, and that doing so left every published method's call sites working.
 - [x] A query parameter whose schema cannot be typed fails generation
 - [x] A ledger entry naming an operation the document no longer carries fails generation, rather than reshaping a published method (verifies spec: APIC)
 - [x] An envelope whose name collides with a schema in the document fails generation
+- [x] A path parameter named after the request argument fails generation, rather than shadowing it and building the path from the wrong value
 
 ## Shape of a method
 
