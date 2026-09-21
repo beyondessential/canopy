@@ -31,6 +31,17 @@ pub enum Error {
 		source: serde_json::Error,
 	},
 
+	/// A value placed in the path would have changed which request is made.
+	#[error("the {name} of {path} is {value:?}, which would change which request this is")]
+	PathValue {
+		/// Template of the path that was being built.
+		path: String,
+		/// Name of the path parameter the value was given for.
+		name: String,
+		/// The value, as it was given.
+		value: String,
+	},
+
 	/// Building the HTTP request failed.
 	#[error("building the request for {path}: {source}")]
 	Request {

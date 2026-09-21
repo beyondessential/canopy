@@ -49,3 +49,7 @@ The reserved tags Canopy returns to a reporter are such a surface (see [STA](../
 
 A key that has been served is kept and kept populated, on the same terms as a schema property, because a consumer reading it cannot tell a removed key from an absent value.
 Where the key's meaning has moved, its value is derived from wherever that meaning now lives rather than dropped.
+
+A parameter widened to accept anything convertible into a type is judged on the signature the crate declares, not on what a call site can still pass, so a widening that narrows what the parameter accepts satisfies the definition and breaks consumers anyway.
+Deref coercion does not reach through a generic: a conversion declared from `&str` alone takes a literal and refuses the `&String` a call site more often holds.
+A widened parameter therefore accepts everything the type it replaced accepted, which is what makes the widening compatible, and the definition does not ask for it (see [APIC](api-client-crate.md)).

@@ -73,6 +73,74 @@ impl<T: CanopyTransport> CanopyClient<T> {
 		self.call(method, path, body).await.map(|_| ())
 	}
 
+	/// Send a request whose body is bytes the caller holds rather than JSON, and
+	/// parse a JSON response body into `R`.
+	///
+	/// Reached only by the generated methods, which are in this crate: a consumer
+	/// calls the method for the operation it wants. Keeping it in the crate is
+	/// what lets the media type stay a `&'static str` — the header value is built
+	/// from it without checking, which is safe for the handful of media types the
+	/// generator emits and would not be for a string a consumer composed.
+	pub(crate) async fn call_payload_json<R: DeserializeOwned>(
+		&self,
+		method: http::Method,
+		path: &str,
+		payload: Option<Bytes>,
+		content_type: &'static str,
+	) -> Result<R> {
+		let response = self
+			.call_payload(method, path, payload, content_type)
+			.await?;
+		serde_json::from_slice(response.body()).map_err(|source| Error::Decode {
+			path: path.to_owned(),
+			source,
+		})
+	}
+
+	/// Send a request whose body is bytes the caller holds, discarding the
+	/// response body.
+	///
+	/// Whether anything calls this is the document's to decide: it is reached
+	/// when an operation carries a payload body and declares no response, and
+	/// none does today. Remove the expectation when one does.
+	#[expect(dead_code, reason = "no operation in the document has this shape yet")]
+	pub(crate) async fn call_payload_empty(
+		&self,
+		method: http::Method,
+		path: &str,
+		payload: Option<Bytes>,
+		content_type: &'static str,
+	) -> Result<()> {
+		self.call_payload(method, path, payload, content_type)
+			.await
+			.map(|_| ())
+	}
+
+	/// Send `payload` as the request body, under `content_type`.
+	///
+	/// The bytes go up as they are, rather than gzipped like a JSON body: canopy
+	/// records the digest of what it receives, so leaving them alone keeps what
+	/// canopy hashes identical to what the caller passed, without depending on
+	/// anything in between to undo a compression first.
+	async fn call_payload(
+		&self,
+		method: http::Method,
+		path: &str,
+		payload: Option<Bytes>,
+		content_type: &'static str,
+	) -> Result<http::Response<Bytes>> {
+		// Whether there is a body at all is settled where the method is
+		// generated, not guessed from the bytes: a method whose envelope carries
+		// no body sends none and declares no content type, which is what its
+		// published signature always sent, while a body that is present and empty
+		// is still a body and still says what it is.
+		let (payload, content_type) = match payload {
+			Some(payload) => (payload, Some(http::HeaderValue::from_static(content_type))),
+			None => (Bytes::new(), None),
+		};
+		self.send(method, path, payload, content_type, None).await
+	}
+
 	/// Send a request, returning the response only if the status is a success.
 	async fn call<B: Serialize + ?Sized>(
 		&self,
@@ -80,27 +148,50 @@ impl<T: CanopyTransport> CanopyClient<T> {
 		path: &str,
 		body: Option<&B>,
 	) -> Result<http::Response<Bytes>> {
-		let mut request = http::Request::builder().method(method).uri(path);
-
-		let payload = match body {
-			None => Bytes::new(),
+		let (payload, content_type, content_encoding) = match body {
+			None => (Bytes::new(), None, None),
 			Some(body) => {
 				let json = serde_json::to_vec(body).map_err(|source| Error::Encode {
 					path: path.to_owned(),
 					source,
 				})?;
-				request = request.header(http::header::CONTENT_TYPE, "application/json");
+				let content_type = Some(http::HeaderValue::from_static("application/json"));
 				if json.len() >= COMPRESS_FROM {
-					request = request.header(http::header::CONTENT_ENCODING, "gzip");
-					Bytes::from(gzip(&json).map_err(|source| Error::Compress {
+					let gzipped = gzip(&json).map_err(|source| Error::Compress {
 						path: path.to_owned(),
 						source,
-					})?)
+					})?;
+					(
+						Bytes::from(gzipped),
+						content_type,
+						Some(http::HeaderValue::from_static("gzip")),
+					)
 				} else {
-					Bytes::from(json)
+					(Bytes::from(json), content_type, None)
 				}
 			}
 		};
+
+		self.send(method, path, payload, content_type, content_encoding)
+			.await
+	}
+
+	/// Put a request on the wire and judge its status.
+	async fn send(
+		&self,
+		method: http::Method,
+		path: &str,
+		payload: Bytes,
+		content_type: Option<http::HeaderValue>,
+		content_encoding: Option<http::HeaderValue>,
+	) -> Result<http::Response<Bytes>> {
+		let mut request = http::Request::builder().method(method).uri(path);
+		if let Some(content_type) = content_type {
+			request = request.header(http::header::CONTENT_TYPE, content_type);
+		}
+		if let Some(content_encoding) = content_encoding {
+			request = request.header(http::header::CONTENT_ENCODING, content_encoding);
+		}
 
 		let request = request.body(payload).map_err(|source| Error::Request {
 			path: path.to_owned(),
