@@ -4055,6 +4055,82 @@ same way a server being upgraded does. `null` for every other intent.*/
     pub type_: ::std::string::String,
 }
 
+/// Request for `POST /artifacts/groups/{group}/{version}/{artifact_type}/{platform}`.
+///
+/// Converts from anything string-like, which is what this method took in place of
+/// `platform` before it carried a request, so a call written against that
+/// signature compiles unchanged and sends what it always sent.
+#[derive(Clone, Debug, ::bon::Builder)]
+#[non_exhaustive]
+pub struct RegisterGroupArtifactRequest {
+	#[builder(into)]
+	pub platform: ::std::string::String,
+	#[builder(into)]
+	pub body: ::std::option::Option<::bytes::Bytes>,
+	pub run: ::std::option::Option<::uuid::Uuid>,
+}
+
+impl<T: ::std::convert::AsRef<str> + ?Sized> ::std::convert::From<&T> for RegisterGroupArtifactRequest {
+	fn from(value: &T) -> Self {
+		Self {
+			platform: value.as_ref().to_owned(),
+			body: ::std::option::Option::None,
+			run: ::std::option::Option::None,
+		}
+	}
+}
+
+/// Request for `POST /artifacts/{version}/{artifact_type}/{platform}`.
+///
+/// Converts from anything string-like, which is what this method took in place of
+/// `platform` before it carried a request, so a call written against that
+/// signature compiles unchanged and sends what it always sent.
+#[derive(Clone, Debug, ::bon::Builder)]
+#[non_exhaustive]
+pub struct RegisterArtifactRequest {
+	#[builder(into)]
+	pub platform: ::std::string::String,
+	#[builder(into)]
+	pub body: ::std::option::Option<::std::string::String>,
+	pub group: ::std::option::Option<::uuid::Uuid>,
+	#[builder(into)]
+	pub digest: ::std::option::Option<::std::string::String>,
+}
+
+impl<T: ::std::convert::AsRef<str> + ?Sized> ::std::convert::From<&T> for RegisterArtifactRequest {
+	fn from(value: &T) -> Self {
+		Self {
+			platform: value.as_ref().to_owned(),
+			body: ::std::option::Option::None,
+			group: ::std::option::Option::None,
+			digest: ::std::option::Option::None,
+		}
+	}
+}
+
+/// Request for `POST /versions/{version}`.
+///
+/// Converts from anything string-like, which is what this method took in place of
+/// `version` before it carried a request, so a call written against that
+/// signature compiles unchanged and sends what it always sent.
+#[derive(Clone, Debug, ::bon::Builder)]
+#[non_exhaustive]
+pub struct CreateVersionRequest {
+	#[builder(into)]
+	pub version: ::std::string::String,
+	#[builder(into)]
+	pub body: ::std::option::Option<::std::string::String>,
+}
+
+impl<T: ::std::convert::AsRef<str> + ?Sized> ::std::convert::From<&T> for CreateVersionRequest {
+	fn from(value: &T) -> Self {
+		Self {
+			version: value.as_ref().to_owned(),
+			body: ::std::option::Option::None,
+		}
+	}
+}
+
 /// One method per operation in canopy's OpenAPI document.
 impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
 	/// List publicly-listed central applications.
@@ -4089,8 +4165,9 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
 	/// Returns the created artifact record.
 	///
 	/// `POST /artifacts/groups/{group}/{version}/{artifact_type}/{platform}`
-	pub async fn artifacts_groups(&self, group: &str, version: &str, artifact_type: &str, platform: &str) -> crate::Result<Artifact> {
-		self.call_json(::http::Method::POST, &format!("/artifacts/groups/{}/{}/{}/{}", group, version, artifact_type, platform), None::<&()>).await
+	pub async fn artifacts_groups(&self, group: &str, version: &str, artifact_type: &str, platform: impl ::std::convert::Into<RegisterGroupArtifactRequest>) -> crate::Result<Artifact> {
+		let request: RegisterGroupArtifactRequest = platform.into();
+		self.call_payload_json(::http::Method::POST, &crate::query(&format!("/artifacts/groups/{}/{}/{}/{}", group, version, artifact_type, request.platform), &[("run", request.run.as_ref().map(::std::string::ToString::to_string))]), request.body.unwrap_or_default(), "application/octet-stream").await
 	}
 	/// Register a downloadable artifact for a version or version range.
 	///
@@ -4112,8 +4189,9 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
 	/// range syntax can't be parsed.
 	///
 	/// `POST /artifacts/{version}/{artifact_type}/{platform}`
-	pub async fn artifacts(&self, version: &str, artifact_type: &str, platform: &str) -> crate::Result<Artifact> {
-		self.call_json(::http::Method::POST, &format!("/artifacts/{}/{}/{}", version, artifact_type, platform), None::<&()>).await
+	pub async fn artifacts(&self, version: &str, artifact_type: &str, platform: impl ::std::convert::Into<RegisterArtifactRequest>) -> crate::Result<Artifact> {
+		let request: RegisterArtifactRequest = platform.into();
+		self.call_payload_json(::http::Method::POST, &crate::query(&format!("/artifacts/{}/{}/{}", version, artifact_type, request.platform), &[("group", request.group.as_ref().map(::std::string::ToString::to_string)), ("digest", request.digest.as_ref().map(::std::string::ToString::to_string))]), request.body.map(::bytes::Bytes::from).unwrap_or_default(), "text/plain").await
 	}
 	/// Register the backup types this server can run.
 	///
@@ -4584,8 +4662,9 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
 	/// Returns the resulting version record.
 	///
 	/// `POST /versions/{version}`
-	pub async fn post_versions(&self, version: &str) -> crate::Result<Version> {
-		self.call_json(::http::Method::POST, &format!("/versions/{}", version), None::<&()>).await
+	pub async fn post_versions(&self, version: impl ::std::convert::Into<CreateVersionRequest>) -> crate::Result<Version> {
+		let request: CreateVersionRequest = version.into();
+		self.call_payload_json(::http::Method::POST, &format!("/versions/{}", request.version), request.body.map(::bytes::Bytes::from).unwrap_or_default(), "text/plain").await
 	}
 	/// List the artifacts available for a version or version range.
 	///

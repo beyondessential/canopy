@@ -47,6 +47,41 @@ pub mod schema {
 	include!("generated.rs");
 }
 
+/// Append the query parameters a generated method was given to `path`.
+///
+/// A parameter given as `None` is left off entirely rather than sent empty,
+/// because canopy tells an absent parameter from an empty one. A method whose
+/// envelope sets none of its parameters therefore sends the bare path, exactly
+/// as it did before the envelope existed.
+pub(crate) fn query(path: &str, params: &[(&str, Option<String>)]) -> String {
+	let mut out = path.to_owned();
+	let mut first = true;
+	for (name, value) in params {
+		let Some(value) = value else { continue };
+		out.push(if first { '?' } else { '&' });
+		first = false;
+		out.push_str(name);
+		out.push('=');
+		percent_encode(value, &mut out);
+	}
+	out
+}
+
+/// Percent-encode a query value, keeping RFC 3986's unreserved set as it is.
+///
+/// The value is whatever the caller passed, so it is encoded rather than
+/// trusted: a parameter carrying an `&` would otherwise read as the start of
+/// another one.
+fn percent_encode(value: &str, out: &mut String) {
+	for byte in value.bytes() {
+		if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+			out.push(byte as char);
+		} else {
+			out.push_str(&format!("%{byte:02X}"));
+		}
+	}
+}
+
 pub use async_trait::async_trait;
 pub use client::CanopyClient;
 pub use error::{CanopyHttpError, Error, Result};

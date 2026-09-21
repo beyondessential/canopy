@@ -96,16 +96,25 @@ Against the published 1.0.2 baseline, with the widened `artifacts_groups`:
   `&String`
 - the new capability (bytes plus `run`) is expressible through the builder
 
-## New operations take the clean shape
+## Which operations get an envelope
 
-The absorbed-last-parameter form exists only to preserve three published
-signatures. An operation with no published baseline takes all path parameters
-positionally and one trailing envelope argument, and gets an envelope even when
-it has a single thing to carry, so it can gain parameters later without ever
-needing this treatment.
+An operation takes an envelope when it has a query parameter or a body the
+document declares as something other than JSON. An operation with only a JSON
+body keeps that body as its own argument, which is the shape all twelve such
+methods were published with, so they are preserved by the rule rather than by
+being listed.
 
-Which three methods are grandfathered is an explicit list in the generator: the
+The absorbed-last-parameter form on top of that exists only to preserve the three
+published signatures that could not carry what their operation needs. An
+operation with no published method takes its envelope as a trailing argument.
+Which three are grandfathered is an explicit list in the generator: the
 compatibility ledger, small and greppable, with `cargo-semver-checks` as backstop.
+
+This is narrower than "every new operation gets an envelope", which would need
+the twelve JSON methods listed as legacy to keep their shape. The cost is that a
+future JSON-bodied operation which later gains a query parameter has to be
+widened the same way the three were — a mechanism that now exists and is tested,
+rather than one that would have to be invented then.
 
 ## The guardrail
 
@@ -130,12 +139,12 @@ rather than drop a shape it cannot express.
 
 ## Build steps
 
-- [ ] Teach the generator `text/plain` bodies (`&str`) alongside octet-stream (`Bytes`)
-- [ ] Type query parameters from the document's schema rather than as `&str`
-- [ ] Generate a per-operation envelope carrying body and query parameters, with the bon/`non_exhaustive` treatment and the single `AsRef<str>` blanket conversion
-- [ ] Widen the three grandfathered methods' last parameter, driven by an explicit compat list
-- [ ] Emit the clean trailing-envelope shape for every other operation
-- [ ] Hard-error on any body or parameter shape the generator cannot express
+- [x] Teach the generator `text/plain` bodies (`&str`) alongside octet-stream (`Bytes`)
+- [x] Type query parameters from the document's schema rather than as `&str`
+- [x] Generate a per-operation envelope carrying body and query parameters, with the bon/`non_exhaustive` treatment and the single `AsRef<str>` blanket conversion
+- [x] Widen the three grandfathered methods' last parameter, driven by an explicit compat list
+- [x] Emit the clean trailing-envelope shape for every other operation
+- [x] Hard-error on any body or parameter shape the generator cannot express
 - [ ] `just gen-openapi && just gen-api`, commit the regenerated document and client
 - [ ] Confirm `just semver-checks` passes against the published baseline, and `just check-generated` is clean
-- [ ] Update the two platform specs above
+- [x] Update the two platform specs above

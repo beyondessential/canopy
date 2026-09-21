@@ -73,6 +73,62 @@ impl<T: CanopyTransport> CanopyClient<T> {
 		self.call(method, path, body).await.map(|_| ())
 	}
 
+	/// Send a request whose body is bytes the caller holds rather than JSON, and
+	/// parse a JSON response body into `R`.
+	///
+	/// Used by the generated methods for operations whose body the document
+	/// declares as something other than JSON.
+	pub async fn call_payload_json<R: DeserializeOwned>(
+		&self,
+		method: http::Method,
+		path: &str,
+		payload: Bytes,
+		content_type: &'static str,
+	) -> Result<R> {
+		let response = self
+			.call_payload(method, path, payload, content_type)
+			.await?;
+		serde_json::from_slice(response.body()).map_err(|source| Error::Decode {
+			path: path.to_owned(),
+			source,
+		})
+	}
+
+	/// Send a request whose body is bytes the caller holds, discarding the
+	/// response body.
+	pub async fn call_payload_empty(
+		&self,
+		method: http::Method,
+		path: &str,
+		payload: Bytes,
+		content_type: &'static str,
+	) -> Result<()> {
+		self.call_payload(method, path, payload, content_type)
+			.await
+			.map(|_| ())
+	}
+
+	/// Send `payload` as the request body, under `content_type`.
+	///
+	/// The bytes go up as they are, rather than gzipped like a JSON body: canopy
+	/// records the digest of what it receives, so leaving them alone keeps what
+	/// canopy hashes identical to what the caller passed, without depending on
+	/// anything in between to undo a compression first.
+	async fn call_payload(
+		&self,
+		method: http::Method,
+		path: &str,
+		payload: Bytes,
+		content_type: &'static str,
+	) -> Result<http::Response<Bytes>> {
+		// A request with no body declares no content type, so a generated method
+		// whose envelope carries no payload sends what it sent before the
+		// envelope existed, header for header.
+		let content_type =
+			(!payload.is_empty()).then(|| http::HeaderValue::from_static(content_type));
+		self.send(method, path, payload, content_type, None).await
+	}
+
 	/// Send a request, returning the response only if the status is a success.
 	async fn call<B: Serialize + ?Sized>(
 		&self,
@@ -80,27 +136,50 @@ impl<T: CanopyTransport> CanopyClient<T> {
 		path: &str,
 		body: Option<&B>,
 	) -> Result<http::Response<Bytes>> {
-		let mut request = http::Request::builder().method(method).uri(path);
-
-		let payload = match body {
-			None => Bytes::new(),
+		let (payload, content_type, content_encoding) = match body {
+			None => (Bytes::new(), None, None),
 			Some(body) => {
 				let json = serde_json::to_vec(body).map_err(|source| Error::Encode {
 					path: path.to_owned(),
 					source,
 				})?;
-				request = request.header(http::header::CONTENT_TYPE, "application/json");
+				let content_type = Some(http::HeaderValue::from_static("application/json"));
 				if json.len() >= COMPRESS_FROM {
-					request = request.header(http::header::CONTENT_ENCODING, "gzip");
-					Bytes::from(gzip(&json).map_err(|source| Error::Compress {
+					let gzipped = gzip(&json).map_err(|source| Error::Compress {
 						path: path.to_owned(),
 						source,
-					})?)
+					})?;
+					(
+						Bytes::from(gzipped),
+						content_type,
+						Some(http::HeaderValue::from_static("gzip")),
+					)
 				} else {
-					Bytes::from(json)
+					(Bytes::from(json), content_type, None)
 				}
 			}
 		};
+
+		self.send(method, path, payload, content_type, content_encoding)
+			.await
+	}
+
+	/// Put a request on the wire and judge its status.
+	async fn send(
+		&self,
+		method: http::Method,
+		path: &str,
+		payload: Bytes,
+		content_type: Option<http::HeaderValue>,
+		content_encoding: Option<http::HeaderValue>,
+	) -> Result<http::Response<Bytes>> {
+		let mut request = http::Request::builder().method(method).uri(path);
+		if let Some(content_type) = content_type {
+			request = request.header(http::header::CONTENT_TYPE, content_type);
+		}
+		if let Some(content_encoding) = content_encoding {
+			request = request.header(http::header::CONTENT_ENCODING, content_encoding);
+		}
 
 		let request = request.body(payload).map_err(|source| Error::Request {
 			path: path.to_owned(),
