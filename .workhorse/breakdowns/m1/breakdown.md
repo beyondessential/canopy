@@ -1,6 +1,6 @@
 # Substrate checks, spun off from the plumbing
 
-M1 takes the plumbing end to end — reserving the `kubernetes` source, the instance label on the wire, the relay's watch-hold-file-refile loop, cluster-grain ingest and grading, cluster reachability, and the cluster detail page — plus two checks to prove it: the Tailscale Kubernetes API proxy, and the aggregate on workloads broadly unscheduled or failing. Their shapes differ, so between them they exercise watching one object and watching many, filing on presence and grading on thresholds.
+M1 takes the plumbing end to end — reserving the `kubernetes` source, the instance label on the wire, the relay's watch-hold-file-refile loop, cluster-grain ingest and grading, cluster reachability, and the cluster detail page — plus three checks to prove it: the Tailscale Kubernetes API proxy, the aggregate on workloads broadly unscheduled or failing, and node pools. Their shapes differ, so between them they exercise watching one object, watching many and deriving a proportion, and filing several instances of one condition.
 
 These are what follows. The area cards are repetitions of a pattern M1 sets, so they can run in parallel once it lands; the application grains card is gated on N1 instead.
 
@@ -20,7 +20,7 @@ Every application has a Postgres instance CNPG reconciles, so a wedged operator 
 
 ## Cluster checks: capacity
 
-The Karpenter controller; node pools as one check with an instance per pool; node health; EC2 node class validity; and Karpenter's spot interruption feed.
+The Karpenter controller; node health; EC2 node class validity; and Karpenter's spot interruption feed. Node pools are not here — they moved into M1 as the proof check for the instance path.
 
 Node health reads what the EKS node monitoring agent already concluded and publishes as node conditions, rather than deriving readiness afresh from the node objects. It covers memory and ephemeral disk pressure, and nodes alive but not functioning — the last graded as a warning rather than a failure, Karpenter having made it mostly a thing that gets replaced.
 

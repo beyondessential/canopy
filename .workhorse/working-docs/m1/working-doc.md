@@ -254,7 +254,7 @@ Its failure is the one that leaves a cluster serving traffic while nobody can re
 **Traffic, application-facing** — Envoy Gateway, ingress-nginx, the AWS Load Balancer Controller, external-dns.
 **Databases** — the CNPG operator and its barman-cloud plugin.
 **Certificates** — cert-manager.
-**Capacity** — the Karpenter controller; node pools, one check with an instance per pool; node health, read from what the EKS node monitoring agent concluded.
+**Capacity** — the Karpenter controller; node pools, one check with an instance per pool (in M1, as a proof check); node health, read from what the EKS node monitoring agent concluded; node class validity; the spot interruption feed.
 **Operator access** — the Tailscale operator, and its Kubernetes API proxy separately.
 **EKS addons** — CoreDNS, kube-proxy, VPC CNI, EBS CSI with the snapshot controller, EFS CSI, Mountpoint-S3 CSI.
 **Platform extras** — HNC, py-kube-downscaler, opencost, Prometheus.
@@ -279,7 +279,7 @@ Plumbing first, then a card per area.
 
 **M1** takes the plumbing end to end plus one check to prove it: reserving the source and driving the reserved-source exclusions off the constant, the instance label on `SubstrateFiling` and through `ingest_substrate`, the relay's watch-hold-file-refile loop, cluster-grain ingest and grading, the cluster reachability sweep with its threshold column, and the cluster detail page.
 
-Two checks prove it, chosen because their shapes differ and each exercises something the other does not.
+Three checks prove it, chosen because their shapes differ and each exercises something the others do not.
 
 **The Tailscale Kubernetes API proxy** is a single component, present and serving or not.
 It proves the plain path: watch one thing, hold its state, file on change, refile on the minute.
@@ -289,13 +289,16 @@ It is also the check most worth having on day one, being the failure that leaves
 It proves what the other cannot: watching many objects of several kinds, deriving one result from them, and grading on thresholds rather than on presence.
 It is also the check that catches what the specific checks did not anticipate, which is the failure mode that has actually been caught by eye.
 
-Between them the plumbing is exercised by a check that is nearly nothing and a check that is nearly everything, which is a better test of it than two of the same shape would be.
+**Node pools** are several of one condition, detected one way, filed as one check with an instance per pool.
+It proves the instance path: the label on the wire, per-instance grading and silencing, detail naming every pool not passing, and the effective result taking the most urgent of them.
+
+Between them the plumbing is exercised by a check that is nearly nothing, a check that is nearly everything, and a check that is several of the same thing at once — the three shapes a substrate filing comes in. Three of one shape would have tested it far less.
 
 Then one card per area, each independently reviewable and mergeable, and able to run in parallel once the pattern is set:
 
 - **Traffic** — Envoy Gateway, ingress-nginx, the AWS Load Balancer Controller, external-dns, and Gateway API drift.
 - **Databases and certificates** — the CNPG operator, its barman-cloud plugin, and cert-manager.
-- **Capacity** — the Karpenter controller, node pools with an instance per pool, and node health from the EKS node monitoring agent.
+- **Capacity** — the Karpenter controller, node health from the EKS node monitoring agent, EC2 node class validity, and Karpenter's spot interruption feed. Node pools are not here, having moved into M1 as the proof check for the instance path.
 - **Addons** — CoreDNS, kube-proxy, VPC CNI, EBS CSI with the snapshot controller, EFS CSI, Mountpoint-S3 CSI, and Kubernetes version support.
 - **Platform extras** — HNC, py-kube-downscaler, opencost, Prometheus, and the Tailscale operator beyond its API proxy.
 
@@ -354,16 +357,11 @@ Taking 95 as the edge is the safer default — it warns earlier — and an opera
 
 A duration hold still earns its place even at this denominator: a rolling deploy of one large deployment can dip several percent for a minute, and the condition worth reporting is one that persists rather than one that passes on its own.
 
-## The instance label lands unexercised by a real check
+## The instance label is exercised by node pools
 
-M1 adds an instance label to `SubstrateFiling` and passes it through `ingest_substrate`, but neither proof check produces instances: the API proxy is one thing, and the aggregate is one number over many things.
-Node pools are what needs it, and they are in the capacity card.
+M1 adds an instance label to `SubstrateFiling` and passes it through `ingest_substrate`, replacing the empty string `ingest_substrate` currently hardcodes.
+Node pools are what produce instances, which is why they join the proof checks rather than waiting for the capacity card: a wire field nothing sets is a wire field nothing has shown to work.
 
-Landing it here anyway is still right.
-It is a wire change, and a wire change made later is one more shape the relay and Canopy can disagree about across a version skew, where landing it once with the rest of the plumbing means the capacity card is only a check.
-The field is additive, so an older relay that never sets it is unaffected.
+The path it proves runs the whole way through, and each part of it is already specified in CHK under "Checks with instances": one state held for the check however many pools there are, each pool graded through policy on its own against its own detail, a rule or silence written for one pool applying to only that pool, the effective result taking the most urgent across pools that were not skipped, the detail carrying every pool not passing, and the check recovering when none is left degraded.
 
-What it does mean is that a test has to carry what a check would otherwise demonstrate: a multi-instance `SubstrateFiling` constructed directly, filed, and read back as one state with per-instance detail and an effective result at the most urgent instance.
-The relay-protocol crate already builds filings directly in its round-trip tests, so this is the established way to exercise the wire without a producer.
-
-If that feels too thin, node pools moving into M1 is the alternative, and the cost is a third check's detection and documentation in the plumbing card.
+Canopy's side already does all of this — `file_check_instances` takes a `Vec<CheckInstance>` and grades them individually — so what M1 adds is the wire and the ingest, and what node pools add is a producer that proves both.
