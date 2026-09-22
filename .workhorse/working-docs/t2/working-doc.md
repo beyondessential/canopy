@@ -1,5 +1,5 @@
 ---
-status: draft
+status: complete
 ---
 
 # Gate the administrative surface behind safety modes
@@ -37,12 +37,11 @@ A client that has lost its memory of its mode reports read-only, so any doubt re
 
 Because the private server runs as several processes, a session is shared state rather than per-process memory, and a raise survives a restart of any one of them.
 
-The client treats a raise as lasting a minute less than the server does.
-The server holds the raise for ten minutes; the client drops itself to read-only at nine.
-So the client stops offering a control before the server would start refusing it, and an operator never has a request refused for an expiry they could not see coming.
+The server holds a raise for a minute longer than the client does.
+The raise the operator sees lasts ten minutes and the countdown opens at ten; the server keeps accepting at that grade for eleven.
+So a request already in flight as the raise ends is not refused for it, and an operator is never refused for an expiry they could not see coming.
 
-The operator sees the client's window, because that is the one that governs what they can reach.
-The countdown opens at nine minutes and the interface does not promise ten anywhere.
+The extra minute is slack, not a window: it is never shown and never offered.
 
 ### What this card does not carry
 
@@ -161,7 +160,7 @@ A session is a row: its identifier, the login it belongs to, its mode, when the 
 The identifier travels as a request header, added centrally where every call already goes through one function.
 
 Two clocks, not one.
-A raise expires ten minutes after it is made, and that is fixed.
+A raise expires ten minutes after it is made, and that is fixed; the server honours it for eleven.
 A session's own liveness is separate and idle-based, since most sessions never raise and would otherwise accumulate forever.
 
 A request updates its session's last-seen, and a periodic sweep retires sessions not seen for a while, alongside the domain and certificate sweeps that already run in the jobs crate.
@@ -233,7 +232,7 @@ Canopy enforces instead, because the danger permission has to be real and a mode
 The visual convention is taken from seedling deliberately and unchanged, so an operator who knows one interface knows the other.
 
 Seedling's elevation window is 9m59s so that a countdown rounded to minutes opens at "10m".
-Canopy's split of nine client-side against ten server-side is a different device for a different reason: seedling has nothing to be refused by.
+Canopy's ten client-side against eleven server-side is a different device for a different reason: seedling's mode gates nothing, so it has nothing to be refused by and needs no slack.
 
 ## Open questions
 
@@ -244,7 +243,7 @@ None outstanding. The doc is ready to split.
 - A read-only session is refused a write-graded request, and a write session is refused a danger-graded one.
 - An operator without the danger permission cannot raise to danger, and is refused a danger-graded request even when their session claims danger mode.
 - The two refusals are distinguishable, and a client meeting the not-raised one returns its indicator to read-only.
-- A raise expires on its own, and the client stops offering graded controls a minute before the server stops accepting them.
+- A raise expires on its own after ten minutes, and the server keeps accepting at that grade for a minute longer.
 - A raise survives being served by a different private-server process, and survives a restart.
 - A reloaded page comes back read-only.
 - Raising to danger asks for confirmation; raising to write does not.
