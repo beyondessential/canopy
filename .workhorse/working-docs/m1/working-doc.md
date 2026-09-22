@@ -240,7 +240,7 @@ No IPv6 equivalent replaces it, address space not being the constraint there.
 A set derived from real incidents beats one derived from what Kubernetes exposes, so these take precedence over anything in the component set above that was reasoned from the component list.
 
 **Node pressure and moribund nodes** confirm the node health check rather than changing it, and sharpen what it reads: memory and ephemeral disk pressure specifically, and a node alive but not functioning.
-Karpenter has made the moribund case rarer, which argues for grading it as a warning that something is being replaced rather than a failure (see Open questions).
+A moribund node warns straight away and fails if it is still moribund after Karpenter should have replaced it, which separates a node being handled from Karpenter not handling it.
 
 **EC2 node classes out of date and unschedulable** is a check the set did not have.
 It is a different condition from a node pool being unhealthy — the pool is willing and the class it references cannot launch — and the ops repo keeps them as separate objects (`karpenter/classes.ts` beside `karpenter/pools.ts`), so they are separate checks against separate kinds.
@@ -274,15 +274,56 @@ The smallest cluster runs 92 pods, so one pod is a bit over 1% and the proportio
 That settles the shape: a proportion alone, with no absolute-count fallback and no floor below which the check stays quiet.
 Neither would earn its place when the smallest real denominator is already this large, and both would be machinery sized for a cluster that does not exist.
 
-Thresholds to start from (provisional — see Open questions):
+#### Bands and hysteresis
 
-- **passed** above 95% healthy
-- **warning** below that
-- **failed** at or below 80% healthy
+Three bands, with edges at 80% and 90% healthy:
 
-On the smallest cluster that is roughly five pods to warn and eighteen to fail, which is the right order: five is a bad afternoon, eighteen is an incident.
+- **passed** at 90% or above
+- **warning** from 80% up to 90%
+- **failed** below 80%
 
-A duration hold still earns its place even at this denominator: a rolling deploy of one large deployment can dip several percent for a minute, and the condition worth reporting is one that persists rather than one that passes on its own.
+Each edge carries 5 points of hysteresis, so getting back across an edge takes 5 points more than falling across it did.
+A warning passes again only once the share is back above 95%, and a failure only lifts to a warning above 85%.
+Between those, the check stays at the result it last held, so a share sitting right on an edge can't flap.
+
+On the smallest cluster (92 pods), that is about ten pods not running to warn and nineteen to fail.
+
+#### How long a degradation must last, by how deep it is
+
+The deeper the drop, the sooner it counts:
+
+- **below 50%**: fails at once
+- **below 70%** for 2 minutes: fails
+- **below 80%** for 5 minutes: fails
+- **below 90%** for 5 minutes: warns
+
+Each is a condition of its own, measured from when the share first went under that line and stayed there, and the check takes the most urgent that holds.
+So a share that crashes to 40% fails at once, one that sits at 65% fails after 2 minutes, and one that drifts to 85% warns after 5.
+Every tier below 80% ends in failure: the 5-minute tier is the only route to a warning.
+
+A shallow dip is the rolling-deploy case and needs time to prove itself.
+A deep one isn't something a deploy does, so waiting would only delay the alarm.
+
+Recovery isn't held.
+The hysteresis already makes recovery a deliberate move, and holding it as well would keep a cluster showing failed for minutes after it had plainly come back.
+
+#### After a relay restart
+
+The relay keeps the hold timers and the hysteresis state in memory, so a restart loses them.
+A relay restarting with no history would read a share of 85% as passing, because no hold has built up yet.
+It would file that, recover the open issue, and then warn again five minutes later: a flap caused only by the relay restarting, which happens routinely during cluster upgrades.
+
+So after a restart the relay files at once only where the result doesn't depend on history: above 95% is passed whatever came before, and below 50% is failed.
+Anywhere between, it files nothing for the aggregate until the hold that would decide it has passed.
+Holding back is safe because each substrate filing is its own check rather than a full report, so an unfiled check is not taken to have recovered and Canopy keeps its last state in the meantime.
+The cluster stays reachable throughout, because the relay's other checks keep filing.
+
+#### Regrading by operators
+
+These thresholds are the relay's defaults, not per-cluster configuration.
+K8S already puts a check's thresholds in its implementation and has operators grade through policy.
+The aggregate puts the healthy share in its detail as a number, so a catalog rule on `check.healthy_share` can regrade it fleet-wide; policy rules already compare numbers.
+The model can hold a rule at cluster scope too, but the interface only offers silences at scope, so per-cluster regrading is not something this card offers.
 
 ## Trade-offs
 
@@ -298,9 +339,10 @@ One rule, one clock, one answer is worth more than the seconds.
 
 ## Open questions
 
-- [ ] **The aggregate's warning-band edge — 90 or 95.** "Fail at 80, warn at 90, pass over 95" reads as three thresholds with 90–95 unaccounted for, and the results vocabulary has only the three grades, so either 90 or 95 is the warning edge and the other is spare. Leaning to 95 as the edge — it warns earlier, the safer default — with an operator who finds it noisy moving it by a policy rule rather than a code change. Confirm before splitting. See "The aggregate".
-- [ ] **The aggregate's thresholds are starting values.** passed above 95% healthy, warning below, failed at or below 80% — to confirm against real cluster behaviour, operator-settable per cluster thereafter.
-- [ ] **Grading a moribund node — warning or failure.** Karpenter having made the case rarer argues for a warning (something is being replaced) rather than a failure. Confirm. See "Checks derived from failures actually had".
+None outstanding for M1.
+
+Moribund nodes were settled for the capacity card: they warn straight away and fail if still moribund after Karpenter should have replaced them.
+How long that is belongs to the capacity card, which carries the note.
 
 ## Testing notes
 
@@ -315,6 +357,7 @@ One rule, one clock, one answer is worth more than the seconds.
 - A cluster that is only a draft is swept for nothing and presents no reachability.
 - The cluster detail page presents the cluster's checks, health and reachability, and silencing a check there quiets it on the cluster.
 - A cluster-grain issue opens no incident.
+- Observe the aggregate on the smallest cluster before relying on it, including across a scheduled downscaler sleep and a cluster upgrade, and adjust the defaults if the bands turn out to be wrong in practice.
 
 ### Relay side
 
@@ -322,6 +365,12 @@ One rule, one clock, one answer is worth more than the seconds.
 - An unchanged condition refiles on the cadence, so a cluster stays reachable while nothing is happening.
 - A filing attempted while the connection is down is not lost to the connection: the next refile carries the current state.
 - A permission the relay's ServiceAccount lacks produces a broken result naming what was refused, not an absent check.
+- The aggregate's bands: 89% held 5 minutes warns; 79% held 5 minutes fails; 65% held 2 minutes fails; 45% fails at once.
+- The aggregate's hysteresis: a warning at 92% stays a warning, and passes at 96%; a failure at 83% stays failed, and lifts to warning at 86%.
+- A dip below 90% that recovers inside 5 minutes files nothing.
+- After a relay restart at 85% healthy, the aggregate files nothing until the hold has passed, and the existing issue stays open rather than recovering and reopening.
+- After a relay restart at 97% or at 40%, the aggregate files at once.
+- The aggregate excludes deployments scaled to zero, namespaces the downscaler has put to sleep, and completed jobs.
 - A check with instances (node pools) files each instance under its own label, grades each on its own policy, takes the effective result as the most urgent across them, and lists every instance not passing in the detail.
 
 ## How this card is split

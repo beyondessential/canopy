@@ -22,7 +22,7 @@ Every application has a Postgres instance CNPG reconciles, so a wedged operator 
 
 The Karpenter controller; node health; EC2 node class validity; and Karpenter's spot interruption feed. Node pools are not here — they moved into M1 as the proof check for the instance path.
 
-Node health reads what the EKS node monitoring agent already concluded and publishes as node conditions, rather than deriving readiness afresh from the node objects. It covers memory and ephemeral disk pressure, and nodes alive but not functioning — the last graded as a warning rather than a failure, Karpenter having made it mostly a thing that gets replaced.
+Node health reads what the EKS node monitoring agent already concluded and publishes as node conditions, rather than deriving readiness afresh from the node objects. It covers memory and ephemeral disk pressure, and nodes alive but not functioning. A moribund node warns straight away and fails if it is still moribund after Karpenter should have replaced it, separating a node being handled from Karpenter not handling it; how long that grace is gets set in this card, from what Karpenter's own repair timings allow.
 
 Node class validity is a separate condition from a pool being unhealthy: the pool is willing and the class it references cannot launch. The ops repo keeps them as separate objects, so they are separate checks against separate kinds.
 
