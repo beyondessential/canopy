@@ -323,3 +323,25 @@ Two exclusions it must get right, or it alarms nightly:
   This is the same fact that makes a hibernated deployment's application checks skip, read at a different grain.
 
 Completed jobs are not failures either, so the denominator is workloads that are supposed to be running.
+
+### The aggregate's measure
+
+Graded on the **healthy share** — the proportion of workloads that should be running and are — rather than on the failing share, which is how it reads on the check and how the thresholds below are stated.
+
+The smallest cluster runs 92 pods, so one pod is a bit over 1% and the proportion does not jump around at the small end.
+That settles the shape: a proportion alone, with no absolute-count fallback and no floor below which the check stays quiet.
+Neither would earn its place when the smallest real denominator is already this large, and both would be machinery sized for a cluster that does not exist.
+
+Thresholds to start from:
+
+- **passed** above 95% healthy
+- **warning** below that
+- **failed** at or below 80% healthy
+
+On the smallest cluster that is roughly five pods to warn and eighteen to fail, which is the right order: five is a bad afternoon, eighteen is an incident.
+
+Still to pin: whether the warning band is one step or two.
+"Fail at 80, warn at 90, pass over 95" reads as three thresholds with 90–95 unaccounted for, and the results vocabulary has only the three grades, so either 90 or 95 is the warning edge and the other is spare.
+Taking 95 as the edge is the safer default — it warns earlier — and an operator who finds it noisy moves it with a policy rule rather than a code change.
+
+A duration hold still earns its place even at this denominator: a rolling deploy of one large deployment can dip several percent for a minute, and the condition worth reporting is one that persists rather than one that passes on its own.

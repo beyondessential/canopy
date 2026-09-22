@@ -20,9 +20,13 @@ Every application has a Postgres instance CNPG reconciles, so a wedged operator 
 
 ## Cluster checks: capacity
 
-The Karpenter controller; node pools as one check with an instance per pool; and node health.
+The Karpenter controller; node pools as one check with an instance per pool; node health; EC2 node class validity; and Karpenter's spot interruption feed.
 
-Node health reads what the EKS node monitoring agent already concluded and publishes as node conditions, rather than deriving readiness afresh from the node objects.
+Node health reads what the EKS node monitoring agent already concluded and publishes as node conditions, rather than deriving readiness afresh from the node objects. It covers memory and ephemeral disk pressure, and nodes alive but not functioning — the last graded as a warning rather than a failure, Karpenter having made it mostly a thing that gets replaced.
+
+Node class validity is a separate condition from a pool being unhealthy: the pool is willing and the class it references cannot launch. The ops repo keeps them as separate objects, so they are separate checks against separate kinds.
+
+The spot feed is its own too. Without the interruption feed Karpenter cannot drain a node before AWS reclaims it, so the consequence is abrupt pod loss rather than slower provisioning, and nothing else reports it.
 
 ## Cluster checks: EKS addons
 
@@ -35,6 +39,26 @@ Kubernetes version support belongs here too: the EKS version approaching end of 
 HNC, py-kube-downscaler, opencost, Prometheus, and the Tailscale operator beyond the API proxy M1 covers.
 
 These degrade rather than break, so they are worth having and worth grading below the rest. Note py-kube-downscaler is what carries putting an environment to sleep, so its health bears on an operator action rather than only on observability.
+
+## Cluster checks: workloads broadly unscheduled or failing
+
+One cluster-grain check on the proportion of workloads that should be running and are, which is the condition that has been caught by eye rather than reported — noticing a quarter of everything is unscheduled or failing.
+
+It is not a rollup of per-application checks. A per-application check says one application's pod cannot be placed; this says a large share of everything cannot, which has different causes (the cluster out of capacity, Karpenter wedged, a node class broken) and fires for causes no component check anticipated. That is its value: it catches what the specific checks did not think of.
+
+Graded on the healthy share, starting at passed above 95%, warning below that, and failed at or below 80%. The smallest cluster runs 92 pods, so a proportion alone is stable enough and needs no absolute-count fallback.
+
+Three exclusions, without which it alarms nightly: a duty deliberately scaled to zero is not a failure, so it reads `.spec.replicas`; py-kube-downscaler sleeps whole environments on a schedule, so a sleeping namespace's zeros are deliberate too; and completed jobs are not failures, so the denominator is workloads that are supposed to be running. The sleeping-namespace exclusion is the same fact that makes a hibernated deployment's application checks skip, read at a different grain.
+
+A degraded result holds past a duration rather than firing immediately, so a rolling deploy dipping the share for a minute does not trip it.
+
+## CNPG disk headroom, and bumping it
+
+A CNPG cluster running out of disk space, warned about early enough to act.
+
+This is one application's Postgres rather than a cluster-wide condition — a namespace holds one instance per central and per facility — so it sits at the application grain and not with the cluster checks.
+
+It is its own card rather than part of the application grains because the valuable half is not a check: a way for Canopy to bump a CNPG cluster's disk before it becomes a problem. That is an action on a cluster, alongside sleeping and waking an environment, and it wants the same treatment — gated by what the environment is, available to admins, audited.
 
 ## Substrate checks for applications and namespaces
 
