@@ -166,6 +166,11 @@ the existing endpoint.
 Deactivate the superseded key when re-issuing. The draft's previous key was never deployed
 anywhere, so retiring it costs nothing and keeps a draft from accumulating active keys.
 
+**Decided: drafts never expire.** No sweep, no age-out — a draft is removed by an operator
+or not at all. A draft that vanished on a timer would take its relay identity's only trace
+with it, which is the precise thing the draft exists to prevent, and there will never be
+enough of them for tidiness to outweigh that.
+
 ### Spec impact to carry back
 
 A draft is product-visible behaviour an operator sees and acts on, so **K8S's "Cluster
@@ -175,16 +180,13 @@ holds no applications. Worth drafting once the wizard's shape is agreed, not bef
 
 ## Open decisions to work
 
-1. **Do drafts expire?** A sweep after some period, or only ever removed by hand. Leaning
-   by hand: there will be very few, and a draft silently vanishing takes its relay identity's
-   only trace with it, which is the thing this decision exists to prevent.
-2. **What registration actually reads.** Since reachability no longer needs a liveness table,
+1. **What registration actually reads.** Since reachability no longer needs a liveness table,
    the options narrow: a small `last_answered_at` on the cluster row written by a relayhub
    probe loop, or no probe loop at all — relayhub simply records connect/disconnect, and
    registration reads "a relay is currently connected". The second is less machinery and may
    be enough, given `Ping` is answered below the `Duties` trait and a connected relay that
    cannot answer it is close to a contradiction.
-3. **Card size.** The model change (table, host column, `Scope::Cluster`, `resolve`) is what
+2. **Card size.** The model change (table, host column, `Scope::Cluster`, `resolve`) is what
    unblocks every other card; the settings page is operator-facing work nothing waits on.
    The card description already flags this as the split worth making if it runs long.
 
