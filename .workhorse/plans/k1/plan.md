@@ -194,11 +194,37 @@ registry" wants a sentence or two for it** — that registering mints the relay'
 that an unfinished registration is kept as a draft rather than discarded, and that a draft
 holds no applications. Worth drafting once the wizard's shape is agreed, not before.
 
-## Open decisions to work
+## The card stays whole
 
-1. **Card size.** The model change (table, host column, `Scope::Cluster`, `resolve`) is what
-   unblocks every other card; the settings page is operator-facing work nothing waits on.
-   The card description already flags this as the split worth making if it runs long.
+**Decided: no split.** The card description floated separating the model change from the
+settings page, and the model half did grow once the September reset landed. Building both
+here anyway: the two halves share the draft-state design, which straddles them — the draft
+row is a model concern and the wizard is what creates and resumes one — so splitting would
+put one design across two cards and leave the first unable to demonstrate the behaviour it
+exists for.
+
+### Build order, since nothing is now waiting on a decision
+
+Each step is usable before the next begins, so the card can be reviewed in pieces even
+though it lands as one.
+
+1. **`kubernetes_clusters`** — `id`, `name`, `relay_identity_id`, nullable `registered_at`,
+   nullable `last_answered_at`. Everything below needs the table.
+2. **A cluster is a host** — `applications.machine_id` becomes nullable, a
+   `kubernetes_cluster_id` joins it, and a CHECK holds exactly one. The largest migration of
+   the card, and the one most likely to surface call sites assuming a machine is always
+   present.
+3. **`Scope::Cluster`** — variant, column, and an arm in each of `to_columns`,
+   `from_columns`, and `resolve_incident_target`, per the AGENTS.md recipe.
+4. **`resolve`** — with a cluster to resolve against and a scope to file at, the seam J2 left
+   can finally place a filing. This is the step that makes the whole relay path live.
+5. **Relayhub probe loop** — periodic `Ping`, plus the stamp on connect from the existing
+   `Build` exchange.
+6. **The settings page** — the wizard, the draft list, and re-issuing a draft's credential.
+
+Step 4 is where the project stops being plumbing: every card downstream is unblocked the
+moment a filing can land, and steps 5 and 6 are what make a cluster registrable by an
+operator rather than by a migration.
 
 ## Upstream changes to carry (from the rebase onto main)
 
