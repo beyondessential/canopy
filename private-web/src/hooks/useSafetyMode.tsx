@@ -57,18 +57,24 @@ export function SafetyModeProvider({ children }: { children: ReactNode }) {
 	// has to move on its own rather than only when something else re-renders.
 	const [now, setNow] = useState(() => Date.now());
 
+	// Set synchronously on adoption, ahead of the re-render, so an answer that
+	// arrives late can tell a session has been adopted since it was asked for.
+	const adopted = useRef(false);
 	const adopt = useCallback((next: SessionState) => {
+		adopted.current = true;
 		setSession(next);
 		publishSession(next.id);
 	}, []);
 
 	// Ask for a session as soon as the app connects, so one always exists and a
-	// later raise modifies the one already there.
+	// later raise modifies the one already there. The mode control is usable
+	// before this answers, and a raise made in that gap brings its own session,
+	// so a late answer never replaces one adopted since.
 	useEffect(() => {
 		let live = true;
 		callApi("safety", "session", {})
 			.then((next) => {
-				if (live) adopt(next as SessionState);
+				if (live && !adopted.current) adopt(next as SessionState);
 			})
 			.catch(() => {
 				// A client with no session is read-only, which is where it starts

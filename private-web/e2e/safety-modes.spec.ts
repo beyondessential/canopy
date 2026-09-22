@@ -149,6 +149,31 @@ test.describe("safety modes", () => {
 		await add.click();
 		await expect(page.getByText("blocked@example.invalid")).toBeVisible();
 	});
+	test("a raise made before the page has its session is not undone when the session arrives", async ({
+		page,
+	}) => {
+		// Hold the page's first request for a session until after the raise.
+		let release: () => void = () => {};
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		await page.route("**/api/safety/session", async (route) => {
+			await held;
+			await route.continue();
+		});
+
+		await page.goto("/settings/admins");
+		await modeControl(page).click();
+		await page.getByRole("menuitem", { name: /write/i }).click();
+		await expect(modeControl(page)).toContainText(/write/i);
+
+		// Let the late answer land, then check it changed nothing.
+		const answered = page.waitForResponse("**/api/safety/session");
+		release();
+		await answered;
+		await expect(modeControl(page)).toContainText(/write/i);
+	});
+
 	test("a blocked control carries its grade's stripe, full colour under the pointer", async ({
 		page,
 	}) => {
