@@ -80,7 +80,7 @@ Seedling's elevation window is 9m59s so a minute-rounded countdown opens at "10m
 
 ## How the grading went
 
-203 operations: 98 read-only, 70 write, 35 danger.
+204 operations: 98 read-only, 70 write, 36 danger.
 
 Two readings settled most of the judgement calls, and are worth stating because
 they are not quite on the face of the criteria.
@@ -99,8 +99,8 @@ write; archiving a machine has no un-archive handler and cascades to the
 applications on it, so it is danger.
 
 The explicit examples in the spec landed where they should: deleting a backup
-configuration, clearing a backup schedule, revoking a certificate, pausing a
-server's certificate work, minting and revoking fleet-query tokens are danger;
+configuration, clearing a backup schedule, closing a machine's restore window,
+revoking a certificate, pausing a server's certificate work, minting and revoking fleet-query tokens are danger;
 creating a backup configuration and renaming a group are write; the SQL
 playground and every fleet-query read are read-only.
 
@@ -151,7 +151,7 @@ and its tests move together, screen by screen.
 - [x] Two error variants, one per refusal, with matching `ERRORS.md` headings — `SafetyModeTooLow { required }` and `DangerNotPermitted`
 - [x] Session endpoints (`/api/safety/session`, `raise`, `lower`), graded read-only so a read-only session can reach them
 - [x] Extend the debug identity shortcut to the new boundary — `use_dev_identity()` made public and honoured by the middleware
-- [x] Grade every handler on the administrative surface, module by module — all 203 operations across 27 modules
+- [x] Grade every handler on the administrative surface, module by module — all 204 operations across 28 modules
 - [x] `just gen-openapi` step writing the generated grade map — `private-web/src/safety-modes.ts`, regenerated and diffed by `just check-generated`
 - [x] Sweep retiring idle sessions, in the jobs crate — `jobs::session_sweep`, hourly, 24h grace, wired into the monitor pod
 - [x] Session provider, session header in `callApi`, and mode indicator in the app bar
