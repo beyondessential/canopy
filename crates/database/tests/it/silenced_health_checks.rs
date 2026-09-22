@@ -88,7 +88,7 @@ async fn combines_server_and_group_scopes() {
 			silenced_health_checks_for_server(
 				&mut conn,
 				Some(grouped),
-				m_grouped,
+				Some(m_grouped),
 				Some(group),
 				"alertd"
 			)
@@ -101,7 +101,7 @@ async fn combines_server_and_group_scopes() {
 			silenced_health_checks_for_server(
 				&mut conn,
 				Some(ungrouped),
-				m_ungrouped,
+				Some(m_ungrouped),
 				None,
 				"alertd"
 			)
@@ -115,7 +115,7 @@ async fn combines_server_and_group_scopes() {
 			silenced_health_checks_for_server(
 				&mut conn,
 				Some(unsilenced),
-				m_unsilenced,
+				Some(m_unsilenced),
 				Some(group),
 				"alertd"
 			)
@@ -147,16 +147,28 @@ async fn scoped_to_the_reporting_source() {
 			.unwrap();
 
 		assert_eq!(
-			silenced_health_checks_for_server(&mut conn, Some(server), m_server, None, "alertd")
-				.await
-				.unwrap(),
+			silenced_health_checks_for_server(
+				&mut conn,
+				Some(server),
+				Some(m_server),
+				None,
+				"alertd"
+			)
+			.await
+			.unwrap(),
 			checks(&["disk"]),
 			"only alertd's own silence applies to alertd's checks",
 		);
 		assert_eq!(
-			silenced_health_checks_for_server(&mut conn, Some(server), m_server, None, "seedling")
-				.await
-				.unwrap(),
+			silenced_health_checks_for_server(
+				&mut conn,
+				Some(server),
+				Some(m_server),
+				None,
+				"seedling"
+			)
+			.await
+			.unwrap(),
 			checks(&["postgres"]),
 		);
 	})
@@ -174,9 +186,15 @@ async fn unsilencing_removes_the_check() {
 			.await
 			.unwrap();
 		assert_eq!(
-			silenced_health_checks_for_server(&mut conn, Some(server), m_server, None, "alertd")
-				.await
-				.unwrap(),
+			silenced_health_checks_for_server(
+				&mut conn,
+				Some(server),
+				Some(m_server),
+				None,
+				"alertd"
+			)
+			.await
+			.unwrap(),
 			checks(&["postgres"]),
 		);
 
@@ -184,9 +202,15 @@ async fn unsilencing_removes_the_check() {
 			.await
 			.unwrap();
 		assert_eq!(
-			silenced_health_checks_for_server(&mut conn, Some(server), m_server, None, "alertd")
-				.await
-				.unwrap(),
+			silenced_health_checks_for_server(
+				&mut conn,
+				Some(server),
+				Some(m_server),
+				None,
+				"alertd"
+			)
+			.await
+			.unwrap(),
 			BTreeSet::new(),
 		);
 	})

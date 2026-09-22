@@ -21,6 +21,7 @@ const TABS: Array<{ value: string; label: string; to: string }> = [
 		label: "Restore consumers",
 		to: "/settings/restore-consumers",
 	},
+	{ value: "clusters", label: "Clusters", to: "/settings/clusters" },
 	{ value: "mcp-tokens", label: "MCP access", to: "/settings/mcp-tokens" },
 	{
 		value: "certificate-authority",
@@ -35,6 +36,7 @@ function valueFromPath(pathname: string): string {
 	if (pathname.startsWith("/settings/healthchecks")) return "healthchecks";
 	if (pathname.startsWith("/settings/restore-consumers"))
 		return "restore-consumers";
+	if (pathname.startsWith("/settings/clusters")) return "clusters";
 	if (pathname.startsWith("/settings/mcp-tokens")) return "mcp-tokens";
 	if (pathname.startsWith("/settings/certificate-authority"))
 		return "certificate-authority";

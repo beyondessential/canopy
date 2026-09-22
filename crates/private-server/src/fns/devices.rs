@@ -571,36 +571,68 @@ pub async fn provision_credential(
 	_admin: TailscaleAdmin,
 	Json(args): Json<ProvisionArgs>,
 ) -> Result<Json<ProvisionedCredential>> {
+	let mut conn = state.db.get().await?;
+	let key_name = args
+		.key_name
+		.filter(|n| !n.trim().is_empty())
+		.unwrap_or_else(|| "Provisioned key".to_string());
+	let credential =
+		mint_provisioned_credential(&mut conn, args.role, args.device_id, &key_name, false).await?;
+	Ok(Json(credential))
+}
+
+/// Mint a device credential and return the private key once, the shared core of
+/// [`provision_credential`] and cluster registration.
+///
+/// With `device_id` set, the credential is attached to that existing device
+/// (created via [`DeviceKey::create`], which inserts a second active key rather
+/// than refusing one); with it unset, a new device is created at `role`. Canopy
+/// keeps only the public key — the private key is encrypted under a fresh
+/// passphrase and never stored or logged after this returns.
+///
+/// `deactivate_superseded` retires the device's existing keys before minting the
+/// new one, for re-issuing a credential that was lost before it reached its
+/// destination: the superseded key was never deployed, so retiring it costs
+/// nothing and keeps a device from accumulating active keys.
+pub(crate) async fn mint_provisioned_credential(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	role: DeviceRole,
+	device_id: Option<Uuid>,
+	key_name: &str,
+	deactivate_superseded: bool,
+) -> Result<ProvisionedCredential> {
 	use algae_cli::{
 		passphrases::{Passphrase, SecretString},
 		streams::encrypt_stream,
 	};
 	use base64::Engine as _;
 
-	let mut conn = state.db.get().await?;
-
 	let generated = keygen::generate_device_key()?;
-	let key_name = args
-		.key_name
-		.filter(|n| !n.trim().is_empty())
-		.unwrap_or_else(|| "Provisioned key".to_string());
 
-	let (device_id, key) = match args.device_id {
+	let (device_id, key) = match device_id {
 		Some(device_id) => {
 			// 404s if the device doesn't exist.
-			let existing = Device::get_with_info(&mut conn, device_id).await?;
-			let key =
-				DeviceKey::create(&mut conn, device_id, generated.spki_der, Some(key_name)).await?;
-			if existing.device.role != args.role {
-				Device::trust(&mut conn, device_id, args.role).await?;
+			let existing = Device::get_with_info(conn, device_id).await?;
+			if deactivate_superseded {
+				Device::deactivate_keys(conn, device_id).await?;
+			}
+			let key = DeviceKey::create(
+				conn,
+				device_id,
+				generated.spki_der,
+				Some(key_name.to_string()),
+			)
+			.await?;
+			if existing.device.role != role {
+				Device::trust(conn, device_id, role).await?;
 			}
 			(device_id, key)
 		}
 		None => {
 			let device =
-				Device::create_at_role(&mut conn, generated.spki_der, args.role, Some(key_name))
+				Device::create_at_role(conn, generated.spki_der, role, Some(key_name.to_string()))
 					.await?;
-			let key = DeviceKey::find_by_device(&mut conn, device.id)
+			let key = DeviceKey::find_by_device(conn, device.id)
 				.await?
 				.into_iter()
 				.next()
@@ -624,20 +656,16 @@ pub async fn provision_credential(
 	.map_err(|e| AppError::custom(format!("encrypting device key: {e}")))?;
 	let key_age_base64 = base64::engine::general_purpose::STANDARD.encode(&encrypted);
 
-	let filename = format!(
-		"canopy-{}-{}.pem.age",
-		args.role,
-		&generated.fingerprint[..12]
-	);
+	let filename = format!("canopy-{}-{}.pem.age", role, &generated.fingerprint[..12]);
 
-	Ok(Json(ProvisionedCredential {
+	Ok(ProvisionedCredential {
 		device_id,
 		key_id: key.id,
 		fingerprint: generated.fingerprint,
 		filename,
 		key_age_base64,
 		passphrase,
-	}))
+	})
 }
 
 /// Request to register an existing public key on a device.

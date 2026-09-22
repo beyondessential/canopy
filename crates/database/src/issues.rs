@@ -48,6 +48,12 @@ pub struct Issue {
 	/// any single application or machine. Group-scoped issues are always
 	/// considered even if an individual member has monitoring turned off.
 	pub server_group_id: Option<Uuid>,
+	/// The Kubernetes cluster this issue is attached to, for a substrate check
+	/// that asserts something about the cluster itself rather than about any one
+	/// application on it. A cluster's checks are read on the cluster, not
+	/// presented on its applications the way a machine's are. At most one of the
+	/// four scope columns is set.
+	pub kubernetes_cluster_id: Option<Uuid>,
 	/// The device that reported this issue, if it was raised by a device
 	/// push. `None` for issues raised by an operator or by the platform
 	/// itself.
@@ -822,6 +828,132 @@ pub async fn raise_machine_event_with_state(
 	.await
 }
 
+/// Open (or recover) a **cluster-scoped** issue: one keyed
+/// `(kubernetes_cluster_id, source, ref)` under the cluster partial unique
+/// index.
+///
+/// A cluster's substrate checks are read on the cluster itself, not presented on
+/// the applications scheduled across it the way a machine's checks are (spec
+/// CHK, "A machine's checks present on its applications"). A cluster belongs to
+/// no group, so `Scope::Cluster` resolves to no incident target: the state is
+/// recorded and rolls into the cluster's own health, but opens no incident.
+///
+/// Like [`raise_machine_event_with_state`], this takes the `source` rather than
+/// assuming `canopy`: a cluster's substrate checks arrive from its relay under
+/// the `kubernetes` source, and recording them under `canopy` would break
+/// per-source silences and the rule that a source's push only recovers its own
+/// checks.
+// spec: CHK
+#[allow(clippy::too_many_arguments)]
+pub async fn raise_cluster_event_with_state(
+	conn: &mut AsyncPgConnection,
+	kubernetes_cluster_id: Uuid,
+	source: &str,
+	device_id: Option<Uuid>,
+	r#ref: &str,
+	description: Option<&str>,
+	message: &str,
+	active: bool,
+	state: Option<&CheckStateStamp>,
+) -> Result<Issue> {
+	use crate::schema::issues;
+
+	if let Some(d) = description
+		&& d.contains('\n')
+	{
+		return Err(AppError::BadRequest(
+			"description must be a single line (no newlines); use `message` for body text".into(),
+		));
+	}
+
+	let now = Timestamp::now();
+
+	conn.transaction::<_, AppError, _>(async |conn| {
+		let existing: Option<Issue> = issues::table
+			.select(Issue::as_select())
+			.filter(
+				issues::kubernetes_cluster_id
+					.eq(kubernetes_cluster_id)
+					.and(issues::source.eq(source))
+					.and(issues::ref_.eq(r#ref)),
+			)
+			.for_update()
+			.first(conn)
+			.await
+			.optional()?;
+
+		let prior_state = existing
+			.as_ref()
+			.map(|e| (e.degraded_since, e.last_degraded_at));
+		let issue: Issue = if let Some(existing) = existing {
+			let new_last_seen = if now > existing.last_seen {
+				now
+			} else {
+				existing.last_seen
+			};
+			let clear_resolved = active && existing.resolved_at.is_some();
+			diesel::update(issues::table.filter(issues::id.eq(existing.id)))
+				.set((
+					issues::description.eq(description),
+					issues::message.eq(message),
+					issues::active.eq(active),
+					issues::last_seen.eq(jiff_diesel::Timestamp::from(new_last_seen)),
+					issues::resolved_at.eq(diesel::dsl::sql::<
+						diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>,
+					>(if clear_resolved {
+						"NULL"
+					} else {
+						"issues.resolved_at"
+					})),
+					issues::resolved_by.eq(diesel::dsl::sql::<
+						diesel::sql_types::Nullable<diesel::sql_types::Text>,
+					>(if clear_resolved {
+						"NULL"
+					} else {
+						"issues.resolved_by"
+					})),
+					issues::resolved_reason.eq(diesel::dsl::sql::<
+						diesel::sql_types::Nullable<diesel::sql_types::Text>,
+					>(if clear_resolved {
+						"NULL"
+					} else {
+						"issues.resolved_reason"
+					})),
+				))
+				.returning(Issue::as_select())
+				.get_result(conn)
+				.await?
+		} else {
+			diesel::insert_into(issues::table)
+				.values((
+					issues::kubernetes_cluster_id.eq(kubernetes_cluster_id),
+					issues::device_id.eq(device_id),
+					issues::source.eq(source),
+					issues::ref_.eq(r#ref),
+					issues::description.eq(description),
+					issues::message.eq(message),
+					issues::active.eq(active),
+					issues::first_seen.eq(jiff_diesel::Timestamp::from(now)),
+					issues::last_seen.eq(jiff_diesel::Timestamp::from(now)),
+				))
+				.returning(Issue::as_select())
+				.get_result(conn)
+				.await?
+		};
+
+		let issue = match state {
+			Some(stamp) => stamp_check_state(conn, issue.id, prior_state, stamp, now).await?,
+			None => issue,
+		};
+
+		// A cluster belongs to no group, so it resolves to no incident target:
+		// the state is recorded but opens no incident.
+
+		Ok(issue)
+	})
+	.await
+}
+
 /// Open (or recover) a **canopy-wide** issue: one scoped to neither a
 /// server nor a group, keyed `(source = canopy, ref)` under the global
 /// partial unique index. This is the state store for canopy monitoring
@@ -957,42 +1089,54 @@ pub async fn raise_global_event_with_state(
 /// part of scope.
 ///
 /// A machine is a target in its own right because a host's disk, memory and
-/// clock assert something about the box, not about any one workload on it.
+/// clock assert something about the box, not about any one workload on it. A
+/// cluster is likewise its own target: a substrate check about the cluster is
+/// read on the cluster, not on the applications scheduled across it.
 // spec: CHK
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scope {
 	Application(Uuid),
 	Machine(Uuid),
 	Group(Uuid),
+	Cluster(Uuid),
 	Global,
 }
 
 impl Scope {
-	/// The `(application_id, machine_id, server_group_id)` storage columns for
-	/// this scope.
-	pub fn to_columns(self) -> (Option<Uuid>, Option<Uuid>, Option<Uuid>) {
+	/// The `(application_id, machine_id, server_group_id, kubernetes_cluster_id)`
+	/// storage columns for this scope.
+	pub fn to_columns(self) -> (Option<Uuid>, Option<Uuid>, Option<Uuid>, Option<Uuid>) {
 		match self {
-			Scope::Application(id) => (Some(id), None, None),
-			Scope::Machine(id) => (None, Some(id), None),
-			Scope::Group(id) => (None, None, Some(id)),
-			Scope::Global => (None, None, None),
+			Scope::Application(id) => (Some(id), None, None, None),
+			Scope::Machine(id) => (None, Some(id), None, None),
+			Scope::Group(id) => (None, None, Some(id), None),
+			Scope::Cluster(id) => (None, None, None, Some(id)),
+			Scope::Global => (None, None, None, None),
 		}
 	}
 
-	/// The scope encoded by an `(application_id, machine_id, server_group_id)`
-	/// triple. The storage CHECK allows at most one to be set, so the arms are
-	/// mutually exclusive in practice; the order below only decides what a row
-	/// that violated the CHECK would read as, and all-null is canopy-wide.
+	/// The scope encoded by an `(application_id, machine_id, server_group_id,
+	/// kubernetes_cluster_id)` tuple. The storage CHECK allows at most one to be
+	/// set, so the arms are mutually exclusive in practice; the order below only
+	/// decides what a row that violated the CHECK would read as, and all-null is
+	/// canopy-wide.
 	pub fn from_columns(
 		application_id: Option<Uuid>,
 		machine_id: Option<Uuid>,
 		server_group_id: Option<Uuid>,
+		kubernetes_cluster_id: Option<Uuid>,
 	) -> Self {
-		match (application_id, machine_id, server_group_id) {
-			(_, _, Some(gid)) => Scope::Group(gid),
-			(_, Some(mid), None) => Scope::Machine(mid),
-			(Some(sid), None, None) => Scope::Application(sid),
-			(None, None, None) => Scope::Global,
+		match (
+			application_id,
+			machine_id,
+			server_group_id,
+			kubernetes_cluster_id,
+		) {
+			(_, _, _, Some(cid)) => Scope::Cluster(cid),
+			(_, _, Some(gid), None) => Scope::Group(gid),
+			(_, Some(mid), None, None) => Scope::Machine(mid),
+			(Some(sid), None, None, None) => Scope::Application(sid),
+			(None, None, None, None) => Scope::Global,
 		}
 	}
 
@@ -1005,6 +1149,10 @@ impl Scope {
 	///
 	/// A machine carries its own monitoring switch, so excusing a box from
 	/// monitoring does not quiet the applications on it, and vice versa.
+	///
+	/// A cluster belongs to no group, so it resolves to no incident target: its
+	/// substrate checks are recorded and roll into the cluster's own health, but
+	/// there is no group environment for them to open an incident against.
 	// spec: INC#targets
 	pub async fn resolve_incident_target(
 		self,
@@ -1027,6 +1175,7 @@ impl Scope {
 				let rank = crate::machines::Machine::rank(conn, mid).await?;
 				Ok(member_target(machine.group_id, rank, machine.is_monitored))
 			}
+			Scope::Cluster(_) => Ok(None),
 			Scope::Global => Ok(Some((IncidentTarget::Global, true))),
 		}
 	}
@@ -1190,9 +1339,11 @@ pub async fn file_check_instances(
 
 	let source = filing.source;
 	debug_assert!(
-		matches!(filing.scope, Scope::Application(_) | Scope::Machine(_))
-			|| source == crate::statuses::CANOPY_SOURCE,
-		"group- and canopy-wide filings are canopy's own; a machine's come from its reporter",
+		matches!(
+			filing.scope,
+			Scope::Application(_) | Scope::Machine(_) | Scope::Cluster(_)
+		) || source == crate::statuses::CANOPY_SOURCE,
+		"group- and canopy-wide filings are canopy's own; an application's, a machine's and a cluster's come from a reporter",
 	);
 	debug_assert!(
 		!filing.instances.is_empty(),
@@ -1252,6 +1403,15 @@ pub async fn file_check_instances(
 			Default::default(),
 			FilingScope {
 				group_id: Some(group_id),
+				..Default::default()
+			},
+		),
+		// A cluster carries no tags of its own, so a substrate check about it is
+		// graded on fleet and cluster-scoped policy alone, as a group's is.
+		Scope::Cluster(cluster_id) => (
+			Default::default(),
+			FilingScope {
+				kubernetes_cluster_id: Some(cluster_id),
 				..Default::default()
 			},
 		),
@@ -1409,6 +1569,20 @@ pub async fn file_check_instances(
 			raise_group_event_with_state(
 				conn,
 				gid,
+				filing.check,
+				description,
+				filing.message,
+				active,
+				Some(&stamp),
+			)
+			.await
+		}
+		Scope::Cluster(cluster_id) => {
+			raise_cluster_event_with_state(
+				conn,
+				cluster_id,
+				source,
+				filing.device_id,
 				filing.check,
 				description,
 				filing.message,
@@ -2018,7 +2192,7 @@ async fn consolidated_checks_for(
 		Scope::Application(id) | Scope::Machine(id) => id,
 		// A group or canopy-wide rollup is a different question, answered by
 		// its own reader; nothing calls this with one.
-		Scope::Group(_) | Scope::Global => {
+		Scope::Group(_) | Scope::Cluster(_) | Scope::Global => {
 			return Err(AppError::BadRequest(
 				"consolidated checks are read for an application or a machine".into(),
 			));
@@ -2056,8 +2230,11 @@ async fn consolidated_checks_for(
 	// going quiet has already made every application on it unreachable in its
 	// own right.
 	// spec: CHK#a-machines-checks-present-on-its-applications
-	if let Scope::Application(id) = target {
-		let machine_id = Application::get_by_id(conn, id).await?.machine_id;
+	// An application on a cluster has no machine, so there is no host check to
+	// present alongside its own; its cluster's checks are read on the cluster.
+	if let Scope::Application(id) = target
+		&& let Some(machine_id) = Application::get_by_id(conn, id).await?.machine_id
+	{
 		let machine = crate::machines::Machine::get_by_id(conn, machine_id).await?;
 		checks.extend(
 			checks_at_scope(
@@ -2104,7 +2281,7 @@ async fn checks_at_scope(
 	use commons_types::subject::CheckSubject;
 	use std::collections::HashSet;
 
-	let (target_application, target_machine, _) = target.to_columns();
+	let (target_application, target_machine, _, _) = target.to_columns();
 	let subject = match target {
 		Scope::Machine(_) => CheckSubject::Machine,
 		_ => CheckSubject::Application,
@@ -2389,6 +2566,7 @@ async fn re_evaluate_incident_membership(
 			issue.application_id,
 			issue.machine_id,
 			issue.server_group_id,
+			issue.kubernetes_cluster_id,
 		),
 		target.group_id(),
 		&issue.source,
@@ -2402,9 +2580,11 @@ async fn re_evaluate_incident_membership(
 	// itself.
 	let (cover_application, cover_machine) = match (issue.machine_id, issue.application_id) {
 		(Some(mid), _) => (None, Some(mid)),
+		// An application on a cluster has no machine, so only a window over the
+		// application itself covers it; there is no box to resolve through.
 		(None, Some(aid)) => (
 			Some(aid),
-			Some(Application::get_by_id(conn, aid).await?.machine_id),
+			Application::get_by_id(conn, aid).await?.machine_id,
 		),
 		(None, None) => (None, None),
 	};
@@ -2689,6 +2869,7 @@ async fn issue_target_and_monitored(
 		issue.application_id,
 		issue.machine_id,
 		issue.server_group_id,
+		issue.kubernetes_cluster_id,
 	)
 	.resolve_incident_target(conn)
 	.await
@@ -3031,7 +3212,9 @@ pub async fn reevaluate_open_issues_for_scope(
 				.await?;
 			(gid, ids, machines, true)
 		}
-		Scope::Global => return Ok(()),
+		// A cluster belongs to no group and opens no incidents, so there is
+		// nothing to re-evaluate for it, exactly as for canopy-wide scope.
+		Scope::Cluster(_) | Scope::Global => return Ok(()),
 	};
 
 	let mut query = issues::table
@@ -3131,6 +3314,7 @@ async fn issue_targets_and_monitored(
 					issue.application_id,
 					issue.machine_id,
 					issue.server_group_id,
+					issue.kubernetes_cluster_id,
 				),
 			)
 		})
@@ -3183,6 +3367,8 @@ async fn issue_targets_and_monitored(
 					machine.is_monitored,
 				)
 			}),
+			// A cluster belongs to no group, so it has no incident target.
+			Scope::Cluster(_) => None,
 		};
 		if let Some(resolved) = resolved {
 			out.insert(issue_id, resolved);
@@ -3851,9 +4037,10 @@ impl Issue {
 			let machine_id: Option<Uuid> = applications::table
 				.select(applications::machine_id)
 				.filter(applications::id.eq(sid))
-				.first(db)
+				.first::<Option<Uuid>>(db)
 				.await
-				.optional()?;
+				.optional()?
+				.flatten();
 			q = q.filter(
 				dsl::application_id.eq(sid).or(dsl::machine_id
 					.is_not_distinct_from(machine_id)

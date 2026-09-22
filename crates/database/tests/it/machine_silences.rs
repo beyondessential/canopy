@@ -114,7 +114,7 @@ async fn one_machine_silence_is_read_the_same_everywhere() {
 		let told = silenced_health_checks_for_server(
 			&mut conn,
 			Some(application),
-			machine,
+			Some(machine),
 			Some(group),
 			SOURCE,
 		)

@@ -183,10 +183,11 @@ impl ReportedDetail {
 			a::applications
 				.select(a::machine_id)
 				.filter(a::id.eq(server))
-				.first::<Uuid>(db)
+				.first::<Option<Uuid>>(db)
 				.await
 				.optional()
 				.map_err(AppError::from)?
+				.flatten()
 		};
 		if let Some(machine_id) = machine_id {
 			rows.extend(
@@ -291,8 +292,11 @@ impl ReportedDetail {
 		// same merge `for_server` does, one application at a time.
 		let machines: Vec<(Uuid, Uuid)> = {
 			use crate::schema::applications::dsl as a;
+			// A machine's detail presents on the applications it hosts; a
+			// cluster-hosted application has no machine to take detail from.
 			a::applications
-				.select((a::id, a::machine_id))
+				.select((a::id, a::machine_id.assume_not_null()))
+				.filter(a::machine_id.is_not_null())
 				.load(db)
 				.await
 				.map_err(AppError::from)?

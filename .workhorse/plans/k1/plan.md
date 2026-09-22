@@ -226,6 +226,27 @@ Step 4 is where the project stops being plumbing: every card downstream is unblo
 moment a filing can land, and steps 5 and 6 are what make a cluster registrable by an
 operator rather than by a migration.
 
+### Implementation checklist
+
+- [x] 1a. Migration: `kubernetes_clusters` table (`id`, `name`, `relay_identity_id` unique, nullable `registered_at`, nullable `last_answered_at`)
+- [x] 1b. `KubernetesCluster` model — create draft, register (set `registered_at`), list registered / list drafts, rename, remove, stamp `last_answered_at`, `names_by_ids`
+- [x] 2a. Migration: `applications.machine_id` nullable, add `kubernetes_cluster_id`, host CHECK (exactly one); guard the machine-group trigger for cluster apps
+- [x] 2b. `Application` model + call sites tolerate a null machine / cluster host
+- [x] 3a. Migration: add `kubernetes_cluster_id` to the scoped tables (issues, scoped silences) + widen their CHECKs + THE TRAP global indexes
+- [x] 3b. `Scope::Cluster` variant + arm in `to_columns`, `from_columns`, `resolve_incident_target`, batch resolve, filing dispatch, `raise_cluster_event_with_state`, `FilingScope`/`scoped_to`, MCP `IssueScopeOut`
+- [x] 4. `jobs::relay::ingest::resolve` — relay identity → registered cluster; `Cluster`→`Scope::Cluster`. `Namespace`→group and `Instance`→application await the harvest correlation path (logged unplaceable until then)
+- [x] 5. Relayhub probe loop — periodic `Ping` + stamp `last_answered_at` on connect from the `Build` round trip
+- [x] 6a. Private-server fns (`/api/kubernetes_clusters/*`): register (mint + draft), confirm (register on answer), re-issue (retiring the superseded key), remove, list. Shared `mint_provisioned_credential` extracted from `provision_credential`. Backend integration tests pass
+- [x] 6b. React settings page (Settings › Clusters): register wizard with credential reveal + live connection polling, draft list with re-issue/remove/check, registered list. Typechecks
+- [x] 6c. Playwright coverage (`e2e/kubernetes-clusters.spec.ts`, 4 tests) — register→draft, registered-shows-answering, remove, empty-name refused
+- [x] 7. Spec impact: K8S's "Cluster registry" already describes drafts, re-issue, and "only a registered cluster hosts applications"; CHK/FLT already describe cluster-as-host and cluster-as-check-target. This card implements existing specs (verifies K8S/CHK/FLT); no spec change needed
+
+**Not done here (host picker):** offering a registered cluster as an application's host in the create/edit UI is part of the operator-facing application-on-a-cluster surface, which arrives with the harvest card that creates cluster-hosted applications. Registered clusters are already exposed by `/api/kubernetes_clusters/list` for that work to build on.
+
+**Deferred to the operator-facing / harvest work (noted, not silently dropped):**
+- Cluster-hosted applications are not created by this card (the harvest path is unwired), so the machine-oriented fleet surfaces (group card, fleet spread, `ServerInfo` listings) list machine-hosted applications only. Presenting cluster-hosted applications there arrives with the harvest card that creates them.
+- `resolve` for `Namespace`/`Instance` targets awaits namespace→group and instance→application correlation, which the harvest path brings.
+
 ## Upstream changes to carry (from the rebase onto main)
 
 - `NamespaceRoster` has been **removed** from `Request`/`Response`. The identity picker it fed

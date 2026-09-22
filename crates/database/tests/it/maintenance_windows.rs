@@ -837,7 +837,7 @@ async fn an_application_window_leaves_the_rest_of_the_box_alerting() {
 			"the box is not being taken down, so its own checks stay watched"
 		);
 		assert!(
-			!targets.suspends_application(beside.id, machine_id, Some(group_id)),
+			!targets.suspends_application(beside.id, Some(machine_id), Some(group_id)),
 			"nor is the workload beside it suspended"
 		);
 	})

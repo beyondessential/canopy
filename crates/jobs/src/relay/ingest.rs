@@ -17,6 +17,7 @@
 use commons_errors::{AppError, Result};
 use commons_types::{Uuid, source::SUBSTRATE_SOURCE};
 use database::{
+	KubernetesCluster,
 	diesel_async::AsyncPgConnection,
 	issues::{CheckInstance, InstancedCheckFiling, Scope, file_check_instances},
 };
@@ -35,8 +36,10 @@ pub enum Placement {
 	Application(Uuid),
 	/// The group a namespace names — its applications at one rank.
 	Group(Uuid),
-	/// Canopy-wide, with the relay's cluster as the check's instance.
-	Cluster { label: String },
+	/// The cluster the relay serves. A cluster is its own check target: its
+	/// substrate checks are read on the cluster, not on the applications
+	/// scheduled across it.
+	Cluster(Uuid),
 }
 
 impl Placement {
@@ -45,30 +48,55 @@ impl Placement {
 		match self {
 			Self::Application(id) => Scope::Application(*id),
 			Self::Group(id) => Scope::Group(*id),
-			Self::Cluster { .. } => Scope::Global,
+			Self::Cluster(id) => Scope::Cluster(*id),
 		}
 	}
 }
 
 /// Resolve the coordinates a relay named to somewhere in canopy.
 ///
-/// **Not yet implemented, and deliberately so.** What an application scheduled
-/// across a cluster rather than run on a box belongs to is the open question
-/// the Kubernetes project carries (see `FLT`, "Cardinality"): an application
-/// runs on exactly one machine today, and a relay's applications have none.
-/// Until a cluster is something an application can be hosted by, and the
-/// registry that names one exists, every filing is unplaceable — which the
-/// caller logs.
+/// A relay's identity names its cluster: the registered `kubernetes_clusters`
+/// row whose `relay_identity_id` is this connection's authenticated identity. A
+/// relay whose identity resolves to no registered cluster — a draft the operator
+/// has not finished, or one they removed — can place nothing, and the caller
+/// logs the filing rather than dropping it silently.
 ///
-/// This is the one function the cluster registry and the identity work fill
-/// in; nothing else in the relay path needs to change for a filing to start
-/// landing.
+/// From the cluster, each target resolves to a scope:
+///
+/// - [`FilingTarget::Cluster`] is the cluster itself, filed at
+///   [`Scope::Cluster`]. This is what makes a cluster's substrate checks land
+///   and, through filings arriving, what keeps the cluster reachable (spec
+///   `CHK`, "Reachability").
+/// - [`FilingTarget::Namespace`] names a group at a rank, and
+///   [`FilingTarget::Instance`] names one application scheduled in the cluster.
+///   Resolving either requires correlating what the relay reports against the
+///   cluster's applications, which come from the harvest path. That path is not
+///   wired yet (see [`ingest_harvest`] and `HarvestFiling`), and no cluster
+///   application exists to correlate against until it is, so these are logged as
+///   unplaceable in the meantime. The cluster grain above does not depend on
+///   them.
 pub async fn resolve(
-	_conn: &mut AsyncPgConnection,
-	_relay_identity_id: Uuid,
-	_target: &FilingTarget,
+	conn: &mut AsyncPgConnection,
+	relay_identity_id: Uuid,
+	target: &FilingTarget,
 ) -> Result<Option<Placement>> {
-	Ok(None)
+	// The connection is authenticated as the relay's identity, and a cluster is
+	// derived from that identity rather than from anything the relay says. Only
+	// a registered cluster hosts anything or carries checks: a draft is a
+	// registration in progress, not a cluster in the registry.
+	let Some(cluster) =
+		KubernetesCluster::get_registered_by_relay_identity(conn, relay_identity_id).await?
+	else {
+		return Ok(None);
+	};
+
+	match target {
+		FilingTarget::Cluster => Ok(Some(Placement::Cluster(cluster.id))),
+		// The namespace-to-group and instance-to-application correlations arrive
+		// with the harvest path; until a cluster application exists there is
+		// nothing to resolve these against.
+		FilingTarget::Namespace { .. } | FilingTarget::Instance { .. } => Ok(None),
+	}
 }
 
 /// File what a relay reported.
@@ -129,18 +157,14 @@ async fn ingest_substrate(
 	let scope = placement.scope();
 
 	// Provenance is the relay, and only where the scope is an application: it
-	// is a separate concern from scope, and a group- or canopy-wide filing
+	// is a separate concern from scope, and a group- or cluster-wide filing
 	// carries none (see `CheckFiling::device_id`).
 	let device_id = matches!(scope, Scope::Application(_)).then_some(relay_identity_id);
 
-	// A cluster-wide check is Canopy-wide with each cluster an instance of it,
-	// so the cluster is the instance label rather than part of the check name.
-	// Everything else is a single unlabelled instance, which is what
-	// `file_check` files.
-	let label = match &placement {
-		Placement::Cluster { label } => label.clone(),
-		_ => String::new(),
-	};
+	// Each substrate filing is a single unlabelled instance: the cluster is now
+	// its own scope rather than an instance of a canopy-wide check, so its
+	// identity is the scope, not a label on the check.
+	let label = String::new();
 
 	let message = substrate.message.clone();
 	file_check_instances(

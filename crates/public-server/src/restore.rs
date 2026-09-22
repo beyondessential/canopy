@@ -208,7 +208,12 @@ async fn resolve_schema_group(
 		return Ok(None);
 	};
 	let central_type = central.r#type.clone();
-	let machine = database::machines::Machine::get_by_id(conn, central.machine_id).await?;
+	// The restore worklist is anchored on a box: a restore rewrites a machine.
+	// A cluster-hosted central has no box, so there is no machine-anchored
+	// schema group for it.
+	let Some(machine_id) = central.machine_id else {
+		return Ok(None);
+	};
 
 	let versions =
 		database::reporting_schemas::versions_of_members(conn, group_id, &members).await?;
@@ -217,7 +222,7 @@ async fn resolve_schema_group(
 			.await?;
 
 	Ok(Some(SchemaGroup {
-		machine_id: machine.id,
+		machine_id,
 		central_type,
 		versions,
 		settlement,

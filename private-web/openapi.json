@@ -6248,6 +6248,219 @@
         ]
       }
     },
+    "/api/kubernetes_clusters/confirm": {
+      "post": {
+        "tags": [
+          "kubernetes_clusters"
+        ],
+        "summary": "Confirm a registration: register the cluster if its relay is answering.",
+        "description": "Canopy confirms the relay is connected and answering before the cluster is\nregistered, so a cluster it cannot read is caught as the operator adds it.\nWhat that confirms is that canopy can reach the relay: a relay that answers\nwhile its access to the cluster is still incomplete registers, and reports\nwhat it cannot do as checks. Idempotent — an already-registered cluster is\nreturned unchanged.",
+        "operationId": "confirm",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClusterIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/kubernetes_clusters/list": {
+      "post": {
+        "tags": [
+          "kubernetes_clusters"
+        ],
+        "summary": "List the registry: registered clusters and in-progress drafts.",
+        "operationId": "list",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterList"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/kubernetes_clusters/register": {
+      "post": {
+        "tags": [
+          "kubernetes_clusters"
+        ],
+        "summary": "Name a cluster and mint its relay's credential, leaving a draft.",
+        "description": "This is what enrols the relay: minting its credential and recording the draft\nthat accounts for the minted identity are one step, so an operator reaches\nboth from the one page. The draft becomes a registered cluster through\n`confirm`, once the relay has connected and answered.",
+        "operationId": "register",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegistrationStarted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/kubernetes_clusters/reissue": {
+      "post": {
+        "tags": [
+          "kubernetes_clusters"
+        ],
+        "summary": "Re-issue a cluster's relay credential, retiring the one before it.",
+        "description": "For a credential lost before it reached the cluster. Re-issuing keeps the\nrelay's identity, so an application's cluster reference never moves, and\nretires the superseded key, which was never deployed anywhere.",
+        "operationId": "reissue",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClusterIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvisionedCredential"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/kubernetes_clusters/remove": {
+      "post": {
+        "tags": [
+          "kubernetes_clusters"
+        ],
+        "summary": "Remove a cluster from the registry, draft or registered.",
+        "operationId": "remove",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClusterIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "default": null
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/maintenance/declare": {
       "post": {
         "tags": [
@@ -9075,7 +9288,6 @@
         "required": [
           "id",
           "type",
-          "machine_id",
           "is_monitored",
           "alert_when_down_for",
           "may_manage_dns",
@@ -9148,10 +9360,21 @@
             "type": "boolean",
             "description": "Whether this server is actively monitored. When `false`, reachability\nchecks skip it entirely and its issues no longer contribute to\nincidents — useful for test environments and ad-hoc demos. The\n`alert_when_down_for` threshold is preserved while unmonitored, so\nturning monitoring back on doesn't lose the configured value."
           },
-          "machine_id": {
-            "type": "string",
+          "kubernetes_cluster_id": {
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "uuid",
-            "description": "The machine this application runs on. An application runs on exactly\none; a machine hosts any number."
+            "description": "The Kubernetes cluster this application is scheduled across, for one\nhosted by a cluster rather than installed on a box. `None` for a\nmachine-hosted application. An application on a cluster takes its group\nfrom the namespace it is deployed in, a cluster belonging to no group."
+          },
+          "machine_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The machine this application runs on, for an application installed on a\nbox. `None` for one hosted by a Kubernetes cluster, which has no box of\nits own. An application runs on exactly one host — a machine or a cluster\n— never both and never neither, so exactly one of `machine_id` and\n`kubernetes_cluster_id` is set."
           },
           "may_manage_dns": {
             "type": "boolean",
@@ -10608,6 +10831,91 @@
           "type": {
             "type": "string",
             "description": "Backup type whose schedule override to remove."
+          }
+        }
+      },
+      "ClusterIdArgs": {
+        "type": "object",
+        "description": "Identify one cluster.",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ClusterList": {
+        "type": "object",
+        "description": "The registry as two lists: the registered clusters, and the drafts an\noperator has begun but not finished.",
+        "required": [
+          "registered",
+          "drafts"
+        ],
+        "properties": {
+          "drafts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClusterView"
+            }
+          },
+          "registered": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClusterView"
+            }
+          }
+        }
+      },
+      "ClusterView": {
+        "type": "object",
+        "description": "A cluster in the registry, as an operator sees it.",
+        "required": [
+          "id",
+          "name",
+          "relay_identity_id",
+          "registered",
+          "answering"
+        ],
+        "properties": {
+          "answering": {
+            "type": "boolean",
+            "description": "Whether the relay has answered recently enough to read as connected right\nnow. This is what registration turns on."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "last_answered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When canopy last had this cluster's relay answer, or `null` if it never\nhas. Never cleared once set, so it reads as \"when did we last hear from\nthis\" for a cluster that has gone quiet."
+          },
+          "name": {
+            "type": "string",
+            "description": "What an operator sees in the host picker."
+          },
+          "registered": {
+            "type": "boolean",
+            "description": "Whether the registration has been confirmed. A draft is `false`."
+          },
+          "registered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the registration was confirmed, or `null` for a draft."
+          },
+          "relay_identity_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The relay's identity. Minting a new credential for it keeps this stable,\nso an application's cluster reference never moves."
           }
         }
       },
@@ -16247,6 +16555,35 @@
           "version_query": {
             "type": "string",
             "description": "Single-row, single-column SQL reading the group's own version out of the\nrestored database, to substitute into `url_template`."
+          }
+        }
+      },
+      "RegisterArgs": {
+        "type": "object",
+        "description": "Begin registering a cluster: name it and mint its relay's credential.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "What to call the cluster in the host picker."
+          }
+        }
+      },
+      "RegistrationStarted": {
+        "type": "object",
+        "description": "The result of beginning a registration: the draft, and the relay credential\nreturned once for the operator to install into the cluster.",
+        "required": [
+          "cluster",
+          "credential"
+        ],
+        "properties": {
+          "cluster": {
+            "$ref": "#/components/schemas/ClusterView"
+          },
+          "credential": {
+            "$ref": "#/components/schemas/ProvisionedCredential"
           }
         }
       },

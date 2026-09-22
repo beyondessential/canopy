@@ -11,23 +11,45 @@ fn columns_round_trip() {
 	let s = Uuid::new_v4();
 	let m = Uuid::new_v4();
 	let g = Uuid::new_v4();
-	assert_eq!(Scope::Application(s).to_columns(), (Some(s), None, None));
-	assert_eq!(Scope::Machine(m).to_columns(), (None, Some(m), None));
-	assert_eq!(Scope::Group(g).to_columns(), (None, None, Some(g)));
-	assert_eq!(Scope::Global.to_columns(), (None, None, None));
+	let c = Uuid::new_v4();
 	assert_eq!(
-		Scope::from_columns(Some(s), None, None),
+		Scope::Application(s).to_columns(),
+		(Some(s), None, None, None)
+	);
+	assert_eq!(Scope::Machine(m).to_columns(), (None, Some(m), None, None));
+	assert_eq!(Scope::Group(g).to_columns(), (None, None, Some(g), None));
+	assert_eq!(Scope::Cluster(c).to_columns(), (None, None, None, Some(c)));
+	assert_eq!(Scope::Global.to_columns(), (None, None, None, None));
+	assert_eq!(
+		Scope::from_columns(Some(s), None, None, None),
 		Scope::Application(s)
 	);
-	assert_eq!(Scope::from_columns(None, Some(m), None), Scope::Machine(m));
-	assert_eq!(Scope::from_columns(None, None, Some(g)), Scope::Group(g));
-	assert_eq!(Scope::from_columns(None, None, None), Scope::Global);
-	// The storage CHECK forbids more than one being set; if it ever happens, a
-	// set group wins (matches the historical scope-resolution order), then a
-	// machine.
-	assert_eq!(Scope::from_columns(Some(s), None, Some(g)), Scope::Group(g));
 	assert_eq!(
-		Scope::from_columns(Some(s), Some(m), None),
+		Scope::from_columns(None, Some(m), None, None),
+		Scope::Machine(m)
+	);
+	assert_eq!(
+		Scope::from_columns(None, None, Some(g), None),
+		Scope::Group(g)
+	);
+	assert_eq!(
+		Scope::from_columns(None, None, None, Some(c)),
+		Scope::Cluster(c)
+	);
+	assert_eq!(Scope::from_columns(None, None, None, None), Scope::Global);
+	// The storage CHECK forbids more than one being set; if it ever happens, a
+	// set cluster wins (matches the scope-resolution order), then a group, then
+	// a machine.
+	assert_eq!(
+		Scope::from_columns(Some(s), None, None, Some(c)),
+		Scope::Cluster(c)
+	);
+	assert_eq!(
+		Scope::from_columns(Some(s), None, Some(g), None),
+		Scope::Group(g)
+	);
+	assert_eq!(
+		Scope::from_columns(Some(s), Some(m), None, None),
 		Scope::Machine(m)
 	);
 }
@@ -166,6 +188,24 @@ async fn a_machine_resolves_through_its_group_on_its_own_switch() {
 		// application has none.
 		assert_eq!(
 			Scope::Machine(ungrouped)
+				.resolve_incident_target(&mut conn)
+				.await
+				.expect("resolve"),
+			None,
+		);
+	})
+	.await
+}
+
+/// A cluster belongs to no group, so it resolves to no incident target: its
+/// substrate checks are recorded and roll into the cluster's health, but there
+/// is no group environment for them to open an incident against.
+// spec: CHK
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cluster_has_no_incident_target() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		assert_eq!(
+			Scope::Cluster(Uuid::new_v4())
 				.resolve_incident_target(&mut conn)
 				.await
 				.expect("resolve"),

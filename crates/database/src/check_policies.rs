@@ -1109,6 +1109,9 @@ pub struct FilingScope {
 	pub machine_id: Option<Uuid>,
 	/// The group the filing's target belongs to, where it has one.
 	pub group_id: Option<Uuid>,
+	/// Set for a filing about one Kubernetes cluster. Scopes cluster-written
+	/// *silences*. A cluster belongs to no group, so it carries no `group_id`.
+	pub kubernetes_cluster_id: Option<Uuid>,
 }
 
 impl ScopedCheckPolicy {
@@ -1129,7 +1132,7 @@ impl ScopedCheckPolicy {
 		check_name: &str,
 	) -> Result<Option<Self>> {
 		use crate::schema::scoped_check_policies::dsl;
-		let (server, machine, group) = scope.to_columns();
+		let (server, machine, group, cluster) = scope.to_columns();
 		dsl::scoped_check_policies
 			.select(Self::as_select())
 			.filter(scoped_identity(source, namespace, check_name))
@@ -1137,7 +1140,8 @@ impl ScopedCheckPolicy {
 				dsl::application_id
 					.is_not_distinct_from(server)
 					.and(dsl::machine_id.is_not_distinct_from(machine))
-					.and(dsl::server_group_id.is_not_distinct_from(group)),
+					.and(dsl::server_group_id.is_not_distinct_from(group))
+					.and(dsl::kubernetes_cluster_id.is_not_distinct_from(cluster)),
 			)
 			.first(db)
 			.await
@@ -1157,7 +1161,7 @@ impl ScopedCheckPolicy {
 		created_by: Option<&str>,
 	) -> Result<Self> {
 		use crate::schema::scoped_check_policies::dsl;
-		let (server, machine, group) = scope.to_columns();
+		let (server, machine, group, cluster) = scope.to_columns();
 		let (subject, application_type) = namespace.to_columns();
 		if let Some(existing) = Self::get(db, scope, source, namespace, check_name).await? {
 			return diesel::update(dsl::scoped_check_policies.filter(dsl::id.eq(existing.id)))
@@ -1179,6 +1183,7 @@ impl ScopedCheckPolicy {
 				dsl::application_id.eq(server),
 				dsl::machine_id.eq(machine),
 				dsl::server_group_id.eq(group),
+				dsl::kubernetes_cluster_id.eq(cluster),
 				dsl::ceiling.eq(CheckResult::Skipped.to_string()),
 				dsl::created_by.eq(created_by),
 			))
@@ -1230,7 +1235,7 @@ impl ScopedCheckPolicy {
 	/// dead config that shouldn't clutter the operator's list.
 	pub async fn list_silences(db: &mut AsyncPgConnection, scope: Scope) -> Result<Vec<Self>> {
 		use crate::schema::scoped_check_policies::dsl;
-		let (server, machine, group) = scope.to_columns();
+		let (server, machine, group, cluster) = scope.to_columns();
 		let rows: Vec<Self> = dsl::scoped_check_policies
 			.select(Self::as_select())
 			.filter(
@@ -1238,6 +1243,7 @@ impl ScopedCheckPolicy {
 					.is_not_distinct_from(server)
 					.and(dsl::machine_id.is_not_distinct_from(machine))
 					.and(dsl::server_group_id.is_not_distinct_from(group))
+					.and(dsl::kubernetes_cluster_id.is_not_distinct_from(cluster))
 					.and(dsl::ceiling.eq(CheckResult::Skipped.to_string())),
 			)
 			.order(dsl::created_at.desc())
@@ -1266,8 +1272,13 @@ impl ScopedCheckPolicy {
 		check_name: &str,
 		scope: FilingScope,
 	) -> Result<Vec<Self>> {
-		let query = Self::scoped_to(scope.application_id, scope.machine_id, scope.group_id)
-			.filter(scoped_identity(source, namespace, check_name));
+		let query = Self::scoped_to(
+			scope.application_id,
+			scope.machine_id,
+			scope.group_id,
+			scope.kubernetes_cluster_id,
+		)
+		.filter(scoped_identity(source, namespace, check_name));
 		let mut rows: Vec<Self> = query.load(db).await.map_err(AppError::from)?;
 		Self::order_chain(&mut rows);
 		Ok(rows)
@@ -1285,11 +1296,15 @@ impl ScopedCheckPolicy {
 		db: &mut AsyncPgConnection,
 		scope: FilingScope,
 	) -> Result<HashMap<CatalogKey, Vec<Self>>> {
-		let rows: Vec<Self> =
-			Self::scoped_to(scope.application_id, scope.machine_id, scope.group_id)
-				.load(db)
-				.await
-				.map_err(AppError::from)?;
+		let rows: Vec<Self> = Self::scoped_to(
+			scope.application_id,
+			scope.machine_id,
+			scope.group_id,
+			scope.kubernetes_cluster_id,
+		)
+		.load(db)
+		.await
+		.map_err(AppError::from)?;
 		let mut chains: HashMap<CatalogKey, Vec<Self>> = HashMap::new();
 		for row in rows {
 			let Ok(namespace) = row.namespace() else {
@@ -1317,6 +1332,7 @@ impl ScopedCheckPolicy {
 		application_id: Option<Uuid>,
 		machine_id: Option<Uuid>,
 		group_id: Option<Uuid>,
+		kubernetes_cluster_id: Option<Uuid>,
 	) -> crate::schema::scoped_check_policies::BoxedQuery<
 		'static,
 		diesel::pg::Pg,
@@ -1326,14 +1342,15 @@ impl ScopedCheckPolicy {
 		let query = dsl::scoped_check_policies
 			.select(Self::as_select())
 			.into_boxed();
-		match (application_id, machine_id, group_id) {
-			(None, None, None) => query.filter(
+		match (application_id, machine_id, group_id, kubernetes_cluster_id) {
+			(None, None, None, None) => query.filter(
 				dsl::application_id
 					.is_null()
 					.and(dsl::machine_id.is_null())
-					.and(dsl::server_group_id.is_null()),
+					.and(dsl::server_group_id.is_null())
+					.and(dsl::kubernetes_cluster_id.is_null()),
 			),
-			(server, machine, group) => query.filter(
+			(server, machine, group, cluster) => query.filter(
 				dsl::application_id
 					.is_not_distinct_from(server)
 					.and(dsl::application_id.is_not_null())
@@ -1342,7 +1359,10 @@ impl ScopedCheckPolicy {
 						.and(dsl::machine_id.is_not_null()))
 					.or(dsl::server_group_id
 						.is_not_distinct_from(group)
-						.and(dsl::server_group_id.is_not_null())),
+						.and(dsl::server_group_id.is_not_null()))
+					.or(dsl::kubernetes_cluster_id
+						.is_not_distinct_from(cluster)
+						.and(dsl::kubernetes_cluster_id.is_not_null())),
 			),
 		}
 	}

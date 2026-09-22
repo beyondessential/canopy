@@ -648,7 +648,7 @@ async fn seed_servers(
 		let created = Application::create(
 			conn,
 			Application {
-				machine_id: machine.id,
+				machine_id: Some(machine.id),
 				..server
 			},
 		)
@@ -668,7 +668,8 @@ async fn seed_servers(
 			r#type,
 			rank: None,
 			// Replaced by `insert`, which is the only path to the database.
-			machine_id: Uuid::nil(),
+			machine_id: Some(Uuid::nil()),
+			kubernetes_cluster_id: None,
 			reported_key: None,
 			group_id: None,
 			public_name: None,
@@ -900,7 +901,10 @@ async fn seed_servers(
 		},
 	)
 	.await?;
-	let archived_machine = Application::get_by_id(conn, archived).await?.machine_id;
+	let archived_machine = Application::get_by_id(conn, archived)
+		.await?
+		.machine_id
+		.expect("seeded application is machine-hosted");
 	Machine::archive(conn, archived_machine).await?;
 
 	// Re-assert the releaser role for the device listing (archival revoked the
@@ -933,9 +937,14 @@ async fn seed_enrollment_tokens(
 	// names its boxes by the application on them, so the machine is read back
 	// off that application.
 	let pending = Application::get_by_id(conn, applications.pending_with_token).await?;
-	let (_token, _plaintext) =
-		MachineEnrollmentToken::mint(conn, pending.machine_id, SignedDuration::from_hours(48))
-			.await?;
+	let (_token, _plaintext) = MachineEnrollmentToken::mint(
+		conn,
+		pending
+			.machine_id
+			.expect("seeded application is machine-hosted"),
+		SignedDuration::from_hours(48),
+	)
+	.await?;
 	let _ = applications.pending_no_token;
 	Ok(())
 }
@@ -989,7 +998,10 @@ async fn seed_statuses(
 		// A push is the box's, so the row names the machine. The seed names its
 		// boxes by the application on them, and each seeded application has a
 		// machine of its own, so the machine is read back off the application.
-		let machine_id = Application::get_by_id(conn, server_id).await?.machine_id;
+		let machine_id = Application::get_by_id(conn, server_id)
+			.await?
+			.machine_id
+			.expect("seeded application is machine-hosted");
 		diesel::insert_into(statuses::table)
 			.values(Status {
 				id: Uuid::new_v4(),

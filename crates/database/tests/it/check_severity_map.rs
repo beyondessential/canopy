@@ -173,7 +173,7 @@ async fn silenced_checks_combine_scopes_and_stay_per_source() {
 		let checks = silenced_health_checks_for_server(
 			&mut conn,
 			Some(server_id),
-			m_server_id,
+			Some(m_server_id),
 			Some(group_id),
 			"alertd",
 		)
@@ -188,7 +188,7 @@ async fn silenced_checks_combine_scopes_and_stay_per_source() {
 		let checks = silenced_health_checks_for_server(
 			&mut conn,
 			Some(server_id),
-			m_server_id,
+			Some(m_server_id),
 			None,
 			"alertd",
 		)

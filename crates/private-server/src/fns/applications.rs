@@ -302,7 +302,14 @@ where
 pub(super) fn server_to_info(s: Application) -> ServerInfo {
 	ServerInfo {
 		id: s.id,
-		machine_id: s.machine_id,
+		// These application listings are machine-oriented (maintenance is
+		// declared over the box, the display host falls back to the box's
+		// tailnet name). A cluster-hosted application has no box; its
+		// presentation among the fleet arrives with the cluster-application
+		// surface, and nothing creates one yet, so a machine is present here.
+		machine_id: s
+			.machine_id
+			.expect("application listed here is machine-hosted"),
 		name: s.name,
 		r#type: s.r#type,
 		rank: s.rank,
@@ -377,7 +384,7 @@ pub(super) async fn decorate_with_status(
 		info.up = Some(ShortStatus::grade(last_reported_at, down_after));
 		info.health = Some(health.get(&info.id).copied().unwrap_or_default());
 		info.maintained =
-			Some(suspended.suspends_application(info.id, info.machine_id, info.group_id));
+			Some(suspended.suspends_application(info.id, Some(info.machine_id), info.group_id));
 		info.own_window = Some(suspended.application_window(info.id));
 	}
 	Ok(())
@@ -616,10 +623,16 @@ pub async fn get_detail(
 	let mut conn = db.get().await?;
 	let server = Application::get_by_id(&mut conn, args.server_id).await?;
 	// The identity belongs to the box, so the device this application reports
-	// through is its machine's.
-	let device_id = database::machines::Machine::get_by_id(&mut conn, server.machine_id)
-		.await?
-		.device_id;
+	// through is its machine's. An application on a cluster has no box and
+	// reports through its cluster's relay, not a machine device.
+	let device_id = match server.machine_id {
+		Some(machine_id) => {
+			database::machines::Machine::get_by_id(&mut conn, machine_id)
+				.await?
+				.device_id
+		}
+		None => None,
+	};
 
 	let (group, status, latest_version) = {
 		let mut conn_group = db.get().await?;
@@ -749,10 +762,16 @@ pub async fn get_detail(
 		None => (Vec::new(), Vec::new()),
 	};
 
-	let machine_name = database::machines::Machine::get_by_id(&mut conn, server.machine_id)
-		.await?
-		.name;
-	let machine_rank = database::machines::Machine::rank(&mut conn, server.machine_id).await?;
+	// An application on a cluster has no box, so it presents no machine facts.
+	let (machine_name, machine_rank) = match server.machine_id {
+		Some(machine_id) => (
+			database::machines::Machine::get_by_id(&mut conn, machine_id)
+				.await?
+				.name,
+			database::machines::Machine::rank(&mut conn, machine_id).await?,
+		),
+		None => (None, None),
+	};
 
 	// This server's own attribution, not its group's: for a server whose
 	// product or rank differs from the group's, the page would otherwise show
@@ -866,9 +885,17 @@ pub async fn update(
 	let new_group_id = args.data.group_id;
 	if let Some(group_id) = new_group_id {
 		let application = Application::get_by_id(&mut conn, args.server_id).await?;
+		// An application on a cluster takes its group from the namespace it is
+		// deployed in, a cluster belonging to no group, so there is no box to
+		// route a group change through and none to set here.
+		let Some(machine_id) = application.machine_id else {
+			return Err(AppError::BadRequest(
+				"an application on a cluster takes its group from its namespace; its group is not set here".into(),
+			));
+		};
 		database::machines::Machine::update(
 			&mut conn,
-			application.machine_id,
+			machine_id,
 			database::machines::MachineUpdate {
 				group_id: Some(group_id),
 				..Default::default()
@@ -922,14 +949,19 @@ pub async fn update(
 	}
 	if rank_changed {
 		// A box's environment is the highest rank among the workloads on it,
-		// so a rank change moves the machine's own issues too.
+		// so a rank change moves the machine's own issues too. An application on
+		// a cluster has no box, so its own scope is what is re-evaluated.
 		// spec: INC#targets
-		let machine_id = Application::get_by_id(&mut conn, args.server_id)
+		let scope = match Application::get_by_id(&mut conn, args.server_id)
 			.await?
-			.machine_id;
+			.machine_id
+		{
+			Some(machine_id) => database::issues::Scope::Machine(machine_id),
+			None => database::issues::Scope::Application(args.server_id),
+		};
 		database::issues::reevaluate_open_issues_for_scope(
 			&mut conn,
-			database::issues::Scope::Machine(machine_id),
+			scope,
 			Some(&format!("rank changed by {}", admin.0.login)),
 		)
 		.await?;
