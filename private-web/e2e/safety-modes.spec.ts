@@ -66,6 +66,58 @@ test.describe("safety modes", () => {
 		await expect(modeControl(page)).not.toContainText(/\d:\d{2}/);
 	});
 
+	test("a reloaded page comes back read-only", async ({ page }) => {
+		await page.goto("/settings/admins");
+		await raiseTo(page, "danger");
+
+		// The session identifier is held in memory and never persisted, so a
+		// reload asks for a fresh session rather than resuming the raise.
+		await page.reload();
+		await expect(modeControl(page)).toContainText(/read-only/i);
+	});
+
+	test("danger is granted and withdrawn from the administrators screen", async ({
+		page,
+		request,
+	}) => {
+		const seeded = `e2e-danger-${Math.random().toString(36).slice(2, 10)}@example.invalid`;
+		await request.post("/api/admins/add", { data: { email: seeded } });
+
+		try {
+			await page.goto("/settings/admins");
+			await expect(page.getByText(seeded)).toBeVisible();
+
+			// Amending an allow-list entry is danger-graded like the rest of it.
+			await raiseTo(page, "danger");
+
+			const row = page.getByRole("listitem").filter({ hasText: seeded });
+			const danger = row.getByRole("checkbox");
+			await expect(danger).not.toBeChecked();
+
+			await danger.check();
+			await expect(danger).toBeChecked();
+
+			// It is the entry that carries it, so it survives a reload.
+			await page.reload();
+			await expect(
+				page.getByRole("listitem").filter({ hasText: seeded }).getByRole("checkbox"),
+			).toBeChecked();
+
+			// And withdrawing it takes it away again.
+			await raiseTo(page, "danger");
+			await page
+				.getByRole("listitem")
+				.filter({ hasText: seeded })
+				.getByRole("checkbox")
+				.uncheck();
+			await expect(
+				page.getByRole("listitem").filter({ hasText: seeded }).getByRole("checkbox"),
+			).not.toBeChecked();
+		} finally {
+			await request.post("/api/admins/delete", { data: { email: seeded } });
+		}
+	});
+
 	test("a control above the mode is present and does not act", async ({
 		page,
 	}) => {

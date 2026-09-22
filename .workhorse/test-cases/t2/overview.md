@@ -26,7 +26,7 @@ Server-side cases exercising a boundary need the real tailnet header path rather
 ## Refusals
 
 - [x] The two refusals are distinguishable: lacking the permission, and being below the required mode (verifies spec: SAFE)
-- [ ] A client refused for its mode returns its indicator to read-only without a reload (verifies spec: SAFE)
+- [x] A client refused for its mode returns its indicator to read-only without a reload (verifies spec: SAFE)
 
 ## Expiry and lifetime
 
@@ -34,8 +34,8 @@ Server-side cases exercising a boundary need the real tailnet header path rather
 - [ ] The server accepts a request at the raised grade in the minute after the raise has lapsed (verifies spec: SAFE)
 - [x] A raise holds when the request is served by a different private-server process (verifies spec: SAFE)
 - [x] A raise survives a restart (verifies spec: SAFE)
-- [ ] A session not seen for some time is retired, and a retired session is no longer live (verifies spec: SAFE)
-- [ ] An operator lowers their mode from the mode control without waiting for the countdown (verifies spec: SAFE)
+- [x] A session not seen for some time is retired, and a retired session is no longer live (verifies spec: SAFE)
+- [x] An operator lowers their mode from the mode control without waiting for the countdown (verifies spec: SAFE)
 
 ## Grading the surface
 
@@ -46,11 +46,11 @@ Server-side cases exercising a boundary need the real tailnet header path rather
 
 ## Interface
 
-- [ ] A reloaded page comes back read-only (verifies spec: SAFE)
-- [ ] Raising to danger asks for confirmation; raising to write does not (verifies spec: SAFE)
-- [ ] The current mode and its remaining time are visible at all times, counting down from ten minutes (verifies spec: SAFE)
-- [ ] A blocked control does not act when clicked, and names the mode it requires (verifies spec: SAFE)
+- [x] A reloaded page comes back read-only (verifies spec: SAFE)
+- [x] Raising to danger asks for confirmation; raising to write does not (verifies spec: SAFE)
+- [x] The current mode and its remaining time are visible at all times, counting down from ten minutes (verifies spec: SAFE)
+- [x] A blocked control does not act when clicked, and names the mode it requires (verifies spec: SAFE)
 - [ ] A control requiring write or danger carries a stripe in that grade's colour, muted at rest and full colour under the pointer (verifies spec: SAFE)
 - [ ] A control disabled for a reason unrelated to its grade carries no stripe (verifies spec: SAFE)
 - [ ] A control withheld because the operator is not an administrator is absent rather than blocked (verifies spec: ADM)
-- [ ] Danger is granted and withdrawn from the administrators screen (verifies spec: ADM)
+- [x] Danger is granted and withdrawn from the administrators screen (verifies spec: ADM)
