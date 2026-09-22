@@ -76,6 +76,26 @@ impl TailscaleUser {
 		}
 		Ok(false)
 	}
+
+	/// Whether the caller holds the danger permission (see the ADM spec): their
+	/// allowlist entry carries it, or the tailnet policy grants it. Resolved on
+	/// the same basis as [`Self::is_admin`] and from the same grant, and
+	/// independent of it — administrator does not confer danger.
+	pub async fn has_danger(
+		&self,
+		db: &mut AsyncPgConnection,
+		directory: Option<&TailnetDirectory>,
+	) -> Result<bool, AppError> {
+		if Admin::check_danger(db, &self.login).await? {
+			return Ok(true);
+		}
+		if let Some(directory) = directory
+			&& directory.has_danger_by_policy(&self.login).await
+		{
+			return Ok(true);
+		}
+		Ok(false)
+	}
 }
 
 impl<S> FromRequestParts<S> for TailscaleUser

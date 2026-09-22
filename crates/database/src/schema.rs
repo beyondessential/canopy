@@ -4,6 +4,7 @@ diesel::table! {
 	admins (email) {
 		email -> Text,
 		created_at -> Timestamptz,
+		danger -> Bool,
 	}
 }
 
@@ -646,6 +647,17 @@ diesel::table! {
 }
 
 diesel::table! {
+	operator_sessions (id) {
+		id -> Uuid,
+		login -> Text,
+		mode -> Text,
+		raise_expires_at -> Nullable<Timestamptz>,
+		last_seen_at -> Timestamptz,
+		created_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	recovery_vault_writes (id) {
 		id -> Uuid,
 		written_at -> Timestamptz,
@@ -1036,6 +1048,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	mcp_tokens,
 	migration_tests,
 	migration_timings,
+	operator_sessions,
 	recovery_vault_writes,
 	reporting_schema_builds,
 	reporting_schema_requests,

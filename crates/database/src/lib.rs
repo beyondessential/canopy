@@ -28,6 +28,7 @@ pub mod maintenance_windows;
 pub mod mcp_tokens;
 pub mod migration_tests;
 pub mod notes;
+pub mod operator_sessions;
 pub mod partitions;
 pub mod pg_duration;
 pub mod recovery_vault;
@@ -71,6 +72,7 @@ pub use commons_types::backup::{
 pub use devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
 pub use kubernetes_clusters::KubernetesCluster;
 pub use machines::{Machine, MachineUpdate, NewMachine};
+pub use operator_sessions::OperatorSession;
 pub use recovery_vault::RecoveryVaultWrite;
 pub use restore::{
 	BackupRestoreCheck, NewBackupRestoreCheck, NewRestoreReplica, RestoreConsumerCapability,

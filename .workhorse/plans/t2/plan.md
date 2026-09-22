@@ -80,13 +80,13 @@ Seedling's elevation window is 9m59s so a minute-rounded countdown opens at "10m
 
 ## Build steps
 
-- [ ] Migration adding the danger column to `admins`, made with `just migration`
-- [ ] Migration adding the sessions table, and its model in the database crate
-- [ ] Grade type in the shared types crate, ordered so the ladder is a comparison
-- [ ] Grant resolution returns both permission sets where it returns one today
+- [x] Migration adding the danger column to `admins`, made with `just migration`
+- [x] Migration adding the sessions table, and its model in the database crate
+- [x] Grade type in the shared types crate, ordered so the ladder is a comparison — `commons_types::safety::SafetyMode`
+- [x] Grant resolution returns both permission sets where it returns one today — `resolve_permissions`, `has_danger_by_policy`, `Admin::check_danger`/`set_danger`, `TailscaleUser::has_danger`
 - [ ] Grade argument and extension injection in the vendored `routes!` macro
 - [ ] Enforcement layer and middleware, including the session-login check
-- [ ] Two error variants, one per refusal, with matching `ERRORS.md` headings
+- [x] Two error variants, one per refusal, with matching `ERRORS.md` headings — `SafetyModeTooLow { required }` and `DangerNotPermitted`
 - [ ] Extend the debug identity shortcut to the new boundary
 - [ ] Grade every handler on the administrative surface, module by module
 - [ ] `just gen-openapi` step writing the generated grade map
