@@ -1,6 +1,6 @@
 # Substrate checks, spun off from the plumbing
 
-M1 takes the plumbing end to end — reserving the `kubernetes` source, the instance label on the wire, the relay's watch-hold-file-refile loop, cluster-grain ingest and grading, cluster reachability, and the cluster detail page — plus the Tailscale Kubernetes API proxy check to prove it.
+M1 takes the plumbing end to end — reserving the `kubernetes` source, the instance label on the wire, the relay's watch-hold-file-refile loop, cluster-grain ingest and grading, cluster reachability, and the cluster detail page — plus two checks to prove it: the Tailscale Kubernetes API proxy, and the aggregate on workloads broadly unscheduled or failing. Their shapes differ, so between them they exercise watching one object and watching many, filing on presence and grading on thresholds.
 
 These are what follows. The area cards are repetitions of a pattern M1 sets, so they can run in parallel once it lands; the application grains card is gated on N1 instead.
 
@@ -39,18 +39,6 @@ Kubernetes version support belongs here too: the EKS version approaching end of 
 HNC, py-kube-downscaler, opencost, Prometheus, and the Tailscale operator beyond the API proxy M1 covers.
 
 These degrade rather than break, so they are worth having and worth grading below the rest. Note py-kube-downscaler is what carries putting an environment to sleep, so its health bears on an operator action rather than only on observability.
-
-## Cluster checks: workloads broadly unscheduled or failing
-
-One cluster-grain check on the proportion of workloads that should be running and are, which is the condition that has been caught by eye rather than reported — noticing a quarter of everything is unscheduled or failing.
-
-It is not a rollup of per-application checks. A per-application check says one application's pod cannot be placed; this says a large share of everything cannot, which has different causes (the cluster out of capacity, Karpenter wedged, a node class broken) and fires for causes no component check anticipated. That is its value: it catches what the specific checks did not think of.
-
-Graded on the healthy share, starting at passed above 95%, warning below that, and failed at or below 80%. The smallest cluster runs 92 pods, so a proportion alone is stable enough and needs no absolute-count fallback.
-
-Three exclusions, without which it alarms nightly: a duty deliberately scaled to zero is not a failure, so it reads `.spec.replicas`; py-kube-downscaler sleeps whole environments on a schedule, so a sleeping namespace's zeros are deliberate too; and completed jobs are not failures, so the denominator is workloads that are supposed to be running. The sleeping-namespace exclusion is the same fact that makes a hibernated deployment's application checks skip, read at a different grain.
-
-A degraded result holds past a duration rather than firing immediately, so a rolling deploy dipping the share for a minute does not trip it.
 
 ## CNPG disk headroom, and bumping it
 

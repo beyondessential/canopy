@@ -279,9 +279,17 @@ Plumbing first, then a card per area.
 
 **M1** takes the plumbing end to end plus one check to prove it: reserving the source and driving the reserved-source exclusions off the constant, the instance label on `SubstrateFiling` and through `ingest_substrate`, the relay's watch-hold-file-refile loop, cluster-grain ingest and grading, the cluster reachability sweep with its threshold column, and the cluster detail page.
 
-The proving check should be the Tailscale Kubernetes API proxy.
-It is the one flagged as especially important, its failure is the one that leaves a cluster serving while nobody can reach it to work on it, and it is worth having on day one rather than a placeholder chosen for being easy.
-If its detection turns out to want more than a plumbing card should carry, cert-manager is the fallback: a plainer availability check that still earns its place.
+Two checks prove it, chosen because their shapes differ and each exercises something the other does not.
+
+**The Tailscale Kubernetes API proxy** is a single component, present and serving or not.
+It proves the plain path: watch one thing, hold its state, file on change, refile on the minute.
+It is also the check most worth having on day one, being the failure that leaves a cluster serving while nobody can reach it to work on it.
+
+**The aggregate** is a proportion computed across every workload in the cluster, with exclusions and a duration hold before it grades.
+It proves what the other cannot: watching many objects of several kinds, deriving one result from them, and grading on thresholds rather than on presence.
+It is also the check that catches what the specific checks did not anticipate, which is the failure mode that has actually been caught by eye.
+
+Between them the plumbing is exercised by a check that is nearly nothing and a check that is nearly everything, which is a better test of it than two of the same shape would be.
 
 Then one card per area, each independently reviewable and mergeable, and able to run in parallel once the pattern is set:
 
@@ -345,3 +353,17 @@ Still to pin: whether the warning band is one step or two.
 Taking 95 as the edge is the safer default — it warns earlier — and an operator who finds it noisy moves it with a policy rule rather than a code change.
 
 A duration hold still earns its place even at this denominator: a rolling deploy of one large deployment can dip several percent for a minute, and the condition worth reporting is one that persists rather than one that passes on its own.
+
+## The instance label lands unexercised by a real check
+
+M1 adds an instance label to `SubstrateFiling` and passes it through `ingest_substrate`, but neither proof check produces instances: the API proxy is one thing, and the aggregate is one number over many things.
+Node pools are what needs it, and they are in the capacity card.
+
+Landing it here anyway is still right.
+It is a wire change, and a wire change made later is one more shape the relay and Canopy can disagree about across a version skew, where landing it once with the rest of the plumbing means the capacity card is only a check.
+The field is additive, so an older relay that never sets it is unaffected.
+
+What it does mean is that a test has to carry what a check would otherwise demonstrate: a multi-instance `SubstrateFiling` constructed directly, filed, and read back as one state with per-instance detail and an effective result at the most urgent instance.
+The relay-protocol crate already builds filings directly in its round-trip tests, so this is the established way to exercise the wire without a producer.
+
+If that feels too thin, node pools moving into M1 is the alternative, and the cost is a third check's detection and documentation in the plumbing card.
