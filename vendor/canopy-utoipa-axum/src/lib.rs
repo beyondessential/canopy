@@ -73,6 +73,31 @@ impl PathItemExt for HttpMethod {
     }
 }
 
+// CANOPY FORK: safety-mode grading (see the SAFE spec).
+//
+// Every handler on the private server's administrative surface declares the
+// safety mode it requires, as a prefix on its `routes!` entry:
+// `routes!(danger: delete)`. The grade is recorded as an OpenAPI operation
+// extension, which is the single place it is written: the server reads it back
+// to enforce the grade per request, and the client build reads it to present a
+// control according to the mode it needs.
+
+/// The OpenAPI operation-extension key carrying a handler's safety-mode grade.
+/// Its value is the mode's wire form: `read-only`, `write`, or `danger`.
+pub const SAFETY_MODE_EXTENSION: &str = "x-canopy-safety-mode";
+
+/// Record a handler's safety-mode grade on its OpenAPI operation. Called by the
+/// [`routes`] macro; not meant to be called directly.
+#[doc(hidden)]
+pub fn __set_safety_mode(operation: &mut utoipa::openapi::path::Operation, mode: &str) {
+    use utoipa::openapi::extensions::Extensions;
+    let incoming = Extensions::from_iter([(SAFETY_MODE_EXTENSION, mode)]);
+    operation
+        .extensions
+        .get_or_insert_with(Extensions::default)
+        .merge(incoming);
+}
+
 /// re-export paste so users do not need to add the dependency.
 #[doc(hidden)]
 pub use paste::paste;
@@ -123,6 +148,26 @@ pub use paste::paste;
 /// ```
 #[macro_export]
 macro_rules! routes {
+    // CANOPY FORK: graded entries. The grade prefix names the safety mode the
+    // handler requires (see the SAFE spec); it is recorded as an OpenAPI
+    // operation extension and read back by the server to enforce it.
+    ( read_only: $handler:path $(,)? ) => { $crate::routes!( @graded "read-only" : $handler ) };
+    ( write: $handler:path $(,)? ) => { $crate::routes!( @graded "write" : $handler ) };
+    ( danger: $handler:path $(,)? ) => { $crate::routes!( @graded "danger" : $handler ) };
+    ( @graded $mode:literal : $handler:path ) => {
+        {
+            use $crate::PathItemExt;
+            let mut paths = utoipa::openapi::path::Paths::new();
+            let mut schemas = Vec::<(String, utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>)>::new();
+            let (path, mut item, types) = $crate::routes!(@resolve_types $handler : schemas);
+            $crate::__set_safety_mode(&mut item, $mode);
+            let method_router = types.iter().by_ref().fold(axum::routing::MethodRouter::new(), |router, path_type| {
+                router.on(path_type.to_method_filter(), $handler)
+            });
+            paths.add_path_operation(&path, types, item);
+            (schemas, paths, method_router)
+        }
+    };
     ( $handler:path $(, $tail:path)* $(,)? ) => {
         {
             use $crate::PathItemExt;

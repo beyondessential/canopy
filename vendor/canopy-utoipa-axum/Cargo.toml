@@ -1,10 +1,15 @@
 # Vendored fork of utoipa-axum 0.2.0 (MIT OR Apache-2.0, upstream
-# https://github.com/juhaku/utoipa). The only functional change is in
-# `src/router.rs`: `routes()`, `nest()`, and `merge()` now panic when two
-# distinct types would register the same OpenAPI component schema name with
-# different definitions, instead of silently overwriting one with the other.
-# See the `// CANOPY FORK:` comments in router.rs. Keep this in sync with
-# upstream when bumping the version.
+# https://github.com/juhaku/utoipa). Two functional changes, both marked with
+# `// CANOPY FORK:` comments at the source:
+#
+# 1. `src/router.rs`: `routes()`, `nest()`, and `merge()` now panic when two
+#    distinct types would register the same OpenAPI component schema name with
+#    different definitions, instead of silently overwriting one with the other.
+# 2. `src/lib.rs`: the `routes!` macro takes a safety-mode grade prefix
+#    (`routes!(danger: delete)`) and records it as an OpenAPI operation
+#    extension, which is where the server reads it back to enforce the grade.
+#
+# Keep this in sync with upstream when bumping the version.
 [package]
 # A vendored fork: never ours to publish under this name.
 publish = false

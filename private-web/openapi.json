@@ -60,7 +60,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/admins/delete": {
@@ -110,7 +111,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/admins/list": {
@@ -160,7 +162,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/backups/allow_restore": {
@@ -6692,7 +6695,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/mcp_tokens/mint": {
@@ -6759,7 +6763,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/mcp_tokens/revoke": {
@@ -6819,7 +6824,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/migration_tests/for_group": {
@@ -7254,6 +7260,170 @@
             "tailscale-admin": []
           }
         ]
+      }
+    },
+    "/api/safety/lower": {
+      "post": {
+        "tags": [
+          "safety"
+        ],
+        "summary": "Lower the caller's session back to read-only at once.",
+        "description": "An operator lowers their mode without waiting for the remaining time to run\nout. Lowering a session that is already read-only is no change.",
+        "operationId": "safety_lower",
+        "responses": {
+          "200": {
+            "description": "The lowered session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/safety/raise": {
+      "post": {
+        "tags": [
+          "safety"
+        ],
+        "summary": "Raise the caller's session to a higher mode for ten minutes.",
+        "description": "Raising to danger requires the danger permission; an operator without it is\ntold they lack the permission rather than that something went wrong. The\nclient offers danger to every operator, because nothing tells it in advance\nwhether its operator holds the permission.",
+        "operationId": "safety_raise",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RaiseArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The raised session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/safety/session": {
+      "post": {
+        "tags": [
+          "safety"
+        ],
+        "summary": "Read the caller's session, minting one if they have none.",
+        "description": "A client calls this when it connects. Presenting a session identifier that is\nunknown, expired, or another login's mints a fresh read-only session rather\nthan failing, so a client always ends up with a usable session.",
+        "operationId": "safety_session",
+        "responses": {
+          "200": {
+            "description": "The caller's session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/self_alerts/active": {
@@ -7841,7 +8011,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/sql/get_last_user_query": {
@@ -7881,7 +8052,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/sql/get_query_history": {
@@ -7923,7 +8095,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/sql/is_sql_available": {
@@ -7945,7 +8118,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/statuses/check_detail": {
@@ -16149,6 +16323,19 @@
           }
         }
       },
+      "RaiseArgs": {
+        "type": "object",
+        "description": "Request body for raising a session to a higher mode.",
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/SafetyMode",
+            "description": "The mode to raise to. Raising to read-only is a lowering; use `lower`."
+          }
+        }
+      },
       "ReachabilityMode": {
         "type": "string",
         "description": "How a source's silence bears on its servers' reachability.\n\nStored as text in Postgres, validated as this enum at the edges.",
@@ -17507,6 +17694,15 @@
           "unknown"
         ]
       },
+      "SafetyMode": {
+        "type": "string",
+        "description": "A rung of the safety-mode ladder: the mode a session is in, or the grade a\nhandler requires. Ordered read-only < write < danger, so `>=` answers\n\"does this session reach this grade?\".",
+        "enum": [
+          "read-only",
+          "write",
+          "danger"
+        ]
+      },
       "SampleArgs": {
         "type": "object",
         "description": "Request body identifying which healthcheck to sample data for.",
@@ -18658,6 +18854,32 @@
             "type": "string",
             "format": "uuid",
             "description": "The server to update."
+          }
+        }
+      },
+      "SessionState": {
+        "type": "object",
+        "description": "The state of an operator's session, as the client presents it.",
+        "required": [
+          "id",
+          "mode"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The session identifier, to be sent back on every subsequent request."
+          },
+          "mode": {
+            "$ref": "#/components/schemas/SafetyMode",
+            "description": "The mode the session is in right now. A raise that has lapsed reads as\nread-only here, so the client and the server agree."
+          },
+          "raise_expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the current raise lapses, as an RFC 3339 timestamp. Absent while the\nsession is read-only. The client counts down to this."
           }
         }
       },

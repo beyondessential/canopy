@@ -78,20 +78,35 @@ Canopy enforces instead, because the danger permission has to be real and a mode
 The visual convention is taken from seedling deliberately and unchanged, so an operator who knows one interface knows the other.
 Seedling's elevation window is 9m59s so a minute-rounded countdown opens at "10m"; canopy's ten against eleven is a different device for a different reason, since seedling's mode gates nothing and so needs no slack.
 
+## Grading calls worth a second look
+
+The two criteria that decide most handlers are mechanical, but a few sit on a line.
+
+`admins::add` and `admins::delete` are graded danger under "issues or invalidates
+credentials or trust material": an allowlist entry is what admits a human to the
+whole surface, so granting or withdrawing one is the trust decision itself rather
+than an amendment to Canopy's records.
+
+`inventory_variables::remove` is graded write, because the interface can set the
+variable again. Where the variable is a secret its value is genuinely gone, which
+reads towards "cannot be undone from the interface" — worth confirming before the
+grading tranche closes.
+
 ## Build steps
 
 - [x] Migration adding the danger column to `admins`, made with `just migration`
 - [x] Migration adding the sessions table, and its model in the database crate
 - [x] Grade type in the shared types crate, ordered so the ladder is a comparison — `commons_types::safety::SafetyMode`
 - [x] Grant resolution returns both permission sets where it returns one today — `resolve_permissions`, `has_danger_by_policy`, `Admin::check_danger`/`set_danger`, `TailscaleUser::has_danger`
-- [ ] Grade argument and extension injection in the vendored `routes!` macro
-- [ ] Enforcement layer and middleware, including the session-login check
+- [x] Grade argument and extension injection in the vendored `routes!` macro — `routes!(danger: delete)`, recorded as the `x-canopy-safety-mode` operation extension
+- [x] Enforcement layer and middleware, including the session-login check — `private-server/src/safety.rs`, reading grades back from the built document
 - [x] Two error variants, one per refusal, with matching `ERRORS.md` headings — `SafetyModeTooLow { required }` and `DangerNotPermitted`
-- [ ] Extend the debug identity shortcut to the new boundary
-- [ ] Grade every handler on the administrative surface, module by module
+- [x] Session endpoints (`/api/safety/session`, `raise`, `lower`), graded read-only so a read-only session can reach them
+- [x] Extend the debug identity shortcut to the new boundary — `use_dev_identity()` made public and honoured by the middleware
+- [ ] Grade every handler on the administrative surface, module by module — done: `admins`, `mcp_tokens`, `sql`, `inventory_variables` (13 operations); the other 23 modules remain
 - [ ] `just gen-openapi` step writing the generated grade map
 - [ ] Sweep retiring idle sessions, in the jobs crate
 - [ ] Session provider, session header in `callApi`, and mode indicator in the app bar
 - [ ] Graded control wrappers carrying the stripe treatment
 - [ ] Danger column on the administrators screen
-- [ ] Boundary tests on the real header path, and Playwright coverage for the interface
+- [ ] Boundary tests on the real header path, and Playwright coverage for the interface — server-side boundary tests written (`tests/it/safety_modes.rs`); Playwright still to come

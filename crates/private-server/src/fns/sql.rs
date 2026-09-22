@@ -71,10 +71,10 @@ pub struct SqlHistoryEntry {
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(is_sql_available))
-		.routes(routes!(execute_query))
-		.routes(routes!(get_last_user_query))
-		.routes(routes!(get_query_history))
+		.routes(routes!(read_only: is_sql_available))
+		.routes(routes!(read_only: execute_query))
+		.routes(routes!(read_only: get_last_user_query))
+		.routes(routes!(read_only: get_query_history))
 }
 
 /// Check whether the read-only SQL playground is enabled.

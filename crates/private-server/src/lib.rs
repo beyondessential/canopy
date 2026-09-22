@@ -3,6 +3,7 @@ pub mod fns;
 pub mod mcp;
 pub mod openapi;
 pub mod run_pairing;
+pub mod safety;
 pub mod spa;
 pub mod state;
 
@@ -16,6 +17,21 @@ pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::rou
 	let (api_router, api_spec) = OpenApiRouter::with_openapi(openapi::ApiDoc::openapi())
 		.merge(fns::routes())
 		.split_for_parts();
+
+	// Every graded handler is decided against the caller's session here (see the
+	// SAFE spec). The grades come from the document the `routes!` entries just
+	// produced, so there is one declaration per handler and no second copy to
+	// drift. Applied to the API routes only: the SPA and Swagger are not the
+	// administrative surface.
+	let safety = crate::safety::SafetyState {
+		app: state.clone(),
+		grades: std::sync::Arc::new(crate::safety::GradeMap::from_openapi(&api_spec)),
+	};
+	tracing::debug!(graded = safety.grades.len(), "safety-mode grades loaded");
+	let api_router = api_router.layer(middleware::from_fn_with_state(
+		safety,
+		crate::safety::enforce,
+	));
 
 	// `/public/...` accepts tagged-device callers via the dual-auth
 	// device extractor. Everything else (admin API, Swagger, SPA) is

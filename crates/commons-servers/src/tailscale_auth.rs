@@ -25,7 +25,13 @@ const TRUST_HEADERS_ENV: &str = "CANOPY_TRUST_TAILSCALE_HEADERS";
 ///
 /// Only ever true in debug builds, and only when the caller has not opted into
 /// trusting real headers via [`TRUST_HEADERS_ENV`]. Always false in release.
-fn use_dev_identity() -> bool {
+///
+/// Public because the safety-mode boundary defers to it the same way the
+/// extractors do: with the dev identity in play a request is treated as holding
+/// a danger-mode session and the danger permission, so the existing test suite
+/// reaches graded handlers without driving a session. Compiled out of release
+/// builds by the same guard, so nothing can reach it in production.
+pub fn use_dev_identity() -> bool {
 	cfg!(debug_assertions) && !trust_real_headers()
 }
 

@@ -36,6 +36,7 @@ mod private_statuses;
 mod provision_credential;
 mod reporting_schemas;
 mod restore_replicas;
+mod safety_modes;
 mod server_version_distance;
 mod sql;
 mod tagged_device_guard;
