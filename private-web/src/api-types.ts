@@ -3123,7 +3123,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** List the registry: registered clusters and in-progress drafts. */
+        /**
+         * List the registry: registered clusters and in-progress drafts.
+         * @description Registered clusters and drafts are returned as separate lists, each carrying
+         *     whether its relay is answering right now.
+         */
         post: operations["list"];
         delete?: never;
         options?: never;
@@ -3185,7 +3189,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Remove a cluster from the registry, draft or registered. */
+        /**
+         * Remove a cluster from the registry, draft or registered.
+         * @description The relay's identity is removed with the cluster; a draft removed this way is
+         *     the operator abandoning a registration.
+         */
         post: operations["remove"];
         delete?: never;
         options?: never;
@@ -5677,7 +5685,10 @@ export interface components {
         };
         /** @description Identify one cluster. */
         ClusterIdArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The cluster to act on.
+             */
             id: string;
         };
         /**
@@ -5685,7 +5696,9 @@ export interface components {
          *     operator has begun but not finished.
          */
         ClusterList: {
+            /** @description The in-progress drafts, newest first. */
             drafts: components["schemas"]["ClusterView"][];
+            /** @description The registered clusters, ordered by name. */
             registered: components["schemas"]["ClusterView"][];
         };
         /** @description A cluster in the registry, as an operator sees it. */
@@ -5695,7 +5708,10 @@ export interface components {
              *     now. This is what registration turns on.
              */
             answering: boolean;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Unique identifier for this cluster.
+             */
             id: string;
             /**
              * Format: date-time
@@ -9263,7 +9279,9 @@ export interface components {
          *     returned once for the operator to install into the cluster.
          */
         RegistrationStarted: {
+            /** @description The draft that was created, accounting for the minted relay identity. */
             cluster: components["schemas"]["ClusterView"];
+            /** @description The relay's credential, returned once for the operator to install. */
             credential: components["schemas"]["ProvisionedCredential"];
         };
         /**
