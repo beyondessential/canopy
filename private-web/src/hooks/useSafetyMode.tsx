@@ -10,6 +10,7 @@ import {
 } from "react";
 import { callApi } from "../api";
 import {
+	RAISE_DURATION_MS,
 	type SafetyMode,
 	publishSession,
 	setRaiseLapsedHandler,
@@ -89,10 +90,13 @@ export function SafetyModeProvider({ children }: { children: ReactNode }) {
 	const lapsed = expiresAt !== null && now >= expiresAt;
 	const mode: SafetyMode =
 		!session || lapsed ? "read-only" : (session.mode ?? "read-only");
+	// Clamped to the length of a raise: the server sets the expiry from its own
+	// clock, so a client running a little behind would otherwise open the
+	// countdown above ten minutes.
 	const remainingMs =
 		mode === "read-only" || expiresAt === null
 			? null
-			: Math.max(0, expiresAt - now);
+			: Math.min(RAISE_DURATION_MS, Math.max(0, expiresAt - now));
 
 	// Tick only while something is counting down.
 	useEffect(() => {

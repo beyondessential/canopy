@@ -131,9 +131,14 @@ export function SafetyModeControl() {
 				{(["read-only", "write", "danger"] as const).map((option) => (
 					<MenuItem
 						key={option}
-						onClick={() =>
-							option === "danger" ? setConfirming(true) : to(option)
-						}
+						onClick={() => {
+							// The menu closes either way: left open behind the
+							// confirmation it keeps the rest of the page from the
+							// accessibility tree, and from the pointer.
+							setAnchor(null);
+							if (option === "danger") setConfirming(true);
+							else to(option);
+						}}
 						disabled={option === mode}
 						sx={{ color: modeColour(option).main, gap: 1 }}
 					>

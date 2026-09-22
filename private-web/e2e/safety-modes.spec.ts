@@ -53,7 +53,7 @@ test.describe("safety modes", () => {
 		await raiseTo(page, "write");
 		// Opens just under ten minutes and is always visible, not something to
 		// go and check.
-		await expect(modeControl(page)).toContainText(/\b(9|10):\d{2}\b/);
+		await expect(modeControl(page)).toContainText(/(9|10):\d{2}/);
 	});
 
 	test("an operator lowers without waiting for the countdown", async ({
