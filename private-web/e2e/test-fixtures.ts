@@ -50,11 +50,16 @@ export const test = base.extend<Options, Fixtures>({
 					// A navigation cancels the request mid-flight and disposes its
 					// response; the page asks again, and that request is raised in
 					// turn. Anything else is a real failure.
-					if (!/disposed|closed|cancel|abort/i.test(String(error))) throw error;
+					if (!/disposed|closed|cancel|abort|ended/i.test(String(error))) {
+						throw error;
+					}
 				}
 			});
 		}
 		await use(page);
+		// A session request can still be in flight as the test ends; let it go
+		// rather than report it against whatever the test was about.
+		await page.unrouteAll({ behavior: "ignoreErrors" });
 	},
 	stack: [
 		async ({}, use) => {
