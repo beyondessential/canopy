@@ -18,7 +18,7 @@ Server-side cases exercising a boundary need the real tailnet header path rather
 - [x] An operator without the danger permission cannot raise to danger (verifies spec: SAFE)
 - [x] An operator without the danger permission is refused a danger-graded request even when their session is in danger mode (verifies spec: SAFE)
 - [x] The danger permission is held through the allowlist entry alone, with no policy grant (verifies spec: ADM)
-- [ ] The danger permission is held through the policy capability alone, with no allowlist entry (verifies spec: ADM)
+- [x] The danger permission is held through the policy capability alone, with no allowlist entry (verifies spec: ADM)
 - [x] A capability value carrying neither key confers neither permission (verifies spec: ADM)
 - [x] Administrator does not confer danger (verifies spec: ADM)
 - [x] Withdrawing the danger permission takes effect during an operator's existing danger raise, not at the end of it (verifies spec: ADM)
@@ -40,7 +40,7 @@ Server-side cases exercising a boundary need the real tailnet header path rather
 ## Grading the surface
 
 - [x] Every handler on the administrative surface carries a grade, and one added without a grade fails the build (verifies spec: SAFE)
-- [ ] Every tool on the fleet query interface is read-only (verifies spec: SAFE)
+- [x] Every tool on the fleet query interface is read-only (verifies spec: SAFE)
 - [x] Minting a fleet-query access token is danger, and listing tokens is read-only (verifies spec: SAFE)
 - [x] The SQL playground is graded read-only despite running operator-supplied queries (verifies spec: SAFE)
 
