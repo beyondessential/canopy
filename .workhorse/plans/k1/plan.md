@@ -121,16 +121,32 @@ page is served by `private-server`. Those are separate Kubernetes `Deployment`s,
 Canopy's established way for one pod to learn what another observed is the database, not a
 pod-to-pod call.
 
-So relayhub records what it observed of each relay, and registration reads it rather than
-probing live. The private-server never talks to the relayhub.
+**Decided: a `last_answered_at` on the cluster row**, written by relayhub, read by
+registration. The private-server never talks to the relayhub.
 
-- **Rejected: an internal HTTP surface on the relayhub.** It buys exactness registration does
-  not need and introduces a pod-to-pod call pattern the codebase does not have.
-- Accepted cost: "answering" becomes "answered moments ago". At registration the operator has
-  just deployed the relay, so the answer is fresh by construction.
+- **Relayhub runs a probe loop**, `Ping`ing each connection it holds on a cadence and
+  stamping `last_answered_at` on the cluster its relay identity resolves to. A relay whose
+  identity resolves to no cluster row has nowhere to write, which is a log line rather than
+  an error: the operator deleted the draft, or never finished one.
+- **Stamp it on connect too, from the `Build` round trip relayhub already makes.** That
+  exchange is itself proof the relay is answering, so using it means an operator who has just
+  deployed a relay sees the wizard confirm almost at once, instead of waiting up to a full
+  cadence for the first probe. Without this the draft flow feels broken precisely when it is
+  working.
+- **The freshness window registration reads against must exceed the probe cadence**, or a
+  relay answering normally reads as stale between probes. Both are knobs to pick with a real
+  relay in front of us rather than guessed here.
+- **Disconnect does not clear the column.** It is a timestamp and staleness is computed from
+  it, so clearing would discard the "when did we last hear from this" an operator wants when
+  diagnosing a cluster that has gone quiet.
 
-Now that reachability covers the ongoing case, this mechanism serves registration alone,
-which makes its shape an open question rather than a settled one — see below.
+**Rejected: an internal HTTP surface on the relayhub** for a live probe. It buys exactness
+registration does not need and introduces a pod-to-pod call pattern the codebase does not
+have.
+
+Accepted cost: "answering" means "answered moments ago". Since reachability covers the
+ongoing case, this column serves registration and operator display, and nothing grades on
+it — so the imprecision has nowhere to do harm.
 
 ## One wizard, and a draft is the trace it leaves
 
@@ -180,13 +196,7 @@ holds no applications. Worth drafting once the wizard's shape is agreed, not bef
 
 ## Open decisions to work
 
-1. **What registration actually reads.** Since reachability no longer needs a liveness table,
-   the options narrow: a small `last_answered_at` on the cluster row written by a relayhub
-   probe loop, or no probe loop at all — relayhub simply records connect/disconnect, and
-   registration reads "a relay is currently connected". The second is less machinery and may
-   be enough, given `Ping` is answered below the `Duties` trait and a connected relay that
-   cannot answer it is close to a contradiction.
-2. **Card size.** The model change (table, host column, `Scope::Cluster`, `resolve`) is what
+1. **Card size.** The model change (table, host column, `Scope::Cluster`, `resolve`) is what
    unblocks every other card; the settings page is operator-facing work nothing waits on.
    The card description already flags this as the split worth making if it runs long.
 
