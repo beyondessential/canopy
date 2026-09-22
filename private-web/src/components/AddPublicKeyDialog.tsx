@@ -11,6 +11,7 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import { useApiAction } from "../api";
+import { GradedAction } from "./GradedAction";
 
 /**
  * Register an externally-generated public key on a device. Unlike generating a
@@ -90,13 +91,15 @@ export default function AddPublicKeyDialog({
 				<Button onClick={close} disabled={action.pending}>
 					Cancel
 				</Button>
-				<Button
-					variant="contained"
-					onClick={onAdd}
-					disabled={action.pending || pem.trim() === ""}
-				>
-					{action.pending ? "Adding…" : "Add key"}
-				</Button>
+				<GradedAction calls="devices/add_key">
+					<Button
+						variant="contained"
+						onClick={onAdd}
+						disabled={action.pending || pem.trim() === ""}
+					>
+						{action.pending ? "Adding…" : "Add key"}
+					</Button>
+				</GradedAction>
 			</DialogActions>
 		</Dialog>
 	);

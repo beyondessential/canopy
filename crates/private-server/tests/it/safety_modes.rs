@@ -565,3 +565,58 @@ async fn the_grade_is_honoured_for_a_minute_after_the_raise_lapses() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn danger_held_through_the_policy_alone_needs_no_allowlist_entry() {
+	use commons_servers::{tailnet_directory::TailnetDirectory, tailscale_auth::TailscaleUser};
+
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		// A grant carrying only the danger key, targeting the Canopy service.
+		let directory = TailnetDirectory::for_test_with_policy(json!({
+			"groups": { "group:oncall": [OPERATOR] },
+			"grants": [{
+				"app": { "bes.au/cap/canopy": [{ "danger": true }] },
+				"dst": ["tag:server-canopy"],
+				"src": ["group:oncall"],
+			}],
+		}));
+		let operator = TailscaleUser {
+			login: OPERATOR.into(),
+			name: "Operator".into(),
+			profile_pic: None,
+		};
+		let stranger = TailscaleUser {
+			login: OTHER.into(),
+			name: "Other".into(),
+			profile_pic: None,
+		};
+
+		// No allowlist entry exists for anyone.
+		assert!(
+			operator
+				.has_danger(&mut conn, Some(&directory))
+				.await
+				.expect("resolve"),
+			"the policy grant alone confers danger"
+		);
+		assert!(
+			!operator
+				.is_admin(&mut conn, Some(&directory))
+				.await
+				.expect("resolve"),
+			"and only danger: the grant carried no admin key"
+		);
+		assert!(
+			!stranger
+				.has_danger(&mut conn, Some(&directory))
+				.await
+				.expect("resolve"),
+			"a login the grant does not name holds nothing"
+		);
+		assert!(
+			!operator.has_danger(&mut conn, None).await.expect("resolve"),
+			"without the policy there is nothing to hold it through"
+		);
+	})
+	.await;
+}

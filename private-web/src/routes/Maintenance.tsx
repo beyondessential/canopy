@@ -16,6 +16,7 @@ import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import DeclareMaintenanceDialog from "../components/DeclareMaintenanceDialog";
+import { GradedAction } from "../components/GradedAction";
 import ServerRankChip from "../components/ServerRankChip";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
@@ -54,9 +55,11 @@ function AmendWindow({
 	}
 	return (
 		<>
-			<Button size="small" onClick={() => setOpen(true)}>
-				Amend
-			</Button>
+			<GradedAction calls="maintenance/declare">
+				<Button size="small" onClick={() => setOpen(true)}>
+					Amend
+				</Button>
+			</GradedAction>
 			<DeclareMaintenanceDialog
 				open={open}
 				onClose={() => setOpen(false)}
@@ -216,20 +219,22 @@ export default function Maintenance() {
 													targetLabel={target}
 													onAmended={list.reload}
 												/>
-												<Button
-													size="small"
-													disabled={lift.pending}
-													onClick={async () => {
-														try {
-															await lift.call({ id: window.id });
-															list.reload();
-														} catch {
-															/* surfaced above */
-														}
-													}}
-												>
-													Lift
-												</Button>
+												<GradedAction calls="maintenance/lift">
+													<Button
+														size="small"
+														disabled={lift.pending}
+														onClick={async () => {
+															try {
+																await lift.call({ id: window.id });
+																list.reload();
+															} catch {
+																/* surfaced above */
+															}
+														}}
+													>
+														Lift
+													</Button>
+												</GradedAction>
 											</Stack>
 										</TableCell>
 									)}

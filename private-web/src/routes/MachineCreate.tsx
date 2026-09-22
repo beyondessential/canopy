@@ -12,6 +12,7 @@ import {
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { callApi, useApiAction } from "../api";
+import { GradedAction } from "../components/GradedAction";
 import GroupControl from "../components/GroupControl";
 import TagsEditor from "../components/TagsEditor";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -216,13 +217,21 @@ export default function MachineCreate() {
 				{error && <Alert severity="error">{error.message}</Alert>}
 
 				<Stack direction="row" spacing={1}>
-					<Button
-						type="submit"
-						variant="contained"
-						disabled={pending || !groupId || !name.trim()}
+					<GradedAction
+						calls={
+							alertWhenUnreachable
+								? "fleet/machines/create"
+								: ["fleet/machines/create", "silenced_refs/silence_machine"]
+						}
 					>
-						{pending ? "Creating…" : "Create machine"}
-					</Button>
+						<Button
+							type="submit"
+							variant="contained"
+							disabled={pending || !groupId || !name.trim()}
+						>
+							{pending ? "Creating…" : "Create machine"}
+						</Button>
+					</GradedAction>
 					<Button
 						type="button"
 						variant="outlined"

@@ -20,6 +20,7 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { useEffect, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { callApi, useApiAction } from "../api";
+import { GradedAction } from "./GradedAction";
 import MachineSetupInstructions from "./MachineSetupInstructions";
 import TailnetIdentitySection from "./TailnetIdentitySection";
 import type { DeviceInfo, TailnetLiveInfo } from "../types";
@@ -137,12 +138,14 @@ function DeviceCard({
 							node and canopy will auto-create the device row if
 							it doesn't exist yet.
 						</Typography>
-						<Button
-							variant="contained"
-							onClick={() => setAttachOpen(true)}
-						>
-							Attach Tailscale device
-						</Button>
+						<GradedAction calls="fleet/machines/attach_tailscale_device">
+							<Button
+								variant="contained"
+								onClick={() => setAttachOpen(true)}
+							>
+								Attach Tailscale device
+							</Button>
+						</GradedAction>
 					</Stack>
 				)}
 			</Paper>
@@ -282,17 +285,19 @@ function AttachMachineDeviceDialog({
 				<Button onClick={onClose} disabled={attachAction.pending}>
 					Cancel
 				</Button>
-				<Button
-					variant="contained"
-					onClick={onConfirm}
-					disabled={
-						attachAction.pending ||
-						preview === null ||
-						identifier.trim() === ""
-					}
-				>
-					{attachAction.pending ? "Attaching…" : "Attach"}
-				</Button>
+				<GradedAction calls="fleet/machines/attach_tailscale_device">
+					<Button
+						variant="contained"
+						onClick={onConfirm}
+						disabled={
+							attachAction.pending ||
+							preview === null ||
+							identifier.trim() === ""
+						}
+					>
+						{attachAction.pending ? "Attaching…" : "Attach"}
+					</Button>
+				</GradedAction>
 			</DialogActions>
 		</Dialog>
 	);

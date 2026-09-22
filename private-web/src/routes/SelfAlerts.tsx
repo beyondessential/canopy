@@ -11,6 +11,7 @@ import {
 import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
+import { GradedAction } from "../components/GradedAction";
 import { healthcheckSettingsPath } from "../types";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { useIsAdmin } from "../hooks/useIsAdmin";
@@ -143,14 +144,16 @@ export default function SelfAlerts() {
 								</Typography>
 								<Box sx={{ flex: 1 }} />
 								{isAdmin && (
-									<Button
-										size="small"
-										color="error"
-										variant="outlined"
-										onClick={() => onResolve(a.id)}
-									>
-										Resolve
-									</Button>
+									<GradedAction calls="self_alerts/resolve">
+										<Button
+											size="small"
+											color="error"
+											variant="outlined"
+											onClick={() => onResolve(a.id)}
+										>
+											Resolve
+										</Button>
+									</GradedAction>
 								)}
 							</Stack>
 							<Typography

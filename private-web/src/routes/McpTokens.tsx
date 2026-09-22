@@ -26,6 +26,7 @@ import BlockIcon from "@mui/icons-material/Block";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import { type FormEvent, useState } from "react";
 import { ApiError, callApi, useApi } from "../api";
+import { GradedAction } from "../components/GradedAction";
 import { usePageTitle } from "../hooks/usePageTitle";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -103,14 +104,16 @@ export default function McpTokens() {
 							onChange={(e) => setName(e.target.value)}
 							disabled={pending}
 						/>
-						<Button
-							type="submit"
-							variant="contained"
-							disabled={pending}
-							sx={{ whiteSpace: "nowrap", flexShrink: 0 }}
-						>
-							{pending ? "Minting…" : "Mint token"}
-						</Button>
+						<GradedAction calls="mcp_tokens/mint">
+							<Button
+								type="submit"
+								variant="contained"
+								disabled={pending}
+								sx={{ whiteSpace: "nowrap", flexShrink: 0 }}
+							>
+								{pending ? "Minting…" : "Mint token"}
+							</Button>
+						</GradedAction>
 					</Stack>
 					{error && (
 						<Alert severity="error" sx={{ mt: 2 }}>
@@ -160,15 +163,17 @@ export default function McpTokens() {
 									</TableCell>
 									<TableCell align="right">
 										{!token.revoked_at && (
-											<Tooltip title="Revoke">
-												<IconButton
-													size="small"
-													aria-label={`revoke ${token.name}`}
-													onClick={() => setConfirmRevoke(token)}
-												>
-													<BlockIcon fontSize="small" />
-												</IconButton>
-											</Tooltip>
+											<GradedAction calls="mcp_tokens/revoke">
+												<Tooltip title="Revoke">
+													<IconButton
+														size="small"
+														aria-label={`revoke ${token.name}`}
+														onClick={() => setConfirmRevoke(token)}
+													>
+														<BlockIcon fontSize="small" />
+													</IconButton>
+												</Tooltip>
+											</GradedAction>
 										)}
 									</TableCell>
 								</TableRow>
@@ -227,12 +232,14 @@ export default function McpTokens() {
 				</DialogContent>
 				<DialogActions>
 					<Button onClick={() => setConfirmRevoke(null)}>Cancel</Button>
-					<Button
-						color="error"
-						onClick={() => confirmRevoke && onRevoke(confirmRevoke)}
-					>
-						Revoke
-					</Button>
+					<GradedAction calls="mcp_tokens/revoke">
+						<Button
+							color="error"
+							onClick={() => confirmRevoke && onRevoke(confirmRevoke)}
+						>
+							Revoke
+						</Button>
+					</GradedAction>
 				</DialogActions>
 			</Dialog>
 

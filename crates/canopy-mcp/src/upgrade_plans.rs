@@ -100,6 +100,8 @@ struct HistoricPlan {
 #[tool_router(router = upgrade_plans_router, vis = "pub(crate)")]
 impl CanopyMcp {
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "Where every environment is going: each open upgrade plan, per group and \
 		               rank, with the version that environment runs now, the version it plans to \
 		               move to, the planned date, and whether that date has passed unmet. Each \
@@ -208,6 +210,8 @@ impl CanopyMcp {
 	}
 
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "Every upgrade plan one group's environments have had, newest first, with \
 		               the rank each was for and how each stands: open, met (the environment \
 		               reached the target), replaced by a later plan, or withdrawn (an operator \

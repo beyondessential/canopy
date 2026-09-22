@@ -36,6 +36,7 @@ import {
 } from "@mui/material";
 import { useEffect, useState } from "react";
 import { ApiError, callApi, useApi } from "../api";
+import { GradedAction } from "./GradedAction";
 import TimeAgo from "./TimeAgo";
 import { humanSeconds } from "../lib/humanDuration";
 import type {
@@ -150,14 +151,16 @@ export default function RestoreReplicasSection({
 					Restore replicas
 				</Typography>
 				{isAdmin && (
-					<Button
-						size="small"
-						variant="outlined"
-						startIcon={<AddIcon />}
-						onClick={() => setCreateOpen(true)}
-					>
-						Declare replica
-					</Button>
+					<GradedAction calls="restore_replicas/create">
+						<Button
+							size="small"
+							variant="outlined"
+							startIcon={<AddIcon />}
+							onClick={() => setCreateOpen(true)}
+						>
+							Declare replica
+						</Button>
+					</GradedAction>
 				)}
 			</Stack>
 
@@ -240,28 +243,34 @@ export default function RestoreReplicasSection({
 										<ParamSummary params={r.params} />
 									</TableCell>
 									<TableCell>
-										<Switch
-											checked={r.enabled}
-											disabled={!isAdmin}
-											onChange={(e) => onToggle(r, e.target.checked)}
-											slotProps={{ input: { "aria-label": `toggle ${r.name}` } }}
-										/>
+										<GradedAction calls="restore_replicas/update">
+											<Switch
+												checked={r.enabled}
+												disabled={!isAdmin}
+												onChange={(e) => onToggle(r, e.target.checked)}
+												slotProps={{ input: { "aria-label": `toggle ${r.name}` } }}
+											/>
+										</GradedAction>
 									</TableCell>
 									{isAdmin && (
 										<TableCell align="right">
-											<IconButton
-												aria-label={`edit ${r.name}`}
-												onClick={() => setEditingReplica(r)}
-											>
-												<EditIcon />
-											</IconButton>
-											<IconButton
-												edge="end"
-												aria-label={`delete ${r.name}`}
-												onClick={() => onDelete(r.id)}
-											>
-												<DeleteIcon />
-											</IconButton>
+											<GradedAction calls="restore_replicas/update">
+												<IconButton
+													aria-label={`edit ${r.name}`}
+													onClick={() => setEditingReplica(r)}
+												>
+													<EditIcon />
+												</IconButton>
+											</GradedAction>
+											<GradedAction calls="restore_replicas/delete">
+												<IconButton
+													edge="end"
+													aria-label={`delete ${r.name}`}
+													onClick={() => onDelete(r.id)}
+												>
+													<DeleteIcon />
+												</IconButton>
+											</GradedAction>
 										</TableCell>
 									)}
 								</TableRow>
@@ -1019,9 +1028,11 @@ function CreateReplicaDialog({
 				<Button onClick={onClose} disabled={pending}>
 					Cancel
 				</Button>
-				<Button variant="contained" onClick={onSubmit} disabled={pending}>
-					{pending ? "Declaring…" : "Declare"}
-				</Button>
+				<GradedAction calls="restore_replicas/create">
+					<Button variant="contained" onClick={onSubmit} disabled={pending}>
+						{pending ? "Declaring…" : "Declare"}
+					</Button>
+				</GradedAction>
 			</DialogActions>
 		</Dialog>
 	);
@@ -1230,9 +1241,11 @@ function EditReplicaDialog({
 				<Button onClick={onClose} disabled={pending}>
 					Cancel
 				</Button>
-				<Button variant="contained" onClick={onSubmit} disabled={pending}>
-					{pending ? "Saving…" : "Save"}
-				</Button>
+				<GradedAction calls="restore_replicas/update">
+					<Button variant="contained" onClick={onSubmit} disabled={pending}>
+						{pending ? "Saving…" : "Save"}
+					</Button>
+				</GradedAction>
 			</DialogActions>
 		</Dialog>
 	);

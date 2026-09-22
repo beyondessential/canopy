@@ -136,17 +136,30 @@ but it amends Canopy's own records rather than acting on the fleet.
 
 ## Applying the blocked treatment across the surface
 
-`GradedAction` wraps a control in the mode its endpoint requires, reading the
-generated grade map so the stripe and the server's decision come from one
-declaration. It is on the administrators screen; the rest of the surface's
-controls are still to be wrapped.
+Every control that calls a write- or danger-graded endpoint names the endpoints
+it calls, typed against the generated grade map so a misspelt name is a compile
+error rather than a control that reads as needing no mode. A control that can
+make several calls, like a form whose save silences a machine only when a toggle
+is off, names the calls its current state would make, and needs the highest of
+their grades. A popover whose rows are graded on their own needs only the lowest
+of them to open, so un-silencing stays reachable in write mode.
 
-That rollout is not only mechanical. The e2e stack runs a debug binary, so the
-server skips the mode check while the interface holds a real read-only session:
-a test that reaches for a graded control has to raise first, as an operator does.
-`e2e/safety.ts` is that helper, and `admins.spec.ts` shows the shape. Every spec
-that drives a control which becomes graded needs the same line, so the wrapping
-and its tests move together, screen by screen.
+A blocked control is also disabled, not only inert to the pointer: a focused
+control would otherwise act on Enter, and a form would submit from a text field.
+
+Three controls cannot take the wrapper and use the pieces it is built from. Menu
+items stay direct children of their menu (`GradedMenuItem`), and a chip's delete
+icon is cloned by the chip, so it takes the stripe itself (`blockedSx`). Machine
+setup mints its first enrollment ticket on its own; below danger it offers the
+mint as a blocked control instead of asking and being refused.
+
+Entries on the upgrades calendar open the amend dialog and are not wrapped: the
+day and week views position them absolutely, so a wrapper has no size. The
+dialog's save is graded, which is where the call is made.
+
+The e2e fixture raises each page's session to danger through the real raise
+endpoint, so specs about other features drive their controls as before. Specs
+about the modes themselves opt out and start read-only.
 
 ## Build steps
 
@@ -163,6 +176,6 @@ and its tests move together, screen by screen.
 - [x] `just gen-openapi` step writing the generated grade map — `private-web/src/safety-modes.ts`, regenerated and diffed by `just check-generated`
 - [x] Sweep retiring idle sessions, in the jobs crate — `jobs::session_sweep`, hourly, 24h grace, wired into the monitor pod
 - [x] Session provider, session header in `callApi`, and mode indicator in the app bar
-- [ ] Graded control wrappers carrying the stripe treatment — `GradedAction` built and applied on the administrators screen; the rest of the surface's controls still to be wrapped
+- [x] Graded control wrappers carrying the stripe treatment, applied across the surface
 - [x] Danger column on the administrators screen — `admins::list` carries the flag, `admins::set_danger` amends it
 - [x] Boundary tests on the real header path, and Playwright coverage for the interface — `tests/it/safety_modes.rs` (9) and `e2e/safety-modes.spec.ts` (8)

@@ -12,6 +12,7 @@ import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
 import { Link as RouterLink } from "react-router-dom";
 import ServerShorty, { type ServerInfo } from "../components/ServerShorty";
 import { useApi, useApiAction } from "../api";
+import { GradedAction } from "../components/GradedAction";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { compareServersByRankThenType } from "../types";
@@ -132,7 +133,9 @@ function ArchivedGroupRow({
 			</MuiLink>
 			<Box sx={{ ml: "auto" }}>
 				{admin && (
-					<RestoreButton pending={action.pending} onClick={onRestore} />
+					<GradedAction calls="fleet/groups/restore">
+						<RestoreButton pending={action.pending} onClick={onRestore} />
+					</GradedAction>
 				)}
 			</Box>
 			{action.error && (
@@ -167,7 +170,11 @@ function ArchivedServerRow({
 			<Box sx={{ flex: 1 }}>
 				<ServerShorty server={server} />
 			</Box>
-			{admin && <RestoreButton pending={action.pending} onClick={onRestore} />}
+			{admin && (
+				<GradedAction calls="fleet/applications/restore">
+					<RestoreButton pending={action.pending} onClick={onRestore} />
+				</GradedAction>
+			)}
 		</Box>
 	);
 }

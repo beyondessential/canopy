@@ -111,6 +111,8 @@ struct BackupProblems {
 #[tool_router(router = fleet_router, vis = "pub(crate)")]
 impl CanopyMcp {
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "Fleet-wide overview: server counts by product/kind/rank, version \
 		               distribution, a health rollup, and a backup-health rollup."
 	)]
@@ -201,6 +203,8 @@ impl CanopyMcp {
 	}
 
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "Scan for current backup problems (fleet-wide, or one group): overdue and \
 		               never-reported backups, provisioning errors, recent failed runs, and stuck \
 		               maintenance. Each problem carries a severity."

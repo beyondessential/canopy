@@ -7,7 +7,7 @@
 import type { SafetyMode } from "./safety";
 
 /** The mode each endpoint requires, keyed as `module/fn`. */
-export const SAFETY_MODES: Readonly<Record<string, SafetyMode>> = Object.freeze({
+export const SAFETY_MODES = {
 	"admins/add": "danger",
 	"admins/delete": "danger",
 	"admins/list": "read-only",
@@ -212,4 +212,11 @@ export const SAFETY_MODES: Readonly<Record<string, SafetyMode>> = Object.freeze(
 	"versions/update_version_changelog": "write",
 	"versions/update_version_status": "write",
 	"versions/upload_artifact": "write",
-});
+} as const satisfies Record<string, SafetyMode>;
+
+/**
+ * An endpoint on the administrative surface, named the way a control names the
+ * endpoint it calls. A misspelt name is a type error rather than a control that
+ * quietly reads as needing no mode at all.
+ */
+export type GradedEndpoint = keyof typeof SAFETY_MODES;

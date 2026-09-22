@@ -145,6 +145,8 @@ struct ServerDetail {
 #[tool_router(router = applications_router, vis = "pub(crate)")]
 impl CanopyMcp {
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "Find applications by name/host/id substring, optionally filtered by type, \
 		               rank, or group. A type is the software and its role together, such as \
 		               `tamanu-central` or `tamanu-facility`. Returns compact records with \
@@ -255,6 +257,8 @@ impl CanopyMcp {
 	}
 
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "Full detail for one application: fields, latest status (version, health, \
 		               platform, postgres), owning group, sibling count, and the machine it runs \
 		               on. Backups belong to that machine — ask about the machine for them."

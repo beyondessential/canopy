@@ -45,6 +45,7 @@ import {
 } from "../components/Legends";
 import ServerRankChip from "../components/ServerRankChip";
 import { useApi, useApiAction } from "../api";
+import { GradedAction } from "../components/GradedAction";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { humanSeconds } from "../lib/humanDuration";
@@ -361,12 +362,14 @@ function DeleteServerButton({
 
 	return (
 		<>
-			<ActionButton
-				color="error"
-				icon={<ArchiveIcon />}
-				label="Archive"
-				onClick={() => setOpen(true)}
-			/>
+			<GradedAction calls="fleet/applications/delete">
+				<ActionButton
+					color="error"
+					icon={<ArchiveIcon />}
+					label="Archive"
+					onClick={() => setOpen(true)}
+				/>
+			</GradedAction>
 			<Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
 				<DialogTitle>Archive server?</DialogTitle>
 				<DialogContent>
@@ -385,14 +388,16 @@ function DeleteServerButton({
 					<Button onClick={() => setOpen(false)} disabled={action.pending}>
 						Cancel
 					</Button>
-					<Button
-						variant="contained"
-						color="error"
-						onClick={onConfirm}
-						disabled={action.pending}
-					>
-						{action.pending ? "Archiving…" : "Archive"}
-					</Button>
+					<GradedAction calls="fleet/applications/delete">
+						<Button
+							variant="contained"
+							color="error"
+							onClick={onConfirm}
+							disabled={action.pending}
+						>
+							{action.pending ? "Archiving…" : "Archive"}
+						</Button>
+					</GradedAction>
 				</DialogActions>
 			</Dialog>
 		</>
@@ -424,15 +429,17 @@ function ArchivedBanner({
 			severity="warning"
 			action={
 				isAdmin ? (
-					<Button
-						color="inherit"
-						size="small"
-						startIcon={<RestoreIcon />}
-						onClick={onRestore}
-						disabled={action.pending}
-					>
-						{action.pending ? "Restoring…" : "Restore"}
-					</Button>
+					<GradedAction calls="fleet/applications/restore">
+						<Button
+							color="inherit"
+							size="small"
+							startIcon={<RestoreIcon />}
+							onClick={onRestore}
+							disabled={action.pending}
+						>
+							{action.pending ? "Restoring…" : "Restore"}
+						</Button>
+					</GradedAction>
 				) : undefined
 			}
 		>

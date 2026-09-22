@@ -13,6 +13,7 @@ import {
 } from "@mui/material";
 import { useEffect, useState } from "react";
 import { useApiAction } from "../api";
+import { GradedAction } from "./GradedAction";
 import type { MaintenanceScope, MaintenanceWindow, ServerRank } from "../types";
 
 const PRESETS = [1, 2, 4, 8];
@@ -157,31 +158,35 @@ export default function DeclareMaintenanceDialog({
 			</DialogContent>
 			<DialogActions>
 				{offerLift && amending && existing && (
-					<Button
-						color="error"
-						disabled={lift.pending || declare.pending}
-						onClick={async () => {
-							try {
-								await lift.call({ id: existing.id });
-								onDone();
-								onClose();
-							} catch {
-								/* surfaced above */
-							}
-						}}
-						sx={{ mr: "auto" }}
-					>
-						Lift
-					</Button>
+					<GradedAction calls="maintenance/lift">
+						<Button
+							color="error"
+							disabled={lift.pending || declare.pending}
+							onClick={async () => {
+								try {
+									await lift.call({ id: existing.id });
+									onDone();
+									onClose();
+								} catch {
+									/* surfaced above */
+								}
+							}}
+							sx={{ mr: "auto" }}
+						>
+							Lift
+						</Button>
+					</GradedAction>
 				)}
 				<Button onClick={onClose}>Cancel</Button>
-				<Button
-					variant="contained"
-					onClick={submit}
-					disabled={declare.pending || lift.pending || endsAt === ""}
-				>
-					{amending ? "Amend" : "Declare"}
-				</Button>
+				<GradedAction calls="maintenance/declare">
+					<Button
+						variant="contained"
+						onClick={submit}
+						disabled={declare.pending || lift.pending || endsAt === ""}
+					>
+						{amending ? "Amend" : "Declare"}
+					</Button>
+				</GradedAction>
 			</DialogActions>
 		</Dialog>
 	);

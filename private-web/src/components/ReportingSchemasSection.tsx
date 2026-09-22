@@ -15,6 +15,7 @@ import {
 } from "@mui/material";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
+import { GradedAction } from "./GradedAction";
 
 type PairState = "awaiting" | "built" | "failed";
 
@@ -112,13 +113,15 @@ export default function ReportingSchemasSection({
 									</Typography>
 								) : (
 									isAdmin && (
-										<Button
-											size="small"
-											onClick={() => ask(pair.version_id)}
-											disabled={build.pending}
-										>
-											{pair.state === "awaiting" ? "Build sooner" : "Build again"}
-										</Button>
+										<GradedAction calls="reporting_schemas/build">
+											<Button
+												size="small"
+												onClick={() => ask(pair.version_id)}
+												disabled={build.pending}
+											>
+												{pair.state === "awaiting" ? "Build sooner" : "Build again"}
+											</Button>
+										</GradedAction>
 									)
 								)}
 							</TableCell>

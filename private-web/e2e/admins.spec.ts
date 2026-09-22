@@ -1,5 +1,4 @@
 import { expect, test } from "./test-fixtures";
-import { raiseTo } from "./safety";
 
 async function callApi(
 	request: { post: (url: string, opts: { data: unknown }) => Promise<unknown> },
@@ -37,9 +36,6 @@ test.describe("admins page", () => {
 		await page.goto("/settings/admins");
 		await expect(page.getByText(seeded)).toBeVisible();
 
-		// Deleting an allow-list entry is danger-graded, so it is blocked until
-		// the operator raises to it.
-		await raiseTo(page, "danger");
 		await page.getByRole("button", { name: `delete ${seeded}` }).click();
 		await expect(page.getByText(seeded)).not.toBeVisible();
 	});
@@ -49,8 +45,6 @@ test.describe("admins page", () => {
 
 		await page.goto("/settings/admins");
 		await page.getByLabel("Email").fill(fresh);
-		// Adding an allow-list entry is danger-graded too.
-		await raiseTo(page, "danger");
 		await page.getByRole("button", { name: "Add admin" }).click();
 
 		try {
@@ -65,9 +59,6 @@ test.describe("admins page", () => {
 		// Browser email validation will block submit when empty;
 		// circumvent with a space-only value to hit our own check.
 		await page.getByLabel("Email").fill("   ");
-		// The control has to be reachable before its own validation can run: a
-		// blocked control does not act at all.
-		await raiseTo(page, "danger");
 		await page.getByRole("button", { name: "Add admin" }).click();
 		await expect(page.getByText("Email cannot be empty")).toBeVisible();
 	});

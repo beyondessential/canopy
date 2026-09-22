@@ -659,6 +659,23 @@ impl TailnetDirectory {
 	}
 }
 
+impl TailnetDirectory {
+	/// Construct a directory that has read the given tailnet policy file, for
+	/// tests. No devices, no background refresh, no API calls. Panics on a
+	/// policy that does not parse, since that is a mistake in the test.
+	pub fn for_test_with_policy(policy: serde_json::Value) -> Self {
+		let policy: PolicyFile = serde_json::from_value(policy).expect("test policy parses");
+		let directory = Self::for_test([]);
+		directory
+			.inner
+			.cache
+			.try_write()
+			.expect("a fresh directory is uncontended")
+			.permissions = resolve_permissions(&policy);
+		directory
+	}
+}
+
 /// True for any IP that's in Tailscale's CGNAT v4 range (100.64.0.0/10) or
 /// its ULA v6 prefix (fd7a:115c:a1e0::/48). Used as the spoof-guard
 /// for the dual-auth tailnet path: only consider X-Forwarded-For values

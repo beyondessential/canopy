@@ -37,6 +37,7 @@ import Markdown from "../components/Markdown";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { ApiError, useApi, useApiAction } from "../api";
 import CheckResultChip from "../components/CheckResultChip";
+import { GradedAction } from "../components/GradedAction";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -391,9 +392,11 @@ function CeilingCard({
 					</Typography>
 				)}
 				{canEdit && (
-					<Button size="small" variant="outlined" onClick={save} disabled={update.pending}>
-						Save
-					</Button>
+					<GradedAction calls="healthchecks/update">
+						<Button size="small" variant="outlined" onClick={save} disabled={update.pending}>
+							Save
+						</Button>
+					</GradedAction>
 				)}
 			</Stack>
 			{update.error && (
@@ -448,9 +451,11 @@ function NotesCard({
 			/>
 			{canEdit && (
 				<Box sx={{ mt: 1 }}>
-					<Button size="small" variant="outlined" onClick={save} disabled={update.pending}>
-						Save notes
-					</Button>
+					<GradedAction calls="healthchecks/update">
+						<Button size="small" variant="outlined" onClick={save} disabled={update.pending}>
+							Save notes
+						</Button>
+					</GradedAction>
 				</Box>
 			)}
 			{update.error && (
@@ -519,9 +524,11 @@ function DocumentationCard({
 					Documentation
 				</Typography>
 				{canEdit && !editing && (
-					<Button size="small" variant="outlined" onClick={startEditing}>
-						{row.documentation ? "Edit" : "Write documentation"}
-					</Button>
+					<GradedAction calls="healthchecks/update_documentation">
+						<Button size="small" variant="outlined" onClick={startEditing}>
+							{row.documentation ? "Edit" : "Write documentation"}
+						</Button>
+					</GradedAction>
 				)}
 			</Stack>
 			{editing ? (
@@ -542,14 +549,16 @@ function DocumentationCard({
 						}}
 					/>
 					<Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-						<Button
-							size="small"
-							variant="contained"
-							onClick={save}
-							disabled={update.pending}
-						>
-							Save documentation
-						</Button>
+						<GradedAction calls="healthchecks/update_documentation">
+							<Button
+								size="small"
+								variant="contained"
+								onClick={save}
+								disabled={update.pending}
+							>
+								Save documentation
+							</Button>
+						</GradedAction>
 						<Button
 							size="small"
 							onClick={() => setEditing(false)}
@@ -755,23 +764,27 @@ function RulesCard({
 			)}
 			{canEdit && (
 				<Stack direction="row" spacing={1} sx={{ mt: 2 }}>
-					<Button
-						size="small"
-						variant="contained"
-						onClick={save}
-						disabled={!dirty || update.pending}
-					>
-						Save rules
-					</Button>
-					{branches.length > 0 && (
+					<GradedAction calls="healthchecks/update_rules">
 						<Button
 							size="small"
-							color="error"
-							onClick={deleteAll}
-							disabled={update.pending}
+							variant="contained"
+							onClick={save}
+							disabled={!dirty || update.pending}
 						>
-							Delete all rules
+							Save rules
 						</Button>
+					</GradedAction>
+					{branches.length > 0 && (
+						<GradedAction calls="healthchecks/update_rules">
+							<Button
+								size="small"
+								color="error"
+								onClick={deleteAll}
+								disabled={update.pending}
+							>
+								Delete all rules
+							</Button>
+						</GradedAction>
 					)}
 				</Stack>
 			)}

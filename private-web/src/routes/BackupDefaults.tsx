@@ -13,6 +13,7 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
+import { GradedAction } from "../components/GradedAction";
 import { usePageTitle } from "../hooks/usePageTitle";
 
 type Retention = {
@@ -267,15 +268,17 @@ function TypeDefaultEditor({
 				)}
 				{save.error && <Alert severity="error">{save.error.message}</Alert>}
 				<Box>
-					<Button variant="contained" onClick={onSave} disabled={!canSave}>
-						{creating
-							? save.pending
-								? "Adding…"
-								: "Add type"
-							: save.pending
-								? "Saving…"
-								: "Save"}
-					</Button>
+					<GradedAction calls="backups/set_type_default">
+						<Button variant="contained" onClick={onSave} disabled={!canSave}>
+							{creating
+								? save.pending
+									? "Adding…"
+									: "Add type"
+								: save.pending
+									? "Saving…"
+									: "Save"}
+						</Button>
+					</GradedAction>
 				</Box>
 			</Stack>
 		</Paper>

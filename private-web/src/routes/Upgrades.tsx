@@ -50,6 +50,7 @@ import {
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import DeclareMaintenanceDialog from "../components/DeclareMaintenanceDialog";
+import { GradedAction } from "../components/GradedAction";
 import ServerRankChip from "../components/ServerRankChip";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
@@ -1854,13 +1855,15 @@ function RecordPlan({
 
 	return (
 		<>
-			<Button
-				variant="contained"
-				startIcon={<AddIcon />}
-				onClick={() => setOpen(true)}
-			>
-				Record a plan
-			</Button>
+			<GradedAction calls="upgrade_plans/record">
+				<Button
+					variant="contained"
+					startIcon={<AddIcon />}
+					onClick={() => setOpen(true)}
+				>
+					Record a plan
+				</Button>
+			</GradedAction>
 			{open && (
 				<RecordPlanDialog
 					environments={environments}
@@ -2090,13 +2093,15 @@ function RecordPlanDialog({
 			</DialogContent>
 			<DialogActions>
 				<Button onClick={onClose}>Cancel</Button>
-				<Button
-					variant="contained"
-					disabled={!chosen || !versionId || record.pending}
-					onClick={submit}
-				>
-					Record
-				</Button>
+				<GradedAction calls="upgrade_plans/record">
+					<Button
+						variant="contained"
+						disabled={!chosen || !versionId || record.pending}
+						onClick={submit}
+					>
+						Record
+					</Button>
+				</GradedAction>
 			</DialogActions>
 		</Dialog>
 	);
@@ -2121,14 +2126,16 @@ function EditPlan({
 
 	return (
 		<>
-			<IconButton
-				size="small"
-				aria-label={`Edit ${groupName}'s plan`}
-				onClick={() => setOpen(true)}
-				disabled={!planId}
-			>
-				<EditIcon fontSize="small" />
-			</IconButton>
+			<GradedAction calls="upgrade_plans/amend">
+				<IconButton
+					size="small"
+					aria-label={`Edit ${groupName}'s plan`}
+					onClick={() => setOpen(true)}
+					disabled={!planId}
+				>
+					<EditIcon fontSize="small" />
+				</IconButton>
+			</GradedAction>
 			{open && (
 				<EditPlanDialog
 					planId={planId}
@@ -2268,9 +2275,11 @@ function EditPlanDialog({
 			</DialogContent>
 			<DialogActions>
 				<Button onClick={onClose}>Cancel</Button>
-				<Button variant="contained" onClick={save} disabled={amend.pending}>
-					Save
-				</Button>
+				<GradedAction calls="upgrade_plans/amend">
+					<Button variant="contained" onClick={save} disabled={amend.pending}>
+						Save
+					</Button>
+				</GradedAction>
 			</DialogActions>
 		</Dialog>
 	);
@@ -2307,14 +2316,16 @@ function WithdrawPlan({
 	};
 
 	return (
-		<IconButton
-			size="small"
-			aria-label={`Withdraw ${groupName}'s plan`}
-			onClick={onClick}
-			disabled={withdraw.pending || !planId}
-		>
-			<DeleteIcon fontSize="small" />
-		</IconButton>
+		<GradedAction calls="upgrade_plans/withdraw">
+			<IconButton
+				size="small"
+				aria-label={`Withdraw ${groupName}'s plan`}
+				onClick={onClick}
+				disabled={withdraw.pending || !planId}
+			>
+				<DeleteIcon fontSize="small" />
+			</IconButton>
+		</GradedAction>
 	);
 }
 
@@ -2388,25 +2399,33 @@ function DeclareFromPlan({
 		new Date(planned.ends_at).getTime() > Date.now();
 	return (
 		<>
-			<Tooltip
-				title={
+			<GradedAction
+				calls={
 					ownWindow
-						? "Maintenance is declared over this environment, so its plan stays open until the work is over; amend it here"
-						: "Declare maintenance: suspend this environment's alerting while the upgrade runs"
+						? ["maintenance/declare", "maintenance/lift"]
+						: "maintenance/declare"
 				}
 			>
-				<IconButton
-					size="small"
-					aria-label={`${ownWindow ? "Amend" : "Declare"} maintenance for ${groupName}`}
-					onClick={() => {
-						setAdjusting(false);
-						setOpen(true);
-					}}
-					data-testid={ownWindow ? "amend-maintenance" : undefined}
+				<Tooltip
+					title={
+						ownWindow
+							? "Maintenance is declared over this environment, so its plan stays open until the work is over; amend it here"
+							: "Declare maintenance: suspend this environment's alerting while the upgrade runs"
+					}
 				>
-					<BuildOutlinedIcon fontSize="small" />
-				</IconButton>
-			</Tooltip>
+					<IconButton
+						size="small"
+						aria-label={`${ownWindow ? "Amend" : "Declare"} maintenance for ${groupName}`}
+						onClick={() => {
+							setAdjusting(false);
+							setOpen(true);
+						}}
+						data-testid={ownWindow ? "amend-maintenance" : undefined}
+					>
+						<BuildOutlinedIcon fontSize="small" />
+					</IconButton>
+				</Tooltip>
+			</GradedAction>
 			{confirmable && planned && (
 				<Dialog
 					open={open && !adjusting}
@@ -2438,26 +2457,28 @@ function DeclareFromPlan({
 							Adjust
 						</Button>
 						<Button onClick={() => setOpen(false)}>Cancel</Button>
-						<Button
-							variant="contained"
-							disabled={declare.pending}
-							onClick={async () => {
-								try {
-									await declare.call({
-										server_group_id: groupId,
-										rank,
-										expected_end: planned.ends_at,
-										note: note ?? undefined,
-									});
-									setOpen(false);
-									onDeclared();
-								} catch {
-									/* surfaced above */
-								}
-							}}
-						>
-							Declare
-						</Button>
+						<GradedAction calls="maintenance/declare">
+							<Button
+								variant="contained"
+								disabled={declare.pending}
+								onClick={async () => {
+									try {
+										await declare.call({
+											server_group_id: groupId,
+											rank,
+											expected_end: planned.ends_at,
+											note: note ?? undefined,
+										});
+										setOpen(false);
+										onDeclared();
+									} catch {
+										/* surfaced above */
+									}
+								}}
+							>
+								Declare
+							</Button>
+						</GradedAction>
 					</DialogActions>
 				</Dialog>
 			)}

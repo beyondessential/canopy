@@ -16,9 +16,11 @@ import { callApi, useApi } from "../api";
 import ApplicationTypeChip from "../components/ApplicationTypeChip";
 import GroupControl from "../components/GroupControl";
 import NameManagementGrants from "../components/NameManagementGrants";
+import { GradedAction } from "../components/GradedAction";
 import TagsEditor from "../components/TagsEditor";
 import { useApplicationTypeCaps } from "../hooks/useApplicationTypes";
 import { usePageTitle } from "../hooks/usePageTitle";
+import type { GradedEndpoint } from "../safety-modes";
 import {
 	applicationName,
 	REACHABILITY_CHECK,
@@ -303,6 +305,25 @@ function Form({
 		}
 	};
 
+	// The calls onSubmit would make, from the same state it reads.
+	const saveCalls: GradedEndpoint[] = ["fleet/machines/update"];
+	if (applications.length > 0) saveCalls.push("fleet/applications/update");
+	if (box.alertWhenUnreachable === machineReachabilitySilenced) {
+		saveCalls.push(
+			box.alertWhenUnreachable
+				? "silenced_refs/unsilence_machine"
+				: "silenced_refs/silence_machine",
+		);
+	}
+	for (const application of applications) {
+		const wants = apps[application.id]!.alertWhenUnreachable;
+		const was = !applicationReachabilitySilenced.has(application.id);
+		if (wants === was) continue;
+		saveCalls.push(
+			wants ? "silenced_refs/unsilence_server" : "silenced_refs/silence_server",
+		);
+	}
+
 	return (
 		<Stack spacing={3} component="form" onSubmit={onSubmit}>
 			<Typography variant="h5" component="h1">
@@ -472,13 +493,15 @@ function Form({
 			{error && <Alert severity="error">{error}</Alert>}
 
 			<Stack direction="row" spacing={1}>
-				<Button
-					type="submit"
-					variant="contained"
-					disabled={pending || !box.groupId}
-				>
-					{pending ? "Saving…" : "Save"}
-				</Button>
+				<GradedAction calls={saveCalls}>
+					<Button
+						type="submit"
+						variant="contained"
+						disabled={pending || !box.groupId}
+					>
+						{pending ? "Saving…" : "Save"}
+					</Button>
+				</GradedAction>
 				<Button
 					type="button"
 					variant="outlined"

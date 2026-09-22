@@ -26,6 +26,7 @@ import GroupTree from "../components/GroupTree";
 import MaintenanceSection from "../components/MaintenanceSection";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import { useApi, useApiAction } from "../api";
+import { GradedAction } from "../components/GradedAction";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
@@ -147,15 +148,17 @@ export default function GroupDetail() {
 							Edit
 						</Button>
 						{allQuiet && !group.deleted_at && (
-							<Button
-								variant="outlined"
-								color="error"
-								startIcon={<ArchiveIcon />}
-								onClick={onArchive}
-								disabled={archive.pending}
-							>
-								Archive
-							</Button>
+							<GradedAction calls="fleet/groups/delete">
+								<Button
+									variant="outlined"
+									color="error"
+									startIcon={<ArchiveIcon />}
+									onClick={onArchive}
+									disabled={archive.pending}
+								>
+									Archive
+								</Button>
+							</GradedAction>
 						)}
 					</Stack>
 				)}
@@ -417,15 +420,17 @@ function ArchivedGroupBanner({
 			severity="warning"
 			action={
 				isAdmin ? (
-					<Button
-						color="inherit"
-						size="small"
-						startIcon={<RestoreIcon />}
-						onClick={onRestore}
-						disabled={action.pending}
-					>
-						{action.pending ? "Restoring…" : "Restore"}
-					</Button>
+					<GradedAction calls="fleet/groups/restore">
+						<Button
+							color="inherit"
+							size="small"
+							startIcon={<RestoreIcon />}
+							onClick={onRestore}
+							disabled={action.pending}
+						>
+							{action.pending ? "Restoring…" : "Restore"}
+						</Button>
+					</GradedAction>
 				) : undefined
 			}
 		>

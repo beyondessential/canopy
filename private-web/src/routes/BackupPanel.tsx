@@ -45,6 +45,7 @@ import {
 	s3EgressRateForRegion,
 } from "../lib/s3Pricing";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { GradedAction } from "../components/GradedAction";
 import TimeAgo from "../components/TimeAgo";
 import { LatestSnapshot, SnapshotId } from "../components/SnapshotId";
 import { BackupProcessingChip } from "../components/BackupProcessingChip";
@@ -271,14 +272,16 @@ function DeleteConfigButton({
 
 	return (
 		<>
-			<Button
-				variant="outlined"
-				color="error"
-				startIcon={<DeleteIcon />}
-				onClick={() => setOpen(true)}
-			>
-				Delete
-			</Button>
+			<GradedAction calls="backups/delete">
+				<Button
+					variant="outlined"
+					color="error"
+					startIcon={<DeleteIcon />}
+					onClick={() => setOpen(true)}
+				>
+					Delete
+				</Button>
+			</GradedAction>
 			<Dialog open={open} onClose={() => !del.pending && setOpen(false)}>
 				<DialogTitle>Delete backup config?</DialogTitle>
 				<DialogContent>
@@ -297,14 +300,16 @@ function DeleteConfigButton({
 					<Button onClick={() => setOpen(false)} disabled={del.pending}>
 						Cancel
 					</Button>
-					<Button
-						color="error"
-						variant="contained"
-						onClick={onConfirm}
-						disabled={del.pending}
-					>
-						{del.pending ? "Deleting…" : "Delete"}
-					</Button>
+					<GradedAction calls="backups/delete">
+						<Button
+							color="error"
+							variant="contained"
+							onClick={onConfirm}
+							disabled={del.pending}
+						>
+							{del.pending ? "Deleting…" : "Delete"}
+						</Button>
+					</GradedAction>
 				</DialogActions>
 			</Dialog>
 		</>
@@ -430,9 +435,11 @@ function TypeSchedule({
 				)}
 				<Box sx={{ flex: 1 }} />
 				{isAdmin && !editing && (
-					<Button size="small" onClick={() => setEditing(true)}>
-						{schedule.has_override ? "Edit override" : "Override"}
-					</Button>
+					<GradedAction calls="backups/set_schedule">
+						<Button size="small" onClick={() => setEditing(true)}>
+							{schedule.has_override ? "Edit override" : "Override"}
+						</Button>
+					</GradedAction>
 				)}
 			</Stack>
 			<Typography variant="body2" color="text.secondary">
@@ -588,23 +595,27 @@ function OverrideEditor({
 			)}
 			{error && <Alert severity="error">{error.message}</Alert>}
 			<Stack direction="row" spacing={1}>
-				<Button
-					variant="contained"
-					size="small"
-					onClick={save}
-					disabled={pending || floorError.length > 0}
-				>
-					{pending ? "Saving…" : "Save override"}
-				</Button>
-				{schedule.has_override && (
+				<GradedAction calls="backups/set_schedule">
 					<Button
+						variant="contained"
 						size="small"
-						color="warning"
-						onClick={reset}
-						disabled={pending}
+						onClick={save}
+						disabled={pending || floorError.length > 0}
 					>
-						Reset to default
+						{pending ? "Saving…" : "Save override"}
 					</Button>
+				</GradedAction>
+				{schedule.has_override && (
+					<GradedAction calls="backups/clear_schedule">
+						<Button
+							size="small"
+							color="warning"
+							onClick={reset}
+							disabled={pending}
+						>
+							Reset to default
+						</Button>
+					</GradedAction>
 				)}
 				<Button size="small" onClick={onCancel} disabled={pending}>
 					Cancel
@@ -641,14 +652,16 @@ function ProvisioningCard({
 					</Alert>
 					{isAdmin && (
 						<Box>
-							<Button
-								variant="contained"
-								startIcon={<RefreshIcon />}
-								onClick={onRetry}
-								disabled={retry.pending}
-							>
-								{retry.pending ? "Retrying…" : "Retry repo creation"}
-							</Button>
+							<GradedAction calls="backups/create_repo">
+								<Button
+									variant="contained"
+									startIcon={<RefreshIcon />}
+									onClick={onRetry}
+									disabled={retry.pending}
+								>
+									{retry.pending ? "Retrying…" : "Retry repo creation"}
+								</Button>
+							</GradedAction>
 						</Box>
 					)}
 					{retry.error && (
@@ -1531,14 +1544,16 @@ function MaintenancePanel({
 										: "Full run queued"
 								}
 							/>
-							<Button
-								size="small"
-								color="inherit"
-								disabled={cancel.pending}
-								onClick={onCancel}
-							>
-								Cancel
-							</Button>
+							<GradedAction calls="backups/cancel_maintenance">
+								<Button
+									size="small"
+									color="inherit"
+									disabled={cancel.pending}
+									onClick={onCancel}
+								>
+									Cancel
+								</Button>
+							</GradedAction>
 						</Stack>
 					) : (
 						<Tooltip
@@ -1549,14 +1564,16 @@ function MaintenancePanel({
 							}
 						>
 							<span>
-								<Button
-									size="small"
-									variant="outlined"
-									disabled={request.pending || fullRunning}
-									onClick={onRequest}
-								>
-									Run full maintenance now
-								</Button>
+								<GradedAction calls="backups/request_maintenance">
+									<Button
+										size="small"
+										variant="outlined"
+										disabled={request.pending || fullRunning}
+										onClick={onRequest}
+									>
+										Run full maintenance now
+									</Button>
+								</GradedAction>
 							</span>
 						</Tooltip>
 					))}
@@ -1701,27 +1718,31 @@ function ServersPanel({
 							</>
 						}
 					/>
-					<Button
-						size="small"
-						color="warning"
-						onClick={() => onDisallowRestore(machineId)}
-						disabled={busy}
-					>
-						Disable
-					</Button>
+					<GradedAction calls="backups/disallow_restore">
+						<Button
+							size="small"
+							color="warning"
+							onClick={() => onDisallowRestore(machineId)}
+							disabled={busy}
+						>
+							Disable
+						</Button>
+					</GradedAction>
 				</Stack>
 			);
 		}
 		return (
-			<Button
-				size="small"
-				color="warning"
-				startIcon={<RestoreIcon />}
-				onClick={() => onAllowRestore(machineId)}
-				disabled={busy}
-			>
-				Allow restores
-			</Button>
+			<GradedAction calls="backups/allow_restore">
+				<Button
+					size="small"
+					color="warning"
+					startIcon={<RestoreIcon />}
+					onClick={() => onAllowRestore(machineId)}
+					disabled={busy}
+				>
+					Allow restores
+				</Button>
+			</GradedAction>
 		);
 	};
 
@@ -1798,29 +1819,33 @@ function ServersPanel({
 						}
 					/>
 					{isAdmin && (
-						<Button
-							size="small"
-							color="error"
-							onClick={() => onCancel(machineId, type)}
-							disabled={cancel.pending}
-						>
-							Cancel
-						</Button>
+						<GradedAction calls="backups/cancel_request">
+							<Button
+								size="small"
+								color="error"
+								onClick={() => onCancel(machineId, type)}
+								disabled={cancel.pending}
+							>
+								Cancel
+							</Button>
+						</GradedAction>
 					)}
 				</Stack>
 			);
 		}
 		return (
 			isAdmin && (
-				<Button
-					size="small"
-					variant="outlined"
-					startIcon={<BackupIcon />}
-					onClick={() => onRequest(machineId, type)}
-					disabled={requestNow.pending}
-				>
-					Backup now
-				</Button>
+				<GradedAction calls="backups/request_now">
+					<Button
+						size="small"
+						variant="outlined"
+						startIcon={<BackupIcon />}
+						onClick={() => onRequest(machineId, type)}
+						disabled={requestNow.pending}
+					>
+						Backup now
+					</Button>
+				</GradedAction>
 			)
 		);
 	};

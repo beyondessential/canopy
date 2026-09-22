@@ -15,6 +15,7 @@ import {
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { callApi, useApi, useApiAction } from "../api";
+import { GradedAction } from "../components/GradedAction";
 import SqlEditor from "../components/SqlEditor";
 import { usePageTitle } from "../hooks/usePageTitle";
 import type { BestoolSnippetDetail as Detail } from "../types";
@@ -147,13 +148,15 @@ function View({ detail }: { detail: Detail }) {
 							<Alert severity="error">{updateAction.error.message}</Alert>
 						)}
 						<Stack direction="row" spacing={1}>
-							<Button
-								type="submit"
-								variant="contained"
-								disabled={updateAction.pending}
-							>
-								{updateAction.pending ? "Saving…" : "Save"}
-							</Button>
+							<GradedAction calls="bestool/save_snippet">
+								<Button
+									type="submit"
+									variant="contained"
+									disabled={updateAction.pending}
+								>
+									{updateAction.pending ? "Saving…" : "Save"}
+								</Button>
+							</GradedAction>
 							<Button
 								type="button"
 								variant="outlined"
@@ -194,16 +197,20 @@ function View({ detail }: { detail: Detail }) {
 					<Typography variant="body2" color="text.secondary">
 						Last edit by {detail.editor}
 					</Typography>
-					<Button variant="contained" onClick={() => setEditing(true)}>
-						Edit
-					</Button>
-					<Button
-						variant="outlined"
-						color="error"
-						onClick={() => setConfirmDelete(true)}
-					>
-						Delete
-					</Button>
+					<GradedAction calls="bestool/save_snippet">
+						<Button variant="contained" onClick={() => setEditing(true)}>
+							Edit
+						</Button>
+					</GradedAction>
+					<GradedAction calls="bestool/delete_snippet">
+						<Button
+							variant="outlined"
+							color="error"
+							onClick={() => setConfirmDelete(true)}
+						>
+							Delete
+						</Button>
+					</GradedAction>
 				</Stack>
 			</Stack>
 			<Paper variant="outlined" sx={{ p: 2 }}>
@@ -248,14 +255,16 @@ function View({ detail }: { detail: Detail }) {
 					>
 						Cancel
 					</Button>
-					<Button
-						variant="contained"
-						color="error"
-						onClick={onDelete}
-						disabled={deleteAction.pending}
-					>
-						{deleteAction.pending ? "Deleting…" : "Delete"}
-					</Button>
+					<GradedAction calls="bestool/delete_snippet">
+						<Button
+							variant="contained"
+							color="error"
+							onClick={onDelete}
+							disabled={deleteAction.pending}
+						>
+							{deleteAction.pending ? "Deleting…" : "Delete"}
+						</Button>
+					</GradedAction>
 				</DialogActions>
 			</Dialog>
 		</Stack>

@@ -16,6 +16,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
+import { GradedAction } from "./GradedAction";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import TimeAgo from "./TimeAgo";
 
@@ -209,14 +210,16 @@ function DomainRow({
 					{createdBy && ` by ${createdBy}`}
 				</Typography>
 				{isAdmin && (
-					<IconButton
-						size="small"
-						aria-label={`Release ${domain}`}
-						onClick={onRelease}
-						disabled={release.pending}
-					>
-						<DeleteIcon fontSize="small" />
-					</IconButton>
+					<GradedAction calls="domains/release">
+						<IconButton
+							size="small"
+							aria-label={`Release ${domain}`}
+							onClick={onRelease}
+							disabled={release.pending}
+						>
+							<DeleteIcon fontSize="small" />
+						</IconButton>
+					</GradedAction>
 				)}
 			</Stack>
 			{names.length > 0 && (
@@ -331,14 +334,16 @@ function ClaimForm({
 						sx={{ flex: 1, maxWidth: 420 }}
 						helperText={`Must be at or under one of: ${zoneApexes.join(", ")}`}
 					/>
-					<Button
-						type="submit"
-						variant="outlined"
-						startIcon={<AddIcon />}
-						disabled={claim.pending || domain.trim() === ""}
-					>
-						Claim
-					</Button>
+					<GradedAction calls="domains/claim">
+						<Button
+							type="submit"
+							variant="outlined"
+							startIcon={<AddIcon />}
+							disabled={claim.pending || domain.trim() === ""}
+						>
+							Claim
+						</Button>
+					</GradedAction>
 				</Stack>
 			)}
 			{claim.error && <Alert severity="error">{claim.error.message}</Alert>}

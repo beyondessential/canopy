@@ -166,6 +166,8 @@ struct MachineDetail {
 #[tool_router(router = machines_router, vis = "pub(crate)")]
 impl CanopyMcp {
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "Find machines (the boxes applications run on) by name/hostname/id substring, \
 		               optionally filtered by group, platform, or cloud-hosting. Returns compact \
 		               records with each box's platform, health, and how many applications it \
@@ -273,6 +275,8 @@ impl CanopyMcp {
 	}
 
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "Full detail for one machine: its own fields, what it reports about itself \
 		               (platform, processor count, memory, filesystems, uptime, addresses), its \
 		               health from the checks filed against it, and the applications running on \

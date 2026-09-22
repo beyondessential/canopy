@@ -85,7 +85,7 @@ export default function Admins() {
 							onChange={(e) => setEmail(e.target.value)}
 							disabled={pending}
 						/>
-						<GradedAction module="admins" fn="add">
+						<GradedAction calls="admins/add">
 							<Button
 								type="submit"
 								variant="contained"
@@ -122,7 +122,7 @@ export default function Admins() {
 								divider
 								secondaryAction={
 									<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-										<GradedAction module="admins" fn="set_danger">
+										<GradedAction calls="admins/set_danger">
 											<FormControlLabel
 												control={
 													<Switch
@@ -140,7 +140,7 @@ export default function Admins() {
 												}}
 											/>
 										</GradedAction>
-										<GradedAction module="admins" fn="delete">
+										<GradedAction calls="admins/delete">
 											<IconButton
 												edge="end"
 												aria-label={`delete ${admin.email}`}

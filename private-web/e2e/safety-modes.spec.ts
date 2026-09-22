@@ -8,9 +8,12 @@
 // mode is present and inert rather than missing.
 
 import { expect, test } from "./test-fixtures";
+import { resetSeededTables, seedServerGroup } from "./seed";
 import { lower, modeControl, raiseTo } from "./safety";
 
 test.describe("safety modes", () => {
+	test.use({ safetyMode: "read-only" });
+
 	test("a page comes up read-only, and says so", async ({ page }) => {
 		await page.goto("/settings/admins");
 		await expect(modeControl(page)).toContainText(/read-only/i);
@@ -145,5 +148,88 @@ test.describe("safety modes", () => {
 		await raiseTo(page, "danger");
 		await add.click();
 		await expect(page.getByText("blocked@example.invalid")).toBeVisible();
+	});
+	test("a blocked control carries its grade's stripe, full colour under the pointer", async ({
+		page,
+	}) => {
+		// Danger: adding an allow-list entry.
+		await page.goto("/settings/admins");
+		const dangerous = page.getByRole("button", { name: "Add admin" });
+		await expect(dangerous).toHaveCSS("background-image", /rgba\(239, 83, 80/);
+		await expect(dangerous).toHaveCSS("filter", "grayscale(0.8)");
+		await page.getByLabel(/requires danger mode/i).first().hover();
+		await expect(dangerous).toHaveCSS("filter", "grayscale(0)");
+
+		// Write: saving a snippet, in the write grade's colour.
+		await page.goto("/bestool/snippets");
+		const writing = page.getByRole("button", { name: "Add" });
+		await expect(writing).toHaveCSS("background-image", /rgba\(255, 152, 0/);
+		await expect(writing).toHaveCSS("filter", "grayscale(0.8)");
+	});
+
+	test("a blocked control is out of reach of the keyboard too", async ({
+		page,
+	}) => {
+		await page.goto("/settings/admins");
+		const add = page.getByRole("button", { name: "Add admin" });
+		await expect(add).toBeDisabled();
+
+		// Enter in the field would otherwise submit the form without ever
+		// touching the blocked button.
+		await page.getByLabel("Email").fill("keyboard@example.invalid");
+		await page.getByLabel("Email").press("Enter");
+		await expect(page.getByText("Admin added")).toHaveCount(0);
+		await expect(page.getByText("keyboard@example.invalid")).toHaveCount(0);
+	});
+
+	test("a control withheld from a non-administrator is absent, not blocked", async ({
+		page,
+		sql,
+	}) => {
+		await resetSeededTables(sql);
+		const group = await seedServerGroup(sql, { name: "absent-not-blocked" });
+
+		// As an administrator, archiving the empty group is there and blocked.
+		await page.goto(`/fleet/groups/${group.id}`);
+		await expect(page.getByRole("button", { name: "Archive" })).toBeVisible();
+		await expect(page.getByLabel(/requires write mode/i).first()).toBeVisible();
+
+		// As someone who is not, it is not there at all, and nothing on the page
+		// is presented as waiting on a mode.
+		await page.route("**/api/commons/is_current_user_admin", (route) =>
+			route.fulfill({ json: false }),
+		);
+		await page.reload();
+		await expect(page.getByText("absent-not-blocked").first()).toBeVisible();
+		await expect(page.getByRole("button", { name: "Archive" })).toHaveCount(0);
+		await expect(page.getByLabel(/requires (write|danger) mode/i)).toHaveCount(0);
+	});
+});
+
+test.describe("safety modes, raised", () => {
+	test("a control disabled for a reason of its own carries no stripe", async ({
+		page,
+	}) => {
+		// Hold the mint open, so the button sits disabled for a request in
+		// flight rather than for its grade.
+		let release: () => void = () => {};
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		await page.route("**/api/mcp_tokens/mint", async (route) => {
+			await held;
+			await route.continue();
+		});
+
+		await page.goto("/settings/mcp-tokens");
+		await page.getByLabel(/name/i).first().fill("in-flight");
+		await page.getByRole("button", { name: "Mint token" }).click();
+
+		const minting = page.getByRole("button", { name: "Minting…" });
+		await expect(minting).toBeDisabled();
+		await expect(minting).toHaveCSS("background-image", "none");
+		await expect(minting).not.toHaveCSS("filter", "grayscale(0.8)");
+
+		release();
 	});
 });

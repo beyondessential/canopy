@@ -15,6 +15,7 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
+import { GradedAction } from "../components/GradedAction";
 import TimeAgo from "../components/TimeAgo";
 import { usePageTitle } from "../hooks/usePageTitle";
 
@@ -155,13 +156,15 @@ export default function RecoveryVault() {
 					</Typography>
 
 					<Stack direction="row" spacing={1}>
-						<Button
-							variant="contained"
-							onClick={startChallenge}
-							disabled={!s.configured || challenge.pending}
-						>
-							{challenge.pending ? "Issuing…" : "Issue challenge"}
-						</Button>
+						<GradedAction calls="backups/recovery_challenge">
+							<Button
+								variant="contained"
+								onClick={startChallenge}
+								disabled={!s.configured || challenge.pending}
+							>
+								{challenge.pending ? "Issuing…" : "Issue challenge"}
+							</Button>
+						</GradedAction>
 					</Stack>
 					{challenge.error && (
 						<Alert severity="error">{challenge.error.message}</Alert>
@@ -194,14 +197,16 @@ export default function RecoveryVault() {
 							{verify.error && (
 								<Alert severity="error">{verify.error.message}</Alert>
 							)}
-							<Button
-								variant="contained"
-								onClick={submitAnswer}
-								disabled={verify.pending || answer.trim() === ""}
-								sx={{ alignSelf: "flex-start" }}
-							>
-								{verify.pending ? "Verifying…" : "Submit answer"}
-							</Button>
+							<GradedAction calls="backups/recovery_verify">
+								<Button
+									variant="contained"
+									onClick={submitAnswer}
+									disabled={verify.pending || answer.trim() === ""}
+									sx={{ alignSelf: "flex-start" }}
+								>
+									{verify.pending ? "Verifying…" : "Submit answer"}
+								</Button>
+							</GradedAction>
 						</>
 					)}
 				</Stack>

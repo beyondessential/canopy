@@ -106,6 +106,8 @@ struct RestoreReplicaDetail {
 #[tool_router(router = restore_router, vis = "pub(crate)")]
 impl CanopyMcp {
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "List managed-restore replica declarations (fleet-wide, or narrowed by group/consumer), \
 		               with the consumer's display name and whether the consumer currently advertises the \
 		               declared intent (`gap: true` means Canopy is not dispatching it — the declaration is \
@@ -141,6 +143,8 @@ impl CanopyMcp {
 	}
 
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "Full detail for one managed-restore replica declaration: its config, the consumer's \
 		               full descriptor for the intent (parameters, semantics — `None` when the declaration \
 		               is a gap), and its recent restore-verification health reports."

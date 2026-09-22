@@ -24,6 +24,7 @@ import { useApi, useApiAction } from "../api";
 import IssueRow from "../components/IssueRow";
 import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import DeclareMaintenanceDialog from "../components/DeclareMaintenanceDialog";
+import { GradedAction } from "../components/GradedAction";
 import { AddNoteButton } from "../components/NotesList";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
@@ -312,27 +313,31 @@ function Header({
 				useFlexGap
 			>
 				{isAdmin && (incident.resolved_at ? (
-					<Button
-						size="small"
-						variant="outlined"
-						color="warning"
-						startIcon={<CheckCircleOutlinedIcon />}
-						onClick={() =>
-							wrap(() => unresolve.call({ incident_id: incident.id }))
-						}
-					>
-						Unresolve
-					</Button>
+					<GradedAction calls="incidents/unresolve">
+						<Button
+							size="small"
+							variant="outlined"
+							color="warning"
+							startIcon={<CheckCircleOutlinedIcon />}
+							onClick={() =>
+								wrap(() => unresolve.call({ incident_id: incident.id }))
+							}
+						>
+							Unresolve
+						</Button>
+					</GradedAction>
 				) : (
-					<Button
-						size="small"
-						variant="outlined"
-						color="success"
-						startIcon={<CheckCircleOutlinedIcon />}
-						onClick={() => setResolveOpen((v) => !v)}
-					>
-						Resolve…
-					</Button>
+					<GradedAction calls="incidents/resolve">
+						<Button
+							size="small"
+							variant="outlined"
+							color="success"
+							startIcon={<CheckCircleOutlinedIcon />}
+							onClick={() => setResolveOpen((v) => !v)}
+						>
+							Resolve…
+						</Button>
+					</GradedAction>
 				))}
 				{isAdmin && (
 					<>
@@ -350,14 +355,16 @@ function Header({
 				{/* spec: MNT#declaring */}
 				{isAdmin && incident.server_group_id != null && (
 					<>
-						<Button
-							size="small"
-							variant="outlined"
-							startIcon={<BuildOutlinedIcon />}
-							onClick={() => setMaintenanceOpen(true)}
-						>
-							This is maintenance…
-						</Button>
+						<GradedAction calls="maintenance/declare">
+							<Button
+								size="small"
+								variant="outlined"
+								startIcon={<BuildOutlinedIcon />}
+								onClick={() => setMaintenanceOpen(true)}
+							>
+								This is maintenance…
+							</Button>
+						</GradedAction>
 						<DeclareMaintenanceDialog
 							open={maintenanceOpen}
 							onClose={() => setMaintenanceOpen(false)}
@@ -399,19 +406,21 @@ function Header({
 							</MenuItem>
 						))}
 					</TextField>
-					<Button
-						variant="outlined"
-						size="small"
-						color="success"
-						startIcon={<CheckCircleOutlinedIcon />}
-						onClick={() =>
-							wrap(() =>
-								resolve.call({ incident_id: incident.id, reason }),
-							).then(() => setResolveOpen(false))
-						}
-					>
-						Resolve
-					</Button>
+					<GradedAction calls="incidents/resolve">
+						<Button
+							variant="outlined"
+							size="small"
+							color="success"
+							startIcon={<CheckCircleOutlinedIcon />}
+							onClick={() =>
+								wrap(() =>
+									resolve.call({ incident_id: incident.id, reason }),
+								).then(() => setResolveOpen(false))
+							}
+						>
+							Resolve
+						</Button>
+					</GradedAction>
 					<Button
 						variant="outlined"
 						size="small"
