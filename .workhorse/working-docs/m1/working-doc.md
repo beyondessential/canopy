@@ -40,8 +40,8 @@ The other is the per-application and per-namespace grains, which cannot be built
 
 So M1 keeps the connection and cluster-wide health, and the application-facing grains spin off into their own card (see the breakdown).
 
-**M1:** reserving the source, the cluster grain landing end to end, cluster reachability, and somewhere to read a cluster's health.
-**Spun off:** the namespace-to-group correlation, `FilingTarget::Namespace` resolving at `Scope::Group`, and per-application substrate checks.
+**M1:** the relay determining cluster-wide conditions and filing them, reserving the source, the cluster grain landing end to end, cluster reachability, and somewhere to read a cluster's health.
+**Spun off:** the namespace-to-group correlation, `FilingTarget::Namespace` resolving at `Scope::Group`, and per-application substrate checks (which alertd produces).
 
 ## Decisions
 
@@ -127,8 +127,72 @@ One rule, one clock, one answer is worth more than the seconds.
 - The cluster detail page presents the cluster's checks, health and reachability, and silencing a check there quiets it on the cluster.
 - A cluster-grain issue opens no incident.
 
-## Open questions
+## Resolved on precedent
 
-- [ ] What is the default `alert_when_down_for` for a cluster? A relay's connection is continuous and it refiles periodically, so the refile cadence is the floor; a machine's default is probably not the right borrow.
-- [ ] Does the cluster detail page present the cluster's applications as marks (an enclosure, the way a machine's page does) or as a plain list? The enclosure carries "one subject per mark" meaning that may not transfer to a host spanning many groups.
-- [ ] Where is the cluster detail page reached from, beyond the registry? An application hosted on a cluster needs a link to its host, as one on a box links to its machine.
+**The cluster's applications are a list, not an enclosure of marks.**
+`MachineDetail` renders "Applications (N)" as a `Stack` of `ServerShorty` rows, and an empty state that says applications appear as the machine reports them, which is exactly a cluster's case too.
+The enclosure is a fleet-view construct — CHK's "a machine's mark encloses the marks of the applications on it" is about how a box is drawn among the fleet, not about its detail page.
+So the question of whether an enclosure's meaning transfers to a host spanning many groups does not arise here: the detail page never used one.
+
+**The page sits at `/fleet/clusters/:id`, beside `/fleet/machines/:id`.**
+The registry stays where it is, routed under settings, because registering and re-issuing is administration while this is monitoring.
+`ServerDetail` links to its host in three places — the breadcrumb's middle slot between group and application, the "hasn't checked in yet" alert, and the host nav item — and a cluster-hosted application wants a cluster in each of the same three.
+Those application-side links belong with N1, which is what creates an application that has a cluster to link to; M1 builds the page and the route it links to.
+
+## The relay determines the cluster-wide checks, and that is this card's
+
+A cluster-wide condition — whether the node pools are healthy, and its kind — is Kubernetes-unique and has no application as its subject, so it is the relay's own to determine and file.
+It is not alertd's and never will be: alertd's two families both take an application as their subject, the harvest against an instance's database and the substrate conditions about one application's workloads.
+Nothing outside this repo is going to grow a check about a whole cluster.
+
+`relay/src/lib.rs` currently says the checks "do not live here: both families are `alertd`'s", which is true of the two application-subject families and silent on the third.
+That silence is what this card fills, and the comment needs correcting so the next reader does not conclude the relay determines nothing.
+
+So M1 spans the relay and Canopy, and both halves are in this repo:
+
+- **Relay:** determine cluster-grain conditions and file them up the existing `Filings` channel, with the periodic refile that keeps a check's state current after a missed observation, a restart, or a reconnection.
+- **Canopy:** reserve the source, land the filing at `Scope::Cluster`, grade it, sweep the cluster's reachability, and present it.
+
+`main.rs` holds the filings sender open with the comment "Nothing files yet"; this card is what takes it.
+alertd's work stays alertd's: the per-application substrate checks belong with the spun-off card, which consumes what alertd files rather than producing anything.
+
+### Cadence and threshold
+
+alertd files every minute, and the relay's cluster checks match it — one cadence across what a relay sends, rather than two to reason about.
+
+**A cluster's default down threshold is 5 minutes**, operator-settable per cluster as CHK requires.
+Five missed refiles: long enough to ride out the relay's pod being rescheduled or its node drained, which is the slow case and routine during a cluster upgrade, and half the headroom a box gets because a relay's blips are shorter — it redials within 30 seconds and Canopy probes it every 30.
+
+This also settles what a registered cluster reads before its first filing: nothing special is needed, because the relay files as soon as it is connected and running this card's checks.
+A cluster that has genuinely never been heard from presents as never reported, which is the same rule every other target is held to and the honest answer for a relay that has not dialled in.
+
+### The relay side
+
+The seam already exists and is unused: `client::Filings` is an `mpsc::Sender<Filing>`, and `relay::run` takes the receiver, so a cluster-check task is a producer on that channel and needs no change to the transport, the dispatch, or the reconnect loop.
+
+What it needs is a watch of the cluster objects the conditions are about, a held current state per check, a file on change, and a refile on the minute.
+Holding state is what makes "file when it changes" possible and is also what the refile re-sends, so it is one structure serving both.
+
+The relay reads the cluster with its own ServiceAccount, and K8S is explicit that a relay whose access is incomplete registers anyway and reports what it cannot do as checks.
+So a permission the relay lacks is a broken result on the check that needed it, carrying what was refused, rather than a check quietly absent — absent says the condition does not exist on this cluster, which would be a false statement about a cluster nobody has finished granting.
+
+## Testing notes (relay side)
+
+- A cluster condition changing files once, promptly, rather than on the next refile.
+- An unchanged condition refiles on the cadence, so a cluster stays reachable while nothing is happening.
+- A filing attempted while the connection is down is not lost to the connection: the next refile carries the current state.
+- A permission the relay's ServiceAccount lacks produces a broken result naming what was refused, not an absent check.
+
+### `SubstrateFiling` cannot say which instance
+
+A cluster has several node pools, and a condition about them is one condition with an instance per pool.
+CHK covers this directly under "Checks with instances": one state for the check, each instance graded through policy on its own against its own detail, the effective result the most urgent across them, and the detail naming every instance not passing.
+That is what lets an operator silence one bad pool without quieting the check.
+
+The protocol cannot express it.
+`SubstrateFiling` carries one `observed`, one `message` and one `detail`, and `ingest_substrate` hardcodes `label = String::new()` with the comment that each substrate filing is a single unlabelled instance.
+Canopy's side is already capable — `file_check_instances` takes a `Vec<CheckInstance>` — so the gap is the wire and the ingest, not the model.
+
+So `SubstrateFiling` gains an instance label, and `ingest_substrate` passes it through instead of the empty string.
+Aggregating pools into one filing whose message lists them would fit the current wire, but it collapses the per-instance grading and silencing CHK requires, and the name rule forbids the other way out (`node-pool-health:ops` is a parameter spelled into a name).
+This lands in M1 because node pools need it, and the spun-off card inherits it for free: several unschedulable pods on one application are instances of one check by the same reasoning.
