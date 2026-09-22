@@ -112,11 +112,9 @@ whole surface. The same reading makes every credential handler in `devices`
 danger — provisioning, adding, deactivating, reactivating keys, changing a
 device's role, attaching or detaching a tailnet identity, and merging records.
 
-`backups::allow_restore` is danger and `disallow_restore` is write, which reads
-backwards against the spec's "disallowing a restore" example. The example makes
-sense as removing a restore *capability* — which is how `restore_replicas::delete`
-is graded — rather than as closing a 24-hour window that lets a live server
-overwrite itself. Worth confirming the example means what this assumes.
+`backups::disallow_restore` is danger and `allow_restore` is write. The spec's
+"disallowing a restore" example means closing a machine's restore window, and
+the example now says so in the backup spec's own words.
 
 `backups::request_now` is danger because the same handler requests restores, and
 a restore overwrites a live server. A backup alone would be write.
