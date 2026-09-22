@@ -91,7 +91,7 @@ test.describe("safety modes", () => {
 			await raiseTo(page, "danger");
 
 			const row = page.getByRole("listitem").filter({ hasText: seeded });
-			const danger = row.getByRole("checkbox");
+			const danger = row.getByRole("switch");
 			await expect(danger).not.toBeChecked();
 
 			await danger.check();
@@ -100,7 +100,7 @@ test.describe("safety modes", () => {
 			// It is the entry that carries it, so it survives a reload.
 			await page.reload();
 			await expect(
-				page.getByRole("listitem").filter({ hasText: seeded }).getByRole("checkbox"),
+				page.getByRole("listitem").filter({ hasText: seeded }).getByRole("switch"),
 			).toBeChecked();
 
 			// And withdrawing it takes it away again.
@@ -108,10 +108,10 @@ test.describe("safety modes", () => {
 			await page
 				.getByRole("listitem")
 				.filter({ hasText: seeded })
-				.getByRole("checkbox")
+				.getByRole("switch")
 				.uncheck();
 			await expect(
-				page.getByRole("listitem").filter({ hasText: seeded }).getByRole("checkbox"),
+				page.getByRole("listitem").filter({ hasText: seeded }).getByRole("switch"),
 			).not.toBeChecked();
 		} finally {
 			await request.post("/api/admins/delete", { data: { email: seeded } });
