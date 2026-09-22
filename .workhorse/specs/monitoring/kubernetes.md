@@ -72,9 +72,28 @@ Each of its applications already carries it as the reason that application's che
 ## Cluster registry
 
 Clusters are registered in Canopy through a settings page and managed in-app, not through environment variables the process reads at startup.
-Registering a cluster enrols its relay, and Canopy confirms the relay is connected and answering before the cluster is saved, so a cluster Canopy cannot read is caught as the operator adds it.
 A registered cluster is its relay's identity and a name: Canopy stores no connection credential for a cluster, so it holds no cluster secret to protect or rotate.
 Canopy supports several clusters at once, and reads the cluster it runs in itself through a relay like any other.
+
+### Registering a cluster
+
+An operator names the cluster, and Canopy mints its relay's credential and returns the private key once for the operator to install into the cluster, as it does for any provisioned credential (see [DPK](../private-server/provisioned-credentials.md)).
+Registering a cluster is therefore what enrols its relay, and an operator reaches both from the one page rather than creating the identity separately.
+
+Canopy confirms the relay is connected and answering before the cluster is registered, so a cluster Canopy cannot read is caught as the operator adds it.
+What that confirms is that Canopy can reach the cluster's relay.
+A relay that answers while its access to the cluster is still incomplete registers, and reports what it cannot do as checks, so registration turns on the connection rather than on the cluster's permissions being right yet.
+
+### An unfinished registration is kept as a draft
+
+A registration waits on the operator installing the credential and the relay dialling in, so it spans a gap Canopy cannot close on its own.
+An unconfirmed registration is kept as a draft, carrying the cluster's name and its relay's identity, and becomes a registered cluster when that relay connects and answers.
+The draft is what accounts for the minted identity in the meantime, so an abandoned registration leaves a record of what the identity was for rather than an identity alone.
+
+Only a registered cluster hosts applications, is offered as an application's host, and carries checks.
+
+An operator can re-issue a draft's credential, retiring the one before it, for a credential lost before it reached the cluster.
+A draft remains until an operator removes it.
 
 ## What each source reports
 
