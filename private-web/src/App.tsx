@@ -12,6 +12,8 @@ import { NavLink, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { useApi } from "./api";
 import AdminProbeBanner from "./components/AdminProbeBanner";
 import { AdminProvider } from "./hooks/useIsAdmin";
+import { SafetyModeProvider } from "./hooks/useSafetyMode";
+import { SafetyModeControl } from "./components/SafetyModeControl";
 import { ApplicationTypesProvider } from "./hooks/useApplicationTypes";
 import { useReloadInterval } from "./hooks/useReloadInterval";
 import Admins from "./routes/Admins";
@@ -123,6 +125,7 @@ export default function App() {
 
 	return (
 		<AdminProvider>
+		<SafetyModeProvider>
 		<ApplicationTypesProvider>
 		<Box>
 			<AppBar position="static" color="default" elevation={1}>
@@ -182,6 +185,7 @@ export default function App() {
 						return inner;
 					})}
 					<Box sx={{ flex: 1 }} />
+					<SafetyModeControl />
 					{externalLinks.map(({ label, href }) => (
 						<Typography
 							key={label}
@@ -382,6 +386,7 @@ export default function App() {
 			</Container>
 		</Box>
 		</ApplicationTypesProvider>
+		</SafetyModeProvider>
 		</AdminProvider>
 	);
 }

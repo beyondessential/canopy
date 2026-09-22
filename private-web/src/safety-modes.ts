@@ -11,6 +11,7 @@ export const SAFETY_MODES: Readonly<Record<string, SafetyMode>> = Object.freeze(
 	"admins/add": "danger",
 	"admins/delete": "danger",
 	"admins/list": "read-only",
+	"admins/set_danger": "danger",
 	"backups/allow_restore": "danger",
 	"backups/cancel_maintenance": "write",
 	"backups/cancel_request": "write",

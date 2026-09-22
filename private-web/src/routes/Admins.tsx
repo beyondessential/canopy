@@ -2,6 +2,7 @@ import {
 	Alert,
 	Box,
 	Button,
+	FormControlLabel,
 	IconButton,
 	LinearProgress,
 	List,
@@ -10,12 +11,14 @@ import {
 	Paper,
 	Snackbar,
 	Stack,
+	Switch,
 	TextField,
 	Typography,
 } from "@mui/material";
 import DeleteIcon from "@mui/icons-material/Delete";
 import { type FormEvent, useState } from "react";
 import { ApiError, callApi, useApi } from "../api";
+import { GradedAction } from "../components/GradedAction";
 import { usePageTitle } from "../hooks/usePageTitle";
 
 export default function Admins() {
@@ -42,6 +45,15 @@ export default function Admins() {
 			setError(formatError(err));
 		} finally {
 			setPending(false);
+		}
+	};
+
+	const onSetDanger = async (target: string, danger: boolean) => {
+		try {
+			await callApi("admins", "set_danger", { email: target, danger });
+			list.reload();
+		} catch (err) {
+			setError(formatError(err));
 		}
 	};
 
@@ -73,14 +85,16 @@ export default function Admins() {
 							onChange={(e) => setEmail(e.target.value)}
 							disabled={pending}
 						/>
-						<Button
-							type="submit"
-							variant="contained"
-							disabled={pending}
-							sx={{ whiteSpace: "nowrap", flexShrink: 0 }}
-						>
-							{pending ? "Adding…" : "Add admin"}
-						</Button>
+						<GradedAction module="admins" fn="add">
+							<Button
+								type="submit"
+								variant="contained"
+								disabled={pending}
+								sx={{ whiteSpace: "nowrap", flexShrink: 0 }}
+							>
+								{pending ? "Adding…" : "Add admin"}
+							</Button>
+						</GradedAction>
 					</Stack>
 					{error && (
 						<Alert severity="error" sx={{ mt: 2 }}>
@@ -104,23 +118,45 @@ export default function Admins() {
 					<List>
 						{list.data.map((admin) => (
 							<ListItem
-								key={admin}
+								key={admin.email}
 								divider
 								secondaryAction={
-									<IconButton
-										edge="end"
-										aria-label={`delete ${admin}`}
-										onClick={() => onDelete(admin)}
-									>
-										<DeleteIcon />
-									</IconButton>
+									<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+										<GradedAction module="admins" fn="set_danger">
+											<FormControlLabel
+												control={
+													<Switch
+														size="small"
+														checked={admin.danger}
+														onChange={(e) =>
+															onSetDanger(admin.email, e.target.checked)
+														}
+														color="error"
+													/>
+												}
+												label="Danger"
+												slotProps={{
+													typography: { variant: "body2" },
+												}}
+											/>
+										</GradedAction>
+										<GradedAction module="admins" fn="delete">
+											<IconButton
+												edge="end"
+												aria-label={`delete ${admin.email}`}
+												onClick={() => onDelete(admin.email)}
+											>
+												<DeleteIcon />
+											</IconButton>
+										</GradedAction>
+									</Stack>
 								}
 							>
 								<ListItemText
 									slotProps={{
 										primary: { sx: { fontFamily: "monospace" } },
 									}}
-									primary={admin}
+									primary={admin.email}
 								/>
 							</ListItem>
 						))}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { noteRefusal, sessionHeaders } from "./safety";
 import type { ApiBody, ApiFn, ApiModule, ApiResponse } from "./types";
 
 export class ApiError extends Error {
@@ -30,7 +31,9 @@ export async function callApi<
 ): Promise<T> {
 	const response = await fetch(`/api/${module}/${fn}`, {
 		method: "POST",
-		headers: { "content-type": "application/json" },
+		// Every request carries the operator's session, so the server can decide
+		// it against the mode the handler requires.
+		headers: { "content-type": "application/json", ...sessionHeaders() },
 		body: JSON.stringify(params),
 		signal,
 	});
@@ -63,6 +66,11 @@ async function answered(
 	) {
 		extra = `: ${(detail as { title: string }).title}`;
 	}
+	// A refusal for the mode means the raise lapsed while the page still thought
+	// it held one. Telling the provider here — where every refusal passes —
+	// returns the indicator to read-only without a reload.
+	noteRefusal(detail);
+
 	throw new ApiError(
 		response.status,
 		`server fn ${module}.${fn} failed: ${response.status}${extra}`,
