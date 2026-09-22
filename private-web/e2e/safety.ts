@@ -21,6 +21,9 @@ export async function raiseTo(page: Page, mode: "write" | "danger") {
 	await page.getByRole("menuitem", { name: new RegExp(mode, "i") }).click();
 	if (mode === "danger") {
 		await page.getByRole("button", { name: "Enter danger mode" }).click();
+		// Wait for the dialog to actually go: while it is closing its backdrop
+		// still takes the pointer, so a following click lands on nothing.
+		await expect(page.getByText("Enter danger mode?")).toHaveCount(0);
 	}
 	await expect(modeControl(page)).toContainText(new RegExp(mode, "i"));
 }

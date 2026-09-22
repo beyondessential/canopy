@@ -75,16 +75,17 @@ test.describe("safety modes", () => {
 		const add = page.getByRole("button", { name: "Add admin" });
 		await expect(add).toBeVisible();
 
-		// It names the mode it wants, on hover.
-		await add.hover();
-		await expect(page.getByText(/requires danger mode/i).first()).toBeVisible();
+		// The wrapper names the mode the control wants, and is what the pointer
+		// reaches — the control inside takes no pointer events at all.
+		const blocked = page.getByLabel(/requires danger mode/i).first();
+		await expect(blocked).toBeVisible();
 
 		await page.getByLabel("Email").fill("blocked@example.invalid");
 		// Clicking a blocked control does nothing at all — not even the form's
-		// own validation runs. `force` gets past Playwright's own actionability
-		// check so the click is really attempted against the blocked control.
-		await add.click({ force: true });
+		// own validation runs.
+		await blocked.click();
 		await expect(page.getByText("Email cannot be empty")).toHaveCount(0);
+		await expect(page.getByText("blocked@example.invalid")).toHaveCount(0);
 
 		// Raised, the same control acts, and the entry appears.
 		await raiseTo(page, "danger");
