@@ -45,6 +45,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 /// A cluster in the registry, as an operator sees it.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ClusterView {
+	/// Unique identifier for this cluster.
 	pub id: Uuid,
 	/// What an operator sees in the host picker.
 	pub name: String,
@@ -85,11 +86,16 @@ impl ClusterView {
 /// operator has begun but not finished.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ClusterList {
+	/// The registered clusters, ordered by name.
 	pub registered: Vec<ClusterView>,
+	/// The in-progress drafts, newest first.
 	pub drafts: Vec<ClusterView>,
 }
 
 /// List the registry: registered clusters and in-progress drafts.
+///
+/// Registered clusters and drafts are returned as separate lists, each carrying
+/// whether its relay is answering right now.
 #[utoipa::path(
 	post,
 	path = "/list",
@@ -127,7 +133,9 @@ pub struct RegisterArgs {
 /// returned once for the operator to install into the cluster.
 #[derive(Serialize, ToSchema)]
 pub struct RegistrationStarted {
+	/// The draft that was created, accounting for the minted relay identity.
 	pub cluster: ClusterView,
+	/// The relay's credential, returned once for the operator to install.
 	pub credential: ProvisionedCredential,
 }
 
@@ -183,6 +191,7 @@ pub async fn register(
 /// Identify one cluster.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct ClusterIdArgs {
+	/// The cluster to act on.
 	pub id: Uuid,
 }
 
@@ -260,6 +269,9 @@ pub async fn reissue(
 }
 
 /// Remove a cluster from the registry, draft or registered.
+///
+/// The relay's identity is removed with the cluster; a draft removed this way is
+/// the operator abandoning a registration.
 #[utoipa::path(
 	post,
 	path = "/remove",
