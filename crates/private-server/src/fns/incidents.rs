@@ -216,15 +216,15 @@ pub struct IncidentWithIssues {
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(list_for_server))
-		.routes(routes!(list_for_group))
-		.routes(routes!(list_active))
-		.routes(routes!(get_incident))
-		.routes(routes!(resolve))
-		.routes(routes!(unresolve))
-		.routes(routes!(add_note))
-		.routes(routes!(list_notes))
-		.routes(routes!(delete_note))
+		.routes(routes!(read_only: list_for_server))
+		.routes(routes!(read_only: list_for_group))
+		.routes(routes!(read_only: list_active))
+		.routes(routes!(read_only: get_incident))
+		.routes(routes!(write: resolve))
+		.routes(routes!(write: unresolve))
+		.routes(routes!(write: add_note))
+		.routes(routes!(read_only: list_notes))
+		.routes(routes!(write: delete_note))
 }
 
 /// Filters for listing incidents that involve a server.

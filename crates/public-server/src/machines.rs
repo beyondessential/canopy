@@ -19,7 +19,7 @@ use utoipa::ToSchema;
 use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
-	OpenApiRouter::new().routes(routes!(self_identity))
+	OpenApiRouter::new().routes(routes!(public: self_identity))
 }
 
 /// The calling identity, the box it is enrolled as, and what runs on that box.

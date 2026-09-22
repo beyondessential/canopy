@@ -19,8 +19,8 @@ use crate::state::AppState;
 // spec: PAC
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(list))
-		.routes(routes!(self_identity))
+		.routes(routes!(public: list))
+		.routes(routes!(public: self_identity))
 }
 
 /// The same two routes under `/applications`, which is what they are about.
@@ -32,8 +32,8 @@ pub fn routes() -> OpenApiRouter<AppState> {
 // spec: PAC
 pub fn alias_routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(list_applications))
-		.routes(routes!(application_self))
+		.routes(routes!(public: list_applications))
+		.routes(routes!(public: application_self))
 }
 
 /// List publicly-listed central applications.

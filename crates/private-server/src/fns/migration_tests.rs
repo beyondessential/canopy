@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
-	OpenApiRouter::new().routes(routes!(for_group))
+	OpenApiRouter::new().routes(routes!(read_only: for_group))
 }
 
 /// Request body for reading a group's migration-test verdicts.

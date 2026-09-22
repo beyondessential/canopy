@@ -50,8 +50,8 @@ const CHALLENGE_TTL: jiff::SignedDuration = jiff::SignedDuration::from_mins(5);
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(register_begin))
-		.routes(routes!(register_complete))
+		.routes(routes!(public: register_begin))
+		.routes(routes!(public: register_complete))
 }
 
 /// Request to start device enrollment against a machine.

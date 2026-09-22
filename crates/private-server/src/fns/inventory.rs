@@ -53,11 +53,11 @@ pub(super) const ANSIBLE_HOST: &str = "ansible_host";
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(for_group))
-		.routes(routes!(take_lease))
-		.routes(routes!(extend_lease))
-		.routes(routes!(release_lease))
-		.routes(routes!(run_state))
+		.routes(routes!(read_only: for_group))
+		.routes(routes!(write: take_lease))
+		.routes(routes!(write: extend_lease))
+		.routes(routes!(write: release_lease))
+		.routes(routes!(read_only: run_state))
 }
 
 /// Which environment to act on: exactly one of the group's identifier or its

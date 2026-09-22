@@ -10,7 +10,7 @@ use database::{
 use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
-	OpenApiRouter::new().routes(routes!(get_self))
+	OpenApiRouter::new().routes(routes!(public: get_self))
 }
 
 /// Get the tags for the calling device's own server.

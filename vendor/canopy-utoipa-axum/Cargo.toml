@@ -5,9 +5,14 @@
 # 1. `src/router.rs`: `routes()`, `nest()`, and `merge()` now panic when two
 #    distinct types would register the same OpenAPI component schema name with
 #    different definitions, instead of silently overwriting one with the other.
-# 2. `src/lib.rs`: the `routes!` macro takes a safety-mode grade prefix
-#    (`routes!(danger: delete)`) and records it as an OpenAPI operation
-#    extension, which is where the server reads it back to enforce the grade.
+# 2. `src/lib.rs`: every `routes!` entry carries a prefix. On the administrative
+#    surface it is a safety-mode grade (`routes!(danger: delete)`), recorded as
+#    an OpenAPI operation extension and read back by the server to enforce it;
+#    on the device-facing public API, which safety modes do not govern, it is
+#    `routes!(public: ...)`. An entry with no prefix is a compile error, so no
+#    handler reaches the administrative surface ungraded. Upstream's bare form
+#    is gone with it; its multi-handler form survives on the `public:` arm,
+#    where one path serves two methods.
 #
 # Keep this in sync with upstream when bumping the version.
 [package]

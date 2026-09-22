@@ -23,13 +23,13 @@ const HISTORY_LIMIT: i64 = 100;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(fleet))
-		.routes(routes!(history))
-		.routes(routes!(targets))
-		.routes(routes!(for_group))
-		.routes(routes!(record))
-		.routes(routes!(amend))
-		.routes(routes!(withdraw))
+		.routes(routes!(read_only: fleet))
+		.routes(routes!(read_only: history))
+		.routes(routes!(read_only: targets))
+		.routes(routes!(read_only: for_group))
+		.routes(routes!(write: record))
+		.routes(routes!(write: amend))
+		.routes(routes!(write: withdraw))
 }
 
 /// The hours a plan says its work runs, resolved to instants.

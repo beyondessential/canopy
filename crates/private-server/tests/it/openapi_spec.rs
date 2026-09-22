@@ -315,3 +315,45 @@ fn every_operation_tag_is_registered() {
 		unregistered.into_iter().collect::<Vec<_>>().join("\n"),
 	);
 }
+
+/// Every operation on the administrative surface carries a safety-mode grade.
+///
+/// The macro already makes an ungraded entry a compile error, so this cannot
+/// fail through the route tables. What it does catch is a grade that reaches the
+/// document as something the server cannot read back — a mode spelled
+/// differently, or an operation registered by some other route that never went
+/// through the macro. A grade the enforcement layer cannot parse is an
+/// unenforced handler.
+///
+/// spec: SAFE#grading-the-administrative-surface
+#[test]
+fn every_operation_declares_a_safety_mode() {
+	let spec = build_spec();
+	let paths = spec["paths"].as_object().expect("paths object");
+
+	let modes = ["read-only", "write", "danger"];
+	let mut ungraded: std::collections::BTreeSet<String> = Default::default();
+	let mut graded = 0usize;
+
+	for (path, item) in paths {
+		for (method, op) in item.as_object().expect("path item object") {
+			let Some(op) = op.as_object() else { continue };
+			match op.get("x-canopy-safety-mode").and_then(|v| v.as_str()) {
+				Some(mode) if modes.contains(&mode) => graded += 1,
+				Some(mode) => {
+					ungraded.insert(format!("{method} {path}: unknown mode {mode:?}"));
+				}
+				None => {
+					ungraded.insert(format!("{method} {path}"));
+				}
+			}
+		}
+	}
+
+	assert!(
+		ungraded.is_empty(),
+		"operations on the administrative surface carrying no readable safety mode:\n{}",
+		ungraded.into_iter().collect::<Vec<_>>().join("\n"),
+	);
+	assert!(graded > 100, "expected the whole surface, found {graded}");
+}

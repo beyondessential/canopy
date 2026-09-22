@@ -19,7 +19,7 @@ pub struct SnippetResponse {
 }
 
 pub fn routes() -> OpenApiRouter<AppState> {
-	OpenApiRouter::new().routes(routes!(list_snippets))
+	OpenApiRouter::new().routes(routes!(public: list_snippets))
 }
 
 /// List all current bestool SQL snippets.

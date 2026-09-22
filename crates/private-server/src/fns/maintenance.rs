@@ -17,10 +17,10 @@ const HISTORY_LIMIT: i64 = 20;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(list_open))
-		.routes(routes!(for_target))
-		.routes(routes!(declare))
-		.routes(routes!(lift))
+		.routes(routes!(read_only: list_open))
+		.routes(routes!(read_only: for_target))
+		.routes(routes!(write: declare))
+		.routes(routes!(write: lift))
 }
 
 /// The target a window covers: exactly one of the ids is set.

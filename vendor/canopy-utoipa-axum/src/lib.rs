@@ -38,7 +38,7 @@
 //!  }
 //!  
 //!  let (router, api): (axum::Router, OpenApi) = OpenApiRouter::new()
-//!      .routes(routes!(get_user))
+//!      .routes(routes!(read_only: get_user))
 //!      .split_for_parts();
 //! ```
 //!
@@ -126,7 +126,7 @@ pub use paste::paste;
 ///  #[utoipa::path(get, path = "")]
 ///  async fn get_user() {}
 ///
-///  let _: UtoipaMethodRouter = routes!(get_user, search_user);
+///  let _: UtoipaMethodRouter = routes!(read_only: get_user);
 /// ```
 /// Since the _`axum`_ does not support method filter for `CONNECT` requests, using this macro with
 /// handler having request method type `CONNECT` `#[utoipa::path(connect, path = "")]` will panic at
@@ -144,7 +144,9 @@ pub use paste::paste;
 ///  #[utoipa::path(post, path = "")]
 ///  async fn post_user() {}
 ///
-///  let _: OpenApiRouter = OpenApiRouter::new().routes(routes!(get_user, post_user));
+///  let _: OpenApiRouter = OpenApiRouter::new()
+///      .routes(routes!(read_only: get_user))
+///      .routes(routes!(write: post_user));
 /// ```
 #[macro_export]
 macro_rules! routes {
@@ -154,21 +156,14 @@ macro_rules! routes {
     ( read_only: $handler:path $(,)? ) => { $crate::routes!( @graded "read-only" : $handler ) };
     ( write: $handler:path $(,)? ) => { $crate::routes!( @graded "write" : $handler ) };
     ( danger: $handler:path $(,)? ) => { $crate::routes!( @graded "danger" : $handler ) };
-    ( @graded $mode:literal : $handler:path ) => {
-        {
-            use $crate::PathItemExt;
-            let mut paths = utoipa::openapi::path::Paths::new();
-            let mut schemas = Vec::<(String, utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>)>::new();
-            let (path, mut item, types) = $crate::routes!(@resolve_types $handler : schemas);
-            $crate::__set_safety_mode(&mut item, $mode);
-            let method_router = types.iter().by_ref().fold(axum::routing::MethodRouter::new(), |router, path_type| {
-                router.on(path_type.to_method_filter(), $handler)
-            });
-            paths.add_path_operation(&path, types, item);
-            (schemas, paths, method_router)
-        }
-    };
-    ( $handler:path $(, $tail:path)* $(,)? ) => {
+    // The device-facing public API is a different surface: its callers are
+    // machines presenting a certificate, not operators holding a session, so
+    // safety modes do not govern it. Saying so is explicit and greppable rather
+    // than being the shape an entry falls into by omission.
+    // Upstream's multi-handler form survives here, because one path serving two
+    // methods is registered in a single call. The graded arms stay one handler
+    // each: a grade belongs to an operation, not to a path.
+    ( public: $handler:path $(, $tail:path)* $(,)? ) => {
         {
             use $crate::PathItemExt;
             let mut paths = utoipa::openapi::path::Paths::new();
@@ -192,6 +187,32 @@ macro_rules! routes {
             $paths.add_path_operation(&path, types, item);
             router
         }
+    };
+    ( @graded $mode:literal : $handler:path ) => {
+        {
+            use $crate::PathItemExt;
+            let mut paths = utoipa::openapi::path::Paths::new();
+            let mut schemas = Vec::<(String, utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>)>::new();
+            let (path, mut item, types) = $crate::routes!(@resolve_types $handler : schemas);
+            $crate::__set_safety_mode(&mut item, $mode);
+            let method_router = types.iter().by_ref().fold(axum::routing::MethodRouter::new(), |router, path_type| {
+                router.on(path_type.to_method_filter(), $handler)
+            });
+            paths.add_path_operation(&path, types, item);
+            (schemas, paths, method_router)
+        }
+    };
+    // CANOPY FORK: an entry without a grade is a compile error, so no handler
+    // can reach the administrative surface ungraded. Upstream's bare and
+    // multi-handler forms are gone with it: every canopy route table is one
+    // handler per entry, and one grade per handler is the point.
+    ( $handler:path $(, $tail:path)* $(,)? ) => {
+        compile_error!(
+            "this handler declares no safety mode. Every handler on the administrative \
+             surface says which mode it requires: routes!(read_only: handler), \
+             routes!(write: handler), or routes!(danger: handler). See the SAFE spec for \
+             which one a handler takes."
+        )
     };
     ( @resolve_types $handler:path : $schemas:tt ) => {
         {

@@ -20,9 +20,9 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(active))
-		.routes(routes!(list))
-		.routes(routes!(resolve))
+		.routes(routes!(read_only: active))
+		.routes(routes!(read_only: list))
+		.routes(routes!(write: resolve))
 }
 
 /// A self-alert: a problem with canopy's own operation, such as an

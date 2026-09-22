@@ -35,11 +35,11 @@ const REGISTRATION_FRESHNESS: SignedDuration = SignedDuration::from_secs(90);
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(list))
-		.routes(routes!(register))
-		.routes(routes!(confirm))
-		.routes(routes!(reissue))
-		.routes(routes!(remove))
+		.routes(routes!(read_only: list))
+		.routes(routes!(danger: register))
+		.routes(routes!(write: confirm))
+		.routes(routes!(danger: reissue))
+		.routes(routes!(danger: remove))
 }
 
 /// A cluster in the registry, as an operator sees it.

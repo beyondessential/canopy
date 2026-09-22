@@ -51,10 +51,10 @@ use crate::{
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(capabilities))
-		.routes(routes!(worklist))
-		.routes(routes!(credentials))
-		.routes(routes!(verification))
+		.routes(routes!(public: capabilities))
+		.routes(routes!(public: worklist))
+		.routes(routes!(public: credentials))
+		.routes(routes!(public: verification))
 }
 
 // ---------------------------------------------------------------------------

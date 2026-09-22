@@ -110,10 +110,10 @@ async fn version_named(conn: &mut AsyncPgConnection, named: &str) -> Result<Vers
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	let api = OpenApiRouter::new()
-		.routes(routes!(list))
-		.routes(routes!(update_for))
-		.routes(routes!(create, remove))
-		.routes(routes!(list_artifacts));
+		.routes(routes!(public: list))
+		.routes(routes!(public: update_for))
+		.routes(routes!(public: create, remove))
+		.routes(routes!(public: list_artifacts));
 
 	// Streaming download proxy doesn't have a JSON wire shape; mount as a
 	// plain route so it stays out of the OpenAPI spec.

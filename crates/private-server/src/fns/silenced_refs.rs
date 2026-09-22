@@ -13,16 +13,16 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(list_for_server))
-		.routes(routes!(list_for_servers))
-		.routes(routes!(list_for_machine))
-		.routes(routes!(list_for_group))
-		.routes(routes!(silence_server))
-		.routes(routes!(unsilence_server))
-		.routes(routes!(silence_machine))
-		.routes(routes!(unsilence_machine))
-		.routes(routes!(silence_group))
-		.routes(routes!(unsilence_group))
+		.routes(routes!(read_only: list_for_server))
+		.routes(routes!(read_only: list_for_servers))
+		.routes(routes!(read_only: list_for_machine))
+		.routes(routes!(read_only: list_for_group))
+		.routes(routes!(danger: silence_server))
+		.routes(routes!(write: unsilence_server))
+		.routes(routes!(danger: silence_machine))
+		.routes(routes!(write: unsilence_machine))
+		.routes(routes!(danger: silence_group))
+		.routes(routes!(write: unsilence_group))
 }
 
 /// Request body identifying a server to look up silences for.
