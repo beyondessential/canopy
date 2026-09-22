@@ -38,13 +38,20 @@ export const test = base.extend<Options, Fixtures>({
 			// already raised. The raise is real: the server records it, and the
 			// page carries the same session identifier from then on.
 			await page.route("**/api/safety/session", async (route) => {
-				const minted = await route.fetch();
-				const session = (await minted.json()) as { id: string };
-				const raised = await page.request.post("/api/safety/raise", {
-					headers: { "x-canopy-session": session.id },
-					data: { mode: "danger" },
-				});
-				await route.fulfill({ response: raised });
+				try {
+					const minted = await route.fetch();
+					const session = (await minted.json()) as { id: string };
+					const raised = await page.request.post("/api/safety/raise", {
+						headers: { "x-canopy-session": session.id },
+						data: { mode: "danger" },
+					});
+					await route.fulfill({ response: raised });
+				} catch (error) {
+					// A navigation cancels the request mid-flight and disposes its
+					// response; the page asks again, and that request is raised in
+					// turn. Anything else is a real failure.
+					if (!/disposed|closed|cancel|abort/i.test(String(error))) throw error;
+				}
 			});
 		}
 		await use(page);
