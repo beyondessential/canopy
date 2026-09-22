@@ -39,7 +39,7 @@ Server-side cases exercising a boundary need the real tailnet header path rather
 
 ## Grading the surface
 
-- [ ] Every handler on the administrative surface carries a grade, and one added without a grade fails the build (verifies spec: SAFE)
+- [x] Every handler on the administrative surface carries a grade, and one added without a grade fails the build (verifies spec: SAFE)
 - [ ] Every tool on the fleet query interface is read-only (verifies spec: SAFE)
 - [x] Minting a fleet-query access token is danger, and listing tokens is read-only (verifies spec: SAFE)
 - [x] The SQL playground is graded read-only despite running operator-supplied queries (verifies spec: SAFE)

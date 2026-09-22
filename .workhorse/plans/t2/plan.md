@@ -78,19 +78,55 @@ Canopy enforces instead, because the danger permission has to be real and a mode
 The visual convention is taken from seedling deliberately and unchanged, so an operator who knows one interface knows the other.
 Seedling's elevation window is 9m59s so a minute-rounded countdown opens at "10m"; canopy's ten against eleven is a different device for a different reason, since seedling's mode gates nothing and so needs no slack.
 
-## Grading calls worth a second look
+## How the grading went
 
-The two criteria that decide most handlers are mechanical, but a few sit on a line.
+203 operations: 98 read-only, 70 write, 35 danger.
 
-`admins::add` and `admins::delete` are graded danger under "issues or invalidates
+Two readings settled most of the judgement calls, and are worth stating because
+they are not quite on the face of the criteria.
+
+**Time-bounded suppression is write; open-ended suppression is danger.** A
+maintenance window announces itself, expires on its own, and can be lifted, so
+declaring one is write. A silence has no expiry — it suppresses alerting until
+somebody remembers to undo it — which is the same shape as the spec's "pausing
+certificate renewal", so `silence_server`/`_machine`/`_group` and
+`healthchecks::decommission` and `set_source_ingest` are danger. Their undo
+handlers restore the protection, so those are write.
+
+**"Cannot be undone from the interface" is about consequence to the fleet, not
+about row permanence.** Deleting an incident note is permanent and is still
+write; archiving a machine has no un-archive handler and cascades to the
+applications on it, so it is danger.
+
+The explicit examples in the spec landed where they should: deleting a backup
+configuration, clearing a backup schedule, revoking a certificate, pausing a
+server's certificate work, minting and revoking fleet-query tokens are danger;
+creating a backup configuration and renaming a group are write; the SQL
+playground and every fleet-query read are read-only.
+
+## Calls worth a second look
+
+`admins::add` and `admins::delete` are danger under "issues or invalidates
 credentials or trust material": an allowlist entry is what admits a human to the
-whole surface, so granting or withdrawing one is the trust decision itself rather
-than an amendment to Canopy's records.
+whole surface. The same reading makes every credential handler in `devices`
+danger — provisioning, adding, deactivating, reactivating keys, changing a
+device's role, attaching or detaching a tailnet identity, and merging records.
 
-`inventory_variables::remove` is graded write, because the interface can set the
-variable again. Where the variable is a secret its value is genuinely gone, which
-reads towards "cannot be undone from the interface" — worth confirming before the
-grading tranche closes.
+`backups::allow_restore` is danger and `disallow_restore` is write, which reads
+backwards against the spec's "disallowing a restore" example. The example makes
+sense as removing a restore *capability* — which is how `restore_replicas::delete`
+is graded — rather than as closing a 24-hour window that lets a live server
+overwrite itself. Worth confirming the example means what this assumes.
+
+`backups::request_now` is danger because the same handler requests restores, and
+a restore overwrites a live server. A backup alone would be write.
+
+`inventory_variables::remove` is write, because the interface can set the
+variable again. Where the variable is a secret its value is genuinely gone.
+
+`backups::set_type_default` is write: it sets canopy-wide schedule and retention
+defaults, so a shorter retention there eventually destroys backups fleet-wide,
+but it amends Canopy's own records rather than acting on the fleet.
 
 ## Build steps
 
@@ -103,8 +139,8 @@ grading tranche closes.
 - [x] Two error variants, one per refusal, with matching `ERRORS.md` headings — `SafetyModeTooLow { required }` and `DangerNotPermitted`
 - [x] Session endpoints (`/api/safety/session`, `raise`, `lower`), graded read-only so a read-only session can reach them
 - [x] Extend the debug identity shortcut to the new boundary — `use_dev_identity()` made public and honoured by the middleware
-- [ ] Grade every handler on the administrative surface, module by module — done: `admins`, `mcp_tokens`, `sql`, `inventory_variables` (13 operations); the other 23 modules remain
-- [ ] `just gen-openapi` step writing the generated grade map
+- [x] Grade every handler on the administrative surface, module by module — all 203 operations across 27 modules
+- [x] `just gen-openapi` step writing the generated grade map — `private-web/src/safety-modes.ts`, regenerated and diffed by `just check-generated`
 - [ ] Sweep retiring idle sessions, in the jobs crate
 - [ ] Session provider, session header in `callApi`, and mode indicator in the app bar
 - [ ] Graded control wrappers carrying the stripe treatment
