@@ -4,7 +4,8 @@ status: draft
 
 # Substrate checks (`kubernetes` source)
 
-Worker-side companion to the relay's substrate checks: register the `kubernetes` source as reserved, ingest what the relay files under it at all three grains (application, namespace, cluster), and grade it.
+The relay determines the conditions that hold for a whole cluster and files them; Canopy reserves the `kubernetes` source, lands them at the cluster grain, grades them, and presents the cluster's health.
+The application and namespace grains, and the rest of the component checks, spin off (see the breakdown).
 
 ## Where the code stands
 
@@ -26,7 +27,7 @@ The relay already carries `default_ceiling`, `default_escalates`, and `documenta
 
 **The namespace grain has nowhere to resolve to.**
 `resolve` returns `None` for `FilingTarget::Namespace`, and there is no namespace storage anywhere: not on `server_groups`, not on `applications`, not on `kubernetes_clusters`.
-Correlating a namespace to the group it names is the substantive unshipped piece of this card.
+Correlating a namespace to the group it names is substantial enough, and tied enough to N1, that it spun off rather than staying here.
 
 **Stale doc comments to fix as we go.**
 `relay-protocol/src/filing.rs` still describes resolution against "the Kubernetes coordinates an operator set on the server record (spec K8S, 'Setting a server's identity')" and cluster filings as "canopy-wide with the cluster as the instance".
@@ -57,7 +58,8 @@ Nothing computes it today: the monitor job has no cluster handling at all, so a 
 
 **A cluster's reachability follows filings landing, like every other target's.**
 The uniform rule CHK states: reachable while a source is currently reporting, measured against the target's own threshold.
-The relay refiles what it holds periodically, so freshness is a real signal rather than one that decays whenever a cluster is healthy.
+This rests on the relay refiling periodically, which nothing does today and which this card builds (see "The relay determines the cluster-wide checks").
+Freshness is a real signal only because of that refile; without it a healthy cluster with nothing changing would decay to unreachable.
 The connection probe stays what it is — `last_answered_at`, feeding registration and the operator display — rather than becoming a second reachability mechanism that could disagree with the first.
 A consequence to accept: a cluster has exactly one expected source, `kubernetes`, so the warning result (an `on`-mode source quiet while others still report) can never arise for a cluster.
 It presents passed or failed, and the check still presents and is still silenceable before anything has gone wrong, which is what CHK requires.
@@ -183,7 +185,7 @@ So a permission the relay lacks is a broken result on the check that needed it, 
 - A filing attempted while the connection is down is not lost to the connection: the next refile carries the current state.
 - A permission the relay's ServiceAccount lacks produces a broken result naming what was refused, not an absent check.
 
-### `SubstrateFiling` cannot say which instance
+## `SubstrateFiling` cannot say which instance
 
 A cluster has several node pools, and a condition about them is one condition with an instance per pool.
 CHK covers this directly under "Checks with instances": one state for the check, each instance graded through policy on its own against its own detail, the effective result the most urgent across them, and the detail naming every instance not passing.
@@ -196,3 +198,95 @@ Canopy's side is already capable — `file_check_instances` takes a `Vec<CheckIn
 So `SubstrateFiling` gains an instance label, and `ingest_substrate` passes it through instead of the empty string.
 Aggregating pools into one filing whose message lists them would fit the current wire, but it collapses the per-instance grading and silencing CHK requires, and the name rule forbids the other way out (`node-pool-health:ops` is a parameter spelled into a name).
 This lands in M1 because node pools need it, and the spun-off card inherits it for free: several unschedulable pods on one application are instances of one check by the same reasoning.
+
+## What the clusters actually run
+
+Read from the ops repo (`pulumi/k8s-core` and `pulumi/k8s-essentials`), which is where the cluster layout lives rather than in this repo or Tamanu's.
+
+EKS. Addons: vpc-cni, kube-proxy, coredns, the EKS node monitoring agent, EBS CSI with the snapshot controller, EFS CSI, and the Mountpoint-S3 CSI driver.
+
+Cluster controllers, each of which every namespace depends on:
+
+- **k8s-core** — cert-manager, the AWS Load Balancer Controller, external-dns, Karpenter (controller, node classes, node pools, placeholders), opencost.
+- **k8s-essentials** — Envoy Gateway with the Gateway API CRD bundle, ingress-nginx, HNC, Prometheus, CNPG with the barman-cloud plugin, the Tailscale operator, py-kube-downscaler.
+
+Three of these change the design rather than just lengthening a list.
+
+**Prometheus is already in the cluster.**
+So there are two places a cluster condition can be read from, and the choice is structural rather than per-check: the Kubernetes API directly, or Prometheus, which already scrapes most of this and holds it over time.
+
+**The EKS node monitoring agent is already deployed.**
+Node health is therefore partly observed already, and it publishes its findings as node conditions, so a node check reads what the agent concluded rather than deriving readiness afresh.
+
+**The Envoy Gateway and Gateway API versions are coupled, and Helm will not maintain the coupling.**
+The ops repo says so at length: CRDs in a chart's `crds/` directory are installed once and never touched by an upgrade, so bumping the controller alone leaves the CRDs behind and the new controller crash-loops on a kind it gained.
+`envoyGateway.ts` refuses to deploy a controller the cluster cannot run, which catches it at deploy time but says nothing about a cluster that has drifted since.
+A known, written-down failure mode with a named owner is a better first check than anything invented from what Kubernetes happens to expose.
+
+## The relay reads the Kubernetes API
+
+Not Prometheus, which is in these clusters but has not proved useful in them.
+The API also matches how K8S already describes the relay — it "holds the current state of what it watches and files a check when that check's result changes", which is watch language rather than query language, and a watch is what makes filing on change possible without polling.
+
+## One check per core component, each detected its own way
+
+The unit is a core component of a running cluster, and each gets its own check because each is detected differently: an ingress controller's failure mode is not CNPG's, and neither is Karpenter's.
+This is not a parameter spelled into a name, which is the thing the house rule forbids — `cnpg` and `envoy-gateway` are different conditions with different detection, different detail, and different remediation, the way `sync` and `disk_free` are different conditions rather than instances of "something is wrong".
+
+Two consequences worth stating, because they size the card:
+
+- Each check carries its own detection logic against whatever objects say that component is healthy, so the count of components is close to the count of the work.
+- Each ships its own documentation, as all of Canopy's own checks do, and the documentation for "cert-manager is down" has nothing in common with "CNPG is down".
+
+The instance model still earns its place elsewhere: node pools are several of one condition, detected one way, which is exactly what instances are for.
+
+## Operator access does not run through the ingress
+
+Cluster operator traffic goes via Tailscale, not via any ingress or gateway.
+So an ingress or gateway failure is an outage for the Tamanu applications' own users and says nothing about whether anyone can get in to fix it.
+The two are separate conditions with separate consequences, and conflating them would grade the wrong one as the emergency.
+
+What carries operator access is the Tailscale operator, and its Kubernetes API proxy in particular: that is the path to the cluster's API.
+Its failure is the one that leaves a cluster serving traffic while nobody can reach it to work on it, which makes it a check in its own right rather than one instance of "the Tailscale operator is up".
+
+## The component set
+
+**Traffic, application-facing** — Envoy Gateway, ingress-nginx, the AWS Load Balancer Controller, external-dns.
+**Databases** — the CNPG operator and its barman-cloud plugin.
+**Certificates** — cert-manager.
+**Capacity** — the Karpenter controller; node pools, one check with an instance per pool; node health, read from what the EKS node monitoring agent concluded.
+**Operator access** — the Tailscale operator, and its Kubernetes API proxy separately.
+**EKS addons** — CoreDNS, kube-proxy, VPC CNI, EBS CSI with the snapshot controller, EFS CSI, Mountpoint-S3 CSI.
+**Platform extras** — HNC, py-kube-downscaler, opencost, Prometheus.
+
+That is around twenty checks, each with its own detection against whatever objects say that component is healthy, its own detail, and its own documentation.
+
+## Two more checks, and one ruled out
+
+**Gateway API drift** is in: the installed CRD bundle against what the Envoy Gateway controller needs.
+The ops repo documents the failure at length and `envoyGateway.ts` refuses to deploy into it, so the deploy-time case is covered and the drift-after case is not watched by anything.
+
+**Kubernetes version support** is in: the EKS version approaching end of standard support.
+Slow-moving, so months of warning is the whole value, and the alternative to a check is noticing when AWS starts charging extended-support rates.
+
+**IP headroom is out.**
+The clusters are IPv6-only with NAT46, so the IPv4 exhaustion this would warn about is not a wall these clusters are anywhere near — it would take an implausible number of nodes to approach it.
+No IPv6 equivalent replaces it, address space not being the constraint there.
+
+## How this card is split
+
+Plumbing first, then a card per area.
+
+**M1** takes the plumbing end to end plus one check to prove it: reserving the source and driving the reserved-source exclusions off the constant, the instance label on `SubstrateFiling` and through `ingest_substrate`, the relay's watch-hold-file-refile loop, cluster-grain ingest and grading, the cluster reachability sweep with its threshold column, and the cluster detail page.
+
+The proving check should be the Tailscale Kubernetes API proxy.
+It is the one flagged as especially important, its failure is the one that leaves a cluster serving while nobody can reach it to work on it, and it is worth having on day one rather than a placeholder chosen for being easy.
+If its detection turns out to want more than a plumbing card should carry, cert-manager is the fallback: a plainer availability check that still earns its place.
+
+Then one card per area, each independently reviewable and mergeable, and able to run in parallel once the pattern is set:
+
+- **Traffic** — Envoy Gateway, ingress-nginx, the AWS Load Balancer Controller, external-dns, and Gateway API drift.
+- **Databases and certificates** — the CNPG operator, its barman-cloud plugin, and cert-manager.
+- **Capacity** — the Karpenter controller, node pools with an instance per pool, and node health from the EKS node monitoring agent.
+- **Addons** — CoreDNS, kube-proxy, VPC CNI, EBS CSI with the snapshot controller, EFS CSI, Mountpoint-S3 CSI, and Kubernetes version support.
+- **Platform extras** — HNC, py-kube-downscaler, opencost, Prometheus, and the Tailscale operator beyond its API proxy.
