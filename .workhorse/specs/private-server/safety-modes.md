@@ -55,7 +55,7 @@ This holds where the read is a sensitive one: the SQL playground runs operator-s
 A handler that changes something is danger when any of the following holds, and write otherwise.
 
 - It cannot be undone from the interface. Deleting a backup configuration qualifies; creating one does not.
-- It acts on a production server rather than amending Canopy's own records. Revoking a certificate qualifies; renaming a server group does not.
+- It acts on the fleet rather than amending Canopy's own records. Revoking a machine's certificate qualifies; renaming a group does not.
 - It removes a protection without destroying anything at the time. Disallowing a restore, pausing certificate renewal, and clearing a backup schedule all qualify.
 - It issues or invalidates credentials or trust material. Minting a fleet-query access token and changing the certificate authority both qualify.
 

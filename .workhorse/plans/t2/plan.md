@@ -2,7 +2,7 @@
 
 Implementation notes for [SAFE](../../specs/private-server/safety-modes.md) and the danger permission added to [ADM](../../specs/private-server/admin-access.md).
 
-The bulk of the work is grading around 130 handlers. Everything else is the machinery that makes the grading mean something.
+The bulk of the work is grading a little over 200 handlers across 27 modules. Everything else is the machinery that makes the grading mean something.
 
 ## Declaring the grade
 
@@ -13,7 +13,7 @@ One declaration does three things: registers the route as it does today, injects
 Nothing is written twice, so nothing can drift.
 
 The cost is that the grade sits away from the handler body.
-The gain is that each module's route table becomes a grading table a reviewer reads in one screen, which is what makes 130 judgements reviewable at all: `backups.rs` is 2600 lines and 28 handlers, and its grading would otherwise be scattered through them.
+The gain is that each module's route table becomes a grading table a reviewer reads in one screen, which is what makes 200-odd judgements reviewable at all: `backups.rs` is 3340 lines and 28 handlers, and its grading would otherwise be scattered through them.
 
 Enforcement is a small layer putting the grade into request extensions, plus one middleware that reads the grade, the session, and the identity, and decides.
 
