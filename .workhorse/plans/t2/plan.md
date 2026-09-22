@@ -128,6 +128,20 @@ variable again. Where the variable is a secret its value is genuinely gone.
 defaults, so a shorter retention there eventually destroys backups fleet-wide,
 but it amends Canopy's own records rather than acting on the fleet.
 
+## Applying the blocked treatment across the surface
+
+`GradedAction` wraps a control in the mode its endpoint requires, reading the
+generated grade map so the stripe and the server's decision come from one
+declaration. It is on the administrators screen; the rest of the surface's
+controls are still to be wrapped.
+
+That rollout is not only mechanical. The e2e stack runs a debug binary, so the
+server skips the mode check while the interface holds a real read-only session:
+a test that reaches for a graded control has to raise first, as an operator does.
+`e2e/safety.ts` is that helper, and `admins.spec.ts` shows the shape. Every spec
+that drives a control which becomes graded needs the same line, so the wrapping
+and its tests move together, screen by screen.
+
 ## Build steps
 
 - [x] Migration adding the danger column to `admins`, made with `just migration`
@@ -141,8 +155,8 @@ but it amends Canopy's own records rather than acting on the fleet.
 - [x] Extend the debug identity shortcut to the new boundary — `use_dev_identity()` made public and honoured by the middleware
 - [x] Grade every handler on the administrative surface, module by module — all 203 operations across 27 modules
 - [x] `just gen-openapi` step writing the generated grade map — `private-web/src/safety-modes.ts`, regenerated and diffed by `just check-generated`
-- [ ] Sweep retiring idle sessions, in the jobs crate
-- [ ] Session provider, session header in `callApi`, and mode indicator in the app bar
-- [ ] Graded control wrappers carrying the stripe treatment
-- [ ] Danger column on the administrators screen
+- [x] Sweep retiring idle sessions, in the jobs crate — `jobs::session_sweep`, hourly, 24h grace, wired into the monitor pod
+- [x] Session provider, session header in `callApi`, and mode indicator in the app bar
+- [ ] Graded control wrappers carrying the stripe treatment — `GradedAction` built and applied on the administrators screen; the rest of the surface's controls still to be wrapped
+- [x] Danger column on the administrators screen — `admins::list` carries the flag, `admins::set_danger` amends it
 - [ ] Boundary tests on the real header path, and Playwright coverage for the interface — server-side boundary tests written (`tests/it/safety_modes.rs`); Playwright still to come
