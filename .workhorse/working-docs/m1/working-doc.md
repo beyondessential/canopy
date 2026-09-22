@@ -260,15 +260,30 @@ It is genuinely cluster-grain rather than a rollup of per-application checks.
 A per-application check says this application's pod cannot be placed; this says a quarter of everything cannot, which is a different signal with different causes — the cluster out of capacity, Karpenter wedged, a node class broken — and it fires for causes no component check anticipated.
 That is the point of it: it is the check that catches what the others did not think of, which is exactly the failure mode described, where the condition was noticed by eye rather than reported.
 
-Two exclusions it must get right, or it alarms nightly:
+#### What it counts
 
-- A duty deliberately scaled to zero is not a failure, which means reading `.spec.replicas` rather than counting absent pods.
-- py-kube-downscaler sleeps whole environments on a schedule, so a sleeping namespace's zero replicas are deliberate too and the aggregate must exclude it.
-  This is the same fact that makes a hibernated deployment's application checks skip, read at a different grain.
+Ready replicas over desired replicas, summed across Deployments, StatefulSets, DaemonSets and CNPG clusters.
+Counting against what each workload wants, not the pods that exist, catches pods that were never created: a ReplicaSet blocked by quota, or by an admission webhook that's down.
+A broken webhook does exactly that, and pod counting can't see it because no pod exists to count.
+Each kind reports desired and ready in its own fields, so each gets its own small reader.
 
-Completed jobs are not failures either, so the denominator is workloads that are supposed to be running.
+What drops out, so the check doesn't alarm every night:
 
-Graded on the **healthy share** — the proportion of workloads that should be running and are — rather than on the failing share, which is how it reads on the check and how the thresholds below are stated.
+- **Scaled to zero**, whether an operator did it or the downscaler did it to sleep an environment. Desired is zero, so it adds nothing to either side and needs no special case.
+- **Hibernated CNPG clusters.** A cluster with `cnpg.io/hibernation=on` still asks for its instances while the operator has removed their pods, so it has to be recognised by that annotation and left out. Without this, every sleeping environment's databases would count as failing.
+- **Jobs and CronJobs.** They aren't meant to keep running, so they're not in the count at all.
+
+#### How an environment actually sleeps
+
+There is no namespace-level fact to read.
+In the ops repo (`tamanu/on-k8s/src/schedule.ts`), hibernating an environment annotates each Deployment with `downscaler/force-downtime=true`, which py-kube-downscaler then scales to zero on its next pass (every 60 seconds), and sets `cnpg.io/hibernation=on` on each CNPG cluster, which the CNPG operator hibernates by removing its pods.
+The namespace is left unannotated on purpose, because a namespace-level downscaler annotation would override the workload-level one.
+So there is no "sleeping namespace" to exclude. Each object that sleeps is recognised by its own mark, which is what "What it counts" does.
+
+Karpenter's placeholders (one low-priority pause pod each for the system and ingress purposes) go pending by design when their node is disrupted, until Karpenter provisions a replacement.
+They need no exclusion: two pods is about 2% of the smallest cluster and they're pending only briefly, and a placeholder stuck pending is a real signal that Karpenter isn't provisioning.
+
+Graded on the **healthy share** — ready replicas as a proportion of desired — rather than on the failing share, which is how it reads on the check and how the thresholds below are stated.
 
 The smallest cluster runs 92 pods, so one pod is a bit over 1% and the proportion does not jump around at the small end.
 That settles the shape: a proportion alone, with no absolute-count fallback and no floor below which the check stays quiet.
@@ -357,7 +372,7 @@ How long that is belongs to the capacity card, which carries the note.
 - A cluster that is only a draft is swept for nothing and presents no reachability.
 - The cluster detail page presents the cluster's checks, health and reachability, and silencing a check there quiets it on the cluster.
 - A cluster-grain issue opens no incident.
-- Observe the aggregate on the smallest cluster before relying on it, including across a scheduled downscaler sleep and a cluster upgrade, and adjust the defaults if the bands turn out to be wrong in practice.
+- Observe the aggregate on the smallest cluster before relying on it, including across a scheduled sleep, a wake (many pods pending at once while Karpenter provisions nodes), and a cluster upgrade, and adjust the defaults if the bands turn out to be wrong in practice.
 
 ### Relay side
 
@@ -370,7 +385,9 @@ How long that is belongs to the capacity card, which carries the note.
 - A dip below 90% that recovers inside 5 minutes files nothing.
 - After a relay restart at 85% healthy, the aggregate files nothing until the hold has passed, and the existing issue stays open rather than recovering and reopening.
 - After a relay restart at 97% or at 40%, the aggregate files at once.
-- The aggregate excludes deployments scaled to zero, namespaces the downscaler has put to sleep, and completed jobs.
+- The aggregate leaves out workloads scaled to zero (by an operator or by the downscaler), CNPG clusters with `cnpg.io/hibernation=on`, and Jobs.
+- A Deployment whose pods can't be created (quota exceeded, admission webhook down) counts against the aggregate even though none of its pods exist.
+- A sleeping environment, with its Deployments scaled down and its CNPG clusters hibernated, contributes nothing to either side of the aggregate.
 - A check with instances (node pools) files each instance under its own label, grades each on its own policy, takes the effective result as the most urgent across them, and lists every instance not passing in the detail.
 
 ## How this card is split
