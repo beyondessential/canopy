@@ -8,7 +8,14 @@
 // mode is present and inert rather than missing.
 
 import { expect, test } from "./test-fixtures";
-import { resetSeededTables, seedServerGroup } from "./seed";
+import {
+	resetSeededTables,
+	seedMachine,
+	seedServer,
+	seedServerGroup,
+	seedStatus,
+	seedVersion,
+} from "./seed";
 import { lower, modeControl, raiseTo } from "./safety";
 
 test.describe("safety modes", () => {
@@ -174,6 +181,41 @@ test.describe("safety modes", () => {
 		await expect(modeControl(page)).toContainText(/write/i);
 	});
 
+	test("machine setup below danger offers its ticket blocked, and mints once raised", async ({
+		page,
+		sql,
+	}) => {
+		await resetSeededTables(sql);
+		const group = await seedServerGroup(sql, { name: "enrol-below-danger" });
+		const machine = await seedMachine(sql, {
+			name: "waiting-box",
+			groupId: group.id,
+		});
+		const tickets = async () =>
+			Number(
+				(
+					await sql.query<{ count: string }>(
+						"SELECT COUNT(*) AS count FROM machine_enrollment_tokens WHERE machine_id = $1",
+						[machine.id],
+					)
+				)[0].count,
+			);
+
+		await page.goto(`/fleet/machines/${machine.id}`);
+
+		// Minting is danger: read-only, the page offers it rather than asking.
+		const issue = page.getByRole("button", { name: "Issue enrollment ticket" });
+		await expect(issue).toBeDisabled();
+		await expect(page.getByLabel(/requires danger mode/i).first()).toBeVisible();
+		await expect(page.getByText(/bestool canopy register/)).toHaveCount(0);
+		expect(await tickets()).toBe(0);
+
+		// Raised, it mints on its own as it always has.
+		await raiseTo(page, "danger");
+		await expect(page.getByText(/bestool canopy register/)).toBeVisible();
+		expect(await tickets()).toBeGreaterThan(0);
+	});
+
 	test("a blocked control carries its grade's stripe, full colour under the pointer", async ({
 		page,
 	}) => {
@@ -232,6 +274,45 @@ test.describe("safety modes", () => {
 });
 
 test.describe("safety modes, raised", () => {
+	test("un-silencing stays reachable in write mode, where silencing is not", async ({
+		page,
+		sql,
+	}) => {
+		await resetSeededTables(sql);
+		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
+		const server = await seedServer(sql, {
+			name: "silence-by-grade",
+			type: "tamanu-central",
+		});
+		await seedStatus(sql, {
+			serverId: server.id,
+			healthy: false,
+			health: [{ check: "postgres", result: "failed" }],
+		});
+
+		// Silencing is danger, which this page starts in.
+		await page.goto(`/fleet/applications/${server.id}`);
+		await page.getByRole("button", { name: "Silence postgres" }).click();
+		await page.getByRole("button", { name: "For this server" }).click();
+		const manage = page.getByRole("button", { name: "Manage silence for postgres" });
+		await expect(manage).toBeVisible();
+
+		// Down to write: the popover still opens, because un-silencing is write
+		// even though silencing is not.
+		await raiseTo(page, "write");
+		await expect(manage).toBeEnabled();
+		await manage.click();
+		const unsilence = page.getByRole("button", { name: "Un-silence" });
+		await expect(unsilence).toBeEnabled();
+		await unsilence.click();
+
+		// With nothing left to un-silence, the popover only offers silencing, so
+		// write no longer opens it.
+		const silence = page.getByRole("button", { name: "Silence postgres" });
+		await expect(silence).toBeDisabled();
+		await expect(page.getByLabel(/requires danger mode/i).first()).toBeVisible();
+	});
+
 	test("a control disabled for a reason of its own carries no stripe", async ({
 		page,
 	}) => {

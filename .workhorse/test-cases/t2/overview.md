@@ -47,10 +47,14 @@ Server-side cases exercising a boundary need the real tailnet header path rather
 ## Interface
 
 - [x] A reloaded page comes back read-only (verifies spec: SAFE)
+- [x] A raise made before the page has its session is not undone when the session arrives (verifies spec: SAFE)
 - [x] Raising to danger asks for confirmation; raising to write does not (verifies spec: SAFE)
 - [x] The current mode and its remaining time are visible at all times, counting down from ten minutes (verifies spec: SAFE)
 - [x] A blocked control does not act when clicked, and names the mode it requires (verifies spec: SAFE)
-- [ ] A control requiring write or danger carries a stripe in that grade's colour, muted at rest and full colour under the pointer (verifies spec: SAFE)
-- [ ] A control disabled for a reason unrelated to its grade carries no stripe (verifies spec: SAFE)
-- [ ] A control withheld because the operator is not an administrator is absent rather than blocked (verifies spec: ADM)
+- [x] A blocked control cannot be reached from the keyboard, and Enter in a field of its form does not submit it (verifies spec: SAFE)
+- [ ] A popover of individually graded rows opens at the lowest grade it offers, so un-silencing is reachable in write mode (verifies spec: SAFE)
+- [ ] Machine setup below danger offers the enrollment ticket as a blocked control, and mints it once the operator raises (verifies spec: SAFE)
+- [x] A control requiring write or danger carries a stripe in that grade's colour, muted at rest and full colour under the pointer (verifies spec: SAFE)
+- [x] A control disabled for a reason unrelated to its grade carries no stripe (verifies spec: SAFE)
+- [x] A control withheld because the operator is not an administrator is absent rather than blocked (verifies spec: ADM)
 - [x] Danger is granted and withdrawn from the administrators screen (verifies spec: ADM)
