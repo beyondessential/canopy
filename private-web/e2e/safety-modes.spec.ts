@@ -94,7 +94,9 @@ test.describe("safety modes", () => {
 			const danger = row.getByRole("switch");
 			await expect(danger).not.toBeChecked();
 
-			await danger.check();
+			// The switch follows the server rather than moving optimistically, so
+			// click it and wait for the answer to come back.
+			await danger.click();
 			await expect(danger).toBeChecked();
 
 			// It is the entry that carries it, so it survives a reload.
@@ -109,7 +111,7 @@ test.describe("safety modes", () => {
 				.getByRole("listitem")
 				.filter({ hasText: seeded })
 				.getByRole("switch")
-				.uncheck();
+				.click();
 			await expect(
 				page.getByRole("listitem").filter({ hasText: seeded }).getByRole("switch"),
 			).not.toBeChecked();
