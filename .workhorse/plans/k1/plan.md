@@ -79,10 +79,21 @@ card's model work — bigger than the registry table itself.
 
 ## A cluster is a check target
 
-`Scope` is `Application | Machine | Group | Global`, stored as three nullable FK columns with
-a CHECK. It gains a **`Cluster` variant with its own nullable FK column**, so Postgres keeps
-the cascade and uniqueness that prevent orphaned check-states. Never a parallel scope enum,
-and never a hand-written match on the columns.
+`Scope` is `Application | Machine | Group | Global`, stored as one nullable FK column per
+targetable grain (`application_id`, `machine_id`, `server_group_id`, all null being
+canopy-wide) under a `num_nonnulls` CHECK holding it to at most one.
+
+AGENTS.md states the recipe exactly, so this is mechanical rather than a design choice:
+adding a grain means **a variant, a column, and an arm in each of `to_columns`,
+`from_columns`, and `resolve_incident_target`** — never a second enum and never a
+hand-written match over the storage columns. So `Scope::Cluster` adds a
+`kubernetes_cluster_id` column to the scoped tables, widens the CHECK, and takes an arm in
+all three functions. Postgres then keeps the `ON DELETE CASCADE` and uniqueness that prevent
+orphaned check-states.
+
+`resolve_incident_target` is the arm needing an actual decision rather than a transcription:
+a cluster belongs to no group, so it has no group/rank to resolve a member target through
+the way an application or machine does.
 
 Consequence for the relay path: `ingest::Placement::Cluster` currently maps to
 `Scope::Global` with the cluster as an instance label. Once `Scope::Cluster` exists it should
@@ -106,8 +117,9 @@ mechanism of its own.
 ## Liveness for registration reaches the page through the database
 
 **Decided, and narrowed by the above.** The registry is in-memory in `relayhub`; the settings
-page is served by `private-server`. Those are separate Deployments, and Canopy's established
-way for one pod to learn what another observed is the database, not a pod-to-pod call.
+page is served by `private-server`. Those are separate Kubernetes `Deployment`s, and
+Canopy's established way for one pod to learn what another observed is the database, not a
+pod-to-pod call.
 
 So relayhub records what it observed of each relay, and registration reads it rather than
 probing live. The private-server never talks to the relayhub.
@@ -141,4 +153,7 @@ which makes its shape an open question rather than a settled one — see below.
 - `NamespaceRoster` has been **removed** from `Request`/`Response`. The identity picker it fed
   needs rechecking against whatever replaced it before this card assumes it exists.
 - Vocabulary reset throughout: servers → **applications**, devices → **identities** in the
-  specs, deployments → **environments** in the protocol.
+  specs. The protocol's sleep/wake pair now acts on an **environment** — a group's
+  applications at one rank — and AGENTS.md now forbids the older word outright, so a
+  `grep -rin` for it should turn up only the `billing.*` cost-allocation label and Kubernetes
+  `Deployment` resources.
