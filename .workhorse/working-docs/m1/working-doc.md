@@ -290,3 +290,36 @@ Then one card per area, each independently reviewable and mergeable, and able to
 - **Capacity** — the Karpenter controller, node pools with an instance per pool, and node health from the EKS node monitoring agent.
 - **Addons** — CoreDNS, kube-proxy, VPC CNI, EBS CSI with the snapshot controller, EFS CSI, Mountpoint-S3 CSI, and Kubernetes version support.
 - **Platform extras** — HNC, py-kube-downscaler, opencost, Prometheus, and the Tailscale operator beyond its API proxy.
+
+## Checks derived from failures actually had
+
+A set derived from real incidents beats one derived from what Kubernetes exposes, so these take precedence over anything above that was reasoned from the component list.
+
+**Node pressure and moribund nodes** confirm the node health check rather than changing it, and sharpen what it reads: memory and ephemeral disk pressure specifically, and a node alive but not functioning.
+Karpenter has made the moribund case rarer, which argues for grading it as a warning that something is being replaced rather than a failure.
+
+**EC2 node classes out of date and unschedulable** is a check the set did not have.
+It is a different condition from a node pool being unhealthy — the pool is willing and the class it references cannot launch — and the ops repo keeps them as separate objects (`karpenter/classes.ts` beside `karpenter/pools.ts`), so they are separate checks against separate kinds.
+
+**Karpenter unable to read spot feeds** is also new.
+Without the interruption feed Karpenter cannot drain a node before AWS reclaims it, so the consequence is abrupt pod loss rather than degraded provisioning, and nothing else reports it.
+
+**CNPG running out of disk space** is the one that does not belong at this grain.
+A CNPG cluster is one application's Postgres — a namespace holds one instance per central and per facility — so its disk headroom is an application-subject condition, not a cluster-wide one.
+It is recorded on this card as explicitly not this card's, and it fits the application grains rather than anything here.
+
+### The aggregate: broadly unscheduled or failing
+
+"Sometimes a problem is detected because we notice we've got like 25% unscheduled or failing" is the most valuable thing in the list, and the set had nothing like it.
+
+It is genuinely cluster-grain rather than a rollup of per-application checks.
+A per-application check says this application's pod cannot be placed; this says a quarter of everything cannot, which is a different signal with different causes — the cluster out of capacity, Karpenter wedged, a node class broken — and it fires for causes no component check anticipated.
+That is the point of it: it is the check that catches what the others did not think of, which is exactly the failure mode described, where the condition was noticed by eye rather than reported.
+
+Two exclusions it must get right, or it alarms nightly:
+
+- A duty deliberately scaled to zero is not a failure, which means reading `.spec.replicas` rather than counting absent pods.
+- py-kube-downscaler sleeps whole environments on a schedule, so a sleeping namespace's zero replicas are deliberate too and the aggregate must exclude it.
+  This is the same fact that makes a hibernated deployment's application checks skip, read at a different grain.
+
+Completed jobs are not failures either, so the denominator is workloads that are supposed to be running.
