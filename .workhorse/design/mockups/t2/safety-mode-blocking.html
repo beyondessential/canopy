@@ -1,0 +1,316 @@
+<!-- spec: private-server/admin-access.md -->
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<title>Safety mode indicator and blocked controls</title>
+<style>
+  :root {
+    --primary: #388e3c;
+    --secondary: #32669a;
+    --warning: #ed6c02;
+    --warning-light: #ff9800;
+    --error: #d32f2f;
+    --error-light: #ef5350;
+    --text-primary: rgba(0,0,0,0.87);
+    --text-secondary: rgba(0,0,0,0.6);
+    --text-disabled: rgba(0,0,0,0.38);
+    --divider: rgba(0,0,0,0.12);
+    --paper: #fff;
+    --default: #fafafa;
+
+    --stripe-write: repeating-linear-gradient(135deg,
+      rgba(255,152,0,0.24), rgba(255,152,0,0.24) 6px,
+      rgba(255,152,0,0.07) 6px, rgba(255,152,0,0.07) 12px);
+    --stripe-danger: repeating-linear-gradient(45deg,
+      rgba(239,83,80,0.24), rgba(239,83,80,0.24) 6px,
+      rgba(239,83,80,0.07) 6px, rgba(239,83,80,0.07) 12px);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--default);
+    color: var(--text-primary);
+    font-family: Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.43;
+  }
+
+  /* App bar: dense Toolbar, color="default", elevation 1 */
+  .appbar {
+    background: var(--paper);
+    box-shadow: 0 2px 1px -1px rgba(0,0,0,.2), 0 1px 1px 0 rgba(0,0,0,.14), 0 1px 3px 0 rgba(0,0,0,.12);
+  }
+  .toolbar {
+    min-height: 48px; display: flex; align-items: center; gap: 16px; padding: 0 16px;
+  }
+  .brand { display: flex; align-items: center; gap: 8px; margin-right: 16px; color: var(--primary); text-decoration: none; }
+  .brand svg { width: 24px; height: 24px; }
+  .brand h1 { font-size: 1.25rem; font-weight: 500; margin: 0; line-height: 1.6; }
+  .nav { color: var(--text-secondary); font-weight: 500; text-decoration: none; }
+  .nav.active { color: var(--secondary); }
+  .spacer { flex: 1; }
+  .ext { color: var(--text-secondary); font-weight: 500; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+  .ext svg { width: 1em; height: 1em; }
+
+  /* Mode indicator */
+  .mode {
+    display: inline-flex; align-items: center; gap: 8px;
+    border: 1px solid; border-radius: 16px;
+    padding: 2px 6px 2px 10px; font-weight: 500; font-size: 0.8125rem;
+    background: var(--paper); cursor: pointer;
+  }
+  .mode .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+  .mode .time { font-variant-numeric: tabular-nums; opacity: .75; }
+  .mode .caret { width: 18px; height: 18px; opacity: .6; }
+  .mode.read { color: var(--text-secondary); border-color: var(--divider); }
+  .mode.write { color: var(--warning); border-color: var(--warning); background: rgba(255,152,0,0.08); }
+  .mode.danger { color: var(--error); border-color: var(--error); background: rgba(239,83,80,0.10); }
+
+  /* Page */
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px 24px 64px; }
+  .stack > * + * { margin-top: 24px; }
+  .paper { background: var(--paper); border: 1px solid var(--divider); border-radius: 4px; padding: 16px; }
+  h2.section { font-size: 1.25rem; font-weight: 500; margin: 0 0 4px; }
+  .caption { color: var(--text-secondary); font-size: .875rem; margin: 0 0 16px; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .row + .row { margin-top: 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-weight: 500; color: var(--text-secondary); font-size: .875rem; padding: 8px 8px 8px 0; border-bottom: 1px solid var(--divider); }
+  td { padding: 10px 8px 10px 0; border-bottom: 1px solid var(--divider); }
+  td.actions { text-align: right; white-space: nowrap; }
+
+  /* Buttons */
+  .btn {
+    font: inherit; font-size: .8125rem; font-weight: 500; letter-spacing: .02857em; text-transform: uppercase;
+    border-radius: 4px; padding: 4px 10px; cursor: pointer; background: transparent;
+    border: 1px solid; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn svg { width: 18px; height: 18px; }
+  .btn.read { color: var(--primary); border-color: rgba(56,142,60,.5); }
+  .btn.write { color: var(--warning); border-color: rgba(237,108,2,.5); }
+  .btn.danger { color: var(--error); border-color: rgba(211,47,47,.5); }
+  .btn.contained { color: #fff; border-color: transparent; }
+  .btn.contained.read { background: var(--primary); }
+
+  /* Blocked: wrapper carries the cursor, button carries the stripes.
+     Greyscaled at rest, full colour under the pointer. */
+  .blocked { display: inline-flex; cursor: not-allowed; position: relative; }
+  .blocked .btn {
+    pointer-events: none;
+    color: var(--text-primary);
+    border-color: var(--divider);
+    filter: grayscale(.8);
+    transition: filter 150ms cubic-bezier(.4,0,.2,1);
+  }
+  .blocked.write .btn { background-image: var(--stripe-write); }
+  .blocked.danger .btn { background-image: var(--stripe-danger); }
+  .blocked:hover .btn { filter: grayscale(0); }
+
+  /* Disabled for an unrelated reason: no stripes, ordinary disabled. */
+  .btn.inert { color: var(--text-disabled); border-color: rgba(0,0,0,.12); cursor: default; pointer-events: none; }
+
+  .tip {
+    position: absolute; left: 50%; top: calc(100% + 6px); transform: translateX(-50%);
+    background: rgba(97,97,97,.92); color: #fff; font-size: .6875rem; font-weight: 500;
+    border-radius: 4px; padding: 4px 8px; white-space: nowrap; opacity: 0; pointer-events: none;
+    transition: opacity 150ms; z-index: 5;
+  }
+  .blocked:hover .tip { opacity: 1; }
+
+  /* Annex */
+  .annex { border-top: 1px dashed var(--divider); margin-top: 48px; padding-top: 24px; }
+  .annex h3 { font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: var(--text-secondary); font-weight: 500; margin: 0 0 12px; }
+  .variants { display: flex; gap: 32px; flex-wrap: wrap; align-items: flex-start; }
+
+  /* Menu */
+  .menu { background: var(--paper); border-radius: 4px; box-shadow: 0 5px 5px -3px rgba(0,0,0,.2), 0 8px 10px 1px rgba(0,0,0,.14), 0 3px 14px 2px rgba(0,0,0,.12); padding: 8px 0; min-width: 232px; }
+  .menu .item { display: flex; align-items: center; gap: 12px; padding: 6px 16px; cursor: pointer; }
+  .menu .item:hover { background: rgba(0,0,0,.04); }
+  .menu .item .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .menu .item small { display: block; color: var(--text-secondary); font-size: .75rem; }
+  .menu .divider { height: 1px; background: var(--divider); margin: 8px 0; }
+
+  /* Dialog */
+  .dialog { background: var(--paper); border-radius: 4px; max-width: 440px; box-shadow: 0 11px 15px -7px rgba(0,0,0,.2), 0 24px 38px 3px rgba(0,0,0,.14), 0 9px 46px 8px rgba(0,0,0,.12); }
+  .dialog .head { display: flex; align-items: center; gap: 10px; padding: 16px 24px 8px; font-size: 1.25rem; font-weight: 500; color: var(--error); }
+  .dialog .body { padding: 0 24px 16px; color: var(--text-secondary); }
+  .dialog .body p { margin: 0 0 8px; }
+  .dialog .acts { display: flex; justify-content: flex-end; gap: 8px; padding: 8px 16px 16px; }
+  .btn.text { border-color: transparent; color: var(--text-secondary); }
+  .btn.contained.danger { background: var(--error); color: #fff; border-color: transparent; }
+</style>
+</head>
+<body>
+
+<div class="appbar">
+  <div class="toolbar">
+    <a class="brand" href="#">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="none" stroke="#388e3c" stroke-width="3"/><path d="M12 7v10M7 12h10" stroke="#32669a" stroke-width="3" stroke-linecap="round"/></svg>
+      <h1>Canopy</h1>
+    </a>
+    <a class="nav" href="#">Status</a>
+    <a class="nav" href="#">Incidents</a>
+    <a class="nav active" href="#">Fleet</a>
+    <a class="nav" href="#">Versions</a>
+    <a class="nav" href="#">Upgrades</a>
+    <a class="nav" href="#">Devices</a>
+    <a class="nav" href="#">Bestool</a>
+    <a class="nav" href="#">Settings</a>
+    <span class="spacer"></span>
+    <button class="mode write">
+      <span class="dot"></span>Write<span class="time">8:41</span>
+      <svg class="caret" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 10l5 5 5-5z"/></svg>
+    </button>
+    <a class="ext" href="#">Public
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
+    </a>
+  </div>
+</div>
+
+<div class="container stack">
+
+  <div class="paper">
+    <h2 class="section">tamanu-prod-au</h2>
+    <p class="caption">Central server, Tamanu 2.34.1</p>
+    <div class="row">
+      <button class="btn read">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zm0 12.5a5 5 0 110-10 5 5 0 010 10zm0-8a3 3 0 100 6 3 3 0 000-6z"/></svg>
+        View logs
+      </button>
+      <button class="btn write">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+        Edit server
+      </button>
+      <span class="blocked danger">
+        <button class="btn">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+          Request maintenance
+        </button>
+        <span class="tip">Needs danger mode</span>
+      </span>
+      <span class="blocked danger">
+        <button class="btn">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 19a2 2 0 002 2h8a2 2 0 002-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+          Archive server
+        </button>
+        <span class="tip">Needs danger mode</span>
+      </span>
+    </div>
+  </div>
+
+  <div class="paper">
+    <h2 class="section">Backup configurations</h2>
+    <p class="caption">Three configured, last run 41 minutes ago</p>
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Schedule</th><th>Last run</th><th></th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>postgres-nightly</td>
+          <td>Daily 02:00 AEST</td>
+          <td>41 minutes ago</td>
+          <td class="actions">
+            <button class="btn write">Edit</button>
+            <span class="blocked danger">
+              <button class="btn">Clear schedule</button>
+              <span class="tip">Needs danger mode</span>
+            </span>
+            <span class="blocked danger">
+              <button class="btn">Delete</button>
+              <span class="tip">Needs danger mode</span>
+            </span>
+          </td>
+        </tr>
+        <tr>
+          <td>files-weekly</td>
+          <td>Sundays 04:00 AEST</td>
+          <td>2 days ago</td>
+          <td class="actions">
+            <button class="btn write">Edit</button>
+            <span class="blocked danger">
+              <button class="btn">Clear schedule</button>
+              <span class="tip">Needs danger mode</span>
+            </span>
+            <span class="blocked danger">
+              <button class="btn">Delete</button>
+              <span class="tip">Needs danger mode</span>
+            </span>
+          </td>
+        </tr>
+        <tr>
+          <td>object-lock-archive</td>
+          <td>Monthly</td>
+          <td>12 days ago</td>
+          <td class="actions">
+            <button class="btn inert">Edit</button>
+            <span class="blocked danger">
+              <button class="btn">Clear schedule</button>
+              <span class="tip">Needs danger mode</span>
+            </span>
+            <span class="blocked danger">
+              <button class="btn">Delete</button>
+              <span class="tip">Needs danger mode</span>
+            </span>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="row" style="margin-top:16px">
+      <button class="btn contained read" style="background:var(--warning)">Add configuration</button>
+    </div>
+  </div>
+
+  <div class="annex">
+    <h3>Indicator, read-only session</h3>
+    <div class="variants">
+      <button class="mode read">
+        <span class="dot"></span>Read-only
+        <svg class="caret" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 10l5 5 5-5z"/></svg>
+      </button>
+      <button class="mode danger">
+        <span class="dot"></span>Danger<span class="time">2:07</span>
+        <svg class="caret" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 10l5 5 5-5z"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="annex">
+    <h3>Raising</h3>
+    <div class="variants">
+      <div class="menu">
+        <div class="item" style="color:var(--text-secondary)">
+          <span class="dot" style="background:currentColor"></span>
+          <span>Read-only<small>Current</small></span>
+        </div>
+        <div class="item" style="color:var(--warning)">
+          <span class="dot" style="background:currentColor"></span>
+          <span>Write<small>Nine minutes</small></span>
+        </div>
+        <div class="item" style="color:var(--error)">
+          <span class="dot" style="background:currentColor"></span>
+          <span>Danger<small>Nine minutes, confirms first</small></span>
+        </div>
+      </div>
+
+      <div class="dialog">
+        <div class="head">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+          Enter danger mode?
+        </div>
+        <div class="body">
+          <p>Danger mode unlocks actions that cannot be undone, act directly on production servers, or remove a protection.</p>
+          <p>It lasts nine minutes, then drops back to read-only.</p>
+        </div>
+        <div class="acts">
+          <button class="btn text">Cancel</button>
+          <button class="btn contained danger">Enter danger mode</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
