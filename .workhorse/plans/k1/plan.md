@@ -132,18 +132,58 @@ probing live. The private-server never talks to the relayhub.
 Now that reachability covers the ongoing case, this mechanism serves registration alone,
 which makes its shape an open question rather than a settled one — see below.
 
+## One wizard, and a draft is the trace it leaves
+
+**Decided.** Registration is a single wizard rather than two independent steps, because a
+cluster registration page that does not mint the credential sends operators hunting for the
+identity page. The cost of one wizard is that the relay identity is minted partway through,
+so an abandoned wizard must not leave that identity orphaned.
+
+So the `kubernetes_clusters` row is written when the credential is minted, in a **draft**
+state, carrying the name and the `relay_identity_id`. The minted relay is therefore never
+loose: the draft row is what says which cluster it was for and who minted it.
+
+- **Draft is a nullable `registered_at`**, matching how `applications.registered_at` already
+  carries "created but not yet reported". Null is a draft; set is a registered cluster.
+- **`registered_at` is set when `Ping` succeeds**, and only then.
+- **Everything downstream reads registered clusters only** — the host picker, an
+  application's `kubernetes_cluster_id`, `Scope::Cluster`, and `resolve`. A draft is a
+  registration in progress, not a cluster in the registry.
+
+This keeps what the spec is actually protecting. K8S's "before the cluster is saved" exists
+so that "a cluster Canopy cannot read is caught as the operator adds it"; a draft is visibly
+not yet registered, so nothing unconfirmed enters the registry or acquires applications.
+
+### Drafts are resumable, which is what makes them worth keeping
+
+A draft that could not be resumed would be litter with a name on it, since the private key is
+shown once and is gone with the abandoned wizard. It can be resumed:
+`provision_credential` takes an **optional `device_id`** and mints through
+`DeviceKey::create`, which — unlike `Device::add_key`, the enrolment path that refuses a
+second active key — simply inserts another. So "re-issue credential" on a draft works with
+the existing endpoint.
+
+Deactivate the superseded key when re-issuing. The draft's previous key was never deployed
+anywhere, so retiring it costs nothing and keeps a draft from accumulating active keys.
+
+### Spec impact to carry back
+
+A draft is product-visible behaviour an operator sees and acts on, so **K8S's "Cluster
+registry" wants a sentence or two for it** — that registering mints the relay's credential,
+that an unfinished registration is kept as a draft rather than discarded, and that a draft
+holds no applications. Worth drafting once the wizard's shape is agreed, not before.
+
 ## Open decisions to work
 
-1. **What registration actually reads.** Since reachability no longer needs a liveness table,
+1. **Do drafts expire?** A sweep after some period, or only ever removed by hand. Leaning
+   by hand: there will be very few, and a draft silently vanishing takes its relay identity's
+   only trace with it, which is the thing this decision exists to prevent.
+2. **What registration actually reads.** Since reachability no longer needs a liveness table,
    the options narrow: a small `last_answered_at` on the cluster row written by a relayhub
    probe loop, or no probe loop at all — relayhub simply records connect/disconnect, and
    registration reads "a relay is currently connected". The second is less machinery and may
    be enough, given `Ping` is answered below the `Duties` trait and a connected relay that
    cannot answer it is close to a contradiction.
-2. **The enrol-then-confirm flow / UX** — registering enrols the relay, but it can only
-   answer after the operator has taken the minted key, deployed it, and it has dialled in.
-   How the settings page spans that, and what happens to a minted relay identity if the
-   operator abandons the flow.
 3. **Card size.** The model change (table, host column, `Scope::Cluster`, `resolve`) is what
    unblocks every other card; the settings page is operator-facing work nothing waits on.
    The card description already flags this as the split worth making if it runs long.
