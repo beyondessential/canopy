@@ -30,8 +30,8 @@ Server-side cases exercising a boundary need the real tailnet header path rather
 
 ## Expiry and lifetime
 
-- [ ] A raise returns to read-only ten minutes after it is made, regardless of activity in between (verifies spec: SAFE)
-- [ ] The server accepts a request at the raised grade in the minute after the raise has lapsed (verifies spec: SAFE)
+- [x] A raise returns to read-only ten minutes after it is made, regardless of activity in between (verifies spec: SAFE)
+- [x] The server accepts a request at the raised grade in the minute after the raise has lapsed (verifies spec: SAFE)
 - [x] A raise holds when the request is served by a different private-server process (verifies spec: SAFE)
 - [x] A raise survives a restart (verifies spec: SAFE)
 - [x] A session not seen for some time is retired, and a retired session is no longer live (verifies spec: SAFE)

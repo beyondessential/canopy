@@ -159,4 +159,4 @@ and its tests move together, screen by screen.
 - [x] Session provider, session header in `callApi`, and mode indicator in the app bar
 - [ ] Graded control wrappers carrying the stripe treatment — `GradedAction` built and applied on the administrators screen; the rest of the surface's controls still to be wrapped
 - [x] Danger column on the administrators screen — `admins::list` carries the flag, `admins::set_danger` amends it
-- [ ] Boundary tests on the real header path, and Playwright coverage for the interface — server-side boundary tests written (`tests/it/safety_modes.rs`); Playwright still to come
+- [x] Boundary tests on the real header path, and Playwright coverage for the interface — `tests/it/safety_modes.rs` (9) and `e2e/safety-modes.spec.ts` (8)
