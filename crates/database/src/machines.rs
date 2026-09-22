@@ -531,7 +531,9 @@ impl Machine {
 		// `applications.rank` is unconstrained text, so an unknown spelling
 		// leaves its application unranked and the rest of the read intact.
 		let rows: Vec<(Uuid, Option<String>)> = dsl::applications
-			.select((dsl::machine_id, dsl::rank))
+			// The filter keeps only rows whose machine is in `machines`, so the
+			// column is non-null here even though it is nullable in general.
+			.select((dsl::machine_id.assume_not_null(), dsl::rank))
 			.filter(dsl::machine_id.eq_any(machines))
 			.filter(dsl::deleted_at.is_null())
 			.load(db)

@@ -79,8 +79,8 @@ async fn two_keys_on_one_machine_are_two_applications() {
 		.unwrap();
 
 		assert_ne!(central.id, facility.id);
-		assert_eq!(central.machine_id, machine.id);
-		assert_eq!(facility.machine_id, machine.id);
+		assert_eq!(central.machine_id, Some(machine.id));
+		assert_eq!(facility.machine_id, Some(machine.id));
 	})
 	.await
 }

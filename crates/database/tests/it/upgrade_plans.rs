@@ -267,7 +267,7 @@ async fn canopy_closes_a_plan_once_the_group_arrives() {
 
 		// The environment lands past the target: further than planned still
 		// means the upgrade happened.
-		report(&mut conn, server.id, server.machine_id, "2.62.0").await;
+		report(&mut conn, server.id, server.machine_id.unwrap(), "2.62.0").await;
 
 		// Through the periodic sweep, which is what runs in production.
 		database::backup::sweep(&mut conn).await.expect("sweep");
@@ -316,7 +316,7 @@ async fn a_plan_stays_open_through_its_own_window() {
 		.await
 		.expect("plan");
 
-		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
+		report(&mut conn, server.id, server.machine_id.unwrap(), "2.61.0").await;
 		assert_eq!(
 			close_met_plans(&mut conn).await.expect("sweep"),
 			0,
@@ -362,7 +362,7 @@ async fn a_window_that_has_not_started_does_not_hold_the_plan() {
 		.await
 		.expect("plan");
 
-		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
+		report(&mut conn, server.id, server.machine_id.unwrap(), "2.61.0").await;
 		assert_eq!(
 			close_met_plans(&mut conn).await.expect("sweep"),
 			1,
@@ -397,7 +397,7 @@ async fn a_start_with_no_end_still_holds_the_plan() {
 		.await
 		.expect("plan");
 
-		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
+		report(&mut conn, server.id, server.machine_id.unwrap(), "2.61.0").await;
 		assert_eq!(
 			close_met_plans(&mut conn).await.expect("sweep"),
 			0,
@@ -426,7 +426,7 @@ async fn a_plan_without_a_window_closes_on_the_version() {
 		.await
 		.expect("plan");
 
-		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
+		report(&mut conn, server.id, server.machine_id.unwrap(), "2.61.0").await;
 		assert_eq!(close_met_plans(&mut conn).await.expect("sweep"), 1);
 	})
 	.await
@@ -460,7 +460,7 @@ async fn a_declared_window_holds_the_plan_open_until_the_work_is_over() {
 		.await
 		.expect("declare");
 
-		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
+		report(&mut conn, server.id, server.machine_id.unwrap(), "2.61.0").await;
 		assert_eq!(
 			close_met_plans(&mut conn).await.expect("sweep"),
 			0,
@@ -509,7 +509,7 @@ async fn a_window_over_the_group_holds_its_environments_plans_open() {
 		.await
 		.expect("declare");
 
-		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
+		report(&mut conn, server.id, server.machine_id.unwrap(), "2.61.0").await;
 		assert_eq!(
 			close_met_plans(&mut conn).await.expect("sweep"),
 			0,
@@ -728,7 +728,7 @@ async fn a_met_plan_is_not_amendable() {
 		.await
 		.expect("plan");
 
-		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
+		report(&mut conn, server.id, server.machine_id.unwrap(), "2.61.0").await;
 		close_met_plans(&mut conn).await.expect("sweep");
 
 		let refused = UpgradePlan::amend(
@@ -1198,7 +1198,7 @@ async fn each_environment_goes_its_own_place() {
 		);
 
 		// The clone arrives; production has not moved.
-		report(&mut conn, clone.id, clone.machine_id, "2.61.0").await;
+		report(&mut conn, clone.id, clone.machine_id.unwrap(), "2.61.0").await;
 		close_met_plans(&mut conn).await.expect("sweep");
 		assert!(
 			UpgradePlan::open_for_environment(&mut conn, group, ServerRank::Clone)

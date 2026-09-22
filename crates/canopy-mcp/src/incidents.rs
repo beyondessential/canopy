@@ -197,6 +197,7 @@ async fn scope_labels(
 		std::collections::HashMap<Uuid, (Option<String>, Option<String>)>,
 		std::collections::HashMap<Uuid, Option<String>>,
 		std::collections::HashMap<Uuid, String>,
+		std::collections::HashMap<Uuid, String>,
 	),
 	McpError,
 > {
@@ -217,7 +218,13 @@ async fn scope_labels(
 		&unique(issues.iter().filter_map(|i| i.server_group_id)),
 	)
 	.await?;
-	Ok((applications, machines, groups))
+	let clusters = database::KubernetesCluster::names_by_ids(
+		conn,
+		&unique(issues.iter().filter_map(|i| i.kubernetes_cluster_id)),
+	)
+	.await
+	.map_err(mcp_err)?;
+	Ok((applications, machines, groups, clusters))
 }
 
 /// What an issue is filed against, and what that thing is called.
@@ -235,6 +242,8 @@ enum IssueScopeOut {
 	Machine { id: Uuid, name: Option<String> },
 	/// The group as a whole, rather than any one of its parts.
 	Group { id: Uuid, name: Option<String> },
+	/// The Kubernetes cluster: its substrate, read on the cluster itself.
+	Cluster { id: Uuid, name: Option<String> },
 	/// Canopy watching itself.
 	Canopy,
 }
@@ -245,11 +254,13 @@ impl IssueScopeOut {
 		applications: &std::collections::HashMap<Uuid, (Option<String>, Option<String>)>,
 		machines: &std::collections::HashMap<Uuid, Option<String>>,
 		groups: &std::collections::HashMap<Uuid, String>,
+		clusters: &std::collections::HashMap<Uuid, String>,
 	) -> Self {
 		match database::issues::Scope::from_columns(
 			issue.application_id,
 			issue.machine_id,
 			issue.server_group_id,
+			issue.kubernetes_cluster_id,
 		) {
 			database::issues::Scope::Application(id) => Self::Application {
 				id,
@@ -262,6 +273,10 @@ impl IssueScopeOut {
 			database::issues::Scope::Group(id) => Self::Group {
 				id,
 				name: groups.get(&id).cloned(),
+			},
+			database::issues::Scope::Cluster(id) => Self::Cluster {
+				id,
+				name: clusters.get(&id).cloned(),
 			},
 			database::issues::Scope::Global => Self::Canopy,
 		}
@@ -476,7 +491,7 @@ impl CanopyMcp {
 			.await
 			.map_err(mcp_err)?
 			.contains(&incident.id);
-		let (names, machine_names, group_names_map) =
+		let (names, machine_names, group_names_map, cluster_names_map) =
 			scope_labels(&mut conn, &rows.iter().map(|(_, i)| i).collect::<Vec<_>>()).await?;
 
 		let issues = rows
@@ -491,7 +506,13 @@ impl CanopyMcp {
 				description: iss.description.clone(),
 				message: iss.message.clone(),
 				active: iss.active,
-				scope: IssueScopeOut::of(iss, &names, &machine_names, &group_names_map),
+				scope: IssueScopeOut::of(
+					iss,
+					&names,
+					&machine_names,
+					&group_names_map,
+					&cluster_names_map,
+				),
 				first_seen: iss.first_seen,
 				last_seen: iss.last_seen,
 				joined_at: link.joined_at,
@@ -551,11 +572,19 @@ impl CanopyMcp {
 		.await
 		.map_err(mcp_err)?;
 
-		let (names, machine_names, group_names_map) =
+		let (names, machine_names, group_names_map, cluster_names_map) =
 			scope_labels(&mut conn, &issues.iter().collect::<Vec<_>>()).await?;
 		let summaries: Vec<IssueSummary> = issues
 			.iter()
-			.map(|i| issue_summary(i, &names, &machine_names, &group_names_map))
+			.map(|i| {
+				issue_summary(
+					i,
+					&names,
+					&machine_names,
+					&group_names_map,
+					&cluster_names_map,
+				)
+			})
 			.collect();
 		ok_json(&IssueList {
 			count: summaries.len(),
@@ -776,10 +805,11 @@ fn issue_summary(
 	names: &std::collections::HashMap<Uuid, (Option<String>, Option<String>)>,
 	machines: &std::collections::HashMap<Uuid, Option<String>>,
 	groups: &std::collections::HashMap<Uuid, String>,
+	clusters: &std::collections::HashMap<Uuid, String>,
 ) -> IssueSummary {
 	IssueSummary {
 		id: i.id,
-		scope: IssueScopeOut::of(i, names, machines, groups),
+		scope: IssueScopeOut::of(i, names, machines, groups, clusters),
 		source: i.source.clone(),
 		r#ref: i.r#ref.clone(),
 		observed_result: i.observed_result,

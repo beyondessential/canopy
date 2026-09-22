@@ -111,11 +111,18 @@ struct ServerDetail {
 	id: Uuid,
 	name: Option<String>,
 	host: Option<String>,
-	/// The box this application runs on. Ask `get_machine` about it for the
-	/// platform, hardware, addresses, and backups, which are the machine's
-	/// rather than this application's.
+	/// The box this application runs on, for one installed on a machine. Ask
+	/// `get_machine` about it for the platform, hardware, addresses, and
+	/// backups, which are the machine's rather than this application's. `None`
+	/// for an application hosted by a Kubernetes cluster, which has no box.
 	// spec: MCP#detail
-	machine_id: Uuid,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	machine_id: Option<Uuid>,
+	/// The Kubernetes cluster this application is scheduled across, for one
+	/// hosted by a cluster rather than a machine. `None` for a machine-hosted
+	/// application.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	kubernetes_cluster_id: Option<Uuid>,
 	/// The application the server runs.
 	r#type: ApplicationType,
 	rank: Option<ServerRank>,
@@ -329,6 +336,7 @@ impl CanopyMcp {
 			name: server.name.clone(),
 			host: server.host.as_ref().map(|h| h.0.to_string()),
 			machine_id: server.machine_id,
+			kubernetes_cluster_id: server.kubernetes_cluster_id,
 			r#type: server.r#type.clone(),
 			rank: server.rank,
 			cloud: server.cloud,

@@ -81,10 +81,11 @@ diesel::table! {
 		name_management_paused_at -> Nullable<Timestamptz>,
 		name_management_paused_by -> Nullable<Text>,
 		name_management_pause_reason -> Nullable<Text>,
-		machine_id -> Uuid,
+		machine_id -> Nullable<Uuid>,
 		#[sql_name = "type"]
 		type_ -> Text,
 		reported_key -> Nullable<Text>,
+		kubernetes_cluster_id -> Nullable<Uuid>,
 	}
 }
 
@@ -386,21 +387,6 @@ diesel::table! {
 }
 
 diesel::table! {
-	inventory_variables (id) {
-		id -> Uuid,
-		server_group_id -> Nullable<Uuid>,
-		rank -> Nullable<Text>,
-		machine_id -> Nullable<Uuid>,
-		name -> Text,
-		value -> Nullable<Jsonb>,
-		is_secret -> Bool,
-		set_by -> Nullable<Text>,
-		created_at -> Timestamptz,
-		updated_at -> Timestamptz,
-	}
-}
-
-diesel::table! {
 	devices (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -456,16 +442,6 @@ diesel::table! {
 }
 
 diesel::table! {
-	issue_notes (id) {
-		id -> Uuid,
-		created_at -> Timestamptz,
-		issue_id -> Uuid,
-		author -> Text,
-		body -> Text,
-	}
-}
-
-diesel::table! {
 	inventory_leases (id) {
 		id -> Uuid,
 		server_group_id -> Uuid,
@@ -477,6 +453,31 @@ diesel::table! {
 		expires_at -> Timestamptz,
 		released_at -> Nullable<Timestamptz>,
 		released_by -> Nullable<Text>,
+	}
+}
+
+diesel::table! {
+	inventory_variables (id) {
+		id -> Uuid,
+		server_group_id -> Nullable<Uuid>,
+		rank -> Nullable<Text>,
+		machine_id -> Nullable<Uuid>,
+		name -> Text,
+		value -> Nullable<Jsonb>,
+		is_secret -> Bool,
+		set_by -> Nullable<Text>,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
+	issue_notes (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		issue_id -> Uuid,
+		author -> Text,
+		body -> Text,
 	}
 }
 
@@ -508,6 +509,19 @@ diesel::table! {
 		last_degraded_at -> Nullable<Timestamptz>,
 		escalates -> Bool,
 		machine_id -> Nullable<Uuid>,
+		kubernetes_cluster_id -> Nullable<Uuid>,
+	}
+}
+
+diesel::table! {
+	kubernetes_clusters (id) {
+		id -> Uuid,
+		name -> Text,
+		relay_identity_id -> Uuid,
+		registered_at -> Nullable<Timestamptz>,
+		last_answered_at -> Nullable<Timestamptz>,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
 	}
 }
 
@@ -708,6 +722,7 @@ diesel::table! {
 		machine_id -> Nullable<Uuid>,
 		subject -> Nullable<Text>,
 		application_type -> Nullable<Text>,
+		kubernetes_cluster_id -> Nullable<Uuid>,
 	}
 }
 
@@ -893,6 +908,7 @@ diesel::table! {
 diesel::joinable!(application_certificates -> applications (application_id));
 diesel::joinable!(application_names -> applications (application_id));
 diesel::joinable!(application_reported_detail -> applications (application_id));
+diesel::joinable!(applications -> kubernetes_clusters (kubernetes_cluster_id));
 diesel::joinable!(applications -> machines (machine_id));
 diesel::joinable!(artifacts -> devices (device_id));
 diesel::joinable!(artifacts -> server_groups (group_id));
@@ -923,15 +939,17 @@ diesel::joinable!(incident_issues -> incidents (incident_id));
 diesel::joinable!(incident_issues -> issues (issue_id));
 diesel::joinable!(incident_notes -> incidents (incident_id));
 diesel::joinable!(incident_reeval_queue -> applications (application_id));
-diesel::joinable!(inventory_variables -> machines (machine_id));
-diesel::joinable!(inventory_variables -> server_groups (server_group_id));
 diesel::joinable!(incidents -> server_groups (server_group_id));
 diesel::joinable!(inventory_leases -> server_groups (server_group_id));
+diesel::joinable!(inventory_variables -> machines (machine_id));
+diesel::joinable!(inventory_variables -> server_groups (server_group_id));
 diesel::joinable!(issue_notes -> issues (issue_id));
 diesel::joinable!(issues -> applications (application_id));
 diesel::joinable!(issues -> devices (device_id));
+diesel::joinable!(issues -> kubernetes_clusters (kubernetes_cluster_id));
 diesel::joinable!(issues -> machines (machine_id));
 diesel::joinable!(issues -> server_groups (server_group_id));
+diesel::joinable!(kubernetes_clusters -> devices (relay_identity_id));
 diesel::joinable!(machine_backup_capabilities -> machines (machine_id));
 diesel::joinable!(machine_enrollment_challenges -> machines (machine_id));
 diesel::joinable!(machine_enrollment_tokens -> machines (machine_id));
@@ -956,6 +974,7 @@ diesel::joinable!(restore_replicas -> devices (consumer_device_id));
 diesel::joinable!(restore_replicas -> machines (machine_id));
 diesel::joinable!(restore_replicas -> server_groups (group_id));
 diesel::joinable!(scoped_check_policies -> applications (application_id));
+diesel::joinable!(scoped_check_policies -> kubernetes_clusters (kubernetes_cluster_id));
 diesel::joinable!(scoped_check_policies -> machines (machine_id));
 diesel::joinable!(scoped_check_policies -> server_groups (server_group_id));
 diesel::joinable!(server_group_backup_config -> server_groups (group_id));
@@ -998,15 +1017,16 @@ diesel::allow_tables_to_appear_in_same_query!(
 	compromised_keys,
 	device_connections,
 	device_keys,
-	inventory_variables,
 	devices,
 	incident_issues,
 	incident_notes,
 	incident_reeval_queue,
 	incidents,
 	inventory_leases,
+	inventory_variables,
 	issue_notes,
 	issues,
+	kubernetes_clusters,
 	machine_backup_capabilities,
 	machine_enrollment_challenges,
 	machine_enrollment_tokens,

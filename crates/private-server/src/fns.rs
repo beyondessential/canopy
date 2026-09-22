@@ -14,6 +14,7 @@ pub mod incidents;
 pub mod inventory;
 pub mod inventory_variables;
 pub mod issues;
+pub mod kubernetes_clusters;
 pub mod machines;
 pub mod maintenance;
 pub mod mcp_tokens;
@@ -142,6 +143,7 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 				.nest("/inventory", inventory::routes())
 				.nest("/inventory_variables", inventory_variables::routes())
 				.nest("/issues", issues::routes())
+				.nest("/kubernetes_clusters", kubernetes_clusters::routes())
 				.nest("/mcp_tokens", mcp_tokens::routes())
 				.nest("/migration_tests", migration_tests::routes())
 				.nest("/reporting_schemas", reporting_schemas::routes())

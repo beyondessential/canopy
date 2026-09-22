@@ -90,14 +90,19 @@ impl SuspendedTargets {
 	}
 
 	/// Is this application suspended, by a window of its own or by any window
-	/// over the box it runs on?
+	/// over the box it runs on? A cluster-hosted application has no box
+	/// (`machine` is `None`), so only a window over it or its group reaches it.
 	pub fn suspends_application(
 		&self,
 		application: Uuid,
-		machine: Uuid,
+		machine: Option<Uuid>,
 		group: Option<Uuid>,
 	) -> bool {
-		self.applications.contains(&application) || self.suspends(machine, group)
+		self.applications.contains(&application)
+			|| match machine {
+				Some(machine) => self.suspends(machine, group),
+				None => group.is_some_and(|g| self.groups.contains(&g)),
+			}
 	}
 
 	/// Is every window covering this application ended, leaving it in the
@@ -105,14 +110,14 @@ impl SuspendedTargets {
 	pub fn settling_application(
 		&self,
 		application: Uuid,
-		machine: Uuid,
+		machine: Option<Uuid>,
 		group: Option<Uuid>,
 	) -> bool {
 		self.suspends_application(application, machine, group)
 			&& !self.holding_applications.contains(&application)
-			&& !self.holding_machines.contains(&machine)
-			&& !self.in_holding_environment(machine)
-			&& !group.is_some_and(|g| self.holding_groups.contains(&g))
+			&& machine.is_none_or(|machine| {
+				!self.holding_machines.contains(&machine) && !self.in_holding_environment(machine)
+			}) && !group.is_some_and(|g| self.holding_groups.contains(&g))
 	}
 
 	/// A window declared over this application in particular, as against one
@@ -229,7 +234,14 @@ pub struct MaintenanceWindow {
 impl MaintenanceWindow {
 	/// The target this window covers.
 	pub fn scope(&self) -> Scope {
-		Scope::from_columns(self.application_id, self.machine_id, self.server_group_id)
+		// A maintenance window never covers a cluster (see `fleet_columns`), so
+		// there is no cluster column to read back here.
+		Scope::from_columns(
+			self.application_id,
+			self.machine_id,
+			self.server_group_id,
+			None,
+		)
 	}
 
 	/// When the window itself ended, or is due to: an operator's lift where
@@ -713,6 +725,12 @@ pub async fn target_label(
 			})
 		}
 		Scope::Global => Ok("Canopy".to_string()),
+		// A window never covers a cluster (see `fleet_columns`), so this is
+		// unreachable; label it by its grain rather than panicking.
+		Scope::Cluster(cid) => {
+			let cluster = crate::KubernetesCluster::get_by_id(db, cid).await?;
+			Ok(cluster.name)
+		}
 	}
 }
 
@@ -728,7 +746,9 @@ fn fleet_columns(scope: Scope) -> Option<(Option<Uuid>, Option<Uuid>, Option<Uui
 		Scope::Application(id) => Some((Some(id), None, None)),
 		Scope::Machine(id) => Some((None, Some(id), None)),
 		Scope::Group(id) => Some((None, None, Some(id))),
-		Scope::Global => None,
+		// A cluster is not a target a window covers, any more than canopy-wide
+		// is: fleet work is declared over an application, a machine, or a group.
+		Scope::Cluster(_) | Scope::Global => None,
 	}
 }
 
@@ -750,9 +770,12 @@ async fn environment_of_machines(
 	let group_ids: Vec<Uuid> = environments.iter().map(|(group, _)| *group).collect();
 	// `applications.rank` is unconstrained text, so an unknown spelling leaves
 	// its application out and the rest of the read intact.
+	// Only machine-hosted applications place a box in an environment; a
+	// cluster-hosted one has no box to carry a window.
 	let members: Vec<(Uuid, Option<Uuid>, Option<String>)> = dsl::applications
-		.select((dsl::machine_id, dsl::group_id, dsl::rank))
+		.select((dsl::machine_id.assume_not_null(), dsl::group_id, dsl::rank))
 		.filter(dsl::group_id.eq_any(&group_ids))
+		.filter(dsl::machine_id.is_not_null())
 		.filter(dsl::deleted_at.is_null())
 		.load(db)
 		.await

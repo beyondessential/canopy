@@ -61,6 +61,14 @@ async fn main() -> miette::Result<()> {
 	let endpoint = relay::endpoint(&identity, args.listen)
 		.map_err(|e| miette!("cannot listen for relays: {e}"))?;
 
-	relay::listen(database::init(), Registry::new(), endpoint).await;
+	let db = database::init();
+	let registry = Registry::new();
+
+	// The probe loop pings each held connection on a cadence, keeping each
+	// registered cluster's `last_answered_at` current for registration and
+	// operator display (spec `K8S`, "Cluster registry").
+	tokio::spawn(relay::probe_connections(db.clone(), registry.clone()));
+
+	relay::listen(db, registry, endpoint).await;
 	Ok(())
 }

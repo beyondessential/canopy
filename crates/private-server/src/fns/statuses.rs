@@ -213,7 +213,18 @@ pub async fn group_details(
 ) -> Result<Json<ServerGroupCard>> {
 	let mut conn = state.db_read.get().await?;
 	let group = ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
-	let applications = group.list_servers(&mut conn).await?;
+	// The group card is organised by the boxes members run on, so it presents
+	// machine-hosted applications. A cluster-hosted application has no box; its
+	// checks are read on its cluster, and its presentation among the fleet
+	// arrives with the cluster-application surface. Nothing creates a
+	// cluster-hosted application yet, so this only future-proofs the machine
+	// view against one existing.
+	let applications: Vec<_> = group
+		.list_servers(&mut conn)
+		.await?
+		.into_iter()
+		.filter(|s| s.machine_id.is_some())
+		.collect();
 
 	// A group card shouldn't 404 just because no versions are published yet
 	// (e.g. a fresh Canopy instance, or every version still draft); treat "no match"
@@ -254,7 +265,9 @@ pub async fn group_details(
 	// The boxes the members run on: their own reachability and health, which a
 	// card presents on the enclosure around each machine's dots.
 	// spec: FLT
-	let machine_ids: Vec<Uuid> = applications.iter().map(|s| s.machine_id).collect();
+	// Every member here is machine-hosted (filtered above), so its machine id is
+	// present.
+	let machine_ids: Vec<Uuid> = applications.iter().filter_map(|s| s.machine_id).collect();
 	let machines: HashMap<Uuid, database::machines::Machine> =
 		database::machines::Machine::get_many(&mut conn, &machine_ids)
 			.await?
@@ -265,7 +278,7 @@ pub async fn group_details(
 		&mut conn,
 		&applications
 			.iter()
-			.map(|s| (s.machine_id, s.group_id))
+			.filter_map(|s| Some((s.machine_id?, s.group_id)))
 			.collect::<Vec<_>>(),
 	)
 	.await?;
@@ -307,6 +320,8 @@ pub async fn group_details(
 				ShortStatus::Up => st.map(|s| s.operators()).unwrap_or_default(),
 				ShortStatus::Down | ShortStatus::Gone => Vec::new(),
 			};
+			// Filtered to machine-hosted members above.
+			let machine_id = s.machine_id.expect("group card member is machine-hosted");
 			FacilityServerStatus {
 				id: s.id,
 				name: s.display_name(),
@@ -316,15 +331,12 @@ pub async fn group_details(
 				operators,
 				rank: s.rank,
 				r#type: s.r#type,
-				machine_id: s.machine_id,
-				machine_name: machines.get(&s.machine_id).and_then(|m| m.name.clone()),
-				machine_up: machines.get(&s.machine_id).map_or(ShortStatus::Gone, |m| {
-					m.reachability(machine_reports.get(&s.machine_id).copied())
+				machine_id,
+				machine_name: machines.get(&machine_id).and_then(|m| m.name.clone()),
+				machine_up: machines.get(&machine_id).map_or(ShortStatus::Gone, |m| {
+					m.reachability(machine_reports.get(&machine_id).copied())
 				}),
-				machine_health: machine_health
-					.get(&s.machine_id)
-					.copied()
-					.unwrap_or_default(),
+				machine_health: machine_health.get(&machine_id).copied().unwrap_or_default(),
 				maintained: suspended.suspends_application(s.id, s.machine_id, s.group_id),
 				own_window: suspended.application_window(s.id),
 				maintenance_settling: suspended.settling_application(
@@ -332,9 +344,9 @@ pub async fn group_details(
 					s.machine_id,
 					s.group_id,
 				),
-				machine_maintained: suspended.suspends(s.machine_id, s.group_id),
-				machine_maintenance_settling: suspended.settling(s.machine_id, s.group_id),
-				machine_own_window: suspended.machine_window(s.machine_id),
+				machine_maintained: suspended.suspends(machine_id, s.group_id),
+				machine_maintenance_settling: suspended.settling(machine_id, s.group_id),
+				machine_own_window: suspended.machine_window(machine_id),
 			}
 		})
 		.collect();
@@ -806,12 +818,17 @@ pub async fn snapshot(
 	// connection either way — that metadata isn't versioned in lockstep with
 	// status pushes, so looking it up "as of" a time would mostly mislead.
 	// spec: FIG#figures
+	let device_id = match server.machine_id {
+		Some(machine_id) => {
+			database::machines::Machine::get_by_id(&mut conn, machine_id)
+				.await?
+				.device_id
+		}
+		None => None,
+	};
 	let nodejs = match figures.node_version() {
 		Some(v) => Some(v),
-		None => match database::machines::Machine::get_by_id(&mut conn, server.machine_id)
-			.await?
-			.device_id
-		{
+		None => match device_id {
 			Some(dev_id) => {
 				DeviceConnection::get_latest_from_device_ids(&mut conn, [dev_id].into_iter())
 					.await?
@@ -926,8 +943,16 @@ async fn consolidated_checks_at(
 	// checks are recognised by subject in the application's own. Either shape
 	// reconstructs the same list.
 	// spec: CHK#a-machines-checks-present-on-its-applications
-	let machine = Machine::get_by_id(conn, server.machine_id).await?;
-	let machine_statuses = Status::machine_latest_per_source_at(conn, machine.id, at).await?;
+	// An application on a cluster has no box, so it has no machine checks to
+	// present alongside its own; its cluster's checks are read on the cluster.
+	let machine = match server.machine_id {
+		Some(machine_id) => Some(Machine::get_by_id(conn, machine_id).await?),
+		None => None,
+	};
+	let machine_statuses = match &machine {
+		Some(machine) => Status::machine_latest_per_source_at(conn, machine.id, at).await?,
+		None => Vec::new(),
+	};
 
 	// The figures come from the same set of statuses the checks do, so the
 	// snapshot presents each figure as of `at` from whichever source last
@@ -970,7 +995,10 @@ async fn consolidated_checks_at(
 			.collect()
 	};
 	let tags = tags_for(server.tags_merged_with_group(conn).await?);
-	let machine_tags = tags_for(machine.tags_merged_with_group(conn).await?);
+	let machine_tags = match &machine {
+		Some(machine) => tags_for(machine.tags_merged_with_group(conn).await?),
+		None => Default::default(),
+	};
 	// Only present checks backed by a live catalog row, matching the live
 	// consolidated view: this drops decommissioned checks and orphaned
 	// check-states (a source's catalog rows removed out from under its
@@ -992,15 +1020,20 @@ async fn consolidated_checks_at(
 		},
 	)
 	.await?;
-	let machine_chains = ScopedCheckPolicy::chains_for_scope(
-		conn,
-		database::check_policies::FilingScope {
-			machine_id: Some(machine.id),
-			group_id: machine.group_id,
-			..Default::default()
-		},
-	)
-	.await?;
+	let machine_chains = match &machine {
+		Some(machine) => {
+			ScopedCheckPolicy::chains_for_scope(
+				conn,
+				database::check_policies::FilingScope {
+					machine_id: Some(machine.id),
+					group_id: machine.group_id,
+					..Default::default()
+				},
+			)
+			.await?
+		}
+		None => Default::default(),
+	};
 
 	let mut checks: Vec<ConsolidatedCheck> = Vec::new();
 	for (status, from_machine_row) in statuses
@@ -1019,14 +1052,19 @@ async fn consolidated_checks_at(
 			&status.source,
 		)
 		.await?;
-		let machine_silenced = database::silenced_refs::silenced_health_checks_for_server(
-			conn,
-			None,
-			machine.id,
-			machine.group_id,
-			&status.source,
-		)
-		.await?;
+		let machine_silenced = match &machine {
+			Some(machine) => {
+				database::silenced_refs::silenced_health_checks_for_server(
+					conn,
+					None,
+					Some(machine.id),
+					machine.group_id,
+					&status.source,
+				)
+				.await?
+			}
+			None => std::collections::BTreeSet::new(),
+		};
 		let empty = serde_json::Map::new();
 		let status_extra = status.extra.as_object().unwrap_or(&empty).clone();
 		for raw in arr {
@@ -1252,7 +1290,15 @@ pub async fn fleet_detail(
 	let mut conn = state.db_read.get().await?;
 
 	// get_all already excludes archived applications and canopy's own row.
-	let applications = Application::get_all(&mut conn, 0, None).await?;
+	// The fleet spread crosses applications against the boxes they run on, so it
+	// covers machine-hosted applications. A cluster-hosted application has no
+	// box; its place in the fleet spread arrives with the cluster-application
+	// surface, and nothing creates one yet.
+	let applications: Vec<_> = Application::get_all(&mut conn, 0, None)
+		.await?
+		.into_iter()
+		.filter(|s| s.machine_id.is_some())
+		.collect();
 	// list_live excludes archived machines but not canopy's own, which is not
 	// a box and is not part of the fleet.
 	let machines: Vec<Machine> = Machine::list_live(&mut conn)
@@ -1304,9 +1350,9 @@ pub async fn fleet_detail(
 			.get(&application.id)
 			.and_then(|(figures, _)| figures.pg_version_banner())
 		{
-			pg_banner_by_machine
-				.entry(application.machine_id)
-				.or_insert(banner);
+			if let Some(machine_id) = application.machine_id {
+				pg_banner_by_machine.entry(machine_id).or_insert(banner);
+			}
 		}
 	}
 
@@ -1340,7 +1386,10 @@ pub async fn fleet_detail(
 			FleetServerDetailData {
 				server_id: server.id,
 				server_name: server.display_name(),
-				machine_id: server.machine_id,
+				// Filtered to machine-hosted applications above.
+				machine_id: server
+					.machine_id
+					.expect("fleet spread application is machine-hosted"),
 				group_id: server.group_id,
 				group_name: server.group_id.and_then(|g| group_names.get(&g).cloned()),
 				rank: server.rank,

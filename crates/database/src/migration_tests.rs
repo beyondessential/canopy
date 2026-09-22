@@ -669,7 +669,12 @@ async fn verdict_row(
 	server: &Application,
 	version: &Version,
 ) -> Result<GroupVerdict> {
-	let latest = latest_test(db, server.machine_id, version.id).await?;
+	// A migration test is run against the snapshot a machine backed up, so a
+	// cluster-hosted application (which has no box) has none.
+	let latest = match server.machine_id {
+		Some(machine_id) => latest_test(db, machine_id, version.id).await?,
+		None => None,
+	};
 	Ok(GroupVerdict {
 		server_id: server.id,
 		target_version_id: version.id,

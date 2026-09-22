@@ -197,7 +197,7 @@ pub async fn is_silenced(
 pub async fn silenced_health_checks_for_server(
 	db: &mut AsyncPgConnection,
 	application_id: Option<Uuid>,
-	machine_id: Uuid,
+	machine_id: Option<Uuid>,
 	group_id: Option<Uuid>,
 	source: &str,
 ) -> Result<BTreeSet<String>> {
@@ -238,7 +238,9 @@ pub async fn silenced_health_checks_for_server(
 			dsl::application_id
 				.is_not_distinct_from(application_id)
 				.and(dsl::application_id.is_not_null())
-				.or(dsl::machine_id.eq(machine_id))
+				.or(dsl::machine_id
+					.is_not_distinct_from(machine_id)
+					.and(dsl::machine_id.is_not_null()))
 				.or(dsl::server_group_id
 					.is_not_distinct_from(group_id)
 					.and(dsl::server_group_id.is_not_null())),

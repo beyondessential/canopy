@@ -25,11 +25,11 @@
 //! check fails for every registered cluster — but it is a single point of
 //! failure the design accepts rather than one it has overlooked.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use commons_errors::Result;
 use commons_types::{Uuid, device::DeviceRole};
-use database::{Db, devices::Device};
+use database::{Db, KubernetesCluster, devices::Device};
 use jiff::Timestamp;
 use relay_protocol::{
 	Filing, FilingTarget, Hello, Request, Response,
@@ -63,6 +63,66 @@ enum Rejected {
 
 	#[error("the relay did not answer what it is running: {0}")]
 	SilentOnBuild(String),
+}
+
+/// How often the hub pings each connection it holds to confirm the relay is
+/// still answering, stamping `last_answered_at` on the cluster its identity
+/// resolves to. The freshness window registration reads against must exceed
+/// this, or a relay answering normally reads as stale between probes.
+pub const PROBE_CADENCE: Duration = Duration::from_secs(30);
+
+/// Record that a relay answered, on the cluster its identity resolves to.
+///
+/// A relay whose identity resolves to no cluster row — the operator deleted the
+/// draft, or never finished one — has nowhere to write, which is a log line
+/// rather than an error: it is a relay dialling in for a registration that is
+/// gone, not a fault.
+async fn record_answered(db: &Db, relay_identity_id: Uuid) {
+	let outcome = async {
+		let mut conn = db.get().await?;
+		KubernetesCluster::stamp_answered(&mut conn, relay_identity_id, Timestamp::now()).await
+	}
+	.await;
+	match outcome {
+		Ok(true) => {}
+		Ok(false) => debug!(
+			relay = %relay_identity_id,
+			"relay answered, but its identity resolves to no cluster row; nothing to stamp",
+		),
+		Err(err) => warn!(
+			relay = %relay_identity_id,
+			"recording that a relay answered: {err}",
+		),
+	}
+}
+
+/// Ping every held connection on a cadence, stamping `last_answered_at` on each
+/// cluster whose relay answers.
+///
+/// This is what keeps a registered cluster's freshness current: registration
+/// and the operator display read `last_answered_at`, and reachability follows
+/// from filings landing, so a cluster answering its probes stays fresh without
+/// canopy dialling it. A connection that fails a probe is left to `hold` to
+/// clean up when its stream loop ends; the probe only records success.
+pub async fn probe_connections(db: Db, registry: Registry) {
+	loop {
+		tokio::time::sleep(PROBE_CADENCE).await;
+		for connected in registry.connected().await {
+			match registry.request(connected.device_id, Request::Ping).await {
+				Ok(Response::Pong) => record_answered(&db, connected.device_id).await,
+				Ok(other) => debug!(
+					relay = %connected.device_id,
+					"relay answered a ping with {other:?}",
+				),
+				// A ping that fails means the connection is going or gone; the
+				// hold task for it ends and removes it from the registry.
+				Err(err) => debug!(
+					relay = %connected.device_id,
+					"pinging a held relay: {err}",
+				),
+			}
+		}
+	}
 }
 
 /// Listen for relays, and hold each connection for as long as it lasts.
@@ -173,6 +233,11 @@ async fn hold(
 			since: Timestamp::now(),
 		})
 		.await;
+
+	// The `Build` exchange above is itself proof the relay answered, so stamp it
+	// now rather than waiting up to a full probe cadence: an operator who has
+	// just deployed a relay sees the registration wizard confirm almost at once.
+	record_answered(&db, device_id).await;
 
 	let outcome = take_filings(&db, &connection, device_id).await;
 

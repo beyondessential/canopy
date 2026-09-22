@@ -279,9 +279,11 @@ async fn resolve_environment(
 		)));
 	}
 
+	// The inventory environment is machine-oriented; a cluster-hosted
+	// application has no box to carry machine-scoped variables.
 	let machine_ids: Vec<Uuid> = applications
 		.iter()
-		.map(|application| application.machine_id)
+		.filter_map(|application| application.machine_id)
 		.collect::<BTreeSet<_>>()
 		.into_iter()
 		.collect();
@@ -609,7 +611,7 @@ pub async fn for_group(
 
 		let on_machine: Vec<&Application> = applications
 			.iter()
-			.filter(|application| application.machine_id == machine.id)
+			.filter(|application| application.machine_id == Some(machine.id))
 			.collect();
 		let address = effective
 			.vars

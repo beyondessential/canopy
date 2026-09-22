@@ -64,10 +64,23 @@ pub struct Application {
 	/// The server's environment tier, for example production, test, or dev.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub rank: Option<ServerRank>,
-	/// The machine this application runs on. An application runs on exactly
-	/// one; a machine hosts any number.
+	/// The machine this application runs on, for an application installed on a
+	/// box. `None` for one hosted by a Kubernetes cluster, which has no box of
+	/// its own. An application runs on exactly one host — a machine or a cluster
+	/// — never both and never neither, so exactly one of `machine_id` and
+	/// `kubernetes_cluster_id` is set.
 	// spec: FLT#cardinality
-	pub machine_id: Uuid,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(treat_none_as_default_value = false)]
+	pub machine_id: Option<Uuid>,
+	/// The Kubernetes cluster this application is scheduled across, for one
+	/// hosted by a cluster rather than installed on a box. `None` for a
+	/// machine-hosted application. An application on a cluster takes its group
+	/// from the namespace it is deployed in, a cluster belonging to no group.
+	// spec: FLT#cardinality, K8S
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(treat_none_as_default_value = false)]
+	pub kubernetes_cluster_id: Option<Uuid>,
 	/// The key the reporter that found this application named it by.
 	///
 	/// A reporter cannot know what Canopy calls the applications on a machine,
@@ -479,7 +492,8 @@ impl Application {
 				host: None,
 				r#type: r#type.clone(),
 				rank: None,
-				machine_id: machine.id,
+				machine_id: Some(machine.id),
+				kubernetes_cluster_id: None,
 				reported_key: key,
 				group_id: machine.group_id,
 				public_name: None,
@@ -591,7 +605,7 @@ impl Application {
 	pub async fn live_by_device_id(db: &mut AsyncPgConnection, dev_id: Uuid) -> Result<Vec<Self>> {
 		use crate::schema::{applications, machines};
 		applications::table
-			.inner_join(machines::table.on(machines::id.eq(applications::machine_id)))
+			.inner_join(machines::table.on(machines::id.nullable().eq(applications::machine_id)))
 			.select(Self::as_select())
 			.filter(machines::device_id.eq(dev_id))
 			.filter(machines::deleted_at.is_null())
@@ -718,7 +732,7 @@ impl Application {
 	pub async fn get_by_device_id(db: &mut AsyncPgConnection, dev_id: Uuid) -> Result<Vec<Self>> {
 		use crate::schema::{applications, machines};
 		applications::table
-			.inner_join(machines::table.on(machines::id.eq(applications::machine_id)))
+			.inner_join(machines::table.on(machines::id.nullable().eq(applications::machine_id)))
 			.select(Self::as_select())
 			.filter(machines::device_id.eq(dev_id))
 			.load(db)
@@ -1097,7 +1111,8 @@ fn test_server_serialization() {
 		r#type: ApplicationType::TamanuCentral,
 		rank: Some(ServerRank::Production),
 		host: Some(UrlField("https://example.com/".parse().unwrap())),
-		machine_id: Uuid::nil(),
+		machine_id: Some(Uuid::nil()),
+		kubernetes_cluster_id: None,
 		reported_key: None,
 		group_id: None,
 		public_name: Some("Test Application".to_string()),

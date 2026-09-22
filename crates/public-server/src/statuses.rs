@@ -912,7 +912,7 @@ async fn effective_check_severities(
 	// Silences are keyed per (source, check): only this source's own
 	// silences force its checks to skip.
 	for check in
-		silenced_health_checks_for_server(db, server_id, machine_id, group_id, source).await?
+		silenced_health_checks_for_server(db, server_id, Some(machine_id), group_id, source).await?
 	{
 		map.insert(check, CheckSeverity::Skip);
 	}
@@ -1057,6 +1057,9 @@ async fn file_health_events(
 				application_id: (!on_machine).then_some(server_id).flatten(),
 				machine_id: on_machine.then_some(machine_id),
 				group_id,
+				// A device push is a machine's; a cluster's checks arrive over
+				// the relay path, never here.
+				kubernetes_cluster_id: None,
 			},
 		)
 		.await?;

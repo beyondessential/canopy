@@ -30,7 +30,8 @@ fn server(r#type: ApplicationType, rank: Option<ServerRank>, machine_id: Uuid) -
 		)),
 		r#type,
 		rank,
-		machine_id,
+		machine_id: Some(machine_id),
+		kubernetes_cluster_id: None,
 		reported_key: None,
 		group_id: None,
 		public_name: None,
@@ -168,7 +169,7 @@ async fn mixed_group_headline_version_comes_from_the_tamanu_member() {
 		ReportedDetail::record(
 			&mut conn,
 			Some(central.id),
-			central.machine_id,
+			central.machine_id.unwrap(),
 			"alertd",
 			&serde_json::json!({}),
 			Some(&"2.34.1".parse().unwrap()),
@@ -261,7 +262,7 @@ async fn only_a_central_speaks_for_the_group() {
 			ReportedDetail::record(
 				&mut conn,
 				Some(app.id),
-				app.machine_id,
+				app.machine_id.unwrap(),
 				"alertd",
 				&serde_json::json!({}),
 				Some(&version.parse().unwrap()),
@@ -310,7 +311,7 @@ async fn production_versions_skip_untracked_types() {
 		ReportedDetail::record(
 			&mut conn,
 			Some(tamanu.id),
-			tamanu.machine_id,
+			tamanu.machine_id.unwrap(),
 			"alertd",
 			&serde_json::json!({}),
 			Some(&"2.34.1".parse().unwrap()),
@@ -322,7 +323,7 @@ async fn production_versions_skip_untracked_types() {
 		ReportedDetail::record(
 			&mut conn,
 			Some(canopy.id),
-			canopy.machine_id,
+			canopy.machine_id.unwrap(),
 			"alertd",
 			&serde_json::json!({}),
 			Some(&"1.8.0".parse().unwrap()),

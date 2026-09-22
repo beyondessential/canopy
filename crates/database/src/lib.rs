@@ -20,6 +20,7 @@ pub mod devices;
 pub mod inventory_leases;
 pub mod inventory_variables;
 pub mod issues;
+pub mod kubernetes_clusters;
 pub mod machine_enrollment_challenges;
 pub mod machine_enrollment_tokens;
 pub mod machines;
@@ -68,6 +69,7 @@ pub use commons_types::backup::{
 	RunOutcome,
 };
 pub use devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
+pub use kubernetes_clusters::KubernetesCluster;
 pub use machines::{Machine, MachineUpdate, NewMachine};
 pub use recovery_vault::RecoveryVaultWrite;
 pub use restore::{

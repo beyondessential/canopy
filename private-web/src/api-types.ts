@@ -3089,6 +3089,118 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/kubernetes_clusters/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm a registration: register the cluster if its relay is answering.
+         * @description Canopy confirms the relay is connected and answering before the cluster is
+         *     registered, so a cluster it cannot read is caught as the operator adds it.
+         *     What that confirms is that canopy can reach the relay: a relay that answers
+         *     while its access to the cluster is still incomplete registers, and reports
+         *     what it cannot do as checks. Idempotent — an already-registered cluster is
+         *     returned unchanged.
+         */
+        post: operations["confirm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kubernetes_clusters/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List the registry: registered clusters and in-progress drafts.
+         * @description Registered clusters and drafts are returned as separate lists, each carrying
+         *     whether its relay is answering right now.
+         */
+        post: operations["list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kubernetes_clusters/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Name a cluster and mint its relay's credential, leaving a draft.
+         * @description This is what enrols the relay: minting its credential and recording the draft
+         *     that accounts for the minted identity are one step, so an operator reaches
+         *     both from the one page. The draft becomes a registered cluster through
+         *     `confirm`, once the relay has connected and answered.
+         */
+        post: operations["register"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kubernetes_clusters/reissue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re-issue a cluster's relay credential, retiring the one before it.
+         * @description For a credential lost before it reached the cluster. Re-issuing keeps the
+         *     relay's identity, so an application's cluster reference never moves, and
+         *     retires the superseded key, which was never deployed anywhere.
+         */
+        post: operations["reissue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kubernetes_clusters/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove a cluster from the registry, draft or registered.
+         * @description The relay's identity is removed with the cluster; a draft removed this way is
+         *     the operator abandoning a registration.
+         */
+        post: operations["remove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/maintenance/declare": {
         parameters: {
             query?: never;
@@ -4571,10 +4683,21 @@ export interface components {
             is_monitored: boolean;
             /**
              * Format: uuid
-             * @description The machine this application runs on. An application runs on exactly
-             *     one; a machine hosts any number.
+             * @description The Kubernetes cluster this application is scheduled across, for one
+             *     hosted by a cluster rather than installed on a box. `None` for a
+             *     machine-hosted application. An application on a cluster takes its group
+             *     from the namespace it is deployed in, a cluster belonging to no group.
              */
-            machine_id: string;
+            kubernetes_cluster_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The machine this application runs on, for an application installed on a
+             *     box. `None` for one hosted by a Kubernetes cluster, which has no box of
+             *     its own. An application runs on exactly one host — a machine or a cluster
+             *     — never both and never neither, so exactly one of `machine_id` and
+             *     `kubernetes_cluster_id` is set.
+             */
+            machine_id?: string | null;
             /**
              * @description Whether this server may manage its own DNS records for names under its
              *     group's domains. Withheld by default: a server without it is
@@ -5559,6 +5682,59 @@ export interface components {
             server_group_id: string;
             /** @description Backup type whose schedule override to remove. */
             type: string;
+        };
+        /** @description Identify one cluster. */
+        ClusterIdArgs: {
+            /**
+             * Format: uuid
+             * @description The cluster to act on.
+             */
+            id: string;
+        };
+        /**
+         * @description The registry as two lists: the registered clusters, and the drafts an
+         *     operator has begun but not finished.
+         */
+        ClusterList: {
+            /** @description The in-progress drafts, newest first. */
+            drafts: components["schemas"]["ClusterView"][];
+            /** @description The registered clusters, ordered by name. */
+            registered: components["schemas"]["ClusterView"][];
+        };
+        /** @description A cluster in the registry, as an operator sees it. */
+        ClusterView: {
+            /**
+             * @description Whether the relay has answered recently enough to read as connected right
+             *     now. This is what registration turns on.
+             */
+            answering: boolean;
+            /**
+             * Format: uuid
+             * @description Unique identifier for this cluster.
+             */
+            id: string;
+            /**
+             * Format: date-time
+             * @description When canopy last had this cluster's relay answer, or `null` if it never
+             *     has. Never cleared once set, so it reads as "when did we last hear from
+             *     this" for a cluster that has gone quiet.
+             */
+            last_answered_at?: string | null;
+            /** @description What an operator sees in the host picker. */
+            name: string;
+            /** @description Whether the registration has been confirmed. A draft is `false`. */
+            registered: boolean;
+            /**
+             * Format: date-time
+             * @description When the registration was confirmed, or `null` for a draft.
+             */
+            registered_at?: string | null;
+            /**
+             * Format: uuid
+             * @description The relay's identity. Minting a new credential for it keeps this stable,
+             *     so an application's cluster reference never moves.
+             */
+            relay_identity_id: string;
         };
         /** @description Request parameters for listing a device's connection history. */
         ConnectionHistoryArgs: {
@@ -9092,6 +9268,21 @@ export interface components {
              *     restored database, to substitute into `url_template`.
              */
             version_query: string;
+        };
+        /** @description Begin registering a cluster: name it and mint its relay's credential. */
+        RegisterArgs: {
+            /** @description What to call the cluster in the host picker. */
+            name: string;
+        };
+        /**
+         * @description The result of beginning a registration: the draft, and the relay credential
+         *     returned once for the operator to install into the cluster.
+         */
+        RegistrationStarted: {
+            /** @description The draft that was created, accounting for the minted relay identity. */
+            cluster: components["schemas"]["ClusterView"];
+            /** @description The relay's credential, returned once for the operator to install. */
+            credential: components["schemas"]["ProvisionedCredential"];
         };
         /**
          * @description Another patch version within the same release line as a version being
@@ -15658,6 +15849,149 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IssueData"];
+                };
+            };
+        };
+    };
+    confirm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClusterIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterList"];
+                };
+            };
+        };
+    };
+    register: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegistrationStarted"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    reissue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClusterIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProvisionedCredential"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClusterIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
         };
