@@ -145,14 +145,13 @@ pub async fn raise(
 		));
 	}
 
-	let mut conn = state.db.get().await?;
-	if args.mode == SafetyMode::Danger
-		&& !user
-			.has_danger(&mut conn, state.tailnet_directory.as_ref())
-			.await?
-	{
+	// The same question the boundary asks, answered in the same place, so the
+	// raise control and the enforcement layer cannot disagree.
+	if args.mode == SafetyMode::Danger && !crate::safety::holds_danger(&state, &user).await? {
 		return Err(AppError::DangerNotPermitted);
 	}
+
+	let mut conn = state.db.get().await?;
 
 	let session = match presented_session(&state, &headers, &user.login).await? {
 		Some(session) => session,

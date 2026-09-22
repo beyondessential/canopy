@@ -108,6 +108,21 @@ pub struct SafetyState {
 	pub grades: Arc<GradeMap>,
 }
 
+/// Whether a caller holds the danger permission (see the ADM spec).
+///
+/// The one place that question is answered, so the boundary and the raise
+/// control cannot disagree about it. The development identity holds it for the
+/// same reason it is an administrator: so the suite reaches danger-graded work
+/// without seeding a permission. Compiled out of release builds.
+pub async fn holds_danger(app: &AppState, user: &TailscaleUser) -> Result<bool> {
+	if use_dev_identity() {
+		return Ok(true);
+	}
+	let mut conn = app.db.get().await?;
+	user.has_danger(&mut conn, app.tailnet_directory.as_ref())
+		.await
+}
+
 /// Decide one request against the grade its handler declares.
 ///
 /// Read-only-graded requests are answered without a session, so a client can
@@ -165,11 +180,7 @@ pub async fn enforce(
 	// Resolved afresh per request and checked before the mode, so an operator
 	// who can never make this request is told that rather than being told to
 	// raise. Withdrawing the permission takes effect during an existing raise.
-	if required == SafetyMode::Danger
-		&& !user
-			.has_danger(&mut conn, safety.app.tailnet_directory.as_ref())
-			.await?
-	{
+	if required == SafetyMode::Danger && !holds_danger(&safety.app, &user).await? {
 		return Err(AppError::DangerNotPermitted);
 	}
 
