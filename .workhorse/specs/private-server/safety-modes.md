@@ -59,6 +59,9 @@ A handler that changes something is danger when any of the following holds, and 
 - It removes a protection without destroying anything at the time. Closing a machine's restore window, pausing certificate renewal, and clearing a backup schedule all qualify.
 - It issues or invalidates credentials or trust material. Minting a fleet-query access token and changing the certificate authority both qualify.
 
+A handler that lets an already-trusted machine obtain credentials is graded write, because making a machine trusted is itself danger and the decision to trust it has already been made there.
+Opening a machine's restore window is graded on this basis.
+
 The fleet query interface (see [MCP](mcp.md)) changes nothing, so every one of its tools is read-only.
 The handlers that mint, revoke, and list its access tokens belong to the administrative surface rather than to that interface: minting and revoking are danger, and listing is read-only.
 

@@ -116,6 +116,14 @@ device's role, attaching or detaching a tailnet identity, and merging records.
 "disallowing a restore" example means closing a machine's restore window, and
 the example now says so in the backup spec's own words.
 
+Opening the window lets the machine mint restore credentials, which reads as
+danger under the credentials criterion, but only an already-authenticated
+machine can use it. The danger was spent upstream, where the machine was made
+trusted: every handler that does that (`devices::provision_credential`,
+`add_key`, `reactivate_key`, `update_role`, `attach_tailscale`, `merge_into`,
+and `machines::mint_enrollment`, `attach_tailscale_device`) is danger. The spec
+now states that rule, so the credentials criterion is not read as reaching it.
+
 `backups::request_now` is danger because the same handler requests restores, and
 a restore overwrites a live server. A backup alone would be write.
 
