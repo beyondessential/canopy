@@ -129,10 +129,99 @@ The handlers that mint, revoke, and list its access tokens live on the administr
 
 ## Implementation notes
 
-The grade rides the existing utoipa annotation on each handler, through `just gen-openapi`, into the generated wire types the interface reads.
+### Declaring the grade
 
-Session identity is the one piece with no existing pattern to follow, since the surface authenticates purely from per-request tailnet headers today and holds no session of any kind.
-It also has to work across several private-server processes, so wherever a session lives it is shared rather than per-process.
+The grade is declared in each module's `routes()` table, in the vendored `routes!` macro: `routes!(danger: delete)` and so on.
+Omitting it fails to match the macro arm, so an ungraded handler is a compile error without any extra machinery.
+
+One declaration does three things: it registers the route as it does today, it injects the operation extension, and it attaches the grade to the route for enforcement.
+Nothing is written twice, so nothing can drift.
+
+The grade sits away from the handler body, which is the cost.
+The gain is that each module's route table becomes a grading table a reviewer reads in one screen, which is what makes 130 judgements reviewable at all: `backups.rs` is 2600 lines and 28 handlers, and its grading is otherwise scattered through them.
+
+Enforcement is a small layer that puts the grade in the request extensions, and one middleware that reads the grade, the session, and the identity, and decides.
+
+### Two boundaries, two mechanisms
+
+The administrator boundary stays exactly as it is: `TailscaleAdmin` resolves the identity, checks administrator status, and upserts the cached user for avatars.
+The mode and danger checks are a separate layer.
+Identity resolves twice per graded request as a result, which is the price of leaving a working administrator path untouched on a card that is already large.
+
+The danger permission is re-resolved on every danger-graded request, against the allowlist and policy, exactly as the administrator check is today.
+Withdrawing danger therefore takes effect at once rather than at the end of someone's raise.
+The session records a mode; it never records a permission, and never grants anything by itself.
+
+### The session
+
+The server mints a session when a client connects, so a session always exists and a raise modifies the one already there.
+A read-only session is the resting state, and read-only-graded handlers require no session at all, which matters because the first requests a page makes are in flight before the session exists.
+
+A session is a row: its identifier, the login it belongs to, its mode, when the raise expires, and when it was last seen.
+The identifier travels as a request header, added centrally where every call already goes through one function.
+
+Two clocks, not one.
+A raise expires ten minutes after it is made, and that is fixed.
+A session's own liveness is separate and idle-based, since most sessions never raise and would otherwise accumulate forever.
+
+A request updates its session's last-seen, and a periodic sweep retires sessions not seen for a while, alongside the domain and certificate sweeps that already run in the jobs crate.
+Rows stay bounded, and X3 inherits a live-session list that is true rather than one padded with every tab ever opened.
+If X3 wants a merely-open tab to count as present, it adds a heartbeat; nothing here forecloses that.
+
+A request presenting an unknown or expired session identifier is treated as read-only rather than refused, because doubt resolves downwards.
+The client meeting that refusal on a graded request starts a fresh session and returns its indicator to read-only.
+
+A session's login is checked against the authenticated identity on every request, so an identifier belonging to someone else is not usable even though the tailnet makes that a remote concern.
+
+### The debug identity, and 322 tests
+
+This is the largest implementation risk on the card, and it is not in the feature.
+
+Both tailnet extractors short-circuit in debug builds and return a fixed `admin@localhost`, so every debug build is an administrator for free.
+The private-server suite has 322 test functions across 108 endpoint paths, and they POST straight at handlers with no session of any kind.
+A mode layer that refuses an unraised request breaks nearly all of them at once.
+
+So the debug shortcut extends to cover the new boundary: with the dev identity in play, a request is treated as holding a danger-mode session and as holding the danger permission, by skipping the checks rather than by seeding anything.
+This mirrors exactly what the shortcut already does for administrator status, and is compiled out of release builds by the same guard, so no misconfiguration can reach it in production.
+Existing tests are untouched.
+
+Tests that exercise the boundary itself opt into the real path with `CANOPY_TRUST_TAILSCALE_HEADERS=1` and drive sessions explicitly, which is the pattern `admin_auth.rs` already sets and which card S2 built for precisely this.
+
+### What changes where
+
+- `admins` gains a danger column, through a migration made with `just migration`. The capability value grows a `danger` key beside `admin`, and grant resolution returns two sets where it returns one.
+- A sessions table, and its model in the database crate.
+- A grade type in the shared types crate, ordered so the ladder is a comparison.
+- The vendored macro gains its grade argument and the extension injection.
+- Two error variants, distinguishable as the behaviour requires: one for lacking the danger permission, one for not being raised. `ERRORS.md` gains a heading for each, matching the problem type.
+- `just gen-openapi` gains the step that writes the generated grade map.
+- The interface gains a session provider, a mode indicator in the app bar, graded control wrappers, and the danger column on the administrators screen.
+
+Two naming collisions to avoid, both already in the tree: `OperatorPresence` and its `operator_presence.rs` test are the monitored-server feature, nothing to do with operators using canopy; and `ActionButton` is already taken by the icon button that reveals its label on hover, so the graded wrappers need their own name.
+
+The session identifier has to be reachable from `callApi`, which is a bare function rather than a hook and is called from outside React.
+So the provider publishes it to a module-level value that `callApi` reads, rather than threading it through every call site.
+
+### Carrying the grade to the client
+
+The grade lands in the OpenAPI document as an operation extension.
+utoipa 5.5's `Operation` carries an `extensions` map for `x-` keys, so the grade travels with the operation it belongs to and no annotation is written twice.
+
+`openapi-typescript` does not surface `x-` extensions in the types it generates, so the grade cannot arrive as a TypeScript type.
+`just gen-openapi` gains a step that reads the emitted `openapi.json` and writes a generated module mapping each module and function to its grade.
+That is the shape the interface wants anyway: `callApi(module, fn)` is a runtime pair, and a component choosing a stripe needs a runtime value rather than a type.
+The generated file is committed alongside `openapi.json` and `api-types.ts`, as those already are.
+
+### Why a session is a table
+
+A signed token carrying login, mode, and expiry would need no storage, would work across processes, and would survive a restart.
+It is rejected anyway, for two reasons that are decisions already made rather than preferences.
+
+X3 reads the live sessions to show who is raised and where, and a token held only by its client cannot be enumerated.
+An operator's raise also has to be able to end before its expiry, and a token cannot be withdrawn once issued.
+
+So a session is a row: its own identifier, the login it belongs to, its mode, and when it expires.
+That satisfies the shared-across-processes and survives-a-restart requirements for free, since Postgres is already the shared thing.
 
 ## Trade-offs
 
@@ -148,7 +237,7 @@ Canopy's split of nine client-side against ten server-side is a different device
 
 ## Open questions
 
-- [ ] How a session mints and carries its identity on a request, which is the one piece with no existing pattern to follow
+None outstanding. The doc is ready to split.
 
 ## Testing notes
 
@@ -163,3 +252,8 @@ Canopy's split of nine client-side against ten server-side is a different device
 - A control disabled for an unrelated reason carries no stripe.
 - Every handler on the administrative surface has a grade, and one added without a grade fails the build.
 - Every tool on the fleet query interface is read-only.
+- A read-only-graded handler answers a request carrying no session at all.
+- A request carrying an unknown or expired session identifier is treated as read-only rather than refused outright.
+- A session identifier is not usable by a login other than the one it belongs to.
+- Withdrawing the danger permission takes effect during an operator's existing danger raise, not at the end of it.
+- Sessions not seen for a while are retired, and a retired session no longer appears as live.
