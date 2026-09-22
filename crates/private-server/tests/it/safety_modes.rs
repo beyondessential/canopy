@@ -443,3 +443,125 @@ async fn new_session(private: &commons_tests::axum_test::TestServer, login: &str
 		.expect("session id")
 		.to_owned()
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_raise_lasts_ten_minutes_and_activity_does_not_extend_it() {
+	trust_headers();
+
+	commons_tests::server::run(async |mut conn, _public, private| {
+		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
+
+		let id = new_session(&private, OPERATOR).await;
+		let raised = private
+			.post("/api/safety/raise")
+			.add_header("Tailscale-User-Login", OPERATOR)
+			.add_header("Tailscale-User-Name", "Operator")
+			.add_header(SESSION_HEADER, &id)
+			.json(&json!({"mode": "write"}))
+			.await;
+		raised.assert_status_ok();
+
+		let uuid: uuid::Uuid = id.parse().expect("session id is a uuid");
+		let before = database::operator_sessions::OperatorSession::get(&mut conn, uuid)
+			.await
+			.expect("read")
+			.expect("exists");
+		let expires_at = before.raise_expires_at.expect("a raise carries an expiry");
+
+		// Ten minutes from when it was made, give or take the round trip.
+		let lasts = expires_at.duration_since(before.created_at).as_secs_f64();
+		assert!(
+			(590.0..=615.0).contains(&lasts),
+			"a raise lasts ten minutes, not {lasts}s"
+		);
+
+		// Work in the meantime keeps the session alive but does not buy more
+		// time at the raised grade: the raise runs from when it was made.
+		for _ in 0..3 {
+			private
+				.post("/api/admins/list")
+				.add_header("Tailscale-User-Login", OPERATOR)
+				.add_header("Tailscale-User-Name", "Operator")
+				.add_header(SESSION_HEADER, &id)
+				.json(&json!({}))
+				.await
+				.assert_status_ok();
+		}
+
+		let after = database::operator_sessions::OperatorSession::get(&mut conn, uuid)
+			.await
+			.expect("read")
+			.expect("exists");
+		assert_eq!(
+			after.raise_expires_at, before.raise_expires_at,
+			"activity does not extend the raise"
+		);
+		assert!(
+			after.last_seen_at >= before.last_seen_at,
+			"activity does keep the session alive"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_grade_is_honoured_for_a_minute_after_the_raise_lapses() {
+	use commons_tests::diesel_async::SimpleAsyncConnection;
+
+	trust_headers();
+
+	commons_tests::server::run(async |mut conn, _public, private| {
+		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
+		Admin::set_danger(&mut conn, OPERATOR, true)
+			.await
+			.expect("grant danger");
+
+		let id = new_session(&private, OPERATOR).await;
+		private
+			.post("/api/safety/raise")
+			.add_header("Tailscale-User-Login", OPERATOR)
+			.add_header("Tailscale-User-Name", "Operator")
+			.add_header(SESSION_HEADER, &id)
+			.json(&json!({"mode": "danger"}))
+			.await
+			.assert_status_ok();
+
+		// Thirty seconds past its expiry: inside the margin, so a request
+		// already on its way is not refused for an expiry its sender had no way
+		// to anticipate.
+		conn.batch_execute(&format!(
+			"UPDATE operator_sessions SET raise_expires_at = now() - interval '30 seconds' \
+			 WHERE id = '{id}'"
+		))
+		.await
+		.expect("backdate the expiry");
+
+		private
+			.post("/api/mcp_tokens/mint")
+			.add_header("Tailscale-User-Login", OPERATOR)
+			.add_header("Tailscale-User-Name", "Operator")
+			.add_header(SESSION_HEADER, &id)
+			.json(&json!({"name": "in-flight"}))
+			.await
+			.assert_status_ok();
+
+		// Two minutes past, well clear of the margin: read-only again.
+		conn.batch_execute(&format!(
+			"UPDATE operator_sessions SET raise_expires_at = now() - interval '2 minutes' \
+			 WHERE id = '{id}'"
+		))
+		.await
+		.expect("backdate the expiry");
+
+		let refused = private
+			.post("/api/mcp_tokens/mint")
+			.add_header("Tailscale-User-Login", OPERATOR)
+			.add_header("Tailscale-User-Name", "Operator")
+			.add_header(SESSION_HEADER, &id)
+			.json(&json!({"name": "too-late"}))
+			.await;
+		refused.assert_status_forbidden();
+		assert!(problem_type(&refused.json()).ends_with("safety-mode-too-low"));
+	})
+	.await;
+}
