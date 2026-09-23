@@ -3702,6 +3702,7 @@
           "clusters"
         ],
         "summary": "Change a registered cluster's name or unreachable threshold.",
+        "description": "Either field may be omitted to leave it as it is. The threshold is what the\ncluster's reachability is graded against, and must be positive. Returns 404\nfor a draft. Requires admin access.",
         "operationId": "clusters_update",
         "requestBody": {
           "content": {

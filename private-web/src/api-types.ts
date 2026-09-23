@@ -1878,7 +1878,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Change a registered cluster's name or unreachable threshold. */
+        /**
+         * Change a registered cluster's name or unreachable threshold.
+         * @description Either field may be omitted to leave it as it is. The threshold is what the
+         *     cluster's reachability is graded against, and must be positive. Returns 404
+         *     for a draft. Requires admin access.
+         */
         post: operations["clusters_update"];
         delete?: never;
         options?: never;
