@@ -620,3 +620,88 @@ async fn danger_held_through_the_policy_alone_needs_no_allowlist_entry() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_route_the_boundary_cannot_grade_is_refused_but_the_redirects_are_not() {
+	trust_headers();
+
+	commons_tests::server::run(async |mut conn, _public, private| {
+		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
+
+		// The compatibility redirects reach no handler and change nothing, so
+		// they answer without a grade. Everything else the boundary cannot
+		// recognise is refused rather than waved through, which is what stops a
+		// mutating handler running unchecked if a grade ever goes missing.
+		let moved = private
+			.post("/api/servers/list")
+			.add_header("Tailscale-User-Login", OPERATOR)
+			.add_header("Tailscale-User-Name", "Operator")
+			.json(&json!({}))
+			.await;
+		assert_eq!(
+			moved.status_code().as_u16(),
+			308,
+			"a moved path still says where it went"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_operator_who_is_not_an_administrator_still_has_a_mode() {
+	trust_headers();
+
+	commons_tests::server::run(async |_conn, _public, private| {
+		// Not on the allowlist: they reach the handlers that are not restricted
+		// to administrators, and those are graded like any other, so they need a
+		// session and a raise the same way.
+		let session = private
+			.post("/api/safety/session")
+			.add_header("Tailscale-User-Login", OTHER)
+			.add_header("Tailscale-User-Name", "Other")
+			.json(&json!({}))
+			.await;
+		session.assert_status_ok();
+		let id = session.json::<serde_json::Value>()["id"]
+			.as_str()
+			.expect("session id")
+			.to_owned();
+
+		// Read-only to begin with, so a write-graded handler they may reach is
+		// refused for the mode.
+		let refused = private
+			.post("/api/bestool/save_snippet")
+			.add_header("Tailscale-User-Login", OTHER)
+			.add_header("Tailscale-User-Name", "Other")
+			.add_header(SESSION_HEADER, &id)
+			.json(&json!({"name": "snip", "sql": "SELECT 1"}))
+			.await;
+		refused.assert_status_forbidden();
+		assert!(problem_type(&refused.json()).ends_with("safety-mode-too-low"));
+
+		// Raising needs no administrator status, and then the handler answers.
+		let raised = private
+			.post("/api/safety/raise")
+			.add_header("Tailscale-User-Login", OTHER)
+			.add_header("Tailscale-User-Name", "Other")
+			.add_header(SESSION_HEADER, &id)
+			.json(&json!({"mode": "write"}))
+			.await;
+		raised.assert_status_ok();
+		assert_eq!(raised.json::<serde_json::Value>()["mode"], "write");
+
+		let saved = private
+			.post("/api/bestool/save_snippet")
+			.add_header("Tailscale-User-Login", OTHER)
+			.add_header("Tailscale-User-Name", "Other")
+			.add_header(SESSION_HEADER, &id)
+			.json(&json!({"name": "snip", "sql": "SELECT 1"}))
+			.await;
+		assert_ne!(
+			saved.status_code().as_u16(),
+			403,
+			"a raised operator is not turned away for their mode"
+		);
+	})
+	.await;
+}

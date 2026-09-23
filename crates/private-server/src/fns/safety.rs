@@ -6,12 +6,17 @@
 //! reaches a higher mode in the first place and a read-only session must be able
 //! to call them. What they change is the operator's own session, not the fleet
 //! or Canopy's records.
+//!
+//! They ask for a tailnet identity rather than an administrator, because every
+//! operator has a safety mode: a handler graded above read-only is not always
+//! restricted to administrators, and a caller who could never hold a session
+//! could never reach one.
 
 use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::TailscaleAdmin;
+use commons_servers::tailscale_auth::TailscaleUser;
 use commons_types::safety::SafetyMode;
 use database::operator_sessions::OperatorSession;
 use jiff::Timestamp;
@@ -60,7 +65,7 @@ impl SessionState {
 /// The session named by the request header, if it exists and belongs to the
 /// caller. A session identifier from another login is not this caller's to use.
 async fn presented_session(
-	state: &AppState,
+	conn: &mut database::diesel_async::AsyncPgConnection,
 	headers: &axum::http::HeaderMap,
 	login: &str,
 ) -> Result<Option<OperatorSession>> {
@@ -71,8 +76,7 @@ async fn presented_session(
 	else {
 		return Ok(None);
 	};
-	let mut conn = state.db.get().await?;
-	Ok(OperatorSession::get(&mut conn, id)
+	Ok(OperatorSession::get(conn, id)
 		.await?
 		.filter(|session| session.login == login))
 }
@@ -87,7 +91,7 @@ async fn presented_session(
 	path = "/session",
 	operation_id = "safety_session",
 	tag = "safety",
-	security(("tailscale-admin" = [])),
+	security(("tailscale-user" = [])),
 	responses(
 		(status = 200, description = "The caller's session.", body = SessionState),
 		(status = 401, body = ProblemDetailsSchema),
@@ -96,13 +100,13 @@ async fn presented_session(
 )]
 pub async fn session(
 	State(state): State<AppState>,
-	TailscaleAdmin(user): TailscaleAdmin,
+	user: TailscaleUser,
 	headers: axum::http::HeaderMap,
 ) -> Result<Json<SessionState>> {
-	if let Some(session) = presented_session(&state, &headers, &user.login).await? {
+	let mut conn = state.db.get().await?;
+	if let Some(session) = presented_session(&mut conn, &headers, &user.login).await? {
 		return Ok(Json(SessionState::of(&session)));
 	}
-	let mut conn = state.db.get().await?;
 	let session = OperatorSession::create(&mut conn, &user.login).await?;
 	Ok(Json(SessionState::of(&session)))
 }
@@ -125,7 +129,7 @@ pub struct RaiseArgs {
 	path = "/raise",
 	operation_id = "safety_raise",
 	tag = "safety",
-	security(("tailscale-admin" = [])),
+	security(("tailscale-user" = [])),
 	responses(
 		(status = 200, description = "The raised session.", body = SessionState),
 		(status = 400, body = ProblemDetailsSchema),
@@ -135,7 +139,7 @@ pub struct RaiseArgs {
 )]
 pub async fn raise(
 	State(state): State<AppState>,
-	TailscaleAdmin(user): TailscaleAdmin,
+	user: TailscaleUser,
 	headers: axum::http::HeaderMap,
 	Json(args): Json<RaiseArgs>,
 ) -> Result<Json<SessionState>> {
@@ -153,7 +157,7 @@ pub async fn raise(
 
 	let mut conn = state.db.get().await?;
 
-	let session = match presented_session(&state, &headers, &user.login).await? {
+	let session = match presented_session(&mut conn, &headers, &user.login).await? {
 		Some(session) => session,
 		None => OperatorSession::create(&mut conn, &user.login).await?,
 	};
@@ -172,7 +176,7 @@ pub async fn raise(
 	path = "/lower",
 	operation_id = "safety_lower",
 	tag = "safety",
-	security(("tailscale-admin" = [])),
+	security(("tailscale-user" = [])),
 	responses(
 		(status = 200, description = "The lowered session.", body = SessionState),
 		(status = 401, body = ProblemDetailsSchema),
@@ -181,11 +185,11 @@ pub async fn raise(
 )]
 pub async fn lower(
 	State(state): State<AppState>,
-	TailscaleAdmin(user): TailscaleAdmin,
+	user: TailscaleUser,
 	headers: axum::http::HeaderMap,
 ) -> Result<Json<SessionState>> {
 	let mut conn = state.db.get().await?;
-	let session = match presented_session(&state, &headers, &user.login).await? {
+	let session = match presented_session(&mut conn, &headers, &user.login).await? {
 		Some(session) => session,
 		None => OperatorSession::create(&mut conn, &user.login).await?,
 	};

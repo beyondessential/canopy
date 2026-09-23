@@ -10,8 +10,8 @@
 /** A rung of the ladder: the mode a session is in, or one a control requires. */
 export type SafetyMode = "read-only" | "write" | "danger";
 
-/** Low to high. The index is the comparison. */
-const LADDER: readonly SafetyMode[] = ["read-only", "write", "danger"];
+/** Low to high. The index is the comparison, for every reading of the ladder. */
+export const LADDER: readonly SafetyMode[] = ["read-only", "write", "danger"];
 
 /** Whether a session in `held` may use something requiring `required`. */
 export function permits(held: SafetyMode, required: SafetyMode): boolean {

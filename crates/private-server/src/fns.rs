@@ -111,11 +111,24 @@ fn moved_paths() -> axum::Router<crate::state::AppState> {
 	axum::Router::new()
 		// `servers` was the applications' prefix before the split gave the
 		// workload its own word.
-		.route("/api/servers/{*rest}", any(applications))
-		.route("/api/applications/{*rest}", any(applications))
-		.route("/api/machines/{*rest}", any(machines))
-		.route("/api/server_groups/{*rest}", any(groups))
+		.route(MOVED_PATHS[0], any(applications))
+		.route(MOVED_PATHS[1], any(applications))
+		.route(MOVED_PATHS[2], any(machines))
+		.route(MOVED_PATHS[3], any(groups))
 }
+
+/// The paths [`moved_paths`] answers on.
+///
+/// They carry no safety-mode grade, because they reach no handler and change
+/// nothing: each one only tells a client where an endpoint went. The safety
+/// layer refuses anything else it has no grade for, so it is told about these
+/// rather than left to guess (see [`crate::safety`]).
+pub const MOVED_PATHS: [&str; 4] = [
+	"/api/servers/{*rest}",
+	"/api/applications/{*rest}",
+	"/api/machines/{*rest}",
+	"/api/server_groups/{*rest}",
+];
 
 pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 	OpenApiRouter::new()

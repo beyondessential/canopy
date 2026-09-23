@@ -9,7 +9,7 @@ vi.mock("../hooks/useIsAdmin", () => ({ useIsAdmin: () => admin.is }));
 // So does the operator's safety mode. These tests are about the section, not
 // the modes, so it is rendered in danger, where every control is reachable.
 vi.mock("../hooks/useSafetyMode", () => ({
-	useSafetyMode: () => ({ mode: "danger", remainingMs: null, busy: false }),
+	useSafetyMode: () => ({ mode: "danger", busy: false }),
 }));
 
 type Pair = {

@@ -9,7 +9,11 @@
 //! at startup, and [`enforce`] decides every graded request against the caller's
 //! session and identity. Nothing else in the server carries a second copy.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+	collections::{HashMap, hash_map::Entry},
+	sync::{Arc, Mutex},
+	time::{Duration, Instant},
+};
 
 use axum::http::Method;
 use axum::{
@@ -31,6 +35,44 @@ use crate::state::AppState;
 /// by the client's `callApi`, so every request from a client that has a session
 /// presents it.
 pub const SESSION_HEADER: &str = "x-canopy-session";
+
+/// How long a session's last-seen may go unwritten.
+///
+/// A day's grace before the sweep retires a session, so a quarter of an hour is
+/// all the precision it needs. Well above the burst of parallel reads a page
+/// makes, so opening one writes the row once rather than a dozen times over,
+/// and the rest of the time the boundary takes no connection at all.
+const TOUCH_INTERVAL: Duration = Duration::from_secs(15 * 60);
+
+/// When each session's last-seen was last written by this process.
+///
+/// The row is what the sweep reads; this only decides when to write it. A
+/// second process keeps its own and writes on its own cadence, which costs one
+/// extra write per interval and nothing in correctness.
+#[derive(Clone, Default)]
+pub struct TouchLog(Arc<Mutex<HashMap<Uuid, Instant>>>);
+
+impl TouchLog {
+	/// Whether this session's last-seen is due to be written, recording that it
+	/// is about to be so the requests beside this one do not write it too.
+	fn due(&self, id: Uuid) -> bool {
+		let now = Instant::now();
+		let mut written = self
+			.0
+			.lock()
+			.expect("touch log is never held across an await");
+		// Sessions come and go, so entries no longer standing in the way of a
+		// write are dropped rather than kept for a session that may be gone.
+		written.retain(|_, at| now.duration_since(*at) < TOUCH_INTERVAL);
+		match written.entry(id) {
+			Entry::Occupied(_) => false,
+			Entry::Vacant(slot) => {
+				slot.insert(now);
+				true
+			}
+		}
+	}
+}
 
 /// The grade each handler on the administrative surface requires, keyed by the
 /// method and routed path the request matched.
@@ -71,11 +113,15 @@ impl GradeMap {
 						map.insert((method, path.clone()), mode);
 					}
 					Err(_) => {
+						// Doubt resolves upwards on an enforcement boundary: a
+						// grade nothing can read is the most restrictive one,
+						// not none. The build rejects this anyway.
 						tracing::error!(
 							%path, %method, %mode,
 							"handler declares a safety mode that is not one of the three; \
-							 treating it as ungraded"
+							 requiring danger until it does"
 						);
+						map.insert((method, path.clone()), SafetyMode::Danger);
 					}
 				}
 			}
@@ -106,6 +152,20 @@ impl GradeMap {
 pub struct SafetyState {
 	pub app: AppState,
 	pub grades: Arc<GradeMap>,
+	pub touched: TouchLog,
+}
+
+/// Keep a session alive, at most once per [`TOUCH_INTERVAL`] per process.
+///
+/// A read costs no connection at all on the overwhelming majority of requests,
+/// which matters because reads are most of them and the boundary would
+/// otherwise take a primary-pool connection alongside the handler's own.
+async fn touch(safety: &SafetyState, id: Uuid) -> Result<()> {
+	if !safety.touched.due(id) {
+		return Ok(());
+	}
+	let mut conn = safety.app.db.get().await?;
+	OperatorSession::touch(&mut conn, id).await
 }
 
 /// Whether a caller holds the danger permission (see the ADM spec).
@@ -151,10 +211,17 @@ pub async fn enforce(
 	}
 
 	let Some(required) = required else {
-		// Not graded: no grade to enforce. Handlers reach this only while the
-		// surface is still being graded; once every handler declares one, the
-		// build rejects an entry without a grade.
-		return Ok(next.run(request).await);
+		// Nothing on this router reaches a handler without a grade, so a miss is
+		// the boundary failing to recognise the request rather than a request
+		// that needs no mode. It is refused: an unrecognised path is exactly the
+		// case where permitting it would be a silent hole.
+		if crate::fns::MOVED_PATHS.contains(&path.as_str()) {
+			return Ok(next.run(request).await);
+		}
+		tracing::error!(%path, method = %request.method(), "no safety mode for this route; refusing");
+		return Err(AppError::SafetyModeTooLow {
+			required: SafetyMode::Danger.to_string(),
+		});
 	};
 
 	let session_id = request
@@ -167,8 +234,7 @@ pub async fn enforce(
 	// touched when it presents one, so reading keeps a session alive.
 	if required == SafetyMode::ReadOnly {
 		if let Some(id) = session_id {
-			let mut conn = safety.app.db.get().await?;
-			OperatorSession::touch(&mut conn, id).await?;
+			touch(&safety, id).await?;
 		}
 		return Ok(next.run(request).await);
 	}
@@ -206,7 +272,10 @@ pub async fn enforce(
 			});
 		}
 
-		if let Some(session) = session {
+		// On the connection already in hand, and on the same cadence as a read's.
+		if let Some(session) = session
+			&& safety.touched.due(session.id)
+		{
 			OperatorSession::touch(&mut conn, session.id).await?;
 		}
 	}

@@ -1,7 +1,7 @@
 import { Box, MenuItem, type MenuItemProps, Tooltip } from "@mui/material";
 import { type ReactElement, type ReactNode, cloneElement } from "react";
 import { useSafetyMode } from "../hooks/useSafetyMode";
-import { type SafetyMode, modeLabel, permits } from "../safety";
+import { LADDER, type SafetyMode, modeLabel, permits } from "../safety";
 import { type GradedEndpoint, SAFETY_MODES } from "../safety-modes";
 
 /** The diagonal stripes a blocked control carries, one per grade. */
@@ -11,9 +11,6 @@ const STRIPES: Record<Exclude<SafetyMode, "read-only">, string> = {
 	danger:
 		"repeating-linear-gradient(45deg, rgba(239,83,80,0.24), rgba(239,83,80,0.24) 6px, rgba(239,83,80,0.07) 6px, rgba(239,83,80,0.07) 12px)",
 };
-
-/** Low to high, so the highest grade among several calls is the last one found. */
-const LADDER: readonly SafetyMode[] = ["read-only", "write", "danger"];
 
 /** The endpoint, or endpoints, a control calls. */
 export type Calls = GradedEndpoint | readonly GradedEndpoint[];
@@ -25,12 +22,32 @@ export type Calls = GradedEndpoint | readonly GradedEndpoint[];
  * only the calls this submission would make.
  */
 export function requiredMode(calls: Calls): SafetyMode {
+	return modesOf(calls).reduce(
+		(highest, mode) =>
+			LADDER.indexOf(mode) > LADDER.indexOf(highest) ? mode : highest,
+		"read-only" as SafetyMode,
+	);
+}
+
+/**
+ * The lowest grade among the endpoints, for a control that only leads to them:
+ * a popover whose rows are each graded on their own is reachable as soon as any
+ * one of them is.
+ */
+export function lowestMode(calls: Calls): SafetyMode {
+	const modes = modesOf(calls);
+	return modes.reduce(
+		(lowest, mode) =>
+			LADDER.indexOf(mode) < LADDER.indexOf(lowest) ? mode : lowest,
+		modes[0] ?? ("read-only" as SafetyMode),
+	);
+}
+
+/** The grade each of these endpoints requires. */
+function modesOf(calls: Calls): SafetyMode[] {
 	const list: readonly GradedEndpoint[] =
 		typeof calls === "string" ? [calls] : calls;
-	return list.reduce<SafetyMode>((highest, call) => {
-		const mode = SAFETY_MODES[call];
-		return LADDER.indexOf(mode) > LADDER.indexOf(highest) ? mode : highest;
-	}, "read-only");
+	return list.map((call) => SAFETY_MODES[call]);
 }
 
 /** What the current mode means for a control calling these endpoints. */
@@ -94,6 +111,12 @@ interface GradedActionProps {
  * control disabled for its own reasons (a request in flight, an incomplete
  * form) carries no stripe.
  *
+ * A blocked control is disabled as well as inert to the pointer, so it cannot
+ * be reached from the keyboard. A child that is a tooltip passes that on to the
+ * control inside, except where that control names `disabled` itself: a tooltip
+ * keeps its child's own props, so such a control has to name the blocked state
+ * as well (see `MachineSetupInstructions`).
+ *
  * Nothing here decides anything — the server refuses the request regardless.
  * This is what stops an operator finding that out by being refused.
  */
@@ -119,12 +142,9 @@ export function GradedAction({
 					display: fullWidth ? "flex" : "inline-flex",
 					width: fullWidth ? "100%" : undefined,
 					cursor: "not-allowed",
-					"& > *": {
-						pointerEvents: "none",
-						backgroundImage: stripeFor(required),
-						filter: "grayscale(0.8)",
-						transition: "filter 150ms cubic-bezier(.4,0,.2,1)",
-					},
+					// The same treatment a control that cannot take the wrapper
+					// applies to itself, so the convention is written once.
+					"& > *": { pointerEvents: "none", ...blockedSx(required) },
 					"&:hover > *": { filter: "grayscale(0)" },
 				}}
 			>

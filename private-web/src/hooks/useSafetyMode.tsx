@@ -26,8 +26,6 @@ interface SessionState {
 export interface SafetyStatus {
 	/** The mode the session is in. Read-only until the operator raises it. */
 	mode: SafetyMode;
-	/** Milliseconds left on the current raise, or null while read-only. */
-	remainingMs: number | null;
 	/** Raise to a mode. Rejects if the operator lacks the danger permission. */
 	raise: (mode: SafetyMode) => Promise<void>;
 	/** Return to read-only at once, without waiting for the countdown. */
@@ -37,6 +35,11 @@ export interface SafetyStatus {
 }
 
 const SafetyContext = createContext<SafetyStatus | null>(null);
+
+// The time left is its own context because it changes every second while a
+// raise is live. Every graded control on the page reads the mode; only the
+// indicator reads this, so only the indicator re-renders on the tick.
+const RemainingContext = createContext<number | null>(null);
 
 /**
  * The operator's safety-mode session.
@@ -145,12 +148,16 @@ export function SafetyModeProvider({ children }: { children: ReactNode }) {
 	}, [adopt]);
 
 	const value = useMemo<SafetyStatus>(
-		() => ({ mode, remainingMs, raise, lower, busy }),
-		[mode, remainingMs, raise, lower, busy],
+		() => ({ mode, raise, lower, busy }),
+		[mode, raise, lower, busy],
 	);
 
 	return (
-		<SafetyContext.Provider value={value}>{children}</SafetyContext.Provider>
+		<SafetyContext.Provider value={value}>
+			<RemainingContext.Provider value={remainingMs}>
+				{children}
+			</RemainingContext.Provider>
+		</SafetyContext.Provider>
 	);
 }
 
@@ -161,4 +168,14 @@ export function useSafetyMode(): SafetyStatus {
 		throw new Error("useSafetyMode must be used inside <SafetyModeProvider>");
 	}
 	return ctx;
+}
+
+/**
+ * Milliseconds left on the current raise, or null while read-only.
+ *
+ * Changes every second while a raise is live, so read it only where it is
+ * shown: a component reading this re-renders on every tick.
+ */
+export function useRemainingMs(): number | null {
+	return useContext(RemainingContext);
 }

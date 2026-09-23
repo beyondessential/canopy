@@ -33,7 +33,12 @@ import { useIsAdmin } from "../hooks/useIsAdmin";
 import type { GradedEndpoint } from "../safety-modes";
 import CheckDocButton from "./CheckDocButton";
 import CheckExtrasList, { checkEntryExtras } from "./CheckExtras";
-import { type Calls, GradedAction, requiredMode } from "./GradedAction";
+import {
+	type Calls,
+	GradedAction,
+	lowestMode,
+	requiredMode,
+} from "./GradedAction";
 import ExternalUsersDetails, {
 	parseExternalUserSessions,
 } from "./ExternalUsersDetails";
@@ -602,11 +607,11 @@ function SilenceCheckButton({
 				: "silenced_refs/silence_group",
 		);
 	}
-	// Each row in the popover is graded on its own, so opening it needs only
-	// the lowest of them: un-silencing is write even where silencing is danger.
-	const popoverCalls = offered.reduce<GradedEndpoint>((lowest, call) =>
-		requiredMode(call) === "write" ? call : lowest,
-	offered[0]);
+	// Each row in the popover is graded on its own, so opening it needs only the
+	// lowest of them: un-silencing is write even where silencing is danger.
+	const popoverMode = lowestMode(offered);
+	const popoverCalls =
+		offered.find((call) => requiredMode(call) === popoverMode) ?? offered[0];
 	const handle = async (fn: () => Promise<unknown>) => {
 		try {
 			await fn();

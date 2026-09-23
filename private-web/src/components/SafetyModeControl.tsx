@@ -13,7 +13,7 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import { ApiError } from "../api";
-import { useSafetyMode } from "../hooks/useSafetyMode";
+import { useRemainingMs, useSafetyMode } from "../hooks/useSafetyMode";
 import { type SafetyMode, modeLabel, refusalOf } from "../safety";
 
 /** The palette each mode reads in. Read-only is deliberately unremarkable. */
@@ -61,7 +61,8 @@ function remaining(ms: number): string {
  * try rather than being quietly shown a shorter menu.
  */
 export function SafetyModeControl() {
-	const { mode, remainingMs, raise, lower, busy } = useSafetyMode();
+	const { mode, raise, lower, busy } = useSafetyMode();
+	const remainingMs = useRemainingMs();
 	const [anchor, setAnchor] = useState<null | HTMLElement>(null);
 	const [confirming, setConfirming] = useState(false);
 	const [refusal, setRefusal] = useState<string | null>(null);

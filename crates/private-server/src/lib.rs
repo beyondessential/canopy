@@ -26,6 +26,7 @@ pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::rou
 	let safety = crate::safety::SafetyState {
 		app: state.clone(),
 		grades: std::sync::Arc::new(crate::safety::GradeMap::from_openapi(&api_spec)),
+		touched: Default::default(),
 	};
 	tracing::debug!(graded = safety.grades.len(), "safety-mode grades loaded");
 	let api_router = api_router.layer(middleware::from_fn_with_state(

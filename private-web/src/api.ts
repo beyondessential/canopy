@@ -96,6 +96,9 @@ export async function uploadApi<T>(
 				// makes the browser preflight the request and keeps a
 				// cross-origin page off the endpoint.
 				"x-canopy-upload": "1",
+				// An upload is graded like any other request, so it carries the
+				// session too.
+				...sessionHeaders(),
 			},
 			body,
 		},

@@ -7517,7 +7517,7 @@
         },
         "security": [
           {
-            "tailscale-admin": []
+            "tailscale-user": []
           }
         ],
         "x-canopy-safety-mode": "read-only"
@@ -7585,7 +7585,7 @@
         },
         "security": [
           {
-            "tailscale-admin": []
+            "tailscale-user": []
           }
         ],
         "x-canopy-safety-mode": "read-only"
@@ -7633,7 +7633,7 @@
         },
         "security": [
           {
-            "tailscale-admin": []
+            "tailscale-user": []
           }
         ],
         "x-canopy-safety-mode": "read-only"

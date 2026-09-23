@@ -214,7 +214,9 @@ export default function MachineSetupInstructions({
 					size="small"
 					startIcon={<RefreshIcon />}
 					onClick={doMint}
-					disabled={mint.pending}
+					// A tooltip keeps its child's own props over the ones the
+					// wrapper passes in, so the blocked state is named here too.
+					disabled={mint.pending || minting.blocked}
 				>
 					{mint.pending ? "Reissuing…" : "Reissue"}
 				</Button>
