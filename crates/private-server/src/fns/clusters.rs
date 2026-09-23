@@ -172,6 +172,10 @@ pub struct ClusterUpdateArgs {
 }
 
 /// Change a registered cluster's name or unreachable threshold.
+///
+/// Either field may be omitted to leave it as it is. The threshold is what the
+/// cluster's reachability is graded against, and must be positive. Returns 404
+/// for a draft. Requires admin access.
 // spec: K8S
 #[utoipa::path(
 	post,
