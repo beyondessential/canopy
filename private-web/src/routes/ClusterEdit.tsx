@@ -10,6 +10,7 @@ import {
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { callApi, useApi } from "../api";
+import { GradedAction } from "../components/GradedAction";
 import { usePageTitle } from "../hooks/usePageTitle";
 import type { ClusterDetail } from "../types";
 
@@ -98,13 +99,15 @@ function Form({ cluster }: { cluster: ClusterDetail["cluster"] }) {
 			{error && <Alert severity="error">{error}</Alert>}
 
 			<Stack direction="row" spacing={1}>
-				<Button
-					type="submit"
-					variant="contained"
-					disabled={pending || name.trim() === ""}
-				>
-					{pending ? "Saving…" : "Save"}
-				</Button>
+				<GradedAction calls="fleet/clusters/update">
+					<Button
+						type="submit"
+						variant="contained"
+						disabled={pending || name.trim() === ""}
+					>
+						{pending ? "Saving…" : "Save"}
+					</Button>
+				</GradedAction>
 				<Button
 					type="button"
 					variant="outlined"

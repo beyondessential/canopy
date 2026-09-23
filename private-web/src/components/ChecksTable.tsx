@@ -618,11 +618,15 @@ function SilenceCheckButton({
 	const ownSilenceCall =
 		target.kind === "machine"
 			? "silenced_refs/silence_machine"
-			: "silenced_refs/silence_server";
+			: target.kind === "cluster"
+				? "silenced_refs/silence_cluster"
+				: "silenced_refs/silence_server";
 	const ownUnsilenceCall =
 		target.kind === "machine"
 			? "silenced_refs/unsilence_machine"
-			: "silenced_refs/unsilence_server";
+			: target.kind === "cluster"
+				? "silenced_refs/unsilence_cluster"
+				: "silenced_refs/unsilence_server";
 	const offered: GradedEndpoint[] = [
 		ownSilence ? ownUnsilenceCall : ownSilenceCall,
 	];

@@ -3693,7 +3693,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/fleet/clusters/update": {
@@ -3750,7 +3751,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/fleet/groups/create": {
@@ -7923,7 +7925,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/silenced_refs/list_for_group": {
@@ -8134,7 +8137,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/silenced_refs/silence_group": {
@@ -8318,7 +8322,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/silenced_refs/unsilence_group": {
