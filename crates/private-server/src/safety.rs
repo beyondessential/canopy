@@ -175,7 +175,6 @@ pub async fn enforce(
 
 	let (mut parts, body) = request.into_parts();
 	let user = TailscaleUser::from_request_parts(&mut parts, &safety.app).await?;
-	let mut conn = safety.app.db.get().await?;
 
 	// Resolved afresh per request and checked before the mode, so an operator
 	// who can never make this request is told that rather than being told to
@@ -184,26 +183,32 @@ pub async fn enforce(
 		return Err(AppError::DangerNotPermitted);
 	}
 
-	let session = match session_id {
-		Some(id) => OperatorSession::get(&mut conn, id).await?,
-		None => None,
-	};
-	// A session belonging to another login is not this caller's to use, so it
-	// reads as no session at all rather than as its owner's mode.
-	let session = session.filter(|session| session.login == user.login);
-	let mode = session
-		.as_ref()
-		.map(|session| session.effective_mode(Timestamp::now()))
-		.unwrap_or(SafetyMode::ReadOnly);
+	// Scoped so the connection goes back to the pool before the handler runs:
+	// held across it, every graded request would take two, and a busy server
+	// could exhaust the pool on connections waiting for their own handlers.
+	{
+		let mut conn = safety.app.db.get().await?;
+		let session = match session_id {
+			Some(id) => OperatorSession::get(&mut conn, id).await?,
+			None => None,
+		};
+		// A session belonging to another login is not this caller's to use, so
+		// it reads as no session at all rather than as its owner's mode.
+		let session = session.filter(|session| session.login == user.login);
+		let mode = session
+			.as_ref()
+			.map(|session| session.effective_mode(Timestamp::now()))
+			.unwrap_or(SafetyMode::ReadOnly);
 
-	if !mode.permits(required) {
-		return Err(AppError::SafetyModeTooLow {
-			required: required.to_string(),
-		});
-	}
+		if !mode.permits(required) {
+			return Err(AppError::SafetyModeTooLow {
+				required: required.to_string(),
+			});
+		}
 
-	if let Some(session) = session {
-		OperatorSession::touch(&mut conn, session.id).await?;
+		if let Some(session) = session {
+			OperatorSession::touch(&mut conn, session.id).await?;
+		}
 	}
 
 	Ok(next
