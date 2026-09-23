@@ -30,6 +30,7 @@ import LockIcon from "@mui/icons-material/Lock";
 import LockOpenIcon from "@mui/icons-material/LockOpen";
 import { useState } from "react";
 import { useParams } from "react-router-dom";
+import { GradedAction } from "../components/GradedAction";
 import Markdown from "../components/Markdown";
 import TimeAgo from "../components/TimeAgo";
 import VersionStatusChip from "../components/VersionStatusChip";
@@ -158,20 +159,22 @@ function StatusControl({
 				<MenuItem value="published">Published</MenuItem>
 				<MenuItem value="yanked">Yanked</MenuItem>
 			</Select>
-			<Button
-				variant="contained"
-				disabled={!dirty || action.pending}
-				onClick={async () => {
-					try {
-						await action.call({ version: versionStr, status: selected });
-						onChanged();
-					} catch {
-						/* surfaced via action.error */
-					}
-				}}
-			>
-				{action.pending ? "Changing…" : "Change"}
-			</Button>
+			<GradedAction calls="versions/update_version_status">
+				<Button
+					variant="contained"
+					disabled={!dirty || action.pending}
+					onClick={async () => {
+						try {
+							await action.call({ version: versionStr, status: selected });
+							onChanged();
+						} catch {
+							/* surfaced via action.error */
+						}
+					}}
+				>
+					{action.pending ? "Changing…" : "Change"}
+				</Button>
+			</GradedAction>
 			{action.error && (
 				<Typography variant="caption" color="error">
 					{action.error.message}
@@ -227,14 +230,16 @@ function ChangelogSection({
 				{isAdmin &&
 					(editing ? (
 						<Stack direction="row" spacing={1}>
-							<Button
-								variant="contained"
-								color="success"
-								onClick={save}
-								disabled={action.pending}
-							>
-								{action.pending ? "Saving…" : "Save"}
-							</Button>
+							<GradedAction calls="versions/update_version_changelog">
+								<Button
+									variant="contained"
+									color="success"
+									onClick={save}
+									disabled={action.pending}
+								>
+									{action.pending ? "Saving…" : "Save"}
+								</Button>
+							</GradedAction>
 							<Button
 								variant="outlined"
 								color="error"
@@ -245,13 +250,15 @@ function ChangelogSection({
 							</Button>
 						</Stack>
 					) : (
-						<Button
-							variant="outlined"
-							startIcon={<EditIcon />}
-							onClick={start}
-						>
-							Edit
-						</Button>
+						<GradedAction calls="versions/update_version_changelog">
+							<Button
+								variant="outlined"
+								startIcon={<EditIcon />}
+								onClick={start}
+							>
+								Edit
+							</Button>
+						</GradedAction>
 					))}
 			</Stack>
 			<Paper variant="outlined" sx={{ p: 2 }}>
@@ -347,13 +354,21 @@ function ArtifactsSection({
 				{isAdmin && (
 					<Stack direction="row" spacing={1}>
 						{unlocked && (
-							<Button
-								variant={showCreate ? "outlined" : "contained"}
-								color={showCreate ? "warning" : "primary"}
-								onClick={() => setShowCreate((s) => !s)}
+							<GradedAction
+								calls={
+									showCreate
+										? []
+										: ["versions/create_artifact", "versions/upload_artifact"]
+								}
 							>
-								{showCreate ? "Cancel create" : "Create"}
-							</Button>
+								<Button
+									variant={showCreate ? "outlined" : "contained"}
+									color={showCreate ? "warning" : "primary"}
+									onClick={() => setShowCreate((s) => !s)}
+								>
+									{showCreate ? "Cancel create" : "Create"}
+								</Button>
+							</GradedAction>
 						)}
 						<Button
 							variant="outlined"
@@ -514,15 +529,17 @@ function ArtifactRow({
 				<TableCell align="right">
 					{confirmDelete ? (
 						<Stack direction="row" spacing={0.5} sx={{ justifyContent: "flex-end" }}>
-							<Button
-								size="small"
-								variant="contained"
-								color="error"
-								onClick={onDelete}
-								disabled={deleteAction.pending}
-							>
-								Really delete
-							</Button>
+							<GradedAction calls="versions/delete_artifact">
+								<Button
+									size="small"
+									variant="contained"
+									color="error"
+									onClick={onDelete}
+									disabled={deleteAction.pending}
+								>
+									Really delete
+								</Button>
+							</GradedAction>
 							<Button
 								size="small"
 								variant="outlined"
@@ -534,21 +551,25 @@ function ArtifactRow({
 						</Stack>
 					) : (
 						<Stack direction="row" spacing={0.5} sx={{ justifyContent: "flex-end" }}>
-							<IconButton
-								aria-label={`edit ${artifactLabel(artifact)}`}
-								size="small"
-								onClick={() => setEditing(true)}
-							>
-								<EditIcon fontSize="small" />
-							</IconButton>
-							<IconButton
-								aria-label={`delete ${artifactLabel(artifact)}`}
-								size="small"
-								color="error"
-								onClick={() => setConfirmDelete(true)}
-							>
-								<DeleteIcon fontSize="small" />
-							</IconButton>
+							<GradedAction calls="versions/update_artifact">
+								<IconButton
+									aria-label={`edit ${artifactLabel(artifact)}`}
+									size="small"
+									onClick={() => setEditing(true)}
+								>
+									<EditIcon fontSize="small" />
+								</IconButton>
+							</GradedAction>
+							<GradedAction calls="versions/delete_artifact">
+								<IconButton
+									aria-label={`delete ${artifactLabel(artifact)}`}
+									size="small"
+									color="error"
+									onClick={() => setConfirmDelete(true)}
+								>
+									<DeleteIcon fontSize="small" />
+								</IconButton>
+							</GradedAction>
 						</Stack>
 					)}
 				</TableCell>
@@ -622,19 +643,21 @@ function EditArtifactRow({
 			</TableCell>
 			<TableCell align="right">
 				<Stack direction="row" spacing={0.5} sx={{ justifyContent: "flex-end" }}>
-					<Button
-						size="small"
-						variant="contained"
-						onClick={save}
-						// `required` on the field never fires: the row is not a
-						// form and Save is not a submit, so nothing validates it.
-						disabled={
-							action.pending ||
-							(!artifact.canopy_holds_bytes && !url?.trim())
-						}
-					>
-						{action.pending ? "Saving…" : "Save"}
-					</Button>
+					<GradedAction calls="versions/update_artifact">
+						<Button
+							size="small"
+							variant="contained"
+							onClick={save}
+							// `required` on the field never fires: the row is not a
+							// form and Save is not a submit, so nothing validates it.
+							disabled={
+								action.pending ||
+								(!artifact.canopy_holds_bytes && !url?.trim())
+							}
+						>
+							{action.pending ? "Saving…" : "Save"}
+						</Button>
+					</GradedAction>
 					<Button
 						size="small"
 						variant="outlined"
@@ -815,13 +838,15 @@ function CreateArtifactForm({
 							required
 						/>
 					)}
-					<Button
-						type="submit"
-						variant="contained"
-						disabled={action.pending || (scoped && !file) || fileError !== null}
-					>
-						{action.pending ? "Creating…" : "Create"}
-					</Button>
+					<GradedAction calls={scoped ? "versions/upload_artifact" : "versions/create_artifact"}>
+						<Button
+							type="submit"
+							variant="contained"
+							disabled={action.pending || (scoped && !file) || fileError !== null}
+						>
+							{action.pending ? "Creating…" : "Create"}
+						</Button>
+					</GradedAction>
 				</Stack>
 				{(fileError ?? action.error?.message) && (
 					<Alert severity="error" sx={{ mt: 1 }}>
@@ -925,13 +950,15 @@ function KnownIssuesSection({
 					Known issues
 				</Typography>
 				{isAdmin && (
-					<Button
-						variant="outlined"
-						size="small"
-						onClick={() => setAddOpen(true)}
-					>
-						Add known issue
-					</Button>
+					<GradedAction calls="versions/add_known_issue">
+						<Button
+							variant="outlined"
+							size="small"
+							onClick={() => setAddOpen(true)}
+						>
+							Add known issue
+						</Button>
+					</GradedAction>
 				)}
 			</Stack>
 
@@ -1033,9 +1060,11 @@ function KnownIssueRow({
 					{issue.author} • <TimeAgo timestamp={issue.created_at} />
 				</Typography>
 				{open && isAdmin && (
-					<Button size="small" onClick={() => setResolveOpen(true)}>
-						Resolve
-					</Button>
+					<GradedAction calls="versions/resolve_known_issue">
+						<Button size="small" onClick={() => setResolveOpen(true)}>
+							Resolve
+						</Button>
+					</GradedAction>
 				)}
 			</Stack>
 			<Typography
@@ -1146,13 +1175,15 @@ function AddKnownIssueDialog({
 				<Button onClick={cancel} disabled={action.pending}>
 					Cancel
 				</Button>
-				<Button
-					variant="contained"
-					onClick={submit}
-					disabled={action.pending || draft.trim() === ""}
-				>
-					{action.pending ? "Adding…" : "Add"}
-				</Button>
+				<GradedAction calls="versions/add_known_issue">
+					<Button
+						variant="contained"
+						onClick={submit}
+						disabled={action.pending || draft.trim() === ""}
+					>
+						{action.pending ? "Adding…" : "Add"}
+					</Button>
+				</GradedAction>
 			</DialogActions>
 		</Dialog>
 	);
@@ -1259,13 +1290,15 @@ function ResolveKnownIssueDialog({
 				<Button onClick={cancel} disabled={action.pending}>
 					Cancel
 				</Button>
-				<Button
-					variant="contained"
-					onClick={submit}
-					disabled={action.pending || draft.trim() === "" || !fixValid}
-				>
-					{action.pending ? "Resolving…" : "Resolve"}
-				</Button>
+				<GradedAction calls="versions/resolve_known_issue">
+					<Button
+						variant="contained"
+						onClick={submit}
+						disabled={action.pending || draft.trim() === "" || !fixValid}
+					>
+						{action.pending ? "Resolving…" : "Resolve"}
+					</Button>
+				</GradedAction>
 			</DialogActions>
 		</Dialog>
 	);

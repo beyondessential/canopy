@@ -16,6 +16,7 @@ export default function ActionButton({
 	href,
 	to,
 	onClick,
+	disabled,
 }: {
 	icon: ReactNode;
 	label: string;
@@ -26,12 +27,16 @@ export default function ActionButton({
 	href?: string;
 	to?: string;
 	onClick?: () => void;
+	/** Forwarded to the button, so a caller that blocks this control (see
+	 * `GradedAction`) takes it out of the keyboard's reach as well. */
+	disabled?: boolean;
 }) {
 	const common = {
 		variant: "outlined" as const,
 		size: "small" as const,
 		color,
 		title,
+		disabled,
 		"aria-label": label,
 		startIcon: icon,
 		sx: {

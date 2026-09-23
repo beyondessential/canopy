@@ -12,6 +12,7 @@ import { useState } from "react";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { qualifiedSilenceRef, namespaceSegment, type NamespaceRef } from "../types";
+import { GradedAction } from "./GradedAction";
 import TimeAgo from "./TimeAgo";
 
 /// Listed at the bottom of the server / group detail page. Renders the
@@ -173,6 +174,12 @@ function SilencedRow({
 			: scope === "machine"
 				? unsilenceMachine
 				: unsilenceGroup;
+	const unsilenceCall =
+		scope === "server"
+			? "silenced_refs/unsilence_server"
+			: scope === "machine"
+				? "silenced_refs/unsilence_machine"
+				: "silenced_refs/unsilence_group";
 	const pending = action.pending;
 	const error = action.error;
 	const unsilence = async () => {
@@ -222,15 +229,17 @@ function SilencedRow({
 					{createdBy && ` by ${createdBy}`}
 				</Typography>
 				{isAdmin && (
-					<Button
-						size="small"
-						variant="outlined"
-						startIcon={<NotificationsActiveOutlinedIcon />}
-						disabled={pending}
-						onClick={unsilence}
-					>
-						Un-silence
-					</Button>
+					<GradedAction calls={unsilenceCall}>
+						<Button
+							size="small"
+							variant="outlined"
+							startIcon={<NotificationsActiveOutlinedIcon />}
+							disabled={pending}
+							onClick={unsilence}
+						>
+							Un-silence
+						</Button>
+					</GradedAction>
 				)}
 			</Stack>
 			{error && <Alert severity="error" sx={{ mt: 1 }}>{error.message}</Alert>}

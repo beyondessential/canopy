@@ -2,6 +2,7 @@ import { Button, Dialog, DialogContent, DialogTitle } from "@mui/material";
 import AddAlertIcon from "@mui/icons-material/AddAlert";
 import { useState } from "react";
 import ActionButton from "./ActionButton";
+import { GradedAction } from "./GradedAction";
 import ManualEventForm from "./ManualEventForm";
 
 /** Admin-only button on the ServerDetail header: opens a dialog with the
@@ -36,20 +37,24 @@ export default function ManualEventButton({
 	return (
 		<>
 			{action ? (
-				<ActionButton
-					icon={<AddAlertIcon />}
-					label={label}
-					onClick={() => setOpen(true)}
-				/>
+				<GradedAction calls="issues/submit_manual_event">
+					<ActionButton
+						icon={<AddAlertIcon />}
+						label={label}
+						onClick={() => setOpen(true)}
+					/>
+				</GradedAction>
 			) : (
-				<Button
-					variant="outlined"
-					size={size}
-					startIcon={<AddAlertIcon />}
-					onClick={() => setOpen(true)}
-				>
-					{label}
-				</Button>
+				<GradedAction calls="issues/submit_manual_event">
+					<Button
+						variant="outlined"
+						size={size}
+						startIcon={<AddAlertIcon />}
+						onClick={() => setOpen(true)}
+					>
+						{label}
+					</Button>
+				</GradedAction>
 			)}
 			<Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="sm">
 				<DialogTitle>{label}</DialogTitle>

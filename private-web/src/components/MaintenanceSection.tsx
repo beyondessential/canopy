@@ -5,7 +5,6 @@ import {
 	LinearProgress,
 	ListSubheader,
 	Menu,
-	MenuItem,
 	Link as MuiLink,
 	Paper,
 	Stack,
@@ -20,6 +19,7 @@ import { useIsAdmin } from "../hooks/useIsAdmin";
 import { environmentName, heldByLabel } from "../types";
 import type { MaintenanceScope, MaintenanceWindow, ServerRank } from "../types";
 import DeclareMaintenanceDialog from "./DeclareMaintenanceDialog";
+import { GradedAction, GradedMenuItem } from "./GradedAction";
 import ServerRankChip from "./ServerRankChip";
 import TimeAgo from "./TimeAgo";
 
@@ -224,25 +224,29 @@ export default function MaintenanceSection({
 					action={
 						isAdmin ? (
 							<Stack direction="row" spacing={1}>
-								<Button size="small" color="info" onClick={() => setDialogOpen(true)}>
-									Amend
-								</Button>
-								<Button
-									size="small"
-									color="info"
-									variant="outlined"
-									disabled={lift.pending}
-									onClick={async () => {
-										try {
-											await lift.call({ id: open.id });
-											reload();
-										} catch {
-											/* surfaced below */
-										}
-									}}
-								>
-									Lift
-								</Button>
+								<GradedAction calls="maintenance/declare">
+									<Button size="small" color="info" onClick={() => setDialogOpen(true)}>
+										Amend
+									</Button>
+								</GradedAction>
+								<GradedAction calls="maintenance/lift">
+									<Button
+										size="small"
+										color="info"
+										variant="outlined"
+										disabled={lift.pending}
+										onClick={async () => {
+											try {
+												await lift.call({ id: open.id });
+												reload();
+											} catch {
+												/* surfaced below */
+											}
+										}}
+									>
+										Lift
+									</Button>
+								</GradedAction>
 							</Stack>
 						) : undefined
 					}
@@ -275,52 +279,58 @@ export default function MaintenanceSection({
 			{isAdmin && (!open || declarable.length > 0) && (
 				<Stack direction="row" sx={{ mb: history.length ? 2 : 0 }}>
 					{!open && (
-						<Button
-							size="small"
-							variant="outlined"
-							startIcon={<BuildOutlinedIcon />}
-							onClick={() => setDialogOpen(true)}
-							sx={
-								declarable.length
-									? {
-											borderTopRightRadius: 0,
-											borderBottomRightRadius: 0,
-											borderRightColor: "transparent",
-										}
-									: undefined
-							}
-						>
-							{fromMachine || fromGroup
-								? `Declare for this ${scope} as well`
-								: "Declare maintenance"}
-						</Button>
-					)}
-					{declarable.length > 0 &&
-						(open ? (
+						<GradedAction calls="maintenance/declare">
 							<Button
 								size="small"
 								variant="outlined"
 								startIcon={<BuildOutlinedIcon />}
-								endIcon={<ArrowDropDownIcon fontSize="small" />}
-								onClick={(event) => setMenuAnchor(event.currentTarget)}
+								onClick={() => setDialogOpen(true)}
+								sx={
+									declarable.length
+										? {
+												borderTopRightRadius: 0,
+												borderBottomRightRadius: 0,
+												borderRightColor: "transparent",
+											}
+										: undefined
+								}
 							>
-								Declare over an environment
+								{fromMachine || fromGroup
+									? `Declare for this ${scope} as well`
+									: "Declare maintenance"}
 							</Button>
+						</GradedAction>
+					)}
+					{declarable.length > 0 &&
+						(open ? (
+							<GradedAction calls="maintenance/declare">
+								<Button
+									size="small"
+									variant="outlined"
+									startIcon={<BuildOutlinedIcon />}
+									endIcon={<ArrowDropDownIcon fontSize="small" />}
+									onClick={(event) => setMenuAnchor(event.currentTarget)}
+								>
+									Declare over an environment
+								</Button>
+							</GradedAction>
 						) : (
-							<Button
-								size="small"
-								variant="outlined"
-								aria-label="Declare over an environment"
-								onClick={(event) => setMenuAnchor(event.currentTarget)}
-								sx={{
-									minWidth: 32,
-									px: 0,
-									borderTopLeftRadius: 0,
-									borderBottomLeftRadius: 0,
-								}}
-							>
-								<ArrowDropDownIcon fontSize="small" />
-							</Button>
+							<GradedAction calls="maintenance/declare">
+								<Button
+									size="small"
+									variant="outlined"
+									aria-label="Declare over an environment"
+									onClick={(event) => setMenuAnchor(event.currentTarget)}
+									sx={{
+										minWidth: 32,
+										px: 0,
+										borderTopLeftRadius: 0,
+										borderBottomLeftRadius: 0,
+									}}
+								>
+									<ArrowDropDownIcon fontSize="small" />
+								</Button>
+							</GradedAction>
 						))}
 				</Stack>
 			)}
@@ -334,34 +344,38 @@ export default function MaintenanceSection({
 					action={
 						isAdmin ? (
 							<Stack direction="row" spacing={1}>
-								<Button
-									size="small"
-									color="info"
-									onClick={() =>
-										setEnvironmentDialog({
-											rank: window.rank as ServerRank,
-											existing: window,
-										})
-									}
-								>
-									Amend
-								</Button>
-								<Button
-									size="small"
-									color="info"
-									variant="outlined"
-									disabled={lift.pending}
-									onClick={async () => {
-										try {
-											await lift.call({ id: window.id });
-											reload();
-										} catch {
-											/* surfaced below */
+								<GradedAction calls="maintenance/declare">
+									<Button
+										size="small"
+										color="info"
+										onClick={() =>
+											setEnvironmentDialog({
+												rank: window.rank as ServerRank,
+												existing: window,
+											})
 										}
-									}}
-								>
-									Lift
-								</Button>
+									>
+										Amend
+									</Button>
+								</GradedAction>
+								<GradedAction calls="maintenance/lift">
+									<Button
+										size="small"
+										color="info"
+										variant="outlined"
+										disabled={lift.pending}
+										onClick={async () => {
+											try {
+												await lift.call({ id: window.id });
+												reload();
+											} catch {
+												/* surfaced below */
+											}
+										}}
+									>
+										Lift
+									</Button>
+								</GradedAction>
 							</Stack>
 						) : undefined
 					}
@@ -398,15 +412,16 @@ export default function MaintenanceSection({
 				>
 					<ListSubheader sx={{ lineHeight: 2 }}>Declare over environment</ListSubheader>
 					{declarable.map((environment) => (
-						<MenuItem
+						<GradedMenuItem
 							key={environment}
+							calls="maintenance/declare"
 							onClick={() => {
 								setMenuAnchor(null);
 								setEnvironmentDialog({ rank: environment, existing: null });
 							}}
 						>
 							<ServerRankChip rank={environment} />
-						</MenuItem>
+						</GradedMenuItem>
 					))}
 				</Menu>
 			)}

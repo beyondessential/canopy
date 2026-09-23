@@ -9,6 +9,7 @@ import {
 import AddIcon from "@mui/icons-material/Add";
 import { useState } from "react";
 import DeviceShorty from "../components/DeviceShorty";
+import { GradedAction } from "../components/GradedAction";
 import ProvisionCredentialDialog from "../components/ProvisionCredentialDialog";
 import { useApi } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -33,13 +34,15 @@ export default function DevicesList() {
 	return (
 		<Stack spacing={2}>
 			<Box sx={{ display: "flex", justifyContent: "flex-end" }}>
-				<Button
-					variant="contained"
-					startIcon={<AddIcon />}
-					onClick={() => setCreateOpen(true)}
-				>
-					Create device
-				</Button>
+				<GradedAction calls="devices/provision_credential">
+					<Button
+						variant="contained"
+						startIcon={<AddIcon />}
+						onClick={() => setCreateOpen(true)}
+					>
+						Create device
+					</Button>
+				</GradedAction>
 				<ProvisionCredentialDialog
 					open={createOpen}
 					onClose={() => setCreateOpen(false)}

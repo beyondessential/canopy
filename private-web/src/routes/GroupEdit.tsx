@@ -12,6 +12,7 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import TagsEditor from "../components/TagsEditor";
 import { useApi, useApiAction } from "../api";
+import { GradedAction } from "../components/GradedAction";
 import { usePageTitle } from "../hooks/usePageTitle";
 import type { ServerGroup, TagMap } from "../types";
 
@@ -100,9 +101,11 @@ function CreateForm() {
 				)}
 
 				<Stack direction="row" spacing={1}>
-					<Button type="submit" variant="contained" disabled={create.pending}>
-						{create.pending ? "Creating…" : "Create group"}
-					</Button>
+					<GradedAction calls="fleet/groups/create">
+						<Button type="submit" variant="contained" disabled={create.pending}>
+							{create.pending ? "Creating…" : "Create group"}
+						</Button>
+					</GradedAction>
 					<Button
 						type="button"
 						variant="outlined"
@@ -290,13 +293,15 @@ function EditForm({
 					sx={{ alignItems: "center", justifyContent: "space-between" }}
 				>
 					<Stack direction="row" spacing={1}>
-						<Button
-							type="submit"
-							variant="contained"
-							disabled={pending}
-						>
-							{update.pending ? "Saving…" : "Save"}
-						</Button>
+						<GradedAction calls="fleet/groups/update">
+							<Button
+								type="submit"
+								variant="contained"
+								disabled={pending}
+							>
+								{update.pending ? "Saving…" : "Save"}
+							</Button>
+						</GradedAction>
 						<Button
 							type="button"
 							variant="outlined"
@@ -307,16 +312,18 @@ function EditForm({
 							Cancel
 						</Button>
 					</Stack>
-					<Button
-						type="button"
-						variant="outlined"
-						color="error"
-						startIcon={<ArchiveIcon />}
-						onClick={onArchive}
-						disabled={pending || memberCount > 0}
-					>
-						Archive group
-					</Button>
+					<GradedAction calls="fleet/groups/delete">
+						<Button
+							type="button"
+							variant="outlined"
+							color="error"
+							startIcon={<ArchiveIcon />}
+							onClick={onArchive}
+							disabled={pending || memberCount > 0}
+						>
+							Archive group
+						</Button>
+					</GradedAction>
 				</Stack>
 			</Stack>
 		</Paper>

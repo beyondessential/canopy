@@ -30,15 +30,15 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(for_server))
-		.routes(routes!(for_group))
-		.routes(routes!(authority))
-		.routes(routes!(set_profile))
-		.routes(routes!(pause))
-		.routes(routes!(resume))
-		.routes(routes!(revoke))
-		.routes(routes!(declare))
-		.routes(routes!(release))
+		.routes(routes!(read_only: for_server))
+		.routes(routes!(read_only: for_group))
+		.routes(routes!(read_only: authority))
+		.routes(routes!(write: set_profile))
+		.routes(routes!(danger: pause))
+		.routes(routes!(write: resume))
+		.routes(routes!(danger: revoke))
+		.routes(routes!(write: declare))
+		.routes(routes!(write: release))
 }
 
 /// A name a server has registered, and how far Canopy has got with it.

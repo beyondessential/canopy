@@ -17,6 +17,7 @@ import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import DownloadIcon from "@mui/icons-material/Download";
 import { useState } from "react";
 import { useApiAction } from "../api";
+import { GradedAction } from "./GradedAction";
 import type { DeviceRole, ProvisionedCredential } from "../types";
 
 const TRUSTABLE_ROLES: DeviceRole[] = [
@@ -201,13 +202,15 @@ export default function ProvisionCredentialDialog({
 						<Button onClick={close} disabled={action.pending}>
 							Cancel
 						</Button>
-						<Button
-							variant="contained"
-							onClick={onProvision}
-							disabled={action.pending}
-						>
-							{action.pending ? "Provisioning…" : "Provision"}
-						</Button>
+						<GradedAction calls="devices/provision_credential">
+							<Button
+								variant="contained"
+								onClick={onProvision}
+								disabled={action.pending}
+							>
+								{action.pending ? "Provisioning…" : "Provision"}
+							</Button>
+						</GradedAction>
 					</>
 				)}
 			</DialogActions>

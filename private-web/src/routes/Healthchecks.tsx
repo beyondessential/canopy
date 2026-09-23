@@ -22,6 +22,7 @@ import { useMemo, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { ApiError, useApi, useApiAction } from "../api";
 import CheckResultChip from "../components/CheckResultChip";
+import { GradedAction } from "../components/GradedAction";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -317,14 +318,16 @@ function HealthcheckRow({
 							</>
 						)}
 						{canEdit && (
-							<Button
-								size="small"
-								variant="outlined"
-								onClick={save}
-								disabled={update.pending}
-							>
-								Save
-							</Button>
+							<GradedAction calls="healthchecks/update">
+								<Button
+									size="small"
+									variant="outlined"
+									onClick={save}
+									disabled={update.pending}
+								>
+									Save
+								</Button>
+							</GradedAction>
 						)}
 						<Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
 							·{" "}
@@ -368,15 +371,17 @@ function HealthcheckRow({
 							<Chip label="gone quiet" color="warning" size="small" />
 						)}
 						{canEdit && goneQuiet && (
-							<Button
-								size="small"
-								color="warning"
-								variant="outlined"
-								onClick={doDecommission}
-								disabled={decommission.pending}
-							>
-								Decommission
-							</Button>
+							<GradedAction calls="healthchecks/decommission">
+								<Button
+									size="small"
+									color="warning"
+									variant="outlined"
+									onClick={doDecommission}
+									disabled={decommission.pending}
+								>
+									Decommission
+								</Button>
+							</GradedAction>
 						)}
 					</Stack>
 				)}

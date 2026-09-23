@@ -144,6 +144,8 @@ struct BackupDefaultsList {
 #[tool_router(router = backups_router, vis = "pub(crate)")]
 impl CanopyMcp {
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "List backup-run history across the fleet (or narrowed by group/server/type/outcome), \
 		               newest first. Each run carries its outcome, error (if failed), and its size / S3 \
 		               traffic figures. Use this to inspect what actually happened; use \
@@ -226,6 +228,8 @@ impl CanopyMcp {
 	}
 
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "List repo-maintenance run history across the fleet (or narrowed by group/kind/outcome), \
 		               newest first: kopia maintenance jobs, distinct from backup runs. Use \
 		               outcome=\"running\" to find jobs currently in flight."
@@ -291,6 +295,8 @@ impl CanopyMcp {
 	}
 
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "Canopy-wide default schedule/retention per backup type — what a group inherits for a \
 		               type unless it sets its own schedule override (see get_group's `backups.schedules`)."
 	)]

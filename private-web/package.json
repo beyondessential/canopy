@@ -10,7 +10,7 @@
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"test:e2e": "playwright test",
-		"gen:api-types": "openapi-typescript openapi.json -o src/api-types.ts"
+		"gen:api-types": "openapi-typescript openapi.json -o src/api-types.ts && node scripts/gen-safety-modes.mjs"
 	},
 	"dependencies": {
 		"@codemirror/lang-sql": "^6.10.0",

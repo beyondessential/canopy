@@ -11,6 +11,8 @@
 //! - **backup staleness + reconcile** — `database::backup::sweep`: stale
 //!   reported runs / maintenance, and report-vs-inventory reconciliation.
 //! - **tailnet key-expiry** — when the Tailscale directory is configured.
+//! - **operator sessions** — retires safety-mode sessions no client has
+//!   presented for a day, on its own hourly timer (see `jobs::session_sweep`).
 //!
 //! Plus a startup **incident reconciliation** pass (see below).
 
@@ -135,6 +137,11 @@ pub fn spawn() -> JoinHandle<()> {
 
 		let backfill_pool = pool.clone();
 		task::spawn(async move { backfill_stability_on_startup(&backfill_pool).await });
+
+		// Operator sessions, on their own hourly timer: a raise lapses on its
+		// own and is decided as read-only wherever it is read, so this is only
+		// about not keeping rows for clients that have gone away.
+		jobs::session_sweep::spawn();
 
 		// Deferred incident (re-)evaluation worker. The status-ingest path
 		// enqueues applications instead of evaluating incident membership inline

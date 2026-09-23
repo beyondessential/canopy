@@ -25,6 +25,7 @@ import ResolverAvatar from "./ResolverAvatar";
 import TargetName from "./TargetName";
 import CheckDocButton from "./CheckDocButton";
 import CheckResultChip from "./CheckResultChip";
+import { type Calls, GradedAction } from "./GradedAction";
 import StatusSnapshotPanel, { StatusSnapshotButton } from "./StatusSnapshot";
 import TimeAgo from "./TimeAgo";
 import {
@@ -410,58 +411,74 @@ function IssueActions({
 		?? silenceMachine.error
 		?? silenceGroup.error;
 
+	const silenceCalls: Calls = [
+		...(issue.application_id != null ? ["silenced_refs/silence_server" as const] : []),
+		...(issue.machine_id != null ? ["silenced_refs/silence_machine" as const] : []),
+		...(issue.server_group_id ? ["silenced_refs/silence_group" as const] : []),
+	];
+
 	return (
 		<Box sx={{ mt: 1 }}>
 			<Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }} useFlexGap>
 				{issue.resolved_at ? (
-					<Button
-						size="small"
-						variant="outlined"
-						color="warning"
-						startIcon={<CheckCircleOutlinedIcon />}
-						onClick={() => wrap(() => unresolve.call({ issue_id: issue.id }))}
-					>
-						Unresolve
-					</Button>
+					<GradedAction calls="issues/unresolve">
+						<Button
+							size="small"
+							variant="outlined"
+							color="warning"
+							startIcon={<CheckCircleOutlinedIcon />}
+							onClick={() => wrap(() => unresolve.call({ issue_id: issue.id }))}
+						>
+							Unresolve
+						</Button>
+					</GradedAction>
 				) : (
-					<Button
-						size="small"
-						variant="outlined"
-						color="success"
-						startIcon={<CheckCircleOutlinedIcon />}
-						onClick={() => setResolveOpen((v) => !v)}
-					>
-						Resolve…
-					</Button>
+					<GradedAction calls="issues/resolve">
+						<Button
+							size="small"
+							variant="outlined"
+							color="success"
+							startIcon={<CheckCircleOutlinedIcon />}
+							onClick={() => setResolveOpen((v) => !v)}
+						>
+							Resolve…
+						</Button>
+					</GradedAction>
 				)}
 				{snoozeActive ? (
-					<Button
-						size="small"
-						variant="outlined"
-						color="warning"
-						startIcon={<SnoozeIcon />}
-						onClick={() => wrap(() => unsnooze.call({ issue_id: issue.id }))}
-					>
-						Unsnooze
-					</Button>
+					<GradedAction calls="issues/unsnooze">
+						<Button
+							size="small"
+							variant="outlined"
+							color="warning"
+							startIcon={<SnoozeIcon />}
+							onClick={() => wrap(() => unsnooze.call({ issue_id: issue.id }))}
+						>
+							Unsnooze
+						</Button>
+					</GradedAction>
 				) : (
+					<GradedAction calls="issues/snooze">
+						<Button
+							size="small"
+							variant="outlined"
+							startIcon={<SnoozeIcon />}
+							onClick={() => setSnoozeOpen((v) => !v)}
+						>
+							Snooze…
+						</Button>
+					</GradedAction>
+				)}
+				<GradedAction calls={silenceCalls}>
 					<Button
 						size="small"
 						variant="outlined"
-						startIcon={<SnoozeIcon />}
-						onClick={() => setSnoozeOpen((v) => !v)}
+						startIcon={<NotificationsOffOutlinedIcon />}
+						onClick={() => setSilenceOpen((v) => !v)}
 					>
-						Snooze…
+						Silence ref…
 					</Button>
-				)}
-				<Button
-					size="small"
-					variant="outlined"
-					startIcon={<NotificationsOffOutlinedIcon />}
-					onClick={() => setSilenceOpen((v) => !v)}
-				>
-					Silence ref…
-				</Button>
+				</GradedAction>
 				<AddNoteButton
 					apiModule="issues"
 					parentKey="issue_id"
@@ -486,19 +503,21 @@ function IssueActions({
 							</MenuItem>
 						))}
 					</TextField>
-					<Button
-						variant="outlined"
-						size="small"
-						color="success"
-						startIcon={<CheckCircleOutlinedIcon />}
-						onClick={() =>
-							wrap(() => resolve.call({ issue_id: issue.id, reason })).then(
-								() => setResolveOpen(false),
-							)
-						}
-					>
-						Resolve
-					</Button>
+					<GradedAction calls="issues/resolve">
+						<Button
+							variant="outlined"
+							size="small"
+							color="success"
+							startIcon={<CheckCircleOutlinedIcon />}
+							onClick={() =>
+								wrap(() => resolve.call({ issue_id: issue.id, reason })).then(
+									() => setResolveOpen(false),
+								)
+							}
+						>
+							Resolve
+						</Button>
+					</GradedAction>
 					<Button
 						variant="outlined"
 						size="small"
@@ -519,21 +538,23 @@ function IssueActions({
 						sx={{ width: 100 }}
 						slotProps={{ htmlInput: { min: 1, max: 24 * 30 } }}
 					/>
-					<Button
-						variant="outlined"
-						size="small"
-						startIcon={<SnoozeIcon />}
-						onClick={() => {
-							const until = new Date(
-								Date.now() + snoozeHours * 3_600_000,
-							).toISOString();
-							wrap(() => snooze.call({ issue_id: issue.id, until })).then(() =>
-								setSnoozeOpen(false),
-							);
-						}}
-					>
-						Snooze
-					</Button>
+					<GradedAction calls="issues/snooze">
+						<Button
+							variant="outlined"
+							size="small"
+							startIcon={<SnoozeIcon />}
+							onClick={() => {
+								const until = new Date(
+									Date.now() + snoozeHours * 3_600_000,
+								).toISOString();
+								wrap(() => snooze.call({ issue_id: issue.id, until })).then(() =>
+									setSnoozeOpen(false),
+								);
+							}}
+						>
+							Snooze
+						</Button>
+					</GradedAction>
 					<Button
 						variant="outlined"
 						size="small"
@@ -552,63 +573,69 @@ function IssueActions({
 					</Typography>
 					<Stack direction="row" spacing={1}>
 						{issue.application_id != null && (
-							<Button
-								variant="outlined"
-								size="small"
-								startIcon={<NotificationsOffOutlinedIcon />}
-								onClick={() =>
-									wrap(() =>
-										silenceServer.call({
-											server_id: issue.application_id,
-											source: issue.source,
-											ref: issue.ref,
-										}),
-									).then(() => setSilenceOpen(false))
-								}
-							>
-								For this server
-							</Button>
+							<GradedAction calls="silenced_refs/silence_server">
+								<Button
+									variant="outlined"
+									size="small"
+									startIcon={<NotificationsOffOutlinedIcon />}
+									onClick={() =>
+										wrap(() =>
+											silenceServer.call({
+												server_id: issue.application_id,
+												source: issue.source,
+												ref: issue.ref,
+											}),
+										).then(() => setSilenceOpen(false))
+									}
+								>
+									For this server
+								</Button>
+							</GradedAction>
 						)}
 						{issue.machine_id != null && (
-							<Button
-								variant="outlined"
-								size="small"
-								startIcon={<NotificationsOffOutlinedIcon />}
-								onClick={() =>
-									wrap(() =>
-										silenceMachine.call({
-											machine_id: issue.machine_id,
-											source: issue.source,
-											ref: issue.ref,
-										}),
-									).then(() => setSilenceOpen(false))
-								}
-							>
-								For this machine
-							</Button>
+							<GradedAction calls="silenced_refs/silence_machine">
+								<Button
+									variant="outlined"
+									size="small"
+									startIcon={<NotificationsOffOutlinedIcon />}
+									onClick={() =>
+										wrap(() =>
+											silenceMachine.call({
+												machine_id: issue.machine_id,
+												source: issue.source,
+												ref: issue.ref,
+											}),
+										).then(() => setSilenceOpen(false))
+									}
+								>
+									For this machine
+								</Button>
+							</GradedAction>
 						)}
 						{issue.server_group_id && (
-							<Button
-								variant="outlined"
-								size="small"
-								startIcon={<NotificationsOffOutlinedIcon />}
-								onClick={() =>
-									wrap(() =>
-										silenceGroup.call({
-											server_group_id: issue.server_group_id!,
-											source: issue.source,
-											ref: issue.ref,
-											// A group spans several application types,
-											// so the silence names the one this issue's
-											// check belongs to.
-											application_type:
-												issue.namespace?.application_type ?? null,
-										}),
-									).then(() => setSilenceOpen(false))
-								}
-							>
-								For this group
-							</Button>
+							<GradedAction calls="silenced_refs/silence_group">
+								<Button
+									variant="outlined"
+									size="small"
+									startIcon={<NotificationsOffOutlinedIcon />}
+									onClick={() =>
+										wrap(() =>
+											silenceGroup.call({
+												server_group_id: issue.server_group_id!,
+												source: issue.source,
+												ref: issue.ref,
+												// A group spans several application types,
+												// so the silence names the one this issue's
+												// check belongs to.
+												application_type:
+													issue.namespace?.application_type ?? null,
+											}),
+										).then(() => setSilenceOpen(false))
+									}
+								>
+									For this group
+								</Button>
+							</GradedAction>
 						)}
 						<Button
 							variant="outlined"

@@ -39,16 +39,16 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(list))
-		.routes(routes!(get))
-		.routes(routes!(get_detail))
-		.routes(routes!(create))
-		.routes(routes!(update))
-		.routes(routes!(archive))
-		.routes(routes!(attach_tailscale_device))
-		.routes(routes!(mint_enrollment))
-		.routes(routes!(revoke_enrollment))
-		.routes(routes!(enrollment_status))
+		.routes(routes!(read_only: list))
+		.routes(routes!(read_only: get))
+		.routes(routes!(read_only: get_detail))
+		.routes(routes!(write: create))
+		.routes(routes!(write: update))
+		.routes(routes!(danger: archive))
+		.routes(routes!(danger: attach_tailscale_device))
+		.routes(routes!(danger: mint_enrollment))
+		.routes(routes!(danger: revoke_enrollment))
+		.routes(routes!(read_only: enrollment_status))
 }
 
 /// Identifies one machine.

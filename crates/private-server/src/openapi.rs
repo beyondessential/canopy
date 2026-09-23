@@ -36,6 +36,7 @@ use utoipa::{
 		(name = "reporting_schemas", description = "Which of a group's versions have a reporting schema built for them."),
 		(name = "restore_replicas", description = "Managed restore replicas: capabilities, worklist, and health."),
 		(name = "self_alerts", description = "Canopy's alerts about its own operation."),
+		(name = "safety", description = "The operator's own safety-mode session: reading it, raising it, lowering it."),
 		(name = "server_groups", description = "Application group management and group-level configuration."),
 		(name = "applications", description = "Application inventory, hierarchy, and metadata."),
 		(name = "silenced_refs", description = "Silencing of issues, incidents, and healthchecks."),

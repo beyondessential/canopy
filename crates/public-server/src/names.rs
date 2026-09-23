@@ -36,13 +36,13 @@ use crate::state::AppState;
 /// Mounted at `/names`.
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(entitlements))
-		.routes(routes!(register_name))
+		.routes(routes!(public: entitlements))
+		.routes(routes!(public: register_name))
 }
 
 /// Mounted at `/certificates`.
 pub fn certificate_routes() -> OpenApiRouter<AppState> {
-	OpenApiRouter::new().routes(routes!(request_certificate))
+	OpenApiRouter::new().routes(routes!(public: request_certificate))
 }
 
 /// Which grant a request needs.

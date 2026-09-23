@@ -226,22 +226,22 @@ pub struct ArtifactData {
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(get_grouped_versions))
-		.routes(routes!(get_version_detail))
-		.routes(routes!(get_version_artifacts))
-		.routes(routes!(update_version_status))
-		.routes(routes!(update_version_changelog))
-		.routes(routes!(update_artifact))
-		.routes(routes!(create_artifact))
+		.routes(routes!(read_only: get_grouped_versions))
+		.routes(routes!(read_only: get_version_detail))
+		.routes(routes!(read_only: get_version_artifacts))
+		.routes(routes!(write: update_version_status))
+		.routes(routes!(write: update_version_changelog))
+		.routes(routes!(write: update_artifact))
+		.routes(routes!(write: create_artifact))
 		.merge(
 			OpenApiRouter::new()
-				.routes(routes!(upload_artifact))
+				.routes(routes!(write: upload_artifact))
 				.layer(DefaultBodyLimit::max(MAX_UPLOAD_ARTIFACT_BODY_BYTES)),
 		)
-		.routes(routes!(delete_artifact))
-		.routes(routes!(list_known_issues))
-		.routes(routes!(add_known_issue))
-		.routes(routes!(resolve_known_issue))
+		.routes(routes!(danger: delete_artifact))
+		.routes(routes!(read_only: list_known_issues))
+		.routes(routes!(write: add_known_issue))
+		.routes(routes!(write: resolve_known_issue))
 }
 
 /// List all versions, grouped by release line.

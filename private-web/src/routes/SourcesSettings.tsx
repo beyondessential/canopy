@@ -24,6 +24,7 @@ import {
 import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { ApiError, useApi, useApiAction } from "../api";
+import { GradedAction } from "../components/GradedAction";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -181,19 +182,21 @@ function SourceRow({
 			</TableCell>
 			<TableCell>
 				{canEdit ? (
-					<ToggleButtonGroup
-						size="small"
-						exclusive
-						value={reachShown}
-						onChange={(_, v) => requestReach(v as ReachabilityMode | null)}
-						disabled={setReach.pending || !ingested}
-					>
-						{REACHABILITY_MODES.map((mode) => (
-							<ToggleButton key={mode} value={mode}>
-								{mode}
-							</ToggleButton>
-						))}
-					</ToggleButtonGroup>
+					<GradedAction calls="healthchecks/set_source_reachability">
+						<ToggleButtonGroup
+							size="small"
+							exclusive
+							value={reachShown}
+							onChange={(_, v) => requestReach(v as ReachabilityMode | null)}
+							disabled={setReach.pending || !ingested}
+						>
+							{REACHABILITY_MODES.map((mode) => (
+								<ToggleButton key={mode} value={mode}>
+									{mode}
+								</ToggleButton>
+							))}
+						</ToggleButtonGroup>
+					</GradedAction>
 				) : (
 					<Chip size="small" label={reachShown} />
 				)}
@@ -205,19 +208,21 @@ function SourceRow({
 			</TableCell>
 			<TableCell>
 				{canEdit ? (
-					<ToggleButtonGroup
-						size="small"
-						exclusive
-						value={ingest}
-						onChange={(_, v) => requestIngest(v as IngestMode | null)}
-						disabled={setIngest.pending}
-					>
-						{INGEST_MODES.map((mode) => (
-							<ToggleButton key={mode} value={mode}>
-								{mode}
-							</ToggleButton>
-						))}
-					</ToggleButtonGroup>
+					<GradedAction calls="healthchecks/set_source_ingest">
+						<ToggleButtonGroup
+							size="small"
+							exclusive
+							value={ingest}
+							onChange={(_, v) => requestIngest(v as IngestMode | null)}
+							disabled={setIngest.pending}
+						>
+							{INGEST_MODES.map((mode) => (
+								<ToggleButton key={mode} value={mode}>
+									{mode}
+								</ToggleButton>
+							))}
+						</ToggleButtonGroup>
+					</GradedAction>
 				) : (
 					<Chip size="small" label={ingest} />
 				)}
@@ -273,9 +278,15 @@ function ConfirmModeDialog({
 				<Button onClick={onCancel} disabled={pending}>
 					Cancel
 				</Button>
-				<Button variant="contained" onClick={onConfirm} disabled={pending}>
-					Confirm
-				</Button>
+				<GradedAction calls={
+					kind === "reachability"
+						? "healthchecks/set_source_reachability"
+						: "healthchecks/set_source_ingest"
+				}>
+					<Button variant="contained" onClick={onConfirm} disabled={pending}>
+						Confirm
+					</Button>
+				</GradedAction>
 			</DialogActions>
 		</Dialog>
 	);

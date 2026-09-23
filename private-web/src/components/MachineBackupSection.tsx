@@ -26,6 +26,7 @@ import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import { BackupLiveProgress } from "./BackupLiveProgress";
 import { BackupProcessingChip } from "./BackupProcessingChip";
+import { GradedAction } from "./GradedAction";
 import { LatestSnapshot } from "./SnapshotId";
 import TimeAgo from "./TimeAgo";
 import { useReloadInterval } from "../hooks/useReloadInterval";
@@ -162,14 +163,16 @@ export default function BackupCapabilitiesSection({
 							severity="warning"
 							icon={<RestoreDataIcon fontSize="inherit" />}
 							action={
-								<Button
-									color="inherit"
-									size="small"
-									onClick={onDisallowRestore}
-									disabled={allowRestore.pending || disallowRestore.pending}
-								>
-									Disable
-								</Button>
+								<GradedAction calls="backups/disallow_restore">
+									<Button
+										color="inherit"
+										size="small"
+										onClick={onDisallowRestore}
+										disabled={allowRestore.pending || disallowRestore.pending}
+									>
+										Disable
+									</Button>
+								</GradedAction>
 							}
 						>
 							Restores are allowed for this machine until{" "}
@@ -177,16 +180,18 @@ export default function BackupCapabilitiesSection({
 							restore backups on demand.
 						</Alert>
 					) : (
-						<Button
-							size="small"
-							color="warning"
-							variant="outlined"
-							startIcon={<RestoreDataIcon />}
-							onClick={onAllowRestore}
-							disabled={allowRestore.pending || disallowRestore.pending}
-						>
-							Allow restores (24h)
-						</Button>
+						<GradedAction calls="backups/allow_restore">
+							<Button
+								size="small"
+								color="warning"
+								variant="outlined"
+								startIcon={<RestoreDataIcon />}
+								onClick={onAllowRestore}
+								disabled={allowRestore.pending || disallowRestore.pending}
+							>
+								Allow restores (24h)
+							</Button>
+						</GradedAction>
 					)}
 					{(allowRestore.error || disallowRestore.error) && (
 						<Alert severity="error" sx={{ mt: 1 }}>
@@ -307,14 +312,16 @@ function BackupCapabilityRow({
 						{setCapability.error.message}
 					</Typography>
 				)}
-				<Switch
-					checked={cap.enabled}
-					disabled={!isAdmin || setCapability.pending}
-					onChange={(e) => onToggle(e.target.checked)}
-					slotProps={{
-						input: { "aria-label": `Enable ${cap.type} backups` },
-					}}
-				/>
+				<GradedAction calls="backups/set_capability">
+					<Switch
+						checked={cap.enabled}
+						disabled={!isAdmin || setCapability.pending}
+						onChange={(e) => onToggle(e.target.checked)}
+						slotProps={{
+							input: { "aria-label": `Enable ${cap.type} backups` },
+						}}
+					/>
+				</GradedAction>
 			</Stack>
 		</Stack>
 	);

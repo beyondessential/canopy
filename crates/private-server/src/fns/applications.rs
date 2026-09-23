@@ -443,14 +443,14 @@ fn server_to_info_with_group(
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(list_some))
-		.routes(routes!(list_archived))
-		.routes(routes!(get_name))
-		.routes(routes!(get_info))
-		.routes(routes!(get_detail))
-		.routes(routes!(update))
-		.routes(routes!(delete))
-		.routes(routes!(restore))
+		.routes(routes!(read_only: list_some))
+		.routes(routes!(read_only: list_archived))
+		.routes(routes!(read_only: get_name))
+		.routes(routes!(read_only: get_info))
+		.routes(routes!(read_only: get_detail))
+		.routes(routes!(write: update))
+		.routes(routes!(write: delete))
+		.routes(routes!(write: restore))
 }
 
 /// Filter and pagination parameters for listing applications.

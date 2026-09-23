@@ -3,6 +3,7 @@ pub mod fns;
 pub mod mcp;
 pub mod openapi;
 pub mod run_pairing;
+pub mod safety;
 pub mod spa;
 pub mod state;
 
@@ -17,6 +18,22 @@ pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::rou
 		.merge(fns::routes())
 		.split_for_parts();
 
+	// Every graded handler is decided against the caller's session here (see the
+	// SAFE spec). The grades come from the document the `routes!` entries just
+	// produced, so there is one declaration per handler and no second copy to
+	// drift. Applied to the API routes only: the SPA and Swagger are not the
+	// administrative surface.
+	let safety = crate::safety::SafetyState {
+		app: state.clone(),
+		grades: std::sync::Arc::new(crate::safety::GradeMap::from_openapi(&api_spec)),
+		touched: Default::default(),
+	};
+	tracing::debug!(graded = safety.grades.len(), "safety-mode grades loaded");
+	let api_router = api_router.layer(middleware::from_fn_with_state(
+		safety,
+		crate::safety::enforce,
+	));
+
 	// `/public/...` accepts tagged-device callers via the dual-auth
 	// device extractor. Everything else (admin API, Swagger, SPA) is
 	// human-only — the tagged-device guard 403s those callers up front
@@ -30,6 +47,10 @@ pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::rou
 
 	let non_public = Router::new()
 		.merge(api_router)
+		// Beside the API, not within it: a redirect reaches no handler and so
+		// carries no safety mode, and the layer above refuses what it cannot
+		// grade. They carry the `/api` prefix themselves.
+		.merge(fns::moved_paths())
 		.merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", api_spec))
 		.nest("/api/mcp", mcp)
 		.fallback(spa::handler)

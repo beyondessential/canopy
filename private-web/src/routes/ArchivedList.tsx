@@ -12,6 +12,7 @@ import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
 import { Link as RouterLink } from "react-router-dom";
 import ServerShorty, { type ServerInfo } from "../components/ServerShorty";
 import { useApi, useApiAction } from "../api";
+import { GradedAction } from "../components/GradedAction";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { compareServersByRankThenType } from "../types";
@@ -80,16 +81,20 @@ export default function ArchivedList() {
 function RestoreButton({
 	pending,
 	onClick,
+	disabled,
 }: {
 	pending: boolean;
 	onClick: () => void;
+	/** Forwarded to the button, so a caller that blocks this control (see
+	 * `GradedAction`) takes it out of the keyboard's reach as well. */
+	disabled?: boolean;
 }) {
 	return (
 		<Button
 			size="small"
 			startIcon={<RestoreIcon />}
 			onClick={onClick}
-			disabled={pending}
+			disabled={pending || disabled}
 		>
 			{pending ? "Restoring…" : "Restore"}
 		</Button>
@@ -132,7 +137,9 @@ function ArchivedGroupRow({
 			</MuiLink>
 			<Box sx={{ ml: "auto" }}>
 				{admin && (
-					<RestoreButton pending={action.pending} onClick={onRestore} />
+					<GradedAction calls="fleet/groups/restore">
+						<RestoreButton pending={action.pending} onClick={onRestore} />
+					</GradedAction>
 				)}
 			</Box>
 			{action.error && (
@@ -167,7 +174,11 @@ function ArchivedServerRow({
 			<Box sx={{ flex: 1 }}>
 				<ServerShorty server={server} />
 			</Box>
-			{admin && <RestoreButton pending={action.pending} onClick={onRestore} />}
+			{admin && (
+				<GradedAction calls="fleet/applications/restore">
+					<RestoreButton pending={action.pending} onClick={onRestore} />
+				</GradedAction>
+			)}
 		</Box>
 	);
 }

@@ -10,6 +10,7 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import { useApiAction } from "../api";
+import { GradedAction } from "./GradedAction";
 
 /// Results an operator can raise a manual condition at: a failure can
 /// open an incident; a warning joins one for context only.
@@ -101,13 +102,15 @@ export default function ManualEventForm({
 				<MuiAlert severity="error">{action.error.message}</MuiAlert>
 			)}
 			<Box>
-				<Button
-					variant="contained"
-					onClick={submit}
-					disabled={!valid || action.pending}
-				>
-					{action.pending ? "Submitting…" : "Submit"}
-				</Button>
+				<GradedAction calls="issues/submit_manual_event">
+					<Button
+						variant="contained"
+						onClick={submit}
+						disabled={!valid || action.pending}
+					>
+						{action.pending ? "Submitting…" : "Submit"}
+					</Button>
+				</GradedAction>
 			</Box>
 		</Stack>
 	);

@@ -1525,3 +1525,67 @@ async fn incidents_name_the_environment_they_target() {
 	})
 	.await
 }
+
+/// Every tool on the fleet query interface declares itself read-only, and needs
+/// no raised session.
+///
+/// The interface changes nothing, so it is graded read-only as a whole (see the
+/// SAFE spec). It is not served through the graded route tables, so this is
+/// what holds a new tool to the same line: listed without the read-only hint,
+/// it fails here.
+#[tokio::test(flavor = "multi_thread")]
+async fn every_tool_is_read_only() {
+	commons_tests::server::run(async |_conn, _public, private| {
+		let list = private
+			.post("/api/mcp")
+			.add_header("accept", ACCEPT)
+			.add_header("mcp-protocol-version", PROTO)
+			.json(&serde_json::json!({
+				"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}
+			}))
+			.await;
+		assert_eq!(list.status_code().as_u16(), 200);
+		let env = parse_envelope(&list.text());
+		let tools = env["result"]["tools"].as_array().expect("tools array");
+		assert!(!tools.is_empty(), "the interface lists its tools");
+
+		let not_read_only: Vec<&str> = tools
+			.iter()
+			.filter(|tool| tool["annotations"]["readOnlyHint"] != serde_json::Value::Bool(true))
+			.filter_map(|tool| tool["name"].as_str())
+			.collect();
+		assert!(
+			not_read_only.is_empty(),
+			"tools not declared read-only: {not_read_only:?}"
+		);
+	})
+	.await
+}
+
+/// A caller reaches the fleet query interface on the real identity path with no
+/// safety-mode session at all, as a read-only request does anywhere.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_interface_needs_no_raised_session() {
+	// SAFETY: single-threaded test process (nextest), env read only by auth.
+	unsafe { std::env::set_var("CANOPY_TRUST_TAILSCALE_HEADERS", "1") };
+
+	commons_tests::server::run(async |mut conn, _public, private| {
+		seed(&mut conn).await;
+		let resp = private
+			.post("/api/mcp")
+			.add_header("accept", ACCEPT)
+			.add_header("mcp-protocol-version", PROTO)
+			.add_header("Tailscale-User-Login", "agent@example.com")
+			.add_header("Tailscale-User-Name", "Agent")
+			.json(&serde_json::json!({
+				"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+				"params": { "name": "fleet_summary", "arguments": {} }
+			}))
+			.await;
+		assert_eq!(resp.status_code().as_u16(), 200);
+		let env = parse_envelope(&resp.text());
+		assert!(env.get("error").is_none(), "rpc error: {env}");
+		assert_ne!(env["result"]["isError"], serde_json::Value::Bool(true));
+	})
+	.await
+}

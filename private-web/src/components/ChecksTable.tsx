@@ -30,8 +30,15 @@ import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
+import type { GradedEndpoint } from "../safety-modes";
 import CheckDocButton from "./CheckDocButton";
 import CheckExtrasList, { checkEntryExtras } from "./CheckExtras";
+import {
+	type Calls,
+	GradedAction,
+	lowestMode,
+	requiredMode,
+} from "./GradedAction";
 import ExternalUsersDetails, {
 	parseExternalUserSessions,
 } from "./ExternalUsersDetails";
@@ -582,6 +589,29 @@ function SilenceCheckButton({
 		unsilenceGroup.error;
 	const refName = silenceRef(source, check);
 	const silenced = !!ownSilence || !!groupSilence;
+	const ownSilenceCall =
+		target.kind === "machine"
+			? "silenced_refs/silence_machine"
+			: "silenced_refs/silence_server";
+	const ownUnsilenceCall =
+		target.kind === "machine"
+			? "silenced_refs/unsilence_machine"
+			: "silenced_refs/unsilence_server";
+	const offered: GradedEndpoint[] = [
+		ownSilence ? ownUnsilenceCall : ownSilenceCall,
+	];
+	if (groupId) {
+		offered.push(
+			groupSilence
+				? "silenced_refs/unsilence_group"
+				: "silenced_refs/silence_group",
+		);
+	}
+	// Each row in the popover is graded on its own, so opening it needs only the
+	// lowest of them: un-silencing is write even where silencing is danger.
+	const popoverMode = lowestMode(offered);
+	const popoverCalls =
+		offered.find((call) => requiredMode(call) === popoverMode) ?? offered[0];
 	const handle = async (fn: () => Promise<unknown>) => {
 		try {
 			await fn();
@@ -593,26 +623,28 @@ function SilenceCheckButton({
 	};
 	return (
 		<>
-			<Tooltip
-				title={silenced ? "Silenced — manage…" : "Silence this check…"}
-			>
-				<IconButton
-					size="small"
-					color={silenced ? "primary" : "default"}
-					aria-label={
-						silenced
-							? `Manage silence for ${check}`
-							: `Silence ${check}`
-					}
-					onClick={(e) => setAnchorEl(e.currentTarget)}
+			<GradedAction calls={popoverCalls}>
+				<Tooltip
+					title={silenced ? "Silenced — manage…" : "Silence this check…"}
 				>
-					{silenced ? (
-						<NotificationsOffIcon fontSize="small" />
-					) : (
-						<NotificationsOffOutlinedIcon fontSize="small" />
-					)}
-				</IconButton>
-			</Tooltip>
+					<IconButton
+						size="small"
+						color={silenced ? "primary" : "default"}
+						aria-label={
+							silenced
+								? `Manage silence for ${check}`
+								: `Silence ${check}`
+						}
+						onClick={(e) => setAnchorEl(e.currentTarget)}
+					>
+						{silenced ? (
+							<NotificationsOffIcon fontSize="small" />
+						) : (
+							<NotificationsOffOutlinedIcon fontSize="small" />
+						)}
+					</IconButton>
+				</Tooltip>
+			</GradedAction>
 			<Popover
 				open={!!anchorEl}
 				anchorEl={anchorEl}
@@ -634,6 +666,8 @@ function SilenceCheckButton({
 								target.kind === "machine" ? "this machine" : "this server"
 							}
 							silence={ownSilence}
+							silenceCalls={ownSilenceCall}
+							unsilenceCalls={ownUnsilenceCall}
 							onSilence={() =>
 								handle(() =>
 									target.kind === "machine"
@@ -669,6 +703,8 @@ function SilenceCheckButton({
 							<SilenceScopeRow
 								scopeLabel="this group"
 								silence={groupSilence}
+								silenceCalls="silenced_refs/silence_group"
+								unsilenceCalls="silenced_refs/unsilence_group"
 								onSilence={() =>
 									handle(() =>
 										silenceGroup.call({
@@ -712,11 +748,15 @@ function SilenceCheckButton({
 function SilenceScopeRow({
 	scopeLabel,
 	silence,
+	silenceCalls,
+	unsilenceCalls,
 	onSilence,
 	onUnsilence,
 }: {
 	scopeLabel: string;
 	silence: { created_at: string; created_by: string | null } | null;
+	silenceCalls: Calls;
+	unsilenceCalls: Calls;
 	onSilence: () => void;
 	onUnsilence: () => void;
 }) {
@@ -736,27 +776,31 @@ function SilenceScopeRow({
 						{silence.created_by && ` by ${silence.created_by}`}
 					</Box>
 				</Typography>
-				<Button
-					size="small"
-					variant="outlined"
-					startIcon={<NotificationsActiveOutlinedIcon />}
-					onClick={onUnsilence}
-				>
-					Un-silence
-				</Button>
+				<GradedAction calls={unsilenceCalls}>
+					<Button
+						size="small"
+						variant="outlined"
+						startIcon={<NotificationsActiveOutlinedIcon />}
+						onClick={onUnsilence}
+					>
+						Un-silence
+					</Button>
+				</GradedAction>
 			</Stack>
 		);
 	}
 	return (
-		<Button
-			size="small"
-			variant="outlined"
-			startIcon={<NotificationsOffOutlinedIcon />}
-			onClick={onSilence}
-			sx={{ alignSelf: "flex-start" }}
-		>
-			For {scopeLabel}
-		</Button>
+		<GradedAction calls={silenceCalls}>
+			<Button
+				size="small"
+				variant="outlined"
+				startIcon={<NotificationsOffOutlinedIcon />}
+				onClick={onSilence}
+				sx={{ alignSelf: "flex-start" }}
+			>
+				For {scopeLabel}
+			</Button>
+		</GradedAction>
 	);
 }
 

@@ -16,6 +16,7 @@ import {
 import { useState } from "react";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
+import { GradedAction } from "../components/GradedAction";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { type BackupConfigView, type BackupRepoMode } from "../types";
 
@@ -177,9 +178,11 @@ function ConfigForm({
 					</Typography>
 					{error && <Alert severity="error">{error.message}</Alert>}
 					<Stack direction="row" spacing={1}>
-						<Button variant="contained" onClick={persist} disabled={pending}>
-							{pending ? "Saving…" : "Save"}
-						</Button>
+						<GradedAction calls="backups/update">
+							<Button variant="contained" onClick={persist} disabled={pending}>
+								{pending ? "Saving…" : "Save"}
+							</Button>
+						</GradedAction>
 						<Button
 							variant="outlined"
 							color="error"
@@ -235,13 +238,15 @@ function ConfigForm({
 						<Alert severity="error">{createShared.error.message}</Alert>
 					)}
 					<Stack direction="row" spacing={1}>
-						<Button
-							variant="contained"
-							onClick={persistShared}
-							disabled={createShared.pending}
-						>
-							{createShared.pending ? "Creating…" : "Create & provision"}
-						</Button>
+						<GradedAction calls="backups/create_shared">
+							<Button
+								variant="contained"
+								onClick={persistShared}
+								disabled={createShared.pending}
+							>
+								{createShared.pending ? "Creating…" : "Create & provision"}
+							</Button>
+						</GradedAction>
 						<Button
 							variant="outlined"
 							color="error"
@@ -372,13 +377,15 @@ function ConfigForm({
 									Re-check
 								</Button>
 							)}
-							<Button
-								variant="contained"
-								onClick={persist}
-								disabled={!canProvision || pending}
-							>
-								{pending ? "Creating…" : "Create & provision"}
-							</Button>
+							<GradedAction calls={["backups/create", "backups/create_repo"]}>
+								<Button
+									variant="contained"
+									onClick={persist}
+									disabled={!canProvision || pending}
+								>
+									{pending ? "Creating…" : "Create & provision"}
+								</Button>
+							</GradedAction>
 						</Stack>
 					</Stack>
 				)}

@@ -14,6 +14,7 @@ import {
 } from "@mui/material";
 import { useEffect, useState } from "react";
 import { callApi, useApiAction } from "../api";
+import { GradedAction } from "./GradedAction";
 import type { DeviceInfo, TailnetLiveInfo } from "../types";
 import TimeAgo from "./TimeAgo";
 
@@ -90,25 +91,29 @@ export default function TailnetIdentitySection({
 				)}
 
 				<Stack direction="row" spacing={1} useFlexGap>
-					<Button
-						variant="contained"
-						onClick={() => setAttachOpen(true)}
-					>
-						{nodeId ? "Replace identity" : "Attach Tailscale identity"}
-					</Button>
+					<GradedAction calls="devices/attach_tailscale">
+						<Button
+							variant="contained"
+							onClick={() => setAttachOpen(true)}
+						>
+							{nodeId ? "Replace identity" : "Attach Tailscale identity"}
+						</Button>
+					</GradedAction>
 					{nodeId &&
 						(confirmDetach ? (
 							<Stack direction="row" spacing={1}>
-								<Button
-									variant="contained"
-									color="error"
-									onClick={onDetach}
-									disabled={detachAction.pending}
-								>
-									{detachAction.pending
-										? "Detaching…"
-										: "Confirm detach"}
-								</Button>
+								<GradedAction calls="devices/detach_tailscale">
+									<Button
+										variant="contained"
+										color="error"
+										onClick={onDetach}
+										disabled={detachAction.pending}
+									>
+										{detachAction.pending
+											? "Detaching…"
+											: "Confirm detach"}
+									</Button>
+								</GradedAction>
 								<Button
 									variant="outlined"
 									onClick={() => setConfirmDetach(false)}
@@ -118,17 +123,21 @@ export default function TailnetIdentitySection({
 								</Button>
 							</Stack>
 						) : (
-							<Button
-								variant="outlined"
-								color="error"
-								onClick={() => setConfirmDetach(true)}
-							>
-								Detach
-							</Button>
+							<GradedAction calls="devices/detach_tailscale">
+								<Button
+									variant="outlined"
+									color="error"
+									onClick={() => setConfirmDetach(true)}
+								>
+									Detach
+								</Button>
+							</GradedAction>
 						))}
-					<Button variant="outlined" onClick={() => setMergeOpen(true)}>
-						Merge into existing device…
-					</Button>
+					<GradedAction calls="devices/merge_into">
+						<Button variant="outlined" onClick={() => setMergeOpen(true)}>
+							Merge into existing device…
+						</Button>
+					</GradedAction>
 				</Stack>
 
 				{detachAction.error && (
@@ -347,17 +356,19 @@ function AttachTailscaleDialog({
 				<Button onClick={onClose} disabled={attachAction.pending}>
 					Cancel
 				</Button>
-				<Button
-					variant="contained"
-					onClick={onConfirm}
-					disabled={
-						attachAction.pending ||
-						preview === null ||
-						identifier.trim() === ""
-					}
-				>
-					{attachAction.pending ? "Attaching…" : "Attach"}
-				</Button>
+				<GradedAction calls="devices/attach_tailscale">
+					<Button
+						variant="contained"
+						onClick={onConfirm}
+						disabled={
+							attachAction.pending ||
+							preview === null ||
+							identifier.trim() === ""
+						}
+					>
+						{attachAction.pending ? "Attaching…" : "Attach"}
+					</Button>
+				</GradedAction>
 			</DialogActions>
 		</Dialog>
 	);
@@ -420,14 +431,16 @@ function MergeIntoDialog({
 				<Button onClick={onClose} disabled={mergeAction.pending}>
 					Cancel
 				</Button>
-				<Button
-					variant="contained"
-					color="warning"
-					onClick={onConfirm}
-					disabled={mergeAction.pending || targetId === ""}
-				>
-					{mergeAction.pending ? "Merging…" : "Merge"}
-				</Button>
+				<GradedAction calls="devices/merge_into">
+					<Button
+						variant="contained"
+						color="warning"
+						onClick={onConfirm}
+						disabled={mergeAction.pending || targetId === ""}
+					>
+						{mergeAction.pending ? "Merging…" : "Merge"}
+					</Button>
+				</GradedAction>
 			</DialogActions>
 		</Dialog>
 	);

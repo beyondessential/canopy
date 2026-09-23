@@ -69,6 +69,8 @@ struct VersionDetail {
 #[tool_router(router = versions_router, vis = "pub(crate)")]
 impl CanopyMcp {
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "List known Tamanu versions with release date, changelog summary, and how \
 		               many live applications currently run each."
 	)]
@@ -105,6 +107,8 @@ impl CanopyMcp {
 	}
 
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "Detail for one Tamanu version: changelog, known issues, available updates, \
 		               and which live applications run it."
 	)]

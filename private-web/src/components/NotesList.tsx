@@ -16,6 +16,7 @@ import AddCommentIcon from "@mui/icons-material/AddComment";
 import DeleteIcon from "@mui/icons-material/Delete";
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
+import { GradedAction } from "./GradedAction";
 import TimeAgo from "./TimeAgo";
 
 /** Shared note shape; both IssueNoteData and IncidentNoteData fit this. */
@@ -122,14 +123,16 @@ export function AddNoteButton({
 
 	return (
 		<>
-			<Button
-				size="small"
-				variant={variant}
-				startIcon={<AddCommentIcon />}
-				onClick={() => setOpen(true)}
-			>
-				{label}
-			</Button>
+			<GradedAction calls={`${apiModule}/add_note`}>
+				<Button
+					size="small"
+					variant={variant}
+					startIcon={<AddCommentIcon />}
+					onClick={() => setOpen(true)}
+				>
+					{label}
+				</Button>
+			</GradedAction>
 			<Dialog open={open} onClose={close} fullWidth maxWidth="sm">
 				<DialogTitle>{label}</DialogTitle>
 				<DialogContent>
@@ -153,13 +156,15 @@ export function AddNoteButton({
 					<Button onClick={close} disabled={add.pending}>
 						Cancel
 					</Button>
-					<Button
-						variant="contained"
-						onClick={submit}
-						disabled={add.pending || draft.trim() === ""}
-					>
-						{add.pending ? "Adding…" : "Add"}
-					</Button>
+					<GradedAction calls={`${apiModule}/add_note`}>
+						<Button
+							variant="contained"
+							onClick={submit}
+							disabled={add.pending || draft.trim() === ""}
+						>
+							{add.pending ? "Adding…" : "Add"}
+						</Button>
+					</GradedAction>
 				</DialogActions>
 			</Dialog>
 		</>
@@ -211,15 +216,17 @@ function NoteRow({
 						<TimeAgo timestamp={note.created_at} />
 					</Typography>
 					{canEdit && (
-						<IconButton
-							size="small"
-							color="error"
-							aria-label="Delete"
-							onClick={remove}
-							disabled={del.pending}
-						>
-							<DeleteIcon fontSize="inherit" />
-						</IconButton>
+						<GradedAction calls={`${apiModule}/delete_note`}>
+							<IconButton
+								size="small"
+								color="error"
+								aria-label="Delete"
+								onClick={remove}
+								disabled={del.pending}
+							>
+								<DeleteIcon fontSize="inherit" />
+							</IconButton>
+						</GradedAction>
 					)}
 				</Stack>
 			</Stack>

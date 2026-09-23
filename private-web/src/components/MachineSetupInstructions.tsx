@@ -15,6 +15,7 @@ import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import { useEffect, useRef, useState } from "react";
 import { useApi, useApiAction } from "../api";
+import { GradedAction, useGrade } from "./GradedAction";
 import { useReloadInterval } from "../hooks/useReloadInterval";
 import TimeAgo from "./TimeAgo";
 import type { EnrollmentTicket } from "../types";
@@ -100,14 +101,17 @@ export default function MachineSetupInstructions({
 
 	// Initial setup auto-mints once — but only when nothing is outstanding, so a
 	// reload mid-enrollment shows the pending ticket instead of clobbering it.
+	// Minting is danger, so a session below it waits for the operator to raise
+	// rather than asking and being refused.
 	const autoMinted = useRef(false);
+	const minting = useGrade("fleet/machines/mint_enrollment");
 	useEffect(() => {
 		if (reEnroll || !statusLoaded || autoMinted.current || ticket) return;
-		if (outstanding) return;
+		if (outstanding || minting.blocked) return;
 		autoMinted.current = true;
 		doMint();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [reEnroll, statusLoaded, outstanding, ticket]);
+	}, [reEnroll, statusLoaded, outstanding, ticket, minting.blocked]);
 
 	// Notify the parent once when (re-)registration completes.
 	const [notified, setNotified] = useState(false);
@@ -154,14 +158,37 @@ export default function MachineSetupInstructions({
 		}
 	};
 
+	// Initial setup that cannot mint yet: the ticket it would have minted on its
+	// own, offered as the control it needs a higher mode for.
+	if (
+		!reEnroll &&
+		minting.blocked &&
+		statusLoaded &&
+		!outstanding &&
+		!ticket &&
+		!mint.pending
+	) {
+		return (
+			<Box>
+				<GradedAction calls="fleet/machines/mint_enrollment">
+					<Button variant="outlined" onClick={doMint}>
+						Issue enrollment ticket
+					</Button>
+				</GradedAction>
+			</Box>
+		);
+	}
+
 	// Idle re-enroll: nothing minted in this session and nothing outstanding —
 	// just offer the button.
 	if (reEnroll && statusLoaded && !outstanding && !ticket && !mint.pending) {
 		return (
 			<Box>
-				<Button variant="outlined" onClick={doMint}>
-					Re-enroll a device
-				</Button>
+				<GradedAction calls="fleet/machines/mint_enrollment">
+					<Button variant="outlined" onClick={doMint}>
+						Re-enroll a device
+					</Button>
+				</GradedAction>
 				<Typography
 					variant="caption"
 					color="text.secondary"
@@ -181,16 +208,20 @@ export default function MachineSetupInstructions({
 	}
 
 	const reissueButton = (
-		<Tooltip title="Generates a new ticket and passphrase; the current ones immediately stop working.">
-			<Button
-				size="small"
-				startIcon={<RefreshIcon />}
-				onClick={doMint}
-				disabled={mint.pending}
-			>
-				{mint.pending ? "Reissuing…" : "Reissue"}
-			</Button>
-		</Tooltip>
+		<GradedAction calls="fleet/machines/mint_enrollment">
+			<Tooltip title="Generates a new ticket and passphrase; the current ones immediately stop working.">
+				<Button
+					size="small"
+					startIcon={<RefreshIcon />}
+					onClick={doMint}
+					// A tooltip keeps its child's own props over the ones the
+					// wrapper passes in, so the blocked state is named here too.
+					disabled={mint.pending || minting.blocked}
+				>
+					{mint.pending ? "Reissuing…" : "Reissue"}
+				</Button>
+			</Tooltip>
+		</GradedAction>
 	);
 
 	return (
@@ -340,14 +371,16 @@ export default function MachineSetupInstructions({
 
 				{reEnroll && (ticket != null || outstanding) && (
 					<Box>
-						<Button
-							size="small"
-							color="error"
-							onClick={onCancel}
-							disabled={revoke.pending}
-						>
-							{revoke.pending ? "Cancelling…" : "Cancel re-enrollment"}
-						</Button>
+						<GradedAction calls="fleet/machines/revoke_enrollment">
+							<Button
+								size="small"
+								color="error"
+								onClick={onCancel}
+								disabled={revoke.pending}
+							>
+								{revoke.pending ? "Cancelling…" : "Cancel re-enrollment"}
+							</Button>
+						</GradedAction>
 					</Box>
 				)}
 

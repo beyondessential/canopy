@@ -191,6 +191,18 @@ In production, the header should be set from a client certificate, as terminated
 - Caddy: use the `{http.request.tls.client.certificate_pem}` placeholder.
 - Envoy: enable `forward_client_cert_details` with `set_current_client_cert_details.cert`, and set `CANOPY_DEVICE_AUTH_CERT_HEADER=xfcc` so that header is the one trusted.
 
+### Private API Authentication
+
+The `private-server` binary serves the admin API and embedded UI, exposed on the tailnet behind the Tailscale Kubernetes operator. The operator sets the `Tailscale-User-Login`, `Tailscale-User-Name`, and `Tailscale-User-Profile-Pic` headers from the caller's tailnet identity, and admin endpoints resolve that identity through the allow-list and tailnet policy (see the administrative-access spec).
+
+In debug builds the server skips that path and acts as a fixed `admin@localhost` administrator, so local dev and integration tests don't have to set those headers on every request. Set `CANOPY_TRUST_TAILSCALE_HEADERS=1` to opt into the real path instead: the server then trusts the `Tailscale-User-*` headers, and admin status resolves through the real allow-list and policy. Use this to exercise a denial locally, e.g. against `just watch-private-api`:
+
+```console
+$ curl -H "Tailscale-User-Login: you@example.com" http://127.0.0.1:8081/api/admins/list
+```
+
+The opt-in is compiled out of release builds: production always authenticates and no environment variable can bypass it.
+
 ### MCP
 
 Claude Code:

@@ -100,6 +100,8 @@ struct GroupDetail {
 #[tool_router(router = groups_router, vis = "pub(crate)")]
 impl CanopyMcp {
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "Find server groups by name/id, with live member count, effective version, \
 		               highest member rank, backup config state, and last-backup time."
 	)]
@@ -144,6 +146,8 @@ impl CanopyMcp {
 	}
 
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "Full detail for one group: members (with version/health), backup config, \
 		               schedules, repo stats, and recent backup/maintenance activity."
 	)]

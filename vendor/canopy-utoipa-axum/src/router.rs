@@ -101,7 +101,7 @@ where
     /// # use canopy_utoipa_axum::{routes, router::{UtoipaMethodRouter, UtoipaMethodRouterExt}};
     /// # #[utoipa::path(get, path = "")]
     /// # async fn search_user() {}
-    /// let _: UtoipaMethodRouter = routes!(search_user).map(|method_router| {
+    /// let _: UtoipaMethodRouter = routes!(read_only: search_user).map(|method_router| {
     ///     // .. implementation here
     ///     method_router
     /// });
@@ -337,7 +337,7 @@ where
     /// async fn search() {}
     ///
     /// let search_router = OpenApiRouter::new()
-    ///     .routes(canopy_utoipa_axum::routes!(search));
+    ///     .routes(canopy_utoipa_axum::routes!(read_only: search));
     ///
     /// let router: OpenApiRouter = OpenApiRouter::new()
     ///     .nest("/api", search_router);
@@ -397,7 +397,7 @@ where
     /// async fn search() {}
     ///
     /// let search_router = OpenApiRouter::new()
-    ///     .routes(canopy_utoipa_axum::routes!(search));
+    ///     .routes(canopy_utoipa_axum::routes!(read_only: search));
     ///
     /// let router: OpenApiRouter = OpenApiRouter::new()
     ///     .merge(search_router);

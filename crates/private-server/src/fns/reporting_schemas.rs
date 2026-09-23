@@ -12,8 +12,8 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(for_group))
-		.routes(routes!(build))
+		.routes(routes!(read_only: for_group))
+		.routes(routes!(write: build))
 }
 
 /// Request body for reading a group's pairs.

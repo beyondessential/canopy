@@ -393,6 +393,8 @@ struct IssueDetail {
 #[tool_router(router = incidents_router, vis = "pub(crate)")]
 impl CanopyMcp {
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "List incidents that were open at any point in a recent window (default last \
 		               7 days), optionally for one group. Use this for 'incidents open in the past \
 		               week'.\n\n\
@@ -471,6 +473,8 @@ impl CanopyMcp {
 	}
 
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "Full detail for one incident: timing, status, and the issues attached to it \
 		               (with their severities and messages)."
 	)]
@@ -541,6 +545,8 @@ impl CanopyMcp {
 	}
 
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "List issues across the fleet, filtered by active state, effective result, \
 		               group, server, and recency. Issues are the per-(server,source,check) conditions \
 		               that make up incidents."
@@ -593,6 +599,8 @@ impl CanopyMcp {
 	}
 
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "Full detail for one issue: its fields and the incidents it is or was part of."
 	)]
 	async fn get_issue(
@@ -651,6 +659,8 @@ impl CanopyMcp {
 	}
 
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "Get the operator-authored documentation for a (source, check): what the \
 		               check observes, what each result means, and hints for solving a failure. \
 		               Prefer this curated knowledge over inferring what a check does from its \
@@ -700,6 +710,8 @@ impl CanopyMcp {
 	}
 
 	#[tool(
+		// Every tool reads; none changes anything (see the SAFE spec).
+		annotations(read_only_hint = true),
 		description = "Full stability records for a set of checks, one row per (target, source, \
 		               check) state: observation counts, the recent healthy<->degraded transition \
 		               ring, an hour-of-week degradation profile (168 buckets, UTC, Monday 00:00 \

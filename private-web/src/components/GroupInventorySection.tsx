@@ -19,6 +19,7 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
+import { GradedAction, blockedSx, blockedTitle, useGrade } from "./GradedAction";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import type {
 	InventoryLease,
@@ -334,15 +335,17 @@ function Run({
 				</Typography>
 			) : (
 				<Stack spacing={0.5} sx={{ mt: 1, alignItems: "flex-start" }}>
-					<Button
-						size="small"
-						variant="outlined"
-						startIcon={<BuildOutlinedIcon />}
-						onClick={() => setDialogOpen(true)}
-						data-testid="declare-work"
-					>
-						Declare the work
-					</Button>
+					<GradedAction calls="maintenance/declare">
+						<Button
+							size="small"
+							variant="outlined"
+							startIcon={<BuildOutlinedIcon />}
+							onClick={() => setDialogOpen(true)}
+							data-testid="declare-work"
+						>
+							Declare the work
+						</Button>
+					</GradedAction>
 					<Typography variant="caption" color="text.secondary">
 						Declare it before running, and no one else can take the lease until
 						you lift it.
@@ -386,6 +389,9 @@ function Vars({
 	empty?: string;
 }) {
 	const remove = useApiAction("inventory_variables", "remove");
+	// The delete icon belongs to the chip, which clones it to attach its own
+	// handler, so it takes the blocked treatment directly rather than a wrapper.
+	const removal = useGrade("inventory_variables/remove");
 
 	if (items.length === 0) {
 		return (
@@ -427,7 +433,9 @@ function Vars({
 								}
 								sx={{ fontFamily: "monospace", maxWidth: "100%" }}
 								onDelete={
-									onRemove
+									onRemove && removal.blocked
+										? () => {}
+										: onRemove
 										? () => {
 												remove
 													.call({
@@ -444,7 +452,16 @@ function Vars({
 								deleteIcon={
 									<DeleteIcon
 										data-testid={`remove-${variable.name}`}
-										titleAccess={`remove ${variable.name}`}
+										titleAccess={
+											removal.blocked
+												? blockedTitle(removal.required)
+												: `remove ${variable.name}`
+										}
+										sx={
+											removal.blocked
+												? { ...blockedSx(removal.required), borderRadius: "50%" }
+												: undefined
+										}
 									/>
 								}
 							/>
@@ -556,13 +573,15 @@ function SetVariable({
 					}
 					label="Secret"
 				/>
-				<Button
-					variant="outlined"
-					onClick={submit}
-					disabled={set.pending || name.trim() === "" || value === ""}
-				>
-					Set
-				</Button>
+				<GradedAction calls="inventory_variables/set">
+					<Button
+						variant="outlined"
+						onClick={submit}
+						disabled={set.pending || name.trim() === "" || value === ""}
+					>
+						Set
+					</Button>
+				</GradedAction>
 			</Stack>
 			{set.error && (
 				<Alert severity="warning" sx={{ mt: 1 }}>

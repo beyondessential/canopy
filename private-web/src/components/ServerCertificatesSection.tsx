@@ -23,6 +23,7 @@ import PlayCircleIcon from "@mui/icons-material/PlayCircle";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
+import { GradedAction } from "./GradedAction";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import TimeAgo from "./TimeAgo";
 
@@ -215,14 +216,16 @@ function PauseBanner({
 			icon={<PauseCircleIcon />}
 			action={
 				isAdmin && (
-					<Button
-						size="small"
-						startIcon={<PlayCircleIcon />}
-						onClick={onResume}
-						disabled={resume.pending}
-					>
-						Resume
-					</Button>
+					<GradedAction calls="certificates/resume">
+						<Button
+							size="small"
+							startIcon={<PlayCircleIcon />}
+							onClick={onResume}
+							disabled={resume.pending}
+						>
+							Resume
+						</Button>
+					</GradedAction>
 				)
 			}
 		>
@@ -273,13 +276,15 @@ function PauseButton({
 
 	return (
 		<>
-			<Button
-				size="small"
-				startIcon={<PauseCircleIcon />}
-				onClick={() => setOpen(true)}
-			>
-				Pause
-			</Button>
+			<GradedAction calls="certificates/pause">
+				<Button
+					size="small"
+					startIcon={<PauseCircleIcon />}
+					onClick={() => setOpen(true)}
+				>
+					Pause
+				</Button>
+			</GradedAction>
 			<Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="sm">
 				<DialogTitle>Pause this server</DialogTitle>
 				<DialogContent>
@@ -307,14 +312,16 @@ function PauseButton({
 				</DialogContent>
 				<DialogActions>
 					<Button onClick={() => setOpen(false)}>Cancel</Button>
-					<Button
-						variant="contained"
-						color="warning"
-						onClick={onConfirm}
-						disabled={pause.pending || reason.trim() === ""}
-					>
-						Pause
-					</Button>
+					<GradedAction calls="certificates/pause">
+						<Button
+							variant="contained"
+							color="warning"
+							onClick={onConfirm}
+							disabled={pause.pending || reason.trim() === ""}
+						>
+							Pause
+						</Button>
+					</GradedAction>
 				</DialogActions>
 			</Dialog>
 		</>
@@ -364,30 +371,32 @@ function ProfilePicker({
 	return (
 		<Box>
 			<Stack direction="row" spacing={1} sx={{ alignItems: "flex-start" }}>
-				<TextField
-					select
-					size="small"
-					label="Certificate lifetime"
-					value={current ?? AUTHORITY_DEFAULT}
-					onChange={(e) => onSelect(e.target.value)}
-					disabled={setProfile.pending || !authorityKnown}
-					sx={{ minWidth: 260 }}
-					helperText={
-						authorityKnown && profiles.length === 0
-							? "The authority advertises no profiles, so it decides the lifetime."
-							: "Takes effect at the next issuance or renewal. A certificate already held keeps its own lifetime."
-					}
-				>
-					<MenuItem value={AUTHORITY_DEFAULT}>
-						Authority default (longest-lived)
-					</MenuItem>
-					{options.map((profile) => (
-						<MenuItem key={profile} value={profile}>
-							{profile}
-							{!profiles.includes(profile) && " (no longer offered)"}
+				<GradedAction calls="certificates/set_profile">
+					<TextField
+						select
+						size="small"
+						label="Certificate lifetime"
+						value={current ?? AUTHORITY_DEFAULT}
+						onChange={(e) => onSelect(e.target.value)}
+						disabled={setProfile.pending || !authorityKnown}
+						sx={{ minWidth: 260 }}
+						helperText={
+							authorityKnown && profiles.length === 0
+								? "The authority advertises no profiles, so it decides the lifetime."
+								: "Takes effect at the next issuance or renewal. A certificate already held keeps its own lifetime."
+						}
+					>
+						<MenuItem value={AUTHORITY_DEFAULT}>
+							Authority default (longest-lived)
 						</MenuItem>
-					))}
-				</TextField>
+						{options.map((profile) => (
+							<MenuItem key={profile} value={profile}>
+								{profile}
+								{!profiles.includes(profile) && " (no longer offered)"}
+							</MenuItem>
+						))}
+					</TextField>
+				</GradedAction>
 			</Stack>
 			{setProfile.error && (
 				<Alert severity="error" sx={{ mt: 1 }}>
@@ -698,9 +707,11 @@ function RevokeButton({
 
 	return (
 		<>
-			<Button size="small" color="error" onClick={() => setOpen(true)}>
-				Revoke
-			</Button>
+			<GradedAction calls="certificates/revoke">
+				<Button size="small" color="error" onClick={() => setOpen(true)}>
+					Revoke
+				</Button>
+			</GradedAction>
 			<Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="sm">
 				<DialogTitle>Revoke the certificate for {name}?</DialogTitle>
 				<DialogContent>
@@ -738,14 +749,16 @@ function RevokeButton({
 				</DialogContent>
 				<DialogActions>
 					<Button onClick={() => setOpen(false)}>Cancel</Button>
-					<Button
-						variant="contained"
-						color="error"
-						onClick={onConfirm}
-						disabled={revoke.pending}
-					>
-						Revoke
-					</Button>
+					<GradedAction calls="certificates/revoke">
+						<Button
+							variant="contained"
+							color="error"
+							onClick={onConfirm}
+							disabled={revoke.pending}
+						>
+							Revoke
+						</Button>
+					</GradedAction>
 				</DialogActions>
 			</Dialog>
 		</>

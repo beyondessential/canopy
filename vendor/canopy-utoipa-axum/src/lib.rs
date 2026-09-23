@@ -38,7 +38,7 @@
 //!  }
 //!  
 //!  let (router, api): (axum::Router, OpenApi) = OpenApiRouter::new()
-//!      .routes(routes!(get_user))
+//!      .routes(routes!(read_only: get_user))
 //!      .split_for_parts();
 //! ```
 //!
@@ -73,6 +73,31 @@ impl PathItemExt for HttpMethod {
     }
 }
 
+// CANOPY FORK: safety-mode grading (see the SAFE spec).
+//
+// Every handler on the private server's administrative surface declares the
+// safety mode it requires, as a prefix on its `routes!` entry:
+// `routes!(danger: delete)`. The grade is recorded as an OpenAPI operation
+// extension, which is the single place it is written: the server reads it back
+// to enforce the grade per request, and the client build reads it to present a
+// control according to the mode it needs.
+
+/// The OpenAPI operation-extension key carrying a handler's safety-mode grade.
+/// Its value is the mode's wire form: `read-only`, `write`, or `danger`.
+pub const SAFETY_MODE_EXTENSION: &str = "x-canopy-safety-mode";
+
+/// Record a handler's safety-mode grade on its OpenAPI operation. Called by the
+/// [`routes`] macro; not meant to be called directly.
+#[doc(hidden)]
+pub fn __set_safety_mode(operation: &mut utoipa::openapi::path::Operation, mode: &str) {
+    use utoipa::openapi::extensions::Extensions;
+    let incoming = Extensions::from_iter([(SAFETY_MODE_EXTENSION, mode)]);
+    operation
+        .extensions
+        .get_or_insert_with(Extensions::default)
+        .merge(incoming);
+}
+
 /// re-export paste so users do not need to add the dependency.
 #[doc(hidden)]
 pub use paste::paste;
@@ -101,7 +126,7 @@ pub use paste::paste;
 ///  #[utoipa::path(get, path = "")]
 ///  async fn get_user() {}
 ///
-///  let _: UtoipaMethodRouter = routes!(get_user, search_user);
+///  let _: UtoipaMethodRouter = routes!(read_only: get_user);
 /// ```
 /// Since the _`axum`_ does not support method filter for `CONNECT` requests, using this macro with
 /// handler having request method type `CONNECT` `#[utoipa::path(connect, path = "")]` will panic at
@@ -119,11 +144,26 @@ pub use paste::paste;
 ///  #[utoipa::path(post, path = "")]
 ///  async fn post_user() {}
 ///
-///  let _: OpenApiRouter = OpenApiRouter::new().routes(routes!(get_user, post_user));
+///  let _: OpenApiRouter = OpenApiRouter::new()
+///      .routes(routes!(read_only: get_user))
+///      .routes(routes!(write: post_user));
 /// ```
 #[macro_export]
 macro_rules! routes {
-    ( $handler:path $(, $tail:path)* $(,)? ) => {
+    // CANOPY FORK: graded entries. The grade prefix names the safety mode the
+    // handler requires (see the SAFE spec); it is recorded as an OpenAPI
+    // operation extension and read back by the server to enforce it.
+    ( read_only: $handler:path $(,)? ) => { $crate::routes!( @graded "read-only" : $handler ) };
+    ( write: $handler:path $(,)? ) => { $crate::routes!( @graded "write" : $handler ) };
+    ( danger: $handler:path $(,)? ) => { $crate::routes!( @graded "danger" : $handler ) };
+    // The device-facing public API is a different surface: its callers are
+    // machines presenting a certificate, not operators holding a session, so
+    // safety modes do not govern it. Saying so is explicit and greppable rather
+    // than being the shape an entry falls into by omission.
+    // Upstream's multi-handler form survives here, because one path serving two
+    // methods is registered in a single call. The graded arms stay one handler
+    // each: a grade belongs to an operation, not to a path.
+    ( public: $handler:path $(, $tail:path)* $(,)? ) => {
         {
             use $crate::PathItemExt;
             let mut paths = utoipa::openapi::path::Paths::new();
@@ -147,6 +187,32 @@ macro_rules! routes {
             $paths.add_path_operation(&path, types, item);
             router
         }
+    };
+    ( @graded $mode:literal : $handler:path ) => {
+        {
+            use $crate::PathItemExt;
+            let mut paths = utoipa::openapi::path::Paths::new();
+            let mut schemas = Vec::<(String, utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>)>::new();
+            let (path, mut item, types) = $crate::routes!(@resolve_types $handler : schemas);
+            $crate::__set_safety_mode(&mut item, $mode);
+            let method_router = types.iter().by_ref().fold(axum::routing::MethodRouter::new(), |router, path_type| {
+                router.on(path_type.to_method_filter(), $handler)
+            });
+            paths.add_path_operation(&path, types, item);
+            (schemas, paths, method_router)
+        }
+    };
+    // CANOPY FORK: an entry without a grade is a compile error, so no handler
+    // can reach the administrative surface ungraded. Upstream's bare and
+    // multi-handler forms are gone with it: every canopy route table is one
+    // handler per entry, and one grade per handler is the point.
+    ( $handler:path $(, $tail:path)* $(,)? ) => {
+        compile_error!(
+            "this handler declares no safety mode. Every handler on the administrative \
+             surface says which mode it requires: routes!(read_only: handler), \
+             routes!(write: handler), or routes!(danger: handler). See the SAFE spec for \
+             which one a handler takes."
+        )
     };
     ( @resolve_types $handler:path : $schemas:tt ) => {
         {

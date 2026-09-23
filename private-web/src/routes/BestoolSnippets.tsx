@@ -13,6 +13,7 @@ import {
 import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
+import { GradedAction } from "../components/GradedAction";
 import SqlEditor from "../components/SqlEditor";
 import { usePageTitle } from "../hooks/usePageTitle";
 
@@ -45,13 +46,15 @@ export default function BestoolSnippets() {
 				<Typography variant="h4" component="h1">
 					PSQL Snippets
 				</Typography>
-				<Button
-					variant={showCreate ? "outlined" : "contained"}
-					color={showCreate ? "error" : "primary"}
-					onClick={() => setShowCreate((s) => !s)}
-				>
-					{showCreate ? "Cancel" : "Add"}
-				</Button>
+				<GradedAction calls={showCreate ? [] : "bestool/save_snippet"}>
+					<Button
+						variant={showCreate ? "outlined" : "contained"}
+						color={showCreate ? "error" : "primary"}
+						onClick={() => setShowCreate((s) => !s)}
+					>
+						{showCreate ? "Cancel" : "Add"}
+					</Button>
+				</GradedAction>
 			</Stack>
 
 			{showCreate && (
@@ -183,13 +186,15 @@ function CreateSnippetForm({ onCreated }: { onCreated: () => void }) {
 					<Alert severity="error">{action.error.message}</Alert>
 				)}
 				<Box>
-					<Button
-						type="submit"
-						variant="contained"
-						disabled={action.pending}
-					>
-						{action.pending ? "Saving…" : "Save"}
-					</Button>
+					<GradedAction calls="bestool/save_snippet">
+						<Button
+							type="submit"
+							variant="contained"
+							disabled={action.pending}
+						>
+							{action.pending ? "Saving…" : "Save"}
+						</Button>
+					</GradedAction>
 				</Box>
 			</Stack>
 		</Paper>

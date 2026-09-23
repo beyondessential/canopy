@@ -22,6 +22,7 @@ import TailnetIdentitySection from "../components/TailnetIdentitySection";
 import ProvisionCredentialDialog from "../components/ProvisionCredentialDialog";
 import AddPublicKeyDialog from "../components/AddPublicKeyDialog";
 import { type ApiState, callApi, useApi, useApiAction } from "../api";
+import { GradedAction } from "../components/GradedAction";
 import { deviceDisplayName } from "../components/DeviceShorty";
 import TimeAgo from "../components/TimeAgo";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -175,23 +176,29 @@ function KeysBox({
 					Public Keys ({device.keys.length})
 				</Typography>
 				<Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
-					<Button variant="outlined" onClick={() => setAddOpen(true)}>
-						Add from public key
-					</Button>
-					<Button variant="contained" onClick={() => setGenerateOpen(true)}>
-						Generate new key
-					</Button>
+					<GradedAction calls="devices/add_key">
+						<Button variant="outlined" onClick={() => setAddOpen(true)}>
+							Add from public key
+						</Button>
+					</GradedAction>
+					<GradedAction calls="devices/provision_credential">
+						<Button variant="contained" onClick={() => setGenerateOpen(true)}>
+							Generate new key
+						</Button>
+					</GradedAction>
 					{hasActiveKey &&
 						(confirmDisableAll ? (
 							<>
-								<Button
-									variant="contained"
-									color="error"
-									onClick={onDisableAll}
-									disabled={disableAll.pending}
-								>
-									{disableAll.pending ? "Disabling…" : "Confirm disable all"}
-								</Button>
+								<GradedAction calls="devices/disable_all_keys">
+									<Button
+										variant="contained"
+										color="error"
+										onClick={onDisableAll}
+										disabled={disableAll.pending}
+									>
+										{disableAll.pending ? "Disabling…" : "Confirm disable all"}
+									</Button>
+								</GradedAction>
 								<Button
 									variant="outlined"
 									onClick={() => setConfirmDisableAll(false)}
@@ -201,13 +208,15 @@ function KeysBox({
 								</Button>
 							</>
 						) : (
-							<Button
-								variant="outlined"
-								color="error"
-								onClick={() => setConfirmDisableAll(true)}
-							>
-								Disable all keys
-							</Button>
+							<GradedAction calls="devices/disable_all_keys">
+								<Button
+									variant="outlined"
+									color="error"
+									onClick={() => setConfirmDisableAll(true)}
+								>
+									Disable all keys
+								</Button>
+							</GradedAction>
 						))}
 				</Stack>
 			</Stack>
@@ -288,13 +297,15 @@ function KeyRow({
 						placeholder="Key name"
 						disabled={action.pending}
 					/>
-					<Button
-						variant="contained"
-						onClick={save}
-						disabled={action.pending}
-					>
-						{action.pending ? "Saving…" : "Save"}
-					</Button>
+					<GradedAction calls="devices/update_key_name">
+						<Button
+							variant="contained"
+							onClick={save}
+							disabled={action.pending}
+						>
+							{action.pending ? "Saving…" : "Save"}
+						</Button>
+					</GradedAction>
 					<Button
 						variant="outlined"
 						color="error"
@@ -322,28 +333,32 @@ function KeyRow({
 						)}
 					</Stack>
 					<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
-						<Button
-							size="small"
-							variant="outlined"
-							color={keyData.is_active ? "error" : "primary"}
-							onClick={onToggleActive}
-							disabled={toggling}
-						>
-							{keyData.is_active
-								? disable.pending
-									? "Disabling…"
-									: "Disable"
-								: enable.pending
-									? "Enabling…"
-									: "Enable"}
-						</Button>
-						<IconButton
-							aria-label={`edit name for ${keyData.name ?? "key"}`}
-							size="small"
-							onClick={() => setEditing(true)}
-						>
-							<EditIcon fontSize="small" />
-						</IconButton>
+						<GradedAction calls={keyData.is_active ? "devices/deactivate_key" : "devices/reactivate_key"}>
+							<Button
+								size="small"
+								variant="outlined"
+								color={keyData.is_active ? "error" : "primary"}
+								onClick={onToggleActive}
+								disabled={toggling}
+							>
+								{keyData.is_active
+									? disable.pending
+										? "Disabling…"
+										: "Disable"
+									: enable.pending
+										? "Enabling…"
+										: "Enable"}
+							</Button>
+						</GradedAction>
+						<GradedAction calls="devices/update_key_name">
+							<IconButton
+								aria-label={`edit name for ${keyData.name ?? "key"}`}
+								size="small"
+								onClick={() => setEditing(true)}
+							>
+								<EditIcon fontSize="small" />
+							</IconButton>
+						</GradedAction>
 					</Stack>
 				</Stack>
 			)}
@@ -410,13 +425,15 @@ function RoleControls({
 						</MenuItem>
 					))}
 				</TextField>
-				<Button
-					variant="contained"
-					onClick={onSave}
-					disabled={updateRoleAction.pending || selected === role}
-				>
-					{updateRoleAction.pending ? "Saving…" : "Save"}
-				</Button>
+				<GradedAction calls="devices/update_role">
+					<Button
+						variant="contained"
+						onClick={onSave}
+						disabled={updateRoleAction.pending || selected === role}
+					>
+						{updateRoleAction.pending ? "Saving…" : "Save"}
+					</Button>
+				</GradedAction>
 			</Stack>
 			{updateRoleAction.error && (
 				<Alert severity="error" sx={{ mt: 1 }}>

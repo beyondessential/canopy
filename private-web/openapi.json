@@ -60,7 +60,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/admins/delete": {
@@ -110,7 +111,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/admins/list": {
@@ -119,17 +121,17 @@
           "admins"
         ],
         "summary": "List the admin allow-list.",
-        "description": "Returns the email addresses of every account currently granted admin\naccess to this API, in no particular order.",
+        "description": "Returns every account granted admin access to this API and whether its entry\nalso carries the danger permission, in no particular order.",
         "operationId": "admin_list",
         "responses": {
           "200": {
-            "description": "Admin emails.",
+            "description": "Admin entries.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "array",
                   "items": {
-                    "type": "string"
+                    "$ref": "#/components/schemas/AdminEntry"
                   }
                 }
               }
@@ -160,7 +162,69 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/admins/set_danger": {
+      "post": {
+        "tags": [
+          "admins"
+        ],
+        "summary": "Grant or withdraw the danger permission on an allow-list entry.",
+        "description": "Amends the operator's existing entry rather than adding them to a second\nlist. Takes effect at once: the permission is resolved afresh for each\nrequest, so withdrawing it reaches an operator who is already raised.",
+        "operationId": "admin_set_danger",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDangerArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Permission amended."
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such allow-list entry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/backups/allow_restore": {
@@ -207,7 +271,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/backups/cancel_maintenance": {
@@ -254,7 +319,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/backups/cancel_request": {
@@ -284,7 +350,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/backups/capabilities": {
@@ -324,7 +391,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/backups/clear_schedule": {
@@ -371,7 +439,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/backups/create": {
@@ -438,7 +507,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/backups/create_repo": {
@@ -495,7 +565,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/backups/create_shared": {
@@ -562,7 +633,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/backups/delete": {
@@ -602,7 +674,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/backups/disallow_restore": {
@@ -632,7 +705,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/backups/get": {
@@ -686,7 +760,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/backups/group_schedules": {
@@ -726,7 +801,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/backups/list": {
@@ -764,7 +840,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/backups/probe": {
@@ -801,7 +878,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/backups/recovery_challenge": {
@@ -846,7 +924,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/backups/recovery_status": {
@@ -881,7 +960,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/backups/recovery_verify": {
@@ -938,7 +1018,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/backups/request_maintenance": {
@@ -995,7 +1076,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/backups/request_now": {
@@ -1035,7 +1117,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/backups/restore_window": {
@@ -1082,7 +1165,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/backups/run_progress": {
@@ -1122,7 +1206,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/backups/set_capability": {
@@ -1162,7 +1247,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/backups/set_schedule": {
@@ -1219,7 +1305,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/backups/set_type_default": {
@@ -1259,7 +1346,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/backups/stats": {
@@ -1306,7 +1394,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/backups/type_defaults": {
@@ -1344,7 +1433,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/backups/update": {
@@ -1391,7 +1481,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/backups/upsert": {
@@ -1468,7 +1559,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/bestool/delete_snippet": {
@@ -1503,7 +1595,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/bestool/get_latest_snippet_id": {
@@ -1546,7 +1639,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/bestool/get_snippet": {
@@ -1598,7 +1692,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/bestool/list_snippets": {
@@ -1640,7 +1735,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/bestool/save_snippet": {
@@ -1687,7 +1783,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/certificates/authority": {
@@ -1714,7 +1811,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/certificates/declare": {
@@ -1771,7 +1869,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/certificates/for_group": {
@@ -1811,7 +1910,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/certificates/for_server": {
@@ -1858,7 +1958,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/certificates/pause": {
@@ -1898,7 +1999,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/certificates/release": {
@@ -1938,7 +2040,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/certificates/resume": {
@@ -1978,7 +2081,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/certificates/revoke": {
@@ -2038,7 +2142,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/certificates/set_profile": {
@@ -2088,7 +2193,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/commons/calendar_url": {
@@ -2123,7 +2229,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/commons/is_current_user_admin": {
@@ -2155,7 +2262,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/commons/products": {
@@ -2190,7 +2298,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/commons/public_url": {
@@ -2225,7 +2334,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/commons/server_versions_url": {
@@ -2260,7 +2370,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/devices/add_key": {
@@ -2317,7 +2428,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/devices/attach_tailscale": {
@@ -2384,7 +2496,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/devices/connection_count": {
@@ -2423,7 +2536,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/devices/connection_history": {
@@ -2463,7 +2577,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/devices/deactivate_key": {
@@ -2493,7 +2608,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/devices/detach_tailscale": {
@@ -2540,7 +2656,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/devices/disable_all_keys": {
@@ -2570,7 +2687,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/devices/get_device_by_id": {
@@ -2617,7 +2735,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/devices/get_servers_for_device": {
@@ -2657,7 +2776,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/devices/list_trusted": {
@@ -2694,7 +2814,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/devices/merge_into": {
@@ -2751,7 +2872,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/devices/provision_credential": {
@@ -2798,7 +2920,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/devices/reactivate_key": {
@@ -2828,7 +2951,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/devices/resolve_tailnet_identifier": {
@@ -2875,7 +2999,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/devices/search": {
@@ -2915,7 +3040,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/devices/update_key_name": {
@@ -2945,7 +3071,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/devices/update_role": {
@@ -2985,7 +3112,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/domains/claim": {
@@ -3042,7 +3170,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/domains/for_group": {
@@ -3082,7 +3211,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/domains/grant_availability": {
@@ -3119,7 +3249,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/domains/release": {
@@ -3159,7 +3290,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/domains/zones": {
@@ -3189,7 +3321,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/fleet/applications/delete": {
@@ -3229,7 +3362,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/fleet/applications/get_detail": {
@@ -3271,7 +3405,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/fleet/applications/get_info": {
@@ -3313,7 +3448,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/fleet/applications/get_name": {
@@ -3355,7 +3491,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/fleet/applications/list_archived": {
@@ -3393,7 +3530,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/fleet/applications/list_some": {
@@ -3425,7 +3563,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/fleet/applications/restore": {
@@ -3465,7 +3604,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/fleet/applications/update": {
@@ -3505,7 +3645,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/fleet/groups/create": {
@@ -3552,7 +3693,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/fleet/groups/delete": {
@@ -3592,7 +3734,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/fleet/groups/get": {
@@ -3639,7 +3782,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/fleet/groups/list": {
@@ -3677,7 +3821,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/fleet/groups/list_archived": {
@@ -3715,7 +3860,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/fleet/groups/restore": {
@@ -3755,7 +3901,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/fleet/groups/search": {
@@ -3795,7 +3942,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/fleet/groups/server_counts": {
@@ -3833,7 +3981,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/fleet/groups/update": {
@@ -3890,7 +4039,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/fleet/machines/archive": {
@@ -3947,7 +4097,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/fleet/machines/attach_tailscale_device": {
@@ -4015,7 +4166,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/fleet/machines/create": {
@@ -4063,7 +4215,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/fleet/machines/enrollment_status": {
@@ -4110,7 +4263,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/fleet/machines/get": {
@@ -4167,7 +4321,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/fleet/machines/get_detail": {
@@ -4224,7 +4379,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/fleet/machines/list": {
@@ -4264,7 +4420,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/fleet/machines/mint_enrollment": {
@@ -4311,7 +4468,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/fleet/machines/revoke_enrollment": {
@@ -4351,7 +4509,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/fleet/machines/update": {
@@ -4418,7 +4577,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/healthchecks/decommission": {
@@ -4468,7 +4628,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/healthchecks/list": {
@@ -4518,7 +4679,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/healthchecks/sample": {
@@ -4575,7 +4737,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/healthchecks/set_source_ingest": {
@@ -4635,7 +4798,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/healthchecks/set_source_reachability": {
@@ -4695,7 +4859,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/healthchecks/sources": {
@@ -4745,7 +4910,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/healthchecks/tag_keys": {
@@ -4795,7 +4961,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/healthchecks/update": {
@@ -4852,7 +5019,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/healthchecks/update_documentation": {
@@ -4909,7 +5077,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/healthchecks/update_rules": {
@@ -4976,7 +5145,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/incidents/add_note": {
@@ -5023,7 +5193,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/incidents/delete_note": {
@@ -5053,7 +5224,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/incidents/get": {
@@ -5100,7 +5272,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/incidents/list_active": {
@@ -5140,7 +5313,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/incidents/list_for_group": {
@@ -5180,7 +5354,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/incidents/list_for_server": {
@@ -5220,7 +5395,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/incidents/list_notes": {
@@ -5260,7 +5436,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/incidents/resolve": {
@@ -5297,7 +5474,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/incidents/unresolve": {
@@ -5334,7 +5512,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/inventory/extend_lease": {
@@ -5391,7 +5570,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/inventory/for_group": {
@@ -5458,7 +5638,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/inventory/release_lease": {
@@ -5505,7 +5686,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/inventory/run_state": {
@@ -5562,7 +5744,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/inventory/take_lease": {
@@ -5629,7 +5812,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/inventory_variables/for_group": {
@@ -5679,7 +5863,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/inventory_variables/remove": {
@@ -5746,7 +5931,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/inventory_variables/set": {
@@ -5813,7 +5999,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/issues/add_note": {
@@ -5860,7 +6047,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/issues/delete_note": {
@@ -5890,7 +6078,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/issues/list": {
@@ -5930,7 +6119,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/issues/list_for_device": {
@@ -5970,7 +6160,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/issues/list_for_server": {
@@ -6010,7 +6201,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/issues/list_notes": {
@@ -6050,7 +6242,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/issues/resolve": {
@@ -6087,7 +6280,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/issues/snooze": {
@@ -6124,7 +6318,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/issues/submit_manual_event": {
@@ -6171,7 +6366,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/issues/unresolve": {
@@ -6208,7 +6404,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/issues/unsnooze": {
@@ -6245,7 +6442,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/kubernetes_clusters/confirm": {
@@ -6292,7 +6490,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/kubernetes_clusters/list": {
@@ -6319,7 +6518,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/kubernetes_clusters/register": {
@@ -6366,7 +6566,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/kubernetes_clusters/reissue": {
@@ -6413,7 +6614,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/kubernetes_clusters/remove": {
@@ -6460,7 +6662,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/maintenance/declare": {
@@ -6507,7 +6710,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/maintenance/for_target": {
@@ -6557,7 +6761,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/maintenance/lift": {
@@ -6604,7 +6809,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/maintenance/list_open": {
@@ -6642,7 +6848,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/mcp_tokens/list": {
@@ -6692,7 +6899,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/mcp_tokens/mint": {
@@ -6759,7 +6967,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/mcp_tokens/revoke": {
@@ -6819,7 +7028,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/migration_tests/for_group": {
@@ -6879,7 +7089,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/reporting_schemas/build": {
@@ -6939,7 +7150,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/reporting_schemas/for_group": {
@@ -6999,7 +7211,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/restore_replicas/checks": {
@@ -7039,7 +7252,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/restore_replicas/consumers": {
@@ -7069,7 +7283,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/restore_replicas/create": {
@@ -7116,7 +7331,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/restore_replicas/delete": {
@@ -7156,7 +7372,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/restore_replicas/for_group": {
@@ -7196,7 +7413,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/restore_replicas/update": {
@@ -7253,7 +7471,172 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/safety/lower": {
+      "post": {
+        "tags": [
+          "safety"
+        ],
+        "summary": "Lower the caller's session back to read-only at once.",
+        "description": "An operator lowers their mode without waiting for the remaining time to run\nout. Lowering a session that is already read-only is no change.",
+        "operationId": "safety_lower",
+        "responses": {
+          "200": {
+            "description": "The lowered session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/safety/raise": {
+      "post": {
+        "tags": [
+          "safety"
+        ],
+        "summary": "Raise the caller's session to a higher mode for ten minutes.",
+        "description": "Raising to danger requires the danger permission; an operator without it is\ntold they lack the permission rather than that something went wrong. The\nclient offers danger to every operator, because nothing tells it in advance\nwhether its operator holds the permission.",
+        "operationId": "safety_raise",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RaiseArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The raised session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/safety/session": {
+      "post": {
+        "tags": [
+          "safety"
+        ],
+        "summary": "Read the caller's session, minting one if they have none.",
+        "description": "A client calls this when it connects. Presenting a session identifier that is\nunknown, expired, or another login's mints a fresh read-only session rather\nthan failing, so a client always ends up with a usable session.",
+        "operationId": "safety_session",
+        "responses": {
+          "200": {
+            "description": "The caller's session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionState"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/self_alerts/active": {
@@ -7293,7 +7676,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/self_alerts/list": {
@@ -7333,7 +7717,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/self_alerts/resolve": {
@@ -7393,7 +7778,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/silenced_refs/list_for_group": {
@@ -7433,7 +7819,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/silenced_refs/list_for_machine": {
@@ -7473,7 +7860,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/silenced_refs/list_for_server": {
@@ -7513,7 +7901,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/silenced_refs/list_for_servers": {
@@ -7553,7 +7942,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/silenced_refs/silence_group": {
@@ -7600,7 +7990,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/silenced_refs/silence_machine": {
@@ -7647,7 +8038,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/silenced_refs/silence_server": {
@@ -7694,7 +8086,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/silenced_refs/unsilence_group": {
@@ -7724,7 +8117,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/silenced_refs/unsilence_machine": {
@@ -7764,7 +8158,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/silenced_refs/unsilence_server": {
@@ -7794,7 +8189,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/sql/execute_query": {
@@ -7841,7 +8237,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/sql/get_last_user_query": {
@@ -7881,7 +8278,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/sql/get_query_history": {
@@ -7923,7 +8321,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/sql/is_sql_available": {
@@ -7945,7 +8344,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/statuses/check_detail": {
@@ -7987,7 +8387,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/statuses/fleet_detail": {
@@ -8024,7 +8425,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/statuses/group_details": {
@@ -8076,7 +8478,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/statuses/group_ids": {
@@ -8112,7 +8515,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/statuses/snapshot": {
@@ -8166,7 +8570,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/statuses/summary": {
@@ -8198,7 +8603,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/upgrade_plans/amend": {
@@ -8265,7 +8671,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/upgrade_plans/fleet": {
@@ -8315,7 +8722,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/upgrade_plans/for_group": {
@@ -8375,7 +8783,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/upgrade_plans/history": {
@@ -8425,7 +8834,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/upgrade_plans/record": {
@@ -8492,7 +8902,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/upgrade_plans/targets": {
@@ -8552,7 +8963,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/upgrade_plans/withdraw": {
@@ -8602,7 +9014,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/versions/add_known_issue": {
@@ -8649,7 +9062,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/versions/create_artifact": {
@@ -8696,7 +9110,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/versions/delete_artifact": {
@@ -8726,7 +9141,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/versions/get_grouped_versions": {
@@ -8761,7 +9177,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/versions/get_version_artifacts": {
@@ -8811,7 +9228,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/versions/get_version_detail": {
@@ -8853,7 +9271,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/versions/list_known_issues": {
@@ -8903,7 +9322,8 @@
           {
             "tailscale-user": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/versions/resolve_known_issue": {
@@ -8960,7 +9380,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/versions/update_artifact": {
@@ -8990,7 +9411,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/versions/update_version_changelog": {
@@ -9020,7 +9442,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/versions/update_version_status": {
@@ -9060,7 +9483,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/versions/upload_artifact": {
@@ -9171,7 +9595,8 @@
           {
             "tailscale-admin": []
           }
-        ]
+        ],
+        "x-canopy-safety-mode": "write"
       }
     }
   },
@@ -9232,6 +9657,24 @@
             "type": "string",
             "format": "uuid",
             "description": "Id of a version in the release line the issue affects. The issue is\nrecorded as affecting that version's exact patch onward, within its\nrelease line."
+          }
+        }
+      },
+      "AdminEntry": {
+        "type": "object",
+        "description": "One entry on the allow-list and the permissions it carries.",
+        "required": [
+          "email",
+          "danger"
+        ],
+        "properties": {
+          "danger": {
+            "type": "boolean",
+            "description": "Whether the entry carries the danger permission. An entry exists because\nthe login is an administrator; this says whether it also reaches danger\n(see the ADM spec). The tailnet policy can confer either permission on a\nlogin with no entry here at all, which this does not show."
+          },
+          "email": {
+            "type": "string",
+            "description": "The login the entry admits."
           }
         }
       },
@@ -16149,6 +16592,19 @@
           }
         }
       },
+      "RaiseArgs": {
+        "type": "object",
+        "description": "Request body for raising a session to a higher mode.",
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/SafetyMode",
+            "description": "The mode to raise to. Raising to read-only is a lowering; use `lower`."
+          }
+        }
+      },
       "ReachabilityMode": {
         "type": "string",
         "description": "How a source's silence bears on its servers' reachability.\n\nStored as text in Postgres, validated as this enum at the edges.",
@@ -17507,6 +17963,15 @@
           "unknown"
         ]
       },
+      "SafetyMode": {
+        "type": "string",
+        "description": "A rung of the safety-mode ladder: the mode a session is in, or the grade a\nhandler requires. Ordered read-only < write < danger, so `>=` answers\n\"does this session reach this grade?\".",
+        "enum": [
+          "read-only",
+          "write",
+          "danger"
+        ]
+      },
       "SampleArgs": {
         "type": "object",
         "description": "Request body identifying which healthcheck to sample data for.",
@@ -18661,6 +19126,32 @@
           }
         }
       },
+      "SessionState": {
+        "type": "object",
+        "description": "The state of an operator's session, as the client presents it.",
+        "required": [
+          "id",
+          "mode"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The session identifier, to be sent back on every subsequent request."
+          },
+          "mode": {
+            "$ref": "#/components/schemas/SafetyMode",
+            "description": "The mode the session is in right now. A raise that has lapsed reads as\nread-only here, so the client and the server agree."
+          },
+          "raise_expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the current raise lapses, as an RFC 3339 timestamp. Absent while the\nsession is read-only. The client counts down to this."
+          }
+        }
+      },
       "SetArgs": {
         "allOf": [
           {
@@ -18710,6 +19201,24 @@
           "type": {
             "type": "string",
             "description": "Backup type to enable or disable."
+          }
+        }
+      },
+      "SetDangerArgs": {
+        "type": "object",
+        "description": "Request body for granting or withdrawing the danger permission.",
+        "required": [
+          "email",
+          "danger"
+        ],
+        "properties": {
+          "danger": {
+            "type": "boolean",
+            "description": "Whether the entry should carry the danger permission."
+          },
+          "email": {
+            "type": "string",
+            "description": "The allow-list entry to amend."
           }
         }
       },
@@ -20299,6 +20808,10 @@
     {
       "name": "self_alerts",
       "description": "Canopy's alerts about its own operation."
+    },
+    {
+      "name": "safety",
+      "description": "The operator's own safety-mode session: reading it, raising it, lowering it."
     },
     {
       "name": "server_groups",

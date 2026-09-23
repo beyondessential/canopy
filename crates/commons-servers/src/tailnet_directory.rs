@@ -103,27 +103,45 @@ struct Cache {
 	by_ip: HashMap<IpAddr, DirectoryEntry>,
 	by_node_id: HashMap<String, DirectoryEntry>,
 	last_refresh: Option<Instant>,
-	/// Administrators derived from the tailnet policy's `bes.au/cap/canopy`
+	/// Permissions derived from the tailnet policy's `bes.au/cap/canopy`
 	/// grants, recomputed on each successful policy read. Empty until the
 	/// first successful read; a failed read leaves the previous value in
-	/// place so a control-plane outage never withdraws policy-granted admin.
-	admin: AdminGrants,
+	/// place so a control-plane outage never withdraws a policy-granted
+	/// permission.
+	permissions: PermissionGrants,
 }
 
-/// The Canopy application capability whose `admin: true` payload confers
-/// administrative access, and the service tag a conferring grant must target.
-const CANOPY_ADMIN_CAP: &str = "bes.au/cap/canopy";
+/// The Canopy application capability whose payload confers permissions, and the
+/// service tag a conferring grant must target. The value's `admin` key confers
+/// administrator and its `danger` key confers danger (see the ADM spec); a value
+/// may carry either, both, or neither.
+const CANOPY_CAP: &str = "bes.au/cap/canopy";
 const CANOPY_SERVICE_TAG: &str = "tag:server-canopy";
 
-/// Administrative access resolved from the tailnet policy.
+/// The two permissions resolved from the tailnet policy. The keys are
+/// independent — a grant carrying only `danger` confers danger and not
+/// administrator, and vice versa.
 #[derive(Debug, Default, Clone)]
-struct AdminGrants {
-	/// Explicit logins granted admin, from group members and bare user
-	/// sources, lowercased for case-insensitive comparison.
+struct PermissionGrants {
+	admin: GrantSet,
+	danger: GrantSet,
+}
+
+/// The callers a set of conferring grants covers for one permission.
+#[derive(Debug, Default, Clone)]
+struct GrantSet {
+	/// Explicit logins, from group members and bare user sources, lowercased
+	/// for case-insensitive comparison.
 	logins: HashSet<String>,
 	/// True when a conferring grant's source covers every tailnet user
 	/// identity (`autogroup:member`).
 	all_members: bool,
+}
+
+impl GrantSet {
+	fn covers(&self, login: &str) -> bool {
+		self.all_members || self.logins.contains(login)
+	}
 }
 
 /// The subset of the tailnet policy file this directory reads.
@@ -145,47 +163,63 @@ struct Grant {
 	app: HashMap<String, Vec<serde_json::Value>>,
 }
 
-/// Resolve the set of administrators a policy file confers through
-/// `bes.au/cap/canopy` grants targeting the Canopy service tag.
-fn resolve_admins(policy: &PolicyFile) -> AdminGrants {
-	let mut out = AdminGrants::default();
-	for grant in &policy.grants {
-		let confers = grant.app.get(CANOPY_ADMIN_CAP).is_some_and(|values| {
-			values
-				.iter()
-				.any(|v| v.get("admin").and_then(serde_json::Value::as_bool) == Some(true))
-		});
-		if !confers {
-			continue;
+/// Whether a `bes.au/cap/canopy` capability value array sets a given key true in
+/// any of its entries.
+fn cap_confers(values: &[serde_json::Value], key: &str) -> bool {
+	values
+		.iter()
+		.any(|v| v.get(key).and_then(serde_json::Value::as_bool) == Some(true))
+}
+
+/// Add a grant's sources to a permission's [`GrantSet`], resolving each against
+/// the policy's groups.
+fn extend_from_sources(set: &mut GrantSet, sources: &[String], policy: &PolicyFile) {
+	for src in sources {
+		match src.as_str() {
+			"autogroup:member" => set.all_members = true,
+			// Tagged devices never reach the administrative surface, so a
+			// tagged source contributes no login.
+			"autogroup:tagged" => {}
+			s if s.starts_with("autogroup:") => {
+				tracing::warn!(source = %s, "canopy grant uses an unsupported autogroup; ignoring");
+			}
+			s if s.starts_with("group:") => match policy.groups.get(s) {
+				Some(members) => {
+					set.logins
+						.extend(members.iter().map(|m| m.to_ascii_lowercase()));
+				}
+				None => {
+					tracing::warn!(group = %s, "canopy grant references an undefined group; ignoring");
+				}
+			},
+			s if s.contains('@') => {
+				set.logins.insert(s.to_ascii_lowercase());
+			}
+			s => {
+				tracing::warn!(source = %s, "canopy grant uses an unsupported source; ignoring");
+			}
 		}
+	}
+}
+
+/// Resolve the permissions a policy file confers through `bes.au/cap/canopy`
+/// grants targeting the Canopy service tag. Each grant's value is inspected for
+/// the `admin` and `danger` keys independently, so one grant can confer either
+/// or both to its sources.
+fn resolve_permissions(policy: &PolicyFile) -> PermissionGrants {
+	let mut out = PermissionGrants::default();
+	for grant in &policy.grants {
+		let Some(values) = grant.app.get(CANOPY_CAP) else {
+			continue;
+		};
 		if !grant.dst.iter().any(|d| d == CANOPY_SERVICE_TAG) {
 			continue;
 		}
-		for src in &grant.src {
-			match src.as_str() {
-				"autogroup:member" => out.all_members = true,
-				// Tagged devices never reach the administrative surface, so a
-				// tagged source contributes no administrative login.
-				"autogroup:tagged" => {}
-				s if s.starts_with("autogroup:") => {
-					tracing::warn!(source = %s, "canopy admin grant uses an unsupported autogroup; ignoring");
-				}
-				s if s.starts_with("group:") => match policy.groups.get(s) {
-					Some(members) => {
-						out.logins
-							.extend(members.iter().map(|m| m.to_ascii_lowercase()));
-					}
-					None => {
-						tracing::warn!(group = %s, "canopy admin grant references an undefined group; ignoring");
-					}
-				},
-				s if s.contains('@') => {
-					out.logins.insert(s.to_ascii_lowercase());
-				}
-				s => {
-					tracing::warn!(source = %s, "canopy admin grant uses an unsupported source; ignoring");
-				}
-			}
+		if cap_confers(values, "admin") {
+			extend_from_sources(&mut out.admin, &grant.src, policy);
+		}
+		if cap_confers(values, "danger") {
+			extend_from_sources(&mut out.danger, &grant.src, policy);
 		}
 	}
 	out
@@ -283,7 +317,16 @@ impl TailnetDirectory {
 	pub async fn is_admin_by_policy(&self, login: &str) -> bool {
 		let login = login.to_ascii_lowercase();
 		let cache = self.inner.cache.read().await;
-		cache.admin.all_members || cache.admin.logins.contains(&login)
+		cache.permissions.admin.covers(&login)
+	}
+
+	/// True when the login is granted the danger permission by the tailnet
+	/// policy (see the ADM spec). Independent of administrator: a grant carrying
+	/// only `danger` confers this and not administrator. Case-insensitive.
+	pub async fn has_danger_by_policy(&self, login: &str) -> bool {
+		let login = login.to_ascii_lowercase();
+		let cache = self.inner.cache.read().await;
+		cache.permissions.danger.covers(&login)
 	}
 
 	/// Lookup a tailnet IP. Returns `None` for unknown IPs. On a miss the
@@ -521,9 +564,9 @@ impl TailnetDirectory {
 			.await
 			.map_err(|e| AppError::custom(format!("decoding policy response: {e}")))?;
 
-		let admin = resolve_admins(&policy);
+		let permissions = resolve_permissions(&policy);
 		let mut cache = self.inner.cache.write().await;
-		cache.admin = admin;
+		cache.permissions = permissions;
 		Ok(())
 	}
 
@@ -596,7 +639,7 @@ impl TailnetDirectory {
 			by_ip,
 			by_node_id,
 			last_refresh: Some(Instant::now()),
-			admin: AdminGrants::default(),
+			permissions: PermissionGrants::default(),
 		};
 		Self {
 			inner: Arc::new(Inner {
@@ -613,6 +656,23 @@ impl TailnetDirectory {
 				oauth: RwLock::default(),
 			}),
 		}
+	}
+}
+
+impl TailnetDirectory {
+	/// Construct a directory that has read the given tailnet policy file, for
+	/// tests. No devices, no background refresh, no API calls. Panics on a
+	/// policy that does not parse, since that is a mistake in the test.
+	pub fn for_test_with_policy(policy: serde_json::Value) -> Self {
+		let policy: PolicyFile = serde_json::from_value(policy).expect("test policy parses");
+		let directory = Self::for_test([]);
+		directory
+			.inner
+			.cache
+			.try_write()
+			.expect("a fresh directory is uncontended")
+			.permissions = resolve_permissions(&policy);
+		directory
 	}
 }
 
@@ -683,7 +743,7 @@ mod tests {
 
 	#[test]
 	fn group_source_resolves_to_members() {
-		let admins = resolve_admins(&policy(serde_json::json!({
+		let perms = resolve_permissions(&policy(serde_json::json!({
 			"groups": { "group:ops": ["Felix@BES.au", "sam@bes.au"] },
 			"grants": [{
 				"app": { "bes.au/cap/canopy": [{ "admin": true }] },
@@ -691,28 +751,28 @@ mod tests {
 				"src": ["group:ops"],
 			}],
 		})));
-		assert!(!admins.all_members);
-		assert!(admins.logins.contains("felix@bes.au"));
-		assert!(admins.logins.contains("sam@bes.au"));
+		assert!(!perms.admin.all_members);
+		assert!(perms.admin.logins.contains("felix@bes.au"));
+		assert!(perms.admin.logins.contains("sam@bes.au"));
 	}
 
 	#[test]
 	fn bare_user_and_autogroup_member_sources() {
-		let admins = resolve_admins(&policy(serde_json::json!({
+		let perms = resolve_permissions(&policy(serde_json::json!({
 			"grants": [{
 				"app": { "bes.au/cap/canopy": [{ "admin": true }] },
 				"dst": ["tag:server-canopy"],
 				"src": ["dana@bes.au", "autogroup:member"],
 			}],
 		})));
-		assert!(admins.all_members);
-		assert!(admins.logins.contains("dana@bes.au"));
+		assert!(perms.admin.all_members);
+		assert!(perms.admin.logins.contains("dana@bes.au"));
 	}
 
 	#[test]
 	fn grant_needs_the_service_tag_and_admin_true() {
 		// Wrong dst: not conferring.
-		let wrong_dst = resolve_admins(&policy(serde_json::json!({
+		let wrong_dst = resolve_permissions(&policy(serde_json::json!({
 			"groups": { "group:ops": ["felix@bes.au"] },
 			"grants": [{
 				"app": { "bes.au/cap/canopy": [{ "admin": true }] },
@@ -720,10 +780,10 @@ mod tests {
 				"src": ["group:ops"],
 			}],
 		})));
-		assert!(wrong_dst.logins.is_empty() && !wrong_dst.all_members);
+		assert!(wrong_dst.admin.logins.is_empty() && !wrong_dst.admin.all_members);
 
-		// Payload without `admin: true`: not conferring.
-		let no_admin = resolve_admins(&policy(serde_json::json!({
+		// Payload without `admin: true`: not conferring admin.
+		let no_admin = resolve_permissions(&policy(serde_json::json!({
 			"groups": { "group:ops": ["felix@bes.au"] },
 			"grants": [{
 				"app": { "bes.au/cap/canopy": [{ "admin": false }] },
@@ -731,10 +791,10 @@ mod tests {
 				"src": ["group:ops"],
 			}],
 		})));
-		assert!(no_admin.logins.is_empty() && !no_admin.all_members);
+		assert!(no_admin.admin.logins.is_empty() && !no_admin.admin.all_members);
 
 		// Different capability: not conferring.
-		let other_cap = resolve_admins(&policy(serde_json::json!({
+		let other_cap = resolve_permissions(&policy(serde_json::json!({
 			"groups": { "group:ops": ["felix@bes.au"] },
 			"grants": [{
 				"app": { "bes.au/cap/other": [{ "admin": true }] },
@@ -742,19 +802,66 @@ mod tests {
 				"src": ["group:ops"],
 			}],
 		})));
-		assert!(other_cap.logins.is_empty() && !other_cap.all_members);
+		assert!(other_cap.admin.logins.is_empty() && !other_cap.admin.all_members);
 	}
 
 	#[test]
 	fn unsupported_sources_are_ignored() {
-		let admins = resolve_admins(&policy(serde_json::json!({
+		let perms = resolve_permissions(&policy(serde_json::json!({
 			"grants": [{
 				"app": { "bes.au/cap/canopy": [{ "admin": true }] },
 				"dst": ["tag:server-canopy"],
 				"src": ["autogroup:tagged", "tag:server-canopy", "*", "autogroup:admin"],
 			}],
 		})));
-		assert!(admins.logins.is_empty() && !admins.all_members);
+		assert!(perms.admin.logins.is_empty() && !perms.admin.all_members);
+	}
+
+	#[test]
+	fn danger_and_admin_keys_resolve_independently() {
+		// The danger key alone confers danger and not administrator.
+		let danger_only = resolve_permissions(&policy(serde_json::json!({
+			"grants": [{
+				"app": { "bes.au/cap/canopy": [{ "danger": true }] },
+				"dst": ["tag:server-canopy"],
+				"src": ["dana@bes.au"],
+			}],
+		})));
+		assert!(danger_only.danger.logins.contains("dana@bes.au"));
+		assert!(danger_only.admin.logins.is_empty() && !danger_only.admin.all_members);
+
+		// The admin key alone confers administrator and not danger.
+		let admin_only = resolve_permissions(&policy(serde_json::json!({
+			"grants": [{
+				"app": { "bes.au/cap/canopy": [{ "admin": true }] },
+				"dst": ["tag:server-canopy"],
+				"src": ["felix@bes.au"],
+			}],
+		})));
+		assert!(admin_only.admin.logins.contains("felix@bes.au"));
+		assert!(admin_only.danger.logins.is_empty() && !admin_only.danger.all_members);
+
+		// A value carrying both keys confers both to its source.
+		let both = resolve_permissions(&policy(serde_json::json!({
+			"grants": [{
+				"app": { "bes.au/cap/canopy": [{ "admin": true, "danger": true }] },
+				"dst": ["tag:server-canopy"],
+				"src": ["sam@bes.au"],
+			}],
+		})));
+		assert!(both.admin.logins.contains("sam@bes.au"));
+		assert!(both.danger.logins.contains("sam@bes.au"));
+
+		// A value carrying neither key confers neither.
+		let neither = resolve_permissions(&policy(serde_json::json!({
+			"grants": [{
+				"app": { "bes.au/cap/canopy": [{}] },
+				"dst": ["tag:server-canopy"],
+				"src": ["felix@bes.au"],
+			}],
+		})));
+		assert!(neither.admin.logins.is_empty() && !neither.admin.all_members);
+		assert!(neither.danger.logins.is_empty() && !neither.danger.all_members);
 	}
 
 	#[test]

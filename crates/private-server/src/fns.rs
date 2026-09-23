@@ -21,6 +21,7 @@ pub mod mcp_tokens;
 pub mod migration_tests;
 pub mod reporting_schemas;
 pub mod restore_replicas;
+pub mod safety;
 pub mod self_alerts;
 pub mod server_groups;
 pub mod silenced_refs;
@@ -70,6 +71,10 @@ pub(crate) fn generate_passphrase() -> String {
 
 /// Where the fleet's endpoints used to be, redirecting to where they are.
 ///
+/// Mounted beside the API rather than within it: these reach no handler and
+/// change nothing, so they have no safety mode, and the layer that enforces
+/// modes refuses whatever it cannot grade (see [`crate::safety`]).
+///
 /// `servers` named the box and the workload at once, and the fleet's records
 /// were spread across three top-level prefixes. Each has its own word now, all
 /// three under `/api/fleet`.
@@ -82,7 +87,7 @@ pub(crate) fn generate_passphrase() -> String {
 /// obliges the caller to repeat the method and body rather than turning the
 /// retry into a GET. Not documented in the schema — the schema says where an
 /// endpoint is, and one path per endpoint is the point of moving them.
-fn moved_paths() -> axum::Router<crate::state::AppState> {
+pub fn moved_paths() -> axum::Router<crate::state::AppState> {
 	use axum::{
 		extract::{OriginalUri, Path},
 		response::Redirect,
@@ -117,48 +122,45 @@ fn moved_paths() -> axum::Router<crate::state::AppState> {
 }
 
 pub fn routes() -> OpenApiRouter<crate::state::AppState> {
-	OpenApiRouter::new()
-		.nest(
-			"/api",
-			OpenApiRouter::new()
-				.nest("/admins", admins::routes())
-				// The fleet's own records, under one prefix — the same shape the
-				// SPA browses them at. `servers` used to name the box and the
-				// workload at once, and the listings sat beside the records.
-				.nest(
-					"/fleet",
-					OpenApiRouter::new()
-						.nest("/applications", applications::routes())
-						.nest("/machines", machines::routes())
-						.nest("/groups", server_groups::routes()),
-				)
-				.nest("/backups", backups::routes())
-				.nest("/bestool", bestool::routes())
-				.nest("/certificates", certificates::routes())
-				.nest("/commons", commons::routes())
-				.nest("/devices", devices::routes())
-				.nest("/domains", domains::routes())
-				.nest("/healthchecks", healthchecks::routes())
-				.nest("/incidents", incidents::routes())
-				.nest("/inventory", inventory::routes())
-				.nest("/inventory_variables", inventory_variables::routes())
-				.nest("/issues", issues::routes())
-				.nest("/kubernetes_clusters", kubernetes_clusters::routes())
-				.nest("/mcp_tokens", mcp_tokens::routes())
-				.nest("/migration_tests", migration_tests::routes())
-				.nest("/reporting_schemas", reporting_schemas::routes())
-				.nest("/restore_replicas", restore_replicas::routes())
-				.nest("/self_alerts", self_alerts::routes())
-				.nest("/maintenance", maintenance::routes())
-				.nest("/silenced_refs", silenced_refs::routes())
-				.nest("/sql", sql::routes())
-				.nest("/statuses", statuses::routes())
-				.nest("/upgrade_plans", upgrade_plans::routes())
-				.nest("/versions", versions::routes()),
-		)
-		// Merged outside the `/api` nest: these routes carry the prefix
-		// themselves, so nesting them would put it on twice.
-		.merge(OpenApiRouter::from(moved_paths()))
+	OpenApiRouter::new().nest(
+		"/api",
+		OpenApiRouter::new()
+			.nest("/admins", admins::routes())
+			// The fleet's own records, under one prefix — the same shape the
+			// SPA browses them at. `servers` used to name the box and the
+			// workload at once, and the listings sat beside the records.
+			.nest(
+				"/fleet",
+				OpenApiRouter::new()
+					.nest("/applications", applications::routes())
+					.nest("/machines", machines::routes())
+					.nest("/groups", server_groups::routes()),
+			)
+			.nest("/backups", backups::routes())
+			.nest("/bestool", bestool::routes())
+			.nest("/certificates", certificates::routes())
+			.nest("/commons", commons::routes())
+			.nest("/devices", devices::routes())
+			.nest("/domains", domains::routes())
+			.nest("/healthchecks", healthchecks::routes())
+			.nest("/incidents", incidents::routes())
+			.nest("/inventory", inventory::routes())
+			.nest("/inventory_variables", inventory_variables::routes())
+			.nest("/issues", issues::routes())
+			.nest("/kubernetes_clusters", kubernetes_clusters::routes())
+			.nest("/mcp_tokens", mcp_tokens::routes())
+			.nest("/migration_tests", migration_tests::routes())
+			.nest("/reporting_schemas", reporting_schemas::routes())
+			.nest("/restore_replicas", restore_replicas::routes())
+			.nest("/safety", safety::routes())
+			.nest("/self_alerts", self_alerts::routes())
+			.nest("/maintenance", maintenance::routes())
+			.nest("/silenced_refs", silenced_refs::routes())
+			.nest("/sql", sql::routes())
+			.nest("/statuses", statuses::routes())
+			.nest("/upgrade_plans", upgrade_plans::routes())
+			.nest("/versions", versions::routes()),
+	)
 }
 
 #[cfg(test)]

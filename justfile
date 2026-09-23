@@ -192,9 +192,13 @@ check-generated:
     # --locked so what is generated depends only on committed inputs: an
     # unlocked resolve could pick a newer codegen dependency than Cargo.lock
     # records and emit different source here than it does on a dev machine.
-    generated=(crates/public-server/openapi.json private-web/openapi.json crates/canopy-api/src/generated.rs crates/canopy-api/Cargo.toml crates/canopy-api/Cargo.lock)
+    generated=(crates/public-server/openapi.json private-web/openapi.json private-web/src/safety-modes.ts crates/canopy-api/src/generated.rs crates/canopy-api/Cargo.toml crates/canopy-api/Cargo.lock)
     cargo run --quiet --locked --bin public-openapi-dump > crates/public-server/openapi.json
     cargo run --quiet --locked --bin private-openapi-dump > private-web/openapi.json
+    # The grade map the interface reads. Node builtins only, so this needs no
+    # npm install: a stale map would block or offer controls against grades the
+    # server no longer enforces.
+    node private-web/scripts/gen-safety-modes.mjs
     cargo run --quiet --locked -p canopy-api-codegen
     cargo metadata --manifest-path crates/canopy-api/Cargo.toml --format-version 1 > /dev/null
     # Against HEAD rather than the index: a staged-but-uncommitted regeneration

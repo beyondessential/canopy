@@ -57,10 +57,32 @@ export interface paths {
         put?: never;
         /**
          * List the admin allow-list.
-         * @description Returns the email addresses of every account currently granted admin
-         *     access to this API, in no particular order.
+         * @description Returns every account granted admin access to this API and whether its entry
+         *     also carries the danger permission, in no particular order.
          */
         post: operations["admin_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admins/set_danger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Grant or withdraw the danger permission on an allow-list entry.
+         * @description Amends the operator's existing entry rather than adding them to a second
+         *     list. Takes effect at once: the permission is resolved afresh for each
+         *     request, so withdrawing it reaches an operator who is already raised.
+         */
+        post: operations["admin_set_danger"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3600,6 +3622,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/safety/lower": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Lower the caller's session back to read-only at once.
+         * @description An operator lowers their mode without waiting for the remaining time to run
+         *     out. Lowering a session that is already read-only is no change.
+         */
+        post: operations["safety_lower"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/safety/raise": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Raise the caller's session to a higher mode for ten minutes.
+         * @description Raising to danger requires the danger permission; an operator without it is
+         *     told they lack the permission rather than that something went wrong. The
+         *     client offers danger to every operator, because nothing tells it in advance
+         *     whether its operator holds the permission.
+         */
+        post: operations["safety_raise"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/safety/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read the caller's session, minting one if they have none.
+         * @description A client calls this when it connects. Presenting a session identifier that is
+         *     unknown, expired, or another login's mints a fresh read-only session rather
+         *     than failing, so a client always ends up with a usable session.
+         */
+        post: operations["safety_session"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/self_alerts/active": {
         parameters: {
             query?: never;
@@ -4595,6 +4683,18 @@ export interface components {
              *     release line.
              */
             version_id: string;
+        };
+        /** @description One entry on the allow-list and the permissions it carries. */
+        AdminEntry: {
+            /**
+             * @description Whether the entry carries the danger permission. An entry exists because
+             *     the login is an administrator; this says whether it also reaches danger
+             *     (see the ADM spec). The tailnet policy can confer either permission on a
+             *     login with no entry here at all, which this does not show.
+             */
+            danger: boolean;
+            /** @description The login the entry admits. */
+            email: string;
         };
         /** @description Request body for amending an open plan. */
         AmendArgs: {
@@ -9001,6 +9101,11 @@ export interface components {
              */
             passphrase: string;
         };
+        /** @description Request body for raising a session to a higher mode. */
+        RaiseArgs: {
+            /** @description The mode to raise to. Raising to read-only is a lowering; use `lower`. */
+            mode: components["schemas"]["SafetyMode"];
+        };
         /**
          * @description How a source's silence bears on its servers' reachability.
          *
@@ -9915,6 +10020,13 @@ export interface components {
          * @enum {string}
          */
         RunStatus: "reported" | "in_progress" | "unknown";
+        /**
+         * @description A rung of the safety-mode ladder: the mode a session is in, or the grade a
+         *     handler requires. Ordered read-only < write < danger, so `>=` answers
+         *     "does this session reach this grade?".
+         * @enum {string}
+         */
+        SafetyMode: "read-only" | "write" | "danger";
         /** @description Request body identifying which healthcheck to sample data for. */
         SampleArgs: {
             /** @description The healthcheck name to sample. */
@@ -10603,6 +10715,24 @@ export interface components {
              */
             server_id: string;
         };
+        /** @description The state of an operator's session, as the client presents it. */
+        SessionState: {
+            /**
+             * Format: uuid
+             * @description The session identifier, to be sent back on every subsequent request.
+             */
+            id: string;
+            /**
+             * @description The mode the session is in right now. A raise that has lapsed reads as
+             *     read-only here, so the client and the server agree.
+             */
+            mode: components["schemas"]["SafetyMode"];
+            /**
+             * @description When the current raise lapses, as an RFC 3339 timestamp. Absent while the
+             *     session is read-only. The client counts down to this.
+             */
+            raise_expires_at?: string | null;
+        };
         /** @description Set or replace one variable. */
         SetArgs: components["schemas"]["ScopeArgs"] & {
             /** @description The variable's name. */
@@ -10629,6 +10759,13 @@ export interface components {
             machine_id: string;
             /** @description Backup type to enable or disable. */
             type: string;
+        };
+        /** @description Request body for granting or withdrawing the danger permission. */
+        SetDangerArgs: {
+            /** @description Whether the entry should carry the danger permission. */
+            danger: boolean;
+            /** @description The allow-list entry to amend. */
+            email: string;
         };
         /** @description The profile a server's certificates are requested under. */
         SetProfileArgs: {
@@ -11666,13 +11803,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Admin emails. */
+            /** @description Admin entries. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": string[];
+                    "application/json": components["schemas"]["AdminEntry"][];
                 };
             };
             401: {
@@ -11684,6 +11821,53 @@ export interface operations {
                 };
             };
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    admin_set_danger: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetDangerArgs"];
+            };
+        };
+        responses: {
+            /** @description Permission amended. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description No such allow-list entry. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -16524,6 +16708,126 @@ export interface operations {
             };
             /** @description The name collides with another of the consumer's declarations. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    safety_lower: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The lowered session. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionState"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    safety_raise: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RaiseArgs"];
+            };
+        };
+        responses: {
+            /** @description The raised session. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionState"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    safety_session: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's session. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionState"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -28,6 +28,7 @@ import DownloadIcon from "@mui/icons-material/Download";
 import ReplayIcon from "@mui/icons-material/Replay";
 import { type FormEvent, useEffect, useState } from "react";
 import { ApiError, callApi, useApi } from "../api";
+import { GradedAction } from "../components/GradedAction";
 import type { ProvisionedCredential } from "../types";
 import { usePageTitle } from "../hooks/usePageTitle";
 
@@ -86,9 +87,11 @@ export default function KubernetesClusters() {
 			</Typography>
 
 			<Box>
-				<Button variant="contained" onClick={() => setWizardOpen(true)}>
-					Register cluster
-				</Button>
+				<GradedAction calls="kubernetes_clusters/register">
+					<Button variant="contained" onClick={() => setWizardOpen(true)}>
+						Register cluster
+					</Button>
+				</GradedAction>
 			</Box>
 
 			{error && <Alert severity="error">{error}</Alert>}
@@ -161,12 +164,14 @@ export default function KubernetesClusters() {
 				</DialogContent>
 				<DialogActions>
 					<Button onClick={() => setConfirmRemove(null)}>Cancel</Button>
-					<Button
-						color="error"
-						onClick={() => confirmRemove && onRemove(confirmRemove)}
-					>
-						Remove
-					</Button>
+					<GradedAction calls="kubernetes_clusters/remove">
+						<Button
+							color="error"
+							onClick={() => confirmRemove && onRemove(confirmRemove)}
+						>
+							Remove
+						</Button>
+					</GradedAction>
 				</DialogActions>
 			</Dialog>
 
@@ -235,34 +240,40 @@ function ClusterSection({
 								</TableCell>
 								<TableCell align="right">
 									{onCheck && (
-										<Tooltip title="Check connection">
+										<GradedAction calls="kubernetes_clusters/confirm">
+											<Tooltip title="Check connection">
+												<IconButton
+													size="small"
+													aria-label={`check ${c.name}`}
+													onClick={() => onCheck(c)}
+												>
+													<ReplayIcon fontSize="small" />
+												</IconButton>
+											</Tooltip>
+										</GradedAction>
+									)}
+									<GradedAction calls="kubernetes_clusters/reissue">
+										<Tooltip title="Re-issue credential">
 											<IconButton
 												size="small"
-												aria-label={`check ${c.name}`}
-												onClick={() => onCheck(c)}
+												aria-label={`reissue ${c.name}`}
+												onClick={() => onReissue(c)}
 											>
-												<ReplayIcon fontSize="small" />
+												<DownloadIcon fontSize="small" />
 											</IconButton>
 										</Tooltip>
-									)}
-									<Tooltip title="Re-issue credential">
-										<IconButton
-											size="small"
-											aria-label={`reissue ${c.name}`}
-											onClick={() => onReissue(c)}
-										>
-											<DownloadIcon fontSize="small" />
-										</IconButton>
-									</Tooltip>
-									<Tooltip title="Remove">
-										<IconButton
-											size="small"
-											aria-label={`remove ${c.name}`}
-											onClick={() => onRemove(c)}
-										>
-											<DeleteIcon fontSize="small" />
-										</IconButton>
-									</Tooltip>
+									</GradedAction>
+									<GradedAction calls="kubernetes_clusters/remove">
+										<Tooltip title="Remove">
+											<IconButton
+												size="small"
+												aria-label={`remove ${c.name}`}
+												onClick={() => onRemove(c)}
+											>
+												<DeleteIcon fontSize="small" />
+											</IconButton>
+										</Tooltip>
+									</GradedAction>
 								</TableCell>
 							</TableRow>
 						))}
@@ -402,9 +413,11 @@ function RegisterWizard({
 						<Button onClick={close} disabled={pending}>
 							Cancel
 						</Button>
-						<Button variant="contained" onClick={onRegister} disabled={pending}>
-							{pending ? "Registering…" : "Register"}
-						</Button>
+						<GradedAction calls="kubernetes_clusters/register">
+							<Button variant="contained" onClick={onRegister} disabled={pending}>
+								{pending ? "Registering…" : "Register"}
+							</Button>
+						</GradedAction>
 					</>
 				) : (
 					<Button onClick={close}>{registered ? "Done" : "Close"}</Button>

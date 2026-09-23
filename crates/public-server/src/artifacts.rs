@@ -111,9 +111,9 @@ const REPORTING_SCHEMA_TYPE: &str = "reporting-schema";
 const SCHEMA_PLATFORM: &str = "any";
 
 pub fn routes() -> OpenApiRouter<AppState> {
-	OpenApiRouter::new().routes(routes!(create)).merge(
+	OpenApiRouter::new().routes(routes!(public: create)).merge(
 		OpenApiRouter::new()
-			.routes(routes!(register_for_group))
+			.routes(routes!(public: register_for_group))
 			.layer(DefaultBodyLimit::max(MAX_UPLOAD_BODY_BYTES)),
 	)
 }
