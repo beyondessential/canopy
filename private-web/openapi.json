@@ -1560,7 +1560,7 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "write"
+        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/bestool/delete_snippet": {

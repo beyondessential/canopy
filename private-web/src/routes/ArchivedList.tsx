@@ -81,16 +81,20 @@ export default function ArchivedList() {
 function RestoreButton({
 	pending,
 	onClick,
+	disabled,
 }: {
 	pending: boolean;
 	onClick: () => void;
+	/** Forwarded to the button, so a caller that blocks this control (see
+	 * `GradedAction`) takes it out of the keyboard's reach as well. */
+	disabled?: boolean;
 }) {
 	return (
 		<Button
 			size="small"
 			startIcon={<RestoreIcon />}
 			onClick={onClick}
-			disabled={pending}
+			disabled={pending || disabled}
 		>
 			{pending ? "Restoring…" : "Restore"}
 		</Button>

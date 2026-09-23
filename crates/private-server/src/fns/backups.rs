@@ -55,7 +55,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(read_only: list))
 		.routes(routes!(write: create))
 		.routes(routes!(write: create_shared))
-		.routes(routes!(write: upsert))
+		.routes(routes!(danger: upsert))
 		.routes(routes!(read_only: probe))
 		.routes(routes!(write: update))
 		.routes(routes!(write: set_schedule))

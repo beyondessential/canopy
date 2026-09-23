@@ -10,7 +10,7 @@
 //! session and identity. Nothing else in the server carries a second copy.
 
 use std::{
-	collections::{HashMap, hash_map::Entry},
+	collections::HashMap,
 	sync::{Arc, Mutex},
 	time::{Duration, Instant},
 };
@@ -44,6 +44,11 @@ pub const SESSION_HEADER: &str = "x-canopy-session";
 /// and the rest of the time the boundary takes no connection at all.
 const TOUCH_INTERVAL: Duration = Duration::from_secs(15 * 60);
 
+/// How many sessions this process tracks last-seen writes for. Far above the
+/// sessions a Canopy instance's operators hold between them, and a ceiling
+/// rather than a target: it exists so the map cannot grow without bound.
+const MAX_TRACKED_SESSIONS: usize = 10_000;
+
 /// When each session's last-seen was last written by this process.
 ///
 /// The row is what the sweep reads; this only decides when to write it. A
@@ -57,24 +62,32 @@ const TOUCH_INTERVAL: Duration = Duration::from_secs(15 * 60);
 pub struct TouchLog(Arc<Mutex<HashMap<(Uuid, String), Instant>>>);
 
 impl TouchLog {
-	/// Whether this session's last-seen is due to be written, recording that it
-	/// is about to be so the requests beside this one do not write it too.
+	/// Whether this session's last-seen is due to be written.
 	fn due(&self, id: Uuid, login: &str) -> bool {
 		let now = Instant::now();
-		let mut written = self
-			.0
-			.lock()
-			.expect("touch log is never held across an await");
+		// A poisoned lock is no reason to refuse every request on the
+		// administrative surface: the worst a torn entry costs is one extra
+		// write of a timestamp.
+		let mut written = self.0.lock().unwrap_or_else(|held| held.into_inner());
 		// Sessions come and go, so entries no longer standing in the way of a
 		// write are dropped rather than kept for a session that may be gone.
 		written.retain(|_, at| now.duration_since(*at) < TOUCH_INTERVAL);
-		match written.entry((id, login.to_owned())) {
-			Entry::Occupied(_) => false,
-			Entry::Vacant(slot) => {
-				slot.insert(now);
-				true
-			}
+		!written.contains_key(&(id, login.to_owned()))
+	}
+
+	/// Record a write that landed, so the requests beside it do not write again.
+	///
+	/// Only a write that matched a row is recorded, so an identifier that is
+	/// unknown or another login's leaves nothing behind: a caller offering a
+	/// fresh one each request cannot grow this without bound.
+	fn wrote(&self, id: Uuid, login: &str) {
+		let mut written = self.0.lock().unwrap_or_else(|held| held.into_inner());
+		// However many sessions are genuinely live, this is a cache of when they
+		// were last written, and starting it over costs one extra write each.
+		if written.len() >= MAX_TRACKED_SESSIONS {
+			written.clear();
 		}
+		written.insert((id, login.to_owned()), Instant::now());
 	}
 }
 
@@ -139,6 +152,15 @@ impl GradeMap {
 		self.0.get(&(method.clone(), path.to_owned())).copied()
 	}
 
+	/// Whether any method on this path is graded.
+	///
+	/// A request naming a path the surface serves but a method it does not is
+	/// the router's to refuse, with the method-not-allowed that says so, rather
+	/// than the boundary's to treat as an unrecognised route.
+	pub fn knows_path(&self, path: &str) -> bool {
+		self.0.keys().any(|(_, known)| known == path)
+	}
+
 	/// How many handlers carry a grade. Used by the startup report and by tests
 	/// asserting the surface is fully graded.
 	pub fn len(&self) -> usize {
@@ -169,7 +191,10 @@ async fn touch(safety: &SafetyState, id: Uuid, login: &str) -> Result<()> {
 		return Ok(());
 	}
 	let mut conn = safety.app.db.get().await?;
-	OperatorSession::touch(&mut conn, id, login).await
+	if OperatorSession::touch(&mut conn, id, login).await? > 0 {
+		safety.touched.wrote(id, login);
+	}
+	Ok(())
 }
 
 /// Whether a caller holds the danger permission (see the ADM spec).
@@ -214,27 +239,31 @@ pub async fn enforce(
 		return Ok(next.run(request).await);
 	}
 
+	let method = request.method().clone();
+	let (mut parts, body) = request.into_parts();
+
 	let Some(required) = required else {
-		// Nothing on this router reaches a handler without a grade, so a miss is
-		// the boundary failing to recognise the request rather than a request
-		// that needs no mode. It is refused: an unrecognised path is exactly the
-		// case where permitting it would be a silent hole.
-		if crate::fns::MOVED_PATHS.contains(&path.as_str()) {
-			return Ok(next.run(request).await);
+		// Every handler on this router declares a grade, so a miss is the server
+		// failing to recognise its own route rather than a request that needs no
+		// mode. It is refused, because permitting it is the one outcome that
+		// would be a silent hole — and reported as the fault it is, rather than
+		// as a lapsed raise, which would send the client off to raise again.
+		if safety.grades.knows_path(&path) {
+			return Ok(next
+				.run(axum::extract::Request::from_parts(parts, body))
+				.await);
 		}
-		tracing::error!(%path, method = %request.method(), "no safety mode for this route; refusing");
-		return Err(AppError::SafetyModeTooLow {
-			required: SafetyMode::Danger.to_string(),
-		});
+		tracing::error!(%path, %method, "no safety mode for this route; refusing");
+		return Err(AppError::custom(format!(
+			"no safety mode is declared for {path}"
+		)));
 	};
 
-	let session_id = request
-		.headers()
+	let session_id = parts
+		.headers
 		.get(SESSION_HEADER)
 		.and_then(|value| value.to_str().ok())
 		.and_then(|value| Uuid::parse_str(value.trim()).ok());
-
-	let (mut parts, body) = request.into_parts();
 
 	// A read-only-graded request needs no session, and no identity either: a
 	// client may read before it has either. It keeps its own session alive when
@@ -293,8 +322,9 @@ pub async fn enforce(
 		// On the connection already in hand, and on the same cadence as a read's.
 		if let Some(session) = session
 			&& safety.touched.due(session.id, &user.login)
+			&& OperatorSession::touch(&mut conn, session.id, &user.login).await? > 0
 		{
-			OperatorSession::touch(&mut conn, session.id, &user.login).await?;
+			safety.touched.wrote(session.id, &user.login);
 		}
 	}
 

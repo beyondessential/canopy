@@ -39,7 +39,7 @@ export const SAFETY_MODES = {
 	"backups/stats": "read-only",
 	"backups/type_defaults": "read-only",
 	"backups/update": "write",
-	"backups/upsert": "write",
+	"backups/upsert": "danger",
 	"bestool/delete_snippet": "write",
 	"bestool/get_latest_snippet_id": "read-only",
 	"bestool/get_snippet": "read-only",

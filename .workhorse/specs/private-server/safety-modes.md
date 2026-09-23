@@ -65,6 +65,8 @@ Opening a machine's restore window is graded on this basis.
 The fleet query interface (see [MCP](mcp.md)) changes nothing, so every one of its tools is read-only.
 The handlers that mint, revoke, and list its access tokens belong to the administrative surface rather than to that interface: minting and revoking are danger, and listing is read-only.
 
+The handlers by which an operator reads and changes their own safety mode are read-only, because a read-only session has to be able to reach them: what they change is that operator's own session rather than the fleet or Canopy's records.
+
 A handler's grade is independent of who may reach it.
 A handler reachable by a caller who is not an administrator is graded on the same basis as any other, and every operator has a safety mode.
 

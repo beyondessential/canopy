@@ -20,6 +20,10 @@ use uuid::Uuid;
 /// countdown runs to this, and the session returns to read-only once it passes.
 pub const RAISE_DURATION: SignedDuration = SignedDuration::from_mins(10);
 
+/// How many sessions one login may hold at once. An operator works in a handful
+/// of clients; far past that, the oldest are ones they no longer hold.
+pub const SESSIONS_PER_LOGIN: i64 = 10;
+
 /// How much longer than [`RAISE_DURATION`] the server honours a raised grade.
 /// Not offered to the operator and not shown anywhere: it exists only so a
 /// request already in flight as the raise ends is not refused for an expiry the
@@ -53,12 +57,42 @@ impl OperatorSession {
 	pub async fn create(db: &mut AsyncPgConnection, login: &str) -> Result<Self> {
 		use crate::schema::operator_sessions::dsl;
 
-		diesel::insert_into(dsl::operator_sessions)
+		let session = diesel::insert_into(dsl::operator_sessions)
 			.values((dsl::id.eq(Uuid::new_v4()), dsl::login.eq(login)))
 			.returning(Self::as_select())
 			.get_result(db)
 			.await
+			.map_err(AppError::from)?;
+		Self::retire_beyond_cap(db, login).await?;
+		Ok(session)
+	}
+
+	/// Drop a login's oldest sessions past [`SESSIONS_PER_LOGIN`].
+	///
+	/// A client asks for a session whenever it cannot present one of its own, so
+	/// without a cap a caller reaching the surface could mint rows at request
+	/// rate. Retiring the oldest also keeps the list of who is raised and where
+	/// worth reading, rather than padded with sessions nobody holds.
+	async fn retire_beyond_cap(db: &mut AsyncPgConnection, login: &str) -> Result<()> {
+		use crate::schema::operator_sessions::dsl;
+
+		let beyond: Vec<Uuid> = dsl::operator_sessions
+			.select(dsl::id)
+			.filter(dsl::login.eq(login))
+			.order(dsl::created_at.desc())
+			.offset(SESSIONS_PER_LOGIN)
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		if beyond.is_empty() {
+			return Ok(());
+		}
+		diesel::delete(dsl::operator_sessions)
+			.filter(dsl::id.eq_any(beyond))
+			.execute(db)
+			.await
 			.map_err(AppError::from)
+			.map(|_| ())
 	}
 
 	/// Fetch a session by its identifier. `None` for an unknown identifier —
@@ -72,6 +106,20 @@ impl OperatorSession {
 			.first(db)
 			.await
 			.optional()
+			.map_err(AppError::from)
+	}
+
+	/// Every session a login currently holds, newest first. Reads who is raised
+	/// and where.
+	pub async fn for_login(db: &mut AsyncPgConnection, login: &str) -> Result<Vec<Self>> {
+		use crate::schema::operator_sessions::dsl;
+
+		dsl::operator_sessions
+			.select(Self::as_select())
+			.filter(dsl::login.eq(login))
+			.order(dsl::created_at.desc())
+			.load(db)
+			.await
 			.map_err(AppError::from)
 	}
 
@@ -131,7 +179,9 @@ impl OperatorSession {
 	///
 	/// Scoped to `login` like every other operation on a session: an identifier
 	/// is not its holder's to keep alive unless the session is theirs.
-	pub async fn touch(db: &mut AsyncPgConnection, id: Uuid, login: &str) -> Result<()> {
+	/// Returns how many rows it wrote: nothing, for an identifier that is
+	/// unknown or another login's.
+	pub async fn touch(db: &mut AsyncPgConnection, id: Uuid, login: &str) -> Result<usize> {
 		use crate::schema::operator_sessions::dsl;
 
 		diesel::update(dsl::operator_sessions)
@@ -141,7 +191,6 @@ impl OperatorSession {
 			.execute(db)
 			.await
 			.map_err(AppError::from)
-			.map(|_| ())
 	}
 
 	/// Retire sessions not seen since `cutoff`, returning how many were removed.

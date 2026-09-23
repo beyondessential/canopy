@@ -783,3 +783,85 @@ async fn a_session_is_kept_alive_only_by_the_login_it_belongs_to() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_login_holds_only_so_many_sessions_at_once() {
+	use database::operator_sessions::{OperatorSession, SESSIONS_PER_LOGIN};
+
+	trust_headers();
+
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let cap = usize::try_from(SESSIONS_PER_LOGIN).expect("a sane cap");
+		let mut minted = Vec::new();
+		for _ in 0..cap + 5 {
+			minted.push(
+				OperatorSession::create(&mut conn, OPERATOR)
+					.await
+					.expect("create"),
+			);
+		}
+
+		// A client asks for a session whenever it cannot present one, so without
+		// a cap this is a row per request.
+		let live = database::operator_sessions::OperatorSession::for_login(&mut conn, OPERATOR)
+			.await
+			.expect("list");
+		assert_eq!(
+			live.len(),
+			cap,
+			"a login keeps only its most recent sessions"
+		);
+
+		// The ones kept are the newest: an operator's current clients.
+		let newest: Vec<_> = minted.iter().rev().take(cap).map(|s| s.id).collect();
+		for id in newest {
+			assert!(live.iter().any(|s| s.id == id), "the newest are kept");
+		}
+		assert!(
+			OperatorSession::get(&mut conn, minted[0].id)
+				.await
+				.expect("read")
+				.is_none(),
+			"the oldest is retired"
+		);
+
+		// Another login's sessions are its own, and unaffected by the cap here.
+		OperatorSession::create(&mut conn, OTHER)
+			.await
+			.expect("create");
+		assert_eq!(
+			OperatorSession::for_login(&mut conn, OTHER)
+				.await
+				.expect("list")
+				.len(),
+			1,
+			"the cap is per login"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_path_served_by_another_method_is_the_routers_to_refuse() {
+	trust_headers();
+
+	commons_tests::server::run(async |mut conn, _public, private| {
+		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
+
+		// The boundary grades a method and a path together, so a path it serves
+		// under another method has no grade here. That is the router's to answer
+		// with the method it allows, not the boundary's to report as a route it
+		// does not recognise.
+		let wrong_method = private
+			.get("/api/admins/list")
+			.add_header("Tailscale-User-Login", OPERATOR)
+			.add_header("Tailscale-User-Name", "Operator")
+			.await;
+		assert_eq!(
+			wrong_method.status_code().as_u16(),
+			405,
+			"the router says which method it allows"
+		);
+	})
+	.await;
+}

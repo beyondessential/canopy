@@ -47,6 +47,10 @@ pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::rou
 
 	let non_public = Router::new()
 		.merge(api_router)
+		// Beside the API, not within it: a redirect reaches no handler and so
+		// carries no safety mode, and the layer above refuses what it cannot
+		// grade. They carry the `/api` prefix themselves.
+		.merge(fns::moved_paths())
 		.merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", api_spec))
 		.nest("/api/mcp", mcp)
 		.fallback(spa::handler)
