@@ -190,6 +190,38 @@ test.describe("safety modes", () => {
 		await expect(writing).toHaveCSS("filter", "grayscale(0.8)");
 	});
 
+	test("the mode control and its menu wear each mode's stripe", async ({
+		page,
+	}) => {
+		await page.goto("/settings/admins");
+
+		// Read-only is plain; each raised mode in the menu carries its stripe,
+		// muted until the pointer is on it.
+		await expect(modeControl(page)).toHaveCSS("background-image", "none");
+		await modeControl(page).click();
+		const write = page.getByRole("menuitem", { name: /write/i });
+		const danger = page.getByRole("menuitem", { name: /danger/i });
+		await expect(write).toHaveCSS("background-image", /rgba\(255, 152, 0/);
+		await expect(danger).toHaveCSS("background-image", /rgba\(239, 83, 80/);
+		await expect(danger).toHaveCSS("filter", "grayscale(0.8)");
+		await danger.hover();
+		await expect(danger).toHaveCSS("filter", "grayscale(0)");
+		await page.keyboard.press("Escape");
+
+		// Raised, the control itself wears the mode's stripe, and the menu shows
+		// the current mode in full colour.
+		await raiseTo(page, "danger");
+		await expect(modeControl(page)).toHaveCSS(
+			"background-image",
+			/rgba\(239, 83, 80, 0\.5/,
+		);
+		await modeControl(page).click();
+		const current = page.getByRole("menuitem", { name: /danger/i });
+		await expect(current).toHaveAttribute("aria-current", "true");
+		await page.mouse.move(0, 0);
+		await expect(current).toHaveCSS("filter", "grayscale(0)");
+	});
+
 	test("a blocked control is out of reach of the keyboard too", async ({
 		page,
 	}) => {

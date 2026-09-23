@@ -76,6 +76,8 @@ A client refused for its mode returns its indicator to read-only and tells the o
 ## Presenting the mode
 
 The current mode and the time remaining on it are visible at all times, counting down from ten minutes when a raise is made.
+While raised, the mode control is filled in that mode's colour and wears its stripe (see "Presenting blocked controls").
+In the raise control, each mode above read-only wears its stripe in its colour, muted at rest and in full colour under the pointer and for the current mode, so the operator learns the treatment from the control that grants it.
 
 A reloaded page is read-only.
 
@@ -85,8 +87,13 @@ A control the operator could use in a higher mode is present and blocked rather 
 A blocked control does not act when clicked, and names the mode it requires.
 Raising is done from the mode control rather than as a by-product of reaching for a blocked control.
 
+A control that opens a form, dialog, or confirmation for making a change carries the grade of that change, so the operator is never led through filling in something they cannot submit.
+Where what the form saves needs a higher mode for some inputs than for others, its opener carries the lowest of them, and the save carries the grade of the submission it would make.
+A control that opens something also worth reading without making a change, such as a detail view with an edit inside it, is not graded; the change inside it is.
+
 A control requiring write or danger carries the grade it requires as a diagonal stripe in that grade's colour, muted while at rest and coming to full colour under the pointer.
-The same treatment is used throughout the surface, so an operator learns it once.
+Write and danger stripes differ in angle as well as colour, so the two read apart from the pattern alone.
+The same treatment is used throughout the surface and on the mode control itself, so an operator learns it once.
 
 A control disabled for a reason unrelated to its grade, such as a request in flight or an incomplete form, carries no stripe, so the treatment never misreports why a control is unavailable.
 

@@ -459,7 +459,7 @@ function Vars({
 										}
 										sx={
 											removal.blocked
-												? { ...blockedSx(removal.required), borderRadius: "50%" }
+												? [blockedSx(removal.required), { borderRadius: "50%" }]
 												: undefined
 										}
 									/>

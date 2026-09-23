@@ -1,16 +1,35 @@
 import { Box, MenuItem, type MenuItemProps, Tooltip } from "@mui/material";
+import { type Theme, alpha } from "@mui/material/styles";
 import { type ReactElement, type ReactNode, cloneElement } from "react";
 import { useSafetyMode } from "../hooks/useSafetyMode";
 import { LADDER, type SafetyMode, modeLabel, permits } from "../safety";
 import { type GradedEndpoint, SAFETY_MODES } from "../safety-modes";
 
-/** The diagonal stripes a blocked control carries, one per grade. */
-const STRIPES: Record<Exclude<SafetyMode, "read-only">, string> = {
-	write:
-		"repeating-linear-gradient(135deg, rgba(255,152,0,0.24), rgba(255,152,0,0.24) 6px, rgba(255,152,0,0.07) 6px, rgba(255,152,0,0.07) 12px)",
-	danger:
-		"repeating-linear-gradient(45deg, rgba(239,83,80,0.24), rgba(239,83,80,0.24) 6px, rgba(239,83,80,0.07) 6px, rgba(239,83,80,0.07) 12px)",
-};
+/** A mode above read-only: one that has a stripe. */
+export type RaisedMode = Exclude<SafetyMode, "read-only">;
+
+/** The palette a raised mode is drawn in, wherever it appears. */
+export function modePalette(mode: RaisedMode): "warning" | "error" {
+	return mode === "write" ? "warning" : "error";
+}
+
+/**
+ * The diagonal stripe a mode is drawn with, in its palette colour. Worn by a
+ * blocked control, by the mode control while raised, and by each raised mode
+ * in its menu, so the operator learns one treatment everywhere. The angle
+ * differs too, so the two read apart from the pattern alone.
+ */
+export function modeStripe(
+	theme: Theme,
+	mode: RaisedMode,
+	opts?: { stripeAlpha?: number; gapAlpha?: number },
+): string {
+	const colour = theme.palette[modePalette(mode)].light;
+	const angle = mode === "write" ? "135deg" : "45deg";
+	const stripe = alpha(colour, opts?.stripeAlpha ?? 0.24);
+	const gap = alpha(colour, opts?.gapAlpha ?? 0.07);
+	return `repeating-linear-gradient(${angle}, ${stripe}, ${stripe} 6px, ${gap} 6px, ${gap} 12px)`;
+}
 
 /**
  * The endpoint, or endpoints, a control calls.
@@ -72,23 +91,39 @@ export function blockedTitle(required: SafetyMode): string {
 }
 
 /**
+ * A mode's stripe, muted at rest and coming to full colour under the pointer
+ * or while `&.Mui-selected`. The blocked treatment, and the mode menu's.
+ */
+export function mutedStripe(theme: Theme, mode: RaisedMode) {
+	const stripe = modeStripe(theme, mode);
+	return {
+		backgroundImage: stripe,
+		filter: "grayscale(0.8)",
+		transition: theme.transitions.create("filter", {
+			duration: theme.transitions.duration.shortest,
+		}),
+		"&:hover, &.Mui-selected, &.Mui-selected:hover": {
+			filter: "grayscale(0)",
+			backgroundImage: stripe,
+		},
+	};
+}
+
+/** The blocked treatment's styles, for nesting inside another `sx`. */
+function blockedStyles(theme: Theme, required: SafetyMode) {
+	return {
+		cursor: "not-allowed",
+		...mutedStripe(theme, required as RaisedMode),
+	};
+}
+
+/**
  * The blocked treatment, for a control that cannot take the
  * {@link GradedAction} wrapper: the grade's stripe, muted at rest and coming to
  * full colour under the pointer. The control itself has to ignore activation.
  */
 export function blockedSx(required: SafetyMode) {
-	return {
-		cursor: "not-allowed",
-		backgroundImage: stripeFor(required),
-		filter: "grayscale(0.8)",
-		transition: "filter 150ms cubic-bezier(.4,0,.2,1)",
-		"&:hover": { filter: "grayscale(0)", backgroundImage: stripeFor(required) },
-	};
-}
-
-/** The stripe for a grade above read-only. */
-function stripeFor(required: SafetyMode): string {
-	return STRIPES[required as Exclude<SafetyMode, "read-only">];
+	return (theme: Theme) => blockedStyles(theme, required);
 }
 
 interface GradedActionProps {
@@ -144,15 +179,15 @@ export function GradedAction({
 			<Box
 				component="span"
 				aria-disabled
-				sx={{
+				sx={(theme) => ({
 					display: fullWidth ? "flex" : "inline-flex",
 					width: fullWidth ? "100%" : undefined,
 					cursor: "not-allowed",
 					// The same treatment a control that cannot take the wrapper
 					// applies to itself, so the convention is written once.
-					"& > *": { pointerEvents: "none", ...blockedSx(required) },
+					"& > *": { pointerEvents: "none", ...blockedStyles(theme, required) },
 					"&:hover > *": { filter: "grayscale(0)" },
-				}}
+				})}
 			>
 				{cloneElement(children, { disabled: true })}
 			</Box>
