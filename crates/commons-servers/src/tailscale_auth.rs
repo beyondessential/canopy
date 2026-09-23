@@ -28,7 +28,7 @@ const TRUST_HEADERS_ENV: &str = "CANOPY_TRUST_TAILSCALE_HEADERS";
 ///
 /// Public because the safety-mode boundary defers to it the same way the
 /// extractors do: with the dev identity in play a request is treated as holding
-/// a danger-mode session and the danger permission, so the existing test suite
+/// a danger-mode session, so the existing test suite
 /// reaches graded handlers without driving a session. Compiled out of release
 /// builds by the same guard, so nothing can reach it in production.
 pub fn use_dev_identity() -> bool {
@@ -77,26 +77,6 @@ impl TailscaleUser {
 		}
 		if let Some(directory) = directory
 			&& directory.is_admin_by_policy(&self.login).await
-		{
-			return Ok(true);
-		}
-		Ok(false)
-	}
-
-	/// Whether the caller holds the danger permission (see the ADM spec): their
-	/// allowlist entry carries it, or the tailnet policy grants it. Resolved on
-	/// the same basis as [`Self::is_admin`] and from the same grant, and
-	/// independent of it — administrator does not confer danger.
-	pub async fn has_danger(
-		&self,
-		db: &mut AsyncPgConnection,
-		directory: Option<&TailnetDirectory>,
-	) -> Result<bool, AppError> {
-		if Admin::check_danger(db, &self.login).await? {
-			return Ok(true);
-		}
-		if let Some(directory) = directory
-			&& directory.has_danger_by_policy(&self.login).await
 		{
 			return Ok(true);
 		}

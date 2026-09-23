@@ -121,17 +121,17 @@
           "admins"
         ],
         "summary": "List the admin allow-list.",
-        "description": "Returns every account granted admin access to this API and whether its entry\nalso carries the danger permission, in no particular order.",
+        "description": "Returns the email addresses of every account currently granted admin\naccess to this API, in no particular order.",
         "operationId": "admin_list",
         "responses": {
           "200": {
-            "description": "Admin entries.",
+            "description": "Admin emails.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/AdminEntry"
+                    "type": "string"
                   }
                 }
               }
@@ -164,67 +164,6 @@
           }
         ],
         "x-canopy-safety-mode": "read-only"
-      }
-    },
-    "/api/admins/set_danger": {
-      "post": {
-        "tags": [
-          "admins"
-        ],
-        "summary": "Grant or withdraw the danger permission on an allow-list entry.",
-        "description": "Amends the operator's existing entry rather than adding them to a second\nlist. Takes effect at once: the permission is resolved afresh for each\nrequest, so withdrawing it reaches an operator who is already raised.",
-        "operationId": "admin_set_danger",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetDangerArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Permission amended."
-          },
-          "401": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "No such allow-list entry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ],
-        "x-canopy-safety-mode": "danger"
       }
     },
     "/api/backups/allow_restore": {
@@ -7529,7 +7468,7 @@
           "safety"
         ],
         "summary": "Raise the caller's session to a higher mode for ten minutes.",
-        "description": "Raising to danger requires the danger permission; an operator without it is\ntold they lack the permission rather than that something went wrong. The\nclient offers danger to every operator, because nothing tells it in advance\nwhether its operator holds the permission.",
+        "description": "Raises the session the request presents, or a fresh one when it presents\nnone that is the caller's own. The raise is not extended by activity.",
         "operationId": "safety_raise",
         "requestBody": {
           "content": {
@@ -7563,16 +7502,6 @@
             }
           },
           "401": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "403": {
             "description": "",
             "content": {
               "application/json": {
@@ -9657,24 +9586,6 @@
             "type": "string",
             "format": "uuid",
             "description": "Id of a version in the release line the issue affects. The issue is\nrecorded as affecting that version's exact patch onward, within its\nrelease line."
-          }
-        }
-      },
-      "AdminEntry": {
-        "type": "object",
-        "description": "One entry on the allow-list and the permissions it carries.",
-        "required": [
-          "email",
-          "danger"
-        ],
-        "properties": {
-          "danger": {
-            "type": "boolean",
-            "description": "Whether the entry carries the danger permission. An entry exists because\nthe login is an administrator; this says whether it also reaches danger\n(see the ADM spec). The tailnet policy can confer either permission on a\nlogin with no entry here at all, which this does not show."
-          },
-          "email": {
-            "type": "string",
-            "description": "The login the entry admits."
           }
         }
       },
@@ -19201,24 +19112,6 @@
           "type": {
             "type": "string",
             "description": "Backup type to enable or disable."
-          }
-        }
-      },
-      "SetDangerArgs": {
-        "type": "object",
-        "description": "Request body for granting or withdrawing the danger permission.",
-        "required": [
-          "email",
-          "danger"
-        ],
-        "properties": {
-          "danger": {
-            "type": "boolean",
-            "description": "Whether the entry should carry the danger permission."
-          },
-          "email": {
-            "type": "string",
-            "description": "The allow-list entry to amend."
           }
         }
       },

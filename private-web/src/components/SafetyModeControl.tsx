@@ -12,9 +12,8 @@ import {
 	Typography,
 } from "@mui/material";
 import { useState } from "react";
-import { ApiError } from "../api";
 import { useRemainingMs, useSafetyMode } from "../hooks/useSafetyMode";
-import { type SafetyMode, modeLabel, refusalOf } from "../safety";
+import { type SafetyMode, modeLabel } from "../safety";
 
 /** The palette each mode reads in. Read-only is deliberately unremarkable. */
 export function modeColour(mode: SafetyMode): {
@@ -55,35 +54,25 @@ function remaining(ms: number): string {
 /**
  * The operator's mode, and how they change it.
  *
- * Always visible, so the mode is never something to go and check. Danger is
- * offered to every operator: nothing tells the client in advance whether its
- * operator holds the permission, so an operator who does not is told when they
- * try rather than being quietly shown a shorter menu.
+ * Always visible, so the mode is never something to go and check.
  */
 export function SafetyModeControl() {
 	const { mode, raise, lower, busy } = useSafetyMode();
 	const remainingMs = useRemainingMs();
 	const [anchor, setAnchor] = useState<null | HTMLElement>(null);
 	const [confirming, setConfirming] = useState(false);
-	const [refusal, setRefusal] = useState<string | null>(null);
+	const [failed, setFailed] = useState(false);
 
 	const colour = modeColour(mode);
 
 	async function to(next: SafetyMode) {
 		setAnchor(null);
-		setRefusal(null);
+		setFailed(false);
 		try {
 			if (next === "read-only") await lower();
 			else await raise(next);
-		} catch (error) {
-			// An operator without the danger permission is told they lack it,
-			// rather than that something went wrong.
-			const detail = error instanceof ApiError ? error.detail : null;
-			setRefusal(
-				refusalOf(detail) === "permission"
-					? "You do not hold the danger permission."
-					: "Could not change mode.",
-			);
+		} catch {
+			setFailed(true);
 		}
 	}
 
@@ -205,13 +194,15 @@ export function SafetyModeControl() {
 				</DialogActions>
 			</Dialog>
 
-			<Dialog open={refusal !== null} onClose={() => setRefusal(null)}>
+			<Dialog open={failed} onClose={() => setFailed(false)}>
 				<DialogTitle>Mode unchanged</DialogTitle>
 				<DialogContent>
-					<Typography color="text.secondary">{refusal}</Typography>
+					<Typography color="text.secondary">
+						Could not change mode.
+					</Typography>
 				</DialogContent>
 				<DialogActions>
-					<Button onClick={() => setRefusal(null)}>Close</Button>
+					<Button onClick={() => setFailed(false)}>Close</Button>
 				</DialogActions>
 			</Dialog>
 		</>

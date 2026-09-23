@@ -255,17 +255,9 @@ backups indefinitely.
 
 Returned (HTTP 403) when a graded request comes from a session below the safety
 mode it requires (see the SAFE spec). The title names the mode the handler needs
-(`write` or `danger`). This is distinct from lacking the danger
-permission: the operator can make the request once they raise their session to
-the required mode. A client that hits this returns its indicator to read-only
+(`write` or `danger`). The operator can make the request once they raise their
+session to the required mode. A client that hits this returns its indicator to read-only
 and tells the operator their raise has lapsed.
-
-## Danger not permitted
-
-Returned (HTTP 403) when a danger-graded request comes from an operator who does
-not hold the danger permission (see the ADM spec), whatever mode their session
-is in. Distinct from a safety-mode refusal: the operator can never make this
-request, so raising their session will not help.
 
 ## Other
 

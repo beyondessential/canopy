@@ -26,7 +26,7 @@ interface SessionState {
 export interface SafetyStatus {
 	/** The mode the session is in. Read-only until the operator raises it. */
 	mode: SafetyMode;
-	/** Raise to a mode. Rejects if the operator lacks the danger permission. */
+	/** Raise to a mode. */
 	raise: (mode: SafetyMode) => Promise<void>;
 	/** Return to read-only at once, without waiting for the countdown. */
 	lower: () => Promise<void>;

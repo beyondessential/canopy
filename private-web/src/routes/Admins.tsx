@@ -2,7 +2,6 @@ import {
 	Alert,
 	Box,
 	Button,
-	FormControlLabel,
 	IconButton,
 	LinearProgress,
 	List,
@@ -11,7 +10,6 @@ import {
 	Paper,
 	Snackbar,
 	Stack,
-	Switch,
 	TextField,
 	Typography,
 } from "@mui/material";
@@ -45,15 +43,6 @@ export default function Admins() {
 			setError(formatError(err));
 		} finally {
 			setPending(false);
-		}
-	};
-
-	const onSetDanger = async (target: string, danger: boolean) => {
-		try {
-			await callApi("admins", "set_danger", { email: target, danger });
-			list.reload();
-		} catch (err) {
-			setError(formatError(err));
 		}
 	};
 
@@ -118,45 +107,25 @@ export default function Admins() {
 					<List>
 						{list.data.map((admin) => (
 							<ListItem
-								key={admin.email}
+								key={admin}
 								divider
 								secondaryAction={
-									<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-										<GradedAction calls="admins/set_danger">
-											<FormControlLabel
-												control={
-													<Switch
-														size="small"
-														checked={admin.danger}
-														onChange={(e) =>
-															onSetDanger(admin.email, e.target.checked)
-														}
-														color="error"
-													/>
-												}
-												label="Danger"
-												slotProps={{
-													typography: { variant: "body2" },
-												}}
-											/>
-										</GradedAction>
-										<GradedAction calls="admins/delete">
-											<IconButton
-												edge="end"
-												aria-label={`delete ${admin.email}`}
-												onClick={() => onDelete(admin.email)}
-											>
-												<DeleteIcon />
-											</IconButton>
-										</GradedAction>
-									</Stack>
+									<GradedAction calls="admins/delete">
+										<IconButton
+											edge="end"
+											aria-label={`delete ${admin}`}
+											onClick={() => onDelete(admin)}
+										>
+											<DeleteIcon />
+										</IconButton>
+									</GradedAction>
 								}
 							>
 								<ListItemText
 									slotProps={{
 										primary: { sx: { fontFamily: "monospace" } },
 									}}
-									primary={admin.email}
+									primary={admin}
 								/>
 							</ListItem>
 						))}

@@ -63,18 +63,14 @@ export function setRaiseLapsedHandler(handler: (() => void) | null): void {
 	onRaiseLapsed = handler;
 }
 
-/** The problem types the two refusals carry. */
+/** The problem type a mode refusal carries. */
 const MODE_REFUSAL = "safety-mode-too-low";
-const PERMISSION_REFUSAL = "danger-not-permitted";
 
-/** Which refusal a problem-details body is, if either. */
-export function refusalOf(detail: unknown): "mode" | "permission" | null {
-	if (!detail || typeof detail !== "object") return null;
+/** Whether a problem-details body is a mode refusal. */
+function isModeRefusal(detail: unknown): boolean {
+	if (!detail || typeof detail !== "object") return false;
 	const type = (detail as { type?: unknown }).type;
-	if (typeof type !== "string") return null;
-	if (type.endsWith(MODE_REFUSAL)) return "mode";
-	if (type.endsWith(PERMISSION_REFUSAL)) return "permission";
-	return null;
+	return typeof type === "string" && type.endsWith(MODE_REFUSAL);
 }
 
 /**
@@ -82,5 +78,5 @@ export function refusalOf(detail: unknown): "mode" | "permission" | null {
  * back to read-only. Called from the API layer, which sees every refusal.
  */
 export function noteRefusal(detail: unknown): void {
-	if (refusalOf(detail) === "mode") onRaiseLapsed?.();
+	if (isModeRefusal(detail)) onRaiseLapsed?.();
 }
