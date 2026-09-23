@@ -120,10 +120,8 @@ pub struct RaiseArgs {
 
 /// Raise the caller's session to a higher mode for ten minutes.
 ///
-/// Raising to danger requires the danger permission; an operator without it is
-/// told they lack the permission rather than that something went wrong. The
-/// client offers danger to every operator, because nothing tells it in advance
-/// whether its operator holds the permission.
+/// Raises the session the request presents, or a fresh one when it presents
+/// none that is the caller's own. The raise is not extended by activity.
 #[utoipa::path(
 	post,
 	path = "/raise",
@@ -134,7 +132,6 @@ pub struct RaiseArgs {
 		(status = 200, description = "The raised session.", body = SessionState),
 		(status = 400, body = ProblemDetailsSchema),
 		(status = 401, body = ProblemDetailsSchema),
-		(status = 403, body = ProblemDetailsSchema),
 	),
 )]
 pub async fn raise(
@@ -147,12 +144,6 @@ pub async fn raise(
 		return Err(AppError::BadRequest(
 			"raising to read-only is a lowering; use lower".into(),
 		));
-	}
-
-	// The same question the boundary asks, answered in the same place, so the
-	// raise control and the enforcement layer cannot disagree.
-	if args.mode == SafetyMode::Danger && !crate::safety::holds_danger(&state, &user).await? {
-		return Err(AppError::DangerNotPermitted);
 	}
 
 	let mut conn = state.db.get().await?;

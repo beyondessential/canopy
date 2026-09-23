@@ -57,32 +57,10 @@ export interface paths {
         put?: never;
         /**
          * List the admin allow-list.
-         * @description Returns every account granted admin access to this API and whether its entry
-         *     also carries the danger permission, in no particular order.
+         * @description Returns the email addresses of every account currently granted admin
+         *     access to this API, in no particular order.
          */
         post: operations["admin_list"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/admins/set_danger": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Grant or withdraw the danger permission on an allow-list entry.
-         * @description Amends the operator's existing entry rather than adding them to a second
-         *     list. Takes effect at once: the permission is resolved afresh for each
-         *     request, so withdrawing it reaches an operator who is already raised.
-         */
-        post: operations["admin_set_danger"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3654,10 +3632,8 @@ export interface paths {
         put?: never;
         /**
          * Raise the caller's session to a higher mode for ten minutes.
-         * @description Raising to danger requires the danger permission; an operator without it is
-         *     told they lack the permission rather than that something went wrong. The
-         *     client offers danger to every operator, because nothing tells it in advance
-         *     whether its operator holds the permission.
+         * @description Raises the session the request presents, or a fresh one when it presents
+         *     none that is the caller's own. The raise is not extended by activity.
          */
         post: operations["safety_raise"];
         delete?: never;
@@ -4683,18 +4659,6 @@ export interface components {
              *     release line.
              */
             version_id: string;
-        };
-        /** @description One entry on the allow-list and the permissions it carries. */
-        AdminEntry: {
-            /**
-             * @description Whether the entry carries the danger permission. An entry exists because
-             *     the login is an administrator; this says whether it also reaches danger
-             *     (see the ADM spec). The tailnet policy can confer either permission on a
-             *     login with no entry here at all, which this does not show.
-             */
-            danger: boolean;
-            /** @description The login the entry admits. */
-            email: string;
         };
         /** @description Request body for amending an open plan. */
         AmendArgs: {
@@ -10760,13 +10724,6 @@ export interface components {
             /** @description Backup type to enable or disable. */
             type: string;
         };
-        /** @description Request body for granting or withdrawing the danger permission. */
-        SetDangerArgs: {
-            /** @description Whether the entry should carry the danger permission. */
-            danger: boolean;
-            /** @description The allow-list entry to amend. */
-            email: string;
-        };
         /** @description The profile a server's certificates are requested under. */
         SetProfileArgs: {
             /**
@@ -11803,13 +11760,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Admin entries. */
+            /** @description Admin emails. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AdminEntry"][];
+                    "application/json": string[];
                 };
             };
             401: {
@@ -11821,53 +11778,6 @@ export interface operations {
                 };
             };
             403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    admin_set_danger: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SetDangerArgs"];
-            };
-        };
-        responses: {
-            /** @description Permission amended. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-            /** @description No such allow-list entry. */
-            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -16784,14 +16694,6 @@ export interface operations {
                 };
             };
             401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-            403: {
                 headers: {
                     [name: string]: unknown;
                 };

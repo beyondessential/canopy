@@ -3,7 +3,7 @@ use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use utoipa::ToSchema;
 
 use crate::state::AppState;
@@ -13,25 +13,12 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(read_only: list))
 		.routes(routes!(danger: add))
 		.routes(routes!(danger: delete))
-		.routes(routes!(danger: set_danger))
-}
-
-/// One entry on the allow-list and the permissions it carries.
-#[derive(Serialize, ToSchema)]
-pub struct AdminEntry {
-	/// The login the entry admits.
-	pub email: String,
-	/// Whether the entry carries the danger permission. An entry exists because
-	/// the login is an administrator; this says whether it also reaches danger
-	/// (see the ADM spec). The tailnet policy can confer either permission on a
-	/// login with no entry here at all, which this does not show.
-	pub danger: bool,
 }
 
 /// List the admin allow-list.
 ///
-/// Returns every account granted admin access to this API and whether its entry
-/// also carries the danger permission, in no particular order.
+/// Returns the email addresses of every account currently granted admin
+/// access to this API, in no particular order.
 #[utoipa::path(
 	post,
 	path = "/list",
@@ -39,7 +26,7 @@ pub struct AdminEntry {
 	tag = "admins",
 	security(("tailscale-admin" = [])),
 	responses(
-		(status = 200, description = "Admin entries.", body = Vec<AdminEntry>),
+		(status = 200, description = "Admin emails.", body = Vec<String>),
 		(status = 401, body = ProblemDetailsSchema),
 		(status = 403, body = ProblemDetailsSchema),
 	),
@@ -47,55 +34,14 @@ pub struct AdminEntry {
 pub async fn list(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
-) -> Result<Json<Vec<AdminEntry>>> {
+) -> Result<Json<Vec<String>>> {
 	let mut conn = state.db.get().await?;
 	let admins = database::admins::Admin::list(&mut conn)
 		.await?
 		.into_iter()
-		.map(|a| AdminEntry {
-			email: a.email,
-			danger: a.danger,
-		})
+		.map(|a| a.email)
 		.collect();
 	Ok(Json(admins))
-}
-
-/// Request body for granting or withdrawing the danger permission.
-#[derive(Deserialize, ToSchema)]
-pub struct SetDangerArgs {
-	/// The allow-list entry to amend.
-	pub email: String,
-	/// Whether the entry should carry the danger permission.
-	pub danger: bool,
-}
-
-/// Grant or withdraw the danger permission on an allow-list entry.
-///
-/// Amends the operator's existing entry rather than adding them to a second
-/// list. Takes effect at once: the permission is resolved afresh for each
-/// request, so withdrawing it reaches an operator who is already raised.
-#[utoipa::path(
-	post,
-	path = "/set_danger",
-	operation_id = "admin_set_danger",
-	tag = "admins",
-	security(("tailscale-admin" = [])),
-	request_body = SetDangerArgs,
-	responses(
-		(status = 200, description = "Permission amended."),
-		(status = 401, body = ProblemDetailsSchema),
-		(status = 403, body = ProblemDetailsSchema),
-		(status = 404, description = "No such allow-list entry.", body = ProblemDetailsSchema),
-	),
-)]
-pub async fn set_danger(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
-	Json(args): Json<SetDangerArgs>,
-) -> Result<Json<()>> {
-	let mut conn = state.db.get().await?;
-	database::admins::Admin::set_danger(&mut conn, &args.email, args.danger).await?;
-	Ok(Json(()))
 }
 
 /// Request body for granting admin access to an email address.

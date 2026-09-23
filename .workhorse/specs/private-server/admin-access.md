@@ -5,39 +5,34 @@ id: ADM
 # Administrative access
 
 The private server's administrative surface is restricted to administrators.
-Two permissions are carried on a caller's authenticated tailnet identity: administrator, which admits them to the surface, and danger, which admits them to its most consequential operations (see [SAFE](safety-modes.md)).
-Both are decided at request time, from the same grant and the same allowlist, so there is one grant to author, one refresh, and one place to look.
+Whether a caller is an administrator is decided at request time from the caller's authenticated tailnet identity.
+What an administrator may do at a given moment is governed by their session's safety mode (see [SAFE](safety-modes.md)).
 This concerns human operators of the administrative API and is distinct from the device administrator role (see [DTR](device-trust.md)).
 
-## Who holds a permission
+## Who is an administrator
 
-A caller holds a permission when either:
+A caller is an administrator when either:
 
-- their allowlist entry records it, or
-- the tailnet policy grants them the corresponding Canopy capability.
+- their login is on the recorded administrator allowlist, or
+- the tailnet policy grants them the Canopy administrator capability.
 
 The two sources are independent, and either alone suffices.
-An operator adds, amends, or removes an allowlist entry directly; the policy-granted set is authored in the tailnet policy and not editable through Canopy.
-An allowlist entry records a login together with the permissions it carries, so granting danger to an operator amends their entry rather than adding them to a second list.
+An operator adds or removes an allowlist entry directly; the policy-granted set is authored in the tailnet policy and not editable through Canopy.
 
-The two permissions are independent: administrator does not confer danger, and danger does not confer administrator.
-Because almost the whole administrative surface is restricted to administrators, an operator holding danger alone reaches very little, so danger is granted alongside administrator rather than in place of it.
+## The administrator grant
 
-## The capability grant
+The tailnet policy confers administrative access through an application-capability grant.
+A grant confers administrative access when both hold:
 
-The tailnet policy confers a permission through an application-capability grant.
-A grant confers a permission when both hold:
-
-- its application capabilities include `bes.au/cap/canopy` with a value carrying that permission's key set true, and
+- its application capabilities include `bes.au/cap/canopy` with a value carrying `admin` set true, and
 - its destinations include the tag under which the Canopy service is published on the tailnet, `tag:server-canopy`.
 
-The key is `admin` for administrator and `danger` for danger.
-A capability value carrying neither key set true confers nothing.
-The grant's sources name the principals who thereby hold the permissions its value carries.
+A capability value that does not carry `admin` set true confers no administrative access.
+The grant's sources name the principals who thereby become administrators.
 
 ## Resolving grant sources
 
-Each source of a conferring grant is resolved, against the same policy, to the callers it covers:
+Each source of an administrator-conferring grant is resolved, against the same policy, to the callers it covers:
 
 - A group resolves to its listed member logins.
 - A bare user login resolves to itself.
@@ -45,16 +40,16 @@ Each source of a conferring grant is resolved, against the same policy, to the c
 - `autogroup:tagged` covers any caller identified only by a device tag.
 - Any other autogroup is not resolved and covers no caller.
 
-A caller holds a permission by policy when their identity matches any resolved source of a grant conferring it.
-The administrative surface admits only callers bearing a tailnet user identity, so a source resolving solely to tagged devices never yields a permission in practice.
+A caller holds policy-granted administrative access when their identity matches any resolved source of an administrator-conferring grant.
+The administrative surface admits only callers bearing a tailnet user identity, so a source resolving solely to tagged devices never yields administrative access in practice.
 
 ## Freshness and availability
 
-A permission derived from the policy reflects the policy as of the most recent successful read, refreshed periodically.
+Administrative status derived from the policy reflects the policy as of the most recent successful read, refreshed periodically.
 Reading the policy requires read access to the tailnet policy file.
-When the policy cannot be read, the recorded allowlist remains authoritative, so a control-plane outage never withdraws a permission held through the allowlist.
+When the policy cannot be read, the recorded allowlist remains authoritative, so a control-plane outage never withdraws administrative access held through the allowlist.
 
-A permission is resolved afresh for each request that depends on it, so withdrawing one takes effect at once rather than when the caller's current session ends.
+Administrative status is resolved afresh for each request, so removing an administrator takes effect at once rather than when their current session ends.
 
 ## Reporting administrative status to a caller
 

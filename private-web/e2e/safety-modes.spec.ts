@@ -86,50 +86,6 @@ test.describe("safety modes", () => {
 		await expect(modeControl(page)).toContainText(/read-only/i);
 	});
 
-	test("danger is granted and withdrawn from the administrators screen", async ({
-		page,
-		request,
-	}) => {
-		const seeded = `e2e-danger-${Math.random().toString(36).slice(2, 10)}@example.invalid`;
-		await request.post("/api/admins/add", { data: { email: seeded } });
-
-		try {
-			await page.goto("/settings/admins");
-			await expect(page.getByText(seeded)).toBeVisible();
-
-			// Amending an allow-list entry is danger-graded like the rest of it.
-			await raiseTo(page, "danger");
-
-			const row = page.getByRole("listitem").filter({ hasText: seeded });
-			const danger = row.getByRole("switch");
-			await expect(danger).not.toBeChecked();
-
-			// The switch follows the server rather than moving optimistically, so
-			// click it and wait for the answer to come back.
-			await danger.click();
-			await expect(danger).toBeChecked();
-
-			// It is the entry that carries it, so it survives a reload.
-			await page.reload();
-			await expect(
-				page.getByRole("listitem").filter({ hasText: seeded }).getByRole("switch"),
-			).toBeChecked();
-
-			// And withdrawing it takes it away again.
-			await raiseTo(page, "danger");
-			await page
-				.getByRole("listitem")
-				.filter({ hasText: seeded })
-				.getByRole("switch")
-				.click();
-			await expect(
-				page.getByRole("listitem").filter({ hasText: seeded }).getByRole("switch"),
-			).not.toBeChecked();
-		} finally {
-			await request.post("/api/admins/delete", { data: { email: seeded } });
-		}
-	});
-
 	test("a control above the mode is present and does not act", async ({
 		page,
 	}) => {

@@ -7,6 +7,7 @@ id: SAFE
 Every operator session on the private server's administrative surface runs in one of three safety modes, and every handler on that surface is graded to the mode it requires.
 A session is read-only until the operator raises it, and returns to read-only on its own.
 This governs what an operator may do at a given moment, and is distinct from whether they may reach the surface at all (see [ADM](admin-access.md)).
+A safety mode guards against mistakes rather than authorising anyone: every administrator may raise to any mode.
 
 ## The modes
 
@@ -23,9 +24,6 @@ That margin is not offered to the operator and does not appear anywhere: it exis
 
 Raising to write takes effect without confirmation.
 Raising to danger asks the operator to confirm first.
-
-The raise control offers danger to every operator, because nothing tells a client in advance whether its operator holds the danger permission.
-An operator who does not hold it is refused when they raise, and told that they lack the permission rather than that something went wrong.
 
 An operator lowers their mode from the same control at any time, without waiting for the remaining time to run out.
 
@@ -72,11 +70,7 @@ A handler reachable by a caller who is not an administrator is graded on the sam
 
 ## Refusals
 
-A graded request from a session below the mode it requires is refused.
-A danger-graded request from an operator who does not hold the danger permission (see [ADM](admin-access.md)) is refused whatever mode their session is in.
-
-The two refusals are distinguishable to a client.
-Lacking the permission says the operator can never make that request; being below the mode says they can, once they raise.
+A graded request from a session below the mode it requires is refused, and the refusal names the mode required.
 A client refused for its mode returns its indicator to read-only and tells the operator that their raise has lapsed, so client and server agree again without a reload.
 
 ## Presenting the mode

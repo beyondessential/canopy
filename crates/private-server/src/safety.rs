@@ -173,7 +173,7 @@ impl GradeMap {
 }
 
 /// What [`enforce`] needs to decide a request: the application state it resolves
-/// identity and permissions against, and the grades it decides them against.
+/// identity against, and the grades it decides requests against.
 #[derive(Clone)]
 pub struct SafetyState {
 	pub app: AppState,
@@ -197,28 +197,12 @@ async fn touch(safety: &SafetyState, id: Uuid, login: &str) -> Result<()> {
 	Ok(())
 }
 
-/// Whether a caller holds the danger permission (see the ADM spec).
-///
-/// The one place that question is answered, so the boundary and the raise
-/// control cannot disagree about it. The development identity holds it for the
-/// same reason it is an administrator: so the suite reaches danger-graded work
-/// without seeding a permission. Compiled out of release builds.
-pub async fn holds_danger(app: &AppState, user: &TailscaleUser) -> Result<bool> {
-	if use_dev_identity() {
-		return Ok(true);
-	}
-	let mut conn = app.db.get().await?;
-	user.has_danger(&mut conn, app.tailnet_directory.as_ref())
-		.await
-}
-
 /// Decide one request against the grade its handler declares.
 ///
 /// Read-only-graded requests are answered without a session, so a client can
 /// read before it has one. Anything higher is decided against the session named
 /// by [`SESSION_HEADER`]: an unknown, expired, or someone else's session all
-/// read as read-only rather than being refused outright, which keeps the two
-/// refusals meaning exactly what they say.
+/// read as read-only rather than being refused outright.
 pub async fn enforce(
 	State(safety): State<SafetyState>,
 	request: Request,
@@ -232,9 +216,9 @@ pub async fn enforce(
 	let required = safety.grades.required(request.method(), &path);
 
 	// The dev identity is an administrator by construction, and is treated as
-	// holding a danger-mode session and the danger permission here for the same
-	// reason: so the existing suite reaches graded handlers without driving a
-	// session. Compiled out of release builds.
+	// holding a danger-mode session here for the same reason: so the existing
+	// suite reaches graded handlers without driving a session. Compiled out of
+	// release builds.
 	if use_dev_identity() {
 		return Ok(next.run(request).await);
 	}
@@ -288,13 +272,6 @@ pub async fn enforce(
 	let user =
 		<TailscaleUser as FromRequestParts<AppState>>::from_request_parts(&mut parts, &safety.app)
 			.await?;
-
-	// Resolved afresh per request and checked before the mode, so an operator
-	// who can never make this request is told that rather than being told to
-	// raise. Withdrawing the permission takes effect during an existing raise.
-	if required == SafetyMode::Danger && !holds_danger(&safety.app, &user).await? {
-		return Err(AppError::DangerNotPermitted);
-	}
 
 	// Scoped so the connection goes back to the pool before the handler runs:
 	// held across it, every graded request would take two, and a busy server

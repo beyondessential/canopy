@@ -127,18 +127,10 @@ pub enum AppError {
 	AuthTokenNotValid,
 
 	/// A graded request from a session below the mode it requires (see the SAFE
-	/// spec). Distinct from [`Self::DangerNotPermitted`]: this says the operator
-	/// *can* make the request once they raise. `required` is the mode wire value
-	/// (`write` or `danger`). Maps to 403.
+	/// spec). The operator can make the request once they raise. `required` is
+	/// the mode wire value (`write` or `danger`). Maps to 403.
 	#[error("this request requires {required} mode")]
 	SafetyModeTooLow { required: String },
-
-	/// A danger-graded request from an operator who does not hold the danger
-	/// permission (see the ADM spec), whatever mode their session is in.
-	/// Distinct from [`Self::SafetyModeTooLow`]: this says the operator can
-	/// never make the request. Maps to 403.
-	#[error("the danger permission is required for this request")]
-	DangerNotPermitted,
 
 	/// User-supplied input was syntactically or semantically invalid.
 	/// Maps to 400 so callers don't have to chase a generic 500.
@@ -298,7 +290,6 @@ impl AppError {
 			Self::AuthTailnetIdentityMissing => StatusCode::UNAUTHORIZED,
 			Self::AuthTokenNotValid => StatusCode::UNAUTHORIZED,
 			Self::SafetyModeTooLow { .. } => StatusCode::FORBIDDEN,
-			Self::DangerNotPermitted => StatusCode::FORBIDDEN,
 			Self::BadRequest(_) => StatusCode::BAD_REQUEST,
 			Self::NotFound(_) => StatusCode::NOT_FOUND,
 			Self::Conflict(_) => StatusCode::CONFLICT,
@@ -372,7 +363,6 @@ impl AppError {
 						Self::AuthTailnetIdentityMissing => "auth-tailnet-identity-missing",
 						Self::AuthTokenNotValid => "auth-token-not-valid",
 						Self::SafetyModeTooLow { .. } => "safety-mode-too-low",
-						Self::DangerNotPermitted => "danger-not-permitted",
 						Self::BadRequest(_) => "bad-request",
 						Self::Conflict(_) => "conflict",
 						Self::CertificateKeyCompromised(_) => "certificate-key-compromised",

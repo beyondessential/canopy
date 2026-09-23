@@ -4,7 +4,6 @@ diesel::table! {
 	admins (email) {
 		email -> Text,
 		created_at -> Timestamptz,
-		danger -> Bool,
 	}
 }
 

@@ -38,9 +38,6 @@ async fn a_read_only_session_is_refused_a_higher_graded_request() {
 
 	commons_tests::server::run(async |mut conn, _public, private| {
 		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
-		Admin::set_danger(&mut conn, OPERATOR, true)
-			.await
-			.expect("grant danger");
 
 		// A fresh session begins read-only.
 		let session = private
@@ -78,11 +75,10 @@ async fn a_read_only_session_is_refused_a_higher_graded_request() {
 		refused.assert_status_forbidden();
 		assert!(
 			problem_type(&refused.json()).ends_with("safety-mode-too-low"),
-			"a mode refusal, not a permission one"
+			"a mode refusal naming the mode required"
 		);
 
-		// And so is a danger-graded one, even though the operator holds danger:
-		// the permission is not the mode.
+		// And so is a danger-graded one.
 		private
 			.post("/api/mcp_tokens/mint")
 			.add_header("Tailscale-User-Login", OPERATOR)
@@ -101,9 +97,6 @@ async fn the_ladder_holds_downwards_and_lowering_ends_a_raise() {
 
 	commons_tests::server::run(async |mut conn, _public, private| {
 		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
-		Admin::set_danger(&mut conn, OPERATOR, true)
-			.await
-			.expect("grant danger");
 
 		let id = new_session(&private, OPERATOR).await;
 
@@ -177,87 +170,12 @@ async fn the_ladder_holds_downwards_and_lowering_ends_a_raise() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_danger_permission_is_separate_from_the_mode() {
+async fn any_administrator_may_raise_to_danger() {
 	trust_headers();
 
 	commons_tests::server::run(async |mut conn, _public, private| {
-		// An administrator who does not hold danger.
+		// A plain allow-list entry: being an administrator is all it takes.
 		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
-
-		let id = new_session(&private, OPERATOR).await;
-
-		// They cannot raise to danger, and are told they lack the permission
-		// rather than that something went wrong.
-		let refused = private
-			.post("/api/safety/raise")
-			.add_header("Tailscale-User-Login", OPERATOR)
-			.add_header("Tailscale-User-Name", "Operator")
-			.add_header(SESSION_HEADER, &id)
-			.json(&json!({"mode": "danger"}))
-			.await;
-		refused.assert_status_forbidden();
-		assert!(
-			problem_type(&refused.json()).ends_with("danger-not-permitted"),
-			"a permission refusal, not a mode one"
-		);
-
-		// Raising to write needs no permission, and takes effect.
-		let raised = private
-			.post("/api/safety/raise")
-			.add_header("Tailscale-User-Login", OPERATOR)
-			.add_header("Tailscale-User-Name", "Operator")
-			.add_header(SESSION_HEADER, &id)
-			.json(&json!({"mode": "write"}))
-			.await;
-		raised.assert_status_ok();
-		assert_eq!(raised.json::<serde_json::Value>()["mode"], "write");
-
-		// Write does not reach a danger-graded handler, and the refusal names
-		// the permission they lack rather than telling them to raise: raising
-		// would not help.
-		let refused = private
-			.post("/api/mcp_tokens/mint")
-			.add_header("Tailscale-User-Login", OPERATOR)
-			.add_header("Tailscale-User-Name", "Operator")
-			.add_header(SESSION_HEADER, &id)
-			.json(&json!({"name": "agent"}))
-			.await;
-		refused.assert_status_forbidden();
-		assert!(
-			problem_type(&refused.json()).ends_with("danger-not-permitted"),
-			"an operator without danger can never make this request"
-		);
-
-		// Granting danger takes effect at once, on the session they already
-		// hold — but the mode still has to be raised to it.
-		Admin::set_danger(&mut conn, OPERATOR, true)
-			.await
-			.expect("grant danger");
-		let refused = private
-			.post("/api/mcp_tokens/mint")
-			.add_header("Tailscale-User-Login", OPERATOR)
-			.add_header("Tailscale-User-Name", "Operator")
-			.add_header(SESSION_HEADER, &id)
-			.json(&json!({"name": "agent"}))
-			.await;
-		refused.assert_status_forbidden();
-		assert!(
-			problem_type(&refused.json()).ends_with("safety-mode-too-low"),
-			"now it is the mode that is short, not the permission"
-		);
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn withdrawing_danger_takes_effect_during_an_existing_raise() {
-	trust_headers();
-
-	commons_tests::server::run(async |mut conn, _public, private| {
-		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
-		Admin::set_danger(&mut conn, OPERATOR, true)
-			.await
-			.expect("grant danger");
 
 		let id = new_session(&private, OPERATOR).await;
 		private
@@ -269,24 +187,14 @@ async fn withdrawing_danger_takes_effect_during_an_existing_raise() {
 			.await
 			.assert_status_ok();
 
-		// Withdrawn mid-raise: the permission is resolved afresh per request, so
-		// it does not wait for the raise to lapse.
-		Admin::set_danger(&mut conn, OPERATOR, false)
-			.await
-			.expect("withdraw danger");
-
-		let refused = private
+		private
 			.post("/api/mcp_tokens/mint")
 			.add_header("Tailscale-User-Login", OPERATOR)
 			.add_header("Tailscale-User-Name", "Operator")
 			.add_header(SESSION_HEADER, &id)
 			.json(&json!({"name": "agent"}))
-			.await;
-		refused.assert_status_forbidden();
-		assert!(
-			problem_type(&refused.json()).ends_with("danger-not-permitted"),
-			"the withdrawal bites inside the raise"
-		);
+			.await
+			.assert_status_ok();
 	})
 	.await;
 }
@@ -298,9 +206,6 @@ async fn a_session_is_usable_only_by_the_login_it_belongs_to() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		for login in [OPERATOR, OTHER] {
 			Admin::add(&mut conn, login).await.expect("add admin");
-			Admin::set_danger(&mut conn, login, true)
-				.await
-				.expect("grant danger");
 		}
 
 		let id = new_session(&private, OPERATOR).await;
@@ -397,9 +302,6 @@ async fn a_raise_survives_a_restart_because_it_is_a_row() {
 
 	commons_tests::server::run(async |mut conn, _public, private| {
 		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
-		Admin::set_danger(&mut conn, OPERATOR, true)
-			.await
-			.expect("grant danger");
 
 		let id = new_session(&private, OPERATOR).await;
 		private
@@ -512,9 +414,6 @@ async fn the_grade_is_honoured_for_a_minute_after_the_raise_lapses() {
 
 	commons_tests::server::run(async |mut conn, _public, private| {
 		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
-		Admin::set_danger(&mut conn, OPERATOR, true)
-			.await
-			.expect("grant danger");
 
 		let id = new_session(&private, OPERATOR).await;
 		private
@@ -562,61 +461,6 @@ async fn the_grade_is_honoured_for_a_minute_after_the_raise_lapses() {
 			.await;
 		refused.assert_status_forbidden();
 		assert!(problem_type(&refused.json()).ends_with("safety-mode-too-low"));
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn danger_held_through_the_policy_alone_needs_no_allowlist_entry() {
-	use commons_servers::{tailnet_directory::TailnetDirectory, tailscale_auth::TailscaleUser};
-
-	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		// A grant carrying only the danger key, targeting the Canopy service.
-		let directory = TailnetDirectory::for_test_with_policy(json!({
-			"groups": { "group:oncall": [OPERATOR] },
-			"grants": [{
-				"app": { "bes.au/cap/canopy": [{ "danger": true }] },
-				"dst": ["tag:server-canopy"],
-				"src": ["group:oncall"],
-			}],
-		}));
-		let operator = TailscaleUser {
-			login: OPERATOR.into(),
-			name: "Operator".into(),
-			profile_pic: None,
-		};
-		let stranger = TailscaleUser {
-			login: OTHER.into(),
-			name: "Other".into(),
-			profile_pic: None,
-		};
-
-		// No allowlist entry exists for anyone.
-		assert!(
-			operator
-				.has_danger(&mut conn, Some(&directory))
-				.await
-				.expect("resolve"),
-			"the policy grant alone confers danger"
-		);
-		assert!(
-			!operator
-				.is_admin(&mut conn, Some(&directory))
-				.await
-				.expect("resolve"),
-			"and only danger: the grant carried no admin key"
-		);
-		assert!(
-			!stranger
-				.has_danger(&mut conn, Some(&directory))
-				.await
-				.expect("resolve"),
-			"a login the grant does not name holds nothing"
-		);
-		assert!(
-			!operator.has_danger(&mut conn, None).await.expect("resolve"),
-			"without the policy there is nothing to hold it through"
-		);
 	})
 	.await;
 }
