@@ -175,6 +175,8 @@ Where one condition holds several times over in a cluster, it is one check with 
 
 Operators reach a cluster's API over the tailnet, through the Tailscale operator's API proxy, and not through the ingress that serves the applications.
 So whether operators can get into a cluster is its own check: the proxy is healthy while its workload is ready and the operator reports it connected to the tailnet.
+Where the proxy runs inside the Tailscale operator rather than as proxies of its own, the operator reports nothing about its own tailnet connection, so the check reads only that the operator is ready, and its detail says the tailnet half was not read.
+A cluster running no API proxy in either form has no such check.
 A failed ingress is an outage for an application's users and says nothing about whether an operator can get in to repair it, and neither condition stands in for the other.
 
 Each of a cluster's node pools is an instance of one node pool check.

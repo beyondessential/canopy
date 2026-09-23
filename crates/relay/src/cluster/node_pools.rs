@@ -169,7 +169,10 @@ mod tests {
 	fn a_pool_whose_launched_nodes_do_not_register_fails() {
 		let i = grade(
 			"general",
-			&[cond(READY, "True"), cond(NODE_REGISTRATION_HEALTHY, "False")],
+			&[
+				cond(READY, "True"),
+				cond(NODE_REGISTRATION_HEALTHY, "False"),
+			],
 		);
 		assert_eq!(i.observed, CheckResult::Failed);
 		assert_eq!(i.detail.unwrap()["condition"], NODE_REGISTRATION_HEALTHY);

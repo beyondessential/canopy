@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "family", rename_all = "kebab-case")]
 pub enum Filing {
-	/// A server's own checks, harvested from its database and workloads.
+	/// An application's own checks, harvested from its database and workloads.
 	Harvest(HarvestFiling),
 	/// A check about the substrate: what the cluster does with the workloads.
 	Substrate(SubstrateFiling),
@@ -48,12 +48,12 @@ pub enum Filing {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "target", rename_all = "kebab-case")]
 pub enum FilingTarget {
-	/// One instance in a namespace: a check about a single server.
+	/// One instance in a namespace: a check about a single application.
 	Instance {
 		namespace: String,
 		instance: Instance,
 	},
-	/// A namespace, which is a server group at a rank.
+	/// A namespace, which is a group at a rank.
 	Namespace { namespace: String },
 	/// The cluster the relay serves, the relay's own identity naming which.
 	Cluster,
@@ -67,14 +67,14 @@ pub enum FilingTarget {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Instance {
-	/// The namespace's central server.
+	/// The namespace's central.
 	Central,
 	/// One facility, by the identity that locates its databases and workloads
 	/// within the namespace.
 	Facility { id: String },
 }
 
-/// A server's own checks, as the status-push body a device would have pushed.
+/// An application's own checks, as the status-push body a device would have pushed.
 ///
 /// The filing **is** the push body rather than a re-modelled filing type: the
 /// relay runs the same check suite a bestool runs and produces the same
@@ -88,7 +88,7 @@ pub enum Instance {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HarvestFiling {
 	/// The instance this describes. A harvest filing is always about one
-	/// server, so the target is always an instance in a namespace.
+	/// application, so the target is always an instance in a namespace.
 	pub namespace: String,
 	pub instance: Instance,
 	/// The status-push body, verbatim.

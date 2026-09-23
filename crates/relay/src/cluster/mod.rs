@@ -20,6 +20,7 @@ use relay_protocol::{Filing, FilingTarget, SubstrateFiling, SubstrateInstance};
 use serde_json::json;
 
 pub mod node_pools;
+pub mod tailscale;
 pub mod watch;
 pub mod workloads;
 
@@ -42,6 +43,12 @@ pub const NODE_POOLS: CheckSpec = CheckSpec {
 	name: "node-pools",
 	title: "A node pool cannot provision nodes",
 	documentation: include_str!("docs/node-pools.md"),
+};
+
+pub const TAILSCALE_API_PROXY: CheckSpec = CheckSpec {
+	name: "tailscale-api-proxy",
+	title: "Operators cannot reach the cluster's API over the tailnet",
+	documentation: include_str!("docs/tailscale-api-proxy.md"),
 };
 
 pub const WORKLOADS_RUNNING: CheckSpec = CheckSpec {
@@ -124,8 +131,7 @@ impl Held {
 			.checks
 			.get(spec.name)
 			.is_none_or(|(_, held)| results(held) != results(&determination));
-		self.checks
-			.insert(spec.name, (spec, determination.clone()));
+		self.checks.insert(spec.name, (spec, determination.clone()));
 		changed.then(|| spec.filing(determination))
 	}
 
@@ -171,19 +177,29 @@ mod tests {
 	#[test]
 	fn a_changed_result_files_and_an_unchanged_one_waits_for_the_refile() {
 		let mut held = Held::default();
-		held.set(WORKLOADS_RUNNING, only(CheckResult::Passed, json!({"ready": 10})));
+		held.set(
+			WORKLOADS_RUNNING,
+			only(CheckResult::Passed, json!({"ready": 10})),
+		);
 		assert!(
-			held.set(WORKLOADS_RUNNING, only(CheckResult::Passed, json!({"ready": 11})))
-				.is_none(),
+			held.set(
+				WORKLOADS_RUNNING,
+				only(CheckResult::Passed, json!({"ready": 11}))
+			)
+			.is_none(),
 			"detail moving without the result is not a change",
 		);
 		assert!(
-			held.set(WORKLOADS_RUNNING, only(CheckResult::Failed, json!({"ready": 2})))
-				.is_some()
+			held.set(
+				WORKLOADS_RUNNING,
+				only(CheckResult::Failed, json!({"ready": 2}))
+			)
+			.is_some()
 		);
 
 		// The refile carries the latest detail.
-		let [Filing::Substrate(filing)] = held.all().try_into().unwrap() else {
+		let all: [Filing; 1] = held.all().try_into().unwrap();
+		let [Filing::Substrate(filing)] = all else {
 			panic!("one substrate filing held");
 		};
 		assert_eq!(filing.instances[0].detail, Some(json!({"ready": 2})));

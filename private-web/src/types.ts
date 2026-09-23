@@ -91,6 +91,8 @@ export type VersionTracking = Solidify<Schemas["VersionTracking"]>;
 export type Caps = Solidify<Schemas["Caps"]>;
 export type ApplicationTypeInfo = Solidify<Schemas["ApplicationTypeInfo"]>;
 export type MachineDetailData = Solidify<Schemas["MachineDetailData"]>;
+export type ClusterDetail = Solidify<Schemas["ClusterDetail"]>;
+export type ClusterApplication = Solidify<Schemas["ClusterApplication"]>;
 export type GroupMachine = Solidify<Schemas["GroupMachine"]>;
 export type ServerRank = Solidify<Schemas["ServerRank"]>;
 export type VersionStatus = Solidify<Schemas["VersionStatus"]>;
@@ -615,7 +617,7 @@ export function healthcheckNameFromRef(
 
 /// Sources canopy reserves for its own conditions. They file at bare
 /// refs; every other source's checks are namespaced under `health/`.
-export const RESERVED_SOURCES = ["canopy", "manual"];
+export const RESERVED_SOURCES = ["canopy", "manual", "kubernetes"];
 
 /// The silence ref for a check, which is what the silence endpoints and
 /// the silence listings speak. Mirrors `database::silenced_refs`: bare

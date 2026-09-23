@@ -32,7 +32,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 
 /// Request body identifying a cluster.
 #[derive(Deserialize, ToSchema)]
-pub struct ClusterIdArgs {
+pub struct ClusterPageArgs {
 	/// The cluster to read.
 	pub cluster_id: Uuid,
 }
@@ -57,7 +57,6 @@ pub struct ClusterApplication {
 	/// What the application is called within its group.
 	pub name: Option<String>,
 	/// What the application is.
-	#[schema(value_type = String)]
 	pub r#type: ApplicationType,
 	/// The application's environment tier.
 	pub rank: Option<ServerRank>,
@@ -101,7 +100,7 @@ pub struct ClusterDetail {
 	operation_id = "clusters_get_detail",
 	tag = "clusters",
 	security(("tailscale-user" = [])),
-	request_body = ClusterIdArgs,
+	request_body = ClusterPageArgs,
 	responses(
 		(status = 200, body = ClusterDetail),
 		(status = 404, body = ProblemDetailsSchema),
@@ -109,7 +108,7 @@ pub struct ClusterDetail {
 )]
 pub async fn get_detail(
 	State(state): State<AppState>,
-	Json(args): Json<ClusterIdArgs>,
+	Json(args): Json<ClusterPageArgs>,
 ) -> Result<Json<ClusterDetail>> {
 	let mut conn = state.db.get().await?;
 	let cluster = registered(&mut conn, args.cluster_id).await?;

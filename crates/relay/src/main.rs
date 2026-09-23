@@ -13,7 +13,7 @@ use clap::Parser;
 use lloggs::{LoggingArgs, PreArgs};
 use relay::{Config, duties::Unattached};
 use relay_protocol::Hello;
-use tracing::info;
+use tracing::{error, info};
 
 /// The relay reports a startup failure as plain text and exits.
 ///
@@ -86,10 +86,6 @@ async fn main() -> Result<(), BoxError> {
 		"relay starting; this is the key canopy must have enrolled",
 	);
 
-	// The check families are what produce filings and what reads the cluster.
-	// Until they land this relay connects, authenticates, and answers — which
-	// is what makes the transport and the enrollment testable against a real
-	// canopy before there is a check to run.
 	let build = Hello {
 		suite_version: "unattached".into(),
 		relay_version: env!("CARGO_PKG_VERSION").into(),
@@ -97,10 +93,20 @@ async fn main() -> Result<(), BoxError> {
 	};
 	let duties = Arc::new(Unattached::new(build));
 
-	// Nothing files yet, so the sender is held here to keep the channel open;
-	// the check families take it when they arrive.
-	let (filings_tx, filings_rx) = tokio::sync::mpsc::channel(256);
-	let _filings = filings_tx;
+	let (filings, filings_rx) = tokio::sync::mpsc::channel(256);
+
+	// The cluster checks read the cluster through the relay's own
+	// ServiceAccount. A relay that cannot build a client still connects and
+	// answers, so canopy sees it and can say what is wrong, but it files
+	// nothing about the cluster, and the cluster reads unreachable.
+	match kube::Client::try_default().await {
+		Ok(client) => {
+			tokio::spawn(relay::cluster::watch::run(client, filings.clone()));
+		}
+		Err(err) => error!("cannot reach this cluster's API, so no cluster checks run: {err}"),
+	}
+	// Held so the channel stays open whatever the checks do.
+	let _filings = filings;
 
 	relay::run(config, duties, filings_rx).await;
 	Ok(())

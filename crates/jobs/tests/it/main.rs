@@ -7,4 +7,5 @@ mod artifact_sweep;
 mod domains;
 mod relay;
 mod relay_end_to_end;
+mod relay_ingest;
 mod session_sweep;

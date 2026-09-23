@@ -44,12 +44,10 @@ pub struct Share {
 
 impl Share {
 	pub fn sum(workloads: impl IntoIterator<Item = Replicas>) -> Self {
-		workloads
-			.into_iter()
-			.fold(Self::default(), |acc, w| Self {
-				desired: acc.desired + w.desired,
-				ready: acc.ready + w.ready,
-			})
+		workloads.into_iter().fold(Self::default(), |acc, w| Self {
+			desired: acc.desired + w.desired,
+			ready: acc.ready + w.ready,
+		})
 	}
 
 	/// The share ready, as a percentage. A cluster asking for nothing at all
@@ -66,7 +64,10 @@ impl Share {
 /// A Deployment or a StatefulSet: its replica count, defaulting to one as the
 /// API does, against its ready replicas.
 pub fn scaled(replicas: Option<i32>, ready: Option<i32>) -> Replicas {
-	Replicas::new(non_negative(replicas.unwrap_or(1)), non_negative(ready.unwrap_or(0)))
+	Replicas::new(
+		non_negative(replicas.unwrap_or(1)),
+		non_negative(ready.unwrap_or(0)),
+	)
 }
 
 /// A DaemonSet: the nodes it should be scheduled on, against those where it is
@@ -154,16 +155,14 @@ impl Grader {
 		let held = |i: usize, hold: Duration| {
 			self.under[i].is_some_and(|since| now.saturating_duration_since(since) >= hold)
 		};
-		let degraded = if percent < FAIL_AT_ONCE_BELOW
-			|| held(1, FAIL_SOON_AFTER)
-			|| held(2, FAIL_AFTER)
-		{
-			Some(CheckResult::Failed)
-		} else if held(3, WARN_AFTER) {
-			Some(CheckResult::Warning)
-		} else {
-			None
-		};
+		let degraded =
+			if percent < FAIL_AT_ONCE_BELOW || held(1, FAIL_SOON_AFTER) || held(2, FAIL_AFTER) {
+				Some(CheckResult::Failed)
+			} else if held(3, WARN_AFTER) {
+				Some(CheckResult::Warning)
+			} else {
+				None
+			};
 
 		let result = match self.result {
 			Some(last) => Some(most_urgent(recovered(last, percent), degraded)),
@@ -245,7 +244,13 @@ mod tests {
 			daemon(4, 4),
 			database(Some(3), Some(2), None).unwrap(),
 		]);
-		assert_eq!(share, Share { desired: 12, ready: 10 });
+		assert_eq!(
+			share,
+			Share {
+				desired: 12,
+				ready: 10
+			}
+		);
 	}
 
 	#[test]
@@ -295,7 +300,10 @@ mod tests {
 		assert_eq!(hold(&mut g, 79.0, t, 5 * MIN), Some(CheckResult::Failed));
 
 		let mut g = settled(CheckResult::Passed, t);
-		assert_eq!(hold(&mut g, 65.0, t, 90 * Duration::from_secs(1)), Some(CheckResult::Passed));
+		assert_eq!(
+			hold(&mut g, 65.0, t, 90 * Duration::from_secs(1)),
+			Some(CheckResult::Passed)
+		);
 		assert_eq!(g.observe(65.0, t + 2 * MIN), Some(CheckResult::Failed));
 
 		let mut g = settled(CheckResult::Passed, t);
@@ -307,9 +315,15 @@ mod tests {
 		let t = Instant::now();
 		let mut g = settled(CheckResult::Passed, t);
 		assert_eq!(hold(&mut g, 85.0, t, 4 * MIN), Some(CheckResult::Passed));
-		assert_eq!(g.observe(97.0, t + 4 * MIN + Duration::from_secs(30)), Some(CheckResult::Passed));
+		assert_eq!(
+			g.observe(97.0, t + 4 * MIN + Duration::from_secs(30)),
+			Some(CheckResult::Passed)
+		);
 		// And the clock restarts after it: another dip is timed afresh.
-		assert_eq!(hold(&mut g, 85.0, t + 5 * MIN, 4 * MIN), Some(CheckResult::Passed));
+		assert_eq!(
+			hold(&mut g, 85.0, t + 5 * MIN, 4 * MIN),
+			Some(CheckResult::Passed)
+		);
 	}
 
 	#[test]

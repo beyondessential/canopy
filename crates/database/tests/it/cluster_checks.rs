@@ -429,3 +429,25 @@ async fn a_clusters_threshold_defaults_to_five_minutes_and_governs_the_sweep() {
 	})
 	.await
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_sources_listing_leaves_the_substrate_source_out() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let cluster = registered_cluster(&mut conn, "ops-main").await;
+		file_substrate(
+			&mut conn,
+			cluster.id,
+			"node-pools",
+			only(CheckResult::Passed),
+		)
+		.await;
+		let sources = database::source_policies::SourcePolicy::list_sources(&mut conn)
+			.await
+			.unwrap();
+		assert!(
+			sources.iter().all(|s| s.source != SUBSTRATE_SOURCE),
+			"a reserved source has no source policy to show",
+		);
+	})
+	.await
+}

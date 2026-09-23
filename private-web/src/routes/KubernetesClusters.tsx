@@ -11,6 +11,7 @@ import {
 	DialogTitle,
 	IconButton,
 	LinearProgress,
+	Link,
 	Snackbar,
 	Stack,
 	Table,
@@ -27,6 +28,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import DownloadIcon from "@mui/icons-material/Download";
 import ReplayIcon from "@mui/icons-material/Replay";
 import { type FormEvent, useEffect, useState } from "react";
+import { Link as RouterLink } from "react-router-dom";
 import { ApiError, callApi, useApi } from "../api";
 import { GradedAction } from "../components/GradedAction";
 import type { ProvisionedCredential } from "../types";
@@ -229,7 +231,15 @@ function ClusterSection({
 					<TableBody>
 						{clusters.map((c) => (
 							<TableRow key={c.id} hover>
-								<TableCell>{c.name}</TableCell>
+								<TableCell>
+									{c.registered ? (
+										<Link component={RouterLink} to={`/fleet/clusters/${c.id}`}>
+											{c.name}
+										</Link>
+									) : (
+										c.name
+									)}
+								</TableCell>
 								<TableCell>
 									<ConnectionChip cluster={c} />
 								</TableCell>

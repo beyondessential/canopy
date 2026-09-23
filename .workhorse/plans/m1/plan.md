@@ -44,6 +44,7 @@ The connection probe stays as it is (`last_answered_at`, for registration and th
 - `CheckTarget` gains `{ kind: "cluster"; id }`. A cluster has no group, so the table offers only the cluster-scoped silence. Check that the silence endpoints and `SilencedRefsSection` accept a cluster scope (`scoped_check_policies` already has the column).
 - Admin edit for `alert_when_down_for`, following `MachineEdit`.
 - The application-side link (an application's page naming its cluster in the breadcrumb, the "hasn't checked in" alert and the host nav) needs a cluster-hosted application to exist, which is N1's. Write it if it's cheap, but it can't be exercised until N1 lands.
+  Not cheap as things stand: an application's page reads it through `ServerInfo`, whose `machine_id` is required (`server_to_info` expects a machine), so a cluster-hosted application cannot load there at all. Making the application grain host-agnostic is N1's, and the link goes in with it.
 - Playwright coverage in `private-web/e2e/`, extending `e2e/seed.ts` to seed a registered cluster with cluster-scoped issues.
 
 ### Incidents
@@ -113,24 +114,40 @@ Grading, as a small state machine the relay holds:
 
 **One check per component, not instances of a generic "component up" check.** Each component fails and is detected differently, so each is its own condition with its own detail and documentation. Instances are for several of one condition (node pools).
 
+## The Tailscale API proxy in the ops setup
+
+The ops repo (`pulumi/k8s-essentials/tailscale.ts`) runs the API proxy in-process in the Tailscale operator (`apiServerProxyConfig.mode: 'true'`), not as a ProxyGroup.
+In that mode nothing in the cluster reports whether the proxy is connected to the tailnet: there is no ProxyGroup or other custom resource carrying a condition or device status, and the operator's Deployment has no readiness probe.
+The operator's tailnet state lives in its `operator` Secret, which holds its node key, so reading it is not a permission to grant the relay.
+
+Decided: support both modes.
+A ProxyGroup of type `kube-apiserver` is read for both halves (`ProxyGroupAvailable`, falling back to `ProxyGroupReady`, and `status.devices` with tailnet IPs), and any one serving on the tailnet passes.
+Failing that, the in-process proxy is found as a Deployment whose container sets `APISERVER_PROXY` to `true` or `noauth` (the chart's own env), graded on its readiness alone, with `connected: null` in the detail.
+Neither present means no API proxy in the cluster, so nothing is filed.
+The tailnet half on today's clusters waits on ops moving the proxy to a ProxyGroup.
+
+Silencing one node pool alone is a scoped policy rule on `check.pool`, not a silence: a silence quiets the whole check. The instance path grades each instance through the rule chain, so that already works; the test case is left unticked until it has a test.
+
 ## Build steps
 
-- [ ] Reserve `kubernetes`; drive `list_sources` and the two `healthchecks.rs` guards off `RESERVED_SOURCES`
-- [ ] Test: device push claiming `kubernetes` is refused; Sources page doesn't list it
-- [ ] Test: cluster-grain substrate filing from a registered cluster lands flat at `Scope::Cluster`
-- [ ] `SubstrateFiling` carries `Vec<SubstrateInstance>`; `ingest_substrate` maps it onto `CheckInstance`; round-trip and ingest tests
-- [ ] Migration: `kubernetes_clusters.alert_when_down_for` default 5 minutes
-- [ ] Cluster half of `sweep_staleness`, with the two `Issue` helpers; tests for stale, recovered, never reported, draft skipped
-- [ ] Private API for the cluster page; `just gen-openapi`
-- [ ] `ChecksTable` / silence plumbing accepts a cluster target
-- [ ] Cluster page at `/fleet/clusters/:id`; registry links to it; admin edit of the threshold
-- [ ] Playwright spec for the cluster page; seed helper for a cluster and its issues
-- [ ] Relay: cluster-check producer with watch/hold/file/refile on a one-minute cadence
-- [ ] Relay: permission errors become `broken` with the refusal in detail
-- [ ] Relay: `tailscale-api-proxy`
-- [ ] Relay: `node-pools`
-- [ ] Relay: `workloads-running` readers, exclusions, bands, hysteresis, holds, restart handling
-- [ ] Relay: document the ClusterRole the checks need
-- [ ] Documentation for each of the three checks
-- [ ] Correct the stale doc comments
+- [x] Reserve `kubernetes`; drive `list_sources` and the two `healthchecks.rs` guards off `RESERVED_SOURCES`
+- [x] Test: device push claiming `kubernetes` is refused; Sources page doesn't list it
+- [x] Test: cluster-grain substrate filing from a registered cluster lands flat at `Scope::Cluster`
+- [x] `SubstrateFiling` carries `Vec<SubstrateInstance>`; `ingest_substrate` maps it onto `CheckInstance`; round-trip and ingest tests
+- [x] Migration: `kubernetes_clusters.alert_when_down_for` default 5 minutes
+- [x] Cluster half of `sweep_staleness`, with the two `Issue` helpers; tests for stale, recovered, never reported, draft skipped
+- [x] Private API for the cluster page; `just gen-openapi`
+- [x] `ChecksTable` / silence plumbing accepts a cluster target
+- [x] Cluster page at `/fleet/clusters/:id`; registry links to it; admin edit of the threshold
+- [x] Playwright spec for the cluster page; seed helper for a cluster and its issues
+- [x] Relay: cluster-check producer with watch/hold/file/refile on a one-minute cadence
+- [x] Relay: permission errors become `broken` with the refusal in detail
+- [x] Relay: `tailscale-api-proxy`, both modes (see "The Tailscale API proxy in the ops setup")
+- [x] Relay: `node-pools`
+- [x] Relay: `workloads-running` readers, exclusions, bands, hysteresis, holds, restart handling
+- [x] Relay: document the ClusterRole the checks need
+- [x] Documentation for each of the three checks
+  - [x] `node-pools`, `workloads-running` (`crates/relay/src/cluster/docs/`)
+  - [x] `tailscale-api-proxy`
+- [x] Correct the stale doc comments
 - [ ] `just check`, `just test-package` for touched crates, `just typecheck`, `just test-e2e`, `cargo fmt`

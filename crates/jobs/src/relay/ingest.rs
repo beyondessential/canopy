@@ -28,7 +28,7 @@ use tracing::warn;
 /// resolved against what canopy knows.
 ///
 /// This is the bridge from the relay's vocabulary (namespaces and instances)
-/// to canopy's (applications, groups, canopy-wide). Resolution happens here
+/// to canopy's (applications, groups, clusters). Resolution happens here
 /// and nowhere else, so a relay never holds a canopy identifier.
 #[derive(Debug, Clone)]
 pub enum Placement {
@@ -202,12 +202,13 @@ async fn ingest_substrate(
 /// A filing canopy could not place, logged rather than dropped silently.
 ///
 /// Worth a line each time: a coordinate that resolves to nothing means canopy
-/// holds no application for that instance, and the check results for it are
-/// going nowhere until it does.
+/// holds nothing for it (no registered cluster for the relay, or no
+/// application or group for the namespace it named), and the check results for
+/// it are going nowhere until it does.
 pub fn unplaceable(relay_identity_id: Uuid, target: &FilingTarget) {
 	warn!(
 		relay = %relay_identity_id,
 		?target,
-		"relay filed against coordinates canopy cannot place; no application record carries them",
+		"relay filed against coordinates canopy cannot place",
 	);
 }
