@@ -48,8 +48,10 @@ test.describe("a cluster's page", () => {
 
 		const hosted = page.getByTestId("applications-on-cluster");
 		await expect(hosted.getByText("Applications (1)")).toBeVisible();
-		await expect(hosted.getByText("Harbour")).toBeVisible();
-		await expect(hosted.getByText("central")).toBeVisible();
+		// A cluster carries many groups' applications, so each row names its group.
+		await expect(
+			hosted.getByRole("link", { name: /Harbour.*central/ }),
+		).toBeVisible();
 	});
 
 	test("the registry links each registered cluster to its page", async ({
@@ -101,7 +103,7 @@ test.describe("a cluster's page", () => {
 		await expect(
 			page.getByRole("code").filter({ hasText: "kubernetes/workloads-running" }),
 		).toBeVisible();
-		await expect(page.getByText("Healthy")).toBeVisible();
+		await expect(page.getByText("Healthy", { exact: true })).toBeVisible();
 	});
 
 	test("an admin changes how long the cluster may go unheard", async ({
