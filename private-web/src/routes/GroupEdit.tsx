@@ -316,7 +316,6 @@ function EditForm({
 						<Button
 							type="button"
 							variant="outlined"
-							color="error"
 							startIcon={<ArchiveIcon />}
 							onClick={onArchive}
 							disabled={pending || memberCount > 0}

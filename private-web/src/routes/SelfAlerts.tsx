@@ -147,7 +147,6 @@ export default function SelfAlerts() {
 									<GradedAction calls="self_alerts/resolve">
 										<Button
 											size="small"
-											color="error"
 											variant="outlined"
 											onClick={() => onResolve(a.id)}
 										>

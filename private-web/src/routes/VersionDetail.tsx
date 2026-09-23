@@ -233,7 +233,6 @@ function ChangelogSection({
 							<GradedAction calls="versions/update_version_changelog">
 								<Button
 									variant="contained"
-									color="success"
 									onClick={save}
 									disabled={action.pending}
 								>
@@ -355,7 +354,7 @@ function ArtifactsSection({
 					<Stack direction="row" spacing={1}>
 						{unlocked && (
 							<GradedAction
-								calls={
+								opens={
 									showCreate
 										? []
 										: ["versions/create_artifact", "versions/upload_artifact"]
@@ -363,20 +362,33 @@ function ArtifactsSection({
 							>
 								<Button
 									variant={showCreate ? "outlined" : "contained"}
-									color={showCreate ? "warning" : "primary"}
+									color={showCreate ? "warning" : undefined}
 									onClick={() => setShowCreate((s) => !s)}
 								>
 									{showCreate ? "Cancel create" : "Create"}
 								</Button>
 							</GradedAction>
 						)}
-						<Button
-							variant="outlined"
-							startIcon={unlocked ? <LockOpenIcon /> : <LockIcon />}
-							onClick={() => setUnlocked((u) => !u)}
+						<GradedAction
+							opens={
+								unlocked
+									? []
+									: [
+											"versions/create_artifact",
+											"versions/upload_artifact",
+											"versions/update_artifact",
+											"versions/delete_artifact",
+										]
+							}
 						>
-							{unlocked ? "Lock" : "Unlock"}
-						</Button>
+							<Button
+								variant="outlined"
+								startIcon={unlocked ? <LockOpenIcon /> : <LockIcon />}
+								onClick={() => setUnlocked((u) => !u)}
+							>
+								{unlocked ? "Lock" : "Unlock"}
+							</Button>
+						</GradedAction>
 					</Stack>
 				)}
 			</Stack>
@@ -533,7 +545,6 @@ function ArtifactRow({
 								<Button
 									size="small"
 									variant="contained"
-									color="error"
 									onClick={onDelete}
 									disabled={deleteAction.pending}
 								>
@@ -564,7 +575,6 @@ function ArtifactRow({
 								<IconButton
 									aria-label={`delete ${artifactLabel(artifact)}`}
 									size="small"
-									color="error"
 									onClick={() => setConfirmDelete(true)}
 								>
 									<DeleteIcon fontSize="small" />

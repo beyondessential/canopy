@@ -425,7 +425,6 @@ function IssueActions({
 						<Button
 							size="small"
 							variant="outlined"
-							color="warning"
 							startIcon={<CheckCircleOutlinedIcon />}
 							onClick={() => wrap(() => unresolve.call({ issue_id: issue.id }))}
 						>
@@ -437,7 +436,6 @@ function IssueActions({
 						<Button
 							size="small"
 							variant="outlined"
-							color="success"
 							startIcon={<CheckCircleOutlinedIcon />}
 							onClick={() => setResolveOpen((v) => !v)}
 						>
@@ -450,7 +448,6 @@ function IssueActions({
 						<Button
 							size="small"
 							variant="outlined"
-							color="warning"
 							startIcon={<SnoozeIcon />}
 							onClick={() => wrap(() => unsnooze.call({ issue_id: issue.id }))}
 						>
@@ -469,7 +466,7 @@ function IssueActions({
 						</Button>
 					</GradedAction>
 				)}
-				<GradedAction calls={silenceCalls}>
+				<GradedAction opens={silenceCalls}>
 					<Button
 						size="small"
 						variant="outlined"
@@ -507,7 +504,6 @@ function IssueActions({
 						<Button
 							variant="outlined"
 							size="small"
-							color="success"
 							startIcon={<CheckCircleOutlinedIcon />}
 							onClick={() =>
 								wrap(() => resolve.call({ issue_id: issue.id, reason })).then(

@@ -317,7 +317,6 @@ function Header({
 						<Button
 							size="small"
 							variant="outlined"
-							color="warning"
 							startIcon={<CheckCircleOutlinedIcon />}
 							onClick={() =>
 								wrap(() => unresolve.call({ incident_id: incident.id }))
@@ -331,7 +330,6 @@ function Header({
 						<Button
 							size="small"
 							variant="outlined"
-							color="success"
 							startIcon={<CheckCircleOutlinedIcon />}
 							onClick={() => setResolveOpen((v) => !v)}
 						>
@@ -410,7 +408,6 @@ function Header({
 						<Button
 							variant="outlined"
 							size="small"
-							color="success"
 							startIcon={<CheckCircleOutlinedIcon />}
 							onClick={() =>
 								wrap(() =>

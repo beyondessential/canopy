@@ -232,7 +232,6 @@ export default function MaintenanceSection({
 								<GradedAction calls="maintenance/lift">
 									<Button
 										size="small"
-										color="info"
 										variant="outlined"
 										disabled={lift.pending}
 										onClick={async () => {
@@ -347,7 +346,6 @@ export default function MaintenanceSection({
 								<GradedAction calls="maintenance/declare">
 									<Button
 										size="small"
-										color="info"
 										onClick={() =>
 											setEnvironmentDialog({
 												rank: window.rank as ServerRank,
@@ -361,7 +359,6 @@ export default function MaintenanceSection({
 								<GradedAction calls="maintenance/lift">
 									<Button
 										size="small"
-										color="info"
 										variant="outlined"
 										disabled={lift.pending}
 										onClick={async () => {

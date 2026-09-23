@@ -160,7 +160,6 @@ export default function DeclareMaintenanceDialog({
 				{offerLift && amending && existing && (
 					<GradedAction calls="maintenance/lift">
 						<Button
-							color="error"
 							disabled={lift.pending || declare.pending}
 							onClick={async () => {
 								try {

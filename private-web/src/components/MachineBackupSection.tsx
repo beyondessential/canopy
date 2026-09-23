@@ -165,7 +165,6 @@ export default function BackupCapabilitiesSection({
 							action={
 								<GradedAction calls="backups/disallow_restore">
 									<Button
-										color="inherit"
 										size="small"
 										onClick={onDisallowRestore}
 										disabled={allowRestore.pending || disallowRestore.pending}
@@ -183,7 +182,6 @@ export default function BackupCapabilitiesSection({
 						<GradedAction calls="backups/allow_restore">
 							<Button
 								size="small"
-								color="warning"
 								variant="outlined"
 								startIcon={<RestoreDataIcon />}
 								onClick={onAllowRestore}

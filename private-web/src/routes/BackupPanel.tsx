@@ -129,14 +129,16 @@ export default function BackupPanel() {
 				<Alert severity="info">Backups not set up for this group.</Alert>
 				{isAdmin && (
 					<Box>
-						<Button
-							component={RouterLink}
-							to={`/fleet/groups/${id}/backups/config`}
-							variant="contained"
-							startIcon={<BackupIcon />}
-						>
-							Set up backups
-						</Button>
+						<GradedAction opens={["backups/create_shared", "backups/create"]}>
+							<Button
+								component={RouterLink}
+								to={`/fleet/groups/${id}/backups/config`}
+								variant="contained"
+								startIcon={<BackupIcon />}
+							>
+								Set up backups
+							</Button>
+						</GradedAction>
 					</Box>
 				)}
 			</Stack>
@@ -185,14 +187,16 @@ export default function BackupPanel() {
 					</Stack>
 					{isAdmin && (
 						<Stack direction="row" spacing={1}>
-							<Button
-								component={RouterLink}
-								to={`/fleet/groups/${id}/backups/config`}
-								variant="outlined"
-								startIcon={<EditIcon />}
-							>
-								Edit config
-							</Button>
+							<GradedAction opens="backups/update">
+								<Button
+									component={RouterLink}
+									to={`/fleet/groups/${id}/backups/config`}
+									variant="outlined"
+									startIcon={<EditIcon />}
+								>
+									Edit config
+								</Button>
+							</GradedAction>
 							<DeleteConfigButton groupId={id} onDeleted={configForTick.reload} />
 						</Stack>
 					)}
@@ -275,7 +279,6 @@ function DeleteConfigButton({
 			<GradedAction calls="backups/delete">
 				<Button
 					variant="outlined"
-					color="error"
 					startIcon={<DeleteIcon />}
 					onClick={() => setOpen(true)}
 				>
@@ -302,7 +305,6 @@ function DeleteConfigButton({
 					</Button>
 					<GradedAction calls="backups/delete">
 						<Button
-							color="error"
 							variant="contained"
 							onClick={onConfirm}
 							disabled={del.pending}
@@ -609,7 +611,6 @@ function OverrideEditor({
 					<GradedAction calls="backups/clear_schedule">
 						<Button
 							size="small"
-							color="warning"
 							onClick={reset}
 							disabled={pending}
 						>
@@ -1547,7 +1548,6 @@ function MaintenancePanel({
 							<GradedAction calls="backups/cancel_maintenance">
 								<Button
 									size="small"
-									color="inherit"
 									disabled={cancel.pending}
 									onClick={onCancel}
 								>
@@ -1721,7 +1721,6 @@ function ServersPanel({
 					<GradedAction calls="backups/disallow_restore">
 						<Button
 							size="small"
-							color="warning"
 							onClick={() => onDisallowRestore(machineId)}
 							disabled={busy}
 						>
@@ -1735,7 +1734,6 @@ function ServersPanel({
 			<GradedAction calls="backups/allow_restore">
 				<Button
 					size="small"
-					color="warning"
 					startIcon={<RestoreIcon />}
 					onClick={() => onAllowRestore(machineId)}
 					disabled={busy}
@@ -1822,7 +1820,6 @@ function ServersPanel({
 						<GradedAction calls="backups/cancel_request">
 							<Button
 								size="small"
-								color="error"
 								onClick={() => onCancel(machineId, type)}
 								disabled={cancel.pending}
 							>

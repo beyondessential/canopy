@@ -33,12 +33,7 @@ import { useIsAdmin } from "../hooks/useIsAdmin";
 import type { GradedEndpoint } from "../safety-modes";
 import CheckDocButton from "./CheckDocButton";
 import CheckExtrasList, { checkEntryExtras } from "./CheckExtras";
-import {
-	type Calls,
-	GradedAction,
-	lowestMode,
-	requiredMode,
-} from "./GradedAction";
+import { type Calls, GradedAction } from "./GradedAction";
 import ExternalUsersDetails, {
 	parseExternalUserSessions,
 } from "./ExternalUsersDetails";
@@ -639,9 +634,6 @@ function SilenceCheckButton({
 	}
 	// Each row in the popover is graded on its own, so opening it needs only the
 	// lowest of them: un-silencing is write even where silencing is danger.
-	const popoverMode = lowestMode(offered);
-	const popoverCalls =
-		offered.find((call) => requiredMode(call) === popoverMode) ?? offered[0];
 	const handle = async (fn: () => Promise<unknown>) => {
 		try {
 			await fn();
@@ -653,13 +645,12 @@ function SilenceCheckButton({
 	};
 	return (
 		<>
-			<GradedAction calls={popoverCalls}>
+			<GradedAction opens={offered}>
 				<Tooltip
 					title={silenced ? "Silenced — manage…" : "Silence this check…"}
 				>
 					<IconButton
 						size="small"
-						color={silenced ? "primary" : "default"}
 						aria-label={
 							silenced
 								? `Manage silence for ${check}`

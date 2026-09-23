@@ -172,6 +172,27 @@ test.describe("safety modes", () => {
 		expect(await tickets()).toBeGreaterThan(0);
 	});
 
+	test("a control that opens a form carries the grade of what the form saves", async ({
+		page,
+		sql,
+	}) => {
+		await resetSeededTables(sql);
+		const group = await seedServerGroup(sql, { name: "opener-group" });
+
+		// Editing a group is write, so the link into its form is blocked
+		// read-only rather than leading to a form that cannot be saved.
+		await page.goto(`/fleet/groups/${group.id}`);
+		const edit = page.getByRole("link", { name: "Edit", exact: true });
+		await expect(edit).toHaveAttribute("aria-disabled", "true");
+		await expect(edit).toHaveCSS("background-image", /rgba\(255, 152, 0/);
+		await edit.click({ force: true });
+		await expect(page).toHaveURL(new RegExp(`/fleet/groups/${group.id}$`));
+
+		await raiseTo(page, "write");
+		await edit.click();
+		await expect(page).toHaveURL(new RegExp(`/fleet/groups/${group.id}/edit$`));
+	});
+
 	test("a blocked control carries its grade's stripe, full colour under the pointer", async ({
 		page,
 	}) => {
@@ -188,6 +209,38 @@ test.describe("safety modes", () => {
 		const writing = page.getByRole("button", { name: "Add" });
 		await expect(writing).toHaveCSS("background-image", /rgba\(255, 152, 0/);
 		await expect(writing).toHaveCSS("filter", "grayscale(0.8)");
+	});
+
+	test("the mode control and its menu wear each mode's stripe", async ({
+		page,
+	}) => {
+		await page.goto("/settings/admins");
+
+		// Read-only is plain; each raised mode in the menu carries its stripe,
+		// muted until the pointer is on it.
+		await expect(modeControl(page)).toHaveCSS("background-image", "none");
+		await modeControl(page).click();
+		const write = page.getByRole("menuitem", { name: /write/i });
+		const danger = page.getByRole("menuitem", { name: /danger/i });
+		await expect(write).toHaveCSS("background-image", /rgba\(255, 152, 0/);
+		await expect(danger).toHaveCSS("background-image", /rgba\(239, 83, 80/);
+		await expect(danger).toHaveCSS("filter", "grayscale(0.8)");
+		await danger.hover();
+		await expect(danger).toHaveCSS("filter", "grayscale(0)");
+		await page.keyboard.press("Escape");
+
+		// Raised, the control itself wears the mode's stripe, and the menu shows
+		// the current mode in full colour.
+		await raiseTo(page, "danger");
+		await expect(modeControl(page)).toHaveCSS(
+			"background-image",
+			/rgba\(239, 83, 80, 0\.5/,
+		);
+		await modeControl(page).click();
+		const current = page.getByRole("menuitem", { name: /danger/i });
+		await expect(current).toHaveAttribute("aria-current", "true");
+		await page.mouse.move(0, 0);
+		await expect(current).toHaveCSS("filter", "grayscale(0)");
 	});
 
 	test("a blocked control is out of reach of the keyboard too", async ({
@@ -230,6 +283,22 @@ test.describe("safety modes", () => {
 });
 
 test.describe("safety modes, raised", () => {
+	test("a usable control is drawn in its grade's colour", async ({ page }) => {
+		// Danger: adding an allow-list entry, in the danger colour.
+		await page.goto("/settings/admins");
+		await expect(page.getByRole("button", { name: "Add admin" })).toHaveCSS(
+			"background-color",
+			"rgb(211, 47, 47)",
+		);
+
+		// Write: saving a snippet, in the write colour.
+		await page.goto("/bestool/snippets");
+		await expect(page.getByRole("button", { name: "Add" })).toHaveCSS(
+			"background-color",
+			"rgb(237, 108, 2)",
+		);
+	});
+
 	test("un-silencing stays reachable in write mode, where silencing is not", async ({
 		page,
 		sql,

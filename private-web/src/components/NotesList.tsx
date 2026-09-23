@@ -219,7 +219,6 @@ function NoteRow({
 						<GradedAction calls={`${apiModule}/delete_note`}>
 							<IconButton
 								size="small"
-								color="error"
 								aria-label="Delete"
 								onClick={remove}
 								disabled={del.pending}

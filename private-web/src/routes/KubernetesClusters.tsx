@@ -168,7 +168,6 @@ export default function KubernetesClusters() {
 					<Button onClick={() => setConfirmRemove(null)}>Cancel</Button>
 					<GradedAction calls="kubernetes_clusters/remove">
 						<Button
-							color="error"
 							onClick={() => confirmRemove && onRemove(confirmRemove)}
 						>
 							Remove

@@ -311,12 +311,13 @@ function Header({
 						    second form that would answer "where do I edit
 						    this" differently. */}
 						{/* spec: FLT#groups */}
-						<ActionButton
-							to={`/fleet/machines/${data.server.machine_id}/edit`}
-							icon={<EditIcon />}
-							label="Edit"
-							color="primary"
-						/>
+						<GradedAction opens="fleet/machines/update">
+							<ActionButton
+								to={`/fleet/machines/${data.server.machine_id}/edit`}
+								icon={<EditIcon />}
+								label="Edit"
+							/>
+						</GradedAction>
 						{!archived && (
 							<DeleteServerButton
 								serverId={data.server.id}
@@ -364,7 +365,6 @@ function DeleteServerButton({
 		<>
 			<GradedAction calls="fleet/applications/delete">
 				<ActionButton
-					color="error"
 					icon={<ArchiveIcon />}
 					label="Archive"
 					onClick={() => setOpen(true)}
@@ -391,7 +391,6 @@ function DeleteServerButton({
 					<GradedAction calls="fleet/applications/delete">
 						<Button
 							variant="contained"
-							color="error"
 							onClick={onConfirm}
 							disabled={action.pending}
 						>
@@ -431,7 +430,6 @@ function ArchivedBanner({
 				isAdmin ? (
 					<GradedAction calls="fleet/applications/restore">
 						<Button
-							color="inherit"
 							size="small"
 							startIcon={<RestoreIcon />}
 							onClick={onRestore}

@@ -12,34 +12,48 @@ import {
 	Typography,
 } from "@mui/material";
 import { useState } from "react";
+import type { Theme } from "@mui/material/styles";
 import { useRemainingMs, useSafetyMode } from "../hooks/useSafetyMode";
-import { type SafetyMode, modeLabel } from "../safety";
+import { LADDER, type SafetyMode, modeLabel } from "../safety";
+import { modePalette, modeStripe, mutedStripe } from "./GradedAction";
 
-/** The palette each mode reads in. Read-only is deliberately unremarkable. */
-export function modeColour(mode: SafetyMode): {
-	main: string;
-	border: string;
-	background: string;
-} {
-	switch (mode) {
-		case "danger":
+/**
+ * The mode control's face. Read-only is deliberately unremarkable; a raised
+ * mode is filled in its colour and wears its stripe, the same stripe its
+ * blocked controls carry, drawn strongly enough to read against the fill.
+ */
+function faceSx(mode: SafetyMode) {
+	return (theme: Theme) => {
+		if (mode === "read-only") {
 			return {
-				main: "error.main",
-				border: "error.main",
-				background: "rgba(239,83,80,0.10)",
+				border: 1,
+				borderColor: "divider",
+				color: "text.secondary",
+				backgroundColor: "background.paper",
 			};
-		case "write":
-			return {
-				main: "warning.main",
-				border: "warning.main",
-				background: "rgba(255,152,0,0.08)",
-			};
+		}
+		const palette = theme.palette[modePalette(mode)];
+		return {
+			border: 1,
+			borderColor: palette.main,
+			color: palette.contrastText,
+			backgroundColor: palette.main,
+			backgroundImage: modeStripe(theme, mode, { stripeAlpha: 0.5, gapAlpha: 0 }),
+			"&:hover": { backgroundColor: palette.dark },
+		};
+	};
+}
+
+/** What each option in the menu says beneath its name. */
+function optionHint(option: SafetyMode, current: SafetyMode): string {
+	if (option === current) return "Current";
+	switch (option) {
 		case "read-only":
-			return {
-				main: "text.secondary",
-				border: "divider",
-				background: "background.paper",
-			};
+			return "Back to reading";
+		case "write":
+			return "Ten minutes";
+		case "danger":
+			return "Ten minutes, confirms first";
 	}
 }
 
@@ -63,8 +77,6 @@ export function SafetyModeControl() {
 	const [confirming, setConfirming] = useState(false);
 	const [failed, setFailed] = useState(false);
 
-	const colour = modeColour(mode);
-
 	async function to(next: SafetyMode) {
 		setAnchor(null);
 		setFailed(false);
@@ -82,17 +94,16 @@ export function SafetyModeControl() {
 				size="small"
 				onClick={(event) => setAnchor(event.currentTarget)}
 				disabled={busy}
-				sx={{
-					borderRadius: 4,
-					border: 1,
-					borderColor: colour.border,
-					color: colour.main,
-					backgroundColor: colour.background,
-					textTransform: "none",
-					fontWeight: 500,
-					gap: 1,
-					px: 1.25,
-				}}
+				sx={[
+					faceSx(mode),
+					{
+						borderRadius: 4,
+						textTransform: "none",
+						fontWeight: 500,
+						gap: 1,
+						px: 1.25,
+					},
+				]}
 			>
 				<Box
 					sx={{
@@ -118,19 +129,31 @@ export function SafetyModeControl() {
 				open={anchor !== null}
 				onClose={() => setAnchor(null)}
 			>
-				{(["read-only", "write", "danger"] as const).map((option) => (
+				{LADDER.map((option) => (
 					<MenuItem
 						key={option}
+						selected={option === mode}
+						aria-current={option === mode ? "true" : undefined}
 						onClick={() => {
 							// The menu closes either way: left open behind the
 							// confirmation it keeps the rest of the page from the
 							// accessibility tree, and from the pointer.
 							setAnchor(null);
+							if (option === mode) return;
 							if (option === "danger") setConfirming(true);
 							else to(option);
 						}}
-						disabled={option === mode}
-						sx={{ color: modeColour(option).main, gap: 1 }}
+						// Each raised mode wears the stripe its blocked controls
+						// carry, so the menu is where the operator learns it.
+						sx={(theme) => ({
+							gap: 1,
+							...(option === "read-only"
+								? { color: "text.secondary" }
+								: {
+										color: `${modePalette(option)}.main`,
+										...mutedStripe(theme, option),
+									}),
+						})}
 					>
 						<Box
 							sx={{
@@ -142,15 +165,7 @@ export function SafetyModeControl() {
 						/>
 						<ListItemText
 							primary={modeLabel(option)}
-							secondary={
-								option === mode
-									? "Current"
-									: option === "read-only"
-										? "Back to reading"
-										: option === "write"
-											? "Ten minutes"
-											: "Ten minutes, confirms first"
-							}
+							secondary={optionHint(option, mode)}
 						/>
 					</MenuItem>
 				))}

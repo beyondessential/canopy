@@ -192,7 +192,6 @@ function KeysBox({
 								<GradedAction calls="devices/disable_all_keys">
 									<Button
 										variant="contained"
-										color="error"
 										onClick={onDisableAll}
 										disabled={disableAll.pending}
 									>
@@ -211,7 +210,6 @@ function KeysBox({
 							<GradedAction calls="devices/disable_all_keys">
 								<Button
 									variant="outlined"
-									color="error"
 									onClick={() => setConfirmDisableAll(true)}
 								>
 									Disable all keys
@@ -337,7 +335,6 @@ function KeyRow({
 							<Button
 								size="small"
 								variant="outlined"
-								color={keyData.is_active ? "error" : "primary"}
 								onClick={onToggleActive}
 								disabled={toggling}
 							>
