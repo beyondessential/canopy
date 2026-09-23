@@ -384,6 +384,35 @@ async fn a_cluster_never_filed_against_reads_as_never_reported() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_decommissioned_checks_filing_is_not_hearing_from_the_cluster() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let cluster = registered_cluster(&mut conn, "ops-main").await;
+		file_substrate(
+			&mut conn,
+			cluster.id,
+			"node-pools",
+			only(CheckResult::Passed),
+		)
+		.await;
+		assert!(cluster.last_reported_at(&mut conn).await.unwrap().is_some());
+
+		// The check leaves the catalog, so it presents nowhere and the filing
+		// behind it no longer says the relay was heard from.
+		CheckPolicy::decommission(
+			&mut conn,
+			SUBSTRATE_SOURCE,
+			&Namespace::Flat,
+			"node-pools",
+			"an operator",
+		)
+		.await
+		.unwrap();
+		assert_eq!(cluster.last_reported_at(&mut conn).await.unwrap(), None);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_draft_cluster_is_not_swept() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let identity = relay_identity(&mut conn).await;

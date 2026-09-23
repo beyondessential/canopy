@@ -221,13 +221,7 @@ impl KubernetesCluster {
 	/// for a cluster never filed against.
 	// spec: CHK#reachability
 	pub async fn last_reported_at(&self, db: &mut AsyncPgConnection) -> Result<Option<Timestamp>> {
-		Ok(
-			crate::issues::Issue::source_freshness_for_clusters(db, &[self.id])
-				.await?
-				.into_iter()
-				.map(|(_, _, seen)| seen)
-				.max(),
-		)
+		crate::issues::Issue::last_filed_at_for_cluster(db, self.id).await
 	}
 
 	/// Whether this cluster is currently reporting, on its own threshold.

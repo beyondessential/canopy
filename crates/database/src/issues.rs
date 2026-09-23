@@ -4518,6 +4518,46 @@ impl Issue {
 			.collect())
 	}
 
+	/// When one cluster was last filed against, over every source at once.
+	///
+	/// The same population [`Self::source_freshness_for_clusters`] reports per
+	/// source, reduced in the database. A caller asking only when the cluster
+	/// was last heard from — its page, grading reachability — has no use for
+	/// the breakdown, and this spares it the catalog and the rows behind it:
+	/// the live-and-flat gate those apply in Rust is the join here.
+	// spec: CHK#reachability
+	pub async fn last_filed_at_for_cluster(
+		db: &mut AsyncPgConnection,
+		cluster_id: Uuid,
+	) -> Result<Option<Timestamp>> {
+		use crate::schema::{check_policies, issues};
+
+		let latest: Option<jiff_diesel::Timestamp> = issues::table
+			.inner_join(
+				check_policies::table.on(check_policies::source
+					.eq(issues::source)
+					.and(issues::check_name.eq(check_policies::check_name.nullable()))
+					// The flat namespace, which is where every check filed at a
+					// cluster sits: its source is curated.
+					.and(check_policies::subject.is_null())
+					.and(check_policies::application_type.is_null())
+					// A decommissioned check is not one the cluster is heard
+					// through, the same as it presents nowhere else.
+					.and(check_policies::decommissioned_at.is_null())),
+			)
+			.filter(
+				issues::kubernetes_cluster_id
+					.eq(cluster_id)
+					.and(issues::source.ne_all([crate::statuses::CANOPY_SOURCE, MANUAL_SOURCE]))
+					.and(issues::check_name.is_not_null()),
+			)
+			.select(diesel::dsl::max(issues::last_seen))
+			.first(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(latest.map(Into::into))
+	}
+
 	/// As [`Self::source_freshness`], at the cluster grain.
 	///
 	/// A cluster is reported on by its relay, which files the cluster's checks
