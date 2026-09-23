@@ -11,7 +11,7 @@ and only revisit grouping if main still crowds 10 GB.
 
 ## Work
 
-- [ ] Add `save-if: ${{ github.ref == 'refs/heads/main' }}` to all six
+- [x] Add `save-if: ${{ github.ref == 'refs/heads/main' }}` to all six
       `Swatinem/rust-cache@v2` steps in `.github/workflows/ci.yml`:
       `test` (~35), `clippy` (~70), `e2e` (~113), `generated` (~190),
       `semver` (~217), `api-crate` (~235). PRs restore main's caches, only main

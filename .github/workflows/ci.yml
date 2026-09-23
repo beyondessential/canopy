@@ -33,6 +33,8 @@ jobs:
         with:
           tool: cargo-nextest,just
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: lts/*
@@ -68,6 +70,8 @@ jobs:
         with:
           tool: just
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: just lint
 
   fmt:
@@ -111,6 +115,8 @@ jobs:
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: lts/*
@@ -188,6 +194,8 @@ jobs:
         with:
           tool: just
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: just check-generated
       - run: just check-api-deps
 
@@ -215,6 +223,8 @@ jobs:
         with:
           tool: cargo-semver-checks,just
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: just semver-checks
 
   api-crate:
@@ -233,6 +243,8 @@ jobs:
         with:
           tool: just
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: just check-api-crate
 
   # Dummy job to have a stable name for PR requirements
