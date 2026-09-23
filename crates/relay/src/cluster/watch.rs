@@ -17,7 +17,7 @@ use std::{
 use futures::StreamExt;
 use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
 use kube::{
-	Api, Client, Resource,
+	Api, Client, Resource, ResourceExt,
 	api::{ApiResource, DynamicObject, GroupVersionKind},
 	runtime::{
 		WatchStreamExt,
@@ -191,6 +191,14 @@ fn determine_api_proxy(
 		Read::Absent => Vec::new(),
 		other => return other.unreadable(),
 	};
+	// A ProxyGroup answers the check by itself, and `tailscale::determine`
+	// discards the in-process proxy when one does. Reading the Deployments
+	// anyway walks every workload's containers for an answer already in hand,
+	// and lets a Deployments read the relay is refused mask a verdict the
+	// ProxyGroups gave cleanly.
+	if !groups.is_empty() {
+		return tailscale::determine(&groups, None);
+	}
 	let deployments = match deployments.read(now) {
 		Read::Ready(all) => all,
 		other => return other.unreadable(),
@@ -393,9 +401,19 @@ where
 		let store = writer.as_reader();
 		let state = Arc::new(Mutex::new(State::default()));
 
+		// The store holds every object of its kind for the whole cluster, in a
+		// sidecar-sized pod, so what the checks never read is dropped before it
+		// is stored. `managedFields` is the apply bookkeeping, often a third of
+		// a serialised workload and read by nothing here. The rest is left
+		// alone: the checks reach into `spec`, `status`, and the CNPG
+		// hibernation annotation.
 		let stream = reflector::reflector(
 			writer,
-			watcher::watcher(api, watcher::Config::default()).default_backoff(),
+			watcher::watcher(api, watcher::Config::default())
+				.default_backoff()
+				.modify(|object| {
+					object.managed_fields_mut().clear();
+				}),
 		);
 		let resource = resource.to_owned();
 		let changed = changed.clone();
