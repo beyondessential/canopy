@@ -14,6 +14,16 @@ export function modePalette(mode: RaisedMode): "warning" | "error" {
 }
 
 /**
+ * The palette a usable control needing `required` is drawn in, or nothing for
+ * one that needs no mode and keeps its own (see {@link inGradeColour}).
+ */
+export function gradeColour(
+	required: SafetyMode,
+): "warning" | "error" | undefined {
+	return required === "read-only" ? undefined : modePalette(required);
+}
+
+/**
  * The diagonal stripe a mode is drawn with, in its palette colour. Worn by a
  * blocked control, by the mode control while raised, and by each raised mode
  * in its menu, so the operator learns one treatment everywhere. The angle
@@ -146,12 +156,45 @@ export function blockedSx(required: SafetyMode) {
 	return (theme: Theme) => blockedStyles(theme, required);
 }
 
+/** The props a graded control is handed. */
+interface GradedChildProps {
+	disabled?: boolean;
+	color?: string;
+	children?: ReactNode;
+}
+
+/**
+ * A usable control in its grade's colour, so what it takes to use a control is
+ * readable from the control itself, in the same colour as its stripe when it
+ * is blocked and as the mode that permits it. The grade's colour wins over any
+ * the control names for itself: red means danger wherever it appears. A
+ * control that needs no mode, such as a toggle standing as its "Cancel", keeps
+ * its own.
+ */
+function inGradeColour(
+	control: ReactElement<GradedChildProps>,
+	required: SafetyMode,
+): ReactElement<GradedChildProps> {
+	const colour = gradeColour(required);
+	if (!colour) return control;
+	if (control.type === Tooltip) {
+		return cloneElement(control, {
+			children: inGradeColour(
+				control.props.children as ReactElement<GradedChildProps>,
+				required,
+			),
+		});
+	}
+	return cloneElement(control, { color: colour });
+}
+
 type GradedActionProps = Grading & {
 	/**
-	 * The control itself. Rendered untouched when the operator's mode reaches
-	 * it; while blocked it is given `disabled`, so it must accept that prop.
+	 * The control itself. When the operator's mode reaches it, it is given its
+	 * grade's `color` (see {@link inGradeColour}); while blocked it is given
+	 * `disabled`. It must accept both, or be a tooltip around one that does.
 	 */
-	children: ReactElement<{ disabled?: boolean }>;
+	children: ReactElement<GradedChildProps>;
 	/** Stretch to the width available, for a control that is itself full width. */
 	fullWidth?: boolean;
 	/** Shown instead of the default tooltip while blocked. */
@@ -167,9 +210,9 @@ type GradedActionProps = Grading & {
  * means it does not act and says which mode it wants; raising is done from the
  * mode control, never as a by-product of reaching for a blocked control.
  *
- * When the mode reaches the control it is rendered exactly as given, so a
- * control disabled for its own reasons (a request in flight, an incomplete
- * form) carries no stripe.
+ * When the mode reaches the control it is rendered in its grade's colour and
+ * otherwise as given, so a control disabled for its own reasons (a request in
+ * flight, an incomplete form) carries no stripe.
  *
  * A blocked control is disabled as well as inert to the pointer, so it cannot
  * be reached from the keyboard. A child that is a tooltip passes that on to the
@@ -187,7 +230,7 @@ export function GradedAction({
 	...grading
 }: GradedActionProps) {
 	const { required, blocked } = useModeGrade(gradingMode(grading));
-	if (!blocked) return children;
+	if (!blocked) return inGradeColour(children, required);
 
 	return (
 		<Tooltip title={title ?? blockedTitle(required)}>
@@ -226,7 +269,20 @@ type GradedMenuItemProps = MenuItemProps & Grading;
 export function GradedMenuItem(item: GradedMenuItemProps) {
 	const { calls: _calls, opens: _opens, onClick, sx, ...props } = item;
 	const { required, blocked } = useModeGrade(gradingMode(item));
-	if (!blocked) return <MenuItem onClick={onClick} sx={sx} {...props} />;
+	if (!blocked) {
+		return (
+			<MenuItem
+				onClick={onClick}
+				sx={[
+					!!gradeColour(required) && {
+						color: `${gradeColour(required)}.main`,
+					},
+					...(Array.isArray(sx) ? sx : sx ? [sx] : []),
+				]}
+				{...props}
+			/>
+		);
+	}
 
 	return (
 		<Tooltip title={blockedTitle(required)} placement="left">

@@ -788,7 +788,6 @@ function RulesCard({
 						<GradedAction calls="healthchecks/update_rules">
 							<Button
 								size="small"
-								color="error"
 								onClick={deleteAll}
 								disabled={update.pending}
 							>

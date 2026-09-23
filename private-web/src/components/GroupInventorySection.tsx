@@ -19,7 +19,13 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
-import { GradedAction, blockedSx, blockedTitle, useGrade } from "./GradedAction";
+import {
+	GradedAction,
+	blockedSx,
+	blockedTitle,
+	gradeColour,
+	useGrade,
+} from "./GradedAction";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import type {
 	InventoryLease,
@@ -460,7 +466,7 @@ function Vars({
 										sx={
 											removal.blocked
 												? [blockedSx(removal.required), { borderRadius: "50%" }]
-												: undefined
+												: { color: `${gradeColour(removal.required)}.main` }
 										}
 									/>
 								}

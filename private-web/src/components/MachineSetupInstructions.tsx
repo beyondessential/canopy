@@ -374,7 +374,6 @@ export default function MachineSetupInstructions({
 						<GradedAction calls="fleet/machines/revoke_enrollment">
 							<Button
 								size="small"
-								color="error"
 								onClick={onCancel}
 								disabled={revoke.pending}
 							>

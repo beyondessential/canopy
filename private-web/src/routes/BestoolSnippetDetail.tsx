@@ -205,7 +205,6 @@ function View({ detail }: { detail: Detail }) {
 					<GradedAction calls="bestool/delete_snippet">
 						<Button
 							variant="outlined"
-							color="error"
 							onClick={() => setConfirmDelete(true)}
 						>
 							Delete
@@ -258,7 +257,6 @@ function View({ detail }: { detail: Detail }) {
 					<GradedAction calls="bestool/delete_snippet">
 						<Button
 							variant="contained"
-							color="error"
 							onClick={onDelete}
 							disabled={deleteAction.pending}
 						>

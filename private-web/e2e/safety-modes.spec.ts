@@ -283,6 +283,22 @@ test.describe("safety modes", () => {
 });
 
 test.describe("safety modes, raised", () => {
+	test("a usable control is drawn in its grade's colour", async ({ page }) => {
+		// Danger: adding an allow-list entry, in the danger colour.
+		await page.goto("/settings/admins");
+		await expect(page.getByRole("button", { name: "Add admin" })).toHaveCSS(
+			"background-color",
+			"rgb(211, 47, 47)",
+		);
+
+		// Write: saving a snippet, in the write colour.
+		await page.goto("/bestool/snippets");
+		await expect(page.getByRole("button", { name: "Add" })).toHaveCSS(
+			"background-color",
+			"rgb(237, 108, 2)",
+		);
+	});
+
 	test("un-silencing stays reachable in write mode, where silencing is not", async ({
 		page,
 		sql,

@@ -181,7 +181,6 @@ export default function MachineDetail() {
 								to={`/fleet/machines/${data.machine.id}/edit`}
 								icon={<EditIcon />}
 								label="Edit"
-								color="primary"
 							/>
 						</GradedAction>
 					)}

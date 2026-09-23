@@ -49,7 +49,7 @@ export default function BestoolSnippets() {
 				<GradedAction calls={showCreate ? [] : "bestool/save_snippet"}>
 					<Button
 						variant={showCreate ? "outlined" : "contained"}
-						color={showCreate ? "error" : "primary"}
+						color={showCreate ? "error" : undefined}
 						onClick={() => setShowCreate((s) => !s)}
 					>
 						{showCreate ? "Cancel" : "Add"}

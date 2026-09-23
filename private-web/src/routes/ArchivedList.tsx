@@ -2,6 +2,7 @@ import {
 	Alert,
 	Box,
 	Button,
+	type ButtonProps,
 	LinearProgress,
 	Link as MuiLink,
 	Paper,
@@ -82,9 +83,12 @@ function RestoreButton({
 	pending,
 	onClick,
 	disabled,
+	color,
 }: {
 	pending: boolean;
 	onClick: () => void;
+	/** Forwarded to the button, so `GradedAction` can give it its grade's colour. */
+	color?: ButtonProps["color"];
 	/** Forwarded to the button, so a caller that blocks this control (see
 	 * `GradedAction`) takes it out of the keyboard's reach as well. */
 	disabled?: boolean;
@@ -94,6 +98,7 @@ function RestoreButton({
 			size="small"
 			startIcon={<RestoreIcon />}
 			onClick={onClick}
+			color={color}
 			disabled={pending || disabled}
 		>
 			{pending ? "Restoring…" : "Restore"}

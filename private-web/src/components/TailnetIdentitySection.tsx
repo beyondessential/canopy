@@ -105,7 +105,6 @@ export default function TailnetIdentitySection({
 								<GradedAction calls="devices/detach_tailscale">
 									<Button
 										variant="contained"
-										color="error"
 										onClick={onDetach}
 										disabled={detachAction.pending}
 									>
@@ -126,7 +125,6 @@ export default function TailnetIdentitySection({
 							<GradedAction calls="devices/detach_tailscale">
 								<Button
 									variant="outlined"
-									color="error"
 									onClick={() => setConfirmDetach(true)}
 								>
 									Detach
@@ -434,7 +432,6 @@ function MergeIntoDialog({
 				<GradedAction calls="devices/merge_into">
 					<Button
 						variant="contained"
-						color="warning"
 						onClick={onConfirm}
 						disabled={mergeAction.pending || targetId === ""}
 					>

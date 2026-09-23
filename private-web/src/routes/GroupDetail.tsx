@@ -155,7 +155,6 @@ export default function GroupDetail() {
 							<GradedAction calls="fleet/groups/delete">
 								<Button
 									variant="outlined"
-									color="error"
 									startIcon={<ArchiveIcon />}
 									onClick={onArchive}
 									disabled={archive.pending}
@@ -428,7 +427,6 @@ function ArchivedGroupBanner({
 				isAdmin ? (
 					<GradedAction calls="fleet/groups/restore">
 						<Button
-							color="inherit"
 							size="small"
 							startIcon={<RestoreIcon />}
 							onClick={onRestore}

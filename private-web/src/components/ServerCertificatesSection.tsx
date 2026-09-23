@@ -315,7 +315,6 @@ function PauseButton({
 					<GradedAction calls="certificates/pause">
 						<Button
 							variant="contained"
-							color="warning"
 							onClick={onConfirm}
 							disabled={pause.pending || reason.trim() === ""}
 						>
@@ -752,7 +751,6 @@ function RevokeButton({
 					<GradedAction calls="certificates/revoke">
 						<Button
 							variant="contained"
-							color="error"
 							onClick={onConfirm}
 							disabled={revoke.pending}
 						>

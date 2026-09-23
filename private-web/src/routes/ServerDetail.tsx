@@ -316,7 +316,6 @@ function Header({
 								to={`/fleet/machines/${data.server.machine_id}/edit`}
 								icon={<EditIcon />}
 								label="Edit"
-								color="primary"
 							/>
 						</GradedAction>
 						{!archived && (
@@ -366,7 +365,6 @@ function DeleteServerButton({
 		<>
 			<GradedAction calls="fleet/applications/delete">
 				<ActionButton
-					color="error"
 					icon={<ArchiveIcon />}
 					label="Archive"
 					onClick={() => setOpen(true)}
@@ -393,7 +391,6 @@ function DeleteServerButton({
 					<GradedAction calls="fleet/applications/delete">
 						<Button
 							variant="contained"
-							color="error"
 							onClick={onConfirm}
 							disabled={action.pending}
 						>
@@ -433,7 +430,6 @@ function ArchivedBanner({
 				isAdmin ? (
 					<GradedAction calls="fleet/applications/restore">
 						<Button
-							color="inherit"
 							size="small"
 							startIcon={<RestoreIcon />}
 							onClick={onRestore}

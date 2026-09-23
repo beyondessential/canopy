@@ -233,7 +233,6 @@ function ChangelogSection({
 							<GradedAction calls="versions/update_version_changelog">
 								<Button
 									variant="contained"
-									color="success"
 									onClick={save}
 									disabled={action.pending}
 								>
@@ -363,7 +362,7 @@ function ArtifactsSection({
 							>
 								<Button
 									variant={showCreate ? "outlined" : "contained"}
-									color={showCreate ? "warning" : "primary"}
+									color={showCreate ? "warning" : undefined}
 									onClick={() => setShowCreate((s) => !s)}
 								>
 									{showCreate ? "Cancel create" : "Create"}
@@ -546,7 +545,6 @@ function ArtifactRow({
 								<Button
 									size="small"
 									variant="contained"
-									color="error"
 									onClick={onDelete}
 									disabled={deleteAction.pending}
 								>
@@ -577,7 +575,6 @@ function ArtifactRow({
 								<IconButton
 									aria-label={`delete ${artifactLabel(artifact)}`}
 									size="small"
-									color="error"
 									onClick={() => setConfirmDelete(true)}
 								>
 									<DeleteIcon fontSize="small" />

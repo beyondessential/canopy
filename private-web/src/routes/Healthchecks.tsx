@@ -374,7 +374,6 @@ function HealthcheckRow({
 							<GradedAction calls="healthchecks/decommission">
 								<Button
 									size="small"
-									color="warning"
 									variant="outlined"
 									onClick={doDecommission}
 									disabled={decommission.pending}

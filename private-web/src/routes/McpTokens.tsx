@@ -234,7 +234,6 @@ export default function McpTokens() {
 					<Button onClick={() => setConfirmRevoke(null)}>Cancel</Button>
 					<GradedAction calls="mcp_tokens/revoke">
 						<Button
-							color="error"
 							onClick={() => confirmRevoke && onRevoke(confirmRevoke)}
 						>
 							Revoke

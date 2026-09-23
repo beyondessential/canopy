@@ -621,7 +621,6 @@ function SilenceCheckButton({
 				>
 					<IconButton
 						size="small"
-						color={silenced ? "primary" : "default"}
 						aria-label={
 							silenced
 								? `Manage silence for ${check}`
