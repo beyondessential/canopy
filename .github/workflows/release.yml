@@ -41,7 +41,7 @@ jobs:
       # crates.io itself, so there is no registry credential in this repository.
       - name: Run release-plz
         id: release-plz
-        uses: release-plz/action@v0.5.132
+        uses: release-plz/action@v0.5.133
         with:
           command: release
           manifest_path: crates/canopy-api/Cargo.toml
@@ -79,7 +79,7 @@ jobs:
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
 
-      - uses: taiki-e/install-action@v2.86.1
+      - uses: taiki-e/install-action@v2.87.7
         with:
           tool: just
 
@@ -98,7 +98,7 @@ jobs:
       # symlink rather than this job papering over it.
       - name: Run release-plz
         id: release-plz
-        uses: release-plz/action@v0.5.132
+        uses: release-plz/action@v0.5.133
         with:
           command: release-pr
           manifest_path: crates/canopy-api/Cargo.toml
