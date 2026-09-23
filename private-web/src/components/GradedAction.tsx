@@ -12,7 +12,13 @@ const STRIPES: Record<Exclude<SafetyMode, "read-only">, string> = {
 		"repeating-linear-gradient(45deg, rgba(239,83,80,0.24), rgba(239,83,80,0.24) 6px, rgba(239,83,80,0.07) 6px, rgba(239,83,80,0.07) 12px)",
 };
 
-/** The endpoint, or endpoints, a control calls. */
+/**
+ * The endpoint, or endpoints, a control calls.
+ *
+ * An empty list is a control that calls nothing as it stands, which is how a
+ * toggle that becomes a plain "Cancel" says it needs no mode for that. It reads
+ * as read-only, so such a control is never blocked.
+ */
 export type Calls = GradedEndpoint | readonly GradedEndpoint[];
 
 /**

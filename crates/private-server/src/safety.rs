@@ -17,7 +17,7 @@ use std::{
 
 use axum::http::Method;
 use axum::{
-	extract::{FromRequestParts as _, MatchedPath, Request, State},
+	extract::{FromRequestParts, MatchedPath, OptionalFromRequestParts, Request, State},
 	middleware::Next,
 	response::Response,
 };
@@ -49,13 +49,17 @@ const TOUCH_INTERVAL: Duration = Duration::from_secs(15 * 60);
 /// The row is what the sweep reads; this only decides when to write it. A
 /// second process keeps its own and writes on its own cadence, which costs one
 /// extra write per interval and nothing in correctness.
+///
+/// Keyed by the login as well as the session, because the write is scoped to
+/// the login too: a caller presenting someone else's identifier writes nothing,
+/// and must not take the slot that would have carried the owner's own write.
 #[derive(Clone, Default)]
-pub struct TouchLog(Arc<Mutex<HashMap<Uuid, Instant>>>);
+pub struct TouchLog(Arc<Mutex<HashMap<(Uuid, String), Instant>>>);
 
 impl TouchLog {
 	/// Whether this session's last-seen is due to be written, recording that it
 	/// is about to be so the requests beside this one do not write it too.
-	fn due(&self, id: Uuid) -> bool {
+	fn due(&self, id: Uuid, login: &str) -> bool {
 		let now = Instant::now();
 		let mut written = self
 			.0
@@ -64,7 +68,7 @@ impl TouchLog {
 		// Sessions come and go, so entries no longer standing in the way of a
 		// write are dropped rather than kept for a session that may be gone.
 		written.retain(|_, at| now.duration_since(*at) < TOUCH_INTERVAL);
-		match written.entry(id) {
+		match written.entry((id, login.to_owned())) {
 			Entry::Occupied(_) => false,
 			Entry::Vacant(slot) => {
 				slot.insert(now);
@@ -160,12 +164,12 @@ pub struct SafetyState {
 /// A read costs no connection at all on the overwhelming majority of requests,
 /// which matters because reads are most of them and the boundary would
 /// otherwise take a primary-pool connection alongside the handler's own.
-async fn touch(safety: &SafetyState, id: Uuid) -> Result<()> {
-	if !safety.touched.due(id) {
+async fn touch(safety: &SafetyState, id: Uuid, login: &str) -> Result<()> {
+	if !safety.touched.due(id, login) {
 		return Ok(());
 	}
 	let mut conn = safety.app.db.get().await?;
-	OperatorSession::touch(&mut conn, id).await
+	OperatorSession::touch(&mut conn, id, login).await
 }
 
 /// Whether a caller holds the danger permission (see the ADM spec).
@@ -230,17 +234,31 @@ pub async fn enforce(
 		.and_then(|value| value.to_str().ok())
 		.and_then(|value| Uuid::parse_str(value.trim()).ok());
 
-	// A read-only-graded request needs no session at all. Its session is still
-	// touched when it presents one, so reading keeps a session alive.
+	let (mut parts, body) = request.into_parts();
+
+	// A read-only-graded request needs no session, and no identity either: a
+	// client may read before it has either. It keeps its own session alive when
+	// it presents both, and only its own — an identifier is not something a
+	// caller can refresh by holding it.
 	if required == SafetyMode::ReadOnly {
 		if let Some(id) = session_id {
-			touch(&safety, id).await?;
+			let user = <TailscaleUser as OptionalFromRequestParts<AppState>>::from_request_parts(
+				&mut parts,
+				&safety.app,
+			)
+			.await?;
+			if let Some(user) = user {
+				touch(&safety, id, &user.login).await?;
+			}
 		}
-		return Ok(next.run(request).await);
+		return Ok(next
+			.run(axum::extract::Request::from_parts(parts, body))
+			.await);
 	}
 
-	let (mut parts, body) = request.into_parts();
-	let user = TailscaleUser::from_request_parts(&mut parts, &safety.app).await?;
+	let user =
+		<TailscaleUser as FromRequestParts<AppState>>::from_request_parts(&mut parts, &safety.app)
+			.await?;
 
 	// Resolved afresh per request and checked before the mode, so an operator
 	// who can never make this request is told that rather than being told to
@@ -274,9 +292,9 @@ pub async fn enforce(
 
 		// On the connection already in hand, and on the same cadence as a read's.
 		if let Some(session) = session
-			&& safety.touched.due(session.id)
+			&& safety.touched.due(session.id, &user.login)
 		{
-			OperatorSession::touch(&mut conn, session.id).await?;
+			OperatorSession::touch(&mut conn, session.id, &user.login).await?;
 		}
 	}
 

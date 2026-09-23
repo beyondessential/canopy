@@ -216,37 +216,40 @@ function Form({
 	// changes. Sequential rather than concurrent because a group change on the
 	// box propagates onto the applications, and an application write racing
 	// that propagation would be writing against a group that is still moving.
-	const onSubmit = async (e: React.FormEvent) => {
-		e.preventDefault();
-		if (!box.groupId) return;
-		setPending(true);
-		setError(null);
-		try {
+	// What saving does, in order, as one list: submitting runs exactly these and
+	// the save button is graded on exactly these. Written once, so a change to
+	// what save does cannot leave the grade behind.
+	const plan: { call: GradedEndpoint; run: () => Promise<unknown> }[] = [
+		{
+			call: "fleet/machines/update",
 			// Flat args, unlike the application's update: every field is
 			// `Option<Option<_>>` on the wire, so an absent one is left alone
 			// and an explicit null clears it. Nesting them under `data` would
 			// send an empty changeset and quietly write nothing.
-			await callApi("fleet/machines", "update", {
-				machine_id: machine.id,
-				name: box.name.trim() === "" ? null : box.name.trim(),
-				group_id: box.groupId,
-				cloud: box.cloud === "" ? null : box.cloud === "true",
-				geolocation:
-					box.lat && box.lon
-						? { lat: Number(box.lat), lon: Number(box.lon) }
-						: null,
-				is_monitored: box.isMonitored,
-				alert_when_down_for: Math.max(
-					60,
-					Math.round(Number(box.alertWhenDownMinutes) * 60),
-				),
-				notes: box.notes,
-				tags: box.tags,
-			});
-
-			for (const application of applications) {
+			run: () =>
+				callApi("fleet/machines", "update", {
+					machine_id: machine.id,
+					name: box.name.trim() === "" ? null : box.name.trim(),
+					group_id: box.groupId,
+					cloud: box.cloud === "" ? null : box.cloud === "true",
+					geolocation:
+						box.lat && box.lon
+							? { lat: Number(box.lat), lon: Number(box.lon) }
+							: null,
+					is_monitored: box.isMonitored,
+					alert_when_down_for: Math.max(
+						60,
+						Math.round(Number(box.alertWhenDownMinutes) * 60),
+					),
+					notes: box.notes,
+					tags: box.tags,
+				}),
+		},
+		...applications.map((application) => ({
+			call: "fleet/applications/update" as GradedEndpoint,
+			run: () => {
 				const form = apps[application.id]!;
-				await callApi("fleet/applications", "update", {
+				return callApi("fleet/applications", "update", {
 					server_id: application.id,
 					data: {
 						name: form.name.trim(),
@@ -269,33 +272,47 @@ function Form({
 						may_manage_tls: form.mayManageTls,
 					},
 				});
-			}
+			},
+		})),
+	];
 
-			if (box.alertWhenUnreachable === machineReachabilitySilenced) {
-				await callApi(
-					"silenced_refs",
-					box.alertWhenUnreachable ? "unsilence_machine" : "silence_machine",
-					{
-						machine_id: machine.id,
-						source: REACHABILITY_CHECK.source,
-						ref: REACHABILITY_CHECK.ref,
-					},
-				);
-			}
-			for (const application of applications) {
-				const wants = apps[application.id]!.alertWhenUnreachable;
-				const was = !applicationReachabilitySilenced.has(application.id);
-				if (wants === was) continue;
-				await callApi(
-					"silenced_refs",
-					wants ? "unsilence_server" : "silence_server",
-					{
-						server_id: application.id,
-						source: REACHABILITY_CHECK.source,
-						ref: REACHABILITY_CHECK.ref,
-					},
-				);
-			}
+	if (box.alertWhenUnreachable === machineReachabilitySilenced) {
+		const fn = box.alertWhenUnreachable ? "unsilence_machine" : "silence_machine";
+		plan.push({
+			call: `silenced_refs/${fn}`,
+			run: () =>
+				callApi("silenced_refs", fn, {
+					machine_id: machine.id,
+					source: REACHABILITY_CHECK.source,
+					ref: REACHABILITY_CHECK.ref,
+				}),
+		});
+	}
+	for (const application of applications) {
+		const wants = apps[application.id]!.alertWhenUnreachable;
+		const was = !applicationReachabilitySilenced.has(application.id);
+		if (wants === was) continue;
+		const fn = wants ? "unsilence_server" : "silence_server";
+		plan.push({
+			call: `silenced_refs/${fn}`,
+			run: () =>
+				callApi("silenced_refs", fn, {
+					server_id: application.id,
+					source: REACHABILITY_CHECK.source,
+					ref: REACHABILITY_CHECK.ref,
+				}),
+		});
+	}
+
+	const saveCalls = plan.map((step) => step.call);
+
+	const onSubmit = async (e: React.FormEvent) => {
+		e.preventDefault();
+		if (!box.groupId) return;
+		setPending(true);
+		setError(null);
+		try {
+			for (const step of plan) await step.run();
 
 			navigate(`/fleet/machines/${machine.id}`);
 		} catch (err) {
@@ -304,25 +321,6 @@ function Form({
 			setPending(false);
 		}
 	};
-
-	// The calls onSubmit would make, from the same state it reads.
-	const saveCalls: GradedEndpoint[] = ["fleet/machines/update"];
-	if (applications.length > 0) saveCalls.push("fleet/applications/update");
-	if (box.alertWhenUnreachable === machineReachabilitySilenced) {
-		saveCalls.push(
-			box.alertWhenUnreachable
-				? "silenced_refs/unsilence_machine"
-				: "silenced_refs/silence_machine",
-		);
-	}
-	for (const application of applications) {
-		const wants = apps[application.id]!.alertWhenUnreachable;
-		const was = !applicationReachabilitySilenced.has(application.id);
-		if (wants === was) continue;
-		saveCalls.push(
-			wants ? "silenced_refs/unsilence_server" : "silenced_refs/silence_server",
-		);
-	}
 
 	return (
 		<Stack spacing={3} component="form" onSubmit={onSubmit}>

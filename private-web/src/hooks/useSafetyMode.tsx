@@ -95,10 +95,12 @@ export function SafetyModeProvider({ children }: { children: ReactNode }) {
 	}, [session?.raise_expires_at]);
 
 	// The stored mode is what the server last said; a raise that has run out
-	// reads as read-only here so the indicator and the server agree.
-	const lapsed = expiresAt !== null && now >= expiresAt;
-	const mode: SafetyMode =
-		!session || lapsed ? "read-only" : (session.mode ?? "read-only");
+	// reads as read-only here so the indicator and the server agree. So does a
+	// raise carrying no time this client can read: doubt resolves downwards,
+	// which is how the server reads a raise with no expiry too.
+	const raised = !!session && session.mode !== "read-only";
+	const lapsed = raised && (expiresAt === null || now >= expiresAt);
+	const mode: SafetyMode = !raised || lapsed ? "read-only" : session.mode;
 	// Clamped to the length of a raise: the server sets the expiry from its own
 	// clock, so a client running a little behind would otherwise open the
 	// countdown above ten minutes.

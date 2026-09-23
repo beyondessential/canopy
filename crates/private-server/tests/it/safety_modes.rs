@@ -705,3 +705,81 @@ async fn an_operator_who_is_not_an_administrator_still_has_a_mode() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_is_kept_alive_only_by_the_login_it_belongs_to() {
+	use commons_tests::diesel_async::SimpleAsyncConnection;
+
+	trust_headers();
+
+	commons_tests::server::run(async |mut conn, _public, private| {
+		for login in [OPERATOR, OTHER] {
+			Admin::add(&mut conn, login).await.expect("add admin");
+		}
+		let id = new_session(&private, OPERATOR).await;
+
+		// Long unseen, so the next sweep would retire it.
+		conn.batch_execute(&format!(
+			"UPDATE operator_sessions SET last_seen_at = now() - interval '20 hours' \
+			 WHERE id = '{id}'"
+		))
+		.await
+		.expect("backdate last-seen");
+		let uuid: uuid::Uuid = id.parse().expect("session id is a uuid");
+		async fn last_seen(
+			conn: &mut database::diesel_async::AsyncPgConnection,
+			id: uuid::Uuid,
+		) -> jiff::Timestamp {
+			database::operator_sessions::OperatorSession::get(conn, id)
+				.await
+				.expect("read")
+				.expect("exists")
+				.last_seen_at
+		}
+		let before = last_seen(&mut conn, uuid).await;
+
+		// Another login reading while holding that identifier does not refresh
+		// it: an identifier is not something a caller can keep alive by holding.
+		private
+			.post("/api/admins/list")
+			.add_header("Tailscale-User-Login", OTHER)
+			.add_header("Tailscale-User-Name", "Other")
+			.add_header(SESSION_HEADER, &id)
+			.json(&json!({}))
+			.await
+			.assert_status_ok();
+		assert_eq!(
+			last_seen(&mut conn, uuid).await,
+			before,
+			"another login's read does not keep this session alive"
+		);
+
+		// A caller with no identity at all likewise leaves it alone.
+		private
+			.post("/api/commons/is_current_user_admin")
+			.add_header(SESSION_HEADER, &id)
+			.json(&json!({}))
+			.await
+			.assert_status_ok();
+		assert_eq!(
+			last_seen(&mut conn, uuid).await,
+			before,
+			"an unauthenticated read does not keep this session alive"
+		);
+
+		// Its own login does.
+		private
+			.post("/api/admins/list")
+			.add_header("Tailscale-User-Login", OPERATOR)
+			.add_header("Tailscale-User-Name", "Operator")
+			.add_header(SESSION_HEADER, &id)
+			.json(&json!({}))
+			.await
+			.assert_status_ok();
+		assert!(
+			last_seen(&mut conn, uuid).await > before,
+			"the session's own login keeps it alive"
+		);
+	})
+	.await;
+}

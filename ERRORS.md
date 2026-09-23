@@ -254,8 +254,8 @@ backups indefinitely.
 ## Safety mode too low
 
 Returned (HTTP 403) when a graded request comes from a session below the safety
-mode it requires (see the SAFE spec). The `required` field carries the mode the
-handler needs (`write` or `danger`). This is distinct from lacking the danger
+mode it requires (see the SAFE spec). The title names the mode the handler needs
+(`write` or `danger`). This is distinct from lacking the danger
 permission: the operator can make the request once they raise their session to
 the required mode. A client that hits this returns its indicator to read-only
 and tells the operator their raise has lapsed.

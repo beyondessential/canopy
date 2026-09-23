@@ -126,13 +126,17 @@ impl OperatorSession {
 			.map_err(AppError::from)
 	}
 
-	/// Bump the session's idle liveness. Called on every request the session
-	/// makes, so the idle sweep only retires sessions genuinely gone quiet.
-	pub async fn touch(db: &mut AsyncPgConnection, id: Uuid) -> Result<()> {
+	/// Bump the session's idle liveness, so the idle sweep only retires sessions
+	/// genuinely gone quiet.
+	///
+	/// Scoped to `login` like every other operation on a session: an identifier
+	/// is not its holder's to keep alive unless the session is theirs.
+	pub async fn touch(db: &mut AsyncPgConnection, id: Uuid, login: &str) -> Result<()> {
 		use crate::schema::operator_sessions::dsl;
 
 		diesel::update(dsl::operator_sessions)
 			.filter(dsl::id.eq(id))
+			.filter(dsl::login.eq(login))
 			.set(dsl::last_seen_at.eq(jiff_diesel::Timestamp::from(Timestamp::now())))
 			.execute(db)
 			.await
