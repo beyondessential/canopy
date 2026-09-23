@@ -125,7 +125,7 @@ export function splitDetail(extra: Record<string, unknown>): {
 
 /** Sources whose check names canopy curates itself. Their names mean one
  * thing fleet-wide, so they are namespaced flat. */
-const RESERVED_SOURCES = ["canopy", "manual"];
+const RESERVED_SOURCES = ["canopy", "manual", "kubernetes"];
 
 /** The two namespace columns, as `Namespace::to_columns` writes them. */
 export interface SeedNamespace {
@@ -819,6 +819,9 @@ export async function seedIssue(
 		/** Machine-scoped issue: a fact about the box rather than a workload on
 		 * it. Mutually exclusive with the other two. */
 		machineId?: string | null;
+		/** Cluster-scoped issue: a condition its relay filed about the cluster.
+		 * Mutually exclusive with the others. */
+		clusterId?: string | null;
 		/** Group-scoped issue (e.g. a backup issue spanning the group). When set,
 		 * leave `serverId` unset so the row satisfies the scope constraint.
 		 * Leaving all unset seeds a canopy-wide issue (a self-alert). */
@@ -862,7 +865,7 @@ export async function seedIssue(
 	// A server-scoped check-state only presents/counts if a live catalog row
 	// backs it (mirrors ingestion's upsert_default); never clobbers an
 	// explicit seedCheckPolicy for the same (source, check).
-	if (opts.serverId || opts.machineId) {
+	if (opts.serverId || opts.machineId || opts.clusterId) {
 		const source = opts.source ?? "alertd";
 		// A machine-scoped issue names a check about the box, which derives to
 		// the machine namespace whatever type is passed; the fallback only
@@ -885,8 +888,8 @@ export async function seedIssue(
 	// an issue rather than healthy check state, which the listings exclude.
 	await sql.query(
 		`INSERT INTO issues
-		 (id, application_id, machine_id, server_group_id, device_id, source, ref, check_name, observed_result, effective_result, escalates, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason, degraded_since, last_degraded_at, detail)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11, $12, $13, COALESCE($14::timestamptz, NOW()), NOW(), $15, $16, $17, $18, NOW(), $19)`,
+		 (id, application_id, machine_id, server_group_id, kubernetes_cluster_id, device_id, source, ref, check_name, observed_result, effective_result, escalates, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason, degraded_since, last_degraded_at, detail)
+		 VALUES ($1, $2, $3, $4, $20, $5, $6, $7, $8, $9, $9, $10, $11, $12, $13, COALESCE($14::timestamptz, NOW()), NOW(), $15, $16, $17, $18, NOW(), $19)`,
 		[
 			id,
 			opts.serverId ?? null,
@@ -907,9 +910,30 @@ export async function seedIssue(
 			resolved ? (opts.resolvedReason ?? null) : null,
 			active ? (opts.firstSeen ?? new Date().toISOString()) : null,
 			opts.detail === undefined ? null : JSON.stringify(opts.detail),
+			opts.clusterId ?? null,
 		],
 	);
 	return { id };
+}
+
+export interface SeededCluster {
+	id: string;
+	name: string;
+}
+
+/** A registered cluster, with the relay identity it is registered to. */
+export async function seedCluster(
+	sql: Sql,
+	opts: { name: string; alertWhenDownForSecs?: number },
+): Promise<SeededCluster> {
+	const relay = await seedDevice(sql, { role: "relay" });
+	const rows = await sql.query<{ id: string }>(
+		`INSERT INTO kubernetes_clusters (name, relay_identity_id, registered_at, alert_when_down_for)
+		 VALUES ($1, $2, NOW(), make_interval(secs => $3))
+		 RETURNING id`,
+		[opts.name, relay.id, opts.alertWhenDownForSecs ?? 300],
+	);
+	return { id: rows[0]!.id, name: opts.name };
 }
 
 export interface SeededIncident {

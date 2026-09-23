@@ -122,7 +122,8 @@ export function HealthIndicator({
  * spec: CHK#silences-follow-the-event */
 export type CheckTarget =
 	| { kind: "application"; id: string }
-	| { kind: "machine"; id: string };
+	| { kind: "machine"; id: string }
+	| { kind: "cluster"; id: string };
 
 /** A silence as this table reads one, whichever scope it came from. */
 type Silence = { source: string; ref: string; created_at: string; created_by: string | null };
@@ -156,12 +157,27 @@ export function ChecksTable(props: {
 		{ machine_id: machineId },
 		[machineId, props.refreshTick],
 	);
+	// A cluster belongs to no group, so its own silences are all it has.
+	// spec: CHK#silences-follow-the-event
+	const clusterApi = useApi(
+		"silenced_refs",
+		"list_for_cluster",
+		{ kubernetes_cluster_id: props.target.id },
+		[props.target.kind, props.target.id, props.refreshTick],
+		{ skip: props.target.kind !== "cluster" },
+	);
 	const applicationSilences: Silence[] =
 		applicationApi.status === "ok" ? applicationApi.data : [];
 	const machineSilences: Silence[] =
 		machineApi.status === "ok" ? machineApi.data : [];
+	const clusterSilences: Silence[] =
+		clusterApi.status === "ok" ? clusterApi.data : [];
 	const ownSilences =
-		props.target.kind === "application" ? applicationSilences : machineSilences;
+		props.target.kind === "application"
+			? applicationSilences
+			: props.target.kind === "cluster"
+				? clusterSilences
+				: machineSilences;
 	if (props.groupId) {
 		return (
 			<ChecksTableGrouped
@@ -523,7 +539,7 @@ function SilencedChip({
 	const tooltipLines: string[] = [];
 	if (ownSilence) {
 		tooltipLines.push(
-			`${targetKind === "machine" ? "Machine" : "Application"}-scope silence${
+			`${TARGET_LABEL[targetKind]}-scope silence${
 				ownSilence.created_by ? ` by ${ownSilence.created_by}` : ""
 			}`,
 		);
@@ -546,6 +562,12 @@ function SilencedChip({
 		</Tooltip>
 	);
 }
+
+const TARGET_LABEL: Record<CheckTarget["kind"], string> = {
+	application: "Application",
+	machine: "Machine",
+	cluster: "Cluster",
+};
 
 /** Compact silence trigger on each `CheckRow`. Opens a popover that
  * shows, per scope, either the existing silence (with an Un-silence
@@ -579,24 +601,32 @@ function SilenceCheckButton({
 	const unsilenceServer = useApiAction("silenced_refs", "unsilence_server");
 	const unsilenceMachine = useApiAction("silenced_refs", "unsilence_machine");
 	const unsilenceGroup = useApiAction("silenced_refs", "unsilence_group");
+	const silenceCluster = useApiAction("silenced_refs", "silence_cluster");
+	const unsilenceCluster = useApiAction("silenced_refs", "unsilence_cluster");
 	const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
 	const error =
 		silenceServer.error ??
 		silenceMachine.error ??
 		silenceGroup.error ??
+		silenceCluster.error ??
 		unsilenceServer.error ??
 		unsilenceMachine.error ??
-		unsilenceGroup.error;
+		unsilenceGroup.error ??
+		unsilenceCluster.error;
 	const refName = silenceRef(source, check);
 	const silenced = !!ownSilence || !!groupSilence;
 	const ownSilenceCall =
 		target.kind === "machine"
 			? "silenced_refs/silence_machine"
-			: "silenced_refs/silence_server";
+			: target.kind === "cluster"
+				? "silenced_refs/silence_cluster"
+				: "silenced_refs/silence_server";
 	const ownUnsilenceCall =
 		target.kind === "machine"
 			? "silenced_refs/unsilence_machine"
-			: "silenced_refs/unsilence_server";
+			: target.kind === "cluster"
+				? "silenced_refs/unsilence_cluster"
+				: "silenced_refs/unsilence_server";
 	const offered: GradedEndpoint[] = [
 		ownSilence ? ownUnsilenceCall : ownSilenceCall,
 	];
@@ -663,40 +693,46 @@ function SilenceCheckButton({
 					<Stack spacing={0.75}>
 						<SilenceScopeRow
 							scopeLabel={
-								target.kind === "machine" ? "this machine" : "this server"
+								target.kind === "machine"
+									? "this machine"
+									: target.kind === "cluster"
+										? "this cluster"
+										: "this server"
 							}
 							silence={ownSilence}
 							silenceCalls={ownSilenceCall}
 							unsilenceCalls={ownUnsilenceCall}
 							onSilence={() =>
-								handle(() =>
-									target.kind === "machine"
-										? silenceMachine.call({
-												machine_id: target.id,
-												source,
-												ref: refName,
-											})
-										: silenceServer.call({
-												server_id: target.id,
-												source,
-												ref: refName,
-											}),
-								)
+								handle(() => {
+									const args = { source, ref: refName };
+									switch (target.kind) {
+										case "machine":
+											return silenceMachine.call({ machine_id: target.id, ...args });
+										case "cluster":
+											return silenceCluster.call({
+												kubernetes_cluster_id: target.id,
+												...args,
+											});
+										case "application":
+											return silenceServer.call({ server_id: target.id, ...args });
+									}
+								})
 							}
 							onUnsilence={() =>
-								handle(() =>
-									target.kind === "machine"
-										? unsilenceMachine.call({
-												machine_id: target.id,
-												source,
-												ref: refName,
-											})
-										: unsilenceServer.call({
-												server_id: target.id,
-												source,
-												ref: refName,
-											}),
-								)
+								handle(() => {
+									const args = { source, ref: refName };
+									switch (target.kind) {
+										case "machine":
+											return unsilenceMachine.call({ machine_id: target.id, ...args });
+										case "cluster":
+											return unsilenceCluster.call({
+												kubernetes_cluster_id: target.id,
+												...args,
+											});
+										case "application":
+											return unsilenceServer.call({ server_id: target.id, ...args });
+									}
+								})
 							}
 						/>
 						{groupId && (

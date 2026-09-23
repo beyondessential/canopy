@@ -15,7 +15,7 @@
 use std::collections::BTreeSet;
 
 use commons_errors::{AppError, Result};
-use commons_types::namespace::{Namespace, NamespaceRef};
+use commons_types::namespace::{Namespace, NamespaceRef, is_reserved};
 use commons_types::server::app_type::ApplicationType;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -26,10 +26,9 @@ use uuid::Uuid;
 use crate::applications::Application;
 use crate::check_policies::ScopedCheckPolicy;
 use crate::issues::{
-	MANUAL_SOURCE, Scope, reevaluate_open_issues_for_group_ref,
-	reevaluate_open_issues_for_machine_ref, reevaluate_open_issues_for_server_ref,
+	Scope, reevaluate_open_issues_for_group_ref, reevaluate_open_issues_for_machine_ref,
+	reevaluate_open_issues_for_server_ref,
 };
-use crate::statuses::CANOPY_SOURCE;
 
 /// The ref prefix (with trailing separator) healthcheck issues use,
 /// whichever source reports them. Mirrors the public-server's `HEALTH_REF`.
@@ -45,7 +44,7 @@ fn ref_to_check(r#ref: &str) -> &str {
 /// The ref a silenced check name presents as: reserved sources file at
 /// bare refs, everything else under the `health/` namespace.
 fn check_to_ref(source: &str, check: &str) -> String {
-	if source == CANOPY_SOURCE || source == MANUAL_SOURCE {
+	if is_reserved(source) {
 		check.to_string()
 	} else {
 		format!("{HEALTH_REF_PREFIX}{check}")
@@ -147,6 +146,28 @@ pub struct MachineSilencedRef {
 	pub created_by: Option<String>,
 }
 
+/// A silenced issue reference scoped to a single cluster: issues matching this
+/// `(source, ref)` on this cluster are still recorded, but present as skipped
+/// and leave the cluster's health.
+///
+/// A cluster belongs to no group, so this is the only scope its checks are
+/// silenced at.
+// spec: CHK#silences-follow-the-event
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ClusterSilencedRef {
+	/// The cluster this silence applies to.
+	pub kubernetes_cluster_id: Uuid,
+	/// The issue source this silence matches.
+	pub source: String,
+	/// The issue reference this silence matches.
+	#[serde(rename = "ref")]
+	pub r#ref: String,
+	/// When this silence was created.
+	pub created_at: Timestamp,
+	/// The operator who created this silence. `None` if not recorded.
+	pub created_by: Option<String>,
+}
+
 /// Is a silence in force for `(source, ref)` on an event at this scope?
 ///
 /// An event can be silenced at its own scope and at its group's. Which "its
@@ -171,8 +192,10 @@ pub async fn is_silenced(
 		Scope::Machine(_) => Namespace::for_machine(source, check),
 		_ => namespace_for(source, check, None)?,
 	};
-	if matches!(scope, Scope::Application(_) | Scope::Machine(_))
-		&& is_silence(ScopedCheckPolicy::get(db, scope, source, &namespace, check).await?)
+	if matches!(
+		scope,
+		Scope::Application(_) | Scope::Machine(_) | Scope::Cluster(_)
+	) && is_silence(ScopedCheckPolicy::get(db, scope, source, &namespace, check).await?)
 	{
 		return Ok(true);
 	}
@@ -473,6 +496,77 @@ impl MachineSilencedRef {
 	) -> Result<Vec<Self>> {
 		Ok(
 			ScopedCheckPolicy::list_silences(db, Scope::Machine(machine_id))
+				.await?
+				.into_iter()
+				.filter_map(Self::from_policy)
+				.collect(),
+		)
+	}
+}
+
+impl ClusterSilencedRef {
+	fn from_policy(p: ScopedCheckPolicy) -> Option<Self> {
+		Some(Self {
+			kubernetes_cluster_id: p.kubernetes_cluster_id?,
+			r#ref: check_to_ref(&p.source, &p.check_name),
+			source: p.source,
+			created_at: p.created_at,
+			created_by: p.created_by,
+		})
+	}
+
+	/// Add a cluster-scoped silence. Idempotent.
+	///
+	/// A cluster's issues belong to no incident target, so there is no
+	/// membership to re-evaluate: the silence takes effect wherever a
+	/// cluster's checks are read.
+	pub async fn add(
+		db: &mut AsyncPgConnection,
+		kubernetes_cluster_id: Uuid,
+		source: &str,
+		r#ref: &str,
+		created_by: Option<&str>,
+	) -> Result<Self> {
+		let check = ref_to_check(r#ref);
+		let namespace = namespace_for(source, check, None)?;
+		let policy = ScopedCheckPolicy::silence(
+			db,
+			Scope::Cluster(kubernetes_cluster_id),
+			source,
+			&namespace,
+			check,
+			created_by,
+		)
+		.await?;
+		Ok(Self::from_policy(policy).expect("cluster-scoped silence has a cluster id"))
+	}
+
+	/// Remove a cluster-scoped silence.
+	pub async fn remove(
+		db: &mut AsyncPgConnection,
+		kubernetes_cluster_id: Uuid,
+		source: &str,
+		r#ref: &str,
+	) -> Result<()> {
+		let check = ref_to_check(r#ref);
+		let namespace = namespace_for(source, check, None)?;
+		ScopedCheckPolicy::unsilence(
+			db,
+			Scope::Cluster(kubernetes_cluster_id),
+			source,
+			&namespace,
+			check,
+		)
+		.await?;
+		Ok(())
+	}
+
+	pub async fn list_for_cluster(
+		db: &mut AsyncPgConnection,
+		kubernetes_cluster_id: Uuid,
+	) -> Result<Vec<Self>> {
+		Ok(
+			ScopedCheckPolicy::list_silences(db, Scope::Cluster(kubernetes_cluster_id))
 				.await?
 				.into_iter()
 				.filter_map(Self::from_policy)

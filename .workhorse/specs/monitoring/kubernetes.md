@@ -92,6 +92,18 @@ The draft is what accounts for the minted identity in the meantime, so an abando
 
 Only a registered cluster hosts applications, is offered as an application's host, and carries checks.
 
+## A cluster's page
+
+A registered cluster has a page of its own, addressed beneath the fleet beside its machines (see [FLT](../servers/overview.md), "Navigating the two grains").
+It presents the cluster's health, its reachability, and the checks filed against it, with the controls each check carries (see [CHK](checks.md), "Operator controls"), and it lists the applications the cluster hosts.
+A cluster's checks are read here and on no application, a cluster carrying the applications of many groups (see [CHK](checks.md), "Targets").
+
+The page shows how long the cluster may go unheard before it reads as unreachable, and an admin sets that there.
+A cluster's reachability is graded against that threshold like any other target's (see [CHK](checks.md), "Reachability").
+
+The registry links each registered cluster to its page, and an application hosted on a cluster names the cluster on its own page, as one on a box names its machine.
+Registering a cluster and re-issuing its credential stay on the registry, which is administration rather than monitoring.
+
 An operator can re-issue a draft's credential, retiring the one before it, for a credential lost before it reached the cluster.
 A draft remains until an operator removes it.
 
@@ -138,15 +150,66 @@ In particular such an application presents no bestool version, having no such ag
 
 ## Checks determined about the substrate
 
-Under the `kubernetes` source, the relay determines checks about what the cluster does with an application's workloads and files them.
+Under the `kubernetes` source, the relay determines checks about the substrate, what the cluster does with the workloads scheduled on it, and files each at the grain its condition holds for.
 The `kubernetes` source is filed only by a relay; no ordinary device reports it and it is reserved from the device API (see [CHK](checks.md), "Sources").
-Its checks register already reviewed, each with the policy its condition warrants.
+Its checks register already reviewed, each with the policy and documentation its condition warrants.
+Its check names are Canopy's own, so each is one catalog entry fleet-wide, whichever cluster or application it is filed against (see [CHK](checks.md), "Names").
+
+The relay determines these checks from the cluster's own objects, read through the cluster's API.
+So a check rests on the state of the cluster itself, not on any other monitoring system in the cluster being healthy.
+
+A permission the relay has not been granted makes the check that needed it broken, naming what was refused.
+A check the relay cannot read is therefore never absent: absent says the condition does not exist on this cluster, which the relay cannot know.
 
 Per application, the relay determines that the application's workloads can be placed, no pod of it being unschedulable, and that its volumes are bound.
 
 A check under this source can also be scoped past a single application, at either grain.
 A check about a namespace targets the group, a namespace being a group at a rank (see [CHK](checks.md), "Targets").
 A check about the cluster targets the cluster and is read there, that being the grain such a condition holds for (see [CHK](checks.md), "Targets").
+
+### Checks about the whole cluster
+
+Each core component of a running cluster has a check of its own, detected in the way that component fails.
+An ingress controller, a database operator and a node provisioner each fail differently, report their state differently, and are repaired differently, so each is its own condition with its own detail and documentation.
+Where one condition holds several times over in a cluster, it is one check with an instance for each, graded and silenced instance by instance (see [CHK](checks.md), "Checks with instances").
+
+Operators reach a cluster's API over the tailnet, through the Tailscale operator's API proxy, and not through the ingress that serves the applications.
+So whether operators can get into a cluster is its own check: the proxy is healthy while its workload is ready and the operator reports it connected to the tailnet.
+Where the proxy runs inside the Tailscale operator rather than as proxies of its own, the operator reports nothing about its own tailnet connection, so the check reads only that the operator is ready, and its detail says the tailnet half was not read.
+A cluster running no API proxy in either form has no such check.
+A failed ingress is an outage for an application's users and says nothing about whether an operator can get in to repair it, and neither condition stands in for the other.
+
+Each of a cluster's node pools is an instance of one node pool check.
+A pool fails when it is not ready, or when the nodes it launches do not register with the cluster.
+Whether a pool's node class can launch nodes is the node class's condition and not the pool's, so a pool is graded on its own conditions apart from that, and one broken class never reads as every pool referencing it failing.
+
+### Workloads broadly not running
+
+One check reports how much of a cluster's workload is running, as the share of desired replicas that are ready, summed across the cluster's Kubernetes Deployments, StatefulSets and DaemonSets and its database clusters.
+It is the cluster's own condition, not a rollup of its applications': a large share of everything failing to run has causes no single application's check describes, such as the cluster being out of capacity or unable to provision nodes, and it reports those causes whether or not any other check anticipated them.
+
+The share counts against what each workload asks for, not the pods that exist, so a workload whose pods cannot be created at all counts as not running.
+Workloads that are not meant to be running are left out of both sides:
+
+- A workload scaled to zero asks for nothing, whether an operator scaled it or it was put to sleep with its environment.
+- A hibernated database cluster still names its instances while it has none running, so it is recognised as hibernated and left out.
+- Jobs run to completion rather than keep running, so they are not counted.
+
+So an environment asleep contributes nothing, and putting one to sleep never reads as its workload failing.
+
+The check grades the share in three bands: passed at 90% or above, warning from 80% up to 90%, and failed below 80%.
+Crossing back over an edge takes 5 points more than falling across it, so a warning passes again only above 95% and a failure lifts to a warning only above 85%, and a share sitting on an edge holds the result it last had.
+
+A degradation counts sooner the deeper it goes.
+The check fails at once below 50%, fails after 2 minutes below 70% or 5 minutes below 80%, and warns after 5 minutes below 90%, each measured from when the share went under that line and stayed under it, and the most urgent that holds is the result.
+A shallow dip is what a rolling deploy looks like and passes on its own, while a deep one is not something a deploy does.
+Recovery takes effect as soon as the share crosses back over its edge.
+
+The detail carries the share as a number, so an operator regrades the check through a policy rule on it rather than through any threshold setting of the relay's (see [CHK](checks.md), "Policy").
+
+A relay that has just started holds none of the history a band or a hold depends on.
+Until it does, it files this check only where the result does not depend on history, which is above 95% and below 50%, and otherwise files nothing for it.
+The check keeps the state last filed in the meantime, each filing standing on its own rather than as part of a complete report, so a relay restarting never recovers the check and reopens it minutes later.
 
 ## Reachability
 

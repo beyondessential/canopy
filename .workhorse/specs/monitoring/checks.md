@@ -124,7 +124,7 @@ Canopy's own checks register already reviewed, with the policy their condition w
 
 ### Scoped policy
 
-Beyond the fleet catalog, a transform can be scoped to a target: per application, per machine, per group, or Canopy-wide.
+Beyond the fleet catalog, a transform can be scoped to a target: per application, per machine, per cluster, per group, or Canopy-wide.
 Transforms apply in order — fleet catalog, then group, then the target itself — each acting on the previous effective result, so the most specific scope has the last word.
 
 The operator interface presents two scoped policies.
@@ -139,6 +139,7 @@ A maintenance window is not one of these transforms: it holds a target's issues 
 A check that can be filed at a scope can be silenced at that scope.
 The scopes a check can be silenced at are the ones it applies at: its own target, and that target's group.
 So a machine's checks are silenced against the machine, an application's against the application, and either against the group they belong to.
+A cluster belongs to no group, so its checks are silenced against the cluster alone.
 
 This holds at every point a silence is read, and those points must agree: what the consolidated view presents as skipped, what the reporting source is told not to run, and what an incident counts are one answer.
 A silence that quiets a check in one of those and not the others is a defect rather than a degree of silencing.
@@ -309,7 +310,7 @@ A manual condition behaves as a reported check whose reporter is the operator: i
 Machines and applications each carry a monitoring switch.
 Checks targeted at one that is not monitored are recorded and presented for visibility but do not contribute to incidents.
 Canopy's own determinations are made for unmonitored targets just as for monitored ones, so an unmonitored target that has gone away still presents as unreachable and unhealthy — it simply raises nothing.
-Group and Canopy-wide checks are not subject to any target's monitoring gate.
+Group, cluster and Canopy-wide checks are not subject to any target's monitoring gate.
 
 A machine's monitoring switch governs the checks targeted at the machine.
 It does not silence the applications on it, each of which has a switch of its own.

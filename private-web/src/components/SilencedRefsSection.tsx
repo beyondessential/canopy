@@ -15,6 +15,8 @@ import { qualifiedSilenceRef, namespaceSegment, type NamespaceRef } from "../typ
 import { GradedAction } from "./GradedAction";
 import TimeAgo from "./TimeAgo";
 
+type SilenceScope = "server" | "machine" | "cluster" | "group";
+
 /// Listed at the bottom of the server / group detail page. Renders the
 /// `(source, ref)` tuples that the operator has silenced at that scope and
 /// offers an un-silence button per row. Silenced refs don't contribute to
@@ -25,7 +27,7 @@ export default function SilencedRefsSection({
 	refreshKey,
 	onChanged,
 }: {
-	scope: "server" | "machine" | "group";
+	scope: SilenceScope;
 	id: string;
 	/** Parent-controlled cache-bust; bump to refetch the list after the
 	 * parent took an action that may have added a silence (e.g. silencing
@@ -58,6 +60,13 @@ export default function SilencedRefsSection({
 		{ machine_id: scope === "machine" ? id : "" },
 		[scope, id, tick, refreshKey],
 	);
+	const clusterResult = useApi(
+		"silenced_refs",
+		"list_for_cluster",
+		{ kubernetes_cluster_id: id },
+		[scope, id, tick, refreshKey],
+		{ skip: scope !== "cluster" },
+	);
 	const groupResult = useApi(
 		"silenced_refs",
 		"list_for_group",
@@ -69,7 +78,9 @@ export default function SilencedRefsSection({
 			? serverResult
 			: scope === "machine"
 				? machineResult
-				: groupResult;
+				: scope === "cluster"
+					? clusterResult
+					: groupResult;
 
 	if (result.status === "loading" || result.status === "idle") {
 		return (
@@ -120,7 +131,7 @@ export default function SilencedRefsSection({
 function SectionHeading({
 	scope,
 }: {
-	scope: "server" | "machine" | "group";
+	scope: SilenceScope;
 }) {
 	return (
 		<Typography variant="h6" component="h2" gutterBottom>
@@ -135,7 +146,9 @@ function SectionHeading({
 					? "— issues with these refs on this server don't open incidents."
 					: scope === "machine"
 						? "— issues with these refs on this machine don't open incidents."
-						: "— issues with these refs anywhere in this group don't open incidents."}
+						: scope === "cluster"
+							? "— checks with these refs on this cluster are ignored."
+							: "— issues with these refs anywhere in this group don't open incidents."}
 			</Typography>
 		</Typography>
 	);
@@ -152,7 +165,7 @@ function SilencedRow({
 	isAdmin,
 	onChanged,
 }: {
-	scope: "server" | "machine" | "group";
+	scope: SilenceScope;
 	id: string;
 	source: string;
 	/** Which catalog entry a group-scoped silence quiets. A group spans
@@ -167,19 +180,24 @@ function SilencedRow({
 }) {
 	const unsilenceServer = useApiAction("silenced_refs", "unsilence_server");
 	const unsilenceMachine = useApiAction("silenced_refs", "unsilence_machine");
+	const unsilenceCluster = useApiAction("silenced_refs", "unsilence_cluster");
 	const unsilenceGroup = useApiAction("silenced_refs", "unsilence_group");
 	const action =
 		scope === "server"
 			? unsilenceServer
 			: scope === "machine"
 				? unsilenceMachine
-				: unsilenceGroup;
+				: scope === "cluster"
+					? unsilenceCluster
+					: unsilenceGroup;
 	const unsilenceCall =
 		scope === "server"
 			? "silenced_refs/unsilence_server"
 			: scope === "machine"
 				? "silenced_refs/unsilence_machine"
-				: "silenced_refs/unsilence_group";
+				: scope === "cluster"
+					? "silenced_refs/unsilence_cluster"
+					: "silenced_refs/unsilence_group";
 	const pending = action.pending;
 	const error = action.error;
 	const unsilence = async () => {
@@ -188,6 +206,12 @@ function SilencedRow({
 				await unsilenceServer.call({ server_id: id, source, ref: refName });
 			} else if (scope === "machine") {
 				await unsilenceMachine.call({ machine_id: id, source, ref: refName });
+			} else if (scope === "cluster") {
+				await unsilenceCluster.call({
+					kubernetes_cluster_id: id,
+					source,
+					ref: refName,
+				});
 			} else {
 				await unsilenceGroup.call({
 					server_group_id: id,

@@ -3588,6 +3588,112 @@
         "x-canopy-safety-mode": "write"
       }
     },
+    "/api/fleet/clusters/get_detail": {
+      "post": {
+        "tags": [
+          "clusters"
+        ],
+        "summary": "Get everything a registered cluster's page presents.",
+        "description": "Returns 404 for a cluster that is still a draft: only a registered cluster\nhosts applications or carries checks.",
+        "operationId": "clusters_get_detail",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClusterPageArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/fleet/clusters/update": {
+      "post": {
+        "tags": [
+          "clusters"
+        ],
+        "summary": "Change a registered cluster's name or unreachable threshold.",
+        "description": "Either field may be omitted to leave it as it is. The threshold is what the\ncluster's reachability is graded against, and must be positive. Returns 404\nfor a draft. Requires admin access.",
+        "operationId": "clusters_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClusterUpdateArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Cluster"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
     "/api/fleet/groups/create": {
       "post": {
         "tags": [
@@ -4686,7 +4792,7 @@
           "healthchecks"
         ],
         "summary": "Set a source's ingest mode.",
-        "description": "Governs whether the device API accepts the source's reports: `allow`\ningests normally, `ignore` accepts but discards them, `deny` rejects\nthe push. The reserved `canopy`/`manual` names are rejected.",
+        "description": "Governs whether the device API accepts the source's reports: `allow`\ningests normally, `ignore` accepts but discards them, `deny` rejects\nthe push. The reserved names (`canopy`, `manual`, `kubernetes`) are rejected.",
         "operationId": "healthcheck_set_source_ingest",
         "requestBody": {
           "content": {
@@ -4747,7 +4853,7 @@
           "healthchecks"
         ],
         "summary": "Set a source's reachability mode.",
-        "description": "Governs how the source's silence bears on its applications' reachability:\n`on` warns, `quiet` never warns but still counts toward unreachable,\n`off` is excluded. The reserved `canopy`/`manual` names are rejected.",
+        "description": "Governs how the source's silence bears on its applications' reachability:\n`on` warns, `quiet` never warns but still counts toward unreachable,\n`off` is excluded. The reserved names (`canopy`, `manual`, `kubernetes`) are rejected.",
         "operationId": "healthcheck_set_source_reachability",
         "requestBody": {
           "content": {
@@ -4808,7 +4914,7 @@
           "healthchecks"
         ],
         "summary": "List the reporting sources and their reachability policy.",
-        "description": "Every non-reserved source that has catalogued checks, with its\nreachability mode (defaulting to `on`) and most recent fleet-wide\nreport. The reserved `canopy`/`manual` sources are excluded.",
+        "description": "Every non-reserved source that has catalogued checks, with its\nreachability mode (defaulting to `on`) and most recent fleet-wide\nreport. The reserved sources are excluded.",
         "operationId": "healthcheck_sources",
         "responses": {
           "200": {
@@ -7711,6 +7817,47 @@
         "x-canopy-safety-mode": "write"
       }
     },
+    "/api/silenced_refs/list_for_cluster": {
+      "post": {
+        "tags": [
+          "silenced_refs"
+        ],
+        "summary": "List cluster-scoped silences for a cluster.",
+        "description": "Returns every (source, ref) pair currently silenced for this cluster, most\nrecently created first. A cluster belongs to no group, so these are the\nonly silences bearing on its checks.",
+        "operationId": "list_for_cluster",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClusterScopeArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ClusterSilencedRef"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
     "/api/silenced_refs/list_for_group": {
       "post": {
         "tags": [
@@ -7875,6 +8022,54 @@
         "x-canopy-safety-mode": "read-only"
       }
     },
+    "/api/silenced_refs/silence_cluster": {
+      "post": {
+        "tags": [
+          "silenced_refs"
+        ],
+        "summary": "Silence an issue on a cluster.",
+        "description": "The matching check keeps being recorded but presents as skipped and leaves\nthe cluster's health. Idempotent. Requires admin access.",
+        "operationId": "silence_cluster",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SilenceClusterArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterSilencedRef"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "x-canopy-safety-mode": "danger"
+      }
+    },
     "/api/silenced_refs/silence_group": {
       "post": {
         "tags": [
@@ -8017,6 +8212,47 @@
           }
         ],
         "x-canopy-safety-mode": "danger"
+      }
+    },
+    "/api/silenced_refs/unsilence_cluster": {
+      "post": {
+        "tags": [
+          "silenced_refs"
+        ],
+        "summary": "Unsilence an issue on a cluster.",
+        "description": "Removes a cluster-scoped silence for the given (source, ref) pair, if one\nexists. Removing a silence that isn't there is not an error. Requires admin\naccess.",
+        "operationId": "unsilence_cluster",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SilenceClusterArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Silence removed, or there was none."
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/silenced_refs/unsilence_group": {
@@ -11190,6 +11426,157 @@
           }
         }
       },
+      "Cluster": {
+        "type": "object",
+        "description": "A cluster, as its page presents it.",
+        "required": [
+          "id",
+          "name",
+          "alert_when_down_for"
+        ],
+        "properties": {
+          "alert_when_down_for": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How long, in seconds, the cluster may go unheard before it reads as\nunreachable."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for this cluster."
+          },
+          "name": {
+            "type": "string",
+            "description": "What an operator calls the cluster."
+          }
+        }
+      },
+      "ClusterApplication": {
+        "type": "object",
+        "description": "An application a cluster hosts, as a row in the cluster's list.",
+        "required": [
+          "id",
+          "type",
+          "display_host",
+          "up",
+          "health",
+          "is_monitored",
+          "maintained",
+          "own_window"
+        ],
+        "properties": {
+          "display_host": {
+            "type": "string",
+            "description": "Where the application answers, or empty when it has no address."
+          },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The group the application belongs to, taken from its namespace."
+          },
+          "group_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "That group's name."
+          },
+          "health": {
+            "$ref": "#/components/schemas/HealthState",
+            "description": "The application's own health."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for this application."
+          },
+          "is_monitored": {
+            "type": "boolean",
+            "description": "Whether canopy is watching this application at all. An unwatched one\npresents as such rather than as an ordinary row."
+          },
+          "maintained": {
+            "type": "boolean",
+            "description": "Whether a maintenance window suspends the application, whether it names\nthe application itself or the group it belongs to."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the application is called within its group."
+          },
+          "own_window": {
+            "type": "boolean",
+            "description": "Whether that window names this application in particular."
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "The application's environment tier."
+              }
+            ]
+          },
+          "type": {
+            "$ref": "#/components/schemas/ApplicationType",
+            "description": "What the application is."
+          },
+          "up": {
+            "$ref": "#/components/schemas/ShortStatus",
+            "description": "Whether the application is currently reporting, on its own threshold."
+          }
+        }
+      },
+      "ClusterDetail": {
+        "type": "object",
+        "description": "Everything a cluster's page presents.",
+        "required": [
+          "cluster",
+          "up",
+          "health",
+          "checks",
+          "applications"
+        ],
+        "properties": {
+          "applications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClusterApplication"
+            },
+            "description": "The applications the cluster hosts."
+          },
+          "checks": {
+            "$ref": "#/components/schemas/ConsolidatedChecks",
+            "description": "The checks filed against the cluster, graded and classified."
+          },
+          "cluster": {
+            "$ref": "#/components/schemas/Cluster",
+            "description": "The cluster's own record."
+          },
+          "health": {
+            "$ref": "#/components/schemas/HealthState",
+            "description": "The cluster's own health, from the checks filed against it."
+          },
+          "last_reported_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the cluster was last reported on by its relay."
+          },
+          "up": {
+            "$ref": "#/components/schemas/ShortStatus",
+            "description": "Whether the cluster is currently reporting, on its own threshold."
+          }
+        }
+      },
       "ClusterIdArgs": {
         "type": "object",
         "description": "Identify one cluster.",
@@ -11225,6 +11612,100 @@
               "$ref": "#/components/schemas/ClusterView"
             },
             "description": "The registered clusters, ordered by name."
+          }
+        }
+      },
+      "ClusterPageArgs": {
+        "type": "object",
+        "description": "Request body identifying a cluster.",
+        "required": [
+          "cluster_id"
+        ],
+        "properties": {
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The cluster to read."
+          }
+        }
+      },
+      "ClusterScopeArgs": {
+        "type": "object",
+        "description": "Request body identifying a cluster to look up silences for.",
+        "required": [
+          "kubernetes_cluster_id"
+        ],
+        "properties": {
+          "kubernetes_cluster_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The cluster to look up silences for."
+          }
+        }
+      },
+      "ClusterSilencedRef": {
+        "type": "object",
+        "description": "A silenced issue reference scoped to a single cluster: issues matching this\n`(source, ref)` on this cluster are still recorded, but present as skipped\nand leave the cluster's health.\n\nA cluster belongs to no group, so this is the only scope its checks are\nsilenced at.",
+        "required": [
+          "kubernetes_cluster_id",
+          "source",
+          "ref",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this silence was created."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The operator who created this silence. `None` if not recorded."
+          },
+          "kubernetes_cluster_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The cluster this silence applies to."
+          },
+          "ref": {
+            "type": "string",
+            "description": "The issue reference this silence matches."
+          },
+          "source": {
+            "type": "string",
+            "description": "The issue source this silence matches."
+          }
+        }
+      },
+      "ClusterUpdateArgs": {
+        "type": "object",
+        "description": "What an admin changes about a cluster from its page.",
+        "required": [
+          "cluster_id"
+        ],
+        "properties": {
+          "alert_when_down_for": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How long, in seconds, the cluster may go unheard before it reads as\nunreachable. Must be positive. Omit to leave it."
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The cluster to change."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A new name. Omit to leave it."
           }
         }
       },
@@ -19192,7 +19673,7 @@
           },
           "source": {
             "type": "string",
-            "description": "The source to configure. The reserved `canopy`/`manual` names are\nrejected."
+            "description": "The source to configure. The reserved names (`canopy`, `manual`, `kubernetes`) are\nrejected."
           }
         }
       },
@@ -19210,7 +19691,7 @@
           },
           "source": {
             "type": "string",
-            "description": "The source to configure. The reserved `canopy`/`manual` names are\nrejected."
+            "description": "The source to configure. The reserved names (`canopy`, `manual`, `kubernetes`) are\nrejected."
           }
         }
       },
@@ -19256,6 +19737,30 @@
           "down",
           "gone"
         ]
+      },
+      "SilenceClusterArgs": {
+        "type": "object",
+        "description": "Request body identifying an issue to silence (or unsilence) on a single\ncluster.",
+        "required": [
+          "kubernetes_cluster_id",
+          "source",
+          "ref"
+        ],
+        "properties": {
+          "kubernetes_cluster_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The cluster to silence the issue on."
+          },
+          "ref": {
+            "type": "string",
+            "description": "The specific issue identifier within `source` to silence."
+          },
+          "source": {
+            "type": "string",
+            "description": "Identifies what raises the issue being silenced."
+          }
+        }
       },
       "SilenceGroupArgs": {
         "type": "object",
@@ -20637,6 +21142,10 @@
     {
       "name": "certificates",
       "description": "TLS certificates and public names: what each server holds, the pause and profile that govern them, and revocation."
+    },
+    {
+      "name": "clusters",
+      "description": "A registered Kubernetes cluster as a host in the fleet: its health, reachability, checks, and the applications it hosts."
     },
     {
       "name": "commons",

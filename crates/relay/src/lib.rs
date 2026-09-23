@@ -9,14 +9,15 @@
 //!
 //! ## What is here and what is not
 //!
-//! This crate is the relay's *frame*: its identity, its connection, the
+//! This crate is the relay's frame: its identity, its connection, the
 //! reconnect loop, and the dispatch that answers canopy's requests and files
-//! upward. The checks themselves — the harvest against each instance's
-//! database, and the substrate checks read from the Kubernetes API — arrive as
-//! their own work, and they do not live here: both families are `alertd`'s,
-//! the substrate half behind a `kube` feature, so a check's two behaviours stay
-//! in one crate and cannot drift on separate release cycles. The relay embeds
-//! that suite and sends what it produces up the filings channel.
+//! upward. It also carries the checks about the cluster itself ([`cluster`]),
+//! which exist only in a cluster and have no counterpart elsewhere.
+//!
+//! The checks about each application do not live here. They are `alertd`'s,
+//! for boxes and clusters alike, so a check's two behaviours stay in one crate
+//! and cannot drift on separate release cycles; the relay embeds that suite and
+//! sends what it produces up the filings channel.
 //!
 //! So the seam for a check is [`client::Filings`], not [`Duties`]. `Duties` is
 //! the separate, smaller thing: the cluster actions canopy *asks* for, none of
@@ -27,6 +28,7 @@
 //! database anywhere near them, which is what the tests here do.
 
 pub mod client;
+pub mod cluster;
 pub mod config;
 pub mod duties;
 pub mod version;

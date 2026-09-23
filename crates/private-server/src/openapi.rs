@@ -20,6 +20,7 @@ use utoipa::{
 		(name = "backups", description = "Group backup-repo onboarding, scheduling, and stats."),
 		(name = "bestool", description = "Bestool SQL snippet library."),
 		(name = "certificates", description = "TLS certificates and public names: what each server holds, the pause and profile that govern them, and revocation."),
+		(name = "clusters", description = "A registered Kubernetes cluster as a host in the fleet: its health, reachability, checks, and the applications it hosts."),
 		(name = "commons", description = "Shared configuration and identity helpers."),
 		(name = "devices", description = "Device registry, trust, and key management."),
 		(name = "domains", description = "Managed DNS zones and the domains each group controls."),

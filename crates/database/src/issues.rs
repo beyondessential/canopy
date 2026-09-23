@@ -1000,7 +1000,9 @@ pub async fn raise_global_event_with_state(
 			.filter(
 				issues::application_id
 					.is_null()
+					.and(issues::machine_id.is_null())
 					.and(issues::server_group_id.is_null())
+					.and(issues::kubernetes_cluster_id.is_null())
 					.and(issues::source.eq(source))
 					.and(issues::ref_.eq(r#ref)),
 			)
@@ -1904,6 +1906,82 @@ pub async fn machine_health_from_check_state(
 		.collect())
 }
 
+/// The same rollup for clusters, from the checks filed at cluster scope.
+///
+/// A cluster belongs to no group, so only a silence set on the cluster itself
+/// bears on it. Its checks are the relay's under the substrate source and
+/// canopy's own, both curated and so flat.
+// spec: CHK#health-rollup
+// spec: K8S
+pub async fn cluster_health_from_check_state(
+	conn: &mut AsyncPgConnection,
+	cluster_ids: &[Uuid],
+) -> Result<std::collections::HashMap<Uuid, commons_types::status::HealthState>> {
+	use crate::schema::{issues, scoped_check_policies};
+	use commons_types::status::HealthState;
+	use std::collections::{HashMap, HashSet};
+
+	if cluster_ids.is_empty() {
+		return Ok(HashMap::new());
+	}
+
+	let rows: Vec<HealthCheckRow> = issues::table
+		.select((
+			issues::kubernetes_cluster_id,
+			issues::source,
+			issues::check_name,
+			issues::effective_result,
+		))
+		.filter(issues::kubernetes_cluster_id.eq_any(cluster_ids))
+		.filter(issues::check_name.is_not_null())
+		.filter(issues::effective_result.is_not_null())
+		.filter(issues::active.eq(true))
+		.filter(issues::resolved_at.is_null())
+		.load(conn)
+		.await?;
+
+	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
+
+	let silences: HashSet<(Uuid, String, String)> = scoped_check_policies::table
+		.select((
+			scoped_check_policies::kubernetes_cluster_id.assume_not_null(),
+			scoped_check_policies::source,
+			scoped_check_policies::check_name,
+		))
+		.filter(scoped_check_policies::ceiling.eq("skipped"))
+		.filter(scoped_check_policies::kubernetes_cluster_id.eq_any(cluster_ids))
+		.load::<(Uuid, String, String)>(conn)
+		.await?
+		.into_iter()
+		.collect();
+
+	let mut contributing: HashMap<Uuid, Vec<CheckResult>> = HashMap::new();
+	for (cluster_id, source, check_name, effective) in rows {
+		let (Some(cluster_id), Some(check_name)) = (cluster_id, check_name) else {
+			continue;
+		};
+		let key = (cluster_id, source, check_name);
+		if !crate::check_policies::CheckPolicy::live_for(&cataloged, &key.1, &key.2, None) {
+			continue;
+		}
+		if silences.contains(&key) {
+			continue;
+		}
+		let Some(result) = effective
+			.as_deref()
+			.and_then(|e| e.parse::<CheckResult>().ok())
+		else {
+			continue;
+		};
+		contributing.entry(cluster_id).or_default().push(result);
+	}
+
+	Ok(contributing
+		.into_iter()
+		.map(|(cluster_id, results)| (cluster_id, HealthState::from_results(results)))
+		.collect())
+}
+
 /// One fleet check-detail row: `(application_id, source, check_name,
 /// observed_result, effective_result, detail)`.
 type FleetCheckRow = (
@@ -2174,6 +2252,18 @@ pub async fn consolidated_checks_latest_for_machine(
 	consolidated_checks_for(conn, Scope::Machine(machine_id), group_id).await
 }
 
+/// One cluster's live consolidated checks: what its relay files about the
+/// cluster, and its reachability. A cluster belongs to no group, so no group
+/// silence reaches it.
+// spec: CHK#targets
+// spec: K8S
+pub async fn consolidated_checks_latest_for_cluster(
+	conn: &mut AsyncPgConnection,
+	cluster_id: Uuid,
+) -> Result<commons_types::status::ConsolidatedChecks> {
+	consolidated_checks_for(conn, Scope::Cluster(cluster_id), None).await
+}
+
 /// The live consolidated checks filed against one target, at whichever grain
 /// it is.
 ///
@@ -2189,18 +2279,23 @@ async fn consolidated_checks_for(
 	use commons_types::status::ConsolidatedChecks;
 
 	let target_id = match target {
-		Scope::Application(id) | Scope::Machine(id) => id,
+		Scope::Application(id) | Scope::Machine(id) | Scope::Cluster(id) => id,
 		// A group or canopy-wide rollup is a different question, answered by
 		// its own reader; nothing calls this with one.
-		Scope::Group(_) | Scope::Cluster(_) | Scope::Global => {
+		Scope::Group(_) | Scope::Global => {
 			return Err(AppError::BadRequest(
-				"consolidated checks are read for an application or a machine".into(),
+				"consolidated checks are read for an application, a machine or a cluster".into(),
 			));
 		}
 	};
 
 	let health_state = match target {
 		Scope::Machine(id) => machine_health_from_check_state(conn, &[(id, group_id)])
+			.await?
+			.get(&id)
+			.copied()
+			.unwrap_or_default(),
+		Scope::Cluster(id) => cluster_health_from_check_state(conn, &[id])
 			.await?
 			.get(&id)
 			.copied()
@@ -2281,7 +2376,10 @@ async fn checks_at_scope(
 	use commons_types::subject::CheckSubject;
 	use std::collections::HashSet;
 
-	let (target_application, target_machine, _, _) = target.to_columns();
+	let (target_application, target_machine, target_group, target_cluster) = target.to_columns();
+	// A cluster's checks are about neither a box nor one application; the
+	// subject only tells a machine's checks apart where they present beside an
+	// application's, which a cluster's never do.
 	let subject = match target {
 		Scope::Machine(_) => CheckSubject::Machine,
 		_ => CheckSubject::Application,
@@ -2297,6 +2395,8 @@ async fn checks_at_scope(
 		))
 		.filter(issues::application_id.is_not_distinct_from(target_application))
 		.filter(issues::machine_id.is_not_distinct_from(target_machine))
+		.filter(issues::server_group_id.is_not_distinct_from(target_group))
+		.filter(issues::kubernetes_cluster_id.is_not_distinct_from(target_cluster))
 		.filter(issues::check_name.is_not_null())
 		.filter(issues::effective_result.is_not_null())
 		.load(conn)
@@ -2323,6 +2423,11 @@ async fn checks_at_scope(
 				scoped_check_policies::application_id
 					.is_not_distinct_from(target_application)
 					.and(scoped_check_policies::machine_id.is_not_distinct_from(target_machine))
+					.and(scoped_check_policies::server_group_id.is_null())
+					.and(
+						scoped_check_policies::kubernetes_cluster_id
+							.is_not_distinct_from(target_cluster),
+					)
 					.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
 			)
 			.load(conn)
@@ -2483,7 +2588,9 @@ pub async fn get_global_issue(conn: &mut AsyncPgConnection, r#ref: &str) -> Resu
 		.filter(
 			dsl::application_id
 				.is_null()
+				.and(dsl::machine_id.is_null())
 				.and(dsl::server_group_id.is_null())
+				.and(dsl::kubernetes_cluster_id.is_null())
 				.and(dsl::source.eq(crate::statuses::CANOPY_SOURCE))
 				.and(dsl::ref_.eq(r#ref)),
 		)
@@ -4228,6 +4335,30 @@ impl Issue {
 			.map_err(AppError::from)
 	}
 
+	/// As [`Self::list_by_source_ref`], at the cluster grain.
+	pub async fn list_by_source_ref_for_clusters(
+		db: &mut AsyncPgConnection,
+		source: &str,
+		ref_: &str,
+		cluster_ids: &[Uuid],
+	) -> Result<Vec<Self>> {
+		use crate::schema::issues::dsl;
+		if cluster_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+		dsl::issues
+			.select(Self::as_select())
+			.filter(
+				dsl::source
+					.eq(source)
+					.and(dsl::ref_.eq(ref_))
+					.and(dsl::kubernetes_cluster_id.eq_any(cluster_ids)),
+			)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Like [`Self::list_by_source_ref`], but matching any of several refs
 	/// at once. Used by the staleness sweep, whose per-source check refs
 	/// are only known at runtime.
@@ -4384,6 +4515,107 @@ impl Issue {
 		Ok(latest
 			.into_iter()
 			.map(|((machine, source), seen)| (machine, source, seen))
+			.collect())
+	}
+
+	/// When one cluster was last filed against, over every source at once.
+	///
+	/// The same population [`Self::source_freshness_for_clusters`] reports per
+	/// source, reduced in the database. A caller asking only when the cluster
+	/// was last heard from — its page, grading reachability — has no use for
+	/// the breakdown, and this spares it the catalog and the rows behind it:
+	/// the live-and-flat gate those apply in Rust is the join here.
+	// spec: CHK#reachability
+	pub async fn last_filed_at_for_cluster(
+		db: &mut AsyncPgConnection,
+		cluster_id: Uuid,
+	) -> Result<Option<Timestamp>> {
+		use crate::schema::{check_policies, issues};
+
+		let latest: Option<jiff_diesel::Timestamp> = issues::table
+			.inner_join(
+				check_policies::table.on(check_policies::source
+					.eq(issues::source)
+					.and(issues::check_name.eq(check_policies::check_name.nullable()))
+					// The flat namespace, which is where every check filed at a
+					// cluster sits: its source is curated.
+					.and(check_policies::subject.is_null())
+					.and(check_policies::application_type.is_null())
+					// A decommissioned check is not one the cluster is heard
+					// through, the same as it presents nowhere else.
+					.and(check_policies::decommissioned_at.is_null())),
+			)
+			.filter(
+				issues::kubernetes_cluster_id
+					.eq(cluster_id)
+					.and(issues::source.ne_all([crate::statuses::CANOPY_SOURCE, MANUAL_SOURCE]))
+					.and(issues::check_name.is_not_null()),
+			)
+			.select(diesel::dsl::max(issues::last_seen))
+			.first(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(latest.map(Into::into))
+	}
+
+	/// As [`Self::source_freshness`], at the cluster grain.
+	///
+	/// A cluster is reported on by its relay, which files the cluster's checks
+	/// under the substrate source. That source is curated, so every check
+	/// filed at a cluster sits in the flat namespace.
+	// spec: CHK#reachability
+	pub async fn source_freshness_for_clusters(
+		db: &mut AsyncPgConnection,
+		cluster_ids: &[Uuid],
+	) -> Result<Vec<(Uuid, String, Timestamp)>> {
+		use crate::check_policies::CheckPolicy;
+		use crate::schema::issues::dsl;
+		use commons_types::namespace::Namespace;
+		use std::collections::HashMap;
+		if cluster_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		let cataloged = CheckPolicy::live_cataloged_pairs(db).await?;
+
+		let rows: Vec<(Uuid, String, String, jiff_diesel::Timestamp)> = dsl::issues
+			.filter(
+				dsl::kubernetes_cluster_id
+					.eq_any(cluster_ids)
+					.and(
+						dsl::source
+							.ne_all([crate::statuses::CANOPY_SOURCE, crate::issues::MANUAL_SOURCE]),
+					)
+					.and(dsl::check_name.is_not_null()),
+			)
+			.select((
+				dsl::kubernetes_cluster_id.assume_not_null(),
+				dsl::source,
+				dsl::check_name.assume_not_null(),
+				dsl::last_seen,
+			))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		let mut latest: HashMap<(Uuid, String), Timestamp> = HashMap::new();
+		for (cluster, source, check, seen) in rows {
+			if !CheckPolicy::live_in(&cataloged, &source, &Namespace::Flat, &check) {
+				continue;
+			}
+			let seen: Timestamp = seen.into();
+			latest
+				.entry((cluster, source))
+				.and_modify(|t| {
+					if seen > *t {
+						*t = seen;
+					}
+				})
+				.or_insert(seen);
+		}
+		Ok(latest
+			.into_iter()
+			.map(|((cluster, source), seen)| (cluster, source, seen))
 			.collect())
 	}
 

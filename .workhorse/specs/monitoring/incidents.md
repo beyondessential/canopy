@@ -9,7 +9,7 @@ It aggregates the issues active on that target over its lifetime, from when it o
 At most one incident is open per target at a time.
 
 Issues and effective results are defined by the check-state model (see [CHK](checks.md)).
-An issue is scoped to what its check asserts something about — an application, a machine, a group, or Canopy as a whole — and that scope decides which target's incident it belongs to.
+An issue is scoped to what its check asserts something about — an application, a machine, a cluster, a group, or Canopy as a whole — and that scope decides which target's incident it belongs to.
 
 ## Targets
 
@@ -25,6 +25,7 @@ Their issues belong to the group itself, which is a target of its own beside the
 A group-scoped issue belongs to the group too, because what a group check asserts is held once for the group however many environments it has: its backups are one repository (see [GRP](../servers/groups.md)).
 Canopy-wide issues belong to the Canopy target.
 An issue on an application or a machine belonging to no group belongs to no target and cannot contribute to incidents.
+A cluster belongs to no group, so a cluster's issues belong to no target either: they are read on the cluster and count towards its health (see [K8S](kubernetes.md), "A cluster's page").
 
 Canopy attaches no configuration to an environment, so an environment's notification channel, grace period, and linger window are its group's.
 

@@ -522,6 +522,7 @@ diesel::table! {
 		last_answered_at -> Nullable<Timestamptz>,
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
+		alert_when_down_for -> Interval,
 	}
 }
 

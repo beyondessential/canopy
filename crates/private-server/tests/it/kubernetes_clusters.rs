@@ -168,3 +168,104 @@ async fn a_nameless_registration_is_refused() {
 	})
 	.await;
 }
+
+/// Register a cluster through the registry and confirm it as a relay
+/// answering would, returning its id.
+async fn registered(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	private: &commons_tests::axum_test::TestServer,
+	name: &str,
+) -> String {
+	let started: Value = private
+		.post("/api/kubernetes_clusters/register")
+		.json(&json!({ "name": name }))
+		.await
+		.json();
+	let relay: uuid::Uuid = started["cluster"]["relay_identity_id"]
+		.as_str()
+		.unwrap()
+		.parse()
+		.unwrap();
+	database::KubernetesCluster::stamp_answered(conn, relay, Timestamp::now())
+		.await
+		.unwrap();
+	let id = started["cluster"]["id"].as_str().unwrap().to_owned();
+	private
+		.post("/api/kubernetes_clusters/confirm")
+		.json(&json!({ "id": id }))
+		.await
+		.assert_status_ok();
+	id
+}
+
+/// A cluster's page, beneath the fleet (spec `K8S`, "A cluster's page").
+#[tokio::test(flavor = "multi_thread")]
+async fn a_registered_cluster_presents_its_health_threshold_and_checks() {
+	run(async |mut conn, _public, private| {
+		let id = registered(&mut conn, &private, "ops-main").await;
+
+		let detail: Value = private
+			.post("/api/fleet/clusters/get_detail")
+			.json(&json!({ "cluster_id": id }))
+			.await
+			.json();
+		assert_eq!(detail["cluster"]["name"], "ops-main");
+		assert_eq!(detail["cluster"]["alert_when_down_for"], 300);
+		assert_eq!(
+			detail["up"], "gone",
+			"never filed against, so never reported"
+		);
+		assert!(detail["applications"].as_array().unwrap().is_empty());
+
+		let updated: Value = private
+			.post("/api/fleet/clusters/update")
+			.json(&json!({ "cluster_id": id, "alert_when_down_for": 1200 }))
+			.await
+			.json();
+		assert_eq!(updated["alert_when_down_for"], 1200);
+
+		private
+			.post("/api/fleet/clusters/update")
+			.json(&json!({ "cluster_id": id, "alert_when_down_for": 0 }))
+			.await
+			.assert_status_bad_request();
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_draft_has_no_page() {
+	run(async |_conn, _public, private| {
+		let started: Value = private
+			.post("/api/kubernetes_clusters/register")
+			.json(&json!({ "name": "half-done" }))
+			.await
+			.json();
+		private
+			.post("/api/fleet/clusters/get_detail")
+			.json(&json!({ "cluster_id": started["cluster"]["id"] }))
+			.await
+			.assert_status_not_found();
+	})
+	.await;
+}
+
+/// The substrate source is reserved, so it has no source policy to set.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_substrate_source_has_no_source_policy() {
+	run(async |_conn, _public, private| {
+		for source in ["kubernetes", "Kubernetes"] {
+			private
+				.post("/api/healthchecks/set_source_reachability")
+				.json(&json!({ "source": source, "reachability": "off" }))
+				.await
+				.assert_status_bad_request();
+			private
+				.post("/api/healthchecks/set_source_ingest")
+				.json(&json!({ "source": source, "ingest": "deny" }))
+				.await
+				.assert_status_bad_request();
+		}
+	})
+	.await;
+}

@@ -1084,9 +1084,11 @@ pub struct ScopedCheckPolicy {
 	/// Set for a machine-scoped transform. Silencing a machine's check quiets
 	/// it wherever it presents, including on the applications that show it.
 	pub machine_id: Option<Uuid>,
-	/// Set for a group-scoped transform. All of `application_id`,
-	/// `machine_id` and `server_group_id` unset means canopy-wide scope.
+	/// Set for a group-scoped transform.
 	pub server_group_id: Option<Uuid>,
+	/// Set for a cluster-scoped transform. Every target column unset means
+	/// canopy-wide scope.
+	pub kubernetes_cluster_id: Option<Uuid>,
 	/// Scoped ceiling: caps the effective result arriving from the
 	/// previous transform in the chain. `skipped` is the silence.
 	pub ceiling: Option<String>,

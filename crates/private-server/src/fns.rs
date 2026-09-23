@@ -6,6 +6,7 @@ pub mod applications;
 pub mod backups;
 pub mod bestool;
 pub mod certificates;
+pub mod clusters;
 pub mod commons;
 pub mod devices;
 pub mod domains;
@@ -134,6 +135,7 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 				OpenApiRouter::new()
 					.nest("/applications", applications::routes())
 					.nest("/machines", machines::routes())
+					.nest("/clusters", clusters::routes())
 					.nest("/groups", server_groups::routes()),
 			)
 			.nest("/backups", backups::routes())

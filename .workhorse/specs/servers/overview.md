@@ -121,7 +121,7 @@ A machine's name is required when a box is created and not when it is edited, so
 
 The fleet is browsed by group, and its listing offers the groups, the archived records, and the fleet's figures.
 
-Everything the fleet holds is addressed beneath the fleet: its listings, its applications, and its machines, in the operator UI and in the private API alike.
+Everything the fleet holds is addressed beneath the fleet: its listings, its applications, its machines, and the clusters hosting applications, in the operator UI and in the private API alike.
 So a listing and a record are never told apart by which of them a name happens to match first, and an address says which grain it names.
 Every address these pages and endpoints answered at before still resolves to where that thing now lives, because a link into Canopy outlives a rename.
 Every machine sits in a group and every application takes its machine's, so a group is a complete index of the fleet.

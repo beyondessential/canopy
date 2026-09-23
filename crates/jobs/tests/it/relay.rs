@@ -259,9 +259,8 @@ async fn a_device_at_another_role_is_refused() {
 }
 
 /// A filing whose coordinates canopy cannot place is dropped with a warning,
-/// and does not take the connection down with it. Until a server record
-/// carries Kubernetes coordinates, every filing lands here — which is exactly
-/// the behaviour wanted for a coordinate no operator has claimed.
+/// and does not take the connection down with it: here, a relay whose identity
+/// names no registered cluster.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_unplaceable_filing_does_not_break_the_connection() {
 	commons_tests::db::TestDb::run(|mut conn, url| async move {

@@ -34,8 +34,8 @@
 //! Which cluster a connection belongs to is derived from the authenticated
 //! relay device, never claimed in a message, so nothing here carries a cluster
 //! identity. Filings likewise address a target in the coordinates the relay
-//! actually holds — a namespace and an instance within it — and canopy maps
-//! those to its own server records (see [`FilingTarget`]).
+//! actually holds — a namespace and an instance within it, or the cluster
+//! itself — and canopy maps those to its own records (see [`FilingTarget`]).
 
 pub mod alpn;
 pub mod filing;
@@ -44,7 +44,9 @@ pub mod request;
 pub mod transport;
 
 pub use alpn::{ALPN_V1, ProtocolVersion};
-pub use filing::{Filing, FilingTarget, HarvestFiling, Instance, SubstrateFiling};
+pub use filing::{
+	Filing, FilingTarget, HarvestFiling, Instance, SubstrateFiling, SubstrateInstance,
+};
 pub use frame::{MAX_FRAME_BYTES, ProtocolError, read_frame, read_required_frame, write_frame};
 pub use request::{Hello, Refusal, RefusalKind, Request, Response};
 pub use transport::{Identity, TransportError};

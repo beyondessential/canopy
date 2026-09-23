@@ -316,7 +316,8 @@ impl Status {
 	pub async fn sweep_staleness(db: &mut AsyncPgConnection) -> Result<usize> {
 		let applications = Self::sweep_application_staleness(db).await?;
 		let machines = Self::sweep_machine_staleness(db).await?;
-		Ok(applications + machines)
+		let clusters = Self::sweep_cluster_staleness(db).await?;
+		Ok(applications + machines + clusters)
 	}
 
 	/// The application half of [`Self::sweep_staleness`].
@@ -485,6 +486,82 @@ impl Status {
 					check: REACHABILITY_REF,
 					observed,
 					title: Some("Machine reachability"),
+					message: &message,
+					detail: Some(detail),
+					default_ceiling: CheckResult::Failed,
+					default_escalates: false,
+					documentation: Some(REACHABILITY_DOC),
+				},
+			)
+			.await?;
+			filed += 1;
+		}
+
+		Ok(filed)
+	}
+
+	/// The cluster half of [`Self::sweep_staleness`].
+	///
+	/// A cluster is heard from through what its relay files about it, graded on
+	/// the cluster's own threshold. Only a registered cluster carries checks,
+	/// so a draft is not swept. Nothing but those filings reports about a
+	/// cluster, so there is no status history to fall back on: a cluster its
+	/// relay has never filed against has never reported.
+	///
+	/// The relay's connection is not read here. It is known the moment it
+	/// drops, but reachability is the same freshness rule at every grain, and
+	/// a second signal would be one that could disagree with the first.
+	// spec: CHK#reachability
+	// spec: K8S
+	async fn sweep_cluster_staleness(db: &mut AsyncPgConnection) -> Result<usize> {
+		use std::collections::HashMap;
+
+		let clusters = crate::KubernetesCluster::list_registered(db).await?;
+		if clusters.is_empty() {
+			return Ok(0);
+		}
+		let cluster_ids: Vec<Uuid> = clusters.iter().map(|c| c.id).collect();
+
+		let freshness = Issue::source_freshness_for_clusters(db, &cluster_ids).await?;
+		let expected = expected_sources(db, freshness).await?;
+
+		let existing_issues = Issue::list_by_source_ref_for_clusters(
+			db,
+			CANOPY_SOURCE,
+			REACHABILITY_REF,
+			&cluster_ids,
+		)
+		.await?;
+		let open: HashMap<Uuid, bool> = existing_issues
+			.iter()
+			.filter_map(|i| i.kubernetes_cluster_id.map(|cid| (cid, i.active)))
+			.collect();
+
+		let now = Timestamp::now();
+		let mut filed = 0usize;
+		for cluster in &clusters {
+			let graded = grade_reachability(
+				"Cluster",
+				&cluster.name,
+				cluster.alert_when_down_for.0,
+				expected.get(&cluster.id).map(Vec::as_slice).unwrap_or(&[]),
+				None,
+				now,
+			);
+			if !worth_filing(&graded.0, open.get(&cluster.id).copied()) {
+				continue;
+			}
+			let (observed, message, detail) = graded;
+
+			crate::issues::file_check(
+				db,
+				crate::issues::CheckFiling {
+					source: CANOPY_SOURCE,
+					scope: crate::issues::Scope::Cluster(cluster.id),
+					device_id: None,
+					check: REACHABILITY_REF,
+					observed,
+					title: Some("Cluster reachability"),
 					message: &message,
 					detail: Some(detail),
 					default_ceiling: CheckResult::Failed,

@@ -47,6 +47,8 @@ import Incidents from "./routes/Incidents";
 import Maintenance from "./routes/Maintenance";
 import Status from "./routes/Status";
 import MachineCreate from "./routes/MachineCreate";
+import ClusterDetail from "./routes/ClusterDetail";
+import ClusterEdit from "./routes/ClusterEdit";
 import MachineDetail from "./routes/MachineDetail";
 import MachineEdit from "./routes/MachineEdit";
 import ServerDetail from "./routes/ServerDetail";
@@ -267,6 +269,14 @@ export default function App() {
 					<Route
 						path="/fleet/machines/:id/edit"
 						element={<MachineEdit />}
+					/>
+					<Route
+						path="/fleet/clusters/:id"
+						element={<ClusterDetail />}
+					/>
+					<Route
+						path="/fleet/clusters/:id/edit"
+						element={<ClusterEdit />}
 					/>
 
 					{/* Where the fleet used to live. A link into Canopy outlives

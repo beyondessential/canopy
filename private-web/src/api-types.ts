@@ -1826,6 +1826,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/fleet/clusters/get_detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get everything a registered cluster's page presents.
+         * @description Returns 404 for a cluster that is still a draft: only a registered cluster
+         *     hosts applications or carries checks.
+         */
+        post: operations["clusters_get_detail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/fleet/clusters/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change a registered cluster's name or unreachable threshold.
+         * @description Either field may be omitted to leave it as it is. The threshold is what the
+         *     cluster's reachability is graded against, and must be positive. Returns 404
+         *     for a draft. Requires admin access.
+         */
+        post: operations["clusters_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/fleet/groups/create": {
         parameters: {
             query?: never;
@@ -2333,7 +2376,7 @@ export interface paths {
          * Set a source's ingest mode.
          * @description Governs whether the device API accepts the source's reports: `allow`
          *     ingests normally, `ignore` accepts but discards them, `deny` rejects
-         *     the push. The reserved `canopy`/`manual` names are rejected.
+         *     the push. The reserved names (`canopy`, `manual`, `kubernetes`) are rejected.
          */
         post: operations["healthcheck_set_source_ingest"];
         delete?: never;
@@ -2355,7 +2398,7 @@ export interface paths {
          * Set a source's reachability mode.
          * @description Governs how the source's silence bears on its applications' reachability:
          *     `on` warns, `quiet` never warns but still counts toward unreachable,
-         *     `off` is excluded. The reserved `canopy`/`manual` names are rejected.
+         *     `off` is excluded. The reserved names (`canopy`, `manual`, `kubernetes`) are rejected.
          */
         post: operations["healthcheck_set_source_reachability"];
         delete?: never;
@@ -2377,7 +2420,7 @@ export interface paths {
          * List the reporting sources and their reachability policy.
          * @description Every non-reserved source that has catalogued checks, with its
          *     reachability mode (defaulting to `on`) and most recent fleet-wide
-         *     report. The reserved `canopy`/`manual` sources are excluded.
+         *     report. The reserved sources are excluded.
          */
         post: operations["healthcheck_sources"];
         delete?: never;
@@ -3731,6 +3774,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/silenced_refs/list_for_cluster": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List cluster-scoped silences for a cluster.
+         * @description Returns every (source, ref) pair currently silenced for this cluster, most
+         *     recently created first. A cluster belongs to no group, so these are the
+         *     only silences bearing on its checks.
+         */
+        post: operations["list_for_cluster"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/silenced_refs/list_for_group": {
         parameters: {
             query?: never;
@@ -3820,6 +3885,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/silenced_refs/silence_cluster": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Silence an issue on a cluster.
+         * @description The matching check keeps being recorded but presents as skipped and leaves
+         *     the cluster's health. Idempotent. Requires admin access.
+         */
+        post: operations["silence_cluster"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/silenced_refs/silence_group": {
         parameters: {
             query?: never;
@@ -3887,6 +3973,28 @@ export interface paths {
          *     invalid, for example if it references a server that doesn't exist.
          */
         post: operations["silence_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/silenced_refs/unsilence_cluster": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unsilence an issue on a cluster.
+         * @description Removes a cluster-scoped silence for the given (source, ref) pair, if one
+         *     exists. Removing a silence that isn't there is not an error. Requires admin
+         *     access.
+         */
+        post: operations["unsilence_cluster"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5747,6 +5855,78 @@ export interface components {
             /** @description Backup type whose schedule override to remove. */
             type: string;
         };
+        /** @description A cluster, as its page presents it. */
+        Cluster: {
+            /**
+             * Format: int64
+             * @description How long, in seconds, the cluster may go unheard before it reads as
+             *     unreachable.
+             */
+            alert_when_down_for: number;
+            /**
+             * Format: uuid
+             * @description Unique identifier for this cluster.
+             */
+            id: string;
+            /** @description What an operator calls the cluster. */
+            name: string;
+        };
+        /** @description An application a cluster hosts, as a row in the cluster's list. */
+        ClusterApplication: {
+            /** @description Where the application answers, or empty when it has no address. */
+            display_host: string;
+            /**
+             * Format: uuid
+             * @description The group the application belongs to, taken from its namespace.
+             */
+            group_id?: string | null;
+            /** @description That group's name. */
+            group_name?: string | null;
+            /** @description The application's own health. */
+            health: components["schemas"]["HealthState"];
+            /**
+             * Format: uuid
+             * @description Unique identifier for this application.
+             */
+            id: string;
+            /**
+             * @description Whether canopy is watching this application at all. An unwatched one
+             *     presents as such rather than as an ordinary row.
+             */
+            is_monitored: boolean;
+            /**
+             * @description Whether a maintenance window suspends the application, whether it names
+             *     the application itself or the group it belongs to.
+             */
+            maintained: boolean;
+            /** @description What the application is called within its group. */
+            name?: string | null;
+            /** @description Whether that window names this application in particular. */
+            own_window: boolean;
+            rank?: null | components["schemas"]["ServerRank"];
+            /** @description What the application is. */
+            type: components["schemas"]["ApplicationType"];
+            /** @description Whether the application is currently reporting, on its own threshold. */
+            up: components["schemas"]["ShortStatus"];
+        };
+        /** @description Everything a cluster's page presents. */
+        ClusterDetail: {
+            /** @description The applications the cluster hosts. */
+            applications: components["schemas"]["ClusterApplication"][];
+            /** @description The checks filed against the cluster, graded and classified. */
+            checks: components["schemas"]["ConsolidatedChecks"];
+            /** @description The cluster's own record. */
+            cluster: components["schemas"]["Cluster"];
+            /** @description The cluster's own health, from the checks filed against it. */
+            health: components["schemas"]["HealthState"];
+            /**
+             * Format: date-time
+             * @description When the cluster was last reported on by its relay.
+             */
+            last_reported_at?: string | null;
+            /** @description Whether the cluster is currently reporting, on its own threshold. */
+            up: components["schemas"]["ShortStatus"];
+        };
         /** @description Identify one cluster. */
         ClusterIdArgs: {
             /**
@@ -5764,6 +5944,64 @@ export interface components {
             drafts: components["schemas"]["ClusterView"][];
             /** @description The registered clusters, ordered by name. */
             registered: components["schemas"]["ClusterView"][];
+        };
+        /** @description Request body identifying a cluster. */
+        ClusterPageArgs: {
+            /**
+             * Format: uuid
+             * @description The cluster to read.
+             */
+            cluster_id: string;
+        };
+        /** @description Request body identifying a cluster to look up silences for. */
+        ClusterScopeArgs: {
+            /**
+             * Format: uuid
+             * @description The cluster to look up silences for.
+             */
+            kubernetes_cluster_id: string;
+        };
+        /**
+         * @description A silenced issue reference scoped to a single cluster: issues matching this
+         *     `(source, ref)` on this cluster are still recorded, but present as skipped
+         *     and leave the cluster's health.
+         *
+         *     A cluster belongs to no group, so this is the only scope its checks are
+         *     silenced at.
+         */
+        ClusterSilencedRef: {
+            /**
+             * Format: date-time
+             * @description When this silence was created.
+             */
+            created_at: string;
+            /** @description The operator who created this silence. `None` if not recorded. */
+            created_by?: string | null;
+            /**
+             * Format: uuid
+             * @description The cluster this silence applies to.
+             */
+            kubernetes_cluster_id: string;
+            /** @description The issue reference this silence matches. */
+            ref: string;
+            /** @description The issue source this silence matches. */
+            source: string;
+        };
+        /** @description What an admin changes about a cluster from its page. */
+        ClusterUpdateArgs: {
+            /**
+             * Format: int64
+             * @description How long, in seconds, the cluster may go unheard before it reads as
+             *     unreachable. Must be positive. Omit to leave it.
+             */
+            alert_when_down_for?: number | null;
+            /**
+             * Format: uuid
+             * @description The cluster to change.
+             */
+            cluster_id: string;
+            /** @description A new name. Omit to leave it. */
+            name?: string | null;
         };
         /** @description A cluster in the registry, as an operator sees it. */
         ClusterView: {
@@ -10768,7 +11006,7 @@ export interface components {
             /** @description The ingest mode to apply: `allow`, `ignore`, or `deny`. */
             ingest: components["schemas"]["IngestMode"];
             /**
-             * @description The source to configure. The reserved `canopy`/`manual` names are
+             * @description The source to configure. The reserved names (`canopy`, `manual`, `kubernetes`) are
              *     rejected.
              */
             source: string;
@@ -10778,7 +11016,7 @@ export interface components {
             /** @description The reachability mode to apply: `on`, `quiet`, or `off`. */
             reachability: components["schemas"]["ReachabilityMode"];
             /**
-             * @description The source to configure. The reserved `canopy`/`manual` names are
+             * @description The source to configure. The reserved names (`canopy`, `manual`, `kubernetes`) are
              *     rejected.
              */
             source: string;
@@ -10819,6 +11057,21 @@ export interface components {
          * @enum {string}
          */
         ShortStatus: "up" | "down" | "gone";
+        /**
+         * @description Request body identifying an issue to silence (or unsilence) on a single
+         *     cluster.
+         */
+        SilenceClusterArgs: {
+            /**
+             * Format: uuid
+             * @description The cluster to silence the issue on.
+             */
+            kubernetes_cluster_id: string;
+            /** @description The specific issue identifier within `source` to silence. */
+            ref: string;
+            /** @description Identifies what raises the issue being silenced. */
+            source: string;
+        };
         /**
          * @description Request body identifying an issue to silence (or unsilence) across a
          *     whole server group.
@@ -14090,6 +14343,76 @@ export interface operations {
             };
         };
     };
+    clusters_get_detail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClusterPageArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterDetail"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    clusters_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClusterUpdateArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Cluster"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     server_groups_create: {
         parameters: {
             query?: never;
@@ -16841,6 +17164,29 @@ export interface operations {
             };
         };
     };
+    list_for_cluster: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClusterScopeArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterSilencedRef"][];
+                };
+            };
+        };
+    };
     list_for_group: {
         parameters: {
             query?: never;
@@ -16933,6 +17279,37 @@ export interface operations {
             };
         };
     };
+    silence_cluster: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SilenceClusterArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterSilencedRef"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     silence_group: {
         parameters: {
             query?: never;
@@ -17015,6 +17392,36 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ServerSilencedRef"];
                 };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    unsilence_cluster: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SilenceClusterArgs"];
+            };
+        };
+        responses: {
+            /** @description Silence removed, or there was none. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             400: {
                 headers: {
