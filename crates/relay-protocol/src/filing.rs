@@ -35,17 +35,16 @@ pub enum Filing {
 
 /// Where a filing lands, in the coordinates the relay actually holds.
 ///
-/// The relay names a namespace and an instance within it, and **canopy**
-/// resolves that to the server or group the filing is about, from the
-/// Kubernetes coordinates an operator set on the server record (spec `K8S`,
-/// "Setting a server's identity"). So the relay never holds canopy's
-/// identifiers and there is nothing to keep in step: identity stays where the
-/// operator set it.
+/// The relay names a namespace and an instance within it, or its own cluster,
+/// and **canopy** resolves that to the application, group or cluster the
+/// filing is about. So the relay never holds canopy's identifiers and there is
+/// nothing to keep in step.
 ///
 /// This is a cluster coordinate, not a check-state scope. Canopy maps it onto
-/// the one `database::issues::Scope` vocabulary on arrival — instance to the
-/// server, namespace to the server group, cluster to canopy-wide with the
-/// cluster as the instance.
+/// the one `database::issues::Scope` vocabulary on arrival: instance to the
+/// application, namespace to the group, and cluster to the cluster itself,
+/// which is a check target in its own right (spec `K8S`, "Checks determined
+/// about the substrate").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "target", rename_all = "kebab-case")]
 pub enum FilingTarget {
@@ -56,8 +55,7 @@ pub enum FilingTarget {
 	},
 	/// A namespace, which is a server group at a rank.
 	Namespace { namespace: String },
-	/// The cluster the relay serves. Filed canopy-wide with the cluster as an
-	/// instance of the check, the relay's own identity naming which cluster.
+	/// The cluster the relay serves, the relay's own identity naming which.
 	Cluster,
 }
 
@@ -110,21 +108,50 @@ pub struct SubstrateFiling {
 	/// a name with a parameter spelled into it. Whatever varies per instance
 	/// goes in `detail`, where a policy rule reaches it.
 	pub check: String,
-	/// What the relay observed. Canopy grades it through the operator's
-	/// policy from there; the relay does not decide severity.
-	pub observed: CheckResult,
+	/// Every instance of the check, which is its complete set: canopy holds
+	/// exactly the instances a filing names, so a check with several (one per
+	/// node pool, say) files them all together rather than one at a time. A
+	/// check that holds once files one instance with an empty label.
+	pub instances: Vec<SubstrateInstance>,
 	/// Single-line headline for a degraded filing.
 	pub title: Option<String>,
 	/// What an operator reads.
 	pub message: String,
-	/// The check's own fields, available to policy rules as `check.*`.
-	pub detail: Option<serde_json::Value>,
 	/// The policy this check registers with on first sight.
 	pub default_ceiling: CheckResult,
 	pub default_escalates: bool,
 	/// The documentation the check ships with, seeded into the catalog on
 	/// first sight and never overwriting an operator's edit.
 	pub documentation: Option<String>,
+}
+
+/// One instance of a substrate check.
+///
+/// Each is graded on its own, so a policy rule or a silence written for one
+/// instance applies to that instance alone (spec `CHK`, "Checks with
+/// instances").
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SubstrateInstance {
+	/// How the instance is named to an operator, e.g. the node pool. Empty
+	/// for a check that holds once.
+	pub label: String,
+	/// What the relay observed. Canopy grades it through the operator's
+	/// policy from there.
+	pub observed: CheckResult,
+	/// The instance's own fields, available to policy rules as `check.*`, so
+	/// whatever identifies the instance belongs here too.
+	pub detail: Option<serde_json::Value>,
+}
+
+impl SubstrateInstance {
+	/// The one instance of a check that holds once.
+	pub fn only(observed: CheckResult, detail: Option<serde_json::Value>) -> Self {
+		Self {
+			label: String::new(),
+			observed,
+			detail,
+		}
+	}
 }
 
 #[cfg(test)]
@@ -184,10 +211,12 @@ mod tests {
 			let filing = Filing::Substrate(SubstrateFiling {
 				target: target.clone(),
 				check: "pod-unschedulable".into(),
-				observed: CheckResult::Failed,
+				instances: vec![SubstrateInstance::only(
+					CheckResult::Failed,
+					Some(serde_json::json!({"pod": "central-api-0"})),
+				)],
 				title: Some("A pod cannot be placed".into()),
 				message: "no node has capacity".into(),
-				detail: Some(serde_json::json!({"pod": "central-api-0"})),
 				default_ceiling: CheckResult::Failed,
 				default_escalates: false,
 				documentation: None,
@@ -197,7 +226,42 @@ mod tests {
 				panic!("family changed across the wire");
 			};
 			assert_eq!(back.target, target);
-			assert_eq!(back.observed, CheckResult::Failed);
+			assert_eq!(back.instances[0].observed, CheckResult::Failed);
 		}
+	}
+
+	#[tokio::test]
+	async fn a_substrate_filing_carries_every_instance_unchanged() {
+		let instances = vec![
+			SubstrateInstance {
+				label: "general".into(),
+				observed: CheckResult::Passed,
+				detail: Some(serde_json::json!({"pool": "general"})),
+			},
+			SubstrateInstance {
+				label: "gpu".into(),
+				observed: CheckResult::Failed,
+				detail: Some(serde_json::json!({
+					"pool": "gpu",
+					"condition": "NodeRegistrationHealthy",
+					"message": "nodes launched but never registered",
+				})),
+			},
+		];
+		let filing = Filing::Substrate(SubstrateFiling {
+			target: FilingTarget::Cluster,
+			check: "node-pools".into(),
+			instances: instances.clone(),
+			title: Some("A node pool is failing".into()),
+			message: "gpu: nodes launched but never registered".into(),
+			default_ceiling: CheckResult::Failed,
+			default_escalates: false,
+			documentation: Some("docs".into()),
+		});
+
+		let Filing::Substrate(back) = round_trip(&filing).await else {
+			panic!("family changed across the wire");
+		};
+		assert_eq!(back.instances, instances);
 	}
 }

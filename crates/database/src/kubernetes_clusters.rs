@@ -20,6 +20,8 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::pg_duration::PgDuration;
+
 /// A Kubernetes cluster in the registry (spec `K8S`).
 ///
 /// The row is a relay identity and a name. A draft has `registered_at` null; it
@@ -60,6 +62,12 @@ pub struct KubernetesCluster {
 		treat_none_as_default_value = false
 	)]
 	pub last_answered_at: Option<Timestamp>,
+	/// How long this cluster may go unheard before it reads as unreachable.
+	/// A cluster is heard from through its relay's filings, so this is graded
+	/// against their freshness, not against the connection (spec `K8S`, "A
+	/// cluster's page").
+	#[schema(value_type = i64)]
+	pub alert_when_down_for: PgDuration,
 	#[serde(skip)]
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub created_at: Timestamp,
@@ -186,6 +194,65 @@ impl KubernetesCluster {
 		use crate::schema::kubernetes_clusters::dsl;
 		diesel::update(dsl::kubernetes_clusters.filter(dsl::id.eq(id)))
 			.set(dsl::name.eq(name))
+			.returning(Self::as_select())
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// The live applications this cluster hosts, ordered by name.
+	pub async fn applications(
+		&self,
+		db: &mut AsyncPgConnection,
+	) -> Result<Vec<crate::applications::Application>> {
+		use crate::schema::applications::dsl;
+		dsl::applications
+			.select(crate::applications::Application::as_select())
+			.filter(dsl::kubernetes_cluster_id.eq(self.id))
+			.filter(dsl::deleted_at.is_null())
+			.order(dsl::name.asc())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// When this cluster was last reported on: the latest filing its relay
+	/// made about it, under any source but canopy's own determinations. `None`
+	/// for a cluster never filed against.
+	// spec: CHK#reachability
+	pub async fn last_reported_at(&self, db: &mut AsyncPgConnection) -> Result<Option<Timestamp>> {
+		Ok(
+			crate::issues::Issue::source_freshness_for_clusters(db, &[self.id])
+				.await?
+				.into_iter()
+				.map(|(_, _, seen)| seen)
+				.max(),
+		)
+	}
+
+	/// Whether this cluster is currently reporting, on its own threshold.
+	pub fn reachability(
+		&self,
+		last_reported_at: Option<Timestamp>,
+	) -> commons_types::status::ShortStatus {
+		commons_types::status::ShortStatus::grade(last_reported_at, self.alert_when_down_for.0)
+	}
+
+	/// Set how long this cluster may go unheard before it reads as
+	/// unreachable. The storage CHECK holds it positive.
+	pub async fn set_alert_when_down_for(
+		db: &mut AsyncPgConnection,
+		id: Uuid,
+		threshold: jiff::SignedDuration,
+	) -> Result<Self> {
+		use crate::schema::kubernetes_clusters::dsl;
+		if !threshold.is_positive() {
+			return Err(AppError::BadRequest(
+				"a cluster's unreachable threshold must be positive".into(),
+			));
+		}
+		diesel::update(dsl::kubernetes_clusters.filter(dsl::id.eq(id)))
+			.set(dsl::alert_when_down_for.eq(PgDuration(threshold)))
 			.returning(Self::as_select())
 			.get_result(db)
 			.await

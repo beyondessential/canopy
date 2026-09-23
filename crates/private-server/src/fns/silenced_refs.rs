@@ -5,7 +5,9 @@ use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::Uuid;
 use commons_types::server::app_type::ApplicationType;
-use database::silenced_refs::{MachineSilencedRef, ServerGroupSilencedRef, ServerSilencedRef};
+use database::silenced_refs::{
+	ClusterSilencedRef, MachineSilencedRef, ServerGroupSilencedRef, ServerSilencedRef,
+};
 use serde::Deserialize;
 use utoipa::ToSchema;
 
@@ -21,6 +23,9 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(write: unsilence_server))
 		.routes(routes!(danger: silence_machine))
 		.routes(routes!(write: unsilence_machine))
+		.routes(routes!(read_only: list_for_cluster))
+		.routes(routes!(danger: silence_cluster))
+		.routes(routes!(write: unsilence_cluster))
 		.routes(routes!(danger: silence_group))
 		.routes(routes!(write: unsilence_group))
 }
@@ -47,6 +52,26 @@ pub struct SilenceMachineArgs {
 	pub machine_id: Uuid,
 	/// Identifies what raises the issue being silenced — for example a
 	/// specific healthcheck.
+	pub source: String,
+	/// The specific issue identifier within `source` to silence.
+	#[serde(rename = "ref")]
+	pub r#ref: String,
+}
+
+/// Request body identifying a cluster to look up silences for.
+#[derive(Deserialize, ToSchema)]
+pub struct ClusterScopeArgs {
+	/// The cluster to look up silences for.
+	pub kubernetes_cluster_id: Uuid,
+}
+
+/// Request body identifying an issue to silence (or unsilence) on a single
+/// cluster.
+#[derive(Deserialize, ToSchema)]
+pub struct SilenceClusterArgs {
+	/// The cluster to silence the issue on.
+	pub kubernetes_cluster_id: Uuid,
+	/// Identifies what raises the issue being silenced.
 	pub source: String,
 	/// The specific issue identifier within `source` to silence.
 	#[serde(rename = "ref")]
@@ -390,5 +415,94 @@ pub async fn unsilence_machine(
 ) -> Result<axum::http::StatusCode> {
 	let mut conn = state.db.get().await?;
 	MachineSilencedRef::remove(&mut conn, args.machine_id, &args.source, &args.r#ref).await?;
+	Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
+/// List cluster-scoped silences for a cluster.
+///
+/// Returns every (source, ref) pair currently silenced for this cluster, most
+/// recently created first. A cluster belongs to no group, so these are the
+/// only silences bearing on its checks.
+#[utoipa::path(
+	post,
+	path = "/list_for_cluster",
+	tag = "silenced_refs",
+	security(("tailscale-user" = [])),
+	request_body = ClusterScopeArgs,
+	responses(
+		(status = 200, body = Vec<ClusterSilencedRef>),
+	),
+)]
+pub async fn list_for_cluster(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+	Json(args): Json<ClusterScopeArgs>,
+) -> Result<Json<Vec<ClusterSilencedRef>>> {
+	let mut conn = state.db.get().await?;
+	let rows = ClusterSilencedRef::list_for_cluster(&mut conn, args.kubernetes_cluster_id).await?;
+	Ok(Json(rows))
+}
+
+/// Silence an issue on a cluster.
+///
+/// The matching check keeps being recorded but presents as skipped and leaves
+/// the cluster's health. Idempotent. Requires admin access.
+#[utoipa::path(
+	post,
+	path = "/silence_cluster",
+	tag = "silenced_refs",
+	security(("tailscale-admin" = [])),
+	request_body = SilenceClusterArgs,
+	responses(
+		(status = 200, body = ClusterSilencedRef),
+		(status = 400, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn silence_cluster(
+	State(state): State<AppState>,
+	admin: TailscaleAdmin,
+	Json(args): Json<SilenceClusterArgs>,
+) -> Result<Json<ClusterSilencedRef>> {
+	let mut conn = state.db.get().await?;
+	let row = ClusterSilencedRef::add(
+		&mut conn,
+		args.kubernetes_cluster_id,
+		&args.source,
+		&args.r#ref,
+		Some(&admin.0.login),
+	)
+	.await?;
+	Ok(Json(row))
+}
+
+/// Unsilence an issue on a cluster.
+///
+/// Removes a cluster-scoped silence for the given (source, ref) pair, if one
+/// exists. Removing a silence that isn't there is not an error. Requires admin
+/// access.
+#[utoipa::path(
+	post,
+	path = "/unsilence_cluster",
+	tag = "silenced_refs",
+	security(("tailscale-admin" = [])),
+	request_body = SilenceClusterArgs,
+	responses(
+		(status = 204, description = "Silence removed, or there was none."),
+		(status = 400, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn unsilence_cluster(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<SilenceClusterArgs>,
+) -> Result<axum::http::StatusCode> {
+	let mut conn = state.db.get().await?;
+	ClusterSilencedRef::remove(
+		&mut conn,
+		args.kubernetes_cluster_id,
+		&args.source,
+		&args.r#ref,
+	)
+	.await?;
 	Ok(axum::http::StatusCode::NO_CONTENT)
 }

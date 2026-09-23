@@ -6,7 +6,10 @@
 use std::collections::HashMap;
 
 use commons_errors::{AppError, Result};
-use commons_types::source::{IngestMode, ReachabilityMode};
+use commons_types::{
+	namespace::RESERVED_SOURCES,
+	source::{IngestMode, ReachabilityMode},
+};
 use diesel::prelude::*;
 use diesel::sql_types;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -73,10 +76,11 @@ impl SourcePolicy {
 			 max(cp.last_seen) AS last_seen \
 			 FROM check_policies cp \
 			 LEFT JOIN source_policies sp ON sp.source = cp.source \
-			 WHERE cp.source NOT IN ('canopy', 'manual') \
+			 WHERE NOT (lower(cp.source) = ANY($1)) \
 			 GROUP BY cp.source, sp.reachability, sp.ingest \
 			 ORDER BY cp.source",
 		)
+		.bind::<sql_types::Array<sql_types::Text>, _>(RESERVED_SOURCES.to_vec())
 		.load(db)
 		.await?;
 		Ok(rows

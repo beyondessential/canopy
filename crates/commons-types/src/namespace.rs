@@ -26,7 +26,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{server::app_type::ApplicationType, subject::CheckSubject};
+use crate::{server::app_type::ApplicationType, source::SUBSTRATE_SOURCE, subject::CheckSubject};
 
 /// Source value canopy uses for conditions it determines itself:
 /// reachability, backup health, key expiry, self-monitoring.
@@ -38,8 +38,10 @@ pub const MANUAL_SOURCE: &str = "manual";
 /// Source names a device push may not claim, because canopy curates them.
 ///
 /// Reserved and flat are the same set, and not by coincidence: a name is
-/// unqualified precisely when we control what it means.
-pub const RESERVED_SOURCES: &[&str] = &[CANOPY_SOURCE, MANUAL_SOURCE];
+/// unqualified precisely when we control what it means. The substrate source
+/// is filed by a relay canopy runs, under names canopy chooses, so it is as
+/// curated as canopy's own.
+pub const RESERVED_SOURCES: &[&str] = &[CANOPY_SOURCE, MANUAL_SOURCE, SUBSTRATE_SOURCE];
 
 /// Whether `source` is one of canopy's own curated reporters.
 ///
@@ -249,6 +251,22 @@ mod tests {
 			Namespace::of(MANUAL_SOURCE, "anything_at_all", None),
 			Some(Namespace::Flat)
 		);
+		// A substrate check is one catalog entry fleet-wide, whichever
+		// application type it happens to be filed against.
+		assert_eq!(
+			Namespace::of(
+				SUBSTRATE_SOURCE,
+				"pod-unschedulable",
+				Some(&ApplicationType::TamanuCentral)
+			),
+			Some(Namespace::Flat)
+		);
+	}
+
+	#[test]
+	fn the_substrate_source_is_reserved_whatever_its_casing() {
+		assert!(is_reserved("kubernetes"));
+		assert!(is_reserved("Kubernetes"));
 	}
 
 	#[test]

@@ -154,17 +154,21 @@ async fn ingest_substrate(
 	substrate: SubstrateFiling,
 	placement: Placement,
 ) -> Result<()> {
+	// The instances are the check's complete set, so a filing naming none
+	// would say the condition has no instances at all rather than anything
+	// about them. The relay never sends one; refuse it rather than guess.
+	if substrate.instances.is_empty() {
+		return Err(AppError::custom(
+			"a substrate filing names no instances, so there is nothing to file",
+		));
+	}
+
 	let scope = placement.scope();
 
 	// Provenance is the relay, and only where the scope is an application: it
 	// is a separate concern from scope, and a group- or cluster-wide filing
 	// carries none (see `CheckFiling::device_id`).
 	let device_id = matches!(scope, Scope::Application(_)).then_some(relay_identity_id);
-
-	// Each substrate filing is a single unlabelled instance: the cluster is now
-	// its own scope rather than an instance of a canopy-wide check, so its
-	// identity is the scope, not a label on the check.
-	let label = String::new();
 
 	let message = substrate.message.clone();
 	file_check_instances(
@@ -178,11 +182,15 @@ async fn ingest_substrate(
 			default_ceiling: substrate.default_ceiling,
 			default_escalates: substrate.default_escalates,
 			documentation: substrate.documentation.as_deref(),
-			instances: vec![CheckInstance {
-				label,
-				observed: substrate.observed,
-				detail: substrate.detail.clone(),
-			}],
+			instances: substrate
+				.instances
+				.into_iter()
+				.map(|i| CheckInstance {
+					label: i.label,
+					observed: i.observed,
+					detail: i.detail,
+				})
+				.collect(),
 		},
 		&|_| message.clone(),
 	)

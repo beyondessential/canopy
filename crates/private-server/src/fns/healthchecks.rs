@@ -224,7 +224,7 @@ pub struct SourceData {
 ///
 /// Every non-reserved source that has catalogued checks, with its
 /// reachability mode (defaulting to `on`) and most recent fleet-wide
-/// report. The reserved `canopy`/`manual` sources are excluded.
+/// report. The reserved sources are excluded.
 #[utoipa::path(
 	post,
 	path = "/sources",
@@ -258,7 +258,7 @@ pub async fn sources(
 /// Request body for setting a source's reachability mode.
 #[derive(Deserialize, ToSchema)]
 pub struct SetSourceReachabilityArgs {
-	/// The source to configure. The reserved `canopy`/`manual` names are
+	/// The source to configure. The reserved names (`canopy`, `manual`, `kubernetes`) are
 	/// rejected.
 	pub source: String,
 	/// The reachability mode to apply: `on`, `quiet`, or `off`.
@@ -269,7 +269,7 @@ pub struct SetSourceReachabilityArgs {
 ///
 /// Governs how the source's silence bears on its applications' reachability:
 /// `on` warns, `quiet` never warns but still counts toward unreachable,
-/// `off` is excluded. The reserved `canopy`/`manual` names are rejected.
+/// `off` is excluded. The reserved names (`canopy`, `manual`, `kubernetes`) are rejected.
 #[utoipa::path(
 	post,
 	path = "/set_source_reachability",
@@ -291,7 +291,7 @@ pub async fn set_source_reachability(
 ) -> Result<Json<()>> {
 	if is_reserved(&args.source) {
 		return Err(AppError::BadRequest(
-			"the reserved canopy/manual sources have no reachability policy".into(),
+			"the reserved sources have no reachability policy".into(),
 		));
 	}
 	let mut conn = state.db.get().await?;
@@ -302,7 +302,7 @@ pub async fn set_source_reachability(
 /// Request body for setting a source's ingest mode.
 #[derive(Deserialize, ToSchema)]
 pub struct SetSourceIngestArgs {
-	/// The source to configure. The reserved `canopy`/`manual` names are
+	/// The source to configure. The reserved names (`canopy`, `manual`, `kubernetes`) are
 	/// rejected.
 	pub source: String,
 	/// The ingest mode to apply: `allow`, `ignore`, or `deny`.
@@ -313,7 +313,7 @@ pub struct SetSourceIngestArgs {
 ///
 /// Governs whether the device API accepts the source's reports: `allow`
 /// ingests normally, `ignore` accepts but discards them, `deny` rejects
-/// the push. The reserved `canopy`/`manual` names are rejected.
+/// the push. The reserved names (`canopy`, `manual`, `kubernetes`) are rejected.
 #[utoipa::path(
 	post,
 	path = "/set_source_ingest",
@@ -335,7 +335,7 @@ pub async fn set_source_ingest(
 ) -> Result<Json<()>> {
 	if is_reserved(&args.source) {
 		return Err(AppError::BadRequest(
-			"the reserved canopy/manual sources have no ingest policy".into(),
+			"the reserved sources have no ingest policy".into(),
 		));
 	}
 	let mut conn = state.db.get().await?;

@@ -13,11 +13,14 @@ use std::time::Duration;
 
 use commons_servers::device_auth::keygen::generate_device_key;
 use commons_types::device::DeviceRole;
+use commons_types::status::CheckResult;
 use database::devices::Device;
+use database::{KubernetesCluster, issues::Issue};
 use jobs::relay::{self as hub, Registry};
 use relay::duties::Unattached;
 use relay_protocol::{
-	Filing, FilingTarget, Hello, Instance, Request, Response, SubstrateFiling, transport::Identity,
+	Filing, FilingTarget, Hello, Request, Response, SUBSTRATE_SOURCE, SubstrateFiling,
+	SubstrateInstance, transport::Identity,
 };
 
 /// Wait for something the two ends reach asynchronously.
@@ -154,20 +157,23 @@ async fn a_real_relay_connects_to_the_real_listener_and_answers_it() {
 		);
 
 		// And the relay's own filing path: a filing written by the shipped
-		// client loop, read by the shipped listener. Canopy cannot place it
-		// yet, which must cost the filing and not the connection.
+		// client loop, read by the shipped listener, landing on the cluster the
+		// relay's identity names.
+		let cluster = KubernetesCluster::create_draft(&mut conn, "ops-main", device.id)
+			.await
+			.expect("draft the cluster");
+		KubernetesCluster::register(&mut conn, cluster.id)
+			.await
+			.expect("register the cluster");
+		let db = database::init_to(&url);
 		filings
 			.send(Filing::Substrate(SubstrateFiling {
-				target: FilingTarget::Instance {
-					namespace: "nauru-demo".into(),
-					instance: Instance::Central,
-				},
-				check: "pod-unschedulable".into(),
-				observed: commons_types::status::CheckResult::Failed,
-				title: Some("A pod cannot be placed".into()),
-				message: "no node has capacity".into(),
-				detail: None,
-				default_ceiling: commons_types::status::CheckResult::Failed,
+				target: FilingTarget::Cluster,
+				check: "tailscale-api-proxy".into(),
+				instances: vec![SubstrateInstance::only(CheckResult::Failed, None)],
+				title: Some("Operators cannot reach the cluster's API".into()),
+				message: "the API proxy is not connected to the tailnet".into(),
+				default_ceiling: CheckResult::Failed,
 				default_escalates: false,
 				documentation: None,
 			}))
@@ -175,16 +181,29 @@ async fn a_real_relay_connects_to_the_real_listener_and_answers_it() {
 			.expect("the relay accepts a filing to send");
 
 		assert!(
-			eventually("the connection to still be answering", || {
-				let registry = registry.clone();
+			eventually("the filing to land on the cluster", || {
+				let db = db.clone();
 				async move {
-					registry
-						.request(device.id, Request::Ping)
-						.await
-						.is_ok_and(|r| r == Response::Pong)
+					let mut conn = db.get().await.unwrap();
+					Issue::list_by_source_ref_for_clusters(
+						&mut conn,
+						SUBSTRATE_SOURCE,
+						"tailscale-api-proxy",
+						&[cluster.id],
+					)
+					.await
+					.unwrap()
+					.iter()
+					.any(|i| i.active)
 				}
 			})
 			.await,
+			"a cluster-grain substrate filing from a registered cluster's relay lands on the cluster",
+		);
+
+		assert_eq!(
+			registry.request(device.id, Request::Ping).await.unwrap(),
+			Response::Pong,
 			"a filing must not cost the connection",
 		);
 
