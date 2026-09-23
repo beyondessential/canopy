@@ -679,7 +679,8 @@ pub async fn list(conn: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Issue>
 			dsl::application_id
 				.is_null()
 				.and(dsl::machine_id.is_null())
-				.and(dsl::server_group_id.is_null()),
+				.and(dsl::server_group_id.is_null())
+				.and(dsl::kubernetes_cluster_id.is_null()),
 		)
 		.order(dsl::last_seen.desc())
 		.limit(limit)

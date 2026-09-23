@@ -41,7 +41,9 @@ test.describe("a cluster's page", () => {
 		await expect(page.getByText("Unhealthy")).toBeVisible();
 		await expect(page.getByText("Unreachable after")).toBeVisible();
 		await expect(page.getByText("5m", { exact: true })).toBeVisible();
-		await expect(page.getByText("node-pools")).toBeVisible();
+		await expect(page.getByRole("link", { name: "node-pools" })).toBeVisible();
+		// A cluster's issue is the cluster's, not one of Canopy's own.
+		await expect(page.getByText("Canopy: node-pools")).toHaveCount(0);
 		await expect(page.getByText("reachability", { exact: true })).toBeVisible();
 
 		const hosted = page.getByTestId("applications-on-cluster");
@@ -96,7 +98,9 @@ test.describe("a cluster's page", () => {
 		await expect(
 			page.getByRole("heading", { name: /Silenced refs/ }),
 		).toBeVisible();
-		await expect(page.getByText("kubernetes/workloads-running")).toBeVisible();
+		await expect(
+			page.getByRole("code").filter({ hasText: "kubernetes/workloads-running" }),
+		).toBeVisible();
 		await expect(page.getByText("Healthy")).toBeVisible();
 	});
 

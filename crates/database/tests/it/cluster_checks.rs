@@ -237,6 +237,14 @@ async fn a_cluster_issue_opens_no_incident_and_counts_towards_its_health() {
 				.is_none(),
 			"a cluster belongs to no group, so its issues belong to no target",
 		);
+		assert!(
+			database::self_alerts::list(&mut conn, 100)
+				.await
+				.unwrap()
+				.iter()
+				.all(|i| i.kubernetes_cluster_id.is_none()),
+			"a cluster's issue is the cluster's, not one of Canopy's own",
+		);
 		let checks = consolidated_checks_latest_for_cluster(&mut conn, cluster.id)
 			.await
 			.unwrap();

@@ -1000,7 +1000,9 @@ pub async fn raise_global_event_with_state(
 			.filter(
 				issues::application_id
 					.is_null()
+					.and(issues::machine_id.is_null())
 					.and(issues::server_group_id.is_null())
+					.and(issues::kubernetes_cluster_id.is_null())
 					.and(issues::source.eq(source))
 					.and(issues::ref_.eq(r#ref)),
 			)
@@ -2586,7 +2588,9 @@ pub async fn get_global_issue(conn: &mut AsyncPgConnection, r#ref: &str) -> Resu
 		.filter(
 			dsl::application_id
 				.is_null()
+				.and(dsl::machine_id.is_null())
 				.and(dsl::server_group_id.is_null())
+				.and(dsl::kubernetes_cluster_id.is_null())
 				.and(dsl::source.eq(crate::statuses::CANOPY_SOURCE))
 				.and(dsl::ref_.eq(r#ref)),
 		)
