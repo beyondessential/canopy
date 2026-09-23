@@ -3,6 +3,7 @@ import {
 	resetSeededTables,
 	seedCluster,
 	seedIssue,
+	seedMaintenanceWindow,
 	seedServerGroup,
 } from "./seed";
 
@@ -104,6 +105,45 @@ test.describe("a cluster's page", () => {
 			page.getByRole("code").filter({ hasText: "kubernetes/workloads-running" }),
 		).toBeVisible();
 		await expect(page.getByText("Healthy", { exact: true })).toBeVisible();
+	});
+
+	test("a hosted application carries the marks a machine's rows carry", async ({
+		page,
+		sql,
+	}) => {
+		const cluster = await seedCluster(sql, { name: "ops-marks" });
+		const group = await seedServerGroup(sql, { name: "Harbour" });
+		const rows = await sql.query<{ id: string; name: string }>(
+			`INSERT INTO applications (type, name, rank, group_id, kubernetes_cluster_id, is_monitored)
+			 VALUES ('tamanu-central', 'watched', 'demo', $1, $2, true),
+			        ('tamanu-facility', 'ignored', 'demo', $1, $2, false)
+			 RETURNING id, name`,
+			[group.id, cluster.id],
+		);
+		const watched = rows.find((r) => r.name === "watched")!;
+		await seedMaintenanceWindow(sql, {
+			applicationId: watched.id,
+			endsInHours: 2,
+		});
+
+		await page.goto(`/fleet/clusters/${cluster.id}`);
+
+		const hosted = page.getByTestId("applications-on-cluster");
+		const dots = hosted.locator("[data-testid='status-dot']");
+		await expect(dots).toHaveCount(2);
+
+		// The window names this application itself, so its dot is ringed rather
+		// than merely dimmed.
+		await expect(
+			hosted.locator("[data-testid='status-dot'][data-maintenance='holding']"),
+		).toHaveCount(1);
+
+		// And the unwatched one says it raises nothing. The rows are ordered by
+		// name, so "ignored" is the first of the two.
+		await dots.first().hover();
+		await expect(
+			page.getByRole("tooltip", { name: /unmonitored/ }),
+		).toBeVisible();
 	});
 
 	test("an admin changes how long the cluster may go unheard", async ({

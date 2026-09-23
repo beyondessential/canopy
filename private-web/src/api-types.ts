@@ -5925,8 +5925,20 @@ export interface components {
              * @description Unique identifier for this application.
              */
             id: string;
+            /**
+             * @description Whether canopy is watching this application at all. An unwatched one
+             *     presents as such rather than as an ordinary row.
+             */
+            is_monitored: boolean;
+            /**
+             * @description Whether a maintenance window suspends the application, whether it names
+             *     the application itself or the group it belongs to.
+             */
+            maintained: boolean;
             /** @description What the application is called within its group. */
             name?: string | null;
+            /** @description Whether that window names this application in particular. */
+            own_window: boolean;
             rank?: null | components["schemas"]["ServerRank"];
             /** @description What the application is. */
             type: components["schemas"]["ApplicationType"];

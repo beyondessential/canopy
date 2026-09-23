@@ -70,6 +70,15 @@ pub struct ClusterApplication {
 	pub up: ShortStatus,
 	/// The application's own health.
 	pub health: HealthState,
+	/// Whether canopy is watching this application at all. An unwatched one
+	/// presents as such rather than as an ordinary row.
+	pub is_monitored: bool,
+	/// Whether a maintenance window suspends the application, whether it names
+	/// the application itself or the group it belongs to.
+	// spec: MNT#presentation
+	pub maintained: bool,
+	/// Whether that window names this application in particular.
+	pub own_window: bool,
 }
 
 /// Everything a cluster's page presents.
@@ -124,24 +133,38 @@ pub async fn get_detail(
 	let hosted = cluster.applications(&mut conn).await?;
 	let group_ids: Vec<Uuid> = hosted.iter().filter_map(|a| a.group_id).collect();
 	let group_names = ServerGroup::names_by_ids(&mut conn, &group_ids).await?;
-	let application_ids: Vec<Uuid> = hosted.iter().map(|a| a.id).collect();
-	let last_reported =
-		database::reported_detail::ReportedDetail::last_reported_ats(&mut conn, &application_ids)
-			.await?;
-	let pairs: Vec<(Uuid, Option<Uuid>)> = hosted.iter().map(|a| (a.id, a.group_id)).collect();
-	let healths = database::issues::health_from_check_state(&mut conn, &pairs).await?;
+	// A cluster's applications present as a machine's do, down to the marks
+	// for an unmonitored application and one a maintenance window suspends,
+	// so they are graded by the one reader. A cluster-hosted application has
+	// no box, so only a window naming it or its group reaches it.
+	let subjects: Vec<super::applications::StatusSubject> = hosted
+		.iter()
+		.map(|a| super::applications::StatusSubject {
+			id: a.id,
+			machine_id: None,
+			group_id: a.group_id,
+			alert_when_down_for: a.alert_when_down_for.0.as_secs(),
+		})
+		.collect();
+	let marks = super::applications::status_marks(&mut conn, &subjects).await?;
 	let applications = hosted
 		.into_iter()
-		.map(|a| ClusterApplication {
-			up: ShortStatus::grade(last_reported.get(&a.id).copied(), a.alert_when_down_for.0),
-			health: healths.get(&a.id).copied().unwrap_or_default(),
-			group_name: a.group_id.and_then(|g| group_names.get(&g).cloned()),
-			display_host: a.host.as_ref().map(|h| h.0.to_string()).unwrap_or_default(),
-			id: a.id,
-			name: a.name,
-			r#type: a.r#type,
-			rank: a.rank,
-			group_id: a.group_id,
+		.map(|a| {
+			let mark = marks.get(&a.id);
+			ClusterApplication {
+				up: mark.map(|m| m.up).unwrap_or_default(),
+				health: mark.map(|m| m.health).unwrap_or_default(),
+				maintained: mark.is_some_and(|m| m.maintained),
+				own_window: mark.is_some_and(|m| m.own_window),
+				is_monitored: a.is_monitored,
+				group_name: a.group_id.and_then(|g| group_names.get(&g).cloned()),
+				display_host: a.host.as_ref().map(|h| h.0.to_string()).unwrap_or_default(),
+				id: a.id,
+				name: a.name,
+				r#type: a.r#type,
+				rank: a.rank,
+				group_id: a.group_id,
+			}
 		})
 		.collect();
 

@@ -11548,7 +11548,10 @@
           "type",
           "display_host",
           "up",
-          "health"
+          "health",
+          "is_monitored",
+          "maintained",
+          "own_window"
         ],
         "properties": {
           "display_host": {
@@ -11579,12 +11582,24 @@
             "format": "uuid",
             "description": "Unique identifier for this application."
           },
+          "is_monitored": {
+            "type": "boolean",
+            "description": "Whether canopy is watching this application at all. An unwatched one\npresents as such rather than as an ordinary row."
+          },
+          "maintained": {
+            "type": "boolean",
+            "description": "Whether a maintenance window suspends the application, whether it names\nthe application itself or the group it belongs to."
+          },
           "name": {
             "type": [
               "string",
               "null"
             ],
             "description": "What the application is called within its group."
+          },
+          "own_window": {
+            "type": "boolean",
+            "description": "Whether that window names this application in particular."
           },
           "rank": {
             "oneOf": [

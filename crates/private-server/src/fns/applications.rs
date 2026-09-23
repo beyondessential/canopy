@@ -338,6 +338,88 @@ pub(super) fn server_to_info(s: Application) -> ServerInfo {
 	}
 }
 
+/// The application a row is about, and what grading it depends on.
+pub(super) struct StatusSubject {
+	pub id: Uuid,
+	/// The box the application runs on, or `None` for one a cluster hosts.
+	/// Maintenance is declared over a machine, and an application with no box
+	/// falls under its group's windows alone.
+	pub machine_id: Option<Uuid>,
+	pub group_id: Option<Uuid>,
+	/// The application's own threshold, in seconds.
+	pub alert_when_down_for: i64,
+}
+
+/// How an application presents beyond its own record.
+pub(super) struct StatusMarks {
+	pub up: ShortStatus,
+	pub health: HealthState,
+	pub maintained: bool,
+	pub own_window: bool,
+}
+
+/// Grade a set of applications for presentation, whatever hosts them.
+///
+/// A machine's page and a cluster's page render the same row, so they answer
+/// it the same way rather than each reaching for the halves it remembers.
+/// Every read here is over the whole set at once.
+pub(super) async fn status_marks(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	subjects: &[StatusSubject],
+) -> Result<std::collections::HashMap<Uuid, StatusMarks>> {
+	if subjects.is_empty() {
+		return Ok(std::collections::HashMap::new());
+	}
+	let ids: Vec<Uuid> = subjects.iter().map(|s| s.id).collect();
+	let statuses = Status::latest_for_servers(conn, &ids).await?;
+	let by_server: std::collections::HashMap<Uuid, &Status> = statuses
+		.iter()
+		.filter_map(|s| Some((s.server_id?, s)))
+		.collect();
+	// Reachability is graded on this rather than on the status window, so an
+	// application quiet for longer than the window reads as unreachable rather
+	// than as never heard from. A status push counts as having been heard
+	// from, so an application reporting only that way does not read as gone.
+	// spec: CHK#reachability
+	let last_reported =
+		database::reported_detail::ReportedDetail::last_reported_ats(conn, &ids).await?;
+	// Health comes from current check state across every source
+	// (silenced checks already skipped in the rollup).
+	let server_groups: Vec<(Uuid, Option<Uuid>)> =
+		subjects.iter().map(|s| (s.id, s.group_id)).collect();
+	let health = database::issues::health_from_check_state(conn, &server_groups).await?;
+	// An application is suspended by a window naming it and by any over the box
+	// it runs on: work on the machine stops the workload whether or not anyone
+	// named it.
+	// spec: MNT#presentation
+	let suspended =
+		database::maintenance_windows::MaintenanceWindow::suspended_targets(conn).await?;
+	Ok(subjects
+		.iter()
+		.map(|subject| {
+			let st = by_server.get(&subject.id).copied();
+			let last_reported_at = last_reported
+				.get(&subject.id)
+				.copied()
+				.max(st.map(|s| s.created_at));
+			let down_after = jiff::SignedDuration::from_secs(subject.alert_when_down_for);
+			(
+				subject.id,
+				StatusMarks {
+					up: ShortStatus::grade(last_reported_at, down_after),
+					health: health.get(&subject.id).copied().unwrap_or_default(),
+					maintained: suspended.suspends_application(
+						subject.id,
+						subject.machine_id,
+						subject.group_id,
+					),
+					own_window: suspended.application_window(subject.id),
+				},
+			)
+		})
+		.collect())
+}
+
 /// Batch-fetch the latest status for each server and write its short/health
 /// representation onto the corresponding `ServerInfo`. Use this on listing
 /// endpoints that feed a UI which renders status dots — skip it on cheap
@@ -349,43 +431,24 @@ pub(super) async fn decorate_with_status(
 	if infos.is_empty() {
 		return Ok(());
 	}
-	let ids: Vec<Uuid> = infos.iter().map(|i| i.id).collect();
-	let statuses = Status::latest_for_servers(conn, &ids).await?;
-	let by_server: std::collections::HashMap<Uuid, &Status> = statuses
+	let subjects: Vec<StatusSubject> = infos
 		.iter()
-		.filter_map(|s| Some((s.server_id?, s)))
+		.map(|i| StatusSubject {
+			id: i.id,
+			machine_id: Some(i.machine_id),
+			group_id: i.group_id,
+			alert_when_down_for: i.alert_when_down_for,
+		})
 		.collect();
-	// Reachability is graded on this rather than on the status window, so an
-	// application quiet for longer than the window reads as unreachable rather
-	// than as never heard from.
-	// spec: CHK#reachability
-	let last_reported =
-		database::reported_detail::ReportedDetail::last_reported_ats(conn, &ids).await?;
-	// Health comes from current check state across every source
-	// (silenced checks already skipped in the rollup).
-	let server_groups: Vec<(Uuid, Option<Uuid>)> =
-		infos.iter().map(|i| (i.id, i.group_id)).collect();
-	let health = database::issues::health_from_check_state(conn, &server_groups).await?;
-	// An application is suspended by a window naming it and by any over the box
-	// it runs on: work on the machine stops the workload whether or not anyone
-	// named it.
-	// spec: MNT#presentation
-	let suspended =
-		database::maintenance_windows::MaintenanceWindow::suspended_targets(conn).await?;
+	let marks = status_marks(conn, &subjects).await?;
 	for info in infos.iter_mut() {
-		let st = by_server.get(&info.id).copied();
-		// Each application's own threshold, carried on the info we are filling.
-		// spec: CHK#reachability
-		let down_after = jiff::SignedDuration::from_secs(info.alert_when_down_for);
-		let last_reported_at = last_reported
-			.get(&info.id)
-			.copied()
-			.max(st.map(|s| s.created_at));
-		info.up = Some(ShortStatus::grade(last_reported_at, down_after));
-		info.health = Some(health.get(&info.id).copied().unwrap_or_default());
-		info.maintained =
-			Some(suspended.suspends_application(info.id, Some(info.machine_id), info.group_id));
-		info.own_window = Some(suspended.application_window(info.id));
+		let Some(mark) = marks.get(&info.id) else {
+			continue;
+		};
+		info.up = Some(mark.up);
+		info.health = Some(mark.health);
+		info.maintained = Some(mark.maintained);
+		info.own_window = Some(mark.own_window);
 	}
 	Ok(())
 }
