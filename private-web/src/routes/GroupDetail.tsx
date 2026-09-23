@@ -131,22 +131,26 @@ export default function GroupDetail() {
 				</Stack>
 				{admin && (
 					<Stack direction="row" spacing={1}>
-						<Button
-							component={RouterLink}
-							to={`/fleet/groups/${group.id}/machines/new`}
-							variant="contained"
-							startIcon={<AddIcon />}
-						>
-							Add machine
-						</Button>
-						<Button
-							component={RouterLink}
-							to={`/fleet/groups/${group.id}/edit`}
-							variant="outlined"
-							startIcon={<EditIcon />}
-						>
-							Edit
-						</Button>
+						<GradedAction opens="fleet/machines/create">
+							<Button
+								component={RouterLink}
+								to={`/fleet/groups/${group.id}/machines/new`}
+								variant="contained"
+								startIcon={<AddIcon />}
+							>
+								Add machine
+							</Button>
+						</GradedAction>
+						<GradedAction opens="fleet/groups/update">
+							<Button
+								component={RouterLink}
+								to={`/fleet/groups/${group.id}/edit`}
+								variant="outlined"
+								startIcon={<EditIcon />}
+							>
+								Edit
+							</Button>
+						</GradedAction>
 						{allQuiet && !group.deleted_at && (
 							<GradedAction calls="fleet/groups/delete">
 								<Button
@@ -325,14 +329,16 @@ function BackupsCard({
 				</Stack>
 				{config.data == null ? (
 					isAdmin ? (
-						<Button
-							component={RouterLink}
-							to={`/fleet/groups/${groupId}/backups/config`}
-							variant="outlined"
-							startIcon={<BackupIcon />}
-						>
-							Set up backups
-						</Button>
+						<GradedAction opens={["backups/create_shared", "backups/create"]}>
+							<Button
+								component={RouterLink}
+								to={`/fleet/groups/${groupId}/backups/config`}
+								variant="outlined"
+								startIcon={<BackupIcon />}
+							>
+								Set up backups
+							</Button>
+						</GradedAction>
 					) : (
 						<Typography variant="body2" color="text.secondary">
 							Not set up

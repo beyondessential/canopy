@@ -50,7 +50,7 @@ import {
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import DeclareMaintenanceDialog from "../components/DeclareMaintenanceDialog";
-import { GradedAction } from "../components/GradedAction";
+import { GradedAction, useGrade } from "../components/GradedAction";
 import ServerRankChip from "../components/ServerRankChip";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
@@ -431,9 +431,14 @@ function PlanCalendar({
 	).length;
 
 	// A met plan is history and no longer amendable, so it keeps the link out
-	// to the group instead.
+	// to the group instead. So does every entry below the mode amending needs:
+	// the entry is the calendar's way to its group first, the editor a shortcut
+	// the plan's own row also offers, graded there.
+	const amending = useGrade("upgrade_plans/amend");
 	const editor = (entry: Entry) =>
-		isAdmin && entry.tone !== "done" ? () => setEditing(entry) : null;
+		isAdmin && entry.tone !== "done" && !amending.blocked
+			? () => setEditing(entry)
+			: null;
 
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }} data-testid="upgrade-calendar">
@@ -2400,7 +2405,7 @@ function DeclareFromPlan({
 	return (
 		<>
 			<GradedAction
-				calls={
+				opens={
 					ownWindow
 						? ["maintenance/declare", "maintenance/lift"]
 						: "maintenance/declare"

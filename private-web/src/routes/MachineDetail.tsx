@@ -43,6 +43,7 @@ import {
 	type ServerRank,
 	heldByLabel,
 } from "../types";
+import { GradedAction } from "../components/GradedAction";
 
 /// A machine's own page: the box, what it reports about itself, its health,
 /// and the workloads on it.
@@ -175,12 +176,14 @@ export default function MachineDetail() {
 						refreshKey={refreshTick}
 					/>
 					{isAdmin && (
-						<ActionButton
-							to={`/fleet/machines/${data.machine.id}/edit`}
-							icon={<EditIcon />}
-							label="Edit"
-							color="primary"
-						/>
+						<GradedAction opens="fleet/machines/update">
+							<ActionButton
+								to={`/fleet/machines/${data.machine.id}/edit`}
+								icon={<EditIcon />}
+								label="Edit"
+								color="primary"
+							/>
+						</GradedAction>
 					)}
 				</Stack>
 			</Stack>

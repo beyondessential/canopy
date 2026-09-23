@@ -469,7 +469,7 @@ function IssueActions({
 						</Button>
 					</GradedAction>
 				)}
-				<GradedAction calls={silenceCalls}>
+				<GradedAction opens={silenceCalls}>
 					<Button
 						size="small"
 						variant="outlined"

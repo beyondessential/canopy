@@ -172,6 +172,27 @@ test.describe("safety modes", () => {
 		expect(await tickets()).toBeGreaterThan(0);
 	});
 
+	test("a control that opens a form carries the grade of what the form saves", async ({
+		page,
+		sql,
+	}) => {
+		await resetSeededTables(sql);
+		const group = await seedServerGroup(sql, { name: "opener-group" });
+
+		// Editing a group is write, so the link into its form is blocked
+		// read-only rather than leading to a form that cannot be saved.
+		await page.goto(`/fleet/groups/${group.id}`);
+		const edit = page.getByRole("link", { name: "Edit", exact: true });
+		await expect(edit).toHaveAttribute("aria-disabled", "true");
+		await expect(edit).toHaveCSS("background-image", /rgba\(255, 152, 0/);
+		await edit.click({ force: true });
+		await expect(page).toHaveURL(new RegExp(`/fleet/groups/${group.id}$`));
+
+		await raiseTo(page, "write");
+		await edit.click();
+		await expect(page).toHaveURL(new RegExp(`/fleet/groups/${group.id}/edit$`));
+	});
+
 	test("a blocked control carries its grade's stripe, full colour under the pointer", async ({
 		page,
 	}) => {

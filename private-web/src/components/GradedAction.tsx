@@ -56,8 +56,8 @@ export function requiredMode(calls: Calls): SafetyMode {
 
 /**
  * The lowest grade among the endpoints, for a control that only leads to them:
- * a popover whose rows are each graded on their own is reachable as soon as any
- * one of them is.
+ * a form, dialog, or popover is worth opening as soon as any one of the changes
+ * it can make is within reach.
  */
 export function lowestMode(calls: Calls): SafetyMode {
 	const modes = modesOf(calls);
@@ -75,14 +75,34 @@ function modesOf(calls: Calls): SafetyMode[] {
 	return list.map((call) => SAFETY_MODES[call]);
 }
 
-/** What the current mode means for a control calling these endpoints. */
-export function useGrade(calls: Calls): {
+/** What the current mode means for a control needing `required`. */
+function useModeGrade(required: SafetyMode): {
 	required: SafetyMode;
 	blocked: boolean;
 } {
 	const { mode } = useSafetyMode();
-	const required = requiredMode(calls);
 	return { required, blocked: !permits(mode, required) };
+}
+
+/** What the current mode means for a control calling these endpoints. */
+export function useGrade(calls: Calls) {
+	return useModeGrade(requiredMode(calls));
+}
+
+/**
+ * The endpoints a control calls, or those the form it opens can call.
+ *
+ * A control that makes the calls itself needs the highest of their grades. One
+ * that opens a form, dialog, or popover for making them needs the lowest, so it
+ * is blocked exactly when nothing inside could be submitted either.
+ */
+export type Grading = { calls: Calls; opens?: never } | { opens: Calls; calls?: never };
+
+/** The mode a control graded by {@link Grading} needs. */
+function gradingMode(grading: Grading): SafetyMode {
+	return grading.opens !== undefined
+		? lowestMode(grading.opens)
+		: requiredMode(grading.calls);
 }
 
 /** What a blocked control says about itself: the mode it needs. */
@@ -126,9 +146,7 @@ export function blockedSx(required: SafetyMode) {
 	return (theme: Theme) => blockedStyles(theme, required);
 }
 
-interface GradedActionProps {
-	/** The endpoint, or endpoints, this control calls. */
-	calls: Calls;
+type GradedActionProps = Grading & {
 	/**
 	 * The control itself. Rendered untouched when the operator's mode reaches
 	 * it; while blocked it is given `disabled`, so it must accept that prop.
@@ -138,10 +156,11 @@ interface GradedActionProps {
 	fullWidth?: boolean;
 	/** Shown instead of the default tooltip while blocked. */
 	title?: ReactNode;
-}
+};
 
 /**
- * Wraps a control in the safety mode its endpoints require.
+ * Wraps a control in the safety mode its endpoints require: `calls` for a
+ * control that makes the change, `opens` for one that opens the form for it.
  *
  * A control the operator could use in a higher mode stays where it is and is
  * blocked, so the surface has the same shape whatever mode they are in. Blocked
@@ -162,12 +181,12 @@ interface GradedActionProps {
  * This is what stops an operator finding that out by being refused.
  */
 export function GradedAction({
-	calls,
 	children,
 	fullWidth,
 	title,
+	...grading
 }: GradedActionProps) {
-	const { required, blocked } = useGrade(calls);
+	const { required, blocked } = useModeGrade(gradingMode(grading));
 	if (!blocked) return children;
 
 	return (
@@ -195,10 +214,7 @@ export function GradedAction({
 	);
 }
 
-interface GradedMenuItemProps extends MenuItemProps {
-	/** The endpoint, or endpoints, choosing this item calls. */
-	calls: Calls;
-}
+type GradedMenuItemProps = MenuItemProps & Grading;
 
 /**
  * A menu item graded like {@link GradedAction}.
@@ -207,13 +223,9 @@ interface GradedMenuItemProps extends MenuItemProps {
  * expects, so it cannot be wrapped: blocked, it keeps its place, carries the
  * stripe, and ignores being chosen.
  */
-export function GradedMenuItem({
-	calls,
-	onClick,
-	sx,
-	...props
-}: GradedMenuItemProps) {
-	const { required, blocked } = useGrade(calls);
+export function GradedMenuItem(item: GradedMenuItemProps) {
+	const { calls: _calls, opens: _opens, onClick, sx, ...props } = item;
+	const { required, blocked } = useModeGrade(gradingMode(item));
 	if (!blocked) return <MenuItem onClick={onClick} sx={sx} {...props} />;
 
 	return (

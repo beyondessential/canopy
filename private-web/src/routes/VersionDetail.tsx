@@ -355,7 +355,7 @@ function ArtifactsSection({
 					<Stack direction="row" spacing={1}>
 						{unlocked && (
 							<GradedAction
-								calls={
+								opens={
 									showCreate
 										? []
 										: ["versions/create_artifact", "versions/upload_artifact"]
@@ -370,13 +370,26 @@ function ArtifactsSection({
 								</Button>
 							</GradedAction>
 						)}
-						<Button
-							variant="outlined"
-							startIcon={unlocked ? <LockOpenIcon /> : <LockIcon />}
-							onClick={() => setUnlocked((u) => !u)}
+						<GradedAction
+							opens={
+								unlocked
+									? []
+									: [
+											"versions/create_artifact",
+											"versions/upload_artifact",
+											"versions/update_artifact",
+											"versions/delete_artifact",
+										]
+							}
 						>
-							{unlocked ? "Lock" : "Unlock"}
-						</Button>
+							<Button
+								variant="outlined"
+								startIcon={unlocked ? <LockOpenIcon /> : <LockIcon />}
+								onClick={() => setUnlocked((u) => !u)}
+							>
+								{unlocked ? "Lock" : "Unlock"}
+							</Button>
+						</GradedAction>
 					</Stack>
 				)}
 			</Stack>

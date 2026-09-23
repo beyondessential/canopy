@@ -311,12 +311,14 @@ function Header({
 						    second form that would answer "where do I edit
 						    this" differently. */}
 						{/* spec: FLT#groups */}
-						<ActionButton
-							to={`/fleet/machines/${data.server.machine_id}/edit`}
-							icon={<EditIcon />}
-							label="Edit"
-							color="primary"
-						/>
+						<GradedAction opens="fleet/machines/update">
+							<ActionButton
+								to={`/fleet/machines/${data.server.machine_id}/edit`}
+								icon={<EditIcon />}
+								label="Edit"
+								color="primary"
+							/>
+						</GradedAction>
 						{!archived && (
 							<DeleteServerButton
 								serverId={data.server.id}

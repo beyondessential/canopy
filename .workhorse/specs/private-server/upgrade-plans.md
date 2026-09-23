@@ -119,6 +119,7 @@ Alongside the table the same view presents the fleet's plans as a calendar, read
 The month answers which week is busy and which two environments land on the same night; the week and the day place each plan on an hour grid, where the length of a block is how long the environment expects to be down and a window running past midnight is drawn again on the following morning rather than clipped at it.
 A day in the month opens that day on its own.
 An entry on the calendar amends the plan it names, so a date moved by a week is moved where it is read.
+While the operator's session is below the mode amending a plan requires, an entry leads to its group instead, and the plan is amended from its row in the table (see [SAFE](safety-modes.md)).
 
 The same view presents the plans that have closed, most recently closed first, so what an environment planned before is readable beside what it plans now.
 Each shows the environment, where it was going, the date and hour it was planned for, and how it closed: met, replaced by a later plan, or withdrawn with the operator who withdrew it and when.

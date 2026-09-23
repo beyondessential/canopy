@@ -5,6 +5,7 @@ import GroupShorty from "../components/GroupShorty";
 import { useApi } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { GradedAction } from "../components/GradedAction";
 
 export default function GroupsList() {
 	usePageTitle("Server groups");
@@ -30,14 +31,16 @@ export default function GroupsList() {
 		<Stack spacing={2}>
 			{admin && (
 				<Stack direction="row" spacing={1} sx={{ justifyContent: "flex-end" }}>
-					<Button
-						component={RouterLink}
-						to="/fleet/groups/new"
-						variant="contained"
-						startIcon={<AddIcon />}
-					>
-						New group
-					</Button>
+					<GradedAction opens="fleet/groups/create">
+						<Button
+							component={RouterLink}
+							to="/fleet/groups/new"
+							variant="contained"
+							startIcon={<AddIcon />}
+						>
+							New group
+						</Button>
+					</GradedAction>
 				</Stack>
 			)}
 			{groups.data.length === 0 ? (

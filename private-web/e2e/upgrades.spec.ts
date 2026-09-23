@@ -13,6 +13,7 @@ import {
 	seedVersionKnownIssue,
 	type ServerRank,
 } from "./seed";
+import { lower, raiseTo } from "./safety";
 
 /** A server of the group at `rank` reporting `version`, which is what that
  * environment reads as running. */
@@ -714,6 +715,45 @@ test.describe("upgrade calendar editing", () => {
 		await expect(
 			page.getByTestId("calendar-day").filter({ hasText: "kamaka" }),
 		).toHaveAttribute("data-date", `${month}-17`);
+	});
+});
+
+test.describe("upgrade calendar below write", () => {
+	test.use({ safetyMode: "read-only" });
+
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("an entry leads to its group until the session can amend it", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await runningAt(sql, group.id, "2.60.0");
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+
+		const now = new Date();
+		const month = [
+			now.getFullYear(),
+			String(now.getMonth() + 1).padStart(2, "0"),
+		].join("-");
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+			plannedFor: `${month}-15`,
+		});
+
+		await page.goto("/upgrades");
+		await raiseTo(page, "write");
+		await page.getByTestId("calendar-entry").click();
+		await expect(page.getByTestId("edit-plan")).toBeVisible();
+		await page.keyboard.press("Escape");
+		await expect(page.getByTestId("edit-plan")).toHaveCount(0);
+
+		await lower(page);
+		await page.getByTestId("calendar-entry").click();
+		await expect(page).toHaveURL(new RegExp(`/fleet/groups/${group.id}$`));
 	});
 });
 

@@ -129,14 +129,16 @@ export default function BackupPanel() {
 				<Alert severity="info">Backups not set up for this group.</Alert>
 				{isAdmin && (
 					<Box>
-						<Button
-							component={RouterLink}
-							to={`/fleet/groups/${id}/backups/config`}
-							variant="contained"
-							startIcon={<BackupIcon />}
-						>
-							Set up backups
-						</Button>
+						<GradedAction opens={["backups/create_shared", "backups/create"]}>
+							<Button
+								component={RouterLink}
+								to={`/fleet/groups/${id}/backups/config`}
+								variant="contained"
+								startIcon={<BackupIcon />}
+							>
+								Set up backups
+							</Button>
+						</GradedAction>
 					</Box>
 				)}
 			</Stack>
@@ -185,14 +187,16 @@ export default function BackupPanel() {
 					</Stack>
 					{isAdmin && (
 						<Stack direction="row" spacing={1}>
-							<Button
-								component={RouterLink}
-								to={`/fleet/groups/${id}/backups/config`}
-								variant="outlined"
-								startIcon={<EditIcon />}
-							>
-								Edit config
-							</Button>
+							<GradedAction opens="backups/update">
+								<Button
+									component={RouterLink}
+									to={`/fleet/groups/${id}/backups/config`}
+									variant="outlined"
+									startIcon={<EditIcon />}
+								>
+									Edit config
+								</Button>
+							</GradedAction>
 							<DeleteConfigButton groupId={id} onDeleted={configForTick.reload} />
 						</Stack>
 					)}

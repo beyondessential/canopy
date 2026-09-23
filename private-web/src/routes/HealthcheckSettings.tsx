@@ -660,14 +660,16 @@ function RulesCard({
 					Conditional rules
 				</Typography>
 				{canEdit && (
-					<Button
-						size="small"
-						variant="contained"
-						onClick={() => setDialog({ index: null })}
-						disabled={update.pending}
-					>
-						Add rule
-					</Button>
+					<GradedAction opens="healthchecks/update_rules">
+						<Button
+							size="small"
+							variant="contained"
+							onClick={() => setDialog({ index: null })}
+							disabled={update.pending}
+						>
+							Add rule
+						</Button>
+					</GradedAction>
 				)}
 			</Stack>
 			<Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
@@ -719,40 +721,48 @@ function RulesCard({
 									{canEdit && (
 										<TableCell>
 											<Stack direction="row" spacing={0.5}>
-												<IconButton
-													size="small"
-													disabled={idx === 0}
-													onClick={() =>
-														setBranches((bs) => swap(bs, idx, idx - 1))
-													}
-												>
-													<ArrowUpwardIcon fontSize="small" />
-												</IconButton>
-												<IconButton
-													size="small"
-													disabled={idx === branches.length - 1}
-													onClick={() =>
-														setBranches((bs) => swap(bs, idx, idx + 1))
-													}
-												>
-													<ArrowDownwardIcon fontSize="small" />
-												</IconButton>
-												<IconButton
-													size="small"
-													onClick={() => setDialog({ index: idx })}
-												>
-													<EditIcon fontSize="small" />
-												</IconButton>
-												<IconButton
-													size="small"
-													onClick={() =>
-														setBranches((bs) =>
-															bs.filter((_, i) => i !== idx),
-														)
-													}
-												>
-													<DeleteIcon fontSize="small" />
-												</IconButton>
+												<GradedAction opens="healthchecks/update_rules">
+													<IconButton
+														size="small"
+														disabled={idx === 0}
+														onClick={() =>
+															setBranches((bs) => swap(bs, idx, idx - 1))
+														}
+													>
+														<ArrowUpwardIcon fontSize="small" />
+													</IconButton>
+												</GradedAction>
+												<GradedAction opens="healthchecks/update_rules">
+													<IconButton
+														size="small"
+														disabled={idx === branches.length - 1}
+														onClick={() =>
+															setBranches((bs) => swap(bs, idx, idx + 1))
+														}
+													>
+														<ArrowDownwardIcon fontSize="small" />
+													</IconButton>
+												</GradedAction>
+												<GradedAction opens="healthchecks/update_rules">
+													<IconButton
+														size="small"
+														onClick={() => setDialog({ index: idx })}
+													>
+														<EditIcon fontSize="small" />
+													</IconButton>
+												</GradedAction>
+												<GradedAction opens="healthchecks/update_rules">
+													<IconButton
+														size="small"
+														onClick={() =>
+															setBranches((bs) =>
+																bs.filter((_, i) => i !== idx),
+															)
+														}
+													>
+														<DeleteIcon fontSize="small" />
+													</IconButton>
+												</GradedAction>
 											</Stack>
 										</TableCell>
 									)}
