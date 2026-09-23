@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3](https://github.com/beyondessential/canopy/compare/bes-canopy-api-v1.0.2...bes-canopy-api-v1.0.3) - 2026-09-23
+
+### Other
+
+- parse and format what the generator emits
+- keep the payload plumbing in the crate
+- refuse a path value that resolves a segment away
+- refuse a path value that would change which request is made
+- carry binary and text bodies in the generated client
+
 ## [1.0.2](https://github.com/beyondessential/canopy/compare/bes-canopy-api-v1.0.1...bes-canopy-api-v1.0.2) - 2026-09-20
 
 ### Other
