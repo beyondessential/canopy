@@ -24,7 +24,7 @@ The Karpenter controller; node health; EC2 node class validity; and Karpenter's 
 
 Node health reads what the EKS node monitoring agent already concluded and publishes as node conditions, rather than deriving readiness afresh from the node objects. It covers memory and ephemeral disk pressure, and nodes alive but not functioning. A moribund node warns straight away and fails if it is still moribund after Karpenter should have replaced it, separating a node being handled from Karpenter not handling it; how long that grace is gets set in this card, from what Karpenter's own repair timings allow.
 
-Node class validity is a separate condition from a pool being unhealthy: the pool is willing and the class it references cannot launch. The ops repo keeps them as separate objects, so they are separate checks against separate kinds.
+Node class validity is a separate condition from a pool being unhealthy: the pool is willing and the class it references cannot launch. The ops repo keeps them as separate objects, so they are separate checks against separate kinds. M1's node pools check already leaves a pool held back only by its class to this check, so until it lands a broken node class goes unreported.
 
 The spot feed is its own too. Without the interruption feed Karpenter cannot drain a node before AWS reclaims it, so the consequence is abrupt pod loss rather than slower provisioning, and nothing else reports it.
 
@@ -54,6 +54,6 @@ Resolve the two `FilingTarget` variants `resolve` currently places nothing for: 
 
 The substantive piece is correlating a namespace name to the group it names, for which no storage exists anywhere today — not on `server_groups`, not on `applications`, not on `kubernetes_clusters`. The approach is open between the relay reporting group and rank alongside the namespace, an operator-held mapping in Canopy, and deriving it from the namespace string by convention; the choice is bound up with the shape N1 settles for a cluster-hosted application, so it belongs with this work rather than ahead of it.
 
-The checks themselves are alertd's, not this repo's: per application, that its workloads can be placed, no pod of it being unschedulable, and that its volumes are bound. This card is Canopy's side — placing what alertd files. The instance label M1 adds to the wire is what lets several unschedulable pods on one application be instances of one check.
+The checks themselves are alertd's, not this repo's: per application, that its workloads can be placed, no pod of it being unschedulable, and that its volumes are bound. This card is Canopy's side — placing what alertd files. M1 makes a substrate filing carry its instances, which is what lets several unschedulable pods on one application be instances of one check.
 
 Depends on N1.

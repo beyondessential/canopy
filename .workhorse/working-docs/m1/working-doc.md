@@ -1,5 +1,5 @@
 ---
-status: draft
+status: complete
 ---
 
 # Substrate checks (`kubernetes` source)
@@ -157,7 +157,9 @@ The protocol cannot express it.
 `SubstrateFiling` carries one `observed`, one `message` and one `detail`, and `ingest_substrate` hardcodes `label = String::new()` with the comment that each substrate filing is a single unlabelled instance.
 Canopy's side is already capable — `file_check_instances` takes a `Vec<CheckInstance>` and grades them individually — so the gap is the wire and the ingest, not the model.
 
-So `SubstrateFiling` gains an instance label, and `ingest_substrate` passes it through instead of the empty string.
+So `SubstrateFiling` carries its instances, and `ingest_substrate` passes them through instead of the one empty-labelled instance.
+It carries all of them at once, a vector of label, observed and detail, because one `file_check_instances` call is the check's complete instance set: filing a pool at a time would replace the set on every filing.
+Nothing files in production yet, so reshaping the wire costs no compatibility.
 Aggregating pools into one filing whose message lists them would fit the current wire, but it collapses the per-instance grading and silencing CHK requires, and the name rule forbids the other way out (`node-pool-health:ops` is a parameter spelled into a name).
 
 This lands in M1 because node pools need it, and the spun-off card inherits it for free: several unschedulable pods on one application are instances of one check by the same reasoning.
@@ -251,6 +253,20 @@ Without the interruption feed Karpenter cannot drain a node before AWS reclaims 
 **CNPG running out of disk space** is the one that does not belong at this grain.
 A CNPG cluster is one application's Postgres — a namespace holds one instance per central and per facility — so its disk headroom is an application-subject condition, not a cluster-wide one.
 It is recorded on this card as explicitly not this card's, and it fits the application grains rather than anything here.
+
+### Node pools: what the check grades on
+
+Karpenter 1.12 reports Ready, NodeClassReady and NodeRegistrationHealthy conditions on each NodePool.
+A pool fails when it is not Ready or the nodes it launches are not registering.
+A pool that is not Ready only because its node class is broken is left to the capacity card's node class check, so one cause raises one alert rather than two.
+Until that card lands, a broken node class goes unreported, which is accepted.
+Being near a pool's CPU or memory limit isn't graded here.
+
+### The Tailscale API proxy: what healthy means
+
+Healthy when the proxy's workload is ready and the Tailscale operator reports the proxy as connected to the tailnet.
+Readiness alone would miss a proxy that is up in the cluster but unreachable over the tailnet, and nobody being able to get in is the failure this check exists for.
+Both are read from inside the cluster.
 
 ### The aggregate: broadly unscheduled or failing
 
