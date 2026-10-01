@@ -36,7 +36,7 @@ The production Tamanu definitions live in the Tamanu repo, change in the same co
 
 We are greatly helped here by Tamanu no longer having json5 config. We therefore require that a Tamanu deployment has fully migrated to settings before it moves onto Seedling.
 
-mSupply definition , promoted from its draft once the Tamanu definition has proven out.
+mSupply as a Seedling definition is , promoted from its draft once the Tamanu definition has proven out.
 
 ### The transition
 
