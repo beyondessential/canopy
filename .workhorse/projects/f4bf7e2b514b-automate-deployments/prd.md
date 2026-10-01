@@ -60,7 +60,7 @@ Rollout follows recoverability, not prerequisite count.
 
 2. AWS-hosted production
 3. On-prem production
-4. The `.local` class last: no certificate needed, but the hardest networks and the hardest rollbacks
+4. The Tam `.local` class last: no certificate needed, but the hardest networks and the hardest rollbacks
 
 PostgreSQL stays a host package throughout.
 Moving it is a later project, for the reversibility reasons the phase 1 PRD and the ops plan set out.
