@@ -35,7 +35,6 @@ The definitions in Seedling's `apps/` are demos and stay that way.
 The production Tamanu definitions live in the Tamanu repo, change in the same commit as the behaviour they describe, and are published as OCI artefacts alongside Tamanu's images, using the provenance and fetch mechanism phase 1 built.
 
 We are greatly helped here by Tamanu no longer having json5 config. We therefore require that a Tamanu deployment has fully migrated to settings before it moves onto Seedling.
-A small amount of per-host state and a few structural requirements remain for the definition to carry — among them the per-server config key and the range of Tamanu versions the definition supports — and are worked out when the definition is carded.
 
 The mSupply definition follows the same regime as a stretch goal, promoted from its draft once the Tamanu definition has proven out.
 
