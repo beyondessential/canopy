@@ -41,7 +41,7 @@ Four Ansible playbooks, each independently runnable and idempotent, as `docs/pla
 - cut over,
 - decommission (the old Tamanu installs).
 
-Install is inert by construction and can go fleet-wide as soon as its package preconditions are confirmed.
+Install is inert by construction and can go fleet-wide as soon as it's done.
 Cutover is the only stage with a blast radius.
 
 Rewrite adopt and cutover against what shipped rather than adapting the existing step lists.
