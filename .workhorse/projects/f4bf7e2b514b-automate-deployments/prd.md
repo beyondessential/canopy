@@ -23,7 +23,7 @@ With this project, Seedling goes production-ready across the Linux fleet; on hos
 Specified in *Seedling in production* and not built.
 
 - **Integrate the new Canopy TLS issuance.** Canopy now issues TLS certificates and bestool already has an implementation, so Seedling follows along.
-- **Integrate Canopy Backups** and remove 
+- **Integrate Canopy Backups** and remove Seedling's own backup framework
 
 Canopy-driven backups and removal of Seedling's own backup framework, also phase 1, do not gate cutover: the fleet's app-data backups stay host-side while PostgreSQL does.
 
