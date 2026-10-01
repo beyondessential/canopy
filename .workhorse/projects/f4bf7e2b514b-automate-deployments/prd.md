@@ -42,7 +42,7 @@ Four Ansible playbooks, each independently runnable and idempotent, as `docs/pla
 - decommission (the old Tamanu installs).
 
 Install is inert by construction and can go fleet-wide as soon as it's done.
-Cutover is the only stage with a blast radius.
+Cutover is the only stage with a 
 
 Rewrite adopt and cutover against what shipped rather than adapting the existing step lists.
 Under the staged ingress takeover an app is fully installed, routed and TLS-provisioned with no host DNAT rules, then one explicit operator action takes traffic.
