@@ -78,14 +78,6 @@ A plan becomes executable only when it passes some condition gates:
 - The upgrade manifest decisions for the versions in the gap are filled in (*Version upgrade schema manifest system*, J3), and are passed to the upgrade once that pathway exists. **This also serves as a manual approve gate by PM.**
 - The environment's op lease is free, so an Ansible run cannot collide.
 
-### Outcome
-
-Canopy records the outcome on the plan: started, finished, duration, and on failure where and with what.
-A plan is met by the environment reporting the target version, as today.
-A failed upgrade leaves the plan open and the environment in maintenance until an operator lifts it.
-
-Rollback is the definition's business, not Canopy's: a Tamanu upgrade that has run migrations is not reversed by setting the old version, and Canopy does not offer a rollback it cannot honour.
-
 ## 3. QA
 
 Canopy and Seedling are tested per card, by whoever builds the card.
