@@ -91,9 +91,6 @@ We'll stand up a Canopy test/staging site, and through the Seedling transition w
 
 ### The UI pass
 
-A structured pass over each product's UI against the test sites: every page, the flows an operator actually performs, empty, large and broken data, and what an operator is left believing after each action.
-Findings are carded in the product's workspace.
-
 Canopy's UI is due a redesign (*Redesign UI with left sidebar navigation*, W3), and the two are sequenced deliberately.
 A pass on today's UI finds the problems the redesign should fix and gives it a baseline, while automation written against today's layout is mostly rewritten after it.
 So: pass first, findings feed the redesign, and automation targets flows rather than layouts so the tests outlive it.
