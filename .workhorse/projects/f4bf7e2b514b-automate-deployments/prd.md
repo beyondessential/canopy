@@ -129,16 +129,6 @@ Each needs a decision on whether it belongs here, in a Tamanu project, or nowher
 - **Mark and gate standard and deployment reports in Tamanu**
 - **Track report requirement vs reporting schema version**
 
-## Success criteria
-
-- A production Tamanu definition is published by Tamanu's release process and fetched by Seedling by reference
-- The pilot is migrated through the four stages, a post-flip rollback is rehearsed on it with no lost writes, and a first production deployment runs on Seedling
-- New Linux deployments are built on Seedling by default
-- An upgrade plan on a Seedling test site is executed by Canopy at its window with no one touching the host; a refused upgrade reports its reason; an Ansible run mid-upgrade is refused by the lease
-- The Canopy test site resets to a known synthetic state and has live non-critical sources reporting into it
-- Each product has had a full UI pass with findings carded, and the flows it covered run in CI
-- A reporting schema and its deployment report are generated from Canopy and installed in order by bestool and by Seedling, and Canopy shows each deployment's applied versions
-
 ## Open questions
 
 - Which certificate path is the default for public hosts
