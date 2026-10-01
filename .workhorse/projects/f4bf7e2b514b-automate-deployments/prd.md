@@ -7,7 +7,7 @@
 
 With this project, Seedling goes production-ready across the Linux fleet; on hosts that run it, Canopy's upgrade plans stop being a record and start actively performing the upgrade without remoting or manually calling Ansible; reporting schemas and reports are generated and installed without a manual step; and both products get the QA they need to be trusted with all of that.
 
-**This is a multi-repo project.** Canopy is where it is planned and tracked, but the code lands in Canopy, Seedling, bestool, Tamanu, and ops. Cards are shaped here and move to their respective workspace when work starts on them.
+**This is a multi-repo project.** Canopy is where it is planned and tracked, but the code lands in Canopy, Seedling, bestool, Tamanu, linux-images, and ops. Cards are shaped here and move to their respective workspace when work starts on them.
 
 ## Sequencing
 
