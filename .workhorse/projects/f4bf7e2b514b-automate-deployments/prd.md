@@ -72,7 +72,7 @@ Environments not on Seedling keep today's passive plans, unchanged.
 
 ### The channel
 
-Seedling already reports to Canopy once a minute through a connected client, and Canopy already uses that to carry instructions back (used 
+Seedling already reports to Canopy once a minute through a connected client, and Canopy already uses that to carry instructions back (used for backups and LT
 That response is the inbound path.
 It is poll-driven, bounded to the report cadence, and needs no new listener and no inbound authority through the relay, which is deliberately outbound-only.
 Keep it that way.
