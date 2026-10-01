@@ -49,7 +49,7 @@ Each is one Ansible run, and revert is one step until Decommision.
 
 Decommission removes the possibility of going back (and reclaims some disk space).
 
-New Linux deployments run install and adopt, then a plain install instead of a cutover, and become the default as soon as the pilot proves out, so the legacy layout stops growing.
+
 
 ### Pilot, then rollout
 
