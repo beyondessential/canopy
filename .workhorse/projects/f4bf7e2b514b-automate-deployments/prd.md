@@ -62,7 +62,7 @@ Rollout follows recoverability, not prerequisite count.
 3. On-prem production
 4. The Tamanu Iti `.local` class last: hardest networks and hardest rollbacks
 
-PostgreSQL stays on the host for now for reversibility reasons - later we'll move it into Seedling for 
+PostgreSQL stays on the host for now for reversibility reasons - later we'll move it into Seedling so it gains t
 Moving it is a later project, for the reversibility reasons the phase 1 PRD and the ops plan set out.
 
 ## 2. Upgrades under Canopy's control
