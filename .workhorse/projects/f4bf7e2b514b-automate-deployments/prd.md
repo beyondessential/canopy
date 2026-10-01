@@ -4,7 +4,6 @@
 
 *Automate Everything* put the fleet's deployment work on record in Canopy: upgrade plans, a desired version per environment, leases that refuse a colliding run, migration testing against real data, and deployment artefacts.
 *Seedling in production* gave Seedling the surface to serve Tamanu the way the fleet serves it today.
-Neither has yet changed how a deployment is actually carried out: no host runs on Seedling, an upgrade plan is still a note a person executes by hand, and a reporting schema still reaches production as SQL somebody runs.
 
 This project closes that gap.
 Seedling goes into production across the Linux fleet; on hosts that run it, Canopy's upgrade plans stop being a record and start performing the upgrade; reporting schemas and reports are generated and installed without a manual step; and both products get the QA they need to be trusted with all of that.
