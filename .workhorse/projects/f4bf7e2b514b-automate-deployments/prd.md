@@ -70,17 +70,6 @@ On a Seedling host an upgrade is trivial: changing Tamanu's `version` runs the d
 
 Environments not on Seedling keep today's passive plans, unchanged.
 
-### What an upgrade instruction carries
-
-An upgrade is not always a param set.
-Across a regime change the definition and the version move together in one atomic update, so the upgrade runs under the definition that knows the new regime.
-An upgrade instruction carries a target version and a definition reference, and Seedling refuses a combination the definition does not support.
-
-Seedling may refuse for other reasons too: the definition's validators reject the change, an operation is already in progress, or the host is configured to accept no remote direction.
-A refusal is reported, not blindly retried.
-
-The settable surface is narrow on purpose: an upgrade instruction, not arbitrary remote param writes.
-
 ### Readiness
 
 A plan becomes executable only when what already exists around it agrees.
