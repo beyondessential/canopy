@@ -86,7 +86,7 @@ This is a project in its own right for a tester rather than per-card testing.
 
 Both Seedling and Canopy have an existing Playwright test suite, so we can use the same tooling and build everything into automations rather than make a fully manual test pass.
 
-We'll stand up a Canopy test/staging site, and through the seedling work
+We'll stand up a Canopy test/staging site, and through the Seedling transiwork
 
 ### A Canopy test site
 
