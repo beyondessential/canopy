@@ -11,14 +11,27 @@ A facility known to be offline (its reachability silenced) keeps central's check
 Two layers.
 Layer 1 is this card; layer 2 is to be split out into its own card.
 
-The Samoa case is resolved by layer 1 alone: the offline facilities' instances are silenced on central's check.
+The motivating case, facilities known to be offline, is resolved by layer 1 alone: their instances are silenced on central's check.
 Layer 2 does not reach that case (see its gates below), which is accepted.
 
 ### Layer 1: reported checks carry instances
 
-A health check in a push gains an `instances` sibling of `detail`, each instance with its own result and detail.
+A health check in a push gains an `instances` field, each instance with its own result, optional label, and a nested `detail` object.
 Canopy grades reported instances the way it already grades its own (see CHK, "Checks with instances"; `file_check_instances`).
 Additive to the public API, so compatible under the api-compatibility rule.
+Payload shapes are in the instanced check payloads mockup (`.workhorse/design/mockups/b4/instanced-check-payloads.html`).
+
+A check's own detail is flattened beside `check` and `result` on the wire (`HealthCheck.extra`), not held in a `detail` object as STA describes.
+So `instances` becomes a reserved key in that flat namespace: a reporter already sending a detail field called `instances` would change meaning.
+Instances themselves nest their detail, being new structure.
+
+- A check entry carries exactly one of `result`, `healthy`, `instances`; `result` with `instances` is a 400.
+- An instance takes `result` only, never the legacy `healthy`; an empty key is a 400.
+- `instances: {}` recovers every instance the check held, and the check is passed.
+- Fields beside `instances` are shared by every instance; rules read `check.<field>` from the instance's detail first, then the shared fields.
+- A check moving between plain and instanced is still one state.
+- The push response stays per check: one query produces every instance, so there is nothing for a reporter to skip per instance.
+- Machine checks can be instanced too, the shape being the same `HealthCheck`.
 
 Instance identity follows the application pattern: `instances` is an object keyed by an instance key the reporter chooses, unique within the check and stable across pushes.
 A payload therefore cannot express two instances sharing a key.
@@ -41,8 +54,8 @@ An instance silence is also the fallback wherever layer 2 cannot resolve a refer
 Canopy never shares its own identifiers and must not learn reporters' domain concepts (Tamanu facility, device).
 So correlation is opaque:
 
-- an application's report declares aliases it is known by, as `(kind, value)` pairs Canopy does not interpret (e.g. kind `tamanu-device`);
-- an instance names the alias it concerns;
+- an application's report declares aliases it is known by, as an `aliases` object keyed by kind, one value per kind, which Canopy does not interpret (e.g. kind `tamanu-device`);
+- an instance names the alias it concerns, in a `concerns` object of the same shape;
 - Canopy resolves the alias within the reporting application's group.
 
 The issue stays the reporting target's for health rollup and incident placement.
