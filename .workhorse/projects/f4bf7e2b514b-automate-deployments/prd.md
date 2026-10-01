@@ -31,7 +31,7 @@ Canopy-driven backups and removal of Seedling's own backup framework, also phase
 
 ### Production definitions
 
-Write production Tamanu Seedling definition bundles. These live in the Tamanu repo, change in the same commit as the behaviour they describe, and are published as OCI artefacts alongside Tamanu's images, using the provenance and fetch mechanism phase 1 built.
+Write production Tamanu Seedling definition bundles. These live in the Tamanu repo, change alongside it, and are published as OCI artefacts alongside Tamanu's images, using the provenance and fetch mechanism phase 1 built.
 
 We are greatly helped here by Tamanu no longer having json5 config. We therefore require that a Tamanu deployment has fully migrated to settings before it moves onto Seedling.
 
