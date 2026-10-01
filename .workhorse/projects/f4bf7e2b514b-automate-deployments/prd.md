@@ -80,7 +80,7 @@ A plan becomes executable only when it passes some condition gates:
 
 ## 3. QA
 
-Both Seedling and Canopy are internal products and do not need Tamanu's level of QA. That said, they've been fully-internal projects for too long and have accumulated a lot of cruft and developer-brained UX. 
+Both Seedling and Canopy are internal products and do not need Tamanu's level of QA. That said, they've been fully-internal projects for too long and have accumulated a lot of cruft and developer-brained UX.
 
 This strand is a project in its own right for a tester rather than per-card testing
 
