@@ -99,7 +99,7 @@ Canopy's UI is due a redesign (#W3) to make it better suited to the density it's
 
 Settle what QA looks like after this project, for Canopy, Seedling, and the deployment and Ansible work around them: what gets a tester's pass and when, what the test sites are for between releases, and who keeps them running.
 
-## 4. Reporting
+## 4. ~~Reporting~~
 
 *Automate Everything* brought reporting-schema generation into Canopy's view through discovery and deployment artefacts.
 
