@@ -5,7 +5,7 @@
 *Automate Everything* put the fleet's deployment work on record in Canopy: upgrade plans, a desired version per environment, leases that refuse a colliding run, migration testing against real data, and deployment artefacts.
 *Seedling in production* gave Seedling the surface to serve Tamanu the way the fleet serves it today.
 
-With this project, Seedling goes production-ready across the Linux fleet; on hosts that run it, Canopy's upgrade plans stop being a record and start actively performing the upgrade without remoting or manually Ansible; reporting schemas and reports are generated and installed without a manual step; and both products get the QA they need to be trusted with all of that.
+With this project, Seedling goes production-ready across the Linux fleet; on hosts that run it, Canopy's upgrade plans stop being a record and start actively performing the upgrade without remoting or manually calling Ansible; reporting schemas and reports are generated and installed without a manual step; and both products get the QA they need to be trusted with all of that.
 
 **This is a multi-repo project.** Canopy is where it is planned and tracked, but the code lands in Canopy, Seedling, bestool, Tamanu, and ops. Cards are shaped here and move to their respective workspace when work starts on them.
 
