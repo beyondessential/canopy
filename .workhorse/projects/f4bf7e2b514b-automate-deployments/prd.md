@@ -84,7 +84,7 @@ Both Seedling and Canopy are internal products and do not need Tamanu's level of
 
 This is a project in its own right for a tester rather than per-card testing.
 
-Both Seedling
+Both Seedling and C
 
 ### A Canopy test site
 
