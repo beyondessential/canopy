@@ -101,8 +101,6 @@ Settle what QA looks like after this project, for Canopy, Seedling, and the depl
 
 *Automate Everything* brought reporting-schema generation into Canopy's view through discovery and deployment artefacts.
 
-
-
 ### Standard and deployment reports
 
 - **Standard reports** are the same for every deployment, published fleet-wide
