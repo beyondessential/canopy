@@ -80,7 +80,7 @@ A plan becomes executable only when it passes some condition gates:
 
 ## 3. QA
 
-Both Seedling and Canopy are internal products and do not need Tamanu's level of QA. That said, they've been fully-inter
+Both Seedling and Canopy are internal products and do not need Tamanu's level of QA. That said, they've been fully-internal pro
 
 This strand is a project in its own right for a tester rather than per-card testing, and is where Sima can contribute most.
 It also takes over the ongoing-QA question *Automate Everything* raised and never carded.
