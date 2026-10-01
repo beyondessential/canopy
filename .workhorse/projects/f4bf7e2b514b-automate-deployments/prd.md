@@ -86,6 +86,8 @@ This is a project in its own right for a tester rather than per-card testing.
 
 Both Seedling and Canopy have an existing Playwright test suite, so we can use the same tooling and build everything into automations rather than make a fully manual test pass.
 
+We'll stand up a Canopy test/staging site, and 
+
 ### A Canopy test site
 
 A standing Canopy deployment, separate from production, with a synthetic fleet: groups across every rank, machines and applications of each type, versions spread across releases, backups that succeed and fail, incidents that open, flap, escalate and close, upgrade plans that are open, late, met and withdrawn.
