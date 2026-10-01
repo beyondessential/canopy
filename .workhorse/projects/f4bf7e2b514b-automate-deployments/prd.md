@@ -17,7 +17,6 @@ Seedling goes into production across the Linux fleet; on hosts that run it, Cano
 - **Once the carry-over lands**: the Ansible transition stages, then the pilot Seedling test site.
 - **Once a Seedling test site exists**: Canopy-driven upgrades, built and exercised there rather than on production; the Seedling QA pass
 - **Once the pilot proves out**: fleet rollout in risk order, and greenfield Linux deployments on Seedling by default
-- **Alongside throughout**: the QA pass and its automation, and reporting, which depends on Seedling only for its Seedling consumer
 
 ## 1. Seedling in production
 
