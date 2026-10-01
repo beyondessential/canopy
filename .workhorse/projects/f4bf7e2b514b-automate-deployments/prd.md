@@ -40,7 +40,7 @@ Four Ansible playbooks, each independently runnable and idempotent, as `docs/pla
 - adopt,
 - cut over,
 - decommission (the old Tamanu installs).
-  
+
 Install is inert by construction, since Seedling with no apps registered performs an idle teardown, and can go fleet-wide as soon as its package preconditions are confirmed.
 Cutover is the only stage with a blast radius.
 
