@@ -49,7 +49,7 @@ Each is one Ansible run, and revert is one step until Decommision.
 
 Decommission removes the possibility of going back (and reclaims some disk space).
 
-As a stretch goal, we'll pre-install Seedling on disk images, with the goal of having a turn-key 
+As a stretch goal, we'll pre-install Seedling on disk images, with the goal of having a turn-key install experience from 
 
 ### Pilot, then rollout
 
