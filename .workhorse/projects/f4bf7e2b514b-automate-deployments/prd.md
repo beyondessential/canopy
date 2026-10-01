@@ -84,6 +84,8 @@ Both Seedling and Canopy are internal products and do not need Tamanu's level of
 
 This is a project in its own right for a tester rather than per-card testing.
 
+Both Seedling
+
 ### A Canopy test site
 
 A standing Canopy deployment, separate from production, with a synthetic fleet: groups across every rank, machines and applications of each type, versions spread across releases, backups that succeed and fail, incidents that open, flap, escalate and close, upgrade plans that are open, late, met and withdrawn.
