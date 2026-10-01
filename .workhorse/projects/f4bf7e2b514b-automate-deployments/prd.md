@@ -25,8 +25,6 @@ Specified in *Seedling in production* and not built.
 - **Integrate the new Canopy TLS issuance.** Canopy now issues TLS certificates and bestool already has an implementation, so Seedling follows along.
 - **Integrate Canopy Backups** and remove Seedling's own backup framework.
 
-Canopy-driven backups and removal of Seedling's own backup framework, also phase 1, do not gate cutover: the fleet's app-data backups stay host-side while PostgreSQL does.
-
 ### Production definitions
 
 Write production Tamanu Seedling definition bundles. These live in the Tamanu repo, change alongside it, and are published as OCI artifacts (~container images, except not) alongside Tamanu's normal container images during release. Seedling fetches them from these artifacts, and can also be pointed directly to github for dev and testing purposes.
