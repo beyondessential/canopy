@@ -42,7 +42,7 @@ Four Ansible playbooks, each independently runnable and idempotent, as originall
 - decommission (the old Tamanu installs).
 
 Install is inert by construction and can go fleet-wide as soon as it's done.
-Adopt creates the workloads in 
+Adopt creates the workloads in seedling but doesn
 Cutover is where we actively swap production workloads into seedling.
 
 Properties that must survive the rewrite:
