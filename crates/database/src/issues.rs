@@ -3573,6 +3573,90 @@ pub async fn sweep_lingering_incidents(db: &mut AsyncPgConnection) -> Result<usi
 	Ok(closed)
 }
 
+/// Queue a reminder for every notified incident that has stayed open another
+/// whole day since it opened.
+///
+/// Only an incident whose opening was delivered reminds. A reminder is queued
+/// for immediate delivery, but `claim_pending` holds it while the incident
+/// lingers and closing the incident cancels it, so it is only sent while an
+/// effective failure is live. `reminders_sent` records the days already
+/// reminded for, so the sweep queues one reminder per day however often it
+/// runs, and one (not a backlog) when it has missed several.
+///
+/// Runs on the monitor pod's minute cadence. Returns the number queued.
+// spec: INC#notification
+pub async fn enqueue_due_reminders(db: &mut AsyncPgConnection) -> Result<usize> {
+	use crate::schema::{incidents, slack_outbox};
+	use diesel::dsl::exists;
+
+	let now = Timestamp::now();
+	let day = SignedDuration::from_hours(24);
+	let candidates: Vec<(Uuid, jiff_diesel::Timestamp, i32)> = incidents::table
+		.select((
+			incidents::id,
+			incidents::opened_at,
+			incidents::reminders_sent,
+		))
+		.filter(incidents::closed_at.is_null())
+		.filter(incidents::opened_at.le(jiff_diesel::Timestamp::from(now - day)))
+		.filter(exists(
+			slack_outbox::table
+				.filter(slack_outbox::incident_id.eq(incidents::id.nullable()))
+				.filter(slack_outbox::kind.eq(crate::slack_outbox::KIND_INCIDENT_OPEN))
+				.filter(slack_outbox::delivered_at.is_not_null()),
+		))
+		.load(db)
+		.await?;
+
+	let mut queued = 0usize;
+	for (incident_id, opened_at, reminders_sent) in candidates {
+		let opened_at = Timestamp::from(opened_at);
+		let days = i32::try_from(now.duration_since(opened_at).as_secs() / day.as_secs())
+			.unwrap_or(i32::MAX);
+		if days <= reminders_sent {
+			continue;
+		}
+		let did_queue = db
+			.transaction::<_, AppError, _>(async |conn| {
+				// The row lock this takes orders us against a concurrent
+				// close: if the close wins, `closed_at` is set and nothing is
+				// queued; if we win, the close cancels the reminder we queued.
+				let claimed: Option<Uuid> = diesel::update(
+					incidents::table
+						.filter(incidents::id.eq(incident_id))
+						.filter(incidents::closed_at.is_null())
+						.filter(incidents::reminders_sent.lt(days)),
+				)
+				.set(incidents::reminders_sent.eq(days))
+				.returning(incidents::id)
+				.get_result(conn)
+				.await
+				.optional()?;
+				if claimed.is_none() {
+					return Ok(false);
+				}
+				let payload =
+					crate::slack_outbox::summary::render(conn, incident_id, Some(now)).await?;
+				crate::slack_outbox::SlackOutbox::enqueue(
+					conn,
+					crate::slack_outbox::KIND_INCIDENT_REMINDER,
+					Some(incident_id),
+					None,
+					None,
+					payload,
+					now,
+				)
+				.await?;
+				Ok(true)
+			})
+			.await?;
+		if did_queue {
+			queued += 1;
+		}
+	}
+	Ok(queued)
+}
+
 /// Stamp `left_at` on every issue still attached to `incident_id`, so no
 /// membership row outlives the incident it names.
 ///
@@ -3841,42 +3925,22 @@ async fn linger_window(
 	})
 }
 
+/// Queue the incident's opening (or escalation) notification. `issue` is the
+/// member that triggered it, already joined. The payload is a snapshot of the
+/// incident's summary now; the drainer renders it afresh when it sends it.
 async fn enqueue_slack_open(
 	conn: &mut AsyncPgConnection,
 	incident_id: Uuid,
 	target: IncidentTarget,
 	issue: &Issue,
 ) -> Result<()> {
-	let (label, open_delay) = match target {
+	let open_delay = match target {
 		IncidentTarget::Environment(gid, _) | IncidentTarget::Group(gid) => {
-			let group = ServerGroup::get_by_id(conn, gid).await?;
-			let server = match issue.application_id {
-				Some(sid) => Some(Application::get_by_id(conn, sid).await?),
-				None => None,
-			};
-			(
-				format_group_label(&group, target.rank(), server.as_ref()),
-				group.slack_open_delay.0,
-			)
+			ServerGroup::get_by_id(conn, gid).await?.slack_open_delay.0
 		}
-		IncidentTarget::Global => ("Canopy".to_string(), GLOBAL_OPEN_GRACE),
+		IncidentTarget::Global => GLOBAL_OPEN_GRACE,
 	};
-	// The deployed Slack workflow's trigger declares a `severity`
-	// variable; feed it the result-derived urgency label.
-	let urgency = if issue.escalates_now() {
-		"Critical"
-	} else if issue.opens_incident() {
-		"Error"
-	} else {
-		"Warning"
-	};
-	let payload = crate::slack_outbox::vars::incident_open(
-		&label,
-		urgency,
-		&issue.source,
-		&issue.r#ref,
-		&issue.message,
-	);
+	let payload = crate::slack_outbox::summary::render(conn, incident_id, None).await?;
 	// Normally the row sits in the outbox for the target's open delay
 	// before the drainer can ship it — that's the flap-suppression
 	// window, so a transient open/close pair never reaches Slack.
@@ -3967,11 +4031,12 @@ async fn enqueue_slack_resolve_inner(
 	if cancelled > 0 && !ever_delivered {
 		return Ok(());
 	}
+	// A reminder still waiting out lingering is for an incident that is now
+	// over. The opening was delivered before any reminder was queued, so this
+	// has no bearing on whether the resolve is owed.
+	crate::slack_outbox::SlackOutbox::cancel_pending_reminders(conn, incident.id).await?;
 	let label = match incident.server_group_id {
-		Some(gid) => {
-			let group = ServerGroup::get_by_id(conn, gid).await?;
-			format_group_label(&group, incident.rank, None)
-		}
+		Some(gid) => format_group_label(&ServerGroup::get_by_id(conn, gid).await?, incident.rank),
 		None => "Canopy".to_string(),
 	};
 	let payload = crate::slack_outbox::vars::incident_resolve(&label, by);
@@ -3988,29 +4053,13 @@ async fn enqueue_slack_resolve_inner(
 	Ok(())
 }
 
-/// How an incident's target reads in a notification: the environment it is on,
-/// and the application the issue was filed against where there is one.
+/// How an incident's target reads in a notification: the environment, or the
+/// group itself where the incident carries no rank.
 // spec: INC#notification
-pub(crate) fn format_group_label(
-	group: &ServerGroup,
-	rank: Option<ServerRank>,
-	server: Option<&Application>,
-) -> String {
-	let group_name = match rank {
+pub(crate) fn format_group_label(group: &ServerGroup, rank: Option<ServerRank>) -> String {
+	match rank {
 		Some(rank) => crate::server_groups::environment_name(&group.name, rank),
 		None => group.name.clone(),
-	};
-	if let Some(server) = server {
-		let host = server.host.as_ref().map(|h| h.0.to_string());
-		let server_part = match (&server.name, host) {
-			(Some(n), Some(h)) if !n.is_empty() => format!("{n} ({h})"),
-			(Some(n), None) if !n.is_empty() => n.clone(),
-			(_, Some(h)) => h,
-			(_, None) => server.id.to_string(),
-		};
-		format!("{group_name} · {server_part}")
-	} else {
-		group_name
 	}
 }
 

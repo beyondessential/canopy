@@ -438,6 +438,7 @@ diesel::table! {
 		escalated_at -> Nullable<Timestamptz>,
 		closing_at -> Nullable<Timestamptz>,
 		rank -> Nullable<Text>,
+		reminders_sent -> Int4,
 	}
 }
 

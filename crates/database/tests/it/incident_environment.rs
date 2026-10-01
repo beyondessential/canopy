@@ -456,11 +456,20 @@ async fn a_notice_names_the_environment_it_is_about() {
 		labels.sort();
 		assert_eq!(
 			labels,
-			vec![
-				"site test \u{b7} http://test.invalid/".to_string(),
-				"site \u{b7} http://prod.invalid/".to_string(),
-			],
+			vec!["site".to_string(), "site test".to_string()],
 			"production reads as the site, and test reads as the site's test",
+		);
+		// The application an issue is on is named on its line in the summary,
+		// not in the target.
+		let messages: Vec<&str> = rows
+			.iter()
+			.map(|r| r.payload["message"].as_str().unwrap_or_default())
+			.collect();
+		assert!(
+			messages
+				.iter()
+				.any(|m| m.contains("on http://test.invalid/")),
+			"got {messages:?}"
 		);
 	})
 	.await

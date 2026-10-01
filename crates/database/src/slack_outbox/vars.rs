@@ -6,8 +6,12 @@
 //! POST a flat JSON object keyed by the declared variable names — no
 //! `blocks`, no `text`.
 //!
-//! Two workflows:
-//! - `incident_open`: variables `server`, `severity`, `source_ref`, `message`, `link`
+//! Two incident workflows:
+//! - `incident_open`: variables `server`, `severity`, `source_ref`, `message`,
+//!   `link`. Openings, escalations, and reminders all post here, each carrying
+//!   the incident summary (see [`super::summary`]): `server` is the incident's
+//!   target, `severity` its worst live result, `source_ref` the per-result
+//!   counts of its live issues, and `message` the list of them.
 //! - `incident_resolve`: variables `server`, `by`, `link`. `by` is either the
 //!   resolving operator's login, or — when the incident retired on its own —
 //!   "the healthcheck recovering" (it describes the event, not an actor: the
@@ -34,7 +38,7 @@ const MAX_MESSAGE_LEN: usize = 2000;
 /// Truncate to at most `max` characters, appending a marker when it had to
 /// cut. Counts characters, not bytes, so it never splits a multi-byte
 /// character, and the result's character count never exceeds `max`.
-fn truncate(text: &str, max: usize) -> String {
+pub(crate) fn truncate(text: &str, max: usize) -> String {
 	if text.chars().count() <= max {
 		return text.to_string();
 	}
@@ -47,17 +51,13 @@ fn truncate(text: &str, max: usize) -> String {
 
 /// `urgency` is the result-derived label for the workflow's `severity`
 /// variable: Critical (escalating failure), Error (failure), Warning.
-pub fn incident_open(
-	server_label: &str,
-	urgency: &str,
-	source: &str,
-	issue_ref: &str,
-	message: &str,
-) -> Value {
+/// `counts` fills `source_ref`, which the workflow lays out as the incident's
+/// headline figures.
+pub fn incident_open(server_label: &str, urgency: &str, counts: &str, message: &str) -> Value {
 	json!({
 		"server": server_label,
 		"severity": urgency,
-		"source_ref": format!("{source}/{issue_ref}"),
+		"source_ref": counts,
 		"message": truncate(message, MAX_MESSAGE_LEN),
 	})
 }
@@ -108,14 +108,14 @@ mod tests {
 
 	#[test]
 	fn short_message_passes_through_untouched() {
-		let payload = incident_open("Prod", "Error", "canopy", "reachability", "boom");
+		let payload = incident_open("Prod", "Error", "1 failed", "boom");
 		assert_eq!(payload["message"], "boom");
 	}
 
 	#[test]
 	fn oversized_message_is_truncated_with_marker() {
 		let long = "x".repeat(MAX_MESSAGE_LEN * 3);
-		let payload = incident_open("Prod", "Error", "canopy", "reachability", &long);
+		let payload = incident_open("Prod", "Error", "1 failed", &long);
 		let got = payload["message"].as_str().unwrap();
 		assert_eq!(
 			got.chars().count(),

@@ -3,8 +3,10 @@
 //! Phase A: posts to Slack Workflow Builder webhooks. One workflow (and one
 //! webhook URL) per outbox kind, because Workflow Builder webhooks bind 1:1
 //! to a workflow with a fixed variable set. The payload column in each
-//! `slack_outbox` row is already the flat JSON the workflow expects — we
-//! POST it verbatim.
+//! `slack_outbox` row is the flat JSON the workflow expects. An opening,
+//! escalation, or reminder is re-rendered from the incident as it stands when
+//! claimed, and the row is updated to what was posted; every other kind is
+//! POSTed verbatim. Reminders post to the open workflow.
 //!
 //! Each loop iteration drains up to [`BATCH`] rows, one per transaction: a
 //! row is claimed with `FOR UPDATE SKIP LOCKED` (the lock is what keeps
@@ -21,8 +23,8 @@ use std::time::Duration;
 use clap::Parser;
 use commons_types::status::CheckResult;
 use database::slack_outbox::{
-	KIND_INCIDENT_OPEN, KIND_INCIDENT_RESOLVE, KIND_MAINTENANCE_DECLARED, KIND_MAINTENANCE_ENDED,
-	KIND_SELF_ALERT_OPEN, KIND_SELF_ALERT_RESOLVE, SlackOutbox,
+	KIND_INCIDENT_OPEN, KIND_INCIDENT_REMINDER, KIND_INCIDENT_RESOLVE, KIND_MAINTENANCE_DECLARED,
+	KIND_MAINTENANCE_ENDED, KIND_SELF_ALERT_OPEN, KIND_SELF_ALERT_RESOLVE, SlackOutbox,
 };
 use diesel_async::AsyncConnection;
 use lloggs::{LoggingArgs, PreArgs};
@@ -144,7 +146,9 @@ impl Config {
 	/// (mark delivered without posting); `Err` — unknown kind.
 	fn url_for(&self, kind: &str) -> Result<Option<&str>, ()> {
 		match kind {
-			KIND_INCIDENT_OPEN => Ok(self.open.as_deref()),
+			// A reminder is the incident's summary again, so it shares the
+			// open workflow's variables and webhook.
+			KIND_INCIDENT_OPEN | KIND_INCIDENT_REMINDER => Ok(self.open.as_deref()),
 			KIND_INCIDENT_RESOLVE => Ok(self.resolve.as_deref()),
 			KIND_MAINTENANCE_DECLARED => Ok(self.maintenance_declared.as_deref()),
 			KIND_MAINTENANCE_ENDED => Ok(self.maintenance_ended.as_deref()),
@@ -204,72 +208,7 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 			for _ in 0..BATCH {
 				let result = db
 					.transaction::<_, commons_errors::AppError, _>(async |conn| {
-						let Some(row) = SlackOutbox::claim_pending(conn, 1).await?.pop() else {
-							return Ok(false);
-						};
-						match deliver(&client, &cfg, &row).await {
-							Ok(body) => {
-								info!(
-									id = %row.id,
-									kind = %row.kind,
-									incident_id = ?row.incident_id,
-									response = %body,
-									"slack delivered"
-								);
-								SlackOutbox::mark_delivered(conn, row.id, &body).await?;
-							}
-							Err(err) => {
-								let next_attempts = row.attempts + 1;
-								if next_attempts >= MAX_ATTEMPTS {
-									error!(
-										id = %row.id,
-										kind = %row.kind,
-										incident_id = ?row.incident_id,
-										attempts = next_attempts,
-										err = %err.msg,
-										response = ?err.body,
-										"slack delivery permanently failed; giving up"
-									);
-									SlackOutbox::mark_given_up(
-										conn,
-										row.id,
-										&format!(
-											"giving up after {next_attempts} attempts: {}",
-											err.msg
-										),
-									)
-									.await?;
-									// Surface the failure as a canopy-self
-									// issue (nil-server) so it shows up in
-									// the UI alongside everything else.
-									// `enqueue_slack_*` skips nil-server
-									// incidents to avoid feeding back into
-									// the very loop that's failing.
-									file_self_event(conn, &row, next_attempts, &err).await?;
-								} else {
-									warn!(
-										id = %row.id,
-										kind = %row.kind,
-										incident_id = ?row.incident_id,
-										attempts = next_attempts,
-										retry_in = %database::slack_outbox::retry_backoff(
-											next_attempts
-										),
-										err = %err.msg,
-										response = ?err.body,
-										"slack delivery failed; will retry"
-									);
-									SlackOutbox::mark_failed(
-										conn,
-										row.id,
-										&err.msg,
-										err.body.as_deref(),
-									)
-									.await?;
-								}
-							}
-						}
-						Ok(true)
+						drain_one(conn, &client, &cfg).await
 					})
 					.await;
 				match result {
@@ -289,6 +228,79 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 			}
 		}
 	})
+}
+
+/// Claim, post, and mark one pending row. Returns `false` when there was no
+/// row to claim. The caller wraps this in the transaction the claim's row lock
+/// lives in.
+async fn drain_one(
+	conn: &mut diesel_async::AsyncPgConnection,
+	client: &reqwest::Client,
+	cfg: &Config,
+) -> Result<bool, commons_errors::AppError> {
+	let Some(mut row) = SlackOutbox::claim_pending(conn, 1).await?.pop() else {
+		return Ok(false);
+	};
+	// spec: INC#notification
+	let payload = row.render_current(conn).await?;
+	if payload != row.payload {
+		SlackOutbox::set_payload(conn, row.id, &payload).await?;
+		row.payload = payload;
+	}
+	match deliver(client, cfg, &row).await {
+		Ok(body) => {
+			info!(
+				id = %row.id,
+				kind = %row.kind,
+				incident_id = ?row.incident_id,
+				response = %body,
+				"slack delivered"
+			);
+			SlackOutbox::mark_delivered(conn, row.id, &body).await?;
+		}
+		Err(err) => {
+			let next_attempts = row.attempts + 1;
+			if next_attempts >= MAX_ATTEMPTS {
+				error!(
+					id = %row.id,
+					kind = %row.kind,
+					incident_id = ?row.incident_id,
+					attempts = next_attempts,
+					err = %err.msg,
+					response = ?err.body,
+					"slack delivery permanently failed; giving up"
+				);
+				SlackOutbox::mark_given_up(
+					conn,
+					row.id,
+					&format!("giving up after {next_attempts} attempts: {}", err.msg),
+				)
+				.await?;
+				// Surface the failure as a canopy-self
+				// issue (nil-server) so it shows up in
+				// the UI alongside everything else.
+				// `enqueue_slack_*` skips nil-server
+				// incidents to avoid feeding back into
+				// the very loop that's failing.
+				file_self_event(conn, &row, next_attempts, &err).await?;
+			} else {
+				warn!(
+					id = %row.id,
+					kind = %row.kind,
+					incident_id = ?row.incident_id,
+					attempts = next_attempts,
+					retry_in = %database::slack_outbox::retry_backoff(
+						next_attempts
+					),
+					err = %err.msg,
+					response = ?err.body,
+					"slack delivery failed; will retry"
+				);
+				SlackOutbox::mark_failed(conn, row.id, &err.msg, err.body.as_deref()).await?;
+			}
+		}
+	}
+	Ok(true)
 }
 
 /// Raise the `slack-delivery-failure` self-alert when the drainer abandons
@@ -596,6 +608,11 @@ mod tests {
 			cfg.url_for(KIND_INCIDENT_RESOLVE),
 			Ok(Some("http://example/resolve"))
 		);
+		assert_eq!(
+			cfg.url_for(KIND_INCIDENT_REMINDER),
+			Ok(Some("http://example/open")),
+			"a reminder posts to the open workflow",
+		);
 		assert_eq!(cfg.url_for(KIND_MAINTENANCE_DECLARED), Ok(None));
 		assert_eq!(cfg.url_for(KIND_MAINTENANCE_ENDED), Ok(None));
 		assert_eq!(cfg.url_for(KIND_SELF_ALERT_OPEN), Ok(None));
@@ -789,6 +806,103 @@ mod tests {
 			.await
 			.expect("per-kind noop ok");
 		assert_eq!(body, "");
+	}
+
+	async fn fail(conn: &mut diesel_async::AsyncPgConnection, application: Uuid, check: &str) {
+		let stamp = database::issues::CheckStateStamp {
+			check: check.into(),
+			observed: CheckResult::Failed,
+			effective: CheckResult::Failed,
+			escalates: false,
+			detail: None,
+		};
+		database::issues::NewEvent {
+			source: "test".into(),
+			r#ref: check.into(),
+			description: None,
+			message: format!("{check} is failing"),
+			active: Some(true),
+			occurred_at: None,
+		}
+		.save_with_state(conn, application, None, Some(&stamp), false)
+		.await
+		.expect("file check");
+	}
+
+	/// The opening posts the incident as it stands when the drainer claims
+	/// it, including an issue that joined during the grace, and the row
+	/// records what was posted.
+	// spec: INC#notification
+	#[tokio::test(flavor = "multi_thread")]
+	async fn drain_posts_the_incident_as_it_stands_and_records_it() {
+		use diesel::{QueryableByName, sql_query, sql_types};
+		use diesel_async::RunQueryDsl;
+
+		#[derive(QueryableByName)]
+		struct RowId {
+			#[diesel(sql_type = sql_types::Uuid)]
+			id: Uuid,
+		}
+
+		commons_tests::db::TestDb::run(async |mut conn, _| {
+			let application: RowId = sql_query(
+				"WITH g AS (INSERT INTO server_groups (name) VALUES ('site') RETURNING id), \
+				 m AS (INSERT INTO machines (group_id) SELECT id FROM g RETURNING id, group_id) \
+				 INSERT INTO applications (type, name, group_id, machine_id) \
+				 SELECT 'tamanu-central', 'central-1', m.group_id, m.id FROM m RETURNING id",
+			)
+			.get_result(&mut conn)
+			.await
+			.expect("application");
+			fail(&mut conn, application.id, "app-down").await;
+			fail(&mut conn, application.id, "db-down").await;
+			let open: RowId = sql_query(
+				"UPDATE slack_outbox SET deliver_after = NOW() WHERE kind = 'incident_open' \
+				 RETURNING id",
+			)
+			.get_result(&mut conn)
+			.await
+			.expect("make the open due");
+
+			let (url, server, recorded) = one_shot_server();
+			let cfg = Config {
+				open: Some(url),
+				resolve: Some("http://127.0.0.1:1/should-not-be-hit".into()),
+				private_url: Some("https://canopy.test".into()),
+				..Default::default()
+			};
+			assert!(
+				drain_one(&mut conn, &reqwest::Client::new(), &cfg)
+					.await
+					.expect("drain")
+			);
+			server.join().unwrap();
+
+			let got = recorded.lock().unwrap().clone().expect("got a request");
+			assert_eq!(got["server"], "site");
+			assert_eq!(got["source_ref"], "2 failed");
+			assert_eq!(
+				got["message"],
+				"• Failed: db-down on central-1\n• Failed: app-down on central-1"
+			);
+
+			let row: SlackOutbox = {
+				use database::schema::slack_outbox::dsl;
+				use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+				dsl::slack_outbox
+					.select(SlackOutbox::as_select())
+					.filter(dsl::id.eq(open.id))
+					.first(&mut conn)
+					.await
+					.expect("row")
+			};
+			assert!(row.delivered_at.is_some());
+			assert_eq!(
+				row.payload["source_ref"], "2 failed",
+				"the row records what was posted, not the snapshot it was queued with"
+			);
+		})
+		.await
 	}
 
 	#[tokio::test(flavor = "multi_thread")]

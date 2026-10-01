@@ -17,10 +17,13 @@
 //! which marks the open row given-up and skips the resolve when it
 //! succeeds.
 //!
-//! The payload is rendered to Block Kit JSON at enqueue time, not at delivery
-//! time, so we capture state as it was when the event happened rather than
-//! risk reading a later (resolved / different-severity) state when the worker
-//! eventually wakes up.
+//! A resolve or maintenance payload is rendered at enqueue time: it describes
+//! one event, and is final once that event has happened. An opening,
+//! escalation, or reminder instead summarises the incident, and the drainer
+//! re-renders it when it claims the row (see [`SlackOutbox::render_current`]),
+//! so issues that joined while it waited out the grace period appear in it.
+//! The enqueue-time payload is a snapshot of the incident when the row was
+//! queued; delivery overwrites it with what was actually sent.
 
 use commons_errors::{AppError, Result};
 use commons_types::backoff::Backoff;
@@ -31,10 +34,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
+pub mod summary;
 pub mod vars;
 
-/// Newly-opened incident — top-level message.
+/// Newly-opened incident — top-level message. Also the escalation of an
+/// incident whose opening has already shipped.
 pub const KIND_INCIDENT_OPEN: &str = "incident_open";
+/// A notified incident still open after another whole day. Posts to the open
+/// workflow, but is its own kind so it never reads as the incident's opening:
+/// [`SlackOutbox::cancel_pending_open`], [`SlackOutbox::delivered_open_ids`],
+/// and [`SlackOutbox::pending_opens_until`] all mean the opening alone.
+pub const KIND_INCIDENT_REMINDER: &str = "incident_reminder";
 /// Incident resolved — Phase A: top-level; Phase B: reply in the incident thread.
 pub const KIND_INCIDENT_RESOLVE: &str = "incident_resolve";
 /// Legacy: direct self-alert notices, from before self-alerts flowed
@@ -165,6 +175,66 @@ impl SlackOutbox {
 		Ok(rows)
 	}
 
+	/// Mark every still-pending `incident_reminder` row for this incident as
+	/// given-up. Called when the incident closes: a reminder that was waiting
+	/// out lingering never ships. Unlike
+	/// [`cancel_pending_open`](Self::cancel_pending_open) this says nothing
+	/// about whether the resolve is owed, since a reminder is only ever queued
+	/// after the opening was delivered.
+	// spec: INC#notification
+	pub async fn cancel_pending_reminders(
+		db: &mut AsyncPgConnection,
+		incident_id: Uuid,
+	) -> Result<usize> {
+		use crate::schema::slack_outbox::dsl;
+		diesel::update(
+			dsl::slack_outbox
+				.filter(dsl::incident_id.eq(Some(incident_id)))
+				.filter(dsl::kind.eq(KIND_INCIDENT_REMINDER))
+				.filter(dsl::delivered_at.is_null())
+				.filter(dsl::gave_up_at.is_null()),
+		)
+		.set((
+			dsl::gave_up_at.eq(jiff_diesel::Timestamp::from(Timestamp::now())),
+			dsl::last_error.eq("cancelled: incident closed before the reminder was delivered"),
+		))
+		.execute(db)
+		.await
+		.map_err(AppError::from)
+	}
+
+	/// The payload this row should post if it were sent now. An opening,
+	/// escalation, or reminder is re-rendered from the incident's current
+	/// membership; every other kind posts what it was enqueued with.
+	// spec: INC#notification
+	pub async fn render_current(&self, db: &mut AsyncPgConnection) -> Result<JsonValue> {
+		let reminder_at = match self.kind.as_str() {
+			KIND_INCIDENT_OPEN => None,
+			KIND_INCIDENT_REMINDER => Some(Timestamp::now()),
+			_ => return Ok(self.payload.clone()),
+		};
+		let Some(incident_id) = self.incident_id else {
+			return Ok(self.payload.clone());
+		};
+		summary::render(db, incident_id, reminder_at).await
+	}
+
+	/// Record the payload a row is about to be posted with, so the row shows
+	/// what was sent rather than the snapshot it was queued with.
+	pub async fn set_payload(
+		db: &mut AsyncPgConnection,
+		id: Uuid,
+		payload: &JsonValue,
+	) -> Result<()> {
+		use crate::schema::slack_outbox::dsl;
+		diesel::update(dsl::slack_outbox.filter(dsl::id.eq(id)))
+			.set(dsl::payload.eq(payload))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
+	}
+
 	/// For each of `incident_ids`, return the `deliver_after` of its
 	/// pending `incident_open` row — i.e. an incident that has been opened
 	/// in the database but whose Slack notice hasn't been sent yet (and
@@ -238,18 +308,22 @@ impl SlackOutbox {
 			.filter(dsl::delivered_at.is_null())
 			.filter(dsl::gave_up_at.is_null())
 			.filter(dsl::deliver_after.le(jiff_diesel::Timestamp::from(now)))
-			// An `incident_open` for a lingering incident (its last effective
-			// failure has left, the linger window hasn't elapsed) must not
-			// ship: a one-off blip would otherwise notify purely because the
-			// linger held the incident open past its `deliver_after`. The row
-			// stays pending — it ships when a failure returns, or is
-			// cancelled when the linger expires and the incident closes.
-			.filter(not(dsl::kind.eq(KIND_INCIDENT_OPEN).and(exists(
-				incidents::table
-					.filter(incidents::id.nullable().eq(dsl::incident_id))
-					.filter(incidents::closed_at.is_null())
-					.filter(incidents::closing_at.is_not_null()),
-			))))
+			// An `incident_open` or `incident_reminder` for a lingering
+			// incident (its last effective failure has left, the linger window
+			// hasn't elapsed) must not ship: a one-off blip would otherwise
+			// notify purely because the linger held the incident open past its
+			// `deliver_after`. The row stays pending — it ships when a failure
+			// returns, or is cancelled when the linger expires and the
+			// incident closes.
+			// spec: INC#notification
+			.filter(not(dsl::kind
+				.eq_any([KIND_INCIDENT_OPEN, KIND_INCIDENT_REMINDER])
+				.and(exists(
+					incidents::table
+						.filter(incidents::id.nullable().eq(dsl::incident_id))
+						.filter(incidents::closed_at.is_null())
+						.filter(incidents::closing_at.is_not_null()),
+				))))
 			.order(dsl::created_at.asc())
 			.limit(limit)
 			.for_update()

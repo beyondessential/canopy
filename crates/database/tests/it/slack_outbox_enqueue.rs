@@ -176,9 +176,17 @@ async fn opening_incident_enqueues_slack_open_row() {
 		// delivery time from PRIVATE_URL + row.incident_id.
 		let payload = open.payload.as_object().expect("payload is a JSON object");
 		assert!(payload.contains_key("server"));
+		// The payload is the incident's summary: its counts in `source_ref`,
+		// and one line per live issue, named by its check where it carries no
+		// headline, with the application it is on.
+		assert_eq!(payload["server"].as_str(), Some("test-group"));
 		assert_eq!(payload["severity"].as_str(), Some("Error"));
-		assert_eq!(payload["source_ref"].as_str(), Some("test/ref-1"));
-		assert_eq!(payload["message"].as_str(), Some("boom"));
+		assert_eq!(payload["source_ref"].as_str(), Some("1 failed"));
+		let message = payload["message"].as_str().expect("message");
+		assert!(
+			message.starts_with("• Failed: ref-1 on http://open.invalid"),
+			"got: {message}"
+		);
 		assert!(
 			!payload.contains_key("link"),
 			"link is injected by the drainer, not at enqueue"
