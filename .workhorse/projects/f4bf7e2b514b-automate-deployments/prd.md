@@ -80,8 +80,7 @@ A plan becomes executable only when it passes some condition gates:
 
 ## 3. QA
 
-
-Both are internal products and do not need Tamanu's level of QA; they need enough that we trust them, and enough automation that the trust survives the next change.
+Both  are internal products and do not need Tamanu's level of QA; they need enough that we trust them, and enough automation that the trust survives the next change.
 
 This strand is a project in its own right for a tester rather than per-card testing, and is where Sima can contribute most.
 It also takes over the ongoing-QA question *Automate Everything* raised and never carded.
