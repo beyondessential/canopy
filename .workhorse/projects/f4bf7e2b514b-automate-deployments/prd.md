@@ -66,7 +66,7 @@ PostgreSQL stays on the host for now for reversibility reasons - later we'll mov
 
 ## 2. Upgrades under Canopy's control
 
-On a Seedling host an upgrade is trivial: changing Tamanu's `version` runs the definition's upgrade procedure. So on an environment with Seedling enabled, an upgrade plan becomes an active control: when the plan is ready and its window opens, Canopy directs Seedling to perform the upgrade, and Seedling reports what it did. Canopy also takes snapshots ("held backups") at the right times, and co-ordinates 
+On a Seedling host an upgrade is trivial: changing Tamanu's `version` runs the definition's upgrade procedure. So on an environment with Seedling enabled, an upgrade plan becomes an active control: when the plan is ready and its window opens, Canopy directs Seedling to perform the upgrade, and Seedling reports what it did. Canopy also takes snapshots ("held backups") at the right times, and co-ordinates between facilities a
 
 Environments not on Seedling keep today's passive plans, unchanged.
 
