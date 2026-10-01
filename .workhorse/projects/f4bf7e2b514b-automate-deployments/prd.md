@@ -74,7 +74,7 @@ Environments not on Seedling keep today's passive plans, unchanged.
 
 A plan becomes executable only when it passes some condition gates:
 
-- Migration testing has a passing verdict for this environment at the target version, recent enough to trust
+- Migration testing has a passing verdict for this environment at the target version, recent enough to trust.
 - The upgrade manifest decisions for the versions in the gap are filled in (*Version upgrade schema manifest system*, J3), and are passed to the upgrade once that pathway exists
 - The environment's lease is free. The upgrade takes it for its duration, so an Ansible run cannot collide
 - A maintenance window is declared over the upgrade, so incidents are suspended rather than raised
