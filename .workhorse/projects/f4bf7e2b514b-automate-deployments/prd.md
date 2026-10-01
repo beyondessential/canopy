@@ -80,7 +80,6 @@ A plan becomes executable only when it passes some condition gates:
 
 ## 3. QA
 
-Canopy and Seedling are tested per card, by whoever builds the card.
 Neither has had a pass by someone whose job is to find what the builder did not think of, and neither has an environment where it runs against data that looks like the fleet without being the fleet.
 Both are internal products and do not need Tamanu's level of QA; they need enough that we trust them, and enough automation that the trust survives the next change.
 
