@@ -91,7 +91,7 @@ We'll stand up a Canopy test/staging site, and through the Seedling transition w
 
 ### The UI pass
 
-Canopy's UI is due a redesign (#W3). This 
+Canopy's UI is due a redesign (#W3) to 
 
 ### Automation
 
