@@ -218,7 +218,25 @@ async fn endpoint_rejects_device_not_bound_to_server() {
 				.get(&format!("/status/{server_id}/check-severities"))
 				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
-			response.assert_status_not_ok();
+			response.assert_status_forbidden();
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn push_rejects_device_not_bound_to_server() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, _device_id, public, _| {
+			let server_id = insert_server(&mut conn, None, None).await;
+
+			let response = public
+				.post(&format!("/status/{server_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({"health": []}))
+				.await;
+			response.assert_status_forbidden();
 		},
 	)
 	.await

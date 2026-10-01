@@ -405,9 +405,9 @@ async fn create(
 	let is_authorized = role == DeviceRole::Admin || machine.device_id == Some(id);
 
 	if !is_authorized {
-		return Err(AppError::custom(
-			"device is not authorized to create statuses",
-		));
+		return Err(AppError::AuthInsufficientPermissions {
+			required: "the device enrolled for this machine".into(),
+		});
 	}
 
 	let raw = body.map(|j| j.0).unwrap_or(serde_json::Value::Null);
@@ -856,9 +856,9 @@ async fn check_severities(
 
 	let machine = Machine::get_by_id(&mut db, machine_id).await?;
 	if role != DeviceRole::Admin && machine.device_id != Some(id) {
-		return Err(AppError::custom(
-			"device is not authorized to read this machine's check severities",
-		));
+		return Err(AppError::AuthInsufficientPermissions {
+			required: "the device enrolled for this machine".into(),
+		});
 	}
 
 	// The read has no payload to name an application with, so it answers for
