@@ -21,14 +21,26 @@ Canopy grades reported instances the way it already grades its own (see CHK, "Ch
 Additive to the public API, so compatible under the api-compatibility rule.
 Payload shapes are in the instanced check payloads mockup (`.workhorse/design/mockups/b4/instanced-check-payloads.html`).
 
-A check's own detail is flattened beside `check` and `result` on the wire (`HealthCheck.extra`), not held in a `detail` object as STA describes.
-So `instances` becomes a reserved key in that flat namespace: a reporter already sending a detail field called `instances` would change meaning.
-Instances themselves nest their detail, being new structure.
+#### Per-check `detail` object (folded into this card)
+
+STA already says a health check carries its own `detail` object, but that was never implemented: V2 nested detail for targets (`parse_target_report`) and left checks flat (`HealthCheck.extra`, `#[serde(flatten)]`, read by stripping `check`/`healthy` at ingestion).
+This card implements it, since the instance shape leans on it:
+
+- a check entry accepts a `detail` object; the flat form stays accepted for plain checks, per the compatibility rule;
+- a plain check carrying flat fields and `detail` together is a 400 rather than a guessed merge;
+- an instanced check takes its fields in `detail` only, and a flat field beside `instances` is a 400, so `instances` is never read as a detail field;
+- `detail` that isn't an object, on a check or an instance, is a 400;
+- rules read `check.<field>` the same from either form.
+
+The narrow remaining break: a reporter sending a flat detail field literally named `detail` or `instances` has it read as structure. bestool sends neither.
+The generated client gains a `detail` field on `HealthCheck`; bestool's `to_health_check` moves to it.
+
+#### Instanced check rules
 
 - A check entry carries exactly one of `result`, `healthy`, `instances`; `result` with `instances` is a 400.
 - An instance takes `result` only, never the legacy `healthy`; an empty key is a 400.
 - `instances: {}` recovers every instance the check held, and the check is passed.
-- Fields beside `instances` are shared by every instance; rules read `check.<field>` from the instance's detail first, then the shared fields.
+- The check's own `detail` is shared by every instance; rules read `check.<field>` from the instance's detail first, then the check's.
 - A check moving between plain and instanced is still one state.
 - The push response stays per check: one query produces every instance, so there is nothing for a reporter to skip per instance.
 - Machine checks can be instanced too, the shape being the same `HealthCheck`.

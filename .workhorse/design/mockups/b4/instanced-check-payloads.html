@@ -102,7 +102,7 @@
 	<p class="lede">Central's <code>sync_facility_stale</code>, with one device offline for two days and one healthy.</p>
 	<div class="pair">
 		<div class="card">
-			<header>Today</header>
+			<header>Today, as sent</header>
 <pre data-json>{
   "check": "sync_facility_stale",
   "result": "failed",
@@ -122,8 +122,7 @@
 			<header>Instanced</header>
 <pre data-json>{
   "check": "sync_facility_stale",
-  "warn_minutes": 10,
-  "fail_minutes": 30,
++ "detail": { "warn_minutes": 10, "fail_minutes": 30 },
 + "instances": {
 +   "6f1c2a9e-4b7d-4e0a-9c55-2d8e1f3b7a10": {
 +     "result": "failed",
@@ -155,7 +154,8 @@
 			<div class="note"><b>Keyed by device id.</b> Same contract as <code>applications</code>: unique within the check, stable across pushes. A silence pins the key.</div>
 			<div class="note"><b>No check-level <code>result</code>.</b> Exactly one of <code>result</code>, <code>healthy</code>, <code>instances</code>. Canopy grades each instance and takes the most urgent one that wasn't skipped.</div>
 			<div class="note"><b>No <code>summary</code> or <code>reason</code>.</b> Canopy writes the message from graded instances by label, so a silenced device drops out of it.</div>
-			<div class="note"><b>Shared fields stay flat.</b> Fields beside <code>instances</code> apply to every instance. Rules read <code>check.&lt;field&gt;</code> from the instance's <code>detail</code> first, then the shared fields.</div>
+			<div class="note"><b>Shared fields in the check's <code>detail</code>.</b> They apply to every instance. Rules read <code>check.&lt;field&gt;</code> from the instance's <code>detail</code> first, then the check's.</div>
+			<div class="note"><b>Nested only.</b> An instanced check takes its fields in <code>detail</code>. A flat field beside <code>instances</code> is a 400, so <code>instances</code> is never mistaken for a detail field.</div>
 			<div class="note"><b>Passing instances are sent.</b> The set is the source's complete truth for the check, so a key left out has recovered.</div>
 		</div>
 	</div>
@@ -164,7 +164,7 @@
 	<p class="lede">Central's <code>fhir_materialisation</code>. One resource is past its threshold, one couldn't be measured, one is disabled, and the schema has a table the check doesn't know.</p>
 	<div class="pair">
 		<div class="card">
-			<header>Today</header>
+			<header>Today, as sent</header>
 <pre data-json>{
   "check": "fhir_materialisation",
   "result": "failed",
@@ -271,7 +271,7 @@
 	</div>
 
 	<h2>3. A mixed push</h2>
-	<p class="lede">Instanced and plain checks share one <code>health</code> array. Each check is one or the other; nothing else in the push changes.</p>
+	<p class="lede">Instanced and plain checks share one <code>health</code> array, and plain checks take either detail form. Nothing else in the push changes.</p>
 	<div class="row">
 		<div class="card">
 			<header>Push from central's machine</header>
@@ -288,12 +288,11 @@
     "host-tamanu-central": {
       "type": "tamanu-central",
       "health": [
-        { "check": "tamanu_http", "result": "passed", "latency_ms": 84 },
++       { "check": "tamanu_http", "result": "passed", "detail": { "latency_ms": 84 } },
         { "check": "sync_lookup", "result": "warning", "minutes_since_refresh": 14.0 },
         {
           "check": "sync_facility_stale",
-          "warn_minutes": 10,
-          "fail_minutes": 30,
++         "detail": { "warn_minutes": 10, "fail_minutes": 30 },
 +         "instances": {
 +           "6f1c2a9e-4b7d-4e0a-9c55-2d8e1f3b7a10": {
 +             "result": "failed",
@@ -329,6 +328,7 @@
 			<div class="note"><b>Graded result.</b> With nothing silenced, <code>sync_facility_stale</code> is <b>failed</b> (Northgate) and its message names Northgate Clinic and Ridge Health Centre.</div>
 			<div class="note"><b>Northgate silenced on central.</b> Northgate drops out. The check is <b>warning</b> (Ridge) and the message names Ridge Health Centre alone.</div>
 			<div class="note"><b>Northgate and Ridge silenced.</b> The check is <b>passed</b>: Harbour is the only instance left.</div>
+			<div class="note"><b>Two forms for plain checks.</b> <code>tamanu_http</code> nests its fields in <code>detail</code>; <code>sync_lookup</code> sends them flat, as every reporter does today. Rules read both as <code>check.&lt;field&gt;</code>.</div>
 			<div class="note"><b>Machine checks too.</b> The shape is <code>HealthCheck</code>, so <code>machine.health</code> entries can be instanced as well, e.g. one instance per mount.</div>
 		</div>
 	</div>
@@ -367,6 +367,21 @@
 				<tr>
 					<td><code>"result"</code> and <code>"instances"</code> together</td>
 					<td>Ambiguous about which one Canopy should grade.</td>
+					<td class="verdict err">400</td>
+				</tr>
+				<tr>
+					<td>Flat fields beside <code>"instances"</code></td>
+					<td>An instanced check takes its fields in <code>detail</code>.</td>
+					<td class="verdict err">400</td>
+				</tr>
+				<tr>
+					<td>Plain check with flat fields and <code>"detail"</code> together</td>
+					<td>Two places for the same fields. Canopy refuses rather than guess at a merge.</td>
+					<td class="verdict err">400</td>
+				</tr>
+				<tr>
+					<td><code>"detail"</code> that isn't an object, on a check or an instance</td>
+					<td>As for a target's <code>detail</code> today.</td>
 					<td class="verdict err">400</td>
 				</tr>
 				<tr>
