@@ -44,7 +44,6 @@ Four Ansible playbooks, each independently runnable and idempotent, as `docs/pla
 Install is inert by construction and can go fleet-wide as soon as it's done.
 Cutover is where we actively swap production workloads into seedling.
 
-Rewrite adopt and cutover against what shipped rather than adapting the existing step lists.
 Under the staged ingress takeover an app is fully installed, routed and TLS-provisioned with no host DNAT rules, then one explicit operator action takes traffic.
 This moves most of cutover into verification done ahead of time, and definitions now arrive as OCI references rather than pushed text.
 
