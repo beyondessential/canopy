@@ -72,7 +72,7 @@ Environments not on Seedling keep today's passive plans, unchanged.
 
 ### Readiness
 
-A plan becomes executable only when what already exists around it agrees.
+A plan becomes executable only when it passes some condition gates:
 
 - Migration testing has a passing verdict for this environment at the target version, recent enough to trust
 - The upgrade manifest decisions for the versions in the gap are filled in (*Version upgrade schema manifest system*, J3), and are passed to the upgrade once that pathway exists
