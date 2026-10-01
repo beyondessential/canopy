@@ -89,12 +89,6 @@ Both Seedling and Canopy have an existing Playwright test suite, so we can use t
 We'll stand up a Canopy test/staging site, and through the Seedling transition work we'll obtain a Seedling test site as well, which can both be used for the QA work.
 - Alternatively, we could have dedicated QA sites, or make a Canopy clone site so it has a snapshot of all the production data.
 
-### Seedling test sites
-
-The pilot from section 1, kept after migration, and a greenfield one.
-Between them they cover adoption, a plain install, upgrades, and the Canopy-driven paths.
-They are rebuilt through the same playbooks the fleet uses, so rehearsing a Seedling release on them also rehearses the playbooks.
-
 ### The UI pass
 
 A structured pass over each product's UI against the test sites: every page, the flows an operator actually performs, empty, large and broken data, and what an operator is left believing after each action.
