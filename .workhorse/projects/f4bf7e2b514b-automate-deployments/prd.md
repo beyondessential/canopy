@@ -101,6 +101,8 @@ Settle what QA looks like after this project, for Canopy, Seedling, and the depl
 
 ## 4. ~~Reporting~~
 
+***Scoped out entirely, moved to early next year.***
+
 *Automate Everything* brought reporting-schema generation into Canopy's view through discovery and deployment artefacts.
 
 ### Standard and deployment reports
