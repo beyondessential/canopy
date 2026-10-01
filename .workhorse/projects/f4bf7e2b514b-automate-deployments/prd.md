@@ -36,7 +36,9 @@ mSupply as a Seedling definition is a stretch goal, desirable to move FSM cleanl
 ### The transition
 
 Four Ansible playbooks, each independently runnable and idempotent, as `docs/plans/adhoc-to-seedling-migration.md` in the ops repo lays out:
-- install, adopt, cut over, decommission.
+- install,
+- adopt,
+- cut over, decommission.
 Install is inert by construction, since Seedling with no apps registered performs an idle teardown, and can go fleet-wide as soon as its package preconditions are confirmed.
 Cutover is the only stage with a blast radius.
 
