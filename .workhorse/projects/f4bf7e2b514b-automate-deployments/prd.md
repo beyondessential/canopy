@@ -70,13 +70,6 @@ On a Seedling host an upgrade is trivial: changing Tamanu's `version` runs the d
 
 Environments not on Seedling keep today's passive plans, unchanged.
 
-### The channel
-
-Seedling already reports to Canopy once a minute through a connected client, and Canopy already uses that to carry instructions back (used for backups and TLS).
-
-An instruction carries an identifier, and Seedling's next reports say what became of it: accepted, refused and why, in progress, done, failed.
-An operator watching the host sees what Canopy asked for and what it caused.
-
 ### What an upgrade instruction carries
 
 An upgrade is not always a param set.
