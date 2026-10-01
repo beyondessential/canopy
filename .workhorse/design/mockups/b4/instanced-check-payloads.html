@@ -98,7 +98,7 @@
 		<span><i class="swatch bad"></i>Cannot be targeted</span>
 	</div>
 
-	<h2>1. One check, before and after</h2>
+	<h2>1. A check reporting arrays</h2>
 	<p class="lede">Central's <code>sync_facility_stale</code>, with one device offline for two days and one healthy.</p>
 	<div class="pair">
 		<div class="card">
@@ -160,7 +160,117 @@
 		</div>
 	</div>
 
-	<h2>2. A mixed push</h2>
+	<h2>2. A check already keyed by resource</h2>
+	<p class="lede">Central's <code>fhir_materialisation</code>. One resource is past its threshold, one couldn't be measured, one is disabled, and the schema has a table the check doesn't know.</p>
+	<div class="pair">
+		<div class="card">
+			<header>Today</header>
+<pre data-json>{
+  "check": "fhir_materialisation",
+  "result": "failed",
+! "resources": {
+!   "ServiceRequest": {
+!     "gap": 41,
+!     "lag_seconds": 7380,
+!     "enablement": "setting",
+!     "pace": "prompt",
+!     "fails_after_seconds": 3600
+!   },
+!   "Patient": {
+!     "gap": 0, "lag_seconds": 0, "enablement": "setting",
+!     "pace": "prompt", "fails_after_seconds": 3600
+!   },
+!   "Encounter": {
+!     "gap": 3, "lag_seconds": 42, "enablement": "setting",
+!     "pace": "prompt", "fails_after_seconds": 3600
+!   },
+!   "MediciReport": {
+!     "gap": 18234, "lag_seconds": 259200, "enablement": "setting",
+!     "pace": "deferred", "fails_after_seconds": 432000
+!   }
+! },
+! "disabled": { "Immunization": "setting" },
+! "upstream_absent": ["Specimen"],
+! "errored": {
+!   "MedicationRequest": "canceling statement due to statement timeout"
+! },
+! "unmonitored": ["appointments"],
+  "summary": "44 unmaterialised, oldest 2h (ServiceRequest), MediciReport 3d behind",
+  "reason": "ServiceRequest unmaterialised for over 1h"
+}</pre>
+		</div>
+		<div class="card">
+			<header>Instanced</header>
+<pre data-json>{
+  "check": "fhir_materialisation",
++ "instances": {
++   "ServiceRequest": {
++     "result": "failed",
++     "detail": {
++       "gap": 41,
++       "lag_seconds": 7380,
++       "enablement": "setting",
++       "pace": "prompt",
++       "fails_after_seconds": 3600
++     }
++   },
++   "Patient": {
++     "result": "passed",
++     "detail": {
++       "gap": 0, "lag_seconds": 0, "enablement": "setting",
++       "pace": "prompt", "fails_after_seconds": 3600
++     }
++   },
++   "Encounter": {
++     "result": "passed",
++     "detail": {
++       "gap": 3, "lag_seconds": 42, "enablement": "setting",
++       "pace": "prompt", "fails_after_seconds": 3600
++     }
++   },
++   "MediciReport": {
++     "result": "passed",
++     "detail": {
++       "gap": 18234, "lag_seconds": 259200, "enablement": "setting",
++       "pace": "deferred", "fails_after_seconds": 432000
++     }
++   },
++   "Immunization": {
++     "result": "skipped",
++     "detail": { "enablement": "setting", "reason": "disabled" }
++   },
++   "Specimen": {
++     "result": "skipped",
++     "detail": { "reason": "upstream absent" }
++   },
++   "MedicationRequest": {
++     "result": "broken",
++     "detail": { "reason": "canceling statement due to statement timeout" }
++   },
++   "appointments": {
++     "result": "broken",
++     "label": "appointments table",
++     "detail": { "reason": "materialised resource the check does not know" }
++   }
++ }
+}</pre>
+		</div>
+	</div>
+	<div class="pair">
+		<div class="notes">
+			<div class="note"><b>Keyed, but still unreachable.</b> A rule field is one name with no dots, so <code>check.resources</code> is one opaque value. Nothing can grade or silence <code>ServiceRequest</code> alone.</div>
+			<div class="note"><b>Five places to look.</b> A resource's state is split across <code>resources</code> and four side lists, each with its own shape.</div>
+			<div class="note"><b>The reporter picks the headline.</b> <code>errored</code> only warns when nothing breached, so a failing resource hides an unmeasurable one.</div>
+		</div>
+		<div class="notes">
+			<div class="note"><b>Inside out.</b> Every resource is an instance keyed by its name, so the four side lists become results: disabled and absent are <b>skipped</b>, errored and unknown are <b>broken</b>. Keys are readable, so no labels are needed.</div>
+			<div class="note"><b>Graded result.</b> <b>Failed</b> (ServiceRequest). The message names ServiceRequest, MedicationRequest and appointments table, since broken instances warn alongside the failure.</div>
+			<div class="note"><b>Now targetable.</b> Silence <code>Encounter</code> on one central, or write a rule on <code>check.pace</code> to grade deferred resources differently.</div>
+			<div class="note open"><b>Open.</b> <code>appointments</code> is a table name where the other keys are resource names, since the check can't map it. Either a mixed key space is fine, or unknown resources carry a prefix such as <code>table:appointments</code>.</div>
+		</div>
+	</div>
+
+	<h2>3. A mixed push</h2>
 	<p class="lede">Instanced and plain checks share one <code>health</code> array. Each check is one or the other; nothing else in the push changes.</p>
 	<div class="row">
 		<div class="card">
@@ -223,7 +333,7 @@
 		</div>
 	</div>
 
-	<h2>3. Edge shapes</h2>
+	<h2>4. Edge shapes</h2>
 	<p class="lede">How Canopy reads the cases a reporter can produce.</p>
 	<div class="card" style="margin-top: 12px">
 		<table>
@@ -273,7 +383,7 @@
 		</table>
 	</div>
 
-	<h2>4. Response</h2>
+	<h2>5. Response</h2>
 	<div class="row">
 		<div class="card">
 			<header>Answer about central, unchanged</header>
@@ -295,7 +405,7 @@
 		</div>
 	</div>
 
-	<h2>5. Separate card: what an instance concerns</h2>
+	<h2>6. Separate card: what an instance concerns</h2>
 	<p class="lede">Layer 2, to show the instance object has room for it. The facility declares an alias and central's instance points at it.</p>
 	<div class="pair">
 		<div class="card">

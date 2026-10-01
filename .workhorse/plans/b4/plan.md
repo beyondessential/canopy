@@ -79,9 +79,17 @@ Tamanu's `sync_sessions.parameters` carries `deviceId` alongside `facilityIds`.
 A device is one facility server, which is what a Canopy application models; a facility is a Tamanu domain concept a server can carry several of.
 So instances key on `deviceId`, with the facility ids (and names, from central's `facilities` table) as instance detail.
 
+### Other checks that take instances
+
+`fhir_materialisation` already keys its detail by resource (`resources.<Name>`), but rule fields are one dot-free name, so no resource is reachable on its own.
+Its four side lists fold into instance results: `disabled` and `upstream_absent` are skipped, `errored` and `unmonitored` are broken.
+That also stops a failing resource from hiding an unmeasurable one, which today's reporter-chosen headline does.
+Open: `unmonitored` entries are table names where the other keys are resource names.
+
 ### Cross-repo (bestool)
 
 - `sync_facility_stale` emits one instance per active non-mobile device, keyed by `deviceId`, labelled with its facilities' names.
+- `fhir_materialisation` emits one instance per resource, keyed by resource name.
 - A facility's alertd declares its `deviceId` (from `local_system_facts`) as an alias on its application.
 
 ## Rejected
