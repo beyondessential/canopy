@@ -18,7 +18,7 @@ With this project, Seedling goes production-ready across the Linux fleet; on hos
 
 ## 1. Seedling in production
 
-### Carried over from phase 1
+### Leftover work
 
 Specified in *Seedling in production* and not built.
 
