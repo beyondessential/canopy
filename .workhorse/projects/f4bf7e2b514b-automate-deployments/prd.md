@@ -49,14 +49,6 @@ Each is one Ansible run, and revert is one step until Decommision.
 
 Decommission removes the possibility of going back (and reclaims some disk space).
 
-Properties that must survive the rewrite:
-
-- The Tamanu version is held constant across a cutover, so nothing runs a schema migration and re-enabling the old units is a real rollback
-- The old workers stop before Seedling's start, so the two stacks never write to the shared database concurrently. This is what makes rollback lossless, and it is not obvious from the step list
-- Verification reads something encrypted under the config key: a completed sync round on a facility, the reporting secret path on a central. An app reporting ready does not prove the key is right
-- Rollback is one step at any point before decommission
-- Decommission is a separate run on operator judgement, and does not remove the old config-key secret
-- Once a host is Seedling-managed, the legacy install and upgrade playbooks refuse to run on it without an explicit override
 
 Ops prerequisites from the same plan: bestool suppresses Tamanu service checks while keeping cluster and DB checks (C3); Seedling's package dependencies resolve on the fleet's OS and architectures (C4); an Ansible-owned ctl client key (C5).
 
