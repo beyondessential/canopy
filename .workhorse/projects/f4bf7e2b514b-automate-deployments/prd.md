@@ -45,8 +45,7 @@ Install is inert by construction and can go fleet-wide as soon as it's done.
 Adopt creates the workloads in seedling but doesn't move anything over.
 Cutover is where we actively swap production workloads into seedling.
 
-Each is one Ansible run, and revert is one step until:
-- Decommission removes the possibility of going back (and reclaims some disk space).
+Each is one Ansible run, and revert is one step until..Decommission removes the possibility of going back (and reclaims some disk space).
 
 Properties that must survive the rewrite:
 
