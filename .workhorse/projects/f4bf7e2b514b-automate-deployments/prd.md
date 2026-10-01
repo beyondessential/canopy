@@ -70,7 +70,6 @@ On a Seedling host an upgrade is trivial: changing Tamanu's `version` runs the d
 
 Environments not on Seedling keep today's passive plans, unchanged.
 
-This is *Control at a distance* from the phase 1 Seedling PRD, which was specified there and not built.
 
 ### The channel
 
