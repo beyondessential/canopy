@@ -27,13 +27,6 @@ Specified in *Seedling in production* and not built.
 
 - **Integrate the new Canopy TLS issuance.** Warm-cert observation reads only Caddy's on-disk cache, so a certificate provisioned off the `:80` path does not satisfy `rt.warm_certs().ready()`. Canopy now issues TLS certificates and bestool already has an implementation, so Seedling follows along: this is the certificate path for hosts where another process holds `:80`, and it covers warm-cert observation of certificates Seedling did not place in the cache
 
-Cleared since phase 1, no longer gating cutover:
-
-- **WAF hook (B8)** — no deployment currently enables it
-- **Custom error pages (B6)** — broken in every Linux deployment for years with no one affected, so there is nothing to preserve across cutover
-- **Emitted Caddy config validation (P2)** — the image is fixed and built by us, so QA and test runs catch a bad config before a Caddy update ever ships alongside a Seedling update
-- **The logic-bug audit** — the high-severity findings that would have gated production are fixed; only medium and low remain, and they do not gate
-
 Canopy-driven backups and removal of Seedling's own backup framework, also phase 1, do not gate cutover: the fleet's app-data backups stay host-side while PostgreSQL does.
 
 ### Production definitions
