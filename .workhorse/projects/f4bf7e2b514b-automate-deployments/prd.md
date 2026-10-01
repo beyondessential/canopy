@@ -93,12 +93,6 @@ We'll stand up a Canopy test/staging site, and through the Seedling transition w
 
 Canopy's UI is due a redesign (#W3) to make it better suited to the density it's achieved over time. This is large enough that it might need its own scope .... edwin?
 
-### Automation
-
-Both repos already run Playwright, Canopy's sharded across CI.
-The pass's flows become Playwright tests against a seeded fixture, so they run on every PR and not only on the test site.
-Expect the tooling to need adapting: fixtures seeded from the same generator as the test site, and for Seedling, driving a real host rather than only the web frontend.
-
 ### Ongoing QA
 
 Settle what QA looks like after this project, for Canopy, Seedling, and the deployment and Ansible work around them: what gets a tester's pass and when, what the test sites are for between releases, and who keeps them running.
