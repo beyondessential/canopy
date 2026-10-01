@@ -44,7 +44,7 @@ Four Ansible playbooks, each independently runnable and idempotent, as originall
 Install is inert by construction and can go fleet-wide as soon as it's done.
 Adopt creates the workloads in seedling but doesn't move anything over.
 Cutover is where we actively swap production workloads into seedling.
-Decommission removes the possibility of going back (and reclaimes th
+Decommission removes the possibility of going back (and reclaims some 
 
 Properties that must survive the rewrite:
 
