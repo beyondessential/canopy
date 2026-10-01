@@ -24,14 +24,15 @@ Seedling goes into production across the Linux fleet; on hosts that run it, Cano
 ### Carried over from phase 1
 
 Specified in *Seedling in production* and not built.
-They gate cutover.
 
-- **Warm-cert observation of runtime-managed and uploaded certificates.** Warm-cert observation still reads only Caddy's on-disk cache, so a certificate Seedling provisioned by DNS-01 or that an operator uploaded does not satisfy `rt.warm_certs().ready()`. Every certificate path that avoids `:80` depends on this
-- **Staged ingress takeover**: an app fully installed, routed and TLS-provisioned with no host DNAT rules, then one explicit operator action to take traffic
-- **A certificate path for hosts where another process holds `:80`**: Canopy issuance, Route53 DNS-01, or importing the live leaf
-- **WAF hook (B8)** and **custom error pages (B6)**, both blocked
-- **Emitted Caddy config validated against the real image (P2)**, the cheapest insurance against a config valid to us and rejected by the binary, which takes every vhost on the host down with it
-- **The logic-bug audit.** 63 bug-sweep cards are open, five high. Phase 1 left open whether the audit gates production; this project has to answer it, since this is the larger-scale deployment the audit was carried out ahead of
+- **Integrate the new Canopy TLS issuance.** Warm-cert observation reads only Caddy's on-disk cache, so a certificate provisioned off the `:80` path does not satisfy `rt.warm_certs().ready()`. Canopy now issues TLS certificates and bestool already has an implementation, so Seedling follows along: this is the certificate path for hosts where another process holds `:80`, and it covers warm-cert observation of certificates Seedling did not place in the cache
+
+Cleared since phase 1, no longer gating cutover:
+
+- **WAF hook (B8)** — no deployment currently enables it
+- **Custom error pages (B6)** — broken in every Linux deployment for years with no one affected, so there is nothing to preserve across cutover
+- **Emitted Caddy config validation (P2)** — the image is fixed and built by us, so QA and test runs catch a bad config before a Caddy update ever ships alongside a Seedling update
+- **The logic-bug audit** — the high-severity findings that would have gated production are fixed; only medium and low remain, and they do not gate
 
 Canopy-driven backups and removal of Seedling's own backup framework, also phase 1, do not gate cutover: the fleet's app-data backups stay host-side while PostgreSQL does.
 
@@ -41,18 +42,9 @@ The definitions in Seedling's `apps/` are demos and stay that way.
 The production Tamanu definitions live in the Tamanu repo, change in the same commit as the behaviour they describe, and are published as OCI artefacts alongside Tamanu's images, using the provenance and fetch mechanism phase 1 built.
 
 What they must say is set by Tamanu's move off json5 config: everything that described the deployment to Tamanu moves into Tamanu's internal settings, in the database, and crosses a cutover untouched.
-Two pieces of per-host state survive.
+A small amount of per-host state and a few structural requirements remain for the definition to carry — among them the per-server config key and the range of Tamanu versions the definition supports — and are worked out when the definition is carded.
 
-- The per-server config key, as a secret param written into a tmpfs volume and re-applied on restart (A1)
-- `DATABASE_URL` carrying a password, because the host cluster authenticates the `tamanu` role with `scram-sha-256` (A2). Transitional: it retires when PostgreSQL moves into Seedling
-
-And three structural requirements.
-
-- Central binds `/api` and `/v1` on the patient portal service as well as the web service (A3)
-- The facility definition declares no ingress when no public hostname is set, so plaintext `.local` hosts are served by a site ingress (A4)
-- The definition declares which Tamanu versions it supports, with the json5-removal release as the floor
-
-The mSupply definition is promoted from its draft under the same regime (A5).
+The mSupply definition follows the same regime as a stretch goal, promoted from its draft once the Tamanu definition has proven out.
 
 ### The transition
 
@@ -61,7 +53,8 @@ Install is inert by construction, since Seedling with no apps registered perform
 Cutover is the only stage with a blast radius.
 
 Rewrite adopt and cutover against what shipped rather than adapting the existing step lists.
-The staged takeover moves most of cutover into verification done ahead of time, and definitions now arrive as OCI references rather than pushed text.
+Under the staged ingress takeover an app is fully installed, routed and TLS-provisioned with no host DNAT rules, then one explicit operator action takes traffic.
+This moves most of cutover into verification done ahead of time, and definitions now arrive as OCI references rather than pushed text.
 
 Properties that must survive the rewrite:
 
@@ -231,7 +224,6 @@ Each needs a decision on whether it belongs here, in a Tamanu project, or nowher
 
 ## Open questions
 
-- Does the bug audit gate the pilot, the first production cutover, or neither? A defensible split: high-severity findings and anything touching ingress, certificates or volumes gate production, the rest does not
 - Which certificate path is the default for public hosts
 - Where the mSupply definition lives
 - Who confirms a ready upgrade plan, and whether production needs the authorisation unlock *Automate Everything* proposed
