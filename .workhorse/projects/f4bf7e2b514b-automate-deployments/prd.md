@@ -36,7 +36,7 @@ mSupply as a Seedling definition is a stretch goal, desirable to move FSM cleanl
 ### The transition
 
 Four Ansible playbooks, each independently runnable and idempotent, as `docs/plans/adhoc-to-seedling-migration.md` in the ops repo lays out:
-- install,
+- install (seed,
 - adopt,
 - cut over,
 - decommission (the old 
