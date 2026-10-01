@@ -76,8 +76,7 @@ A plan becomes executable only when it passes some condition gates:
 
 - Migration testing has a passing verdict for this environment at the target version, recent enough to trust.
 - The upgrade manifest decisions for the versions in the gap are filled in (*Version upgrade schema manifest system*, J3), and are passed to the upgrade once that pathway exists. This also serves as a manual approve gate by PM.
-- The environment's op lease is free. The upgrade takes it for its duration, so an Ansible run cannot collide
-- The upgrade is manually approved (via the upgrade manifest)
+- The environment's op lease is free. The upgrade takes it for its duration, so an Ansible run cannot collide.
 
 ### Outcome
 
