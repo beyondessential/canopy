@@ -84,7 +84,7 @@ Both Seedling and Canopy are internal products and do not need Tamanu's level of
 
 This is a project in its own right for a tester rather than per-card testing.
 
-Both Seedling and Canopy have an existing Playwright test suite, and arguably it might be
+Both Seedling and Canopy have an existing Playwright test suite, and arguably it might be more complete than
 
 ### A Canopy test site
 
