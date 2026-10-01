@@ -89,16 +89,6 @@ Both Seedling and Canopy have an existing Playwright test suite, so we can use t
 We'll stand up a Canopy test/staging site, and through the Seedling transition work we'll obtain a Seedling test site as well, which can both be used for the QA work.
 - Alternatively, we could have dedicated QA sites, or make a Canopy clone site so it has a snapshot of all the production data.
 
-### A Canopy test site
-
-A standing Canopy deployment, separate from production, with a synthetic fleet: groups across every rank, machines and applications of each type, versions spread across releases, backups that succeed and fail, incidents that open, flap, escalate and close, upgrade plans that are open, late, met and withdrawn.
-The synthetic data is generated and reproducible, so the site resets to a known state.
-
-On top of that, some PR and demo Tamanu deployments report into it, so it sees live health checks, backups and restores from software that is actually running, without any of it mattering.
-The Seedling test sites report into it as well, which is where section 2 is exercised.
-
-It is also the natural staging environment for Canopy itself, which *Gate canopy deploys on something other than every push* (N3) lists as one of its options.
-
 ### Seedling test sites
 
 The pilot from section 1, kept after migration, and a greenfield one.
