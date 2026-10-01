@@ -33,7 +33,7 @@ Canopy-driven backups and removal of Seedling's own backup framework, also phase
 
 Write production Tamanu Seedling definition bundles. These live in the Tamanu repo, change alongside it, and are published as OCI artifacts (~container images, except not) alongside Tamanu's normal container images during release. Seedling fetches them from these artifacts, and can also be pointed directly to github for dev and testing purposes.
 
-We are greatly helped here by Tamanu no longer having json5 config. We therefore require that a Tamanu deployment has fully migrated to settings before it moves onto Seedling.
+We are greatly helped here by Tamanu no longer having json config. We therefore require that a Tamanu deployment has fully migrated to settings before it moves onto Seedling.
 
 mSupply as a Seedling definition is a stretch goal, desirable to move FSM cleanly.
 
