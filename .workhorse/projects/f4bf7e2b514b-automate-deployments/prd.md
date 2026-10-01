@@ -49,9 +49,6 @@ Each is one Ansible run, and revert is one step until Decommision.
 
 Decommission removes the possibility of going back (and reclaims some disk space).
 
-
-Ops prerequisites from the same plan: bestool suppresses Tamanu service checks while keeping cluster and DB checks (C3); Seedling's package dependencies resolve on the fleet's OS and architectures (C4); an Ansible-owned ctl client key (C5).
-
 New Linux deployments run install and adopt, then a plain install instead of a cutover, and become the default as soon as the pilot proves out, so the legacy layout stops growing.
 
 ### Pilot, then rollout
