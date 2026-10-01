@@ -100,7 +100,6 @@ Settle what QA looks like after this project, for Canopy, Seedling, and the depl
 ## 4. Reporting
 
 *Automate Everything* brought reporting-schema generation into Canopy's view through discovery and deployment artefacts.
-What it did not reach is reports themselves, and getting schemas and reports onto a deployment with no manual step.
 
 ### Reporting-schema generation
 
