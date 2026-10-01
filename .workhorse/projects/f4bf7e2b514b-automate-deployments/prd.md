@@ -53,7 +53,7 @@ As a stretch goal, we'll pre-install Seedling onto disk images, with the goal of
 
 ### Pilot, then rollout
 
-The pilot is a dedicated AWS environment built through the existing Ansibl path and then migrated, so it exercises the whole transition rather than a greenfield install.
+The pilot is a dedicated AWS environment built through the existing Linux  path and then migrated, so it exercises the whole transition rather than a greenfield install.
 It stays up afterwards as a Seedling test site (section 3).
 
 Rollout follows recoverability, not prerequisite count.
