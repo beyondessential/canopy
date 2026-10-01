@@ -74,9 +74,6 @@ Environments not on Seedling keep today's passive plans, unchanged.
 
 Seedling already reports to Canopy once a minute through a connected client, and Canopy already uses that to carry instructions back (used for backups and TLS).
 
-It is poll-driven, bounded to the report cadence, and needs no new listener and no inbound authority through the relay, which is deliberately outbound-only.
-Keep it that way.
-
 An instruction carries an identifier, and Seedling's next reports say what became of it: accepted, refused and why, in progress, done, failed.
 An operator watching the host sees what Canopy asked for and what it caused.
 
