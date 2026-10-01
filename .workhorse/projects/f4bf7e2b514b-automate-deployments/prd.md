@@ -103,7 +103,7 @@ Settle what QA looks like after this project, for Canopy, Seedling, and the depl
 
 ### Reporting-schema generation
 
-Take the pipeline as it stands after *Automate Everything* and make it something VitiOps runs without help: commissioned from Canopy, produced against a managed restore replica, versioned and attributed as a deployment artefact, with failures that say what failed.
+Take the pipeline as it stands after *Automate Everything* and make it something runs without help: commissioned from Canopy, produced against a managed restore replica, versioned and attributed as a deployment artefact, with failures that say what failed.
 The first card is a pass over the current pipeline listing what is rough.
 
 ### Standard and deployment reports
