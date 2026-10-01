@@ -70,7 +70,6 @@ On a Seedling host an upgrade is trivial: changing Tamanu's `version` runs the d
 
 Environments not on Seedling keep today's passive plans, unchanged.
 
-
 ### The channel
 
 Seedling already reports to Canopy every sixty seconds through a connected client, and the report response is specified to carry instructions back (`r[canopy.report.backup-prompt]`), which Seedling currently receives empty and ignores.
