@@ -66,6 +66,15 @@ Whether an incident notified is recorded as its **published** flag, so flaps can
 An escalating check's effective failure (see [CHK](checks.md), "Policy") notifies immediately, bypassing any remaining grace; if the incident has already notified, the join escalates it with a further notification, at most once per incident.
 A notified incident notifies again when it closes.
 
+A notified incident still open a day after it opened sends a reminder, and another for each further day it stays open.
+A reminder waits out any lingering as the opening notification does, so it is sent only while an effective failure is live, and a reminder whose incident closes while lingering is never sent.
+
+The opening notification, an escalation, and a reminder each summarise the incident as it stands when the notification is sent, so issues that joined during the grace period appear in it.
+The summary gives the incident's target, its worst live result as the notification's severity (critical when a live failure escalates), and how many of its live issues sit at each result.
+It then lists the live issues in timeline order, one line each, giving the issue's result, its headline (or its check where it has none), and the application or machine it is on; an issue scoped to a group or to Canopy as a whole carries no location.
+The list is capped so the notification stays within the channel's message limits, and ends with a count of the issues it left out.
+A reminder leads with how long the incident has been open.
+
 ## Resolution
 
 An operator can resolve an open incident, recording who and why.
