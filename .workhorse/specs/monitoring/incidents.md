@@ -72,7 +72,7 @@ A reminder waits out any lingering as the opening notification does, so it is se
 The opening notification, an escalation, and a reminder each summarise the incident as it stands when the notification is sent, so issues that joined during the grace period appear in it.
 The summary gives the incident's target, its worst live result as the notification's severity (critical when a live failure escalates), and how many of its live issues sit at each result.
 It then lists the live issues in timeline order, one line each, giving the issue's result, its headline (or its check where it has none), and the application or machine it is on; an issue scoped to a group or to Canopy as a whole carries no location.
-The list is capped so the notification stays within the channel's message limits, and ends with a count of the issues it left out.
+The list shows at most five issues; any beyond those are counted at its end rather than listed.
 A reminder leads with how long the incident has been open.
 
 ## Resolution

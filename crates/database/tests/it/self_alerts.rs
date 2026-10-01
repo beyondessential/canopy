@@ -97,7 +97,10 @@ async fn raise_enqueues_once_and_flap_recovery_is_silent() {
 			"non-escalating opens wait out the grace"
 		);
 		assert_eq!(open.payload["server"], "Canopy");
-		assert_eq!(open.payload["source_ref"], format!("canopy/{REF}"));
+		assert_eq!(
+			open.payload["source_ref"], "1 failed",
+			"source_ref carries the incident's counts"
+		);
 
 		// Re-raise while alerting: no new outbox row.
 		raise_with(&mut conn, false).await;

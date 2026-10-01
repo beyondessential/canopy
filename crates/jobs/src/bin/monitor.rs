@@ -11,6 +11,8 @@
 //! - **backup staleness + reconcile** — `database::backup::sweep`: stale
 //!   reported runs / maintenance, and report-vs-inventory reconciliation.
 //! - **tailnet key-expiry** — when the Tailscale directory is configured.
+//! - **incident linger and reminders** — close incidents whose linger window
+//!   has elapsed, and queue the daily reminder for long-open ones.
 //! - **operator sessions** — retires safety-mode sessions no client has
 //!   presented for a day, on its own hourly timer (see `jobs::session_sweep`).
 //!
@@ -241,6 +243,15 @@ pub fn spawn() -> JoinHandle<()> {
 				Ok(0) => {}
 				Ok(n) => debug!("closed {n} lingering incident(s)"),
 				Err(err) => error!("incident linger sweep failed: {err}"),
+			}
+
+			// Notified incidents another whole day past their opening get a
+			// reminder. After the linger sweep, so an incident it just closed
+			// isn't reminded about.
+			match database::issues::enqueue_due_reminders(&mut db).await {
+				Ok(0) => {}
+				Ok(n) => debug!("queued {n} incident reminder(s)"),
+				Err(err) => error!("incident reminder sweep failed: {err}"),
 			}
 
 			// Maintenance windows that have reached their expected end, and
