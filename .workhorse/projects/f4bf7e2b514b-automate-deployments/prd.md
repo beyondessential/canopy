@@ -58,7 +58,7 @@ It stays up afterwards as a Seedling test site (section 3).
 
 Rollout follows recoverability, not prerequisite count.
 
-1. Pilot environments (there's no demos on "Linux" as such anymore, so this probably goes)
+
 2. AWS-hosted production, which tolerates tier 2 gaps behind the stack-wide security group and AWS Backup
 3. On-prem production, which needs tier 1 and tier 2 in full
 4. The `.local` class last: no certificate needed, but the hardest networks and the hardest rollbacks
