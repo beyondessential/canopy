@@ -62,7 +62,7 @@ Rollout follows recoverability, not prerequisite count.
 3. On-prem production
 4. The Tamanu Iti `.local` class last: hardest networks and hardest rollbacks
 
-PostgreSQL stays a host package throughout.
+PostgreSQL stays on the host for now
 Moving it is a later project, for the reversibility reasons the phase 1 PRD and the ops plan set out.
 
 ## 2. Upgrades under Canopy's control
