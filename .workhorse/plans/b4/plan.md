@@ -9,10 +9,10 @@ A facility known to be offline (its reachability silenced) keeps central's check
 ## Direction (workshop)
 
 Two layers.
-Layer 1 is this card; layer 2 is to be split out into its own card.
+Layer 1 is this card; layer 2 is split out into the card breakdown.
 
 The motivating case, facilities known to be offline, is resolved by layer 1 alone: their instances are silenced on central's check.
-Layer 2 does not reach that case (see its gates below), which is accepted.
+Layer 2 does not reach that case (it inherits monitoring and maintenance, not silences), which is accepted.
 
 ### Layer 1: reported checks carry instances
 
@@ -59,31 +59,10 @@ One identity mechanism for every instance, reported or determined.
 An instance silence is a scoped silence that also names an instance key, recording who and when like any silence, at the scopes the check itself can be silenced at.
 It is offered wherever a target's check is presented with its instances: the target's checks, the issue, the incident.
 It is never offered on the fleet-wide check page, which would list every instance on every target.
-An instance silence is also the fallback wherever layer 2 cannot resolve a reference.
 
 ### Layer 2: an instance can name what it concerns
 
-Canopy never shares its own identifiers and must not learn reporters' domain concepts (Tamanu facility, device).
-So correlation is opaque:
-
-- an application's report declares aliases it is known by, as an `aliases` object keyed by kind, one value per kind, which Canopy does not interpret (e.g. kind `tamanu-device`);
-- an instance names the alias it concerns, in a `concerns` object of the same shape;
-- Canopy resolves the alias within the reporting application's group.
-
-The issue stays the reporting target's for health rollup and incident placement.
-The reference only changes how the instance is gated, and where it is presented.
-
-A resolved instance inherits the target-wide gates of the target it concerns: its monitoring switch and its maintenance windows.
-It does not inherit that target's silences, reachability included: a silence quiets one check, and an instance concerning a target is not that target's check.
-
-A resolved instance is also presented on the target it concerns, marked as reported by the reporting target, the way a machine's checks present on its applications.
-It counts towards the reporting target's health, not the referenced one's.
-
-Resolution rules so far:
-
-- aliases persist from an application's last report, since the target most often referenced is the one that has gone quiet;
-- an alias claimed by more than one application in the group resolves to nothing, so ambiguity never silences anything (a facility restored from another's backup can share a device id);
-- an unresolved reference leaves the instance graded on the reporting target's policy alone.
+Split out: see the card breakdown (`.workhorse/breakdowns/b4/breakdown.md`).
 
 ### Keyed by device, not facility
 
@@ -102,7 +81,6 @@ Open: `unmonitored` entries are table names where the other keys are resource na
 
 - `sync_facility_stale` emits one instance per active non-mobile device, keyed by `deviceId`, labelled with its facilities' names.
 - `fhir_materialisation` emits one instance per resource, keyed by resource name.
-- A facility's alertd declares its `deviceId` (from `local_system_facts`) as an alias on its application.
 
 ## Rejected
 
@@ -220,7 +198,7 @@ Each section leaves the tree building and tested, so they can land as separate c
 - [x] `relay-protocol` `SubstrateInstance`: add `key`; `SubstrateFiling` gains a check-level broken outcome; `SubstrateInstance::only` keys `""`. The relay has no deployments yet, so the protocol changes in place: no version bump or compatibility with older relays
 - [x] `crates/relay`: node pools keyed by pool name; `Determination::refused` and `watch.rs`'s `broken()` report a check-level broken instead of a broken instance
 - [x] `jobs/relay/ingest.rs`: map keys and check-level broken; stop passing the relay's `message` through for instanced checks
-- [ ] Self-alerts relay-version check (SELF): confirm how its per-cluster instances are filed and key them by cluster
+- Self-alerts relay-version check (SELF): no such check exists yet, so there was nothing to key. Whoever builds it keys its instances by cluster id
   - Nothing files this condition yet: there is no relay-version check in `self_alerts.rs` or anywhere else, and no named relay version is stored (K8S "Keeping a relay current" is unimplemented). So there is nothing to key on this card; whoever implements it files one instance per registered cluster keyed by the cluster's id, which is stable where its name is not.
 - [x] Update `crates/database/tests/it/cluster_checks.rs` and the backup/restore tests for keys
 
@@ -247,6 +225,6 @@ Each section leaves the tree building and tested, so they can land as separate c
 ### 8. Wrap-up
 
 - [ ] `just check`, `just test`, `cargo fmt`, no new warnings
-- [ ] Draft the card's test cases ([Draft test cases] skill)
-- [ ] Split layer 2 into its own card via the card breakdown; drop the layer 2 prose from this plan once it lives there
+- [x] Draft the card's test cases ([Draft test cases] skill)
+- [x] Split layer 2 into its own card via the card breakdown; drop the layer 2 prose from this plan once it lives there
 - [ ] Note on #bestool/P3 when a `bes-canopy-api` release carries the new `HealthCheck` shape
