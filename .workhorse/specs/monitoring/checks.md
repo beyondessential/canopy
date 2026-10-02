@@ -180,7 +180,7 @@ What the consolidated view presents and what an incident counts agree on it as o
 The reporting source is told the check's policy and not each instance's, since it runs the check rather than its instances one by one (see [STA](../public-server/statuses.md), "Response").
 
 An instance silence belongs to a target, so it is offered wherever a target's check is presented with its instances: among the target's checks, and on the check's issue wherever that is presented, an incident included.
-Where a target's check is presented, its degraded instances and its silenced ones are listed with it, each by its label and result with a silence control of its own, and its passing instances are counted rather than listed.
+Where a target's check is presented, its degraded instances and its silenced ones are listed with it, each by its label and result with a silence control of its own, and its passing instances and those skipped other than by a silence are each counted rather than listed.
 The fleet-wide check page presents a check across every target and offers its catalog policy, which is where a decision about every instance is made.
 
 Wherever a target's silences are listed, an instance silence whose key the check does not currently report is marked as such.
