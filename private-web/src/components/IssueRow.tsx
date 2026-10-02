@@ -4,6 +4,7 @@ import {
 	Button,
 	IconButton,
 	Link as MuiLink,
+	ListItemText,
 	MenuItem,
 	Stack,
 	TextField,
@@ -33,6 +34,7 @@ import {
 	RESOLVED_REASON_LABEL,
 	healthcheckNameFromRef,
 	healthcheckPath,
+	instanceName,
 	type CheckResult,
 	type IssueData,
 	type IssueIncidentLink,
@@ -390,6 +392,10 @@ function IssueActions({
 	const [resolveOpen, setResolveOpen] = useState(false);
 	const [snoozeOpen, setSnoozeOpen] = useState(false);
 	const [silenceOpen, setSilenceOpen] = useState(false);
+	// The instance key to silence, or "" for the whole check.
+	// spec: CHK#silencing-one-instance
+	const [silenceInstance, setSilenceInstance] = useState("");
+	const instanceArg = silenceInstance ? { instance: silenceInstance } : {};
 	const [reason, setReason] = useState<ResolvedReason>("fixed");
 	const [snoozeHours, setSnoozeHours] = useState(4);
 
@@ -567,6 +573,40 @@ function IssueActions({
 						the chosen scope. The issues still record, but no longer trigger or
 						join incidents. Manage and un-silence from the detail page.
 					</Typography>
+					{issue.instances.length > 0 && (
+						<TextField
+							select
+							size="small"
+							label="Silence"
+							value={silenceInstance}
+							onChange={(e) => setSilenceInstance(e.target.value)}
+							// No instance key is empty, so the empty value is the
+							// whole check, which has to be shown as chosen.
+							slotProps={{
+								inputLabel: { shrink: true },
+								select: {
+									displayEmpty: true,
+									renderValue: (selected) => {
+										const chosen = issue.instances.find(
+											(i) => i.key === selected,
+										);
+										return chosen ? instanceName(chosen) : "Whole check";
+									},
+								},
+							}}
+							sx={{ minWidth: 260, alignSelf: "flex-start" }}
+						>
+							<MenuItem value="">Whole check</MenuItem>
+							{issue.instances.map((i) => (
+								<MenuItem key={i.key} value={i.key}>
+									<ListItemText
+										primary={instanceName(i)}
+										secondary={i.effective}
+									/>
+								</MenuItem>
+							))}
+						</TextField>
+					)}
 					<Stack direction="row" spacing={1}>
 						{issue.application_id != null && (
 							<GradedAction calls="silenced_refs/silence_server">
@@ -580,6 +620,7 @@ function IssueActions({
 												server_id: issue.application_id,
 												source: issue.source,
 												ref: issue.ref,
+												...instanceArg,
 											}),
 										).then(() => setSilenceOpen(false))
 									}
@@ -600,6 +641,7 @@ function IssueActions({
 												machine_id: issue.machine_id,
 												source: issue.source,
 												ref: issue.ref,
+												...instanceArg,
 											}),
 										).then(() => setSilenceOpen(false))
 									}
@@ -625,6 +667,7 @@ function IssueActions({
 												// check belongs to.
 												application_type:
 													issue.namespace?.application_type ?? null,
+												...instanceArg,
 											}),
 										).then(() => setSilenceOpen(false))
 									}

@@ -735,6 +735,8 @@ export async function seedServerSilencedRef(
 		ref: string;
 		source?: string;
 		createdBy?: string | null;
+		/** Silence one instance of the check, by key, rather than all of it. */
+		instance?: string | null;
 	},
 ): Promise<void> {
 	const source = opts.source ?? "alertd";
@@ -743,8 +745,8 @@ export async function seedServerSilencedRef(
 	// application type's check leaves another type's same-named check alone.
 	const ns = namespaceOf(source, check, await applicationTypeOf(sql, opts.serverId));
 	await sql.query(
-		`INSERT INTO scoped_check_policies (application_id, source, subject, application_type, check_name, ceiling, created_by)
-		 VALUES ($1, $2, $3, $4, $5, 'skipped', $6)
+		`INSERT INTO scoped_check_policies (application_id, source, subject, application_type, check_name, ceiling, created_by, instance_key)
+		 VALUES ($1, $2, $3, $4, $5, 'skipped', $6, $7)
 		 ON CONFLICT DO NOTHING`,
 		[
 			opts.serverId,
@@ -753,6 +755,7 @@ export async function seedServerSilencedRef(
 			ns.applicationType,
 			check,
 			opts.createdBy ?? null,
+			opts.instance ?? null,
 		],
 	);
 }
@@ -770,14 +773,16 @@ export async function seedGroupSilencedRef(
 		 * so the same name reported by another type is another silence.
 		 * Defaults to a Tamanu central, as `seedServer` does. */
 		applicationType?: ApplicationType;
+		/** Silence one instance of the check, by key, rather than all of it. */
+		instance?: string | null;
 	},
 ): Promise<void> {
 	const source = opts.source ?? "alertd";
 	const check = refToCheck(opts.ref);
 	const ns = namespaceOf(source, check, opts.applicationType ?? "tamanu-central");
 	await sql.query(
-		`INSERT INTO scoped_check_policies (server_group_id, source, subject, application_type, check_name, ceiling, created_by)
-		 VALUES ($1, $2, $3, $4, $5, 'skipped', $6)
+		`INSERT INTO scoped_check_policies (server_group_id, source, subject, application_type, check_name, ceiling, created_by, instance_key)
+		 VALUES ($1, $2, $3, $4, $5, 'skipped', $6, $7)
 		 ON CONFLICT DO NOTHING`,
 		[
 			opts.groupId,
@@ -786,8 +791,106 @@ export async function seedGroupSilencedRef(
 			ns.applicationType,
 			check,
 			opts.createdBy ?? null,
+			opts.instance ?? null,
 		],
 	);
+}
+
+/** Results most urgent first, as the check settles on its instances. */
+const URGENCY = ["failed", "warning", "broken", "passed", "skipped"];
+
+/** One instance of a seeded instanced check. */
+export interface SeedInstance {
+	/** What the instance observed. */
+	result: "failed" | "warning" | "passed" | "skipped";
+	/** What policy graded it to; defaults to what it observed. */
+	effective?: "failed" | "warning" | "passed" | "skipped";
+	label?: string;
+	detail?: Record<string, unknown>;
+}
+
+/** An application's check state for a check with instances, as ingestion
+ * stores one: every instance by key in `issues.instances`, the shared fields
+ * in `detail`, the check settled on its most urgent instance that was not
+ * skipped, and the grading inputs kept beside them so a silence set from the
+ * interface can re-grade it. The catalog entry is reviewed at a `failed`
+ * ceiling, so an instance's failure stays a failure when it is re-graded.
+ * spec: CHK#checks-with-instances */
+export async function seedInstancedCheck(
+	sql: Sql,
+	opts: {
+		serverId: string;
+		check: string;
+		source?: string;
+		/** The fields every instance shares. */
+		detail?: Record<string, unknown>;
+		instances: Record<string, SeedInstance>;
+	},
+): Promise<SeededIssue> {
+	const id = randomUUID();
+	const source = opts.source ?? "alertd";
+	const ns = namespaceOf(
+		source,
+		opts.check,
+		await applicationTypeOf(sql, opts.serverId),
+	);
+	await sql.query(
+		`INSERT INTO check_policies (source, subject, application_type, check_name, ceiling, reviewed_at, reviewed_by)
+		 VALUES ($1, $2, $3, $4, 'failed', NOW(), 'e2e')
+		 ON CONFLICT (source, subject, application_type, check_name)
+		 DO UPDATE SET ceiling = 'failed', reviewed_at = NOW(), reviewed_by = 'e2e'`,
+		[source, ns.subject, ns.applicationType, opts.check],
+	);
+	const stored: Record<string, unknown> = {};
+	for (const [key, instance] of Object.entries(opts.instances)) {
+		stored[key] = {
+			...(instance.label ? { label: instance.label } : {}),
+			observed: instance.result,
+			effective: instance.effective ?? instance.result,
+			...(instance.detail ? { detail: instance.detail } : {}),
+		};
+	}
+	const settle = (results: string[]): string => {
+		const counted = results.filter((r) => r !== "skipped");
+		if (counted.length === 0) return "skipped";
+		return counted.sort((a, b) => URGENCY.indexOf(a) - URGENCY.indexOf(b))[0]!;
+	};
+	const instances = Object.entries(opts.instances);
+	const observed = settle(instances.map(([, i]) => i.result));
+	const effective = settle(instances.map(([, i]) => i.effective ?? i.result));
+	const degraded = instances.filter(([, i]) =>
+		["failed", "warning"].includes(i.effective ?? i.result),
+	);
+	const active = degraded.length > 0;
+	const name = (key: string) => opts.instances[key]!.label ?? key;
+	const title = `Health check '${opts.check}' is degraded`;
+	const message = active
+		? `${opts.check} is degraded for ${degraded.length} of ${instances.length} instances: ${degraded
+				.map(([key, i]) => `${name(key)} (${i.effective ?? i.result})`)
+				.join(", ")}`
+		: `${opts.check}: no instance is degraded`;
+	await sql.query(
+		`INSERT INTO issues
+		 (id, application_id, source, ref, check_name, observed_result, effective_result, detail, instances, grading_context, message, title, description, active, first_seen, last_seen, degraded_since, last_degraded_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, '{"status": {}, "tags": {}}'::jsonb, $10, $11, $12, $13, NOW(), NOW(), $14, $14)`,
+		[
+			id,
+			opts.serverId,
+			source,
+			`health/${opts.check}`,
+			opts.check,
+			observed,
+			effective,
+			JSON.stringify(opts.detail ?? {}),
+			JSON.stringify(stored),
+			message,
+			title,
+			active ? title : null,
+			active,
+			active ? new Date().toISOString() : null,
+		],
+	);
+	return { id };
 }
 
 /** Cache row for a Tailscale user's display info, as the auth layer
