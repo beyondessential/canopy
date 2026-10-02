@@ -108,3 +108,11 @@ Open: `unmonitored` entries are table names where the other keys are resource na
 
 - Filing each facility's staleness on the facility application: state is keyed `(target, source, check)` and both reporters are `alertd`, so the facility's own push would recover central's filing by omission.
 - One check name per facility: breaks the no-parameters-in-check-names rule.
+
+## Notes from spec drafting
+
+- The relay's substrate filings already carry instances (`relay_protocol::SubstrateInstance`: label, observed, detail), and K8S already promises per-instance silences. They take keys like every other instance, so the relay protocol gains a key per instance. A substrate check that holds once is one instance today, with an empty label.
+- Substrate filings currently pass the relay's own `message` through (`ingest_substrate` hands `file_check_instances` a closure returning it). Under CHK, Canopy writes an instanced check's message from its graded instances, so the relay's message gives way to Canopy's for these.
+- Brokenness is not held per instance: CHK keeps one state per check. A broken instance feeds the check's most-urgent aggregate like any other result, and a check left broken by that aggregate retains its last definite result through the existing broken rule.
+- Restore replicas key on type, intent and declared name together (the existing `ReplicaKey`), which replaces the joined type-and-intent detail field.
+- The bestool side is card P3 in the bestool workspace.

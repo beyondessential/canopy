@@ -86,11 +86,22 @@ A name that encodes a parameter turns one configurable check into as many entrie
 ### Checks with instances
 
 Where a target has several instances of one condition, Canopy holds one state for the check, as it does for every (target, source, check).
+A check's instances come either from a reporter sending them (see [STA](../public-server/statuses.md), "Health and detail") or from Canopy's own determinations, and both are handled the same way.
 
-Each instance is graded through policy on its own, against its own detail, so a rule or silence written for one instance applies to only that instance.
-Where it takes more than one field to say which instance this is, the detail carries those fields joined into one as well as separately, because a rule condition matches a single variable and a silence for one instance has to pin all of them.
-The check's effective result is then the most urgent across the instances that were not skipped, and its detail carries every instance that is not passing, each with its own result, so an operator can see which ones are in trouble without opening anything else.
-Its message names those instances.
+Each instance has a key saying which instance it is.
+A key is unique within the check on its target, and the same instance has the same key from one report or determination to the next.
+A reporter chooses the keys of the instances it sends.
+Canopy keys its own instances by whatever tells them apart: a backup type, a replica, a node pool, a cluster.
+An instance may carry a label, which is how it is named to an operator; an instance without one is named by its key.
+
+Each instance is graded through policy on its own, against its own detail and the detail the check shares across its instances, so a rule written for one instance applies to only that instance.
+Where an instance's detail and the check's shared detail both carry a field, the instance's is the one a rule reads.
+The check's effective result is then the most urgent across the instances that were not skipped, and a check whose instances are all skipped is skipped.
+A broken result among them is taken as any broken result is, so a check left broken by its instances retains its last definite result (see "Stability").
+The check's detail carries every instance that is not passing, each with its own result, so an operator can see which ones are in trouble without opening anything else.
+Canopy writes the check's message from its graded instances, naming the degraded ones, so an instance a silence or rule has taken out is never counted in it.
+
+A check's instances are its complete set, so an instance absent from a report has recovered, and a report carrying none recovers every instance the check held.
 The check recovers when no instance is left degraded.
 
 ## Results
@@ -150,6 +161,21 @@ A silence is per target and records who set it; a fleet-wide decision is a polic
 A silence names a check, so it names that check's namespace: quieting one application type's check leaves another type's check of the same name alerting.
 A silence on a target that is itself of one type needs no namespace stated, the target supplying it.
 A group spans several types, so a group silence states which type's check it quiets.
+
+#### Silencing one instance
+
+A silence can name one instance of a check by its key (see "Checks with instances"), quieting that instance while the check's other instances are graded as before.
+It is set, recorded, and scoped as any silence is, at the check's own target or that target's group.
+A group silence on an instance quiets the instance with that key on every target in the group that reports the check.
+What the consolidated view presents and what an incident counts agree on it as on any silence.
+The reporting source is told the check's policy and not each instance's, since it runs the check rather than its instances one by one (see [STA](../public-server/statuses.md), "Response").
+
+An instance silence belongs to a target, so it is offered wherever a target's check is presented with its instances: among the target's checks, and on the check's issue wherever that is presented, an incident included.
+Where a target's check is presented, its degraded instances and its silenced ones are listed with it, each by its label and result with a silence control of its own, and its passing instances are counted rather than listed.
+The fleet-wide check page presents a check across every target and offers its catalog policy, which is where a decision about every instance is made.
+
+Wherever a target's silences are listed, an instance silence whose key the check does not currently report is marked as such.
+A silence that has outlived its instance is therefore visible and can be cleared, and is never removed without an operator.
 
 ## Documentation
 
