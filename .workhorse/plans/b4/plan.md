@@ -120,3 +120,95 @@ Open: `unmonitored` entries are table names where the other keys are resource na
 - Rules apply to instances transparently (CHK, "Checks with instances"): one grading path, with a plain check graded as its own single instance. `file_check_instances` already grades each instance through the catalog entry and scoped chain with `check.result` set to the instance's result. Two gaps to close:
   - Canopy's own filings pass an empty `status_extra`; reported instances must get the push's report detail, as a plain check from the same push does.
   - The rule-authoring sample (`fns/healthchecks.rs`, `sample`) must present one instance's fields merged over the check's shared detail, not the raw `instances` object.
+
+## Build checklist
+
+Layer 1 only; layer 2 is split out (see the last section).
+Each section leaves the tree building and tested, so they can land as separate commits in this order.
+
+### 1. One grading path for instances (database)
+
+- [ ] `database::issues::CheckInstance`: add `key: String`; make `label` an `Option<String>` that falls back to the key wherever an instance is named. Mirror both in `GradedInstance`
+- [ ] Extract the per-instance grading and aggregation out of `file_check_instances` into a shared `grade_instances` (fleet grading + scoped chain per instance, most urgent non-skipped wins, all-skipped is skipped, `escalates` from non-skipped instances only), so push ingestion and Canopy's own filings call the same function
+- [ ] Rule context per instance (spec: CHK#checks-with-instances): instance detail merged over the check's shared detail, `result` set to the instance's observed result, and the caller's `status_extra` passed through instead of the empty map `file_check_instances` uses today
+- [ ] A plain check grades as one instance with an empty key and no label, so its rule context is identical to today's
+- [ ] `instance_detail`: store every instance keyed by key (label, observed, effective, own detail), the shared detail, and degraded/total counts, instead of degraded instances only. The silenced-instance listing, "not reported" marking and broken presentation all read the full set from here
+- [ ] Message: an instanced check's message is composed by Canopy from the degraded graded instances, named by label
+
+### 2. Instance silences (storage)
+
+- [ ] `just migration instance_silences`: add `instance_key TEXT NULL` to `scoped_check_policies`, and recreate every per-scope unique index (application, machine, group, cluster, global) to include it with `NULLS NOT DISTINCT`, as `2026-09-02-080628-0000_check_namespace` does for the namespace columns
+- [ ] `ScopedCheckPolicy::{get, silence, unsilence, list_silences}`: take `Option<&str>` instance key; `chain_for` / `chains_for_scope` return instance rows tagged with their key
+- [ ] `grade_instances` applies an instance-keyed row only to the instance with that key; a row with no key applies to every instance, as now
+- [ ] `silenced_refs.rs`: `ServerSilencedRef`, `MachineSilencedRef`, `ServerGroupSilencedRef`, `ClusterSilencedRef` gain `instance: Option<String>` through `add` / `remove` / `list_*`. `is_silenced` and `silenced_health_checks_for_server` only count keyless rows as silencing the whole check
+- [ ] Silencing or unsilencing an instance re-grades the stored state from its kept instances (observed + detail) right away, then re-runs incident membership. The existing `reevaluate_open_issues_for_*_ref` only re-checks membership, which is enough for a whole-check silence but not for one that changes the check's effective result
+- [ ] Database tests (`crates/database/tests/it/`): instance silence at application and group scope, uniqueness with and without a key, re-grade on silence/unsilence, all-instances-silenced is skipped
+
+### 3. Brokenness is whole-check
+
+- [ ] A `broken` result for a check whose stored state holds instances keeps those instances, presents each as broken, retains the last definite contribution through the existing broken path, and recovers none of them
+- [ ] `grade_instances` refuses a broken instance (debug assertion for Canopy's own callers; the push path rejects it in section 4 before it gets here)
+
+### 4. Push wire shape (public server)
+
+- [ ] `statuses.rs` `HealthCheck`: add `detail: Option<Map>` and `instances: Option<BTreeMap<String, HealthCheckInstance>>`; new `HealthCheckInstance { result, label, detail }` with utoipa docs. `extra` stays flattened for the flat form
+- [ ] `parse_health` refusals, each a path-qualified `BadRequest` like the existing ones:
+  - [ ] more than one of `result`, `healthy`, `instances`, or none of them
+  - [ ] flat fields together with `detail`
+  - [ ] flat fields next to `instances`
+  - [ ] `detail` that isn't an object, on a check or an instance
+  - [ ] empty instance key
+  - [ ] instance without `result`, with `healthy`, or with `broken`
+- [ ] Replace `collect_check_results`' `(CheckResult, &Map)` with one parsed shape (name, single result or instances, detail), with flat extras folded into detail so everything downstream reads one form. `per_check_description` reads that detail
+- [ ] `file_health_events`: grade every check through `grade_instances`, a plain check as its single instance, keeping the existing issue upsert, omission recovery and broken handling. `instances: {}` recovers every held instance; a check switching between plain and instanced stays one state
+- [ ] Response (`effective_check_severities`): an instanced check is answered once per check; confirm no per-instance entries leak in
+- [ ] Status history records the push verbatim, `instances` included (HST)
+- [ ] `just gen-openapi && just gen-api`; commit `crates/public-server/openapi.json` and `crates/canopy-api/`. `HealthCheck` is `#[non_exhaustive]` with a builder, so the new fields pass `cargo-semver-checks`; run `just check-generated`
+- [ ] Public-server tests, new `tests/it/instanced_checks.rs` (declared in `tests/it/main.rs`):
+  - [ ] every refusal above
+  - [ ] nested `detail` and flat form grade alike
+  - [ ] instance grading and aggregation, message naming degraded instances by label
+  - [ ] instance omission recovers it; `instances: {}` recovers all
+  - [ ] broken check keeps and presents held instances, recovers none
+  - [ ] plain → instanced → plain is one state
+  - [ ] one catalog rule grades the plain and instanced forms of a check alike
+  - [ ] instance silence on the application quiets one instance only
+  - [ ] response answers an instanced check once
+
+### 5. Canopy's own instanced checks take keys
+
+- [ ] `backup/staleness.rs`, `backup/reconcile.rs`: key by backup type
+- [ ] `restore.rs`: key from `ReplicaKey` (type, intent, declared name); drop the joined type-and-intent field from `instance_identity`
+- [ ] `reporting_schemas.rs`: key by version
+- [ ] `relay-protocol` `SubstrateInstance`: add `key`; `SubstrateFiling` gains a check-level broken outcome; `SubstrateInstance::only` keys `""`. Check how the relay protocol is versioned against the relay-current mechanism (K8S, "Keeping a relay current") and bump it
+- [ ] `crates/relay`: node pools keyed by pool name; `Determination::refused` and `watch.rs`'s `broken()` report a check-level broken instead of a broken instance
+- [ ] `jobs/relay/ingest.rs`: map keys and check-level broken; stop passing the relay's `message` through for instanced checks
+- [ ] Self-alerts relay-version check (SELF): confirm how its per-cluster instances are filed and key them by cluster
+- [ ] Update `crates/database/tests/it/cluster_checks.rs` and the backup/restore tests for keys
+
+### 6. Private API
+
+- [ ] `commons_types::status::ConsolidatedCheck`: add `instances` (key, label, observed, effective, silenced scope) for degraded and silenced instances, and `passing_instances: usize`; `detail` becomes the shared detail for an instanced check
+- [ ] `fns/statuses.rs`: populate both for current and as-of-past consolidated checks
+- [ ] `fns/silenced_refs.rs`: `silence_*` / `unsilence_*` take optional `instance`; `list_*` return the instance key, its label from the state, and whether the check currently reports that key
+- [ ] `fns/issues.rs`: issue payload carries its degraded instances (key, label, effective) for the issue silence picker
+- [ ] `fns/healthchecks.rs` `sample`: for an instanced check, present the most urgent instance's fields merged over the shared detail, as a rule reads them
+- [ ] MCP check-state tools: the stored detail shape changes, so check what they return reads well for instanced checks (MCP)
+- [ ] `just gen-openapi`; commit `private-web/openapi.json` and `private-web/src/api-types.ts`
+- [ ] Private-server tests: instance silence/unsilence endpoints at each scope, list with the reported flag, consolidated instances and passing count, issue instances
+
+### 7. Frontend
+
+- [ ] `ChecksTable.tsx` `CheckRow`: instance sub-list (result icon, label, truncated key), passing count, per-instance silence button reusing `SilenceScopeRow`, per-instance silenced chip; `CheckExtrasList` shows the shared detail only
+- [ ] `IssueRow.tsx` silence panel: select of "Whole check" plus the issue's degraded instances, shown when the issue has instances; scope buttons pass the chosen instance
+- [ ] `SilencedRefsSection.tsx`: instance label and key on instance silences, "not reported" chip when the check no longer reports the key
+- [ ] `types.ts`: re-export the new wire types
+- [ ] e2e: extend `e2e/seed.ts` to seed an instanced check state and an instance silence; new `e2e/instance-silences.spec.ts` covering silencing from the checks table, from an incident's issue, and listing (including "not reported")
+- [ ] `just typecheck`
+
+### 8. Wrap-up
+
+- [ ] `just check`, `just test`, `cargo fmt`, no new warnings
+- [ ] Draft the card's test cases ([Draft test cases] skill)
+- [ ] Split layer 2 into its own card via the card breakdown; drop the layer 2 prose from this plan once it lives there
+- [ ] Note on #bestool/P3 when a `bes-canopy-api` release carries the new `HealthCheck` shape
