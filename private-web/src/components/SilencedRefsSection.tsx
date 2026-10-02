@@ -111,12 +111,13 @@ export default function SilencedRefsSection({
 					<SilencedRow
 						key={`${row.source}\x00${namespaceSegment(
 							"namespace" in row ? row.namespace : undefined,
-						)}\x00${row.ref}`}
+						)}\x00${row.ref}\x00${row.instance ?? ""}`}
 						scope={scope}
 						id={id}
 						source={row.source}
 						namespace={"namespace" in row ? row.namespace : null}
 						refName={row.ref}
+						instance={row.instance ?? null}
 						createdAt={row.created_at}
 						createdBy={row.created_by ?? null}
 						isAdmin={isAdmin}
@@ -160,6 +161,7 @@ function SilencedRow({
 	source,
 	namespace,
 	refName,
+	instance,
 	createdAt,
 	createdBy,
 	isAdmin,
@@ -173,6 +175,8 @@ function SilencedRow({
 	 * or machine's own silences need none: the target fixes the namespace. */
 	namespace: NamespaceRef | null;
 	refName: string;
+	/** The instance key an instance silence names; `null` for the whole check. */
+	instance: string | null;
 	createdAt: string;
 	createdBy: string | null;
 	isAdmin: boolean;
@@ -203,14 +207,15 @@ function SilencedRow({
 	const unsilence = async () => {
 		try {
 			if (scope === "server") {
-				await unsilenceServer.call({ server_id: id, source, ref: refName });
+				await unsilenceServer.call({ server_id: id, source, ref: refName, instance });
 			} else if (scope === "machine") {
-				await unsilenceMachine.call({ machine_id: id, source, ref: refName });
+				await unsilenceMachine.call({ machine_id: id, source, ref: refName, instance });
 			} else if (scope === "cluster") {
 				await unsilenceCluster.call({
 					kubernetes_cluster_id: id,
 					source,
 					ref: refName,
+					instance,
 				});
 			} else {
 				await unsilenceGroup.call({
@@ -218,6 +223,7 @@ function SilencedRow({
 					source,
 					ref: refName,
 					application_type: namespace?.application_type ?? null,
+					instance,
 				});
 			}
 			onChanged();

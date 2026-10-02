@@ -121,7 +121,13 @@ export type CheckTarget =
 	| { kind: "cluster"; id: string };
 
 /** A silence as this table reads one, whichever scope it came from. */
-type Silence = { source: string; ref: string; created_at: string; created_by: string | null };
+type Silence = {
+	source: string;
+	ref: string;
+	instance?: string | null;
+	created_at: string;
+	created_by: string | null;
+};
 
 export function ChecksTable(props: {
 	checks: ConsolidatedChecks;
@@ -266,9 +272,11 @@ function ChecksTableBody({
 					// different check, and canopy's own checks are silenced
 					// at a bare ref rather than under `health/`.
 					const refName = silenceRef(entry.source, entry.check);
+					// An instance silence quiets one instance, not the row's check.
+					// spec: CHK#silencing-one-instance
 					const ownSilence =
 						rowOwnSilences.find(
-							(s) => s.source === entry.source && s.ref === refName,
+							(s) => s.source === entry.source && s.ref === refName && !s.instance,
 						) ?? null;
 					// A group covers several application types, so its silences
 					// are matched on the namespace too: the same check name
@@ -278,6 +286,7 @@ function ChecksTableBody({
 							(s) =>
 								s.source === entry.source &&
 								s.ref === refName &&
+								!s.instance &&
 								sameNamespace(s.namespace, entry.namespace),
 						) ?? null;
 					return (
