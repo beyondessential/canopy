@@ -1146,7 +1146,7 @@ async fn consolidated_checks_at(
 						}
 					})
 			};
-			let (instances, passing_instances) = graded
+			let presented = graded
 				.stored_instances()
 				.map(|stored| stored.presented(is_silenced, instance_silenced))
 				.unwrap_or_default();
@@ -1163,8 +1163,9 @@ async fn consolidated_checks_at(
 					.filter(serde_json::Value::is_object)
 					.unwrap_or_else(|| serde_json::json!({})),
 				subject,
-				instances,
-				passing_instances,
+				instances: presented.listed,
+				passing_instances: presented.passing,
+				skipped_instances: presented.skipped,
 			});
 		}
 	}

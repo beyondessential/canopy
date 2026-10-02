@@ -467,6 +467,7 @@ mod tests {
 				detail: serde_json::json!({ "users": users }),
 				instances: Vec::new(),
 				passing_instances: 0,
+				skipped_instances: 0,
 			}
 		}
 
@@ -608,6 +609,13 @@ pub struct ConsolidatedCheck {
 	/// 0 for a check without instances.
 	#[serde(default)]
 	pub passing_instances: usize,
+	/// How many of the check's instances were skipped other than by a silence
+	/// (reported skipped, or graded skipped by a rule), counted rather than
+	/// listed. Silenced instances are listed in `instances` instead, and a
+	/// check silenced whole counts none. 0 for a check without instances.
+	// spec: CHK#silencing-one-instance
+	#[serde(default)]
+	pub skipped_instances: usize,
 }
 
 /// One instance of a check, as a target's checks present it: one of a

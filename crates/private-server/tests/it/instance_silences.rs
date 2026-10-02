@@ -187,12 +187,77 @@ async fn a_targets_check_lists_its_degraded_instances_and_counts_the_passing() {
 			assert_eq!(north["silenced_on_group"], false);
 			assert_eq!(instance(&entry, "ridge")["effective"], "warning");
 			assert_eq!(entry["passing_instances"], 1);
+			assert_eq!(entry["skipped_instances"], 0);
 			assert_eq!(entry["detail"], json!({ "fail_minutes": 30 }));
 
 			let plain = application_check(&private, id, "postgres").await;
 			assert_eq!(plain["instances"], json!([]));
 			assert_eq!(plain["passing_instances"], 0);
+			assert_eq!(plain["skipped_instances"], 0);
 			assert_eq!(plain["detail"], json!({ "latency_ms": 9 }));
+		},
+	)
+	.await;
+}
+
+/// Instances skipped other than by a silence, reported skipped or graded so by
+/// a rule, are counted apart from the passing ones, now and as of the push;
+/// silenced instances are listed instead, and a check silenced whole counts
+/// none.
+#[tokio::test(flavor = "multi_thread")]
+async fn instances_skipped_other_than_by_a_silence_are_counted() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, private| {
+			let (id, _) = central_reporting(&mut conn, &public, &cert, device_id).await;
+			// `minutes` is the key's length, so this rule skips `westfield` alone.
+			conn.batch_execute(&format!(
+				"UPDATE check_policies SET rules = '{}'::jsonb WHERE check_name = '{CHECK}'",
+				json!({ "if": [{ "==": [{ "var": "check.minutes" }, 9] }, "skipped"] }),
+			))
+			.await
+			.expect("rule");
+			push(
+				&public,
+				&cert,
+				id,
+				json!({ "health": [instanced(CHECK, &[
+					("north", "failed", "Northgate"),
+					("westfield", "failed", "Westfield"),
+					("dormant", "skipped", ""),
+					("ridge", "warning", "Ridge"),
+					("east", "passed", "Eastbay"),
+				])] }),
+			)
+			.await;
+			post(
+				&private,
+				"/api/silenced_refs/silence_server",
+				json!({ "server_id": id, "source": "alertd", "ref": REF, "instance": "ridge" }),
+			)
+			.await;
+
+			let entry = application_check(&private, id, CHECK).await;
+			assert_eq!(keys(&entry), ["north", "ridge"]);
+			assert_eq!(entry["passing_instances"], 1);
+			assert_eq!(entry["skipped_instances"], 2);
+
+			let snapshot = post(&private, "/api/statuses/snapshot", json!({ "server_id": id })).await;
+			let past = check_in(&snapshot["checks"], CHECK);
+			assert_eq!(keys(past), ["north", "ridge"]);
+			assert_eq!(past["passing_instances"], 1);
+			assert_eq!(past["skipped_instances"], 2);
+
+			conn.batch_execute(&format!(
+				"INSERT INTO scoped_check_policies (application_id, source, subject, application_type, check_name, ceiling) VALUES \
+					('{id}', 'alertd', 'application', 'tamanu-central', '{CHECK}', 'skipped');"
+			))
+			.await
+			.expect("silence the check whole");
+			let entry = application_check(&private, id, CHECK).await;
+			assert_eq!(entry["silenced"], true);
+			assert_eq!(keys(&entry), ["ridge"]);
+			assert_eq!(entry["skipped_instances"], 0);
 		},
 	)
 	.await;

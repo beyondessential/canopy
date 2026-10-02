@@ -11872,6 +11872,11 @@
             "type": "boolean",
             "description": "Whether this check is silenced at server or group scope."
           },
+          "skipped_instances": {
+            "type": "integer",
+            "description": "How many of the check's instances were skipped other than by a silence\n(reported skipped, or graded skipped by a rule), counted rather than\nlisted. Silenced instances are listed in `instances` instead, and a\ncheck silenced whole counts none. 0 for a check without instances.",
+            "minimum": 0
+          },
           "source": {
             "type": "string",
             "description": "The source that reports this check."

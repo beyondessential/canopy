@@ -1389,7 +1389,8 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 
 pub use crate::check_instances::{
 	CheckGrading, CheckInstance, CheckOutcome, GradedCheck, GradedInstance, GradingContext,
-	GradingInputs, InstancedState, ReportedCheck, StoredInstance, StoredInstances, grade_instances,
+	GradingInputs, InstancedState, PresentedInstances, ReportedCheck, StoredInstance,
+	StoredInstances, grade_instances,
 };
 
 /// A check filed from its instances. Everything except the instances is
@@ -2778,7 +2779,7 @@ async fn checks_at_scope(
 				// The state's instances as their last grading left them: an
 				// instance silence re-grades the state when it is set or lifted,
 				// so the stored results already account for it.
-				let (instances, passing_instances) = instances
+				let presented = instances
 					.and_then(|stored| {
 						serde_json::from_value::<StoredInstances>(stored)
 							.inspect_err(|err| tracing::warn!(?err, "unreadable stored instances"))
@@ -2808,8 +2809,9 @@ async fn checks_at_scope(
 					effective,
 					detail: detail.unwrap_or_else(|| serde_json::json!({})),
 					subject,
-					instances,
-					passing_instances,
+					instances: presented.listed,
+					passing_instances: presented.passing,
+					skipped_instances: presented.skipped,
 				})
 			},
 		)
@@ -2858,6 +2860,7 @@ async fn checks_at_scope(
 			subject,
 			instances: Vec::new(),
 			passing_instances: 0,
+			skipped_instances: 0,
 		});
 	}
 

@@ -432,16 +432,18 @@ impl StoredInstances {
 			.count()
 	}
 
-	/// The instances a target's check presents with it, and how many of the
-	/// rest passed.
+	/// The instances a target's check presents with it, and counts of the
+	/// rest.
 	///
 	/// The degraded instances and the silenced ones are listed, each with its
-	/// own result; the passing ones are counted rather than listed (CHK,
-	/// "Silencing one instance"). `silenced` says, for an instance's key,
-	/// whether an instance silence at the check's own target and at its group
-	/// quiets it. A silenced instance presents as skipped, and so does every
-	/// instance of a check silenced whole (`whole_check_silenced`), as the check
-	/// itself does.
+	/// own result; the passing ones, and those skipped other than by a silence
+	/// (reported skipped, or graded skipped by a rule), are each counted rather
+	/// than listed (CHK, "Silencing one instance"). `silenced` says, for an
+	/// instance's key, whether an instance silence at the check's own target
+	/// and at its group quiets it. A silenced instance presents as skipped, and
+	/// so does every instance of a check silenced whole
+	/// (`whole_check_silenced`), as the check itself does; those are neither
+	/// listed nor counted, the silence being the check's.
 	///
 	/// Listed most urgent first, then by name.
 	// spec: CHK#silencing-one-instance
@@ -449,9 +451,10 @@ impl StoredInstances {
 		&self,
 		whole_check_silenced: bool,
 		silenced: impl Fn(&str) -> (bool, bool),
-	) -> (Vec<ConsolidatedInstance>, usize) {
+	) -> PresentedInstances {
 		let mut listed = Vec::new();
 		let mut passing = 0;
+		let mut skipped = 0;
 		for (key, instance) in &self.0 {
 			let (silenced_on_target, silenced_on_group) = silenced(key);
 			let effective = if whole_check_silenced || silenced_on_target || silenced_on_group {
@@ -476,6 +479,8 @@ impl StoredInstances {
 				});
 			} else if effective == CheckResult::Passed {
 				passing += 1;
+			} else if !whole_check_silenced {
+				skipped += 1;
 			}
 		}
 		listed.sort_by(|a, b| {
@@ -488,7 +493,11 @@ impl StoredInstances {
 				})
 				.then_with(|| a.key.cmp(&b.key))
 		});
-		(listed, passing)
+		PresentedInstances {
+			listed,
+			passing,
+			skipped,
+		}
 	}
 
 	/// The instances in trouble, most urgent first: everything neither passed
@@ -520,6 +529,18 @@ impl StoredInstances {
 			})
 			.collect()
 	}
+}
+
+/// What a target's check presents of its instances (see
+/// [`StoredInstances::presented`]).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PresentedInstances {
+	/// The degraded and silenced instances, most urgent first.
+	pub listed: Vec<ConsolidatedInstance>,
+	/// How many passed.
+	pub passing: usize,
+	/// How many were skipped other than by a silence.
+	pub skipped: usize,
 }
 
 /// A check's instances and the inputs they were graded with, as a check

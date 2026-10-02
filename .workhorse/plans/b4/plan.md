@@ -140,8 +140,8 @@ Open: `unmonitored` entries are table names where the other keys are resource na
 ## Notes from the private API (section 6)
 
 - A consolidated instance carries `key`, `label`, `observed`, `effective`, its own `detail` (the mockup shows per-instance facts), and two flags, `silenced_on_target` and `silenced_on_group`, rather than a scope value: the frontend already knows which grain a row is filed against, so the two flags are the whole answer, and no parallel scope enum is introduced.
-- Listed instances are the degraded ones and those an instance silence quiets; `passing_instances` counts the instances whose effective result is passed. An instance a rule (not a silence) grades skipped is neither listed nor counted.
-- A check silenced whole presents every instance as skipped, as the check itself presents, so it lists only its instance-silenced instances.
+- Listed instances are the degraded ones and those an instance silence quiets; `passing_instances` counts the instances whose effective result is passed, and `skipped_instances` those skipped other than by a silence (reported skipped, or graded skipped by a rule), as CHK "Silencing one instance" now says.
+- A check silenced whole presents every instance as skipped, as the check itself presents, so it lists only its instance-silenced instances and counts none as skipped.
 - The as-of-past view grades with no prior state, as it always has for plain checks, so a past broken instanced check presents as broken with no instances listed.
 - Listed silences gain `instance_label` (from the current state; `null` when the key is not reported or has no label) and `instance_reported` (`null` for a whole-check silence). A group silence's key is looked for across every state the silence covers in the group.
 - The issue payload's `instances` is its degraded instances only (key, label, effective), most urgent first.

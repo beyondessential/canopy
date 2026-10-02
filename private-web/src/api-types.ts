@@ -6120,6 +6120,13 @@ export interface components {
             qualified_name: string;
             /** @description Whether this check is silenced at server or group scope. */
             silenced: boolean;
+            /**
+             * @description How many of the check's instances were skipped other than by a silence
+             *     (reported skipped, or graded skipped by a rule), counted rather than
+             *     listed. Silenced instances are listed in `instances` instead, and a
+             *     check silenced whole counts none. 0 for a check without instances.
+             */
+            skipped_instances?: number;
             /** @description The source that reports this check. */
             source: string;
             /**
