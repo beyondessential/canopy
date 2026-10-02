@@ -55,12 +55,12 @@ Scenarios verifying that reported checks can carry instances, that a check carri
 
 ## Canopy's own instanced checks
 
-- [ ] Backup staleness and reconciliation instances are keyed by backup type
-- [ ] Restore-verification, migration-test and redaction instances are keyed by replica type, intent and declared name; two replicas of one type and intent are told apart (verifies spec: RST)
-- [ ] An instance silence on a backup-type instance quiets that type only
-- [ ] Reporting-schema instances are keyed by version
-- [ ] Relay substrate instances carry keys; a relay check that cannot be read is filed broken at check level (verifies spec: K8S)
-- [ ] An instanced substrate check's message is Canopy's, not the relay's
+- [x] Backup staleness and reconciliation instances are keyed by backup type
+- [x] Restore-verification, migration-test and redaction instances are keyed by replica type, intent and declared name; two replicas of one type and intent are told apart (verifies spec: RST)
+- [x] An instance silence on a backup-type instance quiets that type only
+- [x] Reporting-schema instances are keyed by version
+- [x] Relay substrate instances carry keys; a relay check that cannot be read is filed broken at check level (verifies spec: K8S)
+- [x] An instanced substrate check's message is Canopy's, not the relay's
 
 ## Operator interface
 

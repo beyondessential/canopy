@@ -130,6 +130,13 @@ Open: `unmonitored` entries are table names where the other keys are resource na
 - Retaining a failure through brokenness keys on the effective result being broken, whether reported broken or graded broken by a rule (CHK "Stability"); `GradedCheck::retain_through_brokenness` applies it, and the push path and `file_check_instances` read the prior state only once the check comes out broken. A rule grading one instance of an instanced check as broken grades it as a warning (CHK "Checks with instances").
 - The client generator marks every optional collection property `#[builder(default)]`: typify renders an optional object as a bare map, which the builder would otherwise demand, so adding `HealthCheck.detail` would have broken every call site building a check. Four existing fields (`IntentDescriptor.semantics`, `Entitlements.applications`, `ReportingSchemaArgs.artifacts`, `ProgressArgs.extra`) are relaxed by the same rule.
 
+## Notes from Canopy's own instanced checks (section 5)
+
+- A restore replica's key is `type:intent:name`, or `type:intent` for a replica no declaration names, each part percent-encoding `%` and `:` so that open-ended types, intents and names can never collide. The label (`name (type / intent)`) is unchanged; the detail keeps `type`, `intent` and `replica` for rules, and no longer carries the joined `replica_key`. `RESTORE_VERIFICATION_DOC` now points at an instance silence for one replica rather than at `check.replica_key` (catalog documentation seeds on first sight only, so existing rows keep the old text).
+- `file_check_instances`' message composer takes the `GradedCheck` rather than the degraded instances, so a filer can tell a plain check from an instanced one; Canopy's own composers read `graded.degraded()`.
+- Relay protocol, changed in place: `SubstrateInstance { key, label: Option, observed, detail }`; `SubstrateFiling.instances` became `outcome: SubstrateOutcome { Instances(Vec<SubstrateInstance>), Broken { detail } }`; `SubstrateFiling.message` became optional, carried for a check that holds once or could not be read and left out for a check with instances. The relay's own node-pool message composer is gone.
+- Ingest: a plain substrate check (holds once, or broken with no instances held) keeps the relay's message, as Canopy's own plain filings keep their filer's; an instanced one, broken included, takes `GradedCheck::message`. Ingest refuses a broken instance, a duplicated key, and an empty key beside others, rather than tripping `grade_instances`' debug assertions on a relay's input.
+
 ## Build checklist
 
 Layer 1 only; layer 2 is split out (see the last section).
@@ -188,14 +195,15 @@ Each section leaves the tree building and tested, so they can land as separate c
 
 ### 5. Canopy's own instanced checks take keys
 
-- [ ] `backup/staleness.rs`, `backup/reconcile.rs`: key by backup type
-- [ ] `restore.rs`: key from `ReplicaKey` (type, intent, declared name); drop the joined type-and-intent field from `instance_identity`
-- [ ] `reporting_schemas.rs`: key by version
-- [ ] `relay-protocol` `SubstrateInstance`: add `key`; `SubstrateFiling` gains a check-level broken outcome; `SubstrateInstance::only` keys `""`. The relay has no deployments yet, so the protocol changes in place: no version bump or compatibility with older relays
-- [ ] `crates/relay`: node pools keyed by pool name; `Determination::refused` and `watch.rs`'s `broken()` report a check-level broken instead of a broken instance
-- [ ] `jobs/relay/ingest.rs`: map keys and check-level broken; stop passing the relay's `message` through for instanced checks
+- [x] `backup/staleness.rs`, `backup/reconcile.rs`: key by backup type
+- [x] `restore.rs`: key from `ReplicaKey` (type, intent, declared name); drop the joined type-and-intent field from `instance_identity`
+- [x] `reporting_schemas.rs`: key by version
+- [x] `relay-protocol` `SubstrateInstance`: add `key`; `SubstrateFiling` gains a check-level broken outcome; `SubstrateInstance::only` keys `""`. The relay has no deployments yet, so the protocol changes in place: no version bump or compatibility with older relays
+- [x] `crates/relay`: node pools keyed by pool name; `Determination::refused` and `watch.rs`'s `broken()` report a check-level broken instead of a broken instance
+- [x] `jobs/relay/ingest.rs`: map keys and check-level broken; stop passing the relay's `message` through for instanced checks
 - [ ] Self-alerts relay-version check (SELF): confirm how its per-cluster instances are filed and key them by cluster
-- [ ] Update `crates/database/tests/it/cluster_checks.rs` and the backup/restore tests for keys
+  - Nothing files this condition yet: there is no relay-version check in `self_alerts.rs` or anywhere else, and no named relay version is stored (K8S "Keeping a relay current" is unimplemented). So there is nothing to key on this card; whoever implements it files one instance per registered cluster keyed by the cluster's id, which is stable where its name is not.
+- [x] Update `crates/database/tests/it/cluster_checks.rs` and the backup/restore tests for keys
 
 ### 6. Private API
 
