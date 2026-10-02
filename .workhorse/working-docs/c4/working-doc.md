@@ -1,5 +1,5 @@
 ---
-status: draft
+status: complete
 ---
 
 # Check list logic on the application page

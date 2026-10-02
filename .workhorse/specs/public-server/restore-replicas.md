@@ -375,7 +375,7 @@ Each replica's redaction outcome is presented alongside its restore health, so a
 ## Alerting
 
 A failed or overdue restore-health report raises a restore-verification check on the affected machine, subject to the same monitoring and incident gates as any other of that machine's checks.
-It is a machine check because what failed to restore is the machine's backup, so it presents on every application on that machine as the machine's own (see [CHK](../monitoring/checks.md)).
+It is a machine check because what failed to restore is the machine's backup, so it is read on the machine (see [CHK](../monitoring/checks.md)).
 
 A machine has one restore-verification check however many replicas it has.
 Each replica is an instance of that check, graded on its own and carrying its type, its intent, its declared name, and the snapshot in the check's detail (see [CHK](../monitoring/checks.md)), so a rule or silence written for one replica applies to only that replica.
