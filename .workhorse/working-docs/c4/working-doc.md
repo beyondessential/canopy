@@ -116,12 +116,17 @@ Last known bad stays bad until the source reports otherwise.
 That the source is quiet is reachability's to say, not the rollup's.
 A state left at an abandoned grain is not a quiet source, though: it is resolved (see below) and counts for nothing.
 
-### Sorted by qualified name alone
+### Sorted by result, then qualified name
 
-The list is in alphabetical order of the name it displays, whatever each check's result.
-Severity is carried by each row's icon and background, not by its position.
-So `backup-staleness`, `tamanu-central.caddy_certs`, `tamanu-central.sync_facility_stale` read in that order, though the last is the one failing.
-A check keeps its place as its result changes, so the list doesn't reshuffle between visits.
+The list is ordered most urgent result first, and alphabetically by the name it displays within each result.
+Today the second key is the bare check name, so `tamanu-central.caddy_certs` sorts before `caddy_version` among the passes; on the displayed name it sorts after.
+
+### Application-typed checks read as `<type>:<check>`
+
+An entry in an application type's namespace presents as `tamanu-central:caddy_certs`, matching how bestool writes it.
+This is presentation only: CHK "Names" already holds that the namespace is never concatenated into the name, and addresses carry it as a separate part.
+Policy rules keep the dot, where it makes sense for other reasons.
+CHK's "Names" line changes at the split.
 
 ### Plain bugs fixed regardless
 
@@ -173,8 +178,18 @@ Needs checking: nothing still files a backup or machine-subject check at applica
 
 ### Sorting
 
-Both `consolidated_checks_for` and the point-in-time path sort by `qualified_name` alone, server-side, so the UI renders in the order it receives.
-Each qualified name is unique on one target's list once machine checks are gone (namespace prefixes keep application-typed names apart), so source isn't needed to break ties in practice; keep it as the final key anyway for a stable order.
+Both `consolidated_checks_for` and the point-in-time path sort by effective-result urgency, then `qualified_name`, then `source` as a final tie-break, server-side, so the UI renders in the order it receives.
+
+### The separator
+
+One place builds the form: `Namespace::qualified_name` in `commons-types/src/namespace.rs` (and its unit test).
+Everything reads through it: the check list, the healthcheck catalog, self-alerts, the issue list, `CheckRedirect`, and the MCP incident tools (`canopy-mcp/src/incidents.rs`).
+Check URLs carry the namespace as its own segment, so they don't change.
+`tests/it/healthchecks.rs` asserts the dotted form and changes with it.
+`check_policies.rs` doc comments describing `<type>.<check>` change too.
+Still to confirm: no policy-rule or search parser accepts the displayed form as input.
+If one does, it keeps the dot, as decided.
+The MCP tool output is read by agents, not by `cargo-semver-checks`, so the public-API rule doesn't bind it, but anything matching on the dotted string would need updating.
 
 ### Ageing data on the wire
 
@@ -191,6 +206,6 @@ That is a private-API change (`just gen-openapi`), so it doesn't need the public
 - [x] Does a quiet source's last failed state keep counting against health? Yes.
 - [x] Frozen states at abandoned grains: resolved by migration, plus a read-time guard.
 - [x] Machine and cluster pages share `checks_at_scope`, so they get the current-only and ageing rules too.
-- [x] Sort order? By qualified name alone, ignoring result.
-- [ ] The list shows five rows before "Show N more". With urgency no longer deciding position, a failing check can sit below the fold. Drop the fold, or keep it and accept that?
+- [x] Sort order? Result urgency first, then qualified name.
+- [x] Separator? `<type>:<check>` everywhere a check name is displayed; policy rules keep the dot.
 - [ ] Should reachability's silence on Central be revisited? It is hiding a 46-day `tamanu` outage. That's an operational matter rather than part of this card, but someone should know.
