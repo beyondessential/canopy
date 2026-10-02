@@ -103,11 +103,13 @@ An instance's key is its identity rather than one of its fields, and no rule rea
 
 Wherever an operator is shown the fields a rule can read for a check, a check with instances is shown as a rule reads one of its instances, with its fields merged over the check's shared ones.
 The check's effective result is then the most urgent across the instances that were not skipped, and a check whose instances are all skipped is skipped.
-A broken result among them is taken as any broken result is, so a check left broken by its instances retains its last definite result (see "Stability").
+Broken says the check itself could not run, so it is a result of the whole check and never of one instance: an instance is passed, warning, failed, or skipped.
+A broken check is broken in every instance it holds, each presented as broken, and the check retains its last definite result as any broken check does (see "Stability").
+A broken check says nothing about which instances exist, so it recovers none of them, and its instances are those it held when it broke.
 The check's detail carries every instance that is not passing, each with its own result, so an operator can see which ones are in trouble without opening anything else.
 Canopy writes the check's message from its graded instances, naming the degraded ones, so an instance a silence or rule has taken out is never counted in it.
 
-A check's instances are its complete set, so an instance absent from a report has recovered, and a report carrying none recovers every instance the check held.
+A check's instances are its complete set, so an instance absent from a report has recovered, and a report carrying an empty set recovers every instance the check held.
 The check recovers when no instance is left degraded.
 
 ## Results

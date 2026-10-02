@@ -52,8 +52,11 @@ A check reporting several instances of its condition carries them as an object k
 The key is the reporter's to choose: it must be unique within the check, must not be empty, and must identify the same instance across that reporter's pushes, as an application's key does.
 An object keyed this way cannot express two instances sharing a key.
 
-Each instance carries exactly one result, an optional `label` naming it to an operator, and its own `detail` object.
+Each instance carries exactly one result (`passed`, `warning`, `failed`, or `skipped`), an optional `label` naming it to an operator, and its own `detail` object.
 A check carrying both a result and instances is refused, as is an instance without a result.
+
+Brokenness belongs to the whole check (see [CHK](../monitoring/checks.md), "Checks with instances"), so a check that could not run reports `broken` as its own result, without instances, and an instance reporting `broken` is refused.
+A broken check recovers none of the instances it previously reported, since it could not see them.
 
 A check's instances are the source's complete set for it, so a reporter sends its passing instances as well as its degraded ones.
 An empty set says the check currently has no instances, which recovers every instance it previously reported.

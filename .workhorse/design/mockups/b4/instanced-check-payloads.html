@@ -244,11 +244,11 @@
 +     "detail": { "reason": "upstream absent" }
 +   },
 +   "MedicationRequest": {
-+     "result": "broken",
++     "result": "warning",
 +     "detail": { "reason": "canceling statement due to statement timeout" }
 +   },
 +   "appointments": {
-+     "result": "broken",
++     "result": "warning",
 +     "label": "appointments table",
 +     "detail": { "reason": "materialised resource the check does not know" }
 +   }
@@ -263,8 +263,9 @@
 			<div class="note"><b>The reporter picks the headline.</b> <code>errored</code> only warns when nothing breached, so a failing resource hides an unmeasurable one.</div>
 		</div>
 		<div class="notes">
-			<div class="note"><b>Inside out.</b> Every resource is an instance keyed by its name, so the four side lists become results: disabled and absent are <b>skipped</b>, errored and unknown are <b>broken</b>. Keys are readable, so no labels are needed.</div>
-			<div class="note"><b>Graded result.</b> <b>Failed</b> (ServiceRequest). The message names ServiceRequest, MedicationRequest and appointments table, since broken instances warn alongside the failure.</div>
+			<div class="note"><b>Inside out.</b> Every resource is an instance keyed by its name, so the four side lists become results: disabled and absent are <b>skipped</b>, errored and unknown are <b>warning</b>, as they grade today. Keys are readable, so no labels are needed.</div>
+			<div class="note"><b>Not broken.</b> Broken means the whole check couldn't run, so it is never an instance's result. One unreadable resource is a warning on that resource.</div>
+			<div class="note"><b>Graded result.</b> <b>Failed</b> (ServiceRequest). The message names ServiceRequest, MedicationRequest and appointments table.</div>
 			<div class="note"><b>Now targetable.</b> Silence <code>Encounter</code> on one central, or write a rule on <code>check.pace</code> to grade deferred resources differently.</div>
 			<div class="note open"><b>Open.</b> <code>appointments</code> is a table name where the other keys are resource names, since the check can't map it. Either a mixed key space is fine, or unknown resources carry a prefix such as <code>table:appointments</code>.</div>
 		</div>
@@ -350,8 +351,8 @@
 					<td class="verdict ok">Accepted</td>
 				</tr>
 				<tr>
-					<td>One instance <code>"result": "broken"</code></td>
-					<td>The check takes the most urgent result as usual. If that is broken, the check keeps its last definite result, as any broken check does.</td>
+					<td><code>{ "check": "sync_facility_stale", "result": "broken", "detail": { … } }</code></td>
+					<td>The check couldn't run. Every instance it held is shown as broken, the check keeps its last definite result, and no instance recovers.</td>
 					<td class="verdict ok">Accepted</td>
 				</tr>
 				<tr>
@@ -382,6 +383,11 @@
 				<tr>
 					<td><code>"detail"</code> that isn't an object, on a check or an instance</td>
 					<td>As for a target's <code>detail</code> today.</td>
+					<td class="verdict err">400</td>
+				</tr>
+				<tr>
+					<td>Instance with <code>"result": "broken"</code></td>
+					<td>Broken belongs to the whole check. Report it as the check's result, without instances.</td>
 					<td class="verdict err">400</td>
 				</tr>
 				<tr>

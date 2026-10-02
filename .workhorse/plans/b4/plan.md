@@ -94,7 +94,7 @@ So instances key on `deviceId`, with the facility ids (and names, from central's
 ### Other checks that take instances
 
 `fhir_materialisation` already keys its detail by resource (`resources.<Name>`), but rule fields are one dot-free name, so no resource is reachable on its own.
-Its four side lists fold into instance results: `disabled` and `upstream_absent` are skipped, `errored` and `unmonitored` are broken.
+Its four side lists fold into instance results: `disabled` and `upstream_absent` are skipped, `errored` and `unmonitored` are warning (as they grade today), never broken.
 That also stops a failing resource from hiding an unmeasurable one, which today's reporter-chosen headline does.
 Open: `unmonitored` entries are table names where the other keys are resource names.
 
@@ -113,7 +113,8 @@ Open: `unmonitored` entries are table names where the other keys are resource na
 
 - The relay's substrate filings already carry instances (`relay_protocol::SubstrateInstance`: label, observed, detail), and K8S already promises per-instance silences. They take keys like every other instance, so the relay protocol gains a key per instance. A substrate check that holds once is one instance today, with an empty label.
 - Substrate filings currently pass the relay's own `message` through (`ingest_substrate` hands `file_check_instances` a closure returning it). Under CHK, Canopy writes an instanced check's message from its graded instances, so the relay's message gives way to Canopy's for these.
-- Brokenness is not held per instance: CHK keeps one state per check. A broken instance feeds the check's most-urgent aggregate like any other result, and a check left broken by that aggregate retains its last definite result through the existing broken rule.
+- Broken is a whole-check result, never an instance's: an instance reporting `broken` is refused, and a broken check (reported with `result: broken`, no instances) presents every instance it held as broken, retains its last definite result through the existing broken rule, and recovers none of its instances. One state per check, nothing held per instance.
+- The relay emits broken only as whole-check brokenness wrapped in a single unnamed instance (`Determination::refused`, `watch.rs` `broken`). Those become a check-level broken result in the relay protocol.
 - Restore replicas key on type, intent and declared name together (the existing `ReplicaKey`), which replaces the joined type-and-intent detail field.
 - The bestool side is card P3 in the bestool workspace.
 - Rules apply to instances transparently (CHK, "Checks with instances"): one grading path, with a plain check graded as its own single instance. `file_check_instances` already grades each instance through the catalog entry and scoped chain with `check.result` set to the instance's result. Two gaps to close:
