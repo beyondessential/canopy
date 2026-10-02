@@ -85,6 +85,9 @@
 	.field { display: inline-flex; flex-direction: column; border: 1px solid rgba(0,0,0,0.23); border-radius: 4px; padding: 4px 10px; min-width: 260px; position: relative; }
 	.field label { position: absolute; top: -8px; left: 8px; background: #fff; padding: 0 4px; font-size: 12px; color: var(--secondary); }
 	.field span { font-size: 14px; padding: 4px 0; }
+	.field.select { flex-direction: row; align-items: center; padding-right: 4px; }
+	.field.select span { flex: 1; }
+	.caret { width: 24px; height: 24px; fill: rgba(0,0,0,0.54); flex: none; }
 	.menu { position: absolute; background: #fff; border-radius: 4px; box-shadow: 0 5px 5px -3px rgba(0,0,0,0.2), 0 8px 10px 1px rgba(0,0,0,0.14); width: 260px; padding: 8px 0; z-index: 2; }
 	.menu div { padding: 6px 16px; font-size: 14px; }
 	.menu div.sel { background: rgba(56,142,60,0.08); }
@@ -98,6 +101,7 @@
 </head>
 <body>
 <svg width="0" height="0" style="position:absolute">
+	<symbol id="i-caret" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5z"/></symbol>
 	<symbol id="i-pass" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></symbol>
 	<symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 5.99 19.53 19H4.47L12 5.99M12 2 1 21h22L12 2zm1 14h-2v2h2v-2zm0-6h-2v4h2v-4z"/></symbol>
 	<symbol id="i-fail" viewBox="0 0 24 24"><path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z"/></symbol>
@@ -218,8 +222,14 @@
 			<div class="stack" style="margin-top: 8px; position: relative">
 				<div style="color: var(--secondary)">Permanently ignore <code>alertd/health/sync_facility_stale</code> issues at the chosen scope. The issues still record, but no longer trigger or join incidents. Manage and un-silence from the detail page.</div>
 				<div style="border-left: 3px solid var(--new); padding: 6px 0 2px 8px">
-					<div class="field"><label>Silence</label><span>Northgate Clinic</span></div>
-					<span class="caption" style="margin-left: 12px">Whole check, or one of: Northgate Clinic (failed), Ridge Health Centre (warning)</span>
+					<div style="position: relative; display: inline-block">
+						<div class="field select"><label>Silence</label><span>Northgate Clinic</span><svg class="caret"><use href="#i-caret"/></svg></div>
+						<div class="menu" style="top: -24px; left: 440px">
+							<div>Whole check</div>
+							<div class="sel">Northgate Clinic<div class="sub">failed</div></div>
+							<div>Ridge Health Centre<div class="sub">warning</div></div>
+						</div>
+					</div>
 				</div>
 				<div class="btn-row" style="margin-top: 4px">
 					<span class="btn"><svg class="icon"><use href="#i-off-o"/></svg>For this server</span>
