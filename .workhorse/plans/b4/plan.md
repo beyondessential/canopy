@@ -180,7 +180,7 @@ Each section leaves the tree building and tested, so they can land as separate c
 - [ ] `backup/staleness.rs`, `backup/reconcile.rs`: key by backup type
 - [ ] `restore.rs`: key from `ReplicaKey` (type, intent, declared name); drop the joined type-and-intent field from `instance_identity`
 - [ ] `reporting_schemas.rs`: key by version
-- [ ] `relay-protocol` `SubstrateInstance`: add `key`; `SubstrateFiling` gains a check-level broken outcome; `SubstrateInstance::only` keys `""`. Check how the relay protocol is versioned against the relay-current mechanism (K8S, "Keeping a relay current") and bump it
+- [ ] `relay-protocol` `SubstrateInstance`: add `key`; `SubstrateFiling` gains a check-level broken outcome; `SubstrateInstance::only` keys `""`. The relay has no deployments yet, so the protocol changes in place: no version bump or compatibility with older relays
 - [ ] `crates/relay`: node pools keyed by pool name; `Determination::refused` and `watch.rs`'s `broken()` report a check-level broken instead of a broken instance
 - [ ] `jobs/relay/ingest.rs`: map keys and check-level broken; stop passing the relay's `message` through for instanced checks
 - [ ] Self-alerts relay-version check (SELF): confirm how its per-cluster instances are filed and key them by cluster
