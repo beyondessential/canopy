@@ -369,7 +369,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					default_escalates: false,
 					documentation: Some(refs::RECONCILE_MISSING_DOC),
 				},
-				&|degraded| match degraded {
+				&|graded| match graded.degraded().as_slice() {
 					[] => format!("Application {label} backup reports and repo snapshots agree again"),
 					[one] => format!(
 						"Application {label} reported a successful {} backup but its snapshot is not in the repo",
@@ -409,7 +409,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					default_escalates: false,
 					documentation: Some(refs::RECONCILE_RECENCY_DOC),
 				},
-				&|degraded| match degraded {
+				&|graded| match graded.degraded().as_slice() {
 					[] => format!("Repo snapshots for {label} are as new as the runs it reported"),
 					[one] => format!(
 						"The repo holds no {} snapshot for {label} as new as the run it reported",
@@ -442,7 +442,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					default_escalates: false,
 					documentation: Some(refs::RECONCILE_REPORT_GAP_DOC),
 				},
-				&|degraded| match degraded {
+				&|graded| match graded.degraded().as_slice() {
 					[] => format!("Backup reporting for {label} recovered"),
 					[one] => format!(
 						"A fresh {} repo snapshot exists for {label} but no backup run was reported",
@@ -475,7 +475,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					default_escalates: false,
 					documentation: Some(refs::RECONCILE_SIZE_MISMATCH_DOC),
 				},
-				&|degraded| match degraded {
+				&|graded| match graded.degraded().as_slice() {
 					[] => format!("Reported and repo snapshot sizes for {label} agree again"),
 					[one] => format!(
 						"Application {label} reported a {} snapshot size that disagrees with the repo",

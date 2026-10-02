@@ -1733,12 +1733,27 @@ async fn same_scope_replicas_grade_separately_by_name() {
 
 		let verification = filed(&mut conn, server, "restore-verification").await;
 		let detail = verification.instances.clone().expect("instances");
+		let by_key = detail.as_object().unwrap();
 		assert_eq!(
-			detail.as_object().unwrap().len(),
-			2,
-			"two replicas, not one merged key"
+			by_key.keys().map(String::as_str).collect::<Vec<_>>(),
+			[
+				"tamanu-postgres:verify:nightly",
+				"tamanu-postgres:verify:weekly"
+			],
+			"two replicas keyed apart by name, not one merged key"
 		);
-		assert_eq!(degraded_instances(&detail).len(), 1);
+		assert_eq!(
+			by_key["tamanu-postgres:verify:nightly"]["effective"],
+			"warning"
+		);
+		assert_eq!(
+			by_key["tamanu-postgres:verify:weekly"]["effective"],
+			"passed"
+		);
+		assert_eq!(
+			by_key["tamanu-postgres:verify:nightly"]["label"], "nightly (tamanu-postgres / verify)",
+			"the key identifies the replica; the label still names it"
+		);
 		let instances = degraded_instances(&detail);
 		assert_eq!(instances.len(), 1);
 		assert_eq!(instances[0]["detail"]["replica"], "nightly");
@@ -1915,9 +1930,10 @@ async fn one_check_of_each_kind_per_machine_with_the_replicas_as_instances() {
 		assert_eq!(instances.len(), 1);
 		assert_eq!(instances[0]["detail"]["intent"], "verify");
 		assert_eq!(instances[0]["detail"]["replica"], "nightly-verify");
-		assert_eq!(
-			instances[0]["detail"]["replica_key"],
-			"tamanu-postgres:verify"
+		assert_eq!(instances[0]["detail"]["type"], "tamanu-postgres");
+		assert!(
+			instances[0]["detail"].get("replica_key").is_none(),
+			"the instance is keyed, so no joined identity field is spelled into its detail"
 		);
 		assert!(
 			verification.message.contains("nightly-verify"),
@@ -1934,7 +1950,11 @@ async fn one_check_of_each_kind_per_machine_with_the_replicas_as_instances() {
 		// about the analytics copy alone.
 		let redaction = filed(&mut conn, server, "redaction").await;
 		let detail = redaction.instances.clone().expect("instances");
-		assert_eq!(detail.as_object().unwrap().len(), 1);
+		assert_eq!(
+			detail.as_object().unwrap().keys().collect::<Vec<_>>(),
+			["tamanu-postgres:analytics:analytics-copy"],
+			"keyed by the replica's type, intent and name",
+		);
 		let instances = degraded_instances(&detail);
 		assert_eq!(instances[0]["detail"]["intent"], "analytics");
 		assert_eq!(instances[0]["detail"]["columns_skipped"], 3);
@@ -1942,6 +1962,14 @@ async fn one_check_of_each_kind_per_machine_with_the_replicas_as_instances() {
 		// The migration finding carries the version in its detail, not its name.
 		let migration = filed(&mut conn, application, "migration-test").await;
 		let detail = migration.instances.clone().expect("instances");
+		assert!(
+			detail
+				.as_object()
+				.unwrap()
+				.keys()
+				.all(|k| k.starts_with("tamanu-postgres:migrate")),
+			"keyed by the replica's type and intent, then its name: {detail}",
+		);
 		let instances = degraded_instances(&detail);
 		assert_eq!(instances[0]["detail"]["target_version"], "2.63.0");
 		assert_eq!(

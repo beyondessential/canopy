@@ -302,10 +302,10 @@ fn last_success_of(instance: &GradedInstance) -> String {
 /// Join instance labels for a message, in the order they were graded (most
 /// urgent first). Shared with [`crate::backup::reconcile`] so every backup
 /// check names its degraded instances the same way.
-pub(super) fn label_list(instances: &[GradedInstance]) -> String {
+pub(super) fn label_list(instances: &[&GradedInstance]) -> String {
 	instances
 		.iter()
-		.map(GradedInstance::name)
+		.map(|i| i.name())
 		.collect::<Vec<_>>()
 		.join(", ")
 }
@@ -414,7 +414,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					default_escalates: false,
 					documentation: Some(refs::STALENESS_DOC),
 				},
-				&|degraded| match degraded {
+				&|graded| match graded.degraded().as_slice() {
 					[] => format!("Application {label} is backing up on schedule again"),
 					[one] => format!(
 						"Application {label} has no recent {} backup (last success {})",
@@ -448,7 +448,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					default_escalates: false,
 					documentation: Some(refs::NEVER_DOC),
 				},
-				&|degraded| match degraded {
+				&|graded| match graded.degraded().as_slice() {
 					[] => {
 						format!("Application {label} has now backed up everything expected of it")
 					}

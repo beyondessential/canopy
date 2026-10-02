@@ -118,7 +118,7 @@ async fn file(conn: &mut AsyncPgConnection, scope: Scope, outcome: CheckOutcome)
 			default_escalates: true,
 			documentation: None,
 		},
-		&|degraded| format!("{} degraded", degraded.len()),
+		&|graded| format!("{} degraded", graded.degraded().len()),
 	)
 	.await
 	.expect("file the check")

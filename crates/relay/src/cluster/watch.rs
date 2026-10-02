@@ -167,12 +167,11 @@ fn determine_node_pools(pools: &Watched<DynamicObject>, now: Instant) -> Option<
 			)
 		})
 		.collect();
-	instances.sort_by(|a, b| a.label.cmp(&b.label));
+	instances.sort_by(|a, b| a.key.cmp(&b.key));
 	if instances.is_empty() {
 		return None;
 	}
-	let message = node_pools::message(&instances);
-	Some(Determination { instances, message })
+	Some(Determination::instances(instances))
 }
 
 fn determine_api_proxy(
@@ -295,30 +294,27 @@ fn determine_workloads(
 	let share = Share::sum(counted);
 	let percent = share.percent();
 	let result = grader.observe(percent, now)?;
-	Some(Determination {
-		instances: vec![relay_protocol::SubstrateInstance::only(
-			result,
-			Some(json!({
-				"healthy_share": (percent * 10.0).round() / 10.0,
-				"desired": share.desired,
-				"ready": share.ready,
-			})),
-		)],
-		message: format!(
+	Some(Determination::once(
+		result,
+		json!({
+			"healthy_share": (percent * 10.0).round() / 10.0,
+			"desired": share.desired,
+			"ready": share.ready,
+		}),
+		format!(
 			"{:.1}% of the cluster's workload is ready ({} of {} replicas)",
 			percent, share.ready, share.desired
 		),
-	})
+	))
 }
 
+/// A check whose watch has kept failing: broken as a whole, since nothing it
+/// reads is current.
 fn broken(message: String) -> Determination {
-	Determination {
-		instances: vec![relay_protocol::SubstrateInstance::only(
-			commons_types::status::CheckResult::Broken,
-			Some(json!({ "message": message })),
-		)],
-		message: format!("the relay cannot read the cluster: {message}"),
-	}
+	Determination::broken(
+		json!({ "message": message }),
+		format!("the relay cannot read the cluster: {message}"),
+	)
 }
 
 /// A watch over a CRD-defined kind, which may not be installed.

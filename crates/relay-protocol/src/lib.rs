@@ -46,6 +46,7 @@ pub mod transport;
 pub use alpn::{ALPN_V1, ProtocolVersion};
 pub use filing::{
 	Filing, FilingTarget, HarvestFiling, Instance, SubstrateFiling, SubstrateInstance,
+	SubstrateOutcome,
 };
 pub use frame::{MAX_FRAME_BYTES, ProtocolError, read_frame, read_required_frame, write_frame};
 pub use request::{Hello, Refusal, RefusalKind, Request, Response};

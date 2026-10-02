@@ -949,6 +949,16 @@ async fn reconcile_files_missing_when_the_reported_snapshot_is_absent_from_the_r
 			degraded[0]["detail"]["snapshot_id"], "snap-reported",
 			"the id looked up is in the detail: {detail}",
 		);
+		assert_eq!(
+			detail
+				.as_object()
+				.unwrap()
+				.keys()
+				.map(String::as_str)
+				.collect::<Vec<_>>(),
+			[pg.as_str()],
+			"the instance is keyed by its backup type",
+		);
 	})
 	.await;
 }
@@ -2115,6 +2125,119 @@ async fn staleness_is_one_check_per_server_with_the_types_as_instances() {
 			vec![refs::STALENESS.to_string()],
 			"one catalog entry to configure, not one per backup type",
 		);
+	})
+	.await;
+}
+
+/// A backup type is an instance of the staleness check, keyed by the type, so
+/// silencing one type on a machine quiets that type alone: its siblings still
+/// grade, the message stops naming it, and the check passes only once every
+/// stale type is quiet.
+// spec: CHK#silencing-one-instance
+#[tokio::test(flavor = "multi_thread")]
+async fn an_instance_silence_on_one_backup_type_quiets_that_type_only() {
+	TestDb::run(|mut conn, _url| async move {
+		let interval = SignedDuration::from_hours(12);
+		let pg = BackupType::TamanuPostgres;
+		let config = BackupType::Custom("tamanu-config".into());
+
+		let group_id = insert_group(&mut conn, "g").await;
+		let machine_id = insert_server(&mut conn, group_id, true).await;
+		let device_id = insert_device(&mut conn).await;
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
+		for ty in [&pg, &config] {
+			insert_schedule(&mut conn, group_id, ty, interval).await;
+			enable_capability(&mut conn, machine_id, ty).await;
+			insert_backup_success_aged(
+				&mut conn,
+				device_id,
+				group_id,
+				machine_id,
+				ty,
+				SignedDuration::from_hours(72),
+			)
+			.await;
+		}
+
+		let sweep = async |conn: &mut AsyncPgConnection| {
+			let rows = database::backup::staleness::scan_rows(conn)
+				.await
+				.expect("scan");
+			database::backup::staleness::sweep(conn, &rows)
+				.await
+				.expect("sweep");
+		};
+		sweep(&mut conn).await;
+		let instances = issue_instances(&mut conn, machine_id, refs::STALENESS)
+			.await
+			.expect("instances");
+		assert_eq!(
+			instances
+				.as_object()
+				.unwrap()
+				.keys()
+				.map(String::as_str)
+				.collect::<Vec<_>>(),
+			[config.as_str(), pg.as_str()],
+			"keyed by backup type",
+		);
+
+		database::silenced_refs::MachineSilencedRef::add(
+			&mut conn,
+			machine_id,
+			refs::CANOPY_SOURCE,
+			refs::STALENESS,
+			Some(pg.as_str()),
+			Some("op@example.com"),
+		)
+		.await
+		.expect("silence one type");
+		sweep(&mut conn).await;
+
+		let instances = issue_instances(&mut conn, machine_id, refs::STALENESS)
+			.await
+			.expect("instances");
+		assert_eq!(instances[pg.as_str()]["observed"], "failed");
+		assert_eq!(
+			instances[pg.as_str()]["effective"],
+			"skipped",
+			"the silenced type is quiet",
+		);
+		assert_eq!(
+			instances[config.as_str()]["effective"],
+			"warning",
+			"its sibling still grades",
+		);
+		let issue = machine_issue(&mut conn, machine_id, refs::STALENESS)
+			.await
+			.expect("staleness issue");
+		assert!(issue.active);
+		assert_eq!(issue.effective_result.as_deref(), Some("warning"));
+		let message = issue_message(&mut conn, machine_id, refs::STALENESS)
+			.await
+			.expect("message");
+		assert!(message.contains(config.as_str()), "{message}");
+		assert!(
+			!message.contains(pg.as_str()),
+			"the silenced type is not named: {message}",
+		);
+
+		database::silenced_refs::MachineSilencedRef::add(
+			&mut conn,
+			machine_id,
+			refs::CANOPY_SOURCE,
+			refs::STALENESS,
+			Some(config.as_str()),
+			Some("op@example.com"),
+		)
+		.await
+		.expect("silence the other type");
+		sweep(&mut conn).await;
+		let issue = machine_issue(&mut conn, machine_id, refs::STALENESS)
+			.await
+			.expect("staleness issue");
+		assert!(!issue.active, "every stale type is quiet");
+		assert_eq!(issue.effective_result.as_deref(), Some("skipped"));
 	})
 	.await;
 }

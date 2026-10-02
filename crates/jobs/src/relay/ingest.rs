@@ -21,7 +21,9 @@ use database::{
 	diesel_async::AsyncPgConnection,
 	issues::{CheckInstance, CheckOutcome, InstancedCheckFiling, Scope, file_check_instances},
 };
-use relay_protocol::{Filing, FilingTarget, HarvestFiling, SubstrateFiling};
+use relay_protocol::{
+	Filing, FilingTarget, HarvestFiling, SubstrateFiling, SubstrateInstance, SubstrateOutcome,
+};
 use tracing::warn;
 
 /// Where a filing lands, once the coordinates the relay named have been
@@ -148,20 +150,47 @@ async fn ingest_harvest(
 }
 
 /// A substrate filing, through canopy's own filing path.
+///
+/// What a check with instances says is canopy's to write, from the instances as
+/// it graded them, as for any check with instances: the relay's own account of
+/// them would count an instance a silence has since taken out. A check that
+/// holds once, or that the relay could not read, is described by the relay, as
+/// canopy's own plain determinations are described by whatever files them.
+// spec: CHK#checks-with-instances
 async fn ingest_substrate(
 	conn: &mut AsyncPgConnection,
 	relay_identity_id: Uuid,
 	substrate: SubstrateFiling,
 	placement: Placement,
 ) -> Result<()> {
-	// The instances are the check's complete set, so a filing naming none
-	// would say the condition has no instances at all rather than anything
-	// about them. The relay never sends one; refuse it rather than guess.
-	if substrate.instances.is_empty() {
-		return Err(AppError::custom(
-			"a substrate filing names no instances, so there is nothing to file",
-		));
-	}
+	let (detail, outcome) = match substrate.outcome {
+		// Brokenness is the whole check's, so its fields are the ones every
+		// instance the check holds shares.
+		SubstrateOutcome::Broken { detail } => (
+			detail.and_then(|d| match d {
+				serde_json::Value::Object(fields) => Some(fields),
+				_ => None,
+			}),
+			CheckOutcome::Broken,
+		),
+		SubstrateOutcome::Instances(instances) => {
+			refuse_malformed(&instances)?;
+			(
+				None,
+				CheckOutcome::Instances(
+					instances
+						.into_iter()
+						.map(|i| CheckInstance {
+							key: i.key,
+							label: i.label,
+							observed: i.observed,
+							detail: i.detail,
+						})
+						.collect(),
+				),
+			)
+		}
+	};
 
 	let scope = placement.scope();
 
@@ -170,39 +199,7 @@ async fn ingest_substrate(
 	// carries none (see `CheckFiling::device_id`).
 	let device_id = matches!(scope, Scope::Application(_)).then_some(relay_identity_id);
 
-	// Brokenness is the whole check's, never an instance's, and the relay
-	// reports it only as the single instance of a check that could not be
-	// read; it is filed as the check being broken.
-	// spec: CHK#checks-with-instances
-	let broken = substrate
-		.instances
-		.iter()
-		.find(|i| i.observed == CheckResult::Broken)
-		.map(|i| i.detail.as_ref().and_then(|d| d.as_object().cloned()));
-	let (detail, outcome) = if let Some(detail) = broken {
-		(detail, CheckOutcome::Broken)
-	} else {
-		(
-			None,
-			CheckOutcome::Instances(
-				substrate
-					.instances
-					.into_iter()
-					.map(|i| CheckInstance {
-						// The relay names an instance by its label alone, so the
-						// label is its key: unique within the check, and empty for
-						// a check that holds once.
-						key: i.label,
-						label: None,
-						observed: i.observed,
-						detail: i.detail,
-					})
-					.collect(),
-			),
-		)
-	};
-
-	let message = substrate.message.clone();
+	let message = substrate.message;
 	file_check_instances(
 		conn,
 		InstancedCheckFiling {
@@ -217,10 +214,48 @@ async fn ingest_substrate(
 			detail,
 			outcome,
 		},
-		&|_| message.clone(),
+		&|graded| match &message {
+			Some(message) if graded.is_plain() => message.clone(),
+			_ => graded.message(&substrate.check),
+		},
 	)
 	.await?;
 
+	Ok(())
+}
+
+/// Refuse a set of instances canopy cannot hold as the relay sent it.
+///
+/// The instances are the check's complete set, so a filing naming none would
+/// say the condition has no instances at all rather than anything about them,
+/// and the relay never sends one. An instance is told apart by its key, which
+/// is empty only for the one instance of a check that holds once, so an empty
+/// key beside others or a key named twice says nothing canopy could hold. And
+/// an instance is never broken: a check the relay cannot read is broken as a
+/// whole.
+fn refuse_malformed(instances: &[SubstrateInstance]) -> Result<()> {
+	if instances.is_empty() {
+		return Err(AppError::custom(
+			"a substrate filing names no instances, so there is nothing to file",
+		));
+	}
+	if instances.iter().any(|i| i.observed == CheckResult::Broken) {
+		return Err(AppError::custom(
+			"a substrate instance cannot be broken: a check that cannot be read is broken as a whole",
+		));
+	}
+	if instances.len() > 1 && instances.iter().any(|i| i.key.is_empty()) {
+		return Err(AppError::custom(
+			"a substrate instance beside others has an empty key",
+		));
+	}
+	let mut keys: Vec<&str> = instances.iter().map(|i| i.key.as_str()).collect();
+	keys.sort_unstable();
+	if keys.windows(2).any(|w| w[0] == w[1]) {
+		return Err(AppError::custom(
+			"a substrate filing names one instance key twice",
+		));
+	}
 	Ok(())
 }
 

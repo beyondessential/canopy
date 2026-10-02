@@ -529,6 +529,19 @@ async fn a_failed_build_warns_on_the_group_central() {
 			"the builder's own description reaches the operator: {}",
 			issue.message
 		);
+
+		// Each version is an instance keyed by the version, which its detail
+		// also carries for a rule to read; the pair still awaiting its first
+		// build is not one yet.
+		let instances = issue.stored_instances().expect("instances");
+		assert_eq!(
+			instances.0.keys().map(String::as_str).collect::<Vec<_>>(),
+			["2.59.0"]
+		);
+		assert_eq!(
+			instances.0["2.59.0"].detail.as_ref().unwrap()["version"],
+			"2.59.0"
+		);
 	})
 	.await;
 }

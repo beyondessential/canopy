@@ -20,7 +20,7 @@ use jobs::relay::{self as hub, Registry};
 use relay::duties::Unattached;
 use relay_protocol::{
 	Filing, FilingTarget, Hello, Request, Response, SUBSTRATE_SOURCE, SubstrateFiling,
-	SubstrateInstance, transport::Identity,
+	SubstrateInstance, SubstrateOutcome, transport::Identity,
 };
 
 /// Wait for something the two ends reach asynchronously.
@@ -170,9 +170,12 @@ async fn a_real_relay_connects_to_the_real_listener_and_answers_it() {
 			.send(Filing::Substrate(SubstrateFiling {
 				target: FilingTarget::Cluster,
 				check: "tailscale-api-proxy".into(),
-				instances: vec![SubstrateInstance::only(CheckResult::Failed, None)],
+				outcome: SubstrateOutcome::Instances(vec![SubstrateInstance::only(
+					CheckResult::Failed,
+					None,
+				)]),
 				title: Some("Operators cannot reach the cluster's API".into()),
-				message: "the API proxy is not connected to the tailnet".into(),
+				message: Some("the API proxy is not connected to the tailnet".into()),
 				default_ceiling: CheckResult::Failed,
 				default_escalates: false,
 				documentation: None,

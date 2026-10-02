@@ -1421,13 +1421,13 @@ pub struct InstancedCheckFiling<'a> {
 /// is graded separately against its own detail, a rule or silence written for
 /// one instance still applies to only that instance.
 ///
-/// `message` is called with the instances that are not passing, most urgent
-/// first, and is what the operator reads; it gets an empty slice when
-/// everything is healthy, which is the recovery message.
+/// `message` is called with the check as graded and is what the operator
+/// reads. Most filers name what [`GradedCheck::degraded`] lists, most urgent
+/// first, which is empty when everything is healthy: the recovery message.
 pub async fn file_check_instances(
 	conn: &mut AsyncPgConnection,
 	filing: InstancedCheckFiling<'_>,
-	message: &(dyn Fn(&[GradedInstance]) -> String + Sync),
+	message: &(dyn Fn(&GradedCheck) -> String + Sync),
 ) -> Result<Issue> {
 	use crate::check_policies::CheckPolicy;
 
@@ -1490,8 +1490,7 @@ pub async fn file_check_instances(
 		graded.retain_through_brokenness(prior.as_ref());
 	}
 
-	let degraded: Vec<GradedInstance> = graded.degraded().into_iter().cloned().collect();
-	let rendered = message(&degraded);
+	let rendered = message(&graded);
 	let active = matches!(
 		graded.effective,
 		CheckResult::Failed | CheckResult::Warning | CheckResult::Broken
