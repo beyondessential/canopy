@@ -14,9 +14,9 @@ use database::{
 	check_policies::{CheckPolicy, FilingScope, IfLadder, ScopedCheckPolicy},
 	diesel_async::AsyncPgConnection,
 	issues::{
-		CheckFiling, CheckGrading, CheckInstance, CheckOutcome, GradingContext, Incident,
-		InstancedCheckFiling, InstancedDetail, Issue, Scope, file_check, file_check_instances,
-		grade_instances,
+		CheckFiling, CheckGrading, CheckInstance, CheckOutcome, CheckStateStamp, GradingContext,
+		GradingInputs, Incident, InstancedCheckFiling, Issue, NewEvent, Scope, StoredInstances,
+		file_check, file_check_instances, grade_instances,
 	},
 	silenced_refs::{
 		MachineSilencedRef, ServerGroupSilencedRef, ServerSilencedRef, is_silenced,
@@ -131,8 +131,8 @@ async fn state(conn: &mut AsyncPgConnection, scope: Scope) -> Issue {
 		.expect("state filed")
 }
 
-fn stored(issue: &Issue) -> InstancedDetail {
-	InstancedDetail::parse(issue.detail.as_ref()).expect("an instanced detail")
+fn stored(issue: &Issue) -> StoredInstances {
+	issue.stored_instances().expect("the state holds instances")
 }
 
 fn ladder(rules: Value) -> IfLadder {
@@ -174,10 +174,14 @@ async fn the_most_urgent_instance_settles_the_check_and_every_instance_is_stored
 		assert!(issue.escalates);
 
 		let detail = stored(&issue);
-		assert_eq!(detail.total, 3);
-		assert_eq!(detail.degraded, 2);
-		assert_eq!(detail.detail.as_ref().unwrap()["fail_minutes"], 30);
-		let harbour = &detail.instances["dev-harbour"];
+		assert_eq!(detail.0.len(), 3);
+		assert_eq!(detail.degraded(), 2);
+		assert_eq!(
+			issue.detail,
+			Some(json!({"fail_minutes": 30})),
+			"the state's detail is the shared fields",
+		);
+		let harbour = &detail.0["dev-harbour"];
 		assert_eq!(harbour.label.as_deref(), Some("Harbour Hospital"));
 		assert_eq!(harbour.observed, CheckResult::Passed);
 		assert_eq!(harbour.effective, CheckResult::Passed);
@@ -185,8 +189,8 @@ async fn the_most_urgent_instance_settles_the_check_and_every_instance_is_stored
 			harbour.detail.as_ref().unwrap()["minutes_since_success"],
 			1.2
 		);
-		assert_eq!(detail.instances["dev-east"].label, None);
-		assert_eq!(detail.instances["dev-east"].effective, CheckResult::Warning);
+		assert_eq!(detail.0["dev-east"].label, None);
+		assert_eq!(detail.0["dev-east"].effective, CheckResult::Warning);
 	})
 	.await
 }
@@ -216,7 +220,8 @@ async fn a_check_without_instances_stores_its_detail_as_reported() {
 		.expect("file");
 		assert_eq!(issue.detail, Some(detail));
 		assert_eq!(issue.message, "low");
-		assert!(InstancedDetail::parse(issue.detail.as_ref()).is_none());
+		assert!(issue.instances.is_none());
+		assert!(issue.grading_context.is_none());
 	})
 	.await
 }
@@ -230,7 +235,7 @@ async fn a_check_with_an_empty_set_of_instances_passes() {
 		let issue = file(&mut conn, scope, CheckOutcome::Instances(Vec::new())).await;
 		assert_eq!(issue.effective_result, Some(CheckResult::Passed));
 		assert!(!issue.active);
-		assert!(stored(&issue).instances.is_empty());
+		assert!(stored(&issue).0.is_empty());
 	})
 	.await
 }
@@ -285,22 +290,22 @@ async fn a_rule_reads_the_instance_over_the_shared_detail_and_its_own_result() {
 		.expect("file");
 		let detail = stored(&issue);
 		assert_eq!(
-			detail.instances["a"].effective,
+			detail.0["a"].effective,
 			CheckResult::Warning,
 			"the instance's own field wins over the shared one",
 		);
 		assert_eq!(
-			detail.instances["b"].effective,
+			detail.0["b"].effective,
 			CheckResult::Failed,
 			"an instance without the field reads the shared one",
 		);
 		assert_eq!(
-			detail.instances["c"].effective,
+			detail.0["c"].effective,
 			CheckResult::Skipped,
 			"check.result is the instance's own result",
 		);
 		assert_eq!(
-			detail.instances["d"].effective,
+			detail.0["d"].effective,
 			CheckResult::Passed,
 			"a rule pinning a field only one instance carries grades that one",
 		);
@@ -485,12 +490,9 @@ async fn an_instance_silence_on_an_application_quiets_that_instance_and_regrades
 		);
 		assert_eq!(issue.last_seen, last_seen, "a re-grade is not a report");
 		let detail = stored(&issue);
-		assert_eq!(
-			detail.instances["dev-north"].effective,
-			CheckResult::Skipped
-		);
-		assert_eq!(detail.instances["dev-east"].effective, CheckResult::Warning);
-		assert_eq!(detail.degraded, 1);
+		assert_eq!(detail.0["dev-north"].effective, CheckResult::Skipped);
+		assert_eq!(detail.0["dev-east"].effective, CheckResult::Warning);
+		assert_eq!(detail.degraded(), 1);
 
 		// The whole check is not silenced, wherever that is read.
 		assert!(
@@ -532,10 +534,7 @@ async fn an_instance_silence_on_an_application_quiets_that_instance_and_regrades
 			Some(CheckResult::Failed),
 			"unsilencing re-grades at once too",
 		);
-		assert_eq!(
-			stored(&issue).instances["dev-north"].effective,
-			CheckResult::Failed
-		);
+		assert_eq!(stored(&issue).0["dev-north"].effective, CheckResult::Failed);
 	})
 	.await
 }
@@ -657,7 +656,7 @@ async fn a_group_instance_silence_quiets_that_key_on_every_application_in_the_gr
 			let issue = state(&mut conn, Scope::Application(application)).await;
 			assert_eq!(issue.effective_result, Some(CheckResult::Passed));
 			assert_eq!(
-				stored(&issue).instances["dev-north"].effective,
+				stored(&issue).0["dev-north"].effective,
 				CheckResult::Skipped
 			);
 		}
@@ -807,6 +806,218 @@ async fn whole_check_and_instance_silences_are_unique_apart_and_coexist() {
 	.await
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn a_regrade_replays_the_report_and_tags_the_filing_graded_with() {
+	TestDb::run(async |mut conn, _| {
+		let s = seed(&mut conn).await;
+		let source = "alertd";
+		let r#ref = format!("health/{CHECK}");
+		let ns = Namespace::Application(ApplicationType::TamanuCentral);
+		CheckPolicy::upsert_default(&mut conn, source, &ns, CHECK)
+			.await
+			.expect("catalog");
+		CheckPolicy::update(
+			&mut conn,
+			source,
+			&ns,
+			CHECK,
+			CheckResult::Failed,
+			false,
+			None,
+			"op",
+		)
+		.await
+		.expect("review");
+		// A tag only the filing supplies: the application stores none, so the
+		// tags Canopy would read for it afresh do not carry it.
+		CheckPolicy::update_rules(
+			&mut conn,
+			source,
+			&ns,
+			CHECK,
+			Some(&ladder(json!({"if": [
+				{"==": [{"var": "tag.tier"}, "lab"]}, "warning",
+			]}))),
+			"op",
+		)
+		.await
+		.expect("rules");
+
+		// Filed the way push ingestion files: graded with its own context,
+		// then stamped from what was graded.
+		let status: Map<String, Value> = json!({"release": "beta"}).as_object().cloned().unwrap();
+		let tags: HashMap<String, Value> = [("tier".to_string(), json!("lab"))].into();
+		let ctx = GradingContext {
+			source,
+			check: CHECK,
+			status_extra: &status,
+			tags: &tags,
+		};
+		let grading = CheckGrading::load(
+			&mut conn,
+			source,
+			&ns,
+			CHECK,
+			FilingScope {
+				application_id: Some(s.application),
+				group_id: Some(s.group),
+				..Default::default()
+			},
+		)
+		.await
+		.expect("grading");
+		let graded = grade_instances(
+			&grading,
+			&ctx,
+			None,
+			&CheckOutcome::Instances(devices()),
+			None,
+		);
+		assert_eq!(graded.effective, CheckResult::Warning);
+		let stamp = CheckStateStamp::of_graded(CHECK, &graded, &ctx, Some("Sync is stale"));
+		let filed = NewEvent {
+			source: source.into(),
+			r#ref: r#ref.clone(),
+			description: Some("Sync is stale".into()),
+			message: graded.message(CHECK),
+			active: Some(true),
+			occurred_at: None,
+		}
+		.save_with_state(&mut conn, s.application, None, Some(&stamp), false)
+		.await
+		.expect("file");
+		assert_eq!(
+			filed.grading_inputs(),
+			Some(GradingInputs {
+				status: status.clone(),
+				tags: tags.clone(),
+			}),
+		);
+
+		// Silencing the passing instance changes nothing a rule reads, so the
+		// failing one stays graded as the filing graded it.
+		ServerSilencedRef::add(
+			&mut conn,
+			s.application,
+			source,
+			&r#ref,
+			Some("dev-harbour"),
+			None,
+		)
+		.await
+		.expect("silence");
+		let issue =
+			Issue::check_state_at(&mut conn, Scope::Application(s.application), source, &r#ref)
+				.await
+				.expect("read")
+				.expect("filed");
+		let held = stored(&issue);
+		assert_eq!(held.0["dev-harbour"].effective, CheckResult::Skipped);
+		assert_eq!(
+			held.0["dev-north"].effective,
+			CheckResult::Warning,
+			"the re-grade read the tag the filing supplied",
+		);
+		assert_eq!(issue.effective_result, Some(CheckResult::Warning));
+		assert_eq!(issue.grading_context, filed.grading_context);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_title_survives_a_silence_and_its_lifting() {
+	TestDb::run(async |mut conn, _| {
+		let s = seed(&mut conn).await;
+		let scope = Scope::Application(s.application);
+		let issue = file(&mut conn, scope, CheckOutcome::Instances(devices())).await;
+		assert_eq!(issue.description.as_deref(), Some("sync is stale"));
+
+		ServerSilencedRef::add(
+			&mut conn,
+			s.application,
+			CANOPY_SOURCE,
+			CHECK,
+			Some("dev-north"),
+			None,
+		)
+		.await
+		.expect("silence");
+		let issue = state(&mut conn, scope).await;
+		assert!(!issue.active);
+		assert_eq!(issue.description, None, "no headline while not degraded");
+		assert_eq!(issue.title.as_deref(), Some("sync is stale"));
+
+		ServerSilencedRef::remove(
+			&mut conn,
+			s.application,
+			CANOPY_SOURCE,
+			CHECK,
+			Some("dev-north"),
+		)
+		.await
+		.expect("unsilence");
+		let issue = state(&mut conn, scope).await;
+		assert!(issue.active);
+		assert_eq!(
+			issue.description.as_deref(),
+			Some("sync is stale"),
+			"back in trouble, with the title its last filing gave it",
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plain_check_whose_detail_looks_instanced_is_still_plain() {
+	TestDb::run(async |mut conn, _| {
+		let s = seed(&mut conn).await;
+		let scope = Scope::Application(s.application);
+		let detail = json!({
+			"instances": {"dev-north": {"observed": "failed", "effective": "failed"}},
+			"degraded": 1,
+			"total": 1,
+		});
+		let filed = file_check(
+			&mut conn,
+			CheckFiling {
+				source: CANOPY_SOURCE,
+				scope,
+				device_id: None,
+				check: CHECK,
+				observed: CheckResult::Failed,
+				title: None,
+				message: "plain",
+				detail: Some(detail.clone()),
+				default_ceiling: CheckResult::Failed,
+				default_escalates: false,
+				documentation: None,
+			},
+		)
+		.await
+		.expect("file");
+		assert!(filed.instances.is_none());
+		assert!(filed.stored_instances().is_none());
+		assert_eq!(filed.detail, Some(detail.clone()));
+
+		// An instance silence naming a key in that detail reaches nothing.
+		ServerSilencedRef::add(
+			&mut conn,
+			s.application,
+			CANOPY_SOURCE,
+			CHECK,
+			Some("dev-north"),
+			None,
+		)
+		.await
+		.expect("silence");
+		let issue = state(&mut conn, scope).await;
+		assert_eq!(issue.effective_result, Some(CheckResult::Failed));
+		assert_eq!(issue.detail, Some(detail));
+		assert_eq!(issue.message, "plain");
+	})
+	.await
+}
+
 // ── Brokenness is whole-check ───────────────────────────────────────────────
 
 #[tokio::test(flavor = "multi_thread")]
@@ -827,27 +1038,27 @@ async fn a_broken_check_holds_its_instances_as_broken_and_retains_its_failure() 
 		assert!(issue.active);
 		let detail = stored(&issue);
 		assert_eq!(
-			detail.instances.keys().collect::<Vec<_>>(),
+			detail.0.keys().collect::<Vec<_>>(),
 			vec!["dev-harbour", "dev-north"],
 			"no instance is recovered",
 		);
-		for held in detail.instances.values() {
+		for held in detail.0.values() {
 			assert_eq!(held.observed, CheckResult::Broken);
 			assert_eq!(held.effective, CheckResult::Broken);
 		}
 		assert_eq!(
-			detail.instances["dev-north"].label.as_deref(),
+			detail.0["dev-north"].label.as_deref(),
 			Some("Northgate Clinic"),
 			"held with what it was last stored with",
 		);
 		assert_eq!(
-			detail.instances["dev-north"].detail.as_ref().unwrap()["minutes_since_success"],
+			detail.0["dev-north"].detail.as_ref().unwrap()["minutes_since_success"],
 			2875.4
 		);
 
 		// Still broken: still nothing recovered.
 		let issue = file(&mut conn, scope, CheckOutcome::Broken).await;
-		assert_eq!(stored(&issue).total, 2);
+		assert_eq!(stored(&issue).0.len(), 2);
 
 		// The next definite filing grades its instances afresh.
 		let issue = file(
@@ -863,7 +1074,7 @@ async fn a_broken_check_holds_its_instances_as_broken_and_retains_its_failure() 
 		.await;
 		assert_eq!(issue.effective_result, Some(CheckResult::Passed));
 		assert_eq!(
-			stored(&issue).instances.keys().collect::<Vec<_>>(),
+			stored(&issue).0.keys().collect::<Vec<_>>(),
 			vec!["dev-harbour"]
 		);
 	})
@@ -889,7 +1100,7 @@ async fn a_broken_check_with_nothing_definite_to_retain_counts_as_broken() {
 		let issue = file(&mut conn, scope, CheckOutcome::Broken).await;
 		assert_eq!(issue.effective_result, Some(CheckResult::Broken));
 		assert_eq!(
-			stored(&issue).instances["dev-harbour"].effective,
+			stored(&issue).0["dev-harbour"].effective,
 			CheckResult::Broken
 		);
 	})

@@ -194,12 +194,15 @@ async fn instances_are_graded_together_and_the_most_urgent_wins() {
 		)
 		.await;
 		assert_eq!(issue.effective_result, Some(CheckResult::Failed));
-		let detail = issue.detail.expect("instance detail");
-		assert_eq!(detail["total"], 2);
-		assert_eq!(detail["degraded"], 1);
-		assert_eq!(detail["instances"]["gpu"]["detail"]["pool"], "gpu");
-		assert_eq!(detail["instances"]["gpu"]["effective"], "failed");
-		assert_eq!(detail["instances"]["general"]["effective"], "passed");
+		let instances = issue.stored_instances().expect("instances");
+		assert_eq!(instances.0.len(), 2);
+		assert_eq!(instances.degraded(), 1);
+		assert_eq!(
+			instances.0["gpu"].detail,
+			Some(serde_json::json!({"pool": "gpu"}))
+		);
+		assert_eq!(instances.0["gpu"].effective, CheckResult::Failed);
+		assert_eq!(instances.0["general"].effective, CheckResult::Passed);
 
 		// The set is complete each time: a second filing replaces the first.
 		let issue = file_substrate(

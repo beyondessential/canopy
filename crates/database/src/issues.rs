@@ -124,9 +124,42 @@ pub struct Issue {
 	/// notifies immediately, bypassing incident grace. Stamped from the
 	/// catalog on every filing.
 	pub escalates: bool,
+	/// The headline the last filing gave the check, kept whatever its result:
+	/// `description` is the headline only while the state is degraded.
+	pub title: Option<String>,
+	/// The check's instances, by key (see [`StoredInstances`]). `None` for a
+	/// check without instances, whose fields are all in `detail`; for one
+	/// with them, `detail` holds the fields they share.
+	pub instances: Option<serde_json::Value>,
+	/// What the rules grading the instances read beyond each instance, as
+	/// the last filing gave them (see [`GradingInputs`]). Set exactly when
+	/// `instances` is. Internal to grading, so never presented.
+	#[serde(skip)]
+	pub grading_context: Option<serde_json::Value>,
 }
 
 impl Issue {
+	/// This state's instances, or `None` for a check without them.
+	///
+	/// A stored value that does not read back is written outside the model;
+	/// it is logged and read as no instances rather than failing the reader.
+	pub fn stored_instances(&self) -> Option<StoredInstances> {
+		let stored = self.instances.as_ref()?;
+		serde_json::from_value(stored.clone())
+			.inspect_err(
+				|err| tracing::warn!(issue = %self.id, ?err, "unreadable stored instances"),
+			)
+			.ok()
+	}
+
+	/// The inputs this state's instances were last graded with.
+	pub fn grading_inputs(&self) -> Option<GradingInputs> {
+		let stored = self.grading_context.as_ref()?;
+		serde_json::from_value(stored.clone())
+			.inspect_err(|err| tracing::warn!(issue = %self.id, ?err, "unreadable grading context"))
+			.ok()
+	}
+
 	/// Does this state open an incident on its own? An effective failure
 	/// does; anything less joins an already-open incident but doesn't
 	/// create (or hold open) one.
@@ -301,7 +334,37 @@ pub struct CheckStateStamp {
 	pub effective: CheckResult,
 	/// Whether the check's policy escalates (see [`Issue::escalates`]).
 	pub escalates: bool,
+	/// A plain check's fields, or the fields an instanced check shares.
 	pub detail: Option<serde_json::Value>,
+	/// The headline this filing gives the check, kept whatever its result
+	/// (see [`Issue::title`]). `None` keeps the one already stored.
+	pub title: Option<String>,
+	/// The check's instances and what their rules read, or `None` for a check
+	/// without instances, which clears any the state held.
+	pub instanced: Option<InstancedState>,
+}
+
+impl CheckStateStamp {
+	/// The stamp for a check graded through [`grade_instances`] with `ctx`.
+	pub fn of_graded(
+		check: &str,
+		graded: &GradedCheck,
+		ctx: &GradingContext<'_>,
+		title: Option<&str>,
+	) -> Self {
+		Self {
+			check: check.to_string(),
+			observed: graded.observed,
+			effective: graded.effective,
+			escalates: graded.escalates,
+			detail: graded.detail(),
+			title: title.map(str::to_string),
+			instanced: graded.stored_instances().map(|instances| InstancedState {
+				instances,
+				inputs: GradingInputs::of(ctx),
+			}),
+		}
+	}
 }
 
 /// A state's degraded-streak timestamps once it takes an effective result at
@@ -359,9 +422,25 @@ async fn stamp_check_state(
 		stamp.effective,
 		at,
 	);
+	if let Some(title) = &stamp.title {
+		diesel::update(issues::table.filter(issues::id.eq(issue_id)))
+			.set(issues::title.eq(title))
+			.execute(conn)
+			.await
+			.map_err(AppError::from)?;
+	}
+	let (instances, grading_context) = match &stamp.instanced {
+		Some(state) => (
+			Some(serde_json::to_value(&state.instances).expect("instances serialise")),
+			Some(serde_json::to_value(&state.inputs).expect("grading inputs serialise")),
+		),
+		None => (None, None),
+	};
 	let issue = diesel::update(issues::table.filter(issues::id.eq(issue_id)))
 		.set((
 			issues::check_name.eq(&stamp.check),
+			issues::instances.eq(instances),
+			issues::grading_context.eq(grading_context),
 			issues::observed_result.eq(stamp.observed.to_string()),
 			issues::effective_result.eq(stamp.effective.to_string()),
 			issues::escalates.eq(stamp.escalates),
@@ -1310,7 +1389,7 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 
 pub use crate::check_instances::{
 	CheckGrading, CheckInstance, CheckOutcome, GradedCheck, GradedInstance, GradingContext,
-	InstancedDetail, StoredInstance, grade_instances,
+	GradingInputs, InstancedState, StoredInstance, StoredInstances, grade_instances,
 };
 
 /// A check filed from its instances. Everything except the instances is
@@ -1390,14 +1469,15 @@ pub async fn file_check_instances(
 	// Canopy's own determinations come from no report, so a rule's `status.*`
 	// reads nothing for them.
 	let status_extra = serde_json::Map::new();
+	let ctx = GradingContext {
+		source,
+		check: filing.check,
+		status_extra: &status_extra,
+		tags: &target.tags,
+	};
 	let graded = grade_instances(
 		&grading,
-		&GradingContext {
-			source,
-			check: filing.check,
-			status_extra: &status_extra,
-			tags: &target.tags,
-		},
+		&ctx,
 		filing.detail.as_ref(),
 		&filing.outcome,
 		prior.as_ref(),
@@ -1409,13 +1489,7 @@ pub async fn file_check_instances(
 		graded.effective,
 		CheckResult::Failed | CheckResult::Warning | CheckResult::Broken
 	);
-	let stamp = CheckStateStamp {
-		check: filing.check.to_string(),
-		observed: graded.observed,
-		effective: graded.effective,
-		escalates: graded.escalates,
-		detail: graded.detail(),
-	};
+	let stamp = CheckStateStamp::of_graded(filing.check, &graded, &ctx, filing.title);
 	write_check_state(
 		conn,
 		filing.scope,
@@ -1588,40 +1662,34 @@ impl GradingTarget {
 	}
 }
 
-/// The fields a source last reported for a target, which a rule reads as
-/// `status.*`: an application's own, or a machine's. Empty for a source that
-/// reports nothing, as Canopy's own do.
-async fn last_report_fields(
+/// The scopes a check filed at `scope` chains its policy from.
+async fn filing_scope_for(
 	conn: &mut AsyncPgConnection,
 	scope: Scope,
-	source: &str,
-) -> Result<serde_json::Map<String, serde_json::Value>> {
-	let extra: Option<serde_json::Value> = match scope {
-		Scope::Application(application_id) => {
-			use crate::schema::application_reported_detail::dsl;
-			dsl::application_reported_detail
-				.select(dsl::extra)
-				.filter(dsl::application_id.eq(application_id))
-				.filter(dsl::source.eq(source))
-				.first(conn)
-				.await
-				.optional()?
-		}
-		Scope::Machine(machine_id) => {
-			use crate::schema::machine_reported_detail::dsl;
-			dsl::machine_reported_detail
-				.select(dsl::extra)
-				.filter(dsl::machine_id.eq(machine_id))
-				.filter(dsl::source.eq(source))
-				.first(conn)
-				.await
-				.optional()?
-		}
-		Scope::Group(_) | Scope::Cluster(_) | Scope::Global => None,
-	};
-	Ok(match extra {
-		Some(serde_json::Value::Object(fields)) => fields,
-		_ => Default::default(),
+) -> Result<crate::check_policies::FilingScope> {
+	use crate::check_policies::FilingScope;
+	Ok(match scope {
+		Scope::Application(application_id) => FilingScope {
+			application_id: Some(application_id),
+			group_id: Application::get_by_id(conn, application_id).await?.group_id,
+			..Default::default()
+		},
+		Scope::Machine(machine_id) => FilingScope {
+			machine_id: Some(machine_id),
+			group_id: crate::machines::Machine::get_by_id(conn, machine_id)
+				.await?
+				.group_id,
+			..Default::default()
+		},
+		Scope::Group(group_id) => FilingScope {
+			group_id: Some(group_id),
+			..Default::default()
+		},
+		Scope::Cluster(cluster_id) => FilingScope {
+			kubernetes_cluster_id: Some(cluster_id),
+			..Default::default()
+		},
+		Scope::Global => FilingScope::default(),
 	})
 }
 
@@ -1663,16 +1731,21 @@ impl Issue {
 /// effective result moves without any new observation. Re-checking membership
 /// alone, as a whole-check silence needs, would leave the state graded as it
 /// was until the next filing. So each state covered by `scope` is re-graded
-/// from its instances as last observed (their results and fields), through
-/// the policy as it now stands, and written back without counting as an
-/// observation: its stability record and when it was last reported are
-/// untouched.
+/// from its instances as last observed (their results and fields) and the
+/// inputs its last filing gave their rules ([`GradingInputs`]: the report's
+/// fields and the target's tags), through the policy as it now stands, so the
+/// silence is the only thing that changes. It is written back without counting
+/// as an observation: its stability record and when it was last reported are
+/// untouched. A state brought back into trouble presents the title its last
+/// filing gave it.
 ///
 /// A state holding no instances is a check without them, which an instance
 /// silence never reaches, and is left alone.
 ///
-/// The message is Canopy's own, from the re-graded instances
-/// ([`GradedCheck::message`]); the next filing replaces it with the filer's.
+/// The message is Canopy's generic one for an instanced check, from the
+/// re-graded instances ([`GradedCheck::message`]). That is what a reported
+/// instanced check is filed with; Canopy's own instanced checks are filed with
+/// wording of their own, which their next sweep restores.
 // spec: CHK#silencing-one-instance
 pub async fn regrade_instanced_states(
 	conn: &mut AsyncPgConnection,
@@ -1687,7 +1760,7 @@ pub async fn regrade_instanced_states(
 		.select(Issue::as_select())
 		.filter(issues::source.eq(source))
 		.filter(issues::ref_.eq(r#ref))
-		.filter(issues::observed_result.is_not_null())
+		.filter(issues::instances.is_not_null())
 		.into_boxed();
 	query = match scope {
 		Scope::Application(aid) => query.filter(issues::application_id.eq(aid)),
@@ -1738,7 +1811,7 @@ pub async fn regrade_instanced_states(
 	let states: Vec<Issue> = query.load(conn).await?;
 
 	for state in states {
-		let Some(held) = InstancedDetail::parse(state.detail.as_ref()) else {
+		let (Some(held), Some(inputs)) = (state.stored_instances(), state.grading_inputs()) else {
 			continue;
 		};
 		let state_scope = Scope::from_columns(
@@ -1751,24 +1824,21 @@ pub async fn regrade_instanced_states(
 			.check_name
 			.clone()
 			.unwrap_or_else(|| r#ref.to_string());
-		let target = GradingTarget::load(conn, state_scope).await?;
-		let grading =
-			CheckGrading::load(conn, source, namespace, &check, target.filing_scope).await?;
-		let status_extra = last_report_fields(conn, state_scope, source).await?;
+		let filing_scope = filing_scope_for(conn, state_scope).await?;
+		let grading = CheckGrading::load(conn, source, namespace, &check, filing_scope).await?;
 		let outcome = if state.observed_result == Some(CheckResult::Broken) {
 			CheckOutcome::Broken
 		} else {
 			CheckOutcome::Instances(held.observed_instances())
 		};
+		let shared = match &state.detail {
+			Some(serde_json::Value::Object(shared)) => Some(shared),
+			_ => None,
+		};
 		let graded = grade_instances(
 			&grading,
-			&GradingContext {
-				source,
-				check: &check,
-				status_extra: &status_extra,
-				tags: &target.tags,
-			},
-			held.detail.as_ref(),
+			&inputs.context(source, &check),
+			shared,
 			&outcome,
 			Some(&state),
 		);
@@ -1787,16 +1857,14 @@ pub async fn regrade_instanced_states(
 				issues::observed_result.eq(graded.observed.to_string()),
 				issues::effective_result.eq(graded.effective.to_string()),
 				issues::escalates.eq(graded.escalates),
-				issues::detail.eq(graded.detail()),
+				issues::instances.eq(graded
+					.stored_instances()
+					.map(|i| serde_json::to_value(i).expect("instances serialise"))),
 				issues::degraded_since.eq(streak.degraded_since),
 				issues::last_degraded_at.eq(streak.last_degraded_at),
 				issues::active.eq(active),
 				issues::message.eq(graded.message(&check)),
-				issues::description.eq(if active {
-					state.description.clone()
-				} else {
-					None
-				}),
+				issues::description.eq(if active { state.title.clone() } else { None }),
 			))
 			.returning(Issue::as_select())
 			.get_result(conn)

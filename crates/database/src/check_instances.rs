@@ -194,15 +194,9 @@ impl GradedCheck {
 			.count()
 	}
 
-	/// The detail the check's state stores.
-	///
-	/// A check without instances stores its fields as they were reported, so
-	/// a plain check's stored detail is exactly what it always was. Any other
-	/// check stores an [`InstancedDetail`]: every instance it holds, keyed,
-	/// with its label, both results and its own fields, then the shared
-	/// fields and the counts. Everything that presents an instance (which ones
-	/// are degraded or silenced, which keys a silence no longer matches, what
-	/// a broken check held) reads it back from there.
+	/// The detail the check's state stores: a plain check's fields as they
+	/// were reported, so a plain check's stored detail is exactly what it
+	/// always was, or the fields an instanced check shares.
 	pub fn detail(&self) -> Option<Value> {
 		if self.is_plain() {
 			let only = &self.instances[0];
@@ -214,10 +208,20 @@ impl GradedCheck {
 				}
 			};
 		}
-		let stored = InstancedDetail {
-			detail: self.shared.clone(),
-			instances: self
-				.instances
+		self.shared.clone().map(Value::Object)
+	}
+
+	/// The instances the check's state stores, or `None` for a check without
+	/// them: every instance it holds, by key, with its label, both results and
+	/// its own fields. Everything that presents an instance (which ones are
+	/// degraded or silenced, which keys a silence no longer matches, what a
+	/// broken check held) reads it back from there.
+	pub fn stored_instances(&self) -> Option<StoredInstances> {
+		if self.is_plain() {
+			return None;
+		}
+		Some(StoredInstances(
+			self.instances
 				.iter()
 				.map(|i| {
 					(
@@ -231,10 +235,7 @@ impl GradedCheck {
 					)
 				})
 				.collect(),
-			degraded: self.degraded().len(),
-			total: self.instances.len(),
-		};
-		Some(serde_json::to_value(stored).expect("an instanced detail always serialises"))
+		))
 	}
 
 	/// The message Canopy writes for a check with instances, from its graded
@@ -269,29 +270,15 @@ impl GradedCheck {
 	}
 }
 
-/// The stored detail of a check with instances, as [`GradedCheck::detail`]
-/// writes it.
-///
-/// Read strictly: a stored detail is this only if it has exactly this shape,
-/// which is how it is told apart from a plain check's own fields stored as
-/// reported.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct InstancedDetail {
-	/// The fields the check shares across its instances.
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub detail: Option<Map<String, Value>>,
-	/// Every instance the check holds, by key.
-	pub instances: BTreeMap<String, StoredInstance>,
-	/// How many instances are neither passed nor skipped.
-	pub degraded: usize,
-	/// How many instances the check holds.
-	pub total: usize,
-}
+/// A check state's instances (`issues.instances`), by key, as
+/// [`GradedCheck::stored_instances`] writes them. A state holds them only if
+/// its check has instances; a plain check's state has none.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct StoredInstances(pub BTreeMap<String, StoredInstance>);
 
 /// One instance as a check's state stores it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct StoredInstance {
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub label: Option<String>,
@@ -301,10 +288,13 @@ pub struct StoredInstance {
 	pub detail: Option<Value>,
 }
 
-impl InstancedDetail {
-	/// The instanced form of a stored detail, or `None` for a plain check's.
-	pub fn parse(detail: Option<&Value>) -> Option<Self> {
-		serde_json::from_value(detail?.clone()).ok()
+impl StoredInstances {
+	/// How many instances are neither passed nor skipped.
+	pub fn degraded(&self) -> usize {
+		self.0
+			.values()
+			.filter(|i| !matches!(i.effective, CheckResult::Passed | CheckResult::Skipped))
+			.count()
 	}
 
 	/// The instances as last observed, for grading them again (an instance
@@ -313,7 +303,7 @@ impl InstancedDetail {
 	/// A broken check's instances were observed broken; they come back as
 	/// such, for the caller to re-grade as [`CheckOutcome::Broken`].
 	pub fn observed_instances(&self) -> Vec<CheckInstance> {
-		self.instances
+		self.0
 			.iter()
 			.map(|(key, i)| CheckInstance {
 				key: key.clone(),
@@ -322,6 +312,50 @@ impl InstancedDetail {
 				detail: i.detail.clone(),
 			})
 			.collect()
+	}
+}
+
+/// A check's instances and the inputs they were graded with, as a check
+/// state keeps them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstancedState {
+	pub instances: StoredInstances,
+	pub inputs: GradingInputs,
+}
+
+/// What the rules grading a check's instances read beyond each instance: the
+/// report's fields and the target's tags, as the filing gave them
+/// (`issues.grading_context`).
+///
+/// A state with instances keeps the inputs its last filing graded them with,
+/// so re-grading it after an instance silence changes nothing a rule reads.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct GradingInputs {
+	/// What rules read as `status.<field>`.
+	#[serde(default)]
+	pub status: Map<String, Value>,
+	/// What rules read as `tag.<key>`.
+	#[serde(default)]
+	pub tags: HashMap<String, Value>,
+}
+
+impl GradingInputs {
+	/// The inputs a filing grades with, kept.
+	pub fn of(ctx: &GradingContext<'_>) -> Self {
+		Self {
+			status: ctx.status_extra.clone(),
+			tags: ctx.tags.clone(),
+		}
+	}
+
+	/// These inputs as a rule context for `source`'s `check`.
+	pub fn context<'a>(&'a self, source: &'a str, check: &'a str) -> GradingContext<'a> {
+		GradingContext {
+			source,
+			check,
+			status_extra: &self.status,
+			tags: &self.tags,
+		}
 	}
 }
 
@@ -373,8 +407,9 @@ pub fn grade_instances(
 			(instances.clone(), false)
 		}
 		CheckOutcome::Broken => {
-			let held = InstancedDetail::parse(prior.and_then(|p| p.detail.as_ref()))
-				.map(|d| d.observed_instances())
+			let held = prior
+				.and_then(Issue::stored_instances)
+				.map(|held| held.observed_instances())
 				.unwrap_or_default();
 			let held = if held.is_empty() {
 				vec![CheckInstance::plain(CheckResult::Broken, None)]

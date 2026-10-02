@@ -53,3 +53,29 @@ CREATE UNIQUE INDEX scoped_check_policies_global
 		AND machine_id IS NULL
 		AND server_group_id IS NULL
 		AND kubernetes_cluster_id IS NULL;
+
+-- ── issues: a check state's instances ──────────────────────────────────────
+--
+-- A check with instances keeps them in a column of their own (spec CHK,
+-- "Checks with instances"), so whether a state has instances is a fact of the
+-- row rather than something read off the shape of its detail: `detail` holds a
+-- plain check's fields, or the fields an instanced check shares, and a plain
+-- check reporting a field named `instances` is still a plain check.
+--
+-- `instances` is the check's instances by key, each with its label, observed
+-- and effective result, and own fields. `grading_context` is what the filing
+-- that graded them gave its rules beyond the instance (the report's fields and
+-- the target's tags), so a re-grade after an instance silence replays exactly
+-- that rather than reconstructing it. The two are set together or not at all.
+--
+-- `title` is the headline the last filing gave the check, kept whatever the
+-- state's result, where `description` is the headline only while it is
+-- degraded. A re-grade that brings a state back into trouble presents it.
+
+ALTER TABLE issues
+	ADD COLUMN title TEXT,
+	ADD COLUMN instances JSONB,
+	ADD COLUMN grading_context JSONB;
+
+ALTER TABLE issues ADD CONSTRAINT issues_instances_graded_together
+	CHECK ((instances IS NULL) = (grading_context IS NULL));

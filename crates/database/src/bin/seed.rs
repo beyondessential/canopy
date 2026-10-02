@@ -1153,6 +1153,8 @@ async fn seed_issues_and_incidents(
 			effective: result,
 			escalates,
 			detail: None,
+			title: None,
+			instanced: None,
 		};
 		let active = matches!(
 			result,

@@ -1,3 +1,9 @@
+ALTER TABLE issues DROP CONSTRAINT issues_instances_graded_together;
+ALTER TABLE issues
+	DROP COLUMN grading_context,
+	DROP COLUMN instances,
+	DROP COLUMN title;
+
 -- Instance silences have no form without the key, and left in place they would
 -- widen to silence the whole check, so they go.
 DELETE FROM scoped_check_policies WHERE instance_key IS NOT NULL;

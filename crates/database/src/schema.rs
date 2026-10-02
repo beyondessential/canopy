@@ -511,6 +511,9 @@ diesel::table! {
 		escalates -> Bool,
 		machine_id -> Nullable<Uuid>,
 		kubernetes_cluster_id -> Nullable<Uuid>,
+		title -> Nullable<Text>,
+		instances -> Nullable<Jsonb>,
+		grading_context -> Nullable<Jsonb>,
 	}
 }
 

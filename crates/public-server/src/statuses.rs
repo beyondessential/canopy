@@ -1220,6 +1220,8 @@ async fn file_health_events(
 			effective,
 			escalates,
 			detail: Some(serde_json::Value::Object(entry.clone())),
+			title: description.clone(),
+			instanced: None,
 		};
 		let r#ref = format!("{HEALTH_REF}/{check}");
 		let message = message
@@ -1278,6 +1280,8 @@ async fn file_health_events(
 			effective: CheckResult::Passed,
 			escalates: false,
 			detail: None,
+			title: None,
+			instanced: None,
 		};
 		let r#ref = format!("{HEALTH_REF}/{check}");
 		let message = format!("Health check '{check}' recovered");

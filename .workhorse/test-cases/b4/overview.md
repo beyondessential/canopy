@@ -31,6 +31,7 @@ Scenarios verifying that reported checks can carry instances, that a check carri
 - [x] A rule evaluated for an instance reads that instance's result as `check.result` (verifies spec: CHK)
 - [ ] A rule evaluated for a reported instance sees the push's report fields (`status.*`) and the target's tags (verifies spec: CHK)
 - [x] A rule pinning a field only some instances carry grades only those instances (verifies spec: CHK)
+- [x] A plain check whose own fields include `instances`, `degraded` and `total` is still a plain check
 
 ## Brokenness
 
@@ -46,6 +47,8 @@ Scenarios verifying that reported checks can carry instances, that a check carri
 - [x] A machine-scoped instance silence quiets that key on a machine check (verifies spec: CHK)
 - [x] Silencing an instance re-grades the check immediately, without waiting for the next push, and an incident whose last failure was that instance closes (verifies spec: CHK, INC)
 - [x] Unsilencing an instance re-grades the check immediately
+- [x] A re-grade after an instance silence reads the report fields and tags the last filing graded with, so no rule's inputs change (verifies spec: CHK)
+- [x] A check silenced out of trouble and brought back by unsilencing presents the title its last filing gave it
 - [x] An instance silence and a whole-check silence on the same check and target coexist
 - [x] The reporting source is told the check's policy, unaffected by instance silences (verifies spec: CHK, STA)
 - [ ] A target's silences list shows the instance's label and key, and marks a silence whose key the check no longer reports (verifies spec: CHK)

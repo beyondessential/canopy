@@ -36,6 +36,8 @@ async fn file(conn: &mut AsyncPgConnection, r#ref: &str, effective: CheckResult)
 		effective,
 		escalates: false,
 		detail: None,
+		title: None,
+		instanced: None,
 	};
 	NewEvent {
 		source: "test".into(),

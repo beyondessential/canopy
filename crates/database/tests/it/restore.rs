@@ -1638,7 +1638,7 @@ struct FiledRow {
 	#[diesel(sql_type = sql_types::Text)]
 	message: String,
 	#[diesel(sql_type = sql_types::Nullable<sql_types::Jsonb>)]
-	detail: Option<serde_json::Value>,
+	instances: Option<serde_json::Value>,
 }
 
 /// The filed check for a target, looked up on the column its grain files on:
@@ -1650,7 +1650,7 @@ async fn filed(conn: &mut AsyncPgConnection, target_id: Uuid, r#ref: &str) -> Fi
 		_ => "machine_id",
 	};
 	sql_query(format!(
-		"SELECT message, detail FROM issues \
+		"SELECT message, instances FROM issues \
 		 WHERE {column} = $1 AND source = 'canopy' AND \"ref\" = $2 AND active"
 	))
 	.bind::<sql_types::Uuid, _>(target_id)
@@ -1732,9 +1732,13 @@ async fn same_scope_replicas_grade_separately_by_name() {
 			.expect("sweep");
 
 		let verification = filed(&mut conn, server, "restore-verification").await;
-		let detail = verification.detail.expect("detail");
-		assert_eq!(detail["total"], 2, "two replicas, not one merged key");
-		assert_eq!(detail["degraded"], 1);
+		let detail = verification.instances.clone().expect("instances");
+		assert_eq!(
+			detail.as_object().unwrap().len(),
+			2,
+			"two replicas, not one merged key"
+		);
+		assert_eq!(degraded_instances(&detail).len(), 1);
 		let instances = degraded_instances(&detail);
 		assert_eq!(instances.len(), 1);
 		assert_eq!(instances[0]["detail"]["replica"], "nightly");
@@ -1904,9 +1908,9 @@ async fn one_check_of_each_kind_per_machine_with_the_replicas_as_instances() {
 		// Restore verification: three replicas considered, one of them degraded,
 		// and the message names it rather than the healthy ones.
 		let verification = filed(&mut conn, server, "restore-verification").await;
-		let detail = verification.detail.expect("detail");
-		assert_eq!(detail["total"], 3);
-		assert_eq!(detail["degraded"], 1);
+		let detail = verification.instances.clone().expect("instances");
+		assert_eq!(detail.as_object().unwrap().len(), 3);
+		assert_eq!(degraded_instances(&detail).len(), 1);
 		let instances = degraded_instances(&detail);
 		assert_eq!(instances.len(), 1);
 		assert_eq!(instances[0]["detail"]["intent"], "verify");
@@ -1929,15 +1933,15 @@ async fn one_check_of_each_kind_per_machine_with_the_replicas_as_instances() {
 		// Redaction only counts the replicas that reported one, so the check is
 		// about the analytics copy alone.
 		let redaction = filed(&mut conn, server, "redaction").await;
-		let detail = redaction.detail.expect("detail");
-		assert_eq!(detail["total"], 1);
+		let detail = redaction.instances.clone().expect("instances");
+		assert_eq!(detail.as_object().unwrap().len(), 1);
 		let instances = degraded_instances(&detail);
 		assert_eq!(instances[0]["detail"]["intent"], "analytics");
 		assert_eq!(instances[0]["detail"]["columns_skipped"], 3);
 
 		// The migration finding carries the version in its detail, not its name.
 		let migration = filed(&mut conn, application, "migration-test").await;
-		let detail = migration.detail.expect("detail");
+		let detail = migration.instances.clone().expect("instances");
 		let instances = degraded_instances(&detail);
 		assert_eq!(instances[0]["detail"]["target_version"], "2.63.0");
 		assert_eq!(
@@ -2221,9 +2225,9 @@ async fn a_declaration_that_does_not_migrate_leaves_its_environment_untested() {
 	.await;
 }
 
-/// The instances a check's stored detail holds that are not passing.
-fn degraded_instances(detail: &serde_json::Value) -> Vec<&serde_json::Value> {
-	detail["instances"]
+/// The instances a check's state holds that are not passing.
+fn degraded_instances(instances: &serde_json::Value) -> Vec<&serde_json::Value> {
+	instances
 		.as_object()
 		.expect("instances by key")
 		.values()

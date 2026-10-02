@@ -92,6 +92,8 @@ fn failed_stamp(check: &str) -> database::issues::CheckStateStamp {
 		effective: CheckResult::Failed,
 		escalates: false,
 		detail: None,
+		title: None,
+		instanced: None,
 	}
 }
 

@@ -89,6 +89,8 @@ async fn fail(conn: &mut diesel_async::AsyncPgConnection, application: Uuid, che
 			effective: CheckResult::Failed,
 			escalates: false,
 			detail: None,
+			title: None,
+			instanced: None,
 		}),
 		false,
 	)
@@ -259,6 +261,8 @@ async fn a_groups_own_incident_stays_on_the_group() {
 				effective: CheckResult::Failed,
 				escalates: false,
 				detail: None,
+				title: None,
+				instanced: None,
 			}),
 		)
 		.await

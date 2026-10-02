@@ -409,14 +409,14 @@ struct DetailRow {
 	detail: Option<serde_json::Value>,
 }
 
-/// A check's stored detail, which is where the per-instance results live.
-async fn issue_detail(
+/// The instances a machine's check state holds, by key.
+async fn issue_instances(
 	conn: &mut AsyncPgConnection,
 	machine_id: Uuid,
 	r#ref: &str,
 ) -> Option<serde_json::Value> {
 	sql_query(
-		"SELECT detail FROM issues \
+		"SELECT instances AS detail FROM issues \
 		 WHERE machine_id = $1 AND source = $2 AND \"ref\" = $3",
 	)
 	.bind::<sql_types::Uuid, _>(machine_id)
@@ -936,10 +936,10 @@ async fn reconcile_files_missing_when_the_reported_snapshot_is_absent_from_the_r
 			message.contains("its snapshot is not in the repo"),
 			"the message describes the lookup that was made: {message}",
 		);
-		let detail = issue_detail(&mut conn, machine_id, mref)
+		let detail = issue_instances(&mut conn, machine_id, mref)
 			.await
-			.expect("detail recorded");
-		let degraded: Vec<&serde_json::Value> = detail["instances"]
+			.expect("instances recorded");
+		let degraded: Vec<&serde_json::Value> = detail
 			.as_object()
 			.expect("instances by key")
 			.values()
@@ -1658,6 +1658,8 @@ async fn group_event_pages_even_when_all_members_unmonitored() {
 			effective: CheckResult::Failed,
 			escalates: true,
 			detail: None,
+			title: None,
+			instanced: None,
 		};
 		let issue = database::issues::raise_group_event_with_state(
 			&mut conn,
@@ -1697,6 +1699,8 @@ async fn group_event_pages_even_when_all_members_unmonitored() {
 			effective: CheckResult::Passed,
 			escalates: true,
 			detail: None,
+			title: None,
+			instanced: None,
 		};
 		database::issues::raise_group_event_with_state(
 			&mut conn,
@@ -2078,12 +2082,19 @@ async fn staleness_is_one_check_per_server_with_the_types_as_instances() {
 			"the fresh type is not named: {message}",
 		);
 
-		let detail = issue_detail(&mut conn, machine_id, refs::STALENESS)
+		let detail = issue_instances(&mut conn, machine_id, refs::STALENESS)
 			.await
-			.expect("detail");
-		assert_eq!(detail["total"], 4, "four instances were considered");
-		assert_eq!(detail["degraded"], 3, "three of them are stale");
-		let instances = detail["instances"].as_object().expect("instances by key");
+			.expect("instances");
+		let instances = detail.as_object().expect("instances by key");
+		assert_eq!(instances.len(), 4, "four instances were considered");
+		assert_eq!(
+			instances
+				.values()
+				.filter(|i| i["effective"] != "passed")
+				.count(),
+			3,
+			"three of them are stale",
+		);
 		for ty in &stale_types {
 			assert_eq!(
 				instances[&ty.to_string()]["effective"],
