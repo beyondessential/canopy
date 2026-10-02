@@ -64,9 +64,9 @@ Scenarios verifying that reported checks can carry instances, that a check carri
 
 ## Operator interface
 
-- [ ] A target's checks list an instanced check's degraded and silenced instances, each with result, label and its own silence control, and count its passing ones (verifies spec: CHK)
-- [ ] Silencing an instance from the target's checks, for the target and for the group (verifies spec: CHK)
-- [ ] An issue for an instanced check offers silencing the whole check or one of its degraded instances, from within an incident (verifies spec: CHK)
-- [ ] The silenced refs section shows an instance silence and marks it "not reported" when its key is gone (verifies spec: CHK)
+- [x] A target's checks list an instanced check's degraded and silenced instances, each with result, label and its own silence control, and count its passing ones (verifies spec: CHK)
+- [x] Silencing an instance from the target's checks, for the target and for the group (verifies spec: CHK)
+- [x] An issue for an instanced check offers silencing the whole check or one of its degraded instances, from within an incident (verifies spec: CHK)
+- [x] The silenced refs section shows an instance silence and marks it "not reported" when its key is gone (verifies spec: CHK)
 - [x] The rule-authoring sample for an instanced check shows one instance's fields merged over the shared ones (verifies spec: CHK)
-- [ ] The fleet-wide check page offers no instance silence
+- [x] The fleet-wide check page offers no instance silence

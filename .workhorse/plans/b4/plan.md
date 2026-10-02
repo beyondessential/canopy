@@ -148,6 +148,14 @@ Open: `unmonitored` entries are table names where the other keys are resource na
 - MCP: `find_issues` and `get_incident` issues gain `degraded_instances` (absent for a plain check); `get_issue` gains the check's `detail` and every instance with its own fields.
 - Two small frontend guards landed with this section, ahead of section 7: the checks table ignores instance silences when matching a row's whole-check silence, and the silences section passes a row's instance when unsilencing it.
 
+## Notes from the frontend (section 7)
+
+- An instance is named by its label with its key after it, shortened to its first eight and last four characters past fourteen (`shortInstanceKey`), the full key on hover; an instance without a label is named by its key alone (`InstanceName`).
+- A silence whose key the check no longer reports has no label to show (the list gives `instance_label: null` for it), so it reads by its key with the "not reported" chip, where the mockup draws a label.
+- The mockup's orange left rule marks what is new, not a border to draw, so the instance list and the issue's picker carry none.
+- The issue's picker defaults to the whole check, as the panel did before it had a choice.
+- `e2e/seed.ts` gains `seedInstancedCheck` (instances and grading inputs stored as ingestion writes them, its catalog entry reviewed at a `failed` ceiling so a re-grade keeps failures) and an `instance` option on both silence seeds.
+
 ## Build checklist
 
 Layer 1 only; layer 2 is split out (see the last section).
@@ -229,12 +237,12 @@ Each section leaves the tree building and tested, so they can land as separate c
 
 ### 7. Frontend
 
-- [ ] `ChecksTable.tsx` `CheckRow`: instance sub-list (result icon, label, truncated key), passing count, per-instance silence button reusing `SilenceScopeRow`, per-instance silenced chip; `CheckExtrasList` shows the shared detail only
-- [ ] `IssueRow.tsx` silence panel: select of "Whole check" plus the issue's degraded instances, shown when the issue has instances; scope buttons pass the chosen instance
-- [ ] `SilencedRefsSection.tsx`: instance label and key on instance silences, "not reported" chip when the check no longer reports the key
-- [ ] `types.ts`: re-export the new wire types
-- [ ] e2e: extend `e2e/seed.ts` to seed an instanced check state and an instance silence; new `e2e/instance-silences.spec.ts` covering silencing from the checks table, from an incident's issue, and listing (including "not reported")
-- [ ] `just typecheck`
+- [x] `ChecksTable.tsx` `CheckRow`: instance sub-list (result icon, label, truncated key), passing count, per-instance silence button reusing `SilenceScopeRow`, per-instance silenced chip; `CheckExtrasList` shows the shared detail only
+- [x] `IssueRow.tsx` silence panel: select of "Whole check" plus the issue's degraded instances, shown when the issue has instances; scope buttons pass the chosen instance
+- [x] `SilencedRefsSection.tsx`: instance label and key on instance silences, "not reported" chip when the check no longer reports the key
+- [x] `types.ts`: re-export the new wire types
+- [x] e2e: extend `e2e/seed.ts` to seed an instanced check state and an instance silence; new `e2e/instance-silences.spec.ts` covering silencing from the checks table, from an incident's issue, and listing (including "not reported")
+- [x] `just typecheck`
 
 ### 8. Wrap-up
 
