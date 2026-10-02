@@ -51,7 +51,7 @@ Scenarios verifying that reported checks can carry instances, that a check carri
 - [x] A check silenced out of trouble and brought back by unsilencing presents the title its last filing gave it
 - [x] An instance silence and a whole-check silence on the same check and target coexist
 - [x] The reporting source is told the check's policy, unaffected by instance silences (verifies spec: CHK, STA)
-- [ ] A target's silences list shows the instance's label and key, and marks a silence whose key the check no longer reports (verifies spec: CHK)
+- [x] A target's silences list shows the instance's label and key, and marks a silence whose key the check no longer reports (verifies spec: CHK)
 
 ## Canopy's own instanced checks
 
@@ -68,5 +68,5 @@ Scenarios verifying that reported checks can carry instances, that a check carri
 - [ ] Silencing an instance from the target's checks, for the target and for the group (verifies spec: CHK)
 - [ ] An issue for an instanced check offers silencing the whole check or one of its degraded instances, from within an incident (verifies spec: CHK)
 - [ ] The silenced refs section shows an instance silence and marks it "not reported" when its key is gone (verifies spec: CHK)
-- [ ] The rule-authoring sample for an instanced check shows one instance's fields merged over the shared ones (verifies spec: CHK)
+- [x] The rule-authoring sample for an instanced check shows one instance's fields merged over the shared ones (verifies spec: CHK)
 - [ ] The fleet-wide check page offers no instance silence

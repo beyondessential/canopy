@@ -137,6 +137,17 @@ Open: `unmonitored` entries are table names where the other keys are resource na
 - Relay protocol, changed in place: `SubstrateInstance { key, label: Option, observed, detail }`; `SubstrateFiling.instances` became `outcome: SubstrateOutcome { Instances(Vec<SubstrateInstance>), Broken { detail } }`; `SubstrateFiling.message` became optional, carried for a check that holds once or could not be read and left out for a check with instances. The relay's own node-pool message composer is gone.
 - Ingest: a plain substrate check (holds once, or broken with no instances held) keeps the relay's message, as Canopy's own plain filings keep their filer's; an instanced one, broken included, takes `GradedCheck::message`. Ingest refuses a broken instance, a duplicated key, and an empty key beside others, rather than tripping `grade_instances`' debug assertions on a relay's input.
 
+## Notes from the private API (section 6)
+
+- A consolidated instance carries `key`, `label`, `observed`, `effective`, its own `detail` (the mockup shows per-instance facts), and two flags, `silenced_on_target` and `silenced_on_group`, rather than a scope value: the frontend already knows which grain a row is filed against, so the two flags are the whole answer, and no parallel scope enum is introduced.
+- Listed instances are the degraded ones and those an instance silence quiets; `passing_instances` counts the instances whose effective result is passed. An instance a rule (not a silence) grades skipped is neither listed nor counted.
+- A check silenced whole presents every instance as skipped, as the check itself presents, so it lists only its instance-silenced instances.
+- The as-of-past view grades with no prior state, as it always has for plain checks, so a past broken instanced check presents as broken with no instances listed.
+- Listed silences gain `instance_label` (from the current state; `null` when the key is not reported or has no label) and `instance_reported` (`null` for a whole-check silence). A group silence's key is looked for across every state the silence covers in the group.
+- The issue payload's `instances` is its degraded instances only (key, label, effective), most urgent first.
+- MCP: `find_issues` and `get_incident` issues gain `degraded_instances` (absent for a plain check); `get_issue` gains the check's `detail` and every instance with its own fields.
+- Two small frontend guards landed with this section, ahead of section 7: the checks table ignores instance silences when matching a row's whole-check silence, and the silences section passes a row's instance when unsilencing it.
+
 ## Build checklist
 
 Layer 1 only; layer 2 is split out (see the last section).
@@ -207,14 +218,14 @@ Each section leaves the tree building and tested, so they can land as separate c
 
 ### 6. Private API
 
-- [ ] `commons_types::status::ConsolidatedCheck`: add `instances` (key, label, observed, effective, silenced scope) for degraded and silenced instances, and `passing_instances: usize`; `detail` becomes the shared detail for an instanced check
-- [ ] `fns/statuses.rs`: populate both for current and as-of-past consolidated checks
-- [ ] `fns/silenced_refs.rs`: `silence_*` / `unsilence_*` take optional `instance`; `list_*` return the instance key, its label from the state, and whether the check currently reports that key
-- [ ] `fns/issues.rs`: issue payload carries its degraded instances (key, label, effective) for the issue silence picker
-- [ ] `fns/healthchecks.rs` `sample`: for an instanced check, present the most urgent instance's fields merged over the shared detail, as a rule reads them
-- [ ] MCP check-state tools: the stored detail shape changes, so check what they return reads well for instanced checks (MCP)
-- [ ] `just gen-openapi`; commit `private-web/openapi.json` and `private-web/src/api-types.ts`
-- [ ] Private-server tests: instance silence/unsilence endpoints at each scope, list with the reported flag, consolidated instances and passing count, issue instances
+- [x] `commons_types::status::ConsolidatedCheck`: add `instances` (key, label, observed, effective, silenced scope) for degraded and silenced instances, and `passing_instances: usize`; `detail` becomes the shared detail for an instanced check
+- [x] `fns/statuses.rs`: populate both for current and as-of-past consolidated checks
+- [x] `fns/silenced_refs.rs`: `silence_*` / `unsilence_*` take optional `instance`; `list_*` return the instance key, its label from the state, and whether the check currently reports that key
+- [x] `fns/issues.rs`: issue payload carries its degraded instances (key, label, effective) for the issue silence picker
+- [x] `fns/healthchecks.rs` `sample`: for an instanced check, present the most urgent instance's fields merged over the shared detail, as a rule reads them
+- [x] MCP check-state tools: the stored detail shape changes, so check what they return reads well for instanced checks (MCP)
+- [x] `just gen-openapi`; commit `private-web/openapi.json` and `private-web/src/api-types.ts`
+- [x] Private-server tests: instance silence/unsilence endpoints at each scope, list with the reported flag, consolidated instances and passing count, issue instances
 
 ### 7. Frontend
 
