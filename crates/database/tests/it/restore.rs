@@ -1735,9 +1735,9 @@ async fn same_scope_replicas_grade_separately_by_name() {
 		let detail = verification.detail.expect("detail");
 		assert_eq!(detail["total"], 2, "two replicas, not one merged key");
 		assert_eq!(detail["degraded"], 1);
-		let instances = detail["instances"].as_array().expect("instances");
+		let instances = degraded_instances(&detail);
 		assert_eq!(instances.len(), 1);
-		assert_eq!(instances[0]["replica"], "nightly");
+		assert_eq!(instances[0]["detail"]["replica"], "nightly");
 		assert!(
 			verification.message.contains("nightly"),
 			"names the failing replica: {}",
@@ -1907,11 +1907,14 @@ async fn one_check_of_each_kind_per_machine_with_the_replicas_as_instances() {
 		let detail = verification.detail.expect("detail");
 		assert_eq!(detail["total"], 3);
 		assert_eq!(detail["degraded"], 1);
-		let instances = detail["instances"].as_array().expect("instances");
+		let instances = degraded_instances(&detail);
 		assert_eq!(instances.len(), 1);
-		assert_eq!(instances[0]["intent"], "verify");
-		assert_eq!(instances[0]["replica"], "nightly-verify");
-		assert_eq!(instances[0]["replica_key"], "tamanu-postgres:verify");
+		assert_eq!(instances[0]["detail"]["intent"], "verify");
+		assert_eq!(instances[0]["detail"]["replica"], "nightly-verify");
+		assert_eq!(
+			instances[0]["detail"]["replica_key"],
+			"tamanu-postgres:verify"
+		);
 		assert!(
 			verification.message.contains("nightly-verify"),
 			"names the degraded replica: {}",
@@ -1928,15 +1931,17 @@ async fn one_check_of_each_kind_per_machine_with_the_replicas_as_instances() {
 		let redaction = filed(&mut conn, server, "redaction").await;
 		let detail = redaction.detail.expect("detail");
 		assert_eq!(detail["total"], 1);
-		assert_eq!(detail["instances"][0]["intent"], "analytics");
-		assert_eq!(detail["instances"][0]["columns_skipped"], 3);
+		let instances = degraded_instances(&detail);
+		assert_eq!(instances[0]["detail"]["intent"], "analytics");
+		assert_eq!(instances[0]["detail"]["columns_skipped"], 3);
 
 		// The migration finding carries the version in its detail, not its name.
 		let migration = filed(&mut conn, application, "migration-test").await;
 		let detail = migration.detail.expect("detail");
-		assert_eq!(detail["instances"][0]["target_version"], "2.63.0");
+		let instances = degraded_instances(&detail);
+		assert_eq!(instances[0]["detail"]["target_version"], "2.63.0");
 		assert_eq!(
-			detail["instances"][0]["failed_migration"],
+			instances[0]["detail"]["failed_migration"],
 			"backfillNoteTypeIds"
 		);
 	})
@@ -2214,4 +2219,14 @@ async fn a_declaration_that_does_not_migrate_leaves_its_environment_untested() {
 		);
 	})
 	.await;
+}
+
+/// The instances a check's stored detail holds that are not passing.
+fn degraded_instances(detail: &serde_json::Value) -> Vec<&serde_json::Value> {
+	detail["instances"]
+		.as_object()
+		.expect("instances by key")
+		.values()
+		.filter(|i| i["effective"] != "passed" && i["effective"] != "skipped")
+		.collect()
 }

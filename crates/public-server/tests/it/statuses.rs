@@ -1267,6 +1267,7 @@ async fn submit_status_with_all_failing_checks_silenced_opens_no_incident() {
 					&Namespace::for_application("alertd", check, &ApplicationType::TamanuCentral),
 					check,
 					None,
+					None,
 				)
 				.await
 				.expect("seed silence");
@@ -1325,6 +1326,7 @@ async fn submit_status_with_partial_silence_opens_incident_for_unsilenced() {
 				"alertd",
 				&Namespace::for_application("alertd", "database", &ApplicationType::TamanuCentral),
 				"database",
+				None,
 				None,
 			)
 			.await

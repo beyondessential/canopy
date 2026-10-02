@@ -23,7 +23,7 @@ use uuid::Uuid;
 use crate::backup::refs;
 use crate::backups::BackupRun;
 use crate::issues::{
-	CheckInstance, GradedInstance, InstancedCheckFiling, Scope, file_check_instances,
+	CheckInstance, CheckOutcome, GradedInstance, InstancedCheckFiling, Scope, file_check_instances,
 };
 use crate::pg_duration::PgDuration;
 
@@ -1582,6 +1582,15 @@ fn instance_identity(key: &ReplicaKey) -> serde_json::Value {
 	})
 }
 
+/// The key a replica's instance goes by: its type, intent and declared name,
+/// which together tell two replicas of one type and intent apart.
+fn replica_instance_key((_, r#type, intent, declared_as): &ReplicaKey) -> String {
+	match declared_as {
+		Some(name) => format!("{type}:{intent}:{name}"),
+		None => format!("{type}:{intent}"),
+	}
+}
+
 /// Merge `extra` into an instance's identity fields.
 fn instance_detail(key: &ReplicaKey, extra: serde_json::Value) -> Option<serde_json::Value> {
 	let mut detail = instance_identity(key);
@@ -1621,7 +1630,8 @@ fn verification_instance(
 		"healthy".into()
 	};
 	CheckInstance {
-		label: label.to_owned(),
+		key: replica_instance_key(key),
+		label: Some(label.to_owned()),
 		observed,
 		detail: instance_detail(
 			key,
@@ -1651,7 +1661,8 @@ fn redaction_instance(
 		RedactionOutcome::Partial | RedactionOutcome::Failed => CheckResult::Warning,
 	};
 	Some(CheckInstance {
-		label: label.to_owned(),
+		key: replica_instance_key(key),
+		label: Some(label.to_owned()),
 		observed,
 		detail: instance_detail(
 			key,
@@ -1718,7 +1729,8 @@ fn migration_instance(
 	};
 
 	Some(CheckInstance {
-		label: label.to_owned(),
+		key: replica_instance_key(key),
+		label: Some(label.to_owned()),
 		observed,
 		detail: instance_detail(
 			key,
@@ -1753,7 +1765,7 @@ async fn file_verification(
 			[] => format!("Every restore replica of {label} is verifying healthily"),
 			[one] => format!(
 				"Restore verification failed for {label}: {} — {}",
-				one.label,
+				one.name(),
 				instance_why(one),
 			),
 			many => format!(
@@ -1787,7 +1799,7 @@ async fn file_redaction(
 			[] => format!("Every redacting replica of {label} is fully masked"),
 			[one] => format!(
 				"Replica {} of {label} did not fully redact: {}",
-				one.label,
+				one.name(),
 				instance_field(one, "outcome"),
 			),
 			many => format!(
@@ -1821,7 +1833,7 @@ async fn file_migration(
 			[] => format!("Candidate versions have been migration-tested against {label}"),
 			[one] => format!(
 				"Candidate version not clean against {label}'s data: {} — {}",
-				one.label,
+				one.name(),
 				instance_why(one),
 			),
 			many => format!(
@@ -1910,7 +1922,8 @@ pub(crate) async fn file_restore_check(
 				device_id: None,
 				check: r#ref,
 				title: Some(title),
-				instances,
+				detail: None,
+				outcome: CheckOutcome::Instances(instances),
 				default_ceiling: CheckResult::Warning,
 				default_escalates: false,
 				documentation: Some(documentation),
@@ -1941,7 +1954,7 @@ fn instance_field(instance: &GradedInstance, field: &str) -> String {
 fn instance_labels(instances: &[GradedInstance]) -> String {
 	instances
 		.iter()
-		.map(|i| i.label.as_str())
+		.map(GradedInstance::name)
 		.collect::<Vec<_>>()
 		.join(", ")
 }

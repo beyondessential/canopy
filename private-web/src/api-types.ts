@@ -5978,6 +5978,11 @@ export interface components {
             /** @description The operator who created this silence. `None` if not recorded. */
             created_by?: string | null;
             /**
+             * @description The one instance of the check this silence quiets, by key. `None`
+             *     silences the whole check.
+             */
+            instance?: string | null;
+            /**
              * Format: uuid
              * @description The cluster this silence applies to.
              */
@@ -8401,6 +8406,11 @@ export interface components {
             /** @description The operator who created this silence. `None` if not recorded. */
             created_by?: string | null;
             /**
+             * @description The one instance of the check this silence quiets, by key. `None`
+             *     silences the whole check.
+             */
+            instance?: string | null;
+            /**
              * Format: uuid
              * @description The machine this silence applies to.
              */
@@ -10626,6 +10636,11 @@ export interface components {
             /** @description The operator who created this silence. `None` if not recorded. */
             created_by?: string | null;
             /**
+             * @description The one instance of the check this silence quiets, by key. `None`
+             *     silences the whole check.
+             */
+            instance?: string | null;
+            /**
              * @description Which catalog entry this silence quiets. A group covers several
              *     application types, so two of them reporting one check name are two
              *     silences here, and the ref alone does not tell them apart.
@@ -10902,6 +10917,11 @@ export interface components {
             created_at: string;
             /** @description The operator who created this silence. `None` if not recorded. */
             created_by?: string | null;
+            /**
+             * @description The one instance of the check this silence quiets, by key. `None`
+             *     silences the whole check.
+             */
+            instance?: string | null;
             /** @description The issue reference this silence matches. */
             ref: string;
             /** @description The issue source this silence matches. */

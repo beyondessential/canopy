@@ -586,7 +586,8 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 				}
 
 				CheckInstance {
-					label: pair.version.clone(),
+					key: pair.version.clone(),
+					label: None,
 					observed: match pair.state {
 						PairState::Built => CheckResult::Passed,
 						_ => CheckResult::Warning,
@@ -612,7 +613,7 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 				[] => format!("Reporting schemas are built for every version {name} runs"),
 				[one] => format!(
 					"No reporting schema for {name} on {}: {}",
-					one.label,
+					one.name(),
 					one.detail
 						.as_ref()
 						.and_then(|d| d.get("why"))
@@ -622,10 +623,7 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 				many => format!(
 					"No reporting schema for {} of {total} versions {name} runs: {}",
 					many.len(),
-					many.iter()
-						.map(|i| i.label.as_str())
-						.collect::<Vec<_>>()
-						.join(", ")
+					many.iter().map(|i| i.name()).collect::<Vec<_>>().join(", ")
 				),
 			},
 		)

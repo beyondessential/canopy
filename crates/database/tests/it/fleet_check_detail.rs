@@ -156,6 +156,7 @@ async fn silenced_reads_skipped_and_decommissioned_is_absent() {
 			"alertd",
 			&app_ns(),
 			"hushed",
+			None,
 			Some("op"),
 		)
 		.await

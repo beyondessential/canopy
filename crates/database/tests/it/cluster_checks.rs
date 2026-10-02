@@ -11,8 +11,8 @@ use database::{
 	check_policies::CheckPolicy,
 	devices::Device,
 	issues::{
-		CheckInstance, InstancedCheckFiling, Issue, Scope, consolidated_checks_latest_for_cluster,
-		file_check_instances,
+		CheckInstance, CheckOutcome, InstancedCheckFiling, Issue, Scope,
+		consolidated_checks_latest_for_cluster, file_check_instances,
 	},
 	silenced_refs::ClusterSilencedRef,
 	statuses::{CANOPY_SOURCE, REACHABILITY_REF, Status},
@@ -60,7 +60,8 @@ async fn file_substrate(
 			default_ceiling: CheckResult::Failed,
 			default_escalates: false,
 			documentation: Some("What this check means."),
-			instances,
+			detail: None,
+			outcome: CheckOutcome::Instances(instances),
 		},
 		&|_| "message".into(),
 	)
@@ -69,11 +70,7 @@ async fn file_substrate(
 }
 
 fn only(observed: CheckResult) -> Vec<CheckInstance> {
-	vec![CheckInstance {
-		label: String::new(),
-		observed,
-		detail: None,
-	}]
+	vec![CheckInstance::plain(observed, None)]
 }
 
 async fn reachability(conn: &mut AsyncPgConnection, cluster_id: Uuid) -> Option<Issue> {
@@ -182,12 +179,14 @@ async fn instances_are_graded_together_and_the_most_urgent_wins() {
 			"node-pools",
 			vec![
 				CheckInstance {
-					label: "general".into(),
+					key: "general".into(),
+					label: None,
 					observed: CheckResult::Passed,
 					detail: Some(serde_json::json!({"pool": "general"})),
 				},
 				CheckInstance {
-					label: "gpu".into(),
+					key: "gpu".into(),
+					label: None,
 					observed: CheckResult::Failed,
 					detail: Some(serde_json::json!({"pool": "gpu"})),
 				},
@@ -198,7 +197,9 @@ async fn instances_are_graded_together_and_the_most_urgent_wins() {
 		let detail = issue.detail.expect("instance detail");
 		assert_eq!(detail["total"], 2);
 		assert_eq!(detail["degraded"], 1);
-		assert_eq!(detail["instances"][0]["pool"], "gpu");
+		assert_eq!(detail["instances"]["gpu"]["detail"]["pool"], "gpu");
+		assert_eq!(detail["instances"]["gpu"]["effective"], "failed");
+		assert_eq!(detail["instances"]["general"]["effective"], "passed");
 
 		// The set is complete each time: a second filing replaces the first.
 		let issue = file_substrate(
@@ -206,7 +207,8 @@ async fn instances_are_graded_together_and_the_most_urgent_wins() {
 			cluster.id,
 			"node-pools",
 			vec![CheckInstance {
-				label: "general".into(),
+				key: "general".into(),
+				label: None,
 				observed: CheckResult::Passed,
 				detail: Some(serde_json::json!({"pool": "general"})),
 			}],
@@ -271,10 +273,16 @@ async fn a_silenced_cluster_check_presents_skipped_and_leaves_health() {
 		)
 		.await;
 
-		let silence =
-			ClusterSilencedRef::add(&mut conn, cluster.id, SUBSTRATE_SOURCE, "node-pools", None)
-				.await
-				.unwrap();
+		let silence = ClusterSilencedRef::add(
+			&mut conn,
+			cluster.id,
+			SUBSTRATE_SOURCE,
+			"node-pools",
+			None,
+			None,
+		)
+		.await
+		.unwrap();
 		assert_eq!(
 			silence.r#ref, "node-pools",
 			"a reserved source's ref is bare"
@@ -307,7 +315,7 @@ async fn a_silenced_cluster_check_presents_skipped_and_leaves_health() {
 				.len(),
 			1
 		);
-		ClusterSilencedRef::remove(&mut conn, cluster.id, SUBSTRATE_SOURCE, "node-pools")
+		ClusterSilencedRef::remove(&mut conn, cluster.id, SUBSTRATE_SOURCE, "node-pools", None)
 			.await
 			.unwrap();
 		assert!(

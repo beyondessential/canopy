@@ -939,8 +939,14 @@ async fn reconcile_files_missing_when_the_reported_snapshot_is_absent_from_the_r
 		let detail = issue_detail(&mut conn, machine_id, mref)
 			.await
 			.expect("detail recorded");
+		let degraded: Vec<&serde_json::Value> = detail["instances"]
+			.as_object()
+			.expect("instances by key")
+			.values()
+			.filter(|i| i["effective"] != "passed")
+			.collect();
 		assert_eq!(
-			detail["instances"][0]["snapshot_id"], "snap-reported",
+			degraded[0]["detail"]["snapshot_id"], "snap-reported",
 			"the id looked up is in the detail: {detail}",
 		);
 	})
@@ -2077,21 +2083,18 @@ async fn staleness_is_one_check_per_server_with_the_types_as_instances() {
 			.expect("detail");
 		assert_eq!(detail["total"], 4, "four instances were considered");
 		assert_eq!(detail["degraded"], 3, "three of them are stale");
-		let listed: Vec<&str> = detail["instances"]
-			.as_array()
-			.expect("instances array")
-			.iter()
-			.map(|i| i["type"].as_str().expect("type"))
-			.collect();
+		let instances = detail["instances"].as_object().expect("instances by key");
 		for ty in &stale_types {
-			assert!(
-				listed.contains(&ty.to_string().as_str()),
-				"detail lists {ty}"
+			assert_eq!(
+				instances[&ty.to_string()]["effective"],
+				"warning",
+				"detail holds {ty} as degraded",
 			);
 		}
-		assert!(
-			!listed.contains(&fresh_type.to_string().as_str()),
-			"detail omits the healthy type",
+		assert_eq!(
+			instances[&fresh_type.to_string()]["effective"],
+			"passed",
+			"detail holds the healthy type as passing",
 		);
 
 		// And the catalog gained one entry, not one per type.

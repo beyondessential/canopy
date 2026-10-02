@@ -865,13 +865,43 @@ impl CheckPolicy {
 	/// plus [`CheckPolicy::grading_table`] and
 	/// [`ScopedCheckPolicy::chains_for_scope`] to grade a whole report's
 	/// checks without a query per check.
+	///
+	/// This grades the check as a whole, so only the transforms naming no
+	/// instance apply: an instance silence quiets one instance, never the
+	/// check (see [`Self::chain_scoped_for_instance`]).
 	pub fn chain_scoped(
 		fleet: GradedResult,
 		chain: &[ScopedCheckPolicy],
 		ctx: &EvaluationContext<'_>,
 	) -> GradedResult {
+		Self::chain_scoped_where(fleet, chain, ctx, |t| t.instance_key.is_none())
+	}
+
+	/// [`Self::chain_scoped`] for one instance of a check: the transforms
+	/// naming no instance apply to every instance, and one naming an instance
+	/// key only to the instance with that key. The single instance of a check
+	/// without instances has the empty key, which no transform names, so it is
+	/// graded exactly as [`Self::chain_scoped`] grades the check.
+	// spec: CHK#silencing-one-instance
+	pub fn chain_scoped_for_instance(
+		fleet: GradedResult,
+		chain: &[ScopedCheckPolicy],
+		key: &str,
+		ctx: &EvaluationContext<'_>,
+	) -> GradedResult {
+		Self::chain_scoped_where(fleet, chain, ctx, |t| {
+			t.instance_key.as_deref().is_none_or(|k| k == key)
+		})
+	}
+
+	fn chain_scoped_where(
+		fleet: GradedResult,
+		chain: &[ScopedCheckPolicy],
+		ctx: &EvaluationContext<'_>,
+		applies: impl Fn(&ScopedCheckPolicy) -> bool,
+	) -> GradedResult {
 		let mut effective = fleet.effective;
-		for transform in chain {
+		for transform in chain.iter().filter(|t| applies(t)) {
 			effective = transform.transform(effective, ctx);
 		}
 		GradedResult {
@@ -1097,6 +1127,11 @@ pub struct ScopedCheckPolicy {
 	pub rules: Option<JsonValue>,
 	/// The operator who created this transform. `None` if not recorded.
 	pub created_by: Option<String>,
+	/// The instance of the check this transform applies to, by key. `None`
+	/// applies it to every instance, and to a check without instances; a key
+	/// applies it to that instance alone. Never empty.
+	// spec: CHK#silencing-one-instance
+	pub instance_key: Option<String>,
 }
 
 /// Which scopes a filing sits in, for reading the transforms that apply to it.
@@ -1125,13 +1160,16 @@ impl ScopedCheckPolicy {
 			.map_err(|e| AppError::Custom(e.to_string()))
 	}
 
-	/// The transform at exactly this (scope, source, namespace, check), if any.
+	/// The transform at exactly this (scope, source, namespace, check,
+	/// instance), if any. `instance` is `None` for the transform covering the
+	/// whole check, which a transform naming an instance never is.
 	pub async fn get(
 		db: &mut AsyncPgConnection,
 		scope: Scope,
 		source: &str,
 		namespace: &Namespace,
 		check_name: &str,
+		instance: Option<&str>,
 	) -> Result<Option<Self>> {
 		use crate::schema::scoped_check_policies::dsl;
 		let (server, machine, group, cluster) = scope.to_columns();
@@ -1143,7 +1181,8 @@ impl ScopedCheckPolicy {
 					.is_not_distinct_from(server)
 					.and(dsl::machine_id.is_not_distinct_from(machine))
 					.and(dsl::server_group_id.is_not_distinct_from(group))
-					.and(dsl::kubernetes_cluster_id.is_not_distinct_from(cluster)),
+					.and(dsl::kubernetes_cluster_id.is_not_distinct_from(cluster))
+					.and(dsl::instance_key.is_not_distinct_from(instance.map(str::to_owned))),
 			)
 			.first(db)
 			.await
@@ -1152,20 +1191,34 @@ impl ScopedCheckPolicy {
 	}
 
 	/// Upsert a silence: a skipped ceiling at this scope. An existing
-	/// transform at the same (scope, source, namespace, check) keeps its rules;
-	/// its ceiling becomes skipped. Idempotent.
+	/// transform at the same (scope, source, namespace, check, instance) keeps
+	/// its rules; its ceiling becomes skipped. Idempotent.
+	///
+	/// `instance` names the one instance of the check to quiet, by key, or is
+	/// `None` to quiet the whole check. The two are separate silences and
+	/// coexist. An empty key is refused: it is the instance a check without
+	/// instances is graded as, and quieting that is silencing the check.
+	// spec: CHK#silencing-one-instance
 	pub async fn silence(
 		db: &mut AsyncPgConnection,
 		scope: Scope,
 		source: &str,
 		namespace: &Namespace,
 		check_name: &str,
+		instance: Option<&str>,
 		created_by: Option<&str>,
 	) -> Result<Self> {
 		use crate::schema::scoped_check_policies::dsl;
+		if instance == Some("") {
+			return Err(AppError::BadRequest(
+				"an instance silence names the instance's key, which is never empty; silence the whole check instead".into(),
+			));
+		}
 		let (server, machine, group, cluster) = scope.to_columns();
 		let (subject, application_type) = namespace.to_columns();
-		if let Some(existing) = Self::get(db, scope, source, namespace, check_name).await? {
+		if let Some(existing) =
+			Self::get(db, scope, source, namespace, check_name, instance).await?
+		{
 			return diesel::update(dsl::scoped_check_policies.filter(dsl::id.eq(existing.id)))
 				.set((
 					dsl::ceiling.eq(CheckResult::Skipped.to_string()),
@@ -1186,6 +1239,7 @@ impl ScopedCheckPolicy {
 				dsl::machine_id.eq(machine),
 				dsl::server_group_id.eq(group),
 				dsl::kubernetes_cluster_id.eq(cluster),
+				dsl::instance_key.eq(instance),
 				dsl::ceiling.eq(CheckResult::Skipped.to_string()),
 				dsl::created_by.eq(created_by),
 			))
@@ -1195,7 +1249,8 @@ impl ScopedCheckPolicy {
 			.map_err(AppError::from)
 	}
 
-	/// Remove a silence at this scope: the row is deleted when the
+	/// Remove a silence at this scope, of the whole check (`instance` is
+	/// `None`) or of one instance: the row is deleted when the
 	/// silence was all it carried, or just the skipped ceiling is lifted
 	/// when scoped rules remain. A no-op if nothing is silenced there.
 	pub async fn unsilence(
@@ -1204,9 +1259,11 @@ impl ScopedCheckPolicy {
 		source: &str,
 		namespace: &Namespace,
 		check_name: &str,
+		instance: Option<&str>,
 	) -> Result<()> {
 		use crate::schema::scoped_check_policies::dsl;
-		let Some(existing) = Self::get(db, scope, source, namespace, check_name).await? else {
+		let Some(existing) = Self::get(db, scope, source, namespace, check_name, instance).await?
+		else {
 			return Ok(());
 		};
 		if existing.ceiling.as_deref() != Some("skipped") {
@@ -1231,7 +1288,8 @@ impl ScopedCheckPolicy {
 	}
 
 	/// All silences (skipped-ceiling transforms) at one scope, newest
-	/// first. Silences for dead checks — a `(source, check)` with no live
+	/// first, whole-check and instance silences alike (told apart by
+	/// [`Self::instance_key`]). Silences for dead checks — a `(source, check)` with no live
 	/// catalog row (decommissioned, or orphaned with no catalog row at all)
 	/// — are excluded: the check contributes to nothing, so its silence is
 	/// dead config that shouldn't clutter the operator's list.
@@ -1267,6 +1325,10 @@ impl ScopedCheckPolicy {
 	/// order. A server filing chains group then server; a group filing
 	/// its group row; a canopy-wide filing the global row.
 	///
+	/// Transforms naming one instance of the check are included, tagged by
+	/// their [`Self::instance_key`]: [`CheckPolicy::chain_scoped`] passes over
+	/// them when grading the whole check, and
+	/// [`CheckPolicy::chain_scoped_for_instance`] applies each to its instance.
 	pub async fn chain_for(
 		db: &mut AsyncPgConnection,
 		source: &str,
@@ -1290,6 +1352,7 @@ impl ScopedCheckPolicy {
 	/// [`CatalogKey`] and in application order within each group —
 	/// the batch form of [`Self::chain_for`], for callers walking a whole
 	/// report's checks. One query for the lot instead of one per check.
+	/// Instance-keyed transforms are included and tagged as there.
 	///
 	/// A transform whose namespace columns are out of shape is dropped: it
 	/// names no check any filing can resolve to, so keying it under a guessed

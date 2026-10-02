@@ -94,6 +94,7 @@ async fn a_group_silence_on_one_type_leaves_the_others_check_alerting() {
 			"alertd",
 			&Namespace::Application(ApplicationType::TamanuCentral),
 			"postgres",
+			None,
 			Some("op"),
 		)
 		.await

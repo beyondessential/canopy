@@ -736,6 +736,7 @@ diesel::table! {
 		subject -> Nullable<Text>,
 		application_type -> Nullable<Text>,
 		kubernetes_cluster_id -> Nullable<Uuid>,
+		instance_key -> Nullable<Text>,
 	}
 }
 

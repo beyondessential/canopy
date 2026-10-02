@@ -170,6 +170,7 @@ async fn latest_excludes_decommissioned_and_flags_silenced() {
 			"alertd",
 			&app_ns(),
 			"hushed",
+			None,
 			Some("op"),
 		)
 		.await
@@ -243,6 +244,7 @@ async fn synthesised_reachability_reflects_a_silence() {
 			CANOPY_SOURCE,
 			&Namespace::Flat,
 			REACHABILITY_REF,
+			None,
 			Some("op"),
 		)
 		.await

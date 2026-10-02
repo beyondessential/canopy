@@ -75,7 +75,7 @@ async fn state_for(
 async fn server_silence_grades_filings_to_skipped() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn, None).await;
-		ServerSilencedRef::add(&mut conn, server_id, CANOPY_SOURCE, "noisy", None)
+		ServerSilencedRef::add(&mut conn, server_id, CANOPY_SOURCE, "noisy", None, None)
 			.await
 			.expect("silence");
 
@@ -106,6 +106,7 @@ async fn group_silence_covers_member_servers() {
 			CANOPY_SOURCE,
 			&Namespace::Flat,
 			"noisy",
+			None,
 			Some("op"),
 		)
 		.await
@@ -125,6 +126,7 @@ async fn group_silence_covers_member_servers() {
 			CANOPY_SOURCE,
 			&Namespace::Flat,
 			"noisy",
+			None,
 		)
 		.await
 		.expect("unsilence");
@@ -247,6 +249,7 @@ async fn silence_on_a_scoped_rule_row_keeps_the_rules() {
 			"alertd",
 			&app_ns(),
 			"ruled",
+			None,
 			Some("op"),
 		)
 		.await
@@ -257,6 +260,7 @@ async fn silence_on_a_scoped_rule_row_keeps_the_rules() {
 			"alertd",
 			&app_ns(),
 			"ruled",
+			None,
 		)
 		.await
 		.expect("get")
@@ -271,6 +275,7 @@ async fn silence_on_a_scoped_rule_row_keeps_the_rules() {
 			"alertd",
 			&app_ns(),
 			"ruled",
+			None,
 		)
 		.await
 		.expect("unsilence");
@@ -280,6 +285,7 @@ async fn silence_on_a_scoped_rule_row_keeps_the_rules() {
 			"alertd",
 			&app_ns(),
 			"ruled",
+			None,
 		)
 		.await
 		.expect("get")
@@ -295,6 +301,7 @@ async fn silence_on_a_scoped_rule_row_keeps_the_rules() {
 			&app_ns(),
 			"plain",
 			None,
+			None,
 		)
 		.await
 		.expect("plain silence");
@@ -304,6 +311,7 @@ async fn silence_on_a_scoped_rule_row_keeps_the_rules() {
 			"alertd",
 			&app_ns(),
 			"plain",
+			None,
 		)
 		.await
 		.expect("plain unsilence");
@@ -313,7 +321,8 @@ async fn silence_on_a_scoped_rule_row_keeps_the_rules() {
 				Scope::Application(server_id),
 				"alertd",
 				&app_ns(),
-				"plain"
+				"plain",
+				None
 			)
 			.await
 			.expect("get")
@@ -336,6 +345,7 @@ async fn decommission_clears_the_checks_silences() {
 			"alertd",
 			&app_ns(),
 			"noisy",
+			None,
 			Some("op"),
 		)
 		.await
@@ -352,7 +362,8 @@ async fn decommission_clears_the_checks_silences() {
 				Scope::Application(server_id),
 				"alertd",
 				&app_ns(),
-				"noisy"
+				"noisy",
+				None
 			)
 			.await
 			.expect("get")
@@ -376,6 +387,7 @@ async fn list_silences_excludes_orphaned_check_silences() {
 			"bestool-alertd",
 			&app_ns(),
 			"sync",
+			None,
 			Some("op"),
 		)
 		.await

@@ -1326,6 +1326,7 @@ async fn seed_silences(
 		applications.demo_server,
 		"app",
 		"debug-trace",
+		None,
 		Some(&admins[0]),
 	)
 	.await?;
@@ -1336,6 +1337,7 @@ async fn seed_silences(
 		"healthcheck",
 		"backup_freshness",
 		Some(&ApplicationType::TamanuFacility),
+		None,
 		Some(&admins[0]),
 	)
 	.await?;

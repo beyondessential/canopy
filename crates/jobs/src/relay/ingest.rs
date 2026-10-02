@@ -15,11 +15,11 @@
 //! expressed in the single [`database::issues::Scope`] vocabulary.
 
 use commons_errors::{AppError, Result};
-use commons_types::{Uuid, source::SUBSTRATE_SOURCE};
+use commons_types::{Uuid, source::SUBSTRATE_SOURCE, status::CheckResult};
 use database::{
 	KubernetesCluster,
 	diesel_async::AsyncPgConnection,
-	issues::{CheckInstance, InstancedCheckFiling, Scope, file_check_instances},
+	issues::{CheckInstance, CheckOutcome, InstancedCheckFiling, Scope, file_check_instances},
 };
 use relay_protocol::{Filing, FilingTarget, HarvestFiling, SubstrateFiling};
 use tracing::warn;
@@ -170,6 +170,38 @@ async fn ingest_substrate(
 	// carries none (see `CheckFiling::device_id`).
 	let device_id = matches!(scope, Scope::Application(_)).then_some(relay_identity_id);
 
+	// Brokenness is the whole check's, never an instance's, and the relay
+	// reports it only as the single instance of a check that could not be
+	// read; it is filed as the check being broken.
+	// spec: CHK#checks-with-instances
+	let broken = substrate
+		.instances
+		.iter()
+		.find(|i| i.observed == CheckResult::Broken)
+		.map(|i| i.detail.as_ref().and_then(|d| d.as_object().cloned()));
+	let (detail, outcome) = if let Some(detail) = broken {
+		(detail, CheckOutcome::Broken)
+	} else {
+		(
+			None,
+			CheckOutcome::Instances(
+				substrate
+					.instances
+					.into_iter()
+					.map(|i| CheckInstance {
+						// The relay names an instance by its label alone, so the
+						// label is its key: unique within the check, and empty for
+						// a check that holds once.
+						key: i.label,
+						label: None,
+						observed: i.observed,
+						detail: i.detail,
+					})
+					.collect(),
+			),
+		)
+	};
+
 	let message = substrate.message.clone();
 	file_check_instances(
 		conn,
@@ -182,15 +214,8 @@ async fn ingest_substrate(
 			default_ceiling: substrate.default_ceiling,
 			default_escalates: substrate.default_escalates,
 			documentation: substrate.documentation.as_deref(),
-			instances: substrate
-				.instances
-				.into_iter()
-				.map(|i| CheckInstance {
-					label: i.label,
-					observed: i.observed,
-					detail: i.detail,
-				})
-				.collect(),
+			detail,
+			outcome,
 		},
 		&|_| message.clone(),
 	)

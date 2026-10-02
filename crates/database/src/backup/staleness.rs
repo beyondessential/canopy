@@ -29,8 +29,8 @@ use crate::{
 	applications::Application,
 	backup::refs,
 	issues::{
-		CheckFiling, CheckInstance, GradedInstance, InstancedCheckFiling, Scope, file_check,
-		file_check_instances,
+		CheckFiling, CheckInstance, CheckOutcome, GradedInstance, InstancedCheckFiling, Scope,
+		file_check, file_check_instances,
 	},
 };
 
@@ -305,7 +305,7 @@ fn last_success_of(instance: &GradedInstance) -> String {
 pub(super) fn label_list(instances: &[GradedInstance]) -> String {
 	instances
 		.iter()
-		.map(|i| i.label.as_str())
+		.map(GradedInstance::name)
 		.collect::<Vec<_>>()
 		.join(", ")
 }
@@ -361,7 +361,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 			let stale = verdict == StalenessVerdict::Stale;
 			any_stale |= stale;
 			stale_instances.push(CheckInstance {
-				label: row.r#type.to_string(),
+				key: row.r#type.to_string(),
+				label: None,
 				observed: if stale {
 					CheckResult::Failed
 				} else {
@@ -381,7 +382,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 			let never = verdict == StalenessVerdict::Never;
 			any_never |= never;
 			never_instances.push(CheckInstance {
-				label: row.r#type.to_string(),
+				key: row.r#type.to_string(),
+				label: None,
 				observed: if never {
 					CheckResult::Warning
 				} else {
@@ -406,7 +408,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					device_id,
 					check: refs::STALENESS,
 					title: None,
-					instances: stale_instances,
+					detail: None,
+					outcome: CheckOutcome::Instances(stale_instances),
 					default_ceiling: CheckResult::Warning,
 					default_escalates: false,
 					documentation: Some(refs::STALENESS_DOC),
@@ -415,7 +418,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					[] => format!("Application {label} is backing up on schedule again"),
 					[one] => format!(
 						"Application {label} has no recent {} backup (last success {})",
-						one.label,
+						one.name(),
 						last_success_of(one),
 					),
 					many => format!(
@@ -439,7 +442,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					device_id,
 					check: refs::NEVER,
 					title: None,
-					instances: never_instances,
+					detail: None,
+					outcome: CheckOutcome::Instances(never_instances),
 					default_ceiling: CheckResult::Warning,
 					default_escalates: false,
 					documentation: Some(refs::NEVER_DOC),
@@ -450,7 +454,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					}
 					[one] => format!(
 						"Application {label} has never reported a successful {} backup",
-						one.label
+						one.name()
 					),
 					many => format!(
 						"Application {label} has never backed up {} of its {total} types: {}",

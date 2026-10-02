@@ -11665,6 +11665,13 @@
             ],
             "description": "The operator who created this silence. `None` if not recorded."
           },
+          "instance": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The one instance of the check this silence quiets, by key. `None`\nsilences the whole check."
+          },
           "kubernetes_cluster_id": {
             "type": "string",
             "format": "uuid",
@@ -15423,6 +15430,13 @@
             ],
             "description": "The operator who created this silence. `None` if not recorded."
           },
+          "instance": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The one instance of the check this silence quiets, by key. `None`\nsilences the whole check."
+          },
           "machine_id": {
             "type": "string",
             "format": "uuid",
@@ -19004,6 +19018,13 @@
             ],
             "description": "The operator who created this silence. `None` if not recorded."
           },
+          "instance": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The one instance of the check this silence quiets, by key. `None`\nsilences the whole check."
+          },
           "namespace": {
             "$ref": "#/components/schemas/NamespaceRef",
             "description": "Which catalog entry this silence quiets. A group covers several\napplication types, so two of them reporting one check name are two\nsilences here, and the ref alone does not tell them apart."
@@ -19488,6 +19509,13 @@
               "null"
             ],
             "description": "The operator who created this silence. `None` if not recorded."
+          },
+          "instance": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The one instance of the check this silence quiets, by key. `None`\nsilences the whole check."
           },
           "ref": {
             "type": "string",

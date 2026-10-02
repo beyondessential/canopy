@@ -232,6 +232,7 @@ pub async fn silence_server(
 		args.server_id,
 		&args.source,
 		&args.r#ref,
+		None,
 		Some(&admin.0.login),
 	)
 	.await?;
@@ -259,7 +260,7 @@ pub async fn unsilence_server(
 	Json(args): Json<SilenceServerArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	ServerSilencedRef::remove(&mut conn, args.server_id, &args.source, &args.r#ref).await?;
+	ServerSilencedRef::remove(&mut conn, args.server_id, &args.source, &args.r#ref, None).await?;
 	Ok(Json(()))
 }
 
@@ -295,6 +296,7 @@ pub async fn silence_group(
 		&args.source,
 		&args.r#ref,
 		args.application_type.as_ref(),
+		None,
 		Some(&admin.0.login),
 	)
 	.await?;
@@ -328,6 +330,7 @@ pub async fn unsilence_group(
 		&args.source,
 		&args.r#ref,
 		args.application_type.as_ref(),
+		None,
 	)
 	.await?;
 	Ok(Json(()))
@@ -386,6 +389,7 @@ pub async fn silence_machine(
 		args.machine_id,
 		&args.source,
 		&args.r#ref,
+		None,
 		Some(&admin.0.login),
 	)
 	.await?;
@@ -414,7 +418,7 @@ pub async fn unsilence_machine(
 	Json(args): Json<SilenceMachineArgs>,
 ) -> Result<axum::http::StatusCode> {
 	let mut conn = state.db.get().await?;
-	MachineSilencedRef::remove(&mut conn, args.machine_id, &args.source, &args.r#ref).await?;
+	MachineSilencedRef::remove(&mut conn, args.machine_id, &args.source, &args.r#ref, None).await?;
 	Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
@@ -469,6 +473,7 @@ pub async fn silence_cluster(
 		args.kubernetes_cluster_id,
 		&args.source,
 		&args.r#ref,
+		None,
 		Some(&admin.0.login),
 	)
 	.await?;
@@ -502,6 +507,7 @@ pub async fn unsilence_cluster(
 		args.kubernetes_cluster_id,
 		&args.source,
 		&args.r#ref,
+		None,
 	)
 	.await?;
 	Ok(axum::http::StatusCode::NO_CONTENT)
