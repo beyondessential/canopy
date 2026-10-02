@@ -1475,13 +1475,20 @@ pub async fn file_check_instances(
 		status_extra: &status_extra,
 		tags: &target.tags,
 	};
-	let graded = grade_instances(
+	let mut graded = grade_instances(
 		&grading,
 		&ctx,
 		filing.detail.as_ref(),
 		&filing.outcome,
 		prior.as_ref(),
 	);
+	// A check that ran but that policy graded broken keeps an open failure as
+	// a reported-broken one does, so its state is read once that is known.
+	// spec: CHK#stability
+	if prior.is_none() && graded.effective == CheckResult::Broken {
+		let prior = Issue::check_state_at(conn, filing.scope, source, filing.check).await?;
+		graded.retain_through_brokenness(prior.as_ref());
+	}
 
 	let degraded: Vec<GradedInstance> = graded.degraded().into_iter().cloned().collect();
 	let rendered = message(&degraded);

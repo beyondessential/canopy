@@ -888,3 +888,108 @@ async fn status_history_records_the_push_verbatim() {
 	)
 	.await
 }
+
+/// A rule grading a check that ran as broken neither confirms nor clears its
+/// previous definite result: an open failure is retained through it, as it is
+/// through a check reported broken, and a later definite pass clears it.
+// spec: CHK#stability
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rule_graded_broken_retains_the_prior_failure() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let id = central(&mut conn, device_id).await;
+			set_policy(
+				&mut conn,
+				"db",
+				"failed",
+				Some(json!({ "if": [{ "==": [{ "var": "check.runner" }, "flaky"] }, "broken"] })),
+			)
+			.await;
+
+			push(
+				&public,
+				&cert,
+				&mut conn,
+				id,
+				json!({ "health": [{ "check": "db", "result": "failed" }] }),
+			)
+			.await;
+			assert_eq!(
+				state(&mut conn, id, "health/db").await.effective(),
+				"failed"
+			);
+
+			push(
+				&public,
+				&cert,
+				&mut conn,
+				id,
+				json!({ "health": [{ "check": "db", "result": "passed", "runner": "flaky" }] }),
+			)
+			.await;
+			let held = state(&mut conn, id, "health/db").await;
+			assert!(
+				held.active,
+				"a graded brokenness does not clear the failure"
+			);
+			assert_eq!(held.observed_result.as_deref(), Some("passed"));
+			assert_eq!(held.effective(), "failed", "the open failure is retained");
+			assert!(
+				held.description
+					.as_deref()
+					.is_some_and(|d| d.contains("broken")),
+				"{:?}",
+				held.description,
+			);
+
+			push(
+				&public,
+				&cert,
+				&mut conn,
+				id,
+				json!({ "health": [{ "check": "db", "result": "passed" }] }),
+			)
+			.await;
+			let cleared = state(&mut conn, id, "health/db").await;
+			assert!(!cleared.active);
+			assert_eq!(cleared.effective(), "passed");
+		},
+	)
+	.await
+}
+
+/// Brokenness is never one instance's, so a rule grading one instance as
+/// broken grades it as a warning.
+// spec: CHK#checks-with-instances
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rule_grading_an_instance_broken_warns() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let id = central(&mut conn, device_id).await;
+			set_policy(
+				&mut conn,
+				CHECK,
+				"failed",
+				Some(json!({ "if": [{ "==": [{ "var": "check.device" }, "north"] }, "broken"] })),
+			)
+			.await;
+
+			push(
+				&public,
+				&cert,
+				&mut conn,
+				id,
+				stale(&[("north", "failed", ""), ("harbour", "passed", "")]),
+			)
+			.await;
+			let state = state(&mut conn, id, REF).await;
+			assert_eq!(state.instance("north", "effective"), "warning");
+			assert_eq!(state.instance("harbour", "effective"), "passed");
+			assert_eq!(state.effective(), "warning");
+			assert!(state.active);
+		},
+	)
+	.await
+}

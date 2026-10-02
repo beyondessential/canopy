@@ -1135,13 +1135,27 @@ async fn file_health_events(
 			}
 			CheckOutcome::Instances(_) => None,
 		};
-		let graded = grade_instances(
+		let mut graded = grade_instances(
 			&grading,
 			&context(status, status_extra, tags, check),
 			Some(&reported.detail),
 			&reported.outcome,
 			prior.as_ref(),
 		);
+		// A check that ran but that policy graded broken keeps an open failure
+		// as a reported-broken one does, so its state is read once that is
+		// known.
+		// spec: CHK#stability
+		if prior.is_none() && graded.effective == CheckResult::Broken {
+			let prior = Issue::check_state_at(
+				conn,
+				scope_of(check),
+				&status.source,
+				&format!("{HEALTH_REF}/{check}"),
+			)
+			.await?;
+			graded.retain_through_brokenness(prior.as_ref());
+		}
 		effective.insert(check, graded);
 	}
 

@@ -127,7 +127,7 @@ Open: `unmonitored` entries are table names where the other keys are resource na
 - A plain check's stored `detail` no longer carries the entry's `check` / `result` / `healthy` keys, so the flat and nested forms store the same detail.
 - An instanced check is headlined `Health check '<check>' is degraded` (or `is broken`) whatever its instances come to, and that title is stamped on every filing, because lifting an instance silence can bring it back into trouble at any grade.
 - Unrecognised keys on an instance are ignored rather than refused, as unrecognised keys in the current push format are.
-- Retaining a failure through brokenness now keys on the check being reported broken, not on policy grading it broken; a rule mapping a definite result to broken no longer retains a prior failure.
+- Retaining a failure through brokenness keys on the effective result being broken, whether reported broken or graded broken by a rule (CHK "Stability"); `GradedCheck::retain_through_brokenness` applies it, and the push path and `file_check_instances` read the prior state only once the check comes out broken. A rule grading one instance of an instanced check as broken grades it as a warning (CHK "Checks with instances").
 - The client generator marks every optional collection property `#[builder(default)]`: typify renders an optional object as a bare map, which the builder would otherwise demand, so adding `HealthCheck.detail` would have broken every call site building a check. Four existing fields (`IntentDescriptor.semantics`, `Entitlements.applications`, `ReportingSchemaArgs.artifacts`, `ProgressArgs.extra`) are relaxed by the same rule.
 
 ## Build checklist

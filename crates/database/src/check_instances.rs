@@ -275,6 +275,25 @@ impl GradedCheck {
 		degraded
 	}
 
+	/// Keep an open failure through an effective broken result.
+	///
+	/// An effective broken result, whether the check was reported broken or a
+	/// rule graded it so, neither confirms nor clears the previous definite
+	/// one: while `prior`, the check's stored state, holds an open effective
+	/// failure, the check keeps contributing it, with the escalation it had.
+	/// Anything else leaves it broken, which counts as a warning. Does nothing
+	/// unless the check is effectively broken.
+	// spec: CHK#stability
+	pub fn retain_through_brokenness(&mut self, prior: Option<&Issue>) {
+		if self.effective == CheckResult::Broken
+			&& let Some(prior) =
+				prior.filter(|p| p.active && p.effective_result == Some(CheckResult::Failed))
+		{
+			self.effective = CheckResult::Failed;
+			self.escalates = prior.escalates;
+		}
+	}
+
 	/// How many instances were not skipped.
 	pub fn considered(&self) -> usize {
 		self.instances
@@ -466,10 +485,19 @@ impl GradingInputs {
 /// A broken check (see [`CheckOutcome::Broken`]) is graded as broken in every
 /// instance its stored state `prior` holds, each with the fields it was last
 /// stored with; a check that held none is graded as its single plain
-/// instance. Where policy leaves it broken, it retains the contribution of
-/// its last definite result: an open effective failure stays a failure, with
-/// the escalation it had, and anything else is broken, which counts as a
-/// warning. `prior` is only read for a broken check.
+/// instance.
+///
+/// Brokenness is never one instance's: a rule grading one instance of a check
+/// with instances as broken grades it as a warning, which is what brokenness
+/// counts as. The single instance of a check without them keeps the broken a
+/// rule grades it, since that is the whole check's result.
+///
+/// A check whose effective result is broken, whether reported broken or graded
+/// broken by policy, retains the contribution of its last definite result
+/// from `prior` (see [`GradedCheck::retain_through_brokenness`]). `prior` is
+/// otherwise only read for a check reported broken, so a caller may pass
+/// `None` for a check that ran and retain afterwards, loading the state only
+/// when the check came out broken.
 // spec: CHK#checks-with-instances
 // spec: CHK#stability
 pub fn grade_instances(
@@ -514,6 +542,12 @@ pub fn grade_instances(
 		}
 	};
 
+	// A check with instances, as opposed to the single instance a check without
+	// them is graded as.
+	let instanced = !matches!(
+		instances.as_slice(),
+		[only] if only.key.is_empty() && only.label.is_none()
+	);
 	let mut graded_instances = Vec::with_capacity(instances.len());
 	let mut escalates = false;
 	for instance in instances {
@@ -534,8 +568,11 @@ pub fn grade_instances(
 			instance.observed,
 			&eval,
 		);
-		let graded =
+		let mut graded =
 			CheckPolicy::chain_scoped_for_instance(fleet, &grading.chain, &instance.key, &eval);
+		if instanced && !broken && graded.effective == CheckResult::Broken {
+			graded.effective = CheckResult::Warning;
+		}
 		if graded.effective != CheckResult::Skipped {
 			escalates |= graded.escalates;
 		}
@@ -550,7 +587,7 @@ pub fn grade_instances(
 
 	let most_urgent =
 		|results: &mut dyn Iterator<Item = CheckResult>| results.min_by_key(|r| r.urgency_rank());
-	let (observed, mut effective) = if graded_instances.is_empty() {
+	let (observed, effective) = if graded_instances.is_empty() {
 		(CheckResult::Passed, CheckResult::Passed)
 	} else {
 		(
@@ -566,26 +603,16 @@ pub fn grade_instances(
 		)
 	};
 
-	// An effective broken result neither confirms nor clears the previous
-	// definite one: an open failure keeps contributing as a failure.
-	// spec: CHK#stability
-	if broken
-		&& effective == CheckResult::Broken
-		&& let Some(prior) =
-			prior.filter(|p| p.active && p.effective_result == Some(CheckResult::Failed))
-	{
-		effective = CheckResult::Failed;
-		escalates = prior.escalates;
-	}
-
-	GradedCheck {
+	let mut graded = GradedCheck {
 		observed,
 		effective,
 		escalates,
 		instances: graded_instances,
 		shared: shared.cloned(),
 		broken,
-	}
+	};
+	graded.retain_through_brokenness(prior);
+	graded
 }
 
 /// An instance's fields merged over the check's shared ones, the instance's
