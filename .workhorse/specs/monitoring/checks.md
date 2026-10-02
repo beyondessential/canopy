@@ -106,7 +106,7 @@ The check's effective result is then the most urgent across the instances that w
 Broken says the check itself could not run, so it is a result of the whole check and never of one instance: an instance is passed, warning, failed, or skipped.
 A broken check is broken in every instance it holds, each presented as broken, and the check retains its last definite result as any broken check does (see "Stability").
 A broken check says nothing about which instances exist, so it recovers none of them, and its instances are those it held when it broke.
-The check's detail carries every instance that is not passing, each with its own result, so an operator can see which ones are in trouble without opening anything else.
+The check's state keeps every instance it was last given, each with its own result, so which of them are in trouble is presented with the check itself (see "Silencing one instance").
 Canopy writes the check's message from its graded instances, naming the degraded ones, so an instance a silence or rule has taken out is never counted in it.
 
 A check's instances are its complete set, so an instance absent from a report has recovered, and a report carrying an empty set recovers every instance the check held.
