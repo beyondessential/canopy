@@ -68,7 +68,7 @@ It returns a bounded list of matching machines in compact form — identifier, n
 ### Detail
 
 **Get application** takes an application identifier and returns the full record for one application: its own fields (type, rank, name, public name, URL, tags), its reported figures (version, database engine version, runtime version, configured timezone), its overall health and per-check health, its reachability, when it was last seen, its owning group, the count of its siblings in that group, and the machine it runs on.
-Its machine's checks are returned among its own, each marked as the machine's, matching what the operator UI presents for it (see [CHK](../monitoring/checks.md)).
+Its per-check health is its own checks as the operator UI presents them (see [CHK](../monitoring/checks.md), "Presentation"); its machine's checks are read with **Get machine**.
 
 **Get machine** takes a machine identifier and returns the full record for one machine: its own fields (name, group, whether it is cloud-hosted, geolocation, tags), its reported figures (platform, operating system timezone, hostname, bestool version, processor count, memory, filesystems, uptime, addresses), its overall health and per-check health, its reachability, when it was last seen, the applications running on it in compact form, which backup types it is capable of, and the most recent successful backup for each.
 
@@ -113,11 +113,14 @@ A summary or ranking of incidents should count published incidents rather than r
 So an issue about a box reads as the machine's and an issue about software as the application's, and a client can tell which of a group's grains a failure belongs to.
 
 **Find issues** returns issues across the fleet, filtered by active state, by effective result, by group, by machine, by application, and by recency (issues last seen within a look-back window).
-Filtering by application returns the machine's issues among the application's own, matching what that application presents.
+Filtering by application returns the application's own issues, matching what that application presents; its machine's are found by filtering by machine.
 
 **Get issue** takes an issue identifier and returns the issue with the incidents it is or was part of.
 
-**Get check documentation** takes a source and check name and returns the check's operator-authored markdown documentation (see [CHK](../monitoring/checks.md), "Documentation"), which by convention covers what the check observes, what each result means, and how to solve a failure.
+**Get check documentation** takes a source and a check's presented name and returns the check's operator-authored markdown documentation (see [CHK](../monitoring/checks.md), "Documentation"), which by convention covers what the check observes, what each result means, and how to solve a failure.
+The presented name is the one every other tool returns (see [CHK](../monitoring/checks.md), "Names"): `<type>:<check>` for an application type's check, with `<type>.<check>` accepted too, and the bare name for a machine's or Canopy's own.
+A prefix is read as an application type only when it names one, so a check name that happens to contain the separator is read whole.
+A bare name that matches only application types' checks is an error listing the presented names it could mean, so the client asks again with one of them.
 A client investigating an issue consults this before deriving a check's meaning from other sources.
 
 **Get check stability** takes a set of (source, check) pairs — optionally narrowed to one machine, one application, or one group — and returns each matching state's full stability record (see [CHK](../monitoring/checks.md), "Stability"): the observation counts, the transition ring, and the hour-of-week degradation profile, together with the derived flap statistics (recent flap counts, typical degraded-run and healthy-gap durations).

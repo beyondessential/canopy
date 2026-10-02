@@ -1,0 +1,285 @@
+<!-- spec: monitoring/checks.md -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Application check list</title>
+<style>
+body { margin:0; padding:24px; background:#fafafa; font-family:Roboto,Helvetica,Arial,sans-serif; color:rgba(0,0,0,0.87); font-size:14px; }
+.paper { max-width:980px; background:#fff; border:1px solid rgba(0,0,0,0.12); border-radius:4px; padding:16px; }
+.overline { font-size:12px; letter-spacing:0.08em; text-transform:uppercase; color:rgba(0,0,0,0.6); line-height:2.66; }
+.list { display:flex; flex-direction:column; gap:8px; margin-top:4px; }
+.row { display:flex; gap:12px; align-items:flex-start; padding:8px; border:1px solid rgba(0,0,0,0.12); border-radius:4px; }
+.row.loud { background:rgba(0,0,0,0.04); }
+.row.quiet .icon, .row.quiet .body { opacity:0.5; }
+.icon { display:flex; padding-top:1px; }
+.body { flex:1; min-width:0; }
+.head { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.head a { font-family:monospace; font-size:14px; color:#388e3c; text-decoration:underline; text-decoration-color:rgba(56,142,60,0.4); }
+.src, .aged { font-size:12px; color:rgba(0,0,0,0.6); }
+.doc { display:flex; padding:2px; }
+.chip { display:inline-flex; align-items:center; gap:4px; height:24px; padding:0 8px; border:1px solid #bdbdbd; border-radius:16px; font-size:13px; }
+dl { margin:4px 0 0; display:grid; grid-template-columns:max-content 1fr; column-gap:12px; row-gap:2px; font-size:0.8em; }
+dt { color:rgba(0,0,0,0.6); }
+dd { margin:0; font-family:monospace; overflow-wrap:anywhere; }
+.silence { display:flex; padding:5px; }
+button { margin-top:4px; background:none; border:0; color:#388e3c; font:500 13px Roboto,Helvetica,Arial,sans-serif; letter-spacing:0.03em; text-transform:uppercase; padding:4px 5px; }
+</style>
+</head>
+<body>
+<div class="paper">
+  <div class="overline">Checks (31)</div>
+  <div class="list">
+<div class="row loud">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#d32f2f"><path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2m5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:sync_facility_stale</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>stale sync: 1 over 30m, 1 over 10m</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:caddy_certs</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>1 cert(s) valid</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:certificate_notification_errors</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>no recent certificate notification errors</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:db_connect</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>postgres at localhost/tamanu_sync (35ms)</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:fhir_config</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>FHIR and its worker both enabled</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:fhir_job_errors</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>no recent FHIR job errors</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:fhir_jobs</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>queue empty</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:fhir_materialisation</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>no materialisation gap across 6 resources</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:fhir_service_requests_unresolved</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>no unresolved FHIR service requests</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:fhir_workers</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>2 live, 269 dropped</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:http_errors</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>0/5432 server errors (0%) in last 9m 59s (vs history)</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:ips_errors</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>no recent IPS request errors</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:migrations</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>last: 1782783331515-makeChangesUpdatedByUserIdFkeyDeferrable.js</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:patient_communication_errors</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>no recent patient communication errors</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:pg_checksums</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>data checksums enabled</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:pg_tuning</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>appears tuned</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:report_errors</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>no recent report errors</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:service_resources</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>6 service(s) measured, none with a declared ceiling</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:sync_lookup</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>lookup table up to date</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:sync_restart_loop</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>no sync restart loops</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:sync_session_errors</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>no recent sync session errors</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:sync_sessions</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>0 active, 0 stuck &gt;15m</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:sync_snapshot_tables</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>80 snapshot table(s), 2120 sync session(s)/24h</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:tamanu_http</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>HTTP 200 from http://localhost/api/public/ping (69ms)</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:tamanu_service</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>4 expectation(s) met</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row quiet">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="#2e7d32"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:tasks</a><span class="src">tamanu</span><span class="aged" title="17/08/2026, 6:12:00 pm">last reported 46d ago</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.26)"><path d="M20 18.69 7.84 6.14 5.27 3.49 4 4.76l2.8 2.8v.01c-.52.99-.8 2.16-.8 3.42v5l-2 2v1h13.73l2 2L21 19.72zM12 22c1.11 0 2-.89 2-2h-4c0 1.11.89 2 2 2m6-7.32V11c0-3.08-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.15.03-.29.08-.42.12-.1.03-.2.07-.3.11h-.01c-.01 0-.01 0-.02.01-.23.09-.46.2-.68.31 0 0-.01 0-.01.01z"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">reachability</a><span class="src">canopy</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span><span class="chip"><svg width="14" height="14" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M20 18.69 7.84 6.14 5.27 3.49 4 4.76l2.8 2.8v.01c-.52.99-.8 2.16-.8 3.42v5l-2 2v1h13.73l2 2L21 19.72zM12 22c1.11 0 2-.89 2-2h-4c0 1.11.89 2 2 2m6-7.32V11c0-3.08-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.15.03-.29.08-.42.12-.1.03-.2.07-.3.11h-.01c-.01 0-.01 0-.02.01-.23.09-.46.2-.68.31 0 0-.01 0-.01.01z"/></svg> silenced (application)</span></div>
+    <dl><dt>stale_sources</dt><dd>[{&quot;source&quot;: &quot;tamanu&quot;, &quot;stale_secs&quot;: 3991248}]</dd><dt>threshold_secs</dt><dd>600</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M20 18.69 7.84 6.14 5.27 3.49 4 4.76l2.8 2.8v.01c-.52.99-.8 2.16-.8 3.42v5l-2 2v1h13.73l2 2L21 19.72zM12 22c1.11 0 2-.89 2-2h-4c0 1.11.89 2 2 2m6-7.32V11c0-3.08-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.15.03-.29.08-.42.12-.1.03-.2.07-.3.11h-.01c-.01 0-.01 0-.02.01-.23.09-.46.2-.68.31 0 0-.01 0-.01.01z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.26)"><path d="M7 11v2h10v-2zm5-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:canopy_certificates</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>no TLS grant</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.26)"><path d="M7 11v2h10v-2zm5-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:reporting_roles</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>not applicable before 2.60</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.26)"><path d="M7 11v2h10v-2zm5-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:reporting_schema</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>none offered for this version</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+<div class="row">
+  <span class="icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.26)"><path d="M7 11v2h10v-2zm5-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8"/></svg></span>
+  <div class="body">
+    <div class="head"><a href="#">tamanu-central:version_drift</a><span class="src">alertd</span><span class="doc"><svg width="16" height="16" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m1 17h-2v-2h2zm2.07-7.75-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25"/></svg></span></div>
+    <dl><dt>summary</dt><dd>6 container(s) on expected version 2.54.16</dd></dl>
+  </div>
+  <span class="silence"><svg width="20" height="20" viewBox="0 0 24 24" fill="rgba(0,0,0,0.54)"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2m0-15.5c2.49 0 4 2.02 4 4.5v.1l2 2V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.24.06-.47.15-.69.23l1.64 1.64c.18-.02.36-.05.55-.05M5.41 3.35 4 4.76l2.81 2.81C6.29 8.57 6 9.74 6 11v5l-2 2v1h14.24l1.74 1.74 1.41-1.41zM16 17H8v-6c0-.68.12-1.32.34-1.9L16 16.76z"/></svg></span>
+</div>
+  </div>
+  <button>Collapse</button>
+</div>
+</body>
+</html>
