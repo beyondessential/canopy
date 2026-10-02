@@ -94,8 +94,14 @@ A reporter chooses the keys of the instances it sends.
 Canopy keys its own instances by whatever tells them apart: a backup type, a replica, a node pool, a cluster.
 An instance may carry a label, which is how it is named to an operator; an instance without one is named by its key.
 
-Each instance is graded through policy on its own, against its own detail and the detail the check shares across its instances, so a rule written for one instance applies to only that instance.
-Where an instance's detail and the check's shared detail both carry a field, the instance's is the one a rule reads.
+Policy applies to instances without knowing they are there.
+Each instance is graded through the check's whole policy, its catalog entry and every scoped transform, exactly as a check without instances is, and a check without instances is graded as though it were its own single instance.
+A rule evaluated for an instance reads that instance's result as `check.result`, its fields and the fields the check shares across its instances as `check.<field>`, the instance's taking precedence where both carry one, and the report and tags it would read for the check.
+So a rule is written once for a check and holds whether the check reports instances or not, and whether it starts or stops reporting them.
+A rule pinning a field only some instances carry applies to only those instances, which is how one instance is graded differently from the rest.
+An instance's key is its identity rather than one of its fields, and no rule reads it.
+
+Wherever an operator is shown the fields a rule can read for a check, a check with instances is shown as a rule reads one of its instances, with its fields merged over the check's shared ones.
 The check's effective result is then the most urgent across the instances that were not skipped, and a check whose instances are all skipped is skipped.
 A broken result among them is taken as any broken result is, so a check left broken by its instances retains its last definite result (see "Stability").
 The check's detail carries every instance that is not passing, each with its own result, so an operator can see which ones are in trouble without opening anything else.

@@ -57,7 +57,7 @@ A check carrying both a result and instances is refused, as is an instance witho
 
 A check's instances are the source's complete set for it, so a reporter sends its passing instances as well as its degraded ones.
 An empty set says the check currently has no instances, which recovers every instance it previously reported.
-The check's own `detail` holds what its instances share, and a rule reaches an instance's fields and the check's alike as `check.<field>`, the instance's taking precedence.
+The check's own `detail` holds what its instances share, and a rule reaches an instance's fields and the check's alike as `check.<field>`, the instance's taking precedence, so the same rule grades a check whether or not it reports instances (see [CHK](../monitoring/checks.md), "Checks with instances").
 A check is reported with or without instances push by push, and it remains one check either way.
 
 A check's name is reported bare.

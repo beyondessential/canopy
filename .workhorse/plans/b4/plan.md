@@ -116,3 +116,6 @@ Open: `unmonitored` entries are table names where the other keys are resource na
 - Brokenness is not held per instance: CHK keeps one state per check. A broken instance feeds the check's most-urgent aggregate like any other result, and a check left broken by that aggregate retains its last definite result through the existing broken rule.
 - Restore replicas key on type, intent and declared name together (the existing `ReplicaKey`), which replaces the joined type-and-intent detail field.
 - The bestool side is card P3 in the bestool workspace.
+- Rules apply to instances transparently (CHK, "Checks with instances"): one grading path, with a plain check graded as its own single instance. `file_check_instances` already grades each instance through the catalog entry and scoped chain with `check.result` set to the instance's result. Two gaps to close:
+  - Canopy's own filings pass an empty `status_extra`; reported instances must get the push's report detail, as a plain check from the same push does.
+  - The rule-authoring sample (`fns/healthchecks.rs`, `sample`) must present one instance's fields merged over the check's shared detail, not the raw `instances` object.
