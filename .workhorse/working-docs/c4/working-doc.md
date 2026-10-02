@@ -17,7 +17,7 @@ The list is built in `consolidated_checks_for` / `checks_at_scope` in `crates/da
 3. Apply silences (application-scope plus group-scope, `ceiling = skipped`): a silenced row's effective result becomes `skipped`.
 4. If no `canopy/reachability` row exists, add a synthetic passing one.
 5. If the application sits on a machine, repeat steps 1 to 3 for the machine's own rows, without reachability, and append them marked `subject: machine`.
-6. Sort by effective-result urgency, then `source`, then bare `check` name.
+6. Sort by effective-result urgency, then `source`, then bare `check` name (not the qualified name it displays).
 
 The headline health is computed separately (`health_from_check_state`), and that query *does* filter `active = true AND resolved_at IS NULL`.
 So the list and the headline draw on different sets of rows.
@@ -116,9 +116,15 @@ Last known bad stays bad until the source reports otherwise.
 That the source is quiet is reachability's to say, not the rollup's.
 A state left at an abandoned grain is not a quiet source, though: it is resolved (see below) and counts for nothing.
 
+### Sorted by qualified name alone
+
+The list is in alphabetical order of the name it displays, whatever each check's result.
+Severity is carried by each row's icon and background, not by its position.
+So `backup-staleness`, `tamanu-central.caddy_certs`, `tamanu-central.sync_facility_stale` read in that order, though the last is the one failing.
+A check keeps its place as its result changes, so the list doesn't reshuffle between visits.
+
 ### Plain bugs fixed regardless
 
-- Sort by the displayed qualified name, not the bare check name.
 - Key React rows on source and qualified name, which are unique once each check is one row.
 
 ## Implementation options
@@ -165,6 +171,11 @@ A read-time guard in `checks_at_scope` skips machine-namespace rows on an applic
 
 Needs checking: nothing still files a backup or machine-subject check at application scope, including for an application hosted on a cluster.
 
+### Sorting
+
+Both `consolidated_checks_for` and the point-in-time path sort by `qualified_name` alone, server-side, so the UI renders in the order it receives.
+Each qualified name is unique on one target's list once machine checks are gone (namespace prefixes keep application-typed names apart), so source isn't needed to break ties in practice; keep it as the final key anyway for a stable order.
+
 ### Ageing data on the wire
 
 `ConsolidatedCheck` carries no timestamp.
@@ -180,5 +191,6 @@ That is a private-API change (`just gen-openapi`), so it doesn't need the public
 - [x] Does a quiet source's last failed state keep counting against health? Yes.
 - [x] Frozen states at abandoned grains: resolved by migration, plus a read-time guard.
 - [x] Machine and cluster pages share `checks_at_scope`, so they get the current-only and ageing rules too.
-- [ ] Sort within a result: by qualified name alone, or grouped by source?
+- [x] Sort order? By qualified name alone, ignoring result.
+- [ ] The list shows five rows before "Show N more". With urgency no longer deciding position, a failing check can sit below the fold. Drop the fold, or keep it and accept that?
 - [ ] Should reachability's silence on Central be revisited? It is hiding a 46-day `tamanu` outage. That's an operational matter rather than part of this card, but someone should know.
