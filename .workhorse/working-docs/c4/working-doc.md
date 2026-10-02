@@ -194,8 +194,16 @@ Check URLs carry the namespace as a separate segment, so they don't change.
 Nothing parses a displayed qualified name as input today.
 The `split_once('.')` in `check_policies.rs` and `indexOf(".")` in `healthcheck-rule-eval.ts` parse rule paths (`check.<field>`), the dot that stays.
 `CheckRedirect` and the MCP check-doc tool take a source and a bare name and resolve across namespaces.
-So the backwards-compatible dot has nothing to apply to yet.
-The likely first taker is the MCP check-doc tool: an agent that has just read `qualified_name` will pass it back as `check_name`.
+The MCP check-doc tool (`get_check_documentation`) is the first input to take a qualified name, since an agent that has just read `qualified_name` passes it back as `check_name`.
+Its `check_name` becomes the qualified name:
+
+- `<type>:<check>`, or `<type>.<check>` for backwards compatibility, resolves to that type's one entry.
+- A machine or flat check's qualified name is its bare name, so `disk_free` and `reachability` resolve as before.
+- A bare name that matches only application-typed entries is an error naming the qualified names it could mean, so the agent retries with one of them.
+- The prefix counts as a namespace only when it parses as a known application type. Check names are arbitrary reported strings, so anything else is read whole as the name.
+
+`CheckDocArgs.check_name`'s doc comment and the tool description say so.
+`get_across_namespaces` stays as the lookup behind the error's candidate list.
 
 ### Ageing data on the wire
 
@@ -214,5 +222,5 @@ That is a private-API change (`just gen-openapi`), so it doesn't need the public
 - [x] Machine and cluster pages share `checks_at_scope`, so they get the current-only and ageing rules too.
 - [x] Sort order? Result urgency first, then qualified name.
 - [x] Separator? `<type>:<check>` everywhere a check name is displayed; policy rules keep the dot; inputs accept both.
-- [ ] Should the MCP check-doc tool accept a qualified name (either separator) in `check_name`, or keep taking the bare name only?
+- [x] MCP check-doc tool input? The qualified name, with either separator; a bare name that is only application-typed is an error listing the candidates.
 - [ ] Should reachability's silence on Central be revisited? It is hiding a 46-day `tamanu` outage. That's an operational matter rather than part of this card, but someone should know.
