@@ -20,34 +20,34 @@ Scenarios verifying that reported checks can carry instances, that a check carri
 
 ## Grading
 
-- [ ] An instanced check's effective result is the most urgent instance that was not skipped (verifies spec: CHK)
-- [ ] An instanced check whose instances are all skipped is skipped (verifies spec: CHK)
+- [x] An instanced check's effective result is the most urgent instance that was not skipped (verifies spec: CHK)
+- [x] An instanced check whose instances are all skipped is skipped (verifies spec: CHK)
 - [ ] An instanced check's message is written by Canopy and names its degraded instances by label, falling back to the key (verifies spec: CHK)
 - [ ] An instance absent from the next push has recovered (verifies spec: CHK)
 - [ ] `instances: {}` recovers every instance the check held (verifies spec: CHK)
 - [ ] A check that switches between plain and instanced across pushes stays one state (verifies spec: STA)
 - [ ] One catalog rule on `check.<field>` grades a check's plain form and its instanced form alike (verifies spec: CHK)
-- [ ] A rule reads an instance's field over the check's shared field of the same name (verifies spec: CHK)
-- [ ] A rule evaluated for an instance reads that instance's result as `check.result` (verifies spec: CHK)
+- [x] A rule reads an instance's field over the check's shared field of the same name (verifies spec: CHK)
+- [x] A rule evaluated for an instance reads that instance's result as `check.result` (verifies spec: CHK)
 - [ ] A rule evaluated for a reported instance sees the push's report fields (`status.*`) and the target's tags (verifies spec: CHK)
-- [ ] A rule pinning a field only some instances carry grades only those instances (verifies spec: CHK)
+- [x] A rule pinning a field only some instances carry grades only those instances (verifies spec: CHK)
 
 ## Brokenness
 
-- [ ] A check reported `broken` with no instances, after reporting instances, presents every held instance as broken (verifies spec: CHK)
-- [ ] A broken instanced check retains its last definite result (verifies spec: CHK)
-- [ ] A broken instanced check recovers none of its instances; the next healthy push grades them afresh (verifies spec: CHK)
+- [x] A check reported `broken` with no instances, after reporting instances, presents every held instance as broken (verifies spec: CHK)
+- [x] A broken instanced check retains its last definite result (verifies spec: CHK)
+- [x] A broken instanced check recovers none of its instances; the next healthy push grades them afresh (verifies spec: CHK)
 
 ## Instance silences
 
-- [ ] Silencing one instance on an application quiets that instance only; the check is graded on the rest (verifies spec: CHK)
-- [ ] Silencing every degraded instance leaves the check graded on its passing instances, or skipped when none remain (verifies spec: CHK)
-- [ ] A group-scoped instance silence quiets that key on every application in the group reporting the check (verifies spec: CHK)
-- [ ] A machine-scoped instance silence quiets that key on a machine check (verifies spec: CHK)
-- [ ] Silencing an instance re-grades the check immediately, without waiting for the next push, and an incident whose last failure was that instance closes (verifies spec: CHK, INC)
-- [ ] Unsilencing an instance re-grades the check immediately
-- [ ] An instance silence and a whole-check silence on the same check and target coexist
-- [ ] The reporting source is told the check's policy, unaffected by instance silences (verifies spec: CHK, STA)
+- [x] Silencing one instance on an application quiets that instance only; the check is graded on the rest (verifies spec: CHK)
+- [x] Silencing every degraded instance leaves the check graded on its passing instances, or skipped when none remain (verifies spec: CHK)
+- [x] A group-scoped instance silence quiets that key on every application in the group reporting the check (verifies spec: CHK)
+- [x] A machine-scoped instance silence quiets that key on a machine check (verifies spec: CHK)
+- [x] Silencing an instance re-grades the check immediately, without waiting for the next push, and an incident whose last failure was that instance closes (verifies spec: CHK, INC)
+- [x] Unsilencing an instance re-grades the check immediately
+- [x] An instance silence and a whole-check silence on the same check and target coexist
+- [x] The reporting source is told the check's policy, unaffected by instance silences (verifies spec: CHK, STA)
 - [ ] A target's silences list shows the instance's label and key, and marks a silence whose key the check no longer reports (verifies spec: CHK)
 
 ## Canopy's own instanced checks

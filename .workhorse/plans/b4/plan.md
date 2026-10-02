@@ -128,26 +128,26 @@ Each section leaves the tree building and tested, so they can land as separate c
 
 ### 1. One grading path for instances (database)
 
-- [ ] `database::issues::CheckInstance`: add `key: String`; make `label` an `Option<String>` that falls back to the key wherever an instance is named. Mirror both in `GradedInstance`
-- [ ] Extract the per-instance grading and aggregation out of `file_check_instances` into a shared `grade_instances` (fleet grading + scoped chain per instance, most urgent non-skipped wins, all-skipped is skipped, `escalates` from non-skipped instances only), so push ingestion and Canopy's own filings call the same function
-- [ ] Rule context per instance (spec: CHK#checks-with-instances): instance detail merged over the check's shared detail, `result` set to the instance's observed result, and the caller's `status_extra` passed through instead of the empty map `file_check_instances` uses today
-- [ ] A plain check grades as one instance with an empty key and no label, so its rule context is identical to today's
-- [ ] `instance_detail`: store every instance keyed by key (label, observed, effective, own detail), the shared detail, and degraded/total counts, instead of degraded instances only. The silenced-instance listing, "not reported" marking and broken presentation all read the full set from here
-- [ ] Message: an instanced check's message is composed by Canopy from the degraded graded instances, named by label
+- [x] `database::issues::CheckInstance`: add `key: String`; make `label` an `Option<String>` that falls back to the key wherever an instance is named. Mirror both in `GradedInstance`
+- [x] Extract the per-instance grading and aggregation out of `file_check_instances` into a shared `grade_instances` (fleet grading + scoped chain per instance, most urgent non-skipped wins, all-skipped is skipped, `escalates` from non-skipped instances only), so push ingestion and Canopy's own filings call the same function
+- [x] Rule context per instance (spec: CHK#checks-with-instances): instance detail merged over the check's shared detail, `result` set to the instance's observed result, and the caller's `status_extra` passed through instead of the empty map `file_check_instances` uses today
+- [x] A plain check grades as one instance with an empty key and no label, so its rule context is identical to today's
+- [x] `instance_detail`: store every instance keyed by key (label, observed, effective, own detail), the shared detail, and degraded/total counts, instead of degraded instances only. The silenced-instance listing, "not reported" marking and broken presentation all read the full set from here
+- [x] Message: an instanced check's message is composed by Canopy from the degraded graded instances, named by label
 
 ### 2. Instance silences (storage)
 
-- [ ] `just migration instance_silences`: add `instance_key TEXT NULL` to `scoped_check_policies`, and recreate every per-scope unique index (application, machine, group, cluster, global) to include it with `NULLS NOT DISTINCT`, as `2026-09-02-080628-0000_check_namespace` does for the namespace columns
-- [ ] `ScopedCheckPolicy::{get, silence, unsilence, list_silences}`: take `Option<&str>` instance key; `chain_for` / `chains_for_scope` return instance rows tagged with their key
-- [ ] `grade_instances` applies an instance-keyed row only to the instance with that key; a row with no key applies to every instance, as now
-- [ ] `silenced_refs.rs`: `ServerSilencedRef`, `MachineSilencedRef`, `ServerGroupSilencedRef`, `ClusterSilencedRef` gain `instance: Option<String>` through `add` / `remove` / `list_*`. `is_silenced` and `silenced_health_checks_for_server` only count keyless rows as silencing the whole check
-- [ ] Silencing or unsilencing an instance re-grades the stored state from its kept instances (observed + detail) right away, then re-runs incident membership. The existing `reevaluate_open_issues_for_*_ref` only re-checks membership, which is enough for a whole-check silence but not for one that changes the check's effective result
-- [ ] Database tests (`crates/database/tests/it/`): instance silence at application and group scope, uniqueness with and without a key, re-grade on silence/unsilence, all-instances-silenced is skipped
+- [x] `just migration instance_silences`: add `instance_key TEXT NULL` to `scoped_check_policies`, and recreate every per-scope unique index (application, machine, group, cluster, global) to include it with `NULLS NOT DISTINCT`, as `2026-09-02-080628-0000_check_namespace` does for the namespace columns
+- [x] `ScopedCheckPolicy::{get, silence, unsilence, list_silences}`: take `Option<&str>` instance key; `chain_for` / `chains_for_scope` return instance rows tagged with their key
+- [x] `grade_instances` applies an instance-keyed row only to the instance with that key; a row with no key applies to every instance, as now
+- [x] `silenced_refs.rs`: `ServerSilencedRef`, `MachineSilencedRef`, `ServerGroupSilencedRef`, `ClusterSilencedRef` gain `instance: Option<String>` through `add` / `remove` / `list_*`. `is_silenced` and `silenced_health_checks_for_server` only count keyless rows as silencing the whole check
+- [x] Silencing or unsilencing an instance re-grades the stored state from its kept instances (observed + detail) right away, then re-runs incident membership. The existing `reevaluate_open_issues_for_*_ref` only re-checks membership, which is enough for a whole-check silence but not for one that changes the check's effective result
+- [x] Database tests (`crates/database/tests/it/`): instance silence at application and group scope, uniqueness with and without a key, re-grade on silence/unsilence, all-instances-silenced is skipped
 
 ### 3. Brokenness is whole-check
 
-- [ ] A `broken` result for a check whose stored state holds instances keeps those instances, presents each as broken, retains the last definite contribution through the existing broken path, and recovers none of them
-- [ ] `grade_instances` refuses a broken instance (debug assertion for Canopy's own callers; the push path rejects it in section 4 before it gets here)
+- [x] A `broken` result for a check whose stored state holds instances keeps those instances, presents each as broken, retains the last definite contribution through the existing broken path, and recovers none of them
+- [x] `grade_instances` refuses a broken instance (debug assertion for Canopy's own callers; the push path rejects it in section 4 before it gets here)
 
 ### 4. Push wire shape (public server)
 
