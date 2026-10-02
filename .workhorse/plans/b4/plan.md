@@ -224,7 +224,7 @@ Each section leaves the tree building and tested, so they can land as separate c
 
 ### 8. Wrap-up
 
-- [ ] `just check`, `just test`, `cargo fmt`, no new warnings
+- [x] `just check`, `just test`, `cargo fmt`, no new warnings
 - [x] Draft the card's test cases ([Draft test cases] skill)
 - [x] Split layer 2 into its own card via the card breakdown; drop the layer 2 prose from this plan once it lives there
 - [ ] Note on #bestool/P3 when a `bes-canopy-api` release carries the new `HealthCheck` shape
