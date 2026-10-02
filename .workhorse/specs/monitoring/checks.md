@@ -104,6 +104,7 @@ An instance's key is its identity rather than one of its fields, and no rule rea
 Wherever an operator is shown the fields a rule can read for a check, a check with instances is shown as a rule reads one of its instances, with its fields merged over the check's shared ones.
 The check's effective result is then the most urgent across the instances that were not skipped, and a check whose instances are all skipped is skipped.
 Broken says the check itself could not run, so it is a result of the whole check and never of one instance: an instance is passed, warning, failed, or skipped.
+A rule grading one instance as broken grades it as a warning, which is what brokenness counts as.
 A broken check is broken in every instance it holds, each presented as broken, and the check retains its last definite result as any broken check does (see "Stability").
 A broken check says nothing about which instances exist, so it recovers none of them, and its instances are those it held when it broke.
 The check's state keeps every instance it was last given, each with its own result, so which of them are in trouble is presented with the check itself (see "Silencing one instance").
