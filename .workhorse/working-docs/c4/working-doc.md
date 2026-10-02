@@ -126,6 +126,7 @@ Today the second key is the bare check name, so `tamanu-central.caddy_certs` sor
 An entry in an application type's namespace presents as `tamanu-central:caddy_certs`, matching how bestool writes it.
 This is presentation only: CHK "Names" already holds that the namespace is never concatenated into the name, and addresses carry it as a separate part.
 Policy rules keep the dot, where it makes sense for other reasons.
+Anything that accepts a qualified name as input takes `:` and also accepts `.` for backwards compatibility.
 CHK's "Names" line changes at the split.
 
 ### Plain bugs fixed regardless
@@ -182,14 +183,19 @@ Both `consolidated_checks_for` and the point-in-time path sort by effective-resu
 
 ### The separator
 
-One place builds the form: `Namespace::qualified_name` in `commons-types/src/namespace.rs` (and its unit test).
-Everything reads through it: the check list, the healthcheck catalog, self-alerts, the issue list, `CheckRedirect`, and the MCP incident tools (`canopy-mcp/src/incidents.rs`).
-Check URLs carry the namespace as its own segment, so they don't change.
-`tests/it/healthchecks.rs` asserts the dotted form and changes with it.
-`check_policies.rs` doc comments describing `<type>.<check>` change too.
-Still to confirm: no policy-rule or search parser accepts the displayed form as input.
-If one does, it keeps the dot, as decided.
-The MCP tool output is read by agents, not by `cargo-semver-checks`, so the public-API rule doesn't bind it, but anything matching on the dotted string would need updating.
+Two places build the form, and both change:
+
+- `Namespace::qualified_name` in `commons-types/src/namespace.rs`, with its unit test. It is read by the check list, the healthcheck catalogue, self-alerts, the issue list, `CheckRedirect`, and the MCP `CheckDocOut` (whose doc comment says `<type>.<check>`).
+- `qualifiedCheckName` in `private-web/src/types.ts`, with `healthcheckPath.test.ts`. It titles the check detail and healthcheck settings pages and, through `qualifiedSilenceRef`, the silenced-refs list.
+
+Check URLs carry the namespace as a separate segment, so they don't change.
+`tests/it/healthchecks.rs` asserts the dotted form and changes with it, as do the `check_policies.rs` doc comments.
+
+Nothing parses a displayed qualified name as input today.
+The `split_once('.')` in `check_policies.rs` and `indexOf(".")` in `healthcheck-rule-eval.ts` parse rule paths (`check.<field>`), the dot that stays.
+`CheckRedirect` and the MCP check-doc tool take a source and a bare name and resolve across namespaces.
+So the backwards-compatible dot has nothing to apply to yet.
+The likely first taker is the MCP check-doc tool: an agent that has just read `qualified_name` will pass it back as `check_name`.
 
 ### Ageing data on the wire
 
@@ -207,5 +213,6 @@ That is a private-API change (`just gen-openapi`), so it doesn't need the public
 - [x] Frozen states at abandoned grains: resolved by migration, plus a read-time guard.
 - [x] Machine and cluster pages share `checks_at_scope`, so they get the current-only and ageing rules too.
 - [x] Sort order? Result urgency first, then qualified name.
-- [x] Separator? `<type>:<check>` everywhere a check name is displayed; policy rules keep the dot.
+- [x] Separator? `<type>:<check>` everywhere a check name is displayed; policy rules keep the dot; inputs accept both.
+- [ ] Should the MCP check-doc tool accept a qualified name (either separator) in `check_name`, or keep taking the bare name only?
 - [ ] Should reachability's silence on Central be revisited? It is hiding a 46-day `tamanu` outage. That's an operational matter rather than part of this card, but someone should know.
