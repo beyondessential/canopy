@@ -4,32 +4,32 @@ Scenarios verifying that reported checks can carry instances, that a check carri
 
 ## Push shape
 
-- [ ] A check with fields in a nested `detail` object is accepted and its fields are recorded as the check's detail (verifies spec: STA)
-- [ ] A plain check with flat fields beside `check`/`result` is still accepted and read the same as the nested form (verifies spec: STA)
-- [ ] A plain check carrying flat fields and `detail` together is refused (verifies spec: STA)
-- [ ] An instanced check with a flat field beside `instances` is refused (verifies spec: STA)
-- [ ] A `detail` that is not an object, on a check or an instance, is refused (verifies spec: STA)
-- [ ] A check carrying both `result` and `instances` is refused (verifies spec: STA)
-- [ ] A check carrying none of `result`, `healthy`, `instances` is refused
-- [ ] An instance with an empty key is refused (verifies spec: STA)
-- [ ] An instance without a `result` is refused (verifies spec: STA)
-- [ ] An instance with `healthy` instead of `result` is refused
-- [ ] An instance reporting `broken` is refused (verifies spec: STA)
-- [ ] The push response answers an instanced check once, with the check's policy (verifies spec: STA)
-- [ ] Status history records an instanced push verbatim, `instances` included
+- [x] A check with fields in a nested `detail` object is accepted and its fields are recorded as the check's detail (verifies spec: STA)
+- [x] A plain check with flat fields beside `check`/`result` is still accepted and read the same as the nested form (verifies spec: STA)
+- [x] A plain check carrying flat fields and `detail` together is refused (verifies spec: STA)
+- [x] An instanced check with a flat field beside `instances` is refused (verifies spec: STA)
+- [x] A `detail` that is not an object, on a check or an instance, is refused (verifies spec: STA)
+- [x] A check carrying both `result` and `instances` is refused (verifies spec: STA)
+- [x] A check carrying none of `result`, `healthy`, `instances` is refused
+- [x] An instance with an empty key is refused (verifies spec: STA)
+- [x] An instance without a `result` is refused (verifies spec: STA)
+- [x] An instance with `healthy` instead of `result` is refused
+- [x] An instance reporting `broken` is refused (verifies spec: STA)
+- [x] The push response answers an instanced check once, with the check's policy (verifies spec: STA)
+- [x] Status history records an instanced push verbatim, `instances` included
 
 ## Grading
 
 - [x] An instanced check's effective result is the most urgent instance that was not skipped (verifies spec: CHK)
 - [x] An instanced check whose instances are all skipped is skipped (verifies spec: CHK)
-- [ ] An instanced check's message is written by Canopy and names its degraded instances by label, falling back to the key (verifies spec: CHK)
-- [ ] An instance absent from the next push has recovered (verifies spec: CHK)
-- [ ] `instances: {}` recovers every instance the check held (verifies spec: CHK)
-- [ ] A check that switches between plain and instanced across pushes stays one state (verifies spec: STA)
-- [ ] One catalog rule on `check.<field>` grades a check's plain form and its instanced form alike (verifies spec: CHK)
+- [x] An instanced check's message is written by Canopy and names its degraded instances by label, falling back to the key (verifies spec: CHK)
+- [x] An instance absent from the next push has recovered (verifies spec: CHK)
+- [x] `instances: {}` recovers every instance the check held (verifies spec: CHK)
+- [x] A check that switches between plain and instanced across pushes stays one state (verifies spec: STA)
+- [x] One catalog rule on `check.<field>` grades a check's plain form and its instanced form alike (verifies spec: CHK)
 - [x] A rule reads an instance's field over the check's shared field of the same name (verifies spec: CHK)
 - [x] A rule evaluated for an instance reads that instance's result as `check.result` (verifies spec: CHK)
-- [ ] A rule evaluated for a reported instance sees the push's report fields (`status.*`) and the target's tags (verifies spec: CHK)
+- [x] A rule evaluated for a reported instance sees the push's report fields (`status.*`) and the target's tags (verifies spec: CHK)
 - [x] A rule pinning a field only some instances carry grades only those instances (verifies spec: CHK)
 - [x] A plain check whose own fields include `instances`, `degraded` and `total` is still a plain check
 

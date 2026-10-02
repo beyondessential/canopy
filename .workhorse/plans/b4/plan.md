@@ -121,6 +121,15 @@ Open: `unmonitored` entries are table names where the other keys are resource na
   - Canopy's own filings pass an empty `status_extra`; reported instances must get the push's report detail, as a plain check from the same push does.
   - The rule-authoring sample (`fns/healthchecks.rs`, `sample`) must present one instance's fields merged over the check's shared detail, not the raw `instances` object.
 
+## Notes from the push wire shape (section 4)
+
+- A reported check is read into one shape, `database::issues::ReportedCheck` (name, `CheckOutcome`, detail with flat fields folded in), from the stored `health` array, so the private server's as-of-past re-grade (section 6) can read stored instanced and nested-detail entries the same way; it still reads entries itself today.
+- A plain check's stored `detail` no longer carries the entry's `check` / `result` / `healthy` keys, so the flat and nested forms store the same detail.
+- An instanced check is headlined `Health check '<check>' is degraded` (or `is broken`) whatever its instances come to, and that title is stamped on every filing, because lifting an instance silence can bring it back into trouble at any grade.
+- Unrecognised keys on an instance are ignored rather than refused, as unrecognised keys in the current push format are.
+- Retaining a failure through brokenness now keys on the check being reported broken, not on policy grading it broken; a rule mapping a definite result to broken no longer retains a prior failure.
+- The client generator marks every optional collection property `#[builder(default)]`: typify renders an optional object as a bare map, which the builder would otherwise demand, so adding `HealthCheck.detail` would have broken every call site building a check. Four existing fields (`IntentDescriptor.semantics`, `Entitlements.applications`, `ReportingSchemaArgs.artifacts`, `ProgressArgs.extra`) are relaxed by the same rule.
+
 ## Build checklist
 
 Layer 1 only; layer 2 is split out (see the last section).
@@ -153,29 +162,29 @@ Each section leaves the tree building and tested, so they can land as separate c
 
 ### 4. Push wire shape (public server)
 
-- [ ] `statuses.rs` `HealthCheck`: add `detail: Option<Map>` and `instances: Option<BTreeMap<String, HealthCheckInstance>>`; new `HealthCheckInstance { result, label, detail }` with utoipa docs. `extra` stays flattened for the flat form
-- [ ] `parse_health` refusals, each a path-qualified `BadRequest` like the existing ones:
-  - [ ] more than one of `result`, `healthy`, `instances`, or none of them
-  - [ ] flat fields together with `detail`
-  - [ ] flat fields next to `instances`
-  - [ ] `detail` that isn't an object, on a check or an instance
-  - [ ] empty instance key
-  - [ ] instance without `result`, with `healthy`, or with `broken`
-- [ ] Replace `collect_check_results`' `(CheckResult, &Map)` with one parsed shape (name, single result or instances, detail), with flat extras folded into detail so everything downstream reads one form. `per_check_description` reads that detail
-- [ ] `file_health_events`: grade every check through `grade_instances`, a plain check as its single instance, keeping the existing issue upsert, omission recovery and broken handling. `instances: {}` recovers every held instance; a check switching between plain and instanced stays one state
-- [ ] Response (`effective_check_severities`): an instanced check is answered once per check; confirm no per-instance entries leak in
-- [ ] Status history records the push verbatim, `instances` included (HST)
-- [ ] `just gen-openapi && just gen-api`; commit `crates/public-server/openapi.json` and `crates/canopy-api/`. `HealthCheck` is `#[non_exhaustive]` with a builder, so the new fields pass `cargo-semver-checks`; run `just check-generated`
-- [ ] Public-server tests, new `tests/it/instanced_checks.rs` (declared in `tests/it/main.rs`):
-  - [ ] every refusal above
-  - [ ] nested `detail` and flat form grade alike
-  - [ ] instance grading and aggregation, message naming degraded instances by label
-  - [ ] instance omission recovers it; `instances: {}` recovers all
-  - [ ] broken check keeps and presents held instances, recovers none
-  - [ ] plain → instanced → plain is one state
-  - [ ] one catalog rule grades the plain and instanced forms of a check alike
-  - [ ] instance silence on the application quiets one instance only
-  - [ ] response answers an instanced check once
+- [x] `statuses.rs` `HealthCheck`: add `detail: Option<Map>` and `instances: Option<BTreeMap<String, HealthCheckInstance>>`; new `HealthCheckInstance { result, label, detail }` with utoipa docs. `extra` stays flattened for the flat form
+- [x] `parse_health` refusals, each a path-qualified `BadRequest` like the existing ones:
+  - [x] more than one of `result`, `healthy`, `instances`, or none of them
+  - [x] flat fields together with `detail`
+  - [x] flat fields next to `instances`
+  - [x] `detail` that isn't an object, on a check or an instance
+  - [x] empty instance key
+  - [x] instance without `result`, with `healthy`, or with `broken`
+- [x] Replace `collect_check_results`' `(CheckResult, &Map)` with one parsed shape (name, single result or instances, detail), with flat extras folded into detail so everything downstream reads one form. `per_check_description` reads that detail
+- [x] `file_health_events`: grade every check through `grade_instances`, a plain check as its single instance, keeping the existing issue upsert, omission recovery and broken handling. `instances: {}` recovers every held instance; a check switching between plain and instanced stays one state
+- [x] Response (`effective_check_severities`): an instanced check is answered once per check; confirm no per-instance entries leak in
+- [x] Status history records the push verbatim, `instances` included (HST)
+- [x] `just gen-openapi && just gen-api`; commit `crates/public-server/openapi.json` and `crates/canopy-api/`. `HealthCheck` is `#[non_exhaustive]` with a builder, so the new fields pass `cargo-semver-checks`; run `just check-generated`
+- [x] Public-server tests, new `tests/it/instanced_checks.rs` (declared in `tests/it/main.rs`):
+  - [x] every refusal above
+  - [x] nested `detail` and flat form grade alike
+  - [x] instance grading and aggregation, message naming degraded instances by label
+  - [x] instance omission recovers it; `instances: {}` recovers all
+  - [x] broken check keeps and presents held instances, recovers none
+  - [x] plain → instanced → plain is one state
+  - [x] one catalog rule grades the plain and instanced forms of a check alike
+  - [x] instance silence on the application quiets one instance only
+  - [x] response answers an instanced check once
 
 ### 5. Canopy's own instanced checks take keys
 
