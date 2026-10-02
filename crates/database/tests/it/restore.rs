@@ -1734,8 +1734,12 @@ async fn same_scope_replicas_grade_separately_by_name() {
 		let verification = filed(&mut conn, server, "restore-verification").await;
 		let detail = verification.instances.clone().expect("instances");
 		let by_key = detail.as_object().unwrap();
+		// jsonb orders object keys by length before content, so compare the
+		// keys as a set rather than in whatever order they come back.
+		let mut keys = by_key.keys().map(String::as_str).collect::<Vec<_>>();
+		keys.sort_unstable();
 		assert_eq!(
-			by_key.keys().map(String::as_str).collect::<Vec<_>>(),
+			keys,
 			[
 				"tamanu-postgres:verify:nightly",
 				"tamanu-postgres:verify:weekly"
