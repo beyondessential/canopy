@@ -22,10 +22,13 @@ use commons_types::{
 use database::{
 	Db,
 	applications::Application,
-	check_policies::{CheckPolicy, EvaluationContext, FilingScope, GradedResult},
+	check_policies::{CheckPolicy, FilingScope},
 	devices::Device,
 	diesel_async::{AsyncConnection, AsyncPgConnection},
-	issues::{CheckStateStamp, Issue, NewEvent},
+	issues::{
+		CheckGrading, CheckOutcome, CheckStateStamp, GradedCheck, GradingContext, Issue, NewEvent,
+		ReportedCheck, Scope, grade_instances,
+	},
 	machines::Machine,
 	silenced_refs::silenced_health_checks_for_server,
 	statuses::{NewStatus, Status},
@@ -69,9 +72,9 @@ pub struct StatusPayload {
 	/// empty (`[]`) for a source that genuinely runs no checks — which
 	/// recovers every check it previously reported. Each entry must
 	/// include a non-empty `check` name and exactly one of `result` /
-	/// `healthy`; any additional fields per check (latency, free disk %,
-	/// certificate expiry, etc.) are passed through verbatim and shown in the
-	/// status UI.
+	/// `healthy` / `instances`; a check's own fields (latency, free disk %,
+	/// certificate expiry, etc.) go in its `detail`, or flat beside a single
+	/// result, and are recorded verbatim and shown in the status UI.
 	///
 	/// Every check name seen — whatever its result — is added to the
 	/// operator-facing check catalog, where the policy grading its results
@@ -156,7 +159,10 @@ pub struct ApplicationReport {
 	pub detail: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
-/// One health-check result within a status push.
+/// One health check within a status push: its name, its own detail, and either
+/// a single result or a set of instances.
+///
+/// Exactly one of `result`, `healthy` and `instances` must be present.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct HealthCheck {
 	/// Name of the check. Must be a non-empty string, and should stay stable
@@ -164,22 +170,66 @@ pub struct HealthCheck {
 	/// successive failures and the eventual recovery land on the same issue.
 	pub check: String,
 	/// Outcome of the check: `passed`, `warning`, `failed`, `broken`, or
-	/// `skipped`. Exactly one of `result` / `healthy` must be present per
-	/// entry. `warning` and `failed` open the check's issue as graded by
-	/// its policy; `broken` (the check itself errored, not the system under
-	/// test) neither confirms nor clears a known failure — the issue stays
-	/// open, retaining its contribution; `skipped` (a precondition was
-	/// not met) and `passed` open nothing and close prior issues.
+	/// `skipped`. Exactly one of `result` / `healthy` / `instances` must be
+	/// present per entry. `warning` and `failed` open the check's issue as
+	/// graded by its policy; `broken` (the check itself errored, not the
+	/// system under test) neither confirms nor clears a known failure — the
+	/// issue stays open, retaining its contribution; `skipped` (a precondition
+	/// was not met) and `passed` open nothing and close prior issues.
 	pub result: Option<CheckResult>,
 	/// Legacy pass/fail form: `true` means `passed`, `false` means `failed`.
-	/// Mutually exclusive with `result`.
+	/// Mutually exclusive with `result` and `instances`.
 	pub healthy: Option<bool>,
-	/// Arbitrary additional fields specific to this check (shown in the
-	/// status UI as a key/value block, and available to operator-defined
-	/// severity rules).
+	/// The check's own fields (shown in the status UI as a key/value block,
+	/// and read by operator-defined policy rules as `check.<field>`). For a
+	/// check with `instances`, the fields its instances share; a rule reads an
+	/// instance's own field of the same name over it.
+	///
+	/// Must be an object. A check with a single result may instead carry its
+	/// fields flat beside `check` and `result` (see `extra`), but not both
+	/// ways at once; a check with `instances` carries its fields here only.
+	#[schema(additional_properties = true, value_type = Object, required = false)]
+	pub detail: Option<serde_json::Map<String, serde_json::Value>>,
+	/// The check's instances, in place of a `result`: one entry per instance
+	/// of the check's condition (one per device, per resource, per mount),
+	/// keyed by an instance key the reporter chooses. A key must not be empty,
+	/// must be unique within the check, and must identify the same instance
+	/// across this reporter's pushes.
+	///
+	/// The set is the check's complete one: an instance left out of a push
+	/// has recovered, so passing instances are sent too, and an empty object
+	/// recovers every instance the check held. Each instance is graded
+	/// through the check's policy on its own, and the check takes the most
+	/// urgent result among the instances that were not skipped. Canopy writes
+	/// the check's message from its graded instances, naming the degraded ones
+	/// by label.
+	///
+	/// A check that could not run reports `result: broken` without instances:
+	/// brokenness belongs to the whole check, never to one instance.
+	pub instances: Option<BTreeMap<String, HealthCheckInstance>>,
+	/// A check with a single result may carry its fields flat beside `check`
+	/// and `result`, outside `detail`, and they are read as its detail. Not
+	/// accepted together with `detail` or beside `instances`.
 	#[serde(flatten)]
 	#[schema(additional_properties = true, value_type = Object)]
 	pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+/// One instance of a health check.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct HealthCheckInstance {
+	/// What this instance observed: `passed`, `warning`, `failed`, or
+	/// `skipped`. Required. `broken` is refused, being the whole check's
+	/// result (report it as the check's own `result`, without instances), and
+	/// the legacy `healthy` boolean is not accepted on an instance.
+	pub result: CheckResult,
+	/// How the instance is named to an operator, in the check's message and
+	/// wherever it is listed. Without one, the instance is named by its key.
+	pub label: Option<String>,
+	/// This instance's own fields. Must be an object. A rule reads them as
+	/// `check.<field>`, over the check's shared `detail`.
+	#[schema(additional_properties = true, value_type = Object, required = false)]
+	pub detail: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// The source a push is attributed to when it names none: the reporter
@@ -954,19 +1004,21 @@ enum SubjectSplit {
 /// (`result: skipped` — precondition not met) file nothing and close
 /// the check's issue.
 ///
-/// Each check's effective result comes from applying the operator-owned
-/// `check_policies` catalog entry for `(source, check)` (see
-/// [`CheckPolicy::apply`] for the rules/ceiling contract) to the
-/// observed result. Every check seen on a push — whatever its result —
-/// upserts a default catalog row so new checks are visible to operators
-/// immediately at the default warning ceiling. `status.healthy` is
-/// intentionally not consulted: the catalog is canopy's single source
-/// of truth for per-check grading.
+/// Every check is graded through [`grade_instances`]: each of its instances
+/// through the operator-owned `check_policies` catalog entry for
+/// `(source, check)` (see [`CheckPolicy::grade`] for the rules/ceiling
+/// contract) and the scoped chain covering the target, a check with a single
+/// result as its own single instance. Every check seen on a push — whatever
+/// its result — upserts a default catalog row so new checks are visible to
+/// operators immediately at the default warning ceiling. `status.healthy` is
+/// intentionally not consulted: the catalog is canopy's single source of
+/// truth for per-check grading.
 ///
 /// Until issues themselves carry results, the effective result maps to
 /// the issue severity: failed → error (critical when the policy
 /// escalates), warning and broken → warning; passed and skipped file
 /// nothing and close prior issues.
+// spec: CHK#checks-with-instances
 #[allow(clippy::too_many_arguments)]
 async fn file_health_events(
 	conn: &mut AsyncPgConnection,
@@ -979,7 +1031,7 @@ async fn file_health_events(
 	tags: &std::collections::HashMap<String, serde_json::Value>,
 	subject: SubjectSplit,
 ) -> Result<()> {
-	let curr_check_results = collect_check_results(&status.health);
+	let reported = ReportedCheck::all_in(&status.health);
 	let occurred_at = Some(status.created_at);
 
 	// Which grain a check on this push belongs to.
@@ -1004,6 +1056,13 @@ async fn file_health_events(
 		Some(ty) if !on_machine(check) => Namespace::for_application(&status.source, check, ty),
 		_ => Namespace::for_machine(&status.source, check),
 	};
+	// The scope a check files at. A check off the machine always has an
+	// application to file against: with no application, every check is the
+	// machine's.
+	let scope_of = |check: &str| match server_id {
+		Some(server_id) if !on_machine(check) => Scope::Application(server_id),
+		_ => Scope::Machine(machine_id),
+	};
 
 	// Upsert a catalog row for every check name seen on this push,
 	// whatever its result. New checks land at the default warning
@@ -1011,43 +1070,39 @@ async fn file_health_events(
 	// page. A name resolves to the namespace its subject and this
 	// source put it in, so a machine check on a Tamanu push is the
 	// box's entry and not one Tamanu owns.
-	for check_name in curr_check_results.keys() {
+	for check_name in reported.keys() {
 		let namespace = namespace_of(check_name);
 		CheckPolicy::upsert_default(conn, &status.source, &namespace, check_name).await?;
 	}
 
-	// Status-level extras are shared across every per-check evaluation.
+	// Status-level extras are shared across every per-check evaluation, and
+	// rules read them for every instance of every check.
 	let empty_map = serde_json::Map::new();
 	let status_extra = status.extra.as_object().unwrap_or(&empty_map);
+	fn context<'a>(
+		status: &'a Status,
+		status_extra: &'a serde_json::Map<String, serde_json::Value>,
+		tags: &'a std::collections::HashMap<String, serde_json::Value>,
+		check: &'a str,
+	) -> GradingContext<'a> {
+		GradingContext {
+			source: &status.source,
+			check,
+			status_extra,
+			tags,
+		}
+	}
 
 	// Grade every check in the push through its policy.
-	let mut effective: BTreeMap<&String, GradedResult> = BTreeMap::new();
-	for (check, (result, entry)) in &curr_check_results {
-		// Strip the reserved `check` / `healthy` keys, and replace any
-		// wire-form `result` with the normalised value so rules see a
-		// uniform `check.result` even for legacy (`healthy: bool`)
-		// payloads.
-		let mut check_extra = (*entry).clone();
-		check_extra.remove("check");
-		check_extra.remove("healthy");
-		check_extra.insert(
-			"result".into(),
-			serde_json::Value::String(result.to_string()),
-		);
-		let ctx = EvaluationContext {
-			status_extra,
-			check_extra: &check_extra,
-			tags,
-		};
+	let mut effective: BTreeMap<&String, GradedCheck> = BTreeMap::new();
+	for (check, reported) in &reported {
 		let on_machine = on_machine(check);
 		let namespace = namespace_of(check);
-		let graded = CheckPolicy::apply_scoped(
+		let grading = CheckGrading::load(
 			conn,
 			&status.source,
 			&namespace,
 			check,
-			*result,
-			&ctx,
 			FilingScope {
 				// A unified push carries both grains' checks. Grade each at
 				// the grain its subject belongs to, so a machine check is
@@ -1063,6 +1118,30 @@ async fn file_health_events(
 			},
 		)
 		.await?;
+		// A broken check holds the instances its state held, and keeps an open
+		// failure, so only then is its state read before it is written. Read
+		// at the grain the check files at: a machine check's open failure is
+		// the box's issue, and looking for it among the application's would
+		// never find it.
+		let prior = match reported.outcome {
+			CheckOutcome::Broken => {
+				Issue::check_state_at(
+					conn,
+					scope_of(check),
+					&status.source,
+					&format!("{HEALTH_REF}/{check}"),
+				)
+				.await?
+			}
+			CheckOutcome::Instances(_) => None,
+		};
+		let graded = grade_instances(
+			&grading,
+			&context(status, status_extra, tags, check),
+			Some(&reported.detail),
+			&reported.outcome,
+			prior.as_ref(),
+		);
 		effective.insert(check, graded);
 	}
 
@@ -1111,7 +1190,7 @@ async fn file_health_events(
 	// File every check in the push — passing ones included, so the state
 	// row records the current result and when it was last reported. An
 	// effective broken result neither confirms nor clears the previous
-	// definite result: the filing retains an open effective failure's
+	// definite result: the grading retains an open effective failure's
 	// contribution, or counts as a warning when there was nothing to
 	// retain (broken contributes as a warning in the rollups).
 	//
@@ -1119,17 +1198,16 @@ async fn file_health_events(
 	// another in a single push, the incoming failure must join the open
 	// incident before the outgoing one leaves, or the incident closes
 	// and reopens as two.
-	let filing_order = effective.iter().filter(|(_, g)| {
+	let degraded = |g: &GradedCheck| {
 		matches!(
 			g.effective,
 			CheckResult::Warning | CheckResult::Failed | CheckResult::Broken
 		)
-	});
-	let filing_order = filing_order.chain(
-		effective
-			.iter()
-			.filter(|(_, g)| matches!(g.effective, CheckResult::Passed | CheckResult::Skipped)),
-	);
+	};
+	let filing_order = effective
+		.iter()
+		.filter(|(_, g)| degraded(g))
+		.chain(effective.iter().filter(|(_, g)| !degraded(g)));
 	for (check, graded) in filing_order {
 		let on_machine = on_machine(check);
 		let was_active = if on_machine {
@@ -1137,96 +1215,58 @@ async fn file_health_events(
 		} else {
 			previously_active.contains(*check)
 		};
-		let (effective, escalates, active, description, message) = match graded.effective {
-			CheckResult::Failed => (
-				CheckResult::Failed,
-				graded.escalates,
-				true,
-				Some(format!("Health check '{check}' failed")),
-				None,
-			),
-			CheckResult::Warning => (
-				CheckResult::Warning,
-				graded.escalates,
-				true,
-				Some(format!("Health check '{check}' warned")),
-				None,
-			),
-			CheckResult::Broken => {
-				// Read at the grain this check files at: a machine check's
-				// open failure is the box's issue, and looking for it among
-				// the application's would never find it.
-				let r#ref = format!("{HEALTH_REF}/{check}");
-				let prior = if on_machine {
-					Issue::list_by_source_ref_for_machines(
-						conn,
-						&status.source,
-						&r#ref,
-						&[machine_id],
-					)
-					.await?
-				} else {
-					match server_id {
-						Some(server_id) => {
-							Issue::list_by_source_ref(conn, &status.source, &r#ref, &[server_id])
-								.await?
-						}
-						None => Vec::new(),
-					}
-				};
-				let retained = prior
-					.into_iter()
-					.next()
-					.filter(|i| i.active && i.effective_result == Some(CheckResult::Failed));
-				let (effective, escalates) = match retained {
-					Some(prior) => (CheckResult::Failed, prior.escalates),
-					None => (CheckResult::Broken, graded.escalates),
-				};
-				(
-					effective,
-					escalates,
-					true,
-					Some(format!("Health check '{check}' is broken")),
-					None,
-				)
-			}
-			CheckResult::Passed => (
-				CheckResult::Passed,
-				graded.escalates,
-				false,
-				None,
-				Some(if was_active {
-					format!("Health check '{check}' recovered")
-				} else {
-					format!("Health check '{check}' passing")
-				}),
-			),
-			CheckResult::Skipped => (
-				CheckResult::Skipped,
-				graded.escalates,
-				false,
-				None,
-				Some(if was_active {
-					format!("Health check '{check}' is now skipped")
-				} else {
-					format!("Health check '{check}' skipped")
-				}),
-			),
+		let active = degraded(graded);
+		let (description, title, message) = if graded.is_plain() {
+			// A check with a single result is headlined by what policy made of
+			// it. A broken check retaining a failure is still broken, so the
+			// headline reads its instance's grade rather than the retained
+			// contribution.
+			let description = match graded.instances[0].effective {
+				_ if !active => None,
+				CheckResult::Broken => Some(format!("Health check '{check}' is broken")),
+				CheckResult::Failed => Some(format!("Health check '{check}' failed")),
+				_ => Some(format!("Health check '{check}' warned")),
+			};
+			let message = match graded.effective {
+				_ if active => per_check_description(&reported[*check].detail),
+				CheckResult::Skipped if was_active => {
+					Some(format!("Health check '{check}' is now skipped"))
+				}
+				CheckResult::Skipped => Some(format!("Health check '{check}' skipped")),
+				_ if was_active => Some(format!("Health check '{check}' recovered")),
+				_ => Some(format!("Health check '{check}' passing")),
+			};
+			(
+				description.clone(),
+				description,
+				message.unwrap_or_default(),
+			)
+		} else {
+			// A check with instances is headlined the same whatever its
+			// instances come to, and the title is kept whatever the result:
+			// lifting an instance silence can bring the state back into
+			// trouble at any grade, and it presents this title then. Canopy
+			// writes the message from the graded instances, so an instance
+			// a silence has taken out is never counted in it.
+			// spec: CHK#checks-with-instances
+			let title = if graded.broken {
+				format!("Health check '{check}' is broken")
+			} else {
+				format!("Health check '{check}' is degraded")
+			};
+			(
+				active.then(|| title.clone()),
+				Some(title),
+				graded.message(check),
+			)
 		};
-		let (observed, entry) = curr_check_results[*check];
-		let stamp = CheckStateStamp {
-			check: (*check).clone(),
-			observed,
-			effective,
-			escalates,
-			detail: Some(serde_json::Value::Object(entry.clone())),
-			title: description.clone(),
-			instanced: None,
-		};
+		let stamp = CheckStateStamp::of_graded(
+			check,
+			graded,
+			&context(status, status_extra, tags, check),
+			title.as_deref(),
+		);
 		let r#ref = format!("{HEALTH_REF}/{check}");
-		let message = message
-			.or_else(|| per_check_description(entry))
-			.unwrap_or_default();
 		if on_machine {
 			// A degraded machine check is one issue at machine scope however
 			// many applications run on the box. Incident evaluation happens
@@ -1271,7 +1311,7 @@ async fn file_health_events(
 		.map(|c| (c, false))
 		.chain(previously_active_on_machine.iter().map(|c| (c, true)))
 	{
-		if curr_check_results.contains_key(check) {
+		if reported.contains_key(check) {
 			continue;
 		}
 		let stamp = CheckStateStamp {
@@ -1326,35 +1366,10 @@ async fn file_health_events(
 	Ok(())
 }
 
-/// Normalised result of every well-formed check in a `health[]` blob.
-/// Anything malformed (non-object entry, missing/invalid `check`, no
-/// resolvable result) is ignored — the public endpoint validates on
-/// the way in, so by the time we read it back from the DB we're either
-/// looking at our own well-formed data or at historical pre-contract
-/// rows where missing means absent. Reads both the `result` enum form
-/// and the legacy `healthy: bool` form via [`CheckResult::from_entry`].
-fn collect_check_results(
-	health: &serde_json::Value,
-) -> BTreeMap<String, (CheckResult, &serde_json::Map<String, serde_json::Value>)> {
-	let Some(arr) = health.as_array() else {
-		return BTreeMap::new();
-	};
-	arr.iter()
-		.filter_map(|e| {
-			let obj = e.as_object()?;
-			let check = obj.get("check")?.as_str()?;
-			let result = CheckResult::from_entry(obj)?;
-			Some((check.to_string(), (result, obj)))
-		})
-		.collect()
-}
-
-fn per_check_description(entry: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+/// A degraded check's message: its fields, one per line.
+fn per_check_description(detail: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
 	let mut lines = Vec::new();
-	for (k, v) in entry.iter() {
-		if k == "check" || k == "healthy" || k == "result" {
-			continue;
-		}
+	for (k, v) in detail {
 		let rendered = match v {
 			serde_json::Value::String(s) => s.clone(),
 			other => other.to_string(),
@@ -1426,9 +1441,11 @@ struct ParsedPush {
 /// A `health` array, wherever it appears, must be an array of objects, each
 /// with `check: non-empty string` and **exactly one** of
 /// `result: "passed" | "warning" | "failed" | "broken" | "skipped"`
-/// (current bestool) or `healthy: bool` (legacy). An unrecognised `result`
-/// string is a 400 — canopy ships before any bestool that adds enum values.
-/// Other fields on each entry are passed through verbatim.
+/// (current bestool), `healthy: bool` (legacy), or an `instances` object. An
+/// unrecognised `result` string is a 400 — canopy ships before any bestool
+/// that adds enum values. A check's fields sit in a `detail` object or, for a
+/// check with a single result, flat beside it, never both; see
+/// [`parse_health`] for every refusal.
 fn parse_push(raw: serde_json::Value) -> Result<ParsedPush> {
 	let mut obj = match raw {
 		serde_json::Value::Null => serde_json::Map::new(),
@@ -1566,55 +1583,143 @@ fn parse_target_report(value: serde_json::Value, path: &str) -> Result<TargetRep
 
 /// Validate one `health` array, wherever in the payload it sits. `path` names
 /// it for the error message, so a reporter is told which target it got wrong.
+///
+/// The array is returned as sent: status history records the push verbatim,
+/// and [`ReportedCheck`] reads it back in one form whichever form each check
+/// took.
+// spec: STA#health-and-detail
+// spec: STA#instances
 fn parse_health(value: serde_json::Value, path: &str) -> Result<serde_json::Value> {
 	let health_arr = match value {
 		serde_json::Value::Array(a) => a,
 		_ => return Err(AppError::BadRequest(format!("`{path}` must be an array"))),
 	};
 	for (idx, entry) in health_arr.iter().enumerate() {
-		let Some(entry_obj) = entry.as_object() else {
-			return Err(AppError::BadRequest(format!(
-				"`{path}[{idx}]` must be an object",
-			)));
-		};
-		match entry_obj.get("check") {
-			Some(serde_json::Value::String(s)) if !s.is_empty() => {}
-			Some(_) | None => {
-				return Err(AppError::BadRequest(format!(
-					"`{path}[{idx}].check` must be a non-empty string",
-				)));
-			}
-		}
-		match (entry_obj.get("result"), entry_obj.get("healthy")) {
-			(Some(_), Some(_)) => {
-				return Err(AppError::BadRequest(format!(
-					"`{path}[{idx}]` must not have both `result` and `healthy`",
-				)));
-			}
-			(Some(serde_json::Value::String(s)), None) => {
-				if s.parse::<CheckResult>().is_err() {
-					return Err(AppError::BadRequest(format!(
-						"`{path}[{idx}].result` must be one of passed, warning, failed, broken, skipped",
-					)));
-				}
-			}
-			(Some(_), None) => {
-				return Err(AppError::BadRequest(format!(
-					"`{path}[{idx}].result` must be a string",
-				)));
-			}
-			(None, Some(serde_json::Value::Bool(_))) => {}
-			(None, Some(_)) => {
-				return Err(AppError::BadRequest(format!(
-					"`{path}[{idx}].healthy` must be a boolean",
-				)));
-			}
-			(None, None) => {
-				return Err(AppError::BadRequest(format!(
-					"`{path}[{idx}]` must have a `result` (or legacy `healthy`)",
-				)));
-			}
-		}
+		parse_health_entry(entry, &format!("{path}[{idx}]"))?;
 	}
 	Ok(serde_json::Value::Array(health_arr))
+}
+
+/// Validate one check of a `health` array.
+fn parse_health_entry(entry: &serde_json::Value, path: &str) -> Result<()> {
+	let bad = |message: String| Err(AppError::BadRequest(message));
+	let Some(entry) = entry.as_object() else {
+		return bad(format!("`{path}` must be an object"));
+	};
+	match entry.get("check") {
+		Some(serde_json::Value::String(s)) if !s.is_empty() => {}
+		Some(_) | None => return bad(format!("`{path}.check` must be a non-empty string")),
+	}
+
+	let has_detail = entry.contains_key("detail");
+	if let Some(detail) = entry.get("detail")
+		&& !detail.is_object()
+	{
+		return bad(format!("`{path}.detail` must be an object"));
+	}
+	// Fields beside the structure are the flat form of a check's detail, which
+	// only a check with a single result may use, and only in place of `detail`.
+	let flat = entry
+		.keys()
+		.filter(|k| !["check", "result", "healthy", "detail", "instances"].contains(&k.as_str()))
+		.map(|k| format!("`{k}`"))
+		.collect::<Vec<_>>();
+
+	match (
+		entry.get("result"),
+		entry.get("healthy"),
+		entry.get("instances"),
+	) {
+		(Some(_), Some(_), None) => {
+			return bad(format!(
+				"`{path}` must not have both `result` and `healthy`"
+			));
+		}
+		(Some(_), _, Some(_)) | (_, Some(_), Some(_)) => {
+			return bad(format!(
+				"`{path}` must have exactly one of `result`, `healthy` or `instances`",
+			));
+		}
+		(Some(serde_json::Value::String(s)), None, None) => {
+			if s.parse::<CheckResult>().is_err() {
+				return bad(format!(
+					"`{path}.result` must be one of passed, warning, failed, broken, skipped",
+				));
+			}
+		}
+		(Some(_), None, None) => return bad(format!("`{path}.result` must be a string")),
+		(None, Some(serde_json::Value::Bool(_)), None) => {}
+		(None, Some(_), None) => return bad(format!("`{path}.healthy` must be a boolean")),
+		(None, None, Some(instances)) => {
+			if !flat.is_empty() {
+				return bad(format!(
+					"`{path}` has instances, so its fields belong in `detail`, not beside them: {}",
+					flat.join(", "),
+				));
+			}
+			let Some(instances) = instances.as_object() else {
+				return bad(format!("`{path}.instances` must be an object"));
+			};
+			for (key, instance) in instances {
+				if key.is_empty() {
+					return bad(format!("`{path}.instances` keys must be non-empty strings"));
+				}
+				parse_health_instance(instance, &format!("{path}.instances.{key}"))?;
+			}
+			return Ok(());
+		}
+		(None, None, None) => {
+			return bad(format!(
+				"`{path}` must have a `result` (or legacy `healthy`), or `instances`",
+			));
+		}
+	}
+
+	if has_detail && !flat.is_empty() {
+		return bad(format!(
+			"`{path}` has its fields both in `detail` and beside it ({}); send them one way",
+			flat.join(", "),
+		));
+	}
+	Ok(())
+}
+
+/// Validate one instance of a check.
+fn parse_health_instance(instance: &serde_json::Value, path: &str) -> Result<()> {
+	let bad = |message: String| Err(AppError::BadRequest(message));
+	let Some(instance) = instance.as_object() else {
+		return bad(format!("`{path}` must be an object"));
+	};
+	if instance.contains_key("healthy") {
+		return bad(format!(
+			"`{path}` must report a `result`; the legacy `healthy` is not accepted on an instance",
+		));
+	}
+	match instance.get("result") {
+		Some(serde_json::Value::String(s)) => match s.parse::<CheckResult>() {
+			Ok(CheckResult::Broken) => {
+				return bad(format!(
+					"`{path}.result` must not be broken: brokenness is the whole check's, so report `result: broken` on the check, without instances",
+				));
+			}
+			Ok(_) => {}
+			Err(_) => {
+				return bad(format!(
+					"`{path}.result` must be one of passed, warning, failed, skipped",
+				));
+			}
+		},
+		Some(_) => return bad(format!("`{path}.result` must be a string")),
+		None => return bad(format!("`{path}` must have a `result`")),
+	}
+	match instance.get("label") {
+		None | Some(serde_json::Value::String(_)) => {}
+		Some(_) => return bad(format!("`{path}.label` must be a string")),
+	}
+	if let Some(detail) = instance.get("detail")
+		&& !detail.is_object()
+	{
+		return bad(format!("`{path}.detail` must be an object"));
+	}
+	Ok(())
 }

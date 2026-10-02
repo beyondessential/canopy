@@ -1,6 +1,8 @@
 //! What the generated types carry.
 
-use bes_canopy_api::schema::{CheckResult, CredentialProcessOutput, HealthCheck, StatusPayload};
+use bes_canopy_api::schema::{
+	CheckResult, CredentialProcessOutput, HealthCheck, HealthCheckInstance, StatusPayload,
+};
 
 #[test]
 fn a_credential_secret_is_readable_but_not_printed() {
@@ -104,4 +106,57 @@ fn a_struct_is_built_without_naming_every_field() {
 
 	assert!(payload.source.is_none());
 	assert!(payload.extra.is_empty());
+}
+
+#[test]
+fn a_check_is_built_without_its_optional_detail() {
+	// `detail` is an optional object, which the generated type holds as a bare
+	// map: the builder must not demand it, or its addition broke every call
+	// site building a check.
+	let check = HealthCheck::builder()
+		.check("disk-space".into())
+		.result(CheckResult::Passed)
+		.build();
+
+	let sent = serde_json::to_value(&check).expect("serialising the check");
+	assert_eq!(
+		sent,
+		serde_json::json!({ "check": "disk-space", "result": "passed" }),
+		"an unset detail is not sent, so a flat-form check stays valid",
+	);
+}
+
+#[test]
+fn a_check_carries_instances_with_their_own_detail() {
+	let instance = HealthCheckInstance::builder()
+		.result(CheckResult::Failed)
+		.label("Northgate Clinic".into())
+		.detail(serde_json::Map::from_iter([(
+			"minutes_since_success".to_string(),
+			serde_json::json!(2875.4),
+		)]))
+		.build();
+	let check = HealthCheck::builder()
+		.check("sync_facility_stale".into())
+		.detail(serde_json::Map::from_iter([(
+			"fail_minutes".to_string(),
+			serde_json::json!(30),
+		)]))
+		.instances([("6f1c2a9e".to_string(), instance)].into_iter().collect())
+		.build();
+
+	assert_eq!(
+		serde_json::to_value(&check).expect("serialising the check"),
+		serde_json::json!({
+			"check": "sync_facility_stale",
+			"detail": { "fail_minutes": 30 },
+			"instances": {
+				"6f1c2a9e": {
+					"result": "failed",
+					"label": "Northgate Clinic",
+					"detail": { "minutes_since_success": 2875.4 },
+				},
+			},
+		}),
+	);
 }

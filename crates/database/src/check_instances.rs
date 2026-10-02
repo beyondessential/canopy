@@ -102,6 +102,95 @@ pub enum CheckOutcome {
 	Broken,
 }
 
+/// One check as a status push reported it: its name, what it observed, and its
+/// own fields, in the one form every reader takes whichever form the reporter
+/// sent it in (see STA, "Health and detail").
+///
+/// A check with a single result carries its fields either in a `detail` object
+/// or flat beside its name and result; both read the same here, so a rule, the
+/// stored state and the fleet spread see `check.<field>` alike. A check with
+/// instances carries its shared fields in `detail` only.
+// spec: STA#health-and-detail
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReportedCheck {
+	pub name: String,
+	/// What the check observed: its instances (a check with a single result
+	/// being its one [`CheckInstance::plain`]), or that it could not run.
+	pub outcome: CheckOutcome,
+	/// The check's own fields: for a check with instances, those its instances
+	/// share.
+	pub detail: Map<String, Value>,
+}
+
+/// The keys of a `health` entry that are its structure rather than its fields.
+const HEALTH_ENTRY_KEYS: [&str; 5] = ["check", "result", "healthy", "detail", "instances"];
+
+impl ReportedCheck {
+	/// Read one entry of a push's `health` array.
+	///
+	/// The push is validated on the way in, so this reads either well-formed
+	/// entries or historical rows that predate the contract. Anything it cannot
+	/// read as a check (no name, no resolvable result) is `None`, and an
+	/// instance it cannot read is left out.
+	pub fn from_entry(entry: &Map<String, Value>) -> Option<Self> {
+		let name = entry.get("check")?.as_str()?.to_string();
+		let detail = match entry.get("detail") {
+			Some(Value::Object(detail)) => detail.clone(),
+			_ => entry
+				.iter()
+				.filter(|(k, _)| !HEALTH_ENTRY_KEYS.contains(&k.as_str()))
+				.map(|(k, v)| (k.clone(), v.clone()))
+				.collect(),
+		};
+		let outcome = match entry.get("instances") {
+			Some(Value::Object(instances)) => CheckOutcome::Instances(
+				instances
+					.iter()
+					.filter_map(|(key, instance)| {
+						let instance = instance.as_object()?;
+						let observed: CheckResult =
+							instance.get("result")?.as_str()?.parse().ok()?;
+						if key.is_empty() || observed == CheckResult::Broken {
+							return None;
+						}
+						Some(CheckInstance {
+							key: key.clone(),
+							label: instance
+								.get("label")
+								.and_then(Value::as_str)
+								.map(str::to_string),
+							observed,
+							detail: instance.get("detail").filter(|d| d.is_object()).cloned(),
+						})
+					})
+					.collect(),
+			),
+			_ => match CheckResult::from_entry(entry)? {
+				CheckResult::Broken => CheckOutcome::Broken,
+				observed => CheckOutcome::Instances(vec![CheckInstance::plain(observed, None)]),
+			},
+		};
+		Some(Self {
+			name,
+			outcome,
+			detail,
+		})
+	}
+
+	/// Every check a push's `health` array reports, by name. Two entries
+	/// naming one check are one check, the later superseding the earlier
+	/// whole, so its result never mixes with another entry's fields.
+	pub fn all_in(health: &Value) -> BTreeMap<String, Self> {
+		health
+			.as_array()
+			.into_iter()
+			.flatten()
+			.filter_map(|entry| Self::from_entry(entry.as_object()?))
+			.map(|check| (check.name.clone(), check))
+			.collect()
+	}
+}
+
 /// One check's policy, loaded once and applied to each of its instances: the
 /// fleet catalog entry and every scoped transform covering the filing's
 /// target, instance-keyed ones included.

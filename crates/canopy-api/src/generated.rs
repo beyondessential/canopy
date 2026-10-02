@@ -7,7 +7,7 @@ pub const OPENAPI_VERSION: &str = "1.0.3";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "eb5c2ec24ac2c5c371f9ad8a7c00e23d9cc5ec2017f9419422a4eeb905d77d04";
+pub const OPENAPI_BLAKE3: &str = "a74cb4dc49fdf06236a36aa7da57ff11e16419e48476dc0035a6e9202fa6f047";
 
 /// Error types.
 pub mod error {
@@ -1255,6 +1255,7 @@ describe a single-application machine, which is every machine today;
 on a machine hosting several they are left at their defaults and this
 list is the answer.*/
     #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+    #[builder(default)]
     pub applications: ::std::vec::Vec<ApplicationEntitlements>,
     ///The certificates Canopy holds for this server.
     pub certificates: ::std::vec::Vec<HeldCertificate>,
@@ -1272,13 +1273,16 @@ behalf. While true, requests are refused and an agent should wait.*/
     ///The names this server has registered addresses for.
     pub registered_names: ::std::vec::Vec<::std::string::String>,
 }
-///One health-check result within a status push.
+/**One health check within a status push: its name, its own detail, and either
+a single result or a set of instances.
+
+Exactly one of `result`, `healthy` and `instances` must be present.*/
 ///
 /// <details><summary>JSON schema</summary>
 ///
 /// ```json
 ///{
-///  "description": "One health-check result within a status push.",
+///  "description": "One health check within a status push: its name, its own detail, and either\na single result or a set of instances.\n\nExactly one of `result`, `healthy` and `instances` must be present.",
 ///  "type": "object",
 ///  "required": [
 ///    "check"
@@ -1288,12 +1292,29 @@ behalf. While true, requests are refused and an agent should wait.*/
 ///      "description": "Name of the check. Must be a non-empty string, and should stay stable\nacross pushes: results for the same name are correlated over time, so\nsuccessive failures and the eventual recovery land on the same issue.",
 ///      "type": "string"
 ///    },
+///    "detail": {
+///      "description": "The check's own fields (shown in the status UI as a key/value block,\nand read by operator-defined policy rules as `check.<field>`). For a\ncheck with `instances`, the fields its instances share; a rule reads an\ninstance's own field of the same name over it.\n\nMust be an object. A check with a single result may instead carry its\nfields flat beside `check` and `result` (see `extra`), but not both\nways at once; a check with `instances` carries its fields here only.",
+///      "type": "object"
+///    },
 ///    "healthy": {
-///      "description": "Legacy pass/fail form: `true` means `passed`, `false` means `failed`.\nMutually exclusive with `result`.",
+///      "description": "Legacy pass/fail form: `true` means `passed`, `false` means `failed`.\nMutually exclusive with `result` and `instances`.",
 ///      "type": [
 ///        "boolean",
 ///        "null"
 ///      ]
+///    },
+///    "instances": {
+///      "description": "The check's instances, in place of a `result`: one entry per instance\nof the check's condition (one per device, per resource, per mount),\nkeyed by an instance key the reporter chooses. A key must not be empty,\nmust be unique within the check, and must identify the same instance\nacross this reporter's pushes.\n\nThe set is the check's complete one: an instance left out of a push\nhas recovered, so passing instances are sent too, and an empty object\nrecovers every instance the check held. Each instance is graded\nthrough the check's policy on its own, and the check takes the most\nurgent result among the instances that were not skipped. Canopy writes\nthe check's message from its graded instances, naming the degraded ones\nby label.\n\nA check that could not run reports `result: broken` without instances:\nbrokenness belongs to the whole check, never to one instance.",
+///      "type": [
+///        "object",
+///        "null"
+///      ],
+///      "additionalProperties": {
+///        "$ref": "#/components/schemas/HealthCheckInstance"
+///      },
+///      "propertyNames": {
+///        "type": "string"
+///      }
 ///    },
 ///    "result": {
 ///      "oneOf": [
@@ -1301,7 +1322,7 @@ behalf. While true, requests are refused and an agent should wait.*/
 ///          "type": "null"
 ///        },
 ///        {
-///          "description": "Outcome of the check: `passed`, `warning`, `failed`, `broken`, or\n`skipped`. Exactly one of `result` / `healthy` must be present per\nentry. `warning` and `failed` open the check's issue as graded by\nits policy; `broken` (the check itself errored, not the system under\ntest) neither confirms nor clears a known failure — the issue stays\nopen, retaining its contribution; `skipped` (a precondition was\nnot met) and `passed` open nothing and close prior issues.",
+///          "description": "Outcome of the check: `passed`, `warning`, `failed`, `broken`, or\n`skipped`. Exactly one of `result` / `healthy` / `instances` must be\npresent per entry. `warning` and `failed` open the check's issue as\ngraded by its policy; `broken` (the check itself errored, not the\nsystem under test) neither confirms nor clears a known failure — the\nissue stays open, retaining its contribution; `skipped` (a precondition\nwas not met) and `passed` open nothing and close prior issues.",
 ///          "$ref": "#/components/schemas/CheckResult"
 ///        }
 ///      ]
@@ -1319,10 +1340,41 @@ pub struct HealthCheck {
 across pushes: results for the same name are correlated over time, so
 successive failures and the eventual recovery land on the same issue.*/
     pub check: ::std::string::String,
+    /**The check's own fields (shown in the status UI as a key/value block,
+and read by operator-defined policy rules as `check.<field>`). For a
+check with `instances`, the fields its instances share; a rule reads an
+instance's own field of the same name over it.
+
+Must be an object. A check with a single result may instead carry its
+fields flat beside `check` and `result` (see `extra`), but not both
+ways at once; a check with `instances` carries its fields here only.*/
+    #[serde(default, skip_serializing_if = "::serde_json::Map::is_empty")]
+    #[builder(default)]
+    pub detail: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
     /**Legacy pass/fail form: `true` means `passed`, `false` means `failed`.
-Mutually exclusive with `result`.*/
+Mutually exclusive with `result` and `instances`.*/
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub healthy: ::std::option::Option<bool>,
+    /**The check's instances, in place of a `result`: one entry per instance
+of the check's condition (one per device, per resource, per mount),
+keyed by an instance key the reporter chooses. A key must not be empty,
+must be unique within the check, and must identify the same instance
+across this reporter's pushes.
+
+The set is the check's complete one: an instance left out of a push
+has recovered, so passing instances are sent too, and an empty object
+recovers every instance the check held. Each instance is graded
+through the check's policy on its own, and the check takes the most
+urgent result among the instances that were not skipped. Canopy writes
+the check's message from its graded instances, naming the degraded ones
+by label.
+
+A check that could not run reports `result: broken` without instances:
+brokenness belongs to the whole check, never to one instance.*/
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub instances: ::std::option::Option<
+        ::std::collections::HashMap<::std::string::String, HealthCheckInstance>,
+    >,
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub result: ::std::option::Option<CheckResult>,
     /// Any further keys the schema accepts alongside those above,
@@ -1330,6 +1382,56 @@ Mutually exclusive with `result`.*/
     #[serde(flatten)]
     #[builder(default)]
     pub extra: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
+}
+///One instance of a health check.
+///
+/// <details><summary>JSON schema</summary>
+///
+/// ```json
+///{
+///  "description": "One instance of a health check.",
+///  "type": "object",
+///  "required": [
+///    "result"
+///  ],
+///  "properties": {
+///    "detail": {
+///      "description": "This instance's own fields. Must be an object. A rule reads them as\n`check.<field>`, over the check's shared `detail`.",
+///      "type": "object"
+///    },
+///    "label": {
+///      "description": "How the instance is named to an operator, in the check's message and\nwherever it is listed. Without one, the instance is named by its key.",
+///      "type": [
+///        "string",
+///        "null"
+///      ]
+///    },
+///    "result": {
+///      "description": "What this instance observed: `passed`, `warning`, `failed`, or\n`skipped`. Required. `broken` is refused, being the whole check's\nresult (report it as the check's own `result`, without instances), and\nthe legacy `healthy` boolean is not accepted on an instance.",
+///      "$ref": "#/components/schemas/CheckResult"
+///    }
+///  }
+///}
+/// ```
+/// </details>
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[derive(::bon::Builder)]
+#[non_exhaustive]
+pub struct HealthCheckInstance {
+    /**This instance's own fields. Must be an object. A rule reads them as
+`check.<field>`, over the check's shared `detail`.*/
+    #[serde(default, skip_serializing_if = "::serde_json::Map::is_empty")]
+    #[builder(default)]
+    pub detail: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
+    /**How the instance is named to an operator, in the check's message and
+wherever it is listed. Without one, the instance is named by its key.*/
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub label: ::std::option::Option<::std::string::String>,
+    /**What this instance observed: `passed`, `warning`, `failed`, or
+`skipped`. Required. `broken` is refused, being the whole check's
+result (report it as the check's own `result`, without instances), and
+the legacy `healthy` boolean is not accepted on an instance.*/
+    pub result: CheckResult,
 }
 /**A certificate Canopy holds for the asking server, as the server needs to see
 it: enough to decide whether to renew, and nothing about anyone else.*/
@@ -1475,6 +1577,7 @@ Tamanu reporting schema and registers it for the group). Unrecognised
 values are stored but have no effect, so a consumer may advertise ahead
 of Canopy support.*/
     #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+    #[builder(default)]
     pub semantics: ::std::vec::Vec<::std::string::String>,
 }
 ///The calling identity, the box it is enrolled as, and what runs on that box.
@@ -2025,6 +2128,7 @@ pub struct ProgressArgs {
     /**Any further detail the backup engine emits. Canopy makes no commitment
 about its shape: it is stored and shown verbatim, never interpreted.*/
     #[serde(default, skip_serializing_if = "::serde_json::Map::is_empty")]
+    #[builder(default)]
     pub extra: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
     ///Files finished so far.
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
@@ -2497,6 +2601,7 @@ run: if progress reports already carried it, that value stands.*/
 pub struct ReportingSchemaArgs {
     ///The artifacts the build registered, of which the schema is one.
     #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+    #[builder(default)]
     pub artifacts: ::std::vec::Vec<::uuid::Uuid>,
     ///Whether a schema came out of the build.
     pub built: bool,
@@ -2946,7 +3051,7 @@ status data.*/
 ///      }
 ///    },
 ///    "health": {
-///      "description": "Per-check breakdown. A push without a `health` array is the legacy\nTamanu direct-report format: it is treated as the `tamanu` source\nreporting a single always-passing `tasks` heartbeat check. May be\nempty (`[]`) for a source that genuinely runs no checks — which\nrecovers every check it previously reported. Each entry must\ninclude a non-empty `check` name and exactly one of `result` /\n`healthy`; any additional fields per check (latency, free disk %,\ncertificate expiry, etc.) are passed through verbatim and shown in the\nstatus UI.\n\nEvery check name seen — whatever its result — is added to the\noperator-facing check catalog, where the policy grading its results\ncan be reviewed and adjusted. A check whose effective result is\nfailed or warning opens (or keeps open) its issue; a broken check\nkeeps the same issue open, retaining a known failure's contribution\nwhile warning the check itself is broken; effective passed and\nskipped results open nothing and close prior issues.",
+///      "description": "Per-check breakdown. A push without a `health` array is the legacy\nTamanu direct-report format: it is treated as the `tamanu` source\nreporting a single always-passing `tasks` heartbeat check. May be\nempty (`[]`) for a source that genuinely runs no checks — which\nrecovers every check it previously reported. Each entry must\ninclude a non-empty `check` name and exactly one of `result` /\n`healthy` / `instances`; a check's own fields (latency, free disk %,\ncertificate expiry, etc.) go in its `detail`, or flat beside a single\nresult, and are recorded verbatim and shown in the status UI.\n\nEvery check name seen — whatever its result — is added to the\noperator-facing check catalog, where the policy grading its results\ncan be reviewed and adjusted. A check whose effective result is\nfailed or warning opens (or keeps open) its issue; a broken check\nkeeps the same issue open, retaining a known failure's contribution\nwhile warning the check itself is broken; effective passed and\nskipped results open nothing and close prior issues.",
 ///      "type": "array",
 ///      "items": {
 ///        "$ref": "#/components/schemas/HealthCheck"
@@ -3007,9 +3112,9 @@ reporting a single always-passing `tasks` heartbeat check. May be
 empty (`[]`) for a source that genuinely runs no checks — which
 recovers every check it previously reported. Each entry must
 include a non-empty `check` name and exactly one of `result` /
-`healthy`; any additional fields per check (latency, free disk %,
-certificate expiry, etc.) are passed through verbatim and shown in the
-status UI.
+`healthy` / `instances`; a check's own fields (latency, free disk %,
+certificate expiry, etc.) go in its `detail`, or flat beside a single
+result, and are recorded verbatim and shown in the status UI.
 
 Every check name seen — whatever its result — is added to the
 operator-facing check catalog, where the policy grading its results
