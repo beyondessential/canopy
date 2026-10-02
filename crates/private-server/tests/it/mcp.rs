@@ -521,6 +521,65 @@ async fn issues_filter_and_detail() {
 	.await
 }
 
+/// An issue whose check has instances reads with them: its degraded instances
+/// on the issue list, and every instance with its fields beside the shared
+/// detail on the issue itself. A plain check's issue carries neither.
+// spec: CHK#checks-with-instances
+#[tokio::test(flavor = "multi_thread")]
+async fn issues_carry_their_instances() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		seed(&mut conn).await;
+		let instanced = "44444444-4444-4444-4444-444444444444";
+		let plain = "55555555-5555-5555-5555-555555555555";
+		conn.batch_execute(&format!(
+			"INSERT INTO issues (id, application_id, source, ref, check_name, observed_result, effective_result, \
+			 message, active, first_seen, last_seen, degraded_since, last_degraded_at, detail, instances, grading_context) VALUES \
+			('{instanced}', '{SRV_GROUPED}', 'alertd', 'health/sync_facility_stale', 'sync_facility_stale', \
+			 'failed', 'failed', 'stale', true, NOW(), NOW(), NOW(), NOW(), '{{\"fail_minutes\": 30}}'::jsonb, \
+			 '{{\"north\": {{\"label\": \"Northgate\", \"observed\": \"failed\", \"effective\": \"failed\", \"detail\": {{\"minutes\": 2875}}}}, \
+			    \"east\": {{\"observed\": \"passed\", \"effective\": \"passed\"}}}}'::jsonb, '{{}}'::jsonb), \
+			('{plain}', '{SRV_GROUPED}', 'alertd', 'health/postgres', 'postgres', \
+			 'failed', 'failed', 'down', true, NOW(), NOW(), NOW(), NOW(), NULL, NULL, NULL);"
+		))
+		.await
+		.expect("seed issues");
+
+		let list = call_tool!(private, "find_issues", serde_json::json!({}));
+		let listed = |id: &str| {
+			list["issues"]
+				.as_array()
+				.unwrap()
+				.iter()
+				.find(|i| i["id"] == id)
+				.unwrap_or_else(|| panic!("{id} not listed"))
+				.clone()
+		};
+		assert_eq!(
+			listed(instanced)["degraded_instances"],
+			serde_json::json!([{ "key": "north", "label": "Northgate", "effective_result": "failed" }]),
+		);
+		assert!(listed(plain).get("degraded_instances").is_none());
+
+		let detail = call_tool!(
+			private,
+			"get_issue",
+			serde_json::json!({ "issue_id": instanced })
+		);
+		assert_eq!(detail["detail"], serde_json::json!({ "fail_minutes": 30 }));
+		let instances = detail["instances"].as_array().expect("every instance");
+		assert_eq!(instances.len(), 2);
+		let north = instances.iter().find(|i| i["key"] == "north").unwrap();
+		assert_eq!(north["label"], "Northgate");
+		assert_eq!(north["observed_result"], "failed");
+		assert_eq!(north["effective_result"], "failed");
+		assert_eq!(north["detail"], serde_json::json!({ "minutes": 2875 }));
+
+		let detail = call_tool!(private, "get_issue", serde_json::json!({ "issue_id": plain }));
+		assert!(detail.get("instances").is_none());
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn backup_problems_scan_runs() {
 	commons_tests::server::run(async |mut conn, _public, private| {

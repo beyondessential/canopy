@@ -13,6 +13,7 @@ use commons_types::source::{IngestMode, ReachabilityMode};
 use commons_types::status::CheckResult;
 use database::applications::Application;
 use database::check_policies::{CheckPolicy, IfLadder};
+use database::issues::ReportedCheck;
 use database::source_policies::SourcePolicy;
 use database::statuses::Status;
 use jiff::Timestamp;
@@ -626,9 +627,10 @@ pub struct HealthcheckSample {
 	/// contained this check, available to conditional rules under the
 	/// `status.<field>` namespace.
 	pub status_extra: serde_json::Map<String, JsonValue>,
-	/// The sampled check's own reported fields (excluding its name and
-	/// pass/fail flag), available to conditional rules under the
-	/// `check.<field>` namespace.
+	/// The sampled check's own reported fields and its `result`, available to
+	/// conditional rules under the `check.<field>` namespace. A check with
+	/// instances is shown as a rule reads its most urgent instance: that
+	/// instance's fields merged over the check's shared ones, and its result.
 	pub check_extra: serde_json::Map<String, JsonValue>,
 	/// The reporting server's tags, merged with its group's tags,
 	/// available to conditional rules under the `tag.<key>` namespace.
@@ -711,34 +713,16 @@ pub async fn sample(
 	// ingestion path strips reserved keys.
 	let status_extra = status.extra.as_object().cloned().unwrap_or_default();
 
-	// Pull the check entry out of the health array (any entry matching
-	// by name; we don't require a failing result here so we still
-	// surface the check's typical shape even on a passing push). Strip
-	// the reserved fields and inject the normalised `result` so the UI
-	// sees exactly what the ingestion path passes to the policy —
-	// including a `check.result` value on legacy (`healthy: bool`)
-	// pushes.
-	let check_extra = status
-		.health
-		.as_array()
-		.and_then(|arr| {
-			arr.iter().find_map(|e| {
-				let obj = e.as_object()?;
-				let name = obj.get("check")?.as_str()?;
-				if name == args.check_name {
-					let result = commons_types::status::CheckResult::from_entry(obj);
-					let mut m = obj.clone();
-					m.remove("check");
-					m.remove("healthy");
-					if let Some(result) = result {
-						m.insert("result".into(), JsonValue::String(result.to_string()));
-					}
-					Some(m)
-				} else {
-					None
-				}
-			})
-		})
+	// The check as ingestion reads it (whatever its result: a passing push
+	// still shows the check's typical shape), presented as a rule reads it:
+	// for a check with instances, its most urgent instance's fields merged over
+	// the shared ones, with that instance's result as `result`. The result is
+	// the normalised one, so a legacy (`healthy: bool`) push shows a
+	// `check.result` too.
+	// spec: CHK#checks-with-instances
+	let check_extra = ReportedCheck::all_in(&status.health)
+		.get(&args.check_name)
+		.map(ReportedCheck::sample_fields)
 		.unwrap_or_default();
 
 	let tag_map = match (&server, &machine) {

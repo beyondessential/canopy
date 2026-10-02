@@ -1728,38 +1728,23 @@ impl Issue {
 	}
 }
 
-/// Grade a check's stored states again from the instances they hold, after an
-/// instance silence covering them was set or lifted, and settle their incident
-/// membership on the result.
+/// The check states holding instances that a silence of `(source, ref)` at
+/// `scope` covers.
 ///
-/// An instance silence can change what the whole check comes to: silencing
-/// the one failing instance leaves the check graded on the rest, so its
-/// effective result moves without any new observation. Re-checking membership
-/// alone, as a whole-check silence needs, would leave the state graded as it
-/// was until the next filing. So each state covered by `scope` is re-graded
-/// from its instances as last observed (their results and fields) and the
-/// inputs its last filing gave their rules ([`GradingInputs`]: the report's
-/// fields and the target's tags), through the policy as it now stands, so the
-/// silence is the only thing that changes. It is written back without counting
-/// as an observation: its stability record and when it was last reported are
-/// untouched. A state brought back into trouble presents the title its last
-/// filing gave it.
-///
-/// A state holding no instances is a check without them, which an instance
-/// silence never reaches, and is left alone.
-///
-/// The message is Canopy's generic one for an instanced check, from the
-/// re-graded instances ([`GradedCheck::message`]). That is what a reported
-/// instanced check is filed with; Canopy's own instanced checks are filed with
-/// wording of their own, which their next sweep restores.
+/// A target's silence covers that target's state. A group silence covers every
+/// target in the group filing the check it names: one application type's
+/// applications for an application check, the group's machines for a machine
+/// check, and for a curated source's check every target in the group and the
+/// group itself. A state holding no instances is a check without them, which an
+/// instance silence never reaches, and is left out.
 // spec: CHK#silencing-one-instance
-pub async fn regrade_instanced_states(
+pub async fn instanced_states_covered_by(
 	conn: &mut AsyncPgConnection,
 	scope: Scope,
 	source: &str,
 	namespace: &Namespace,
 	r#ref: &str,
-) -> Result<()> {
+) -> Result<Vec<Issue>> {
 	use crate::schema::{applications, issues, machines};
 
 	let mut query = issues::table
@@ -1772,10 +1757,6 @@ pub async fn regrade_instanced_states(
 		Scope::Application(aid) => query.filter(issues::application_id.eq(aid)),
 		Scope::Machine(mid) => query.filter(issues::machine_id.eq(mid)),
 		Scope::Cluster(cid) => query.filter(issues::kubernetes_cluster_id.eq(cid)),
-		// A group silence covers every target in the group filing the check it
-		// names: one application type's applications for an application check,
-		// the group's machines for a machine check, and for a curated source's
-		// check every target in the group and the group itself.
 		Scope::Group(gid) => {
 			let applications_of = |ty: Option<String>| {
 				let mut members = applications::table
@@ -1812,9 +1793,46 @@ pub async fn regrade_instanced_states(
 			}
 		}
 		// No instance silence is offered above the group.
-		Scope::Global => return Ok(()),
+		Scope::Global => return Ok(Vec::new()),
 	};
-	let states: Vec<Issue> = query.load(conn).await?;
+	Ok(query.load(conn).await?)
+}
+
+/// Grade a check's stored states again from the instances they hold, after an
+/// instance silence covering them was set or lifted, and settle their incident
+/// membership on the result.
+///
+/// An instance silence can change what the whole check comes to: silencing
+/// the one failing instance leaves the check graded on the rest, so its
+/// effective result moves without any new observation. Re-checking membership
+/// alone, as a whole-check silence needs, would leave the state graded as it
+/// was until the next filing. So each state covered by `scope` is re-graded
+/// from its instances as last observed (their results and fields) and the
+/// inputs its last filing gave their rules ([`GradingInputs`]: the report's
+/// fields and the target's tags), through the policy as it now stands, so the
+/// silence is the only thing that changes. It is written back without counting
+/// as an observation: its stability record and when it was last reported are
+/// untouched. A state brought back into trouble presents the title its last
+/// filing gave it.
+///
+/// A state holding no instances is a check without them, which an instance
+/// silence never reaches, and is left alone.
+///
+/// The message is Canopy's generic one for an instanced check, from the
+/// re-graded instances ([`GradedCheck::message`]). That is what a reported
+/// instanced check is filed with; Canopy's own instanced checks are filed with
+/// wording of their own, which their next sweep restores.
+// spec: CHK#silencing-one-instance
+pub async fn regrade_instanced_states(
+	conn: &mut AsyncPgConnection,
+	scope: Scope,
+	source: &str,
+	namespace: &Namespace,
+	r#ref: &str,
+) -> Result<()> {
+	use crate::schema::issues;
+
+	let states = instanced_states_covered_by(conn, scope, source, namespace, r#ref).await?;
 
 	for state in states {
 		let (Some(held), Some(inputs)) = (state.stored_instances(), state.grading_inputs()) else {
@@ -2471,6 +2489,7 @@ type ConsolidatedRow = (
 	Option<String>,
 	Option<String>,
 	Option<serde_json::Value>,
+	Option<serde_json::Value>,
 );
 
 /// A server's current checks across every source, graded, for presentation.
@@ -2644,6 +2663,7 @@ async fn checks_at_scope(
 			issues::observed_result,
 			issues::effective_result,
 			issues::detail,
+			issues::instances,
 		))
 		.filter(issues::application_id.is_not_distinct_from(target_application))
 		.filter(issues::machine_id.is_not_distinct_from(target_machine))
@@ -2662,80 +2682,137 @@ async fn checks_at_scope(
 	};
 
 	let group_ids: Vec<Uuid> = group_id.into_iter().collect();
-	let silence_rows: Vec<(Option<String>, Option<String>, String, String)> =
-		scoped_check_policies::table
-			.select((
-				scoped_check_policies::subject,
-				scoped_check_policies::application_type,
-				scoped_check_policies::source,
-				scoped_check_policies::check_name,
-			))
-			.filter(scoped_check_policies::ceiling.eq("skipped"))
-			// An instance silence quiets one instance, never the whole check.
-			.filter(scoped_check_policies::instance_key.is_null())
-			.filter(
-				scoped_check_policies::application_id
-					.is_not_distinct_from(target_application)
-					.and(scoped_check_policies::machine_id.is_not_distinct_from(target_machine))
-					.and(scoped_check_policies::server_group_id.is_null())
-					.and(
-						scoped_check_policies::kubernetes_cluster_id
-							.is_not_distinct_from(target_cluster),
-					)
-					.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
-			)
-			.load(conn)
-			.await?;
+	#[allow(clippy::type_complexity)]
+	let silence_rows: Vec<(
+		Option<String>,
+		Option<String>,
+		String,
+		String,
+		Option<String>,
+		Option<Uuid>,
+	)> = scoped_check_policies::table
+		.select((
+			scoped_check_policies::subject,
+			scoped_check_policies::application_type,
+			scoped_check_policies::source,
+			scoped_check_policies::check_name,
+			scoped_check_policies::instance_key,
+			scoped_check_policies::server_group_id,
+		))
+		.filter(scoped_check_policies::ceiling.eq("skipped"))
+		.filter(
+			scoped_check_policies::application_id
+				.is_not_distinct_from(target_application)
+				.and(scoped_check_policies::machine_id.is_not_distinct_from(target_machine))
+				.and(scoped_check_policies::server_group_id.is_null())
+				.and(
+					scoped_check_policies::kubernetes_cluster_id
+						.is_not_distinct_from(target_cluster),
+				)
+				.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
+		)
+		.load(conn)
+		.await?;
 	// This is one target, so a matching check at either its own scope or its
 	// group's means silenced here. The namespace has to match too: a group
 	// spans several application types, so a silence on one type's `version` is
 	// not a silence on another type's.
-	let silenced: HashSet<(Namespace, String, String)> = silence_rows
-		.into_iter()
-		.filter_map(|(subject, ty, source, check)| {
-			let ns = Namespace::from_columns(subject.as_deref(), ty.as_deref()).ok()?;
-			Some((ns, source, check))
-		})
-		.collect();
+	//
+	// An instance silence quiets one instance, never the whole check, so it is
+	// kept apart, by key and by whether it is the target's own or its group's.
+	// spec: CHK#silencing-one-instance
+	let mut silenced: HashSet<(Namespace, String, String)> = HashSet::new();
+	let mut instance_silences: std::collections::HashMap<
+		(Namespace, String, String, String),
+		(bool, bool),
+	> = std::collections::HashMap::new();
+	for (subject, ty, source, check, instance, group) in silence_rows {
+		let Ok(ns) = Namespace::from_columns(subject.as_deref(), ty.as_deref()) else {
+			continue;
+		};
+		match instance {
+			None => {
+				silenced.insert((ns, source, check));
+			}
+			Some(key) => {
+				let flags = instance_silences
+					.entry((ns, source, check, key))
+					.or_default();
+				if group.is_some() {
+					flags.1 = true;
+				} else {
+					flags.0 = true;
+				}
+			}
+		}
+	}
 
 	let mut checks: Vec<ConsolidatedCheck> = rows
 		.into_iter()
-		.filter_map(|(source, check_name, observed, effective, detail)| {
-			let check = check_name?;
-			if !include_reachability && is_reachability(&source, &check) {
-				return None;
-			}
-			let namespace = Namespace::of(&source, &check, application_type.as_ref())?;
-			if !crate::check_policies::CheckPolicy::live_in(cataloged, &source, &namespace, &check)
-			{
-				return None;
-			}
-			let stored: CheckResult = effective.as_deref().and_then(|e| e.parse().ok())?;
-			let is_silenced =
-				silenced.contains(&(namespace.clone(), source.clone(), check.clone()));
-			// A silence is a scoped ceiling of `skipped`: cap the effective
-			// result here so the live view matches both the health rollup
-			// (which excludes silenced checks) and the snapshot path (which
-			// re-grades through `apply_scoped`). The stored effective may
-			// still read failed/warning if the silence post-dates the last
-			// push — the observed result keeps what was reported.
-			let effective = if is_silenced {
-				CheckResult::Skipped
-			} else {
-				stored
-			};
-			Some(ConsolidatedCheck {
-				silenced: is_silenced,
-				observed: observed.as_deref().and_then(|o| o.parse().ok()),
-				qualified_name: namespace.qualified_name(&check),
-				namespace: (&namespace).into(),
-				source,
-				check,
-				effective,
-				detail: detail.unwrap_or_else(|| serde_json::json!({})),
-				subject,
-			})
-		})
+		.filter_map(
+			|(source, check_name, observed, effective, detail, instances)| {
+				let check = check_name?;
+				if !include_reachability && is_reachability(&source, &check) {
+					return None;
+				}
+				let namespace = Namespace::of(&source, &check, application_type.as_ref())?;
+				if !crate::check_policies::CheckPolicy::live_in(
+					cataloged, &source, &namespace, &check,
+				) {
+					return None;
+				}
+				let stored: CheckResult = effective.as_deref().and_then(|e| e.parse().ok())?;
+				let is_silenced =
+					silenced.contains(&(namespace.clone(), source.clone(), check.clone()));
+				// A silence is a scoped ceiling of `skipped`: cap the effective
+				// result here so the live view matches both the health rollup
+				// (which excludes silenced checks) and the snapshot path (which
+				// re-grades through `apply_scoped`). The stored effective may
+				// still read failed/warning if the silence post-dates the last
+				// push — the observed result keeps what was reported.
+				let effective = if is_silenced {
+					CheckResult::Skipped
+				} else {
+					stored
+				};
+				// The state's instances as their last grading left them: an
+				// instance silence re-grades the state when it is set or lifted,
+				// so the stored results already account for it.
+				let (instances, passing_instances) = instances
+					.and_then(|stored| {
+						serde_json::from_value::<StoredInstances>(stored)
+							.inspect_err(|err| tracing::warn!(?err, "unreadable stored instances"))
+							.ok()
+					})
+					.map(|stored| {
+						stored.presented(is_silenced, |key| {
+							instance_silences
+								.get(&(
+									namespace.clone(),
+									source.clone(),
+									check.clone(),
+									key.to_string(),
+								))
+								.copied()
+								.unwrap_or_default()
+						})
+					})
+					.unwrap_or_default();
+				Some(ConsolidatedCheck {
+					silenced: is_silenced,
+					observed: observed.as_deref().and_then(|o| o.parse().ok()),
+					qualified_name: namespace.qualified_name(&check),
+					namespace: (&namespace).into(),
+					source,
+					check,
+					effective,
+					detail: detail.unwrap_or_else(|| serde_json::json!({})),
+					subject,
+					instances,
+					passing_instances,
+				})
+			},
+		)
 		.collect();
 	// Reachability presents for every target, whether or not a reporter has
 	// ever gone quiet. The sweep only files this check while it's degraded
@@ -2779,6 +2856,8 @@ async fn checks_at_scope(
 			},
 			detail: serde_json::json!({}),
 			subject,
+			instances: Vec::new(),
+			passing_instances: 0,
 		});
 	}
 

@@ -26,8 +26,9 @@ use uuid::Uuid;
 use crate::applications::Application;
 use crate::check_policies::ScopedCheckPolicy;
 use crate::issues::{
-	Scope, reevaluate_open_issues_for_group_ref, reevaluate_open_issues_for_machine_ref,
-	reevaluate_open_issues_for_server_ref, regrade_instanced_states,
+	Scope, StoredInstance, instanced_states_covered_by, reevaluate_open_issues_for_group_ref,
+	reevaluate_open_issues_for_machine_ref, reevaluate_open_issues_for_server_ref,
+	regrade_instanced_states,
 };
 
 /// The ref prefix (with trailing separator) healthcheck issues use,
@@ -82,6 +83,68 @@ async fn type_of(db: &mut AsyncPgConnection, application_id: Uuid) -> Result<App
 	Ok(Application::get_by_id(db, application_id).await?.r#type)
 }
 
+/// Where an instance silence's key stands in the check's current state: the
+/// label the state gives the instance, and whether the check reports it at
+/// all. A whole-check silence has neither.
+#[derive(Debug, Default)]
+struct InstancePresence {
+	label: Option<String>,
+	reported: Option<bool>,
+}
+
+impl InstancePresence {
+	/// Read the instance a silence names off the states it covers: its target's
+	/// state, or for a group silence every state in the group filing the check.
+	/// A key no covered state holds is not reported, which is what marks a
+	/// silence that has outlived its instance.
+	// spec: CHK#silencing-one-instance
+	async fn of(db: &mut AsyncPgConnection, policy: &ScopedCheckPolicy) -> Result<Self> {
+		let Some(key) = policy.instance_key.as_deref() else {
+			return Ok(Self::default());
+		};
+		// A row whose namespace does not read back names no check a state is
+		// filed under, so nothing reports its key.
+		let Ok(namespace) = policy.namespace() else {
+			return Ok(Self {
+				label: None,
+				reported: Some(false),
+			});
+		};
+		let scope = Scope::from_columns(
+			policy.application_id,
+			policy.machine_id,
+			policy.server_group_id,
+			policy.kubernetes_cluster_id,
+		);
+		let r#ref = check_to_ref(&policy.source, &policy.check_name);
+		let held: Vec<StoredInstance> =
+			instanced_states_covered_by(db, scope, &policy.source, &namespace, &r#ref)
+				.await?
+				.iter()
+				.filter_map(|state| state.stored_instances()?.0.remove(key))
+				.collect();
+		Ok(Self {
+			label: held.iter().find_map(|i| i.label.clone()),
+			reported: Some(!held.is_empty()),
+		})
+	}
+}
+
+/// Present each silence with where its instance stands, dropping any row
+/// `from_policy` does not take for its scope.
+async fn present<T>(
+	db: &mut AsyncPgConnection,
+	policies: Vec<ScopedCheckPolicy>,
+	from_policy: fn(ScopedCheckPolicy, InstancePresence) -> Option<T>,
+) -> Result<Vec<T>> {
+	let mut presented = Vec::with_capacity(policies.len());
+	for policy in policies {
+		let presence = InstancePresence::of(db, &policy).await?;
+		presented.extend(from_policy(policy, presence));
+	}
+	Ok(presented)
+}
+
 /// A silenced issue reference scoped to a single server: issues matching
 /// this `(source, ref)` on this server are still recorded, but are excluded
 /// from incidents and notifications.
@@ -98,6 +161,15 @@ pub struct ServerSilencedRef {
 	/// silences the whole check.
 	// spec: CHK#silencing-one-instance
 	pub instance: Option<String>,
+	/// The silenced instance's label, as the check's current state names it.
+	/// `None` for a whole-check silence, an instance without a label, or a key
+	/// the check does not currently report.
+	pub instance_label: Option<String>,
+	/// Whether the check currently reports the silenced instance's key. `None`
+	/// for a whole-check silence. A silence that has outlived its instance is
+	/// presented as such, so an operator can clear it.
+	// spec: CHK#silencing-one-instance
+	pub instance_reported: Option<bool>,
 	/// When this silence was created.
 	pub created_at: Timestamp,
 	/// The operator who created this silence. `None` if not recorded.
@@ -125,6 +197,15 @@ pub struct ServerGroupSilencedRef {
 	/// silences the whole check.
 	// spec: CHK#silencing-one-instance
 	pub instance: Option<String>,
+	/// The silenced instance's label, as the check's current state names it.
+	/// `None` for a whole-check silence, an instance without a label, or a key
+	/// the check does not currently report.
+	pub instance_label: Option<String>,
+	/// Whether the check currently reports the silenced instance's key. `None`
+	/// for a whole-check silence. A silence that has outlived its instance is
+	/// presented as such, so an operator can clear it.
+	// spec: CHK#silencing-one-instance
+	pub instance_reported: Option<bool>,
 	/// When this silence was created.
 	pub created_at: Timestamp,
 	/// The operator who created this silence. `None` if not recorded.
@@ -152,6 +233,15 @@ pub struct MachineSilencedRef {
 	/// silences the whole check.
 	// spec: CHK#silencing-one-instance
 	pub instance: Option<String>,
+	/// The silenced instance's label, as the check's current state names it.
+	/// `None` for a whole-check silence, an instance without a label, or a key
+	/// the check does not currently report.
+	pub instance_label: Option<String>,
+	/// Whether the check currently reports the silenced instance's key. `None`
+	/// for a whole-check silence. A silence that has outlived its instance is
+	/// presented as such, so an operator can clear it.
+	// spec: CHK#silencing-one-instance
+	pub instance_reported: Option<bool>,
 	/// When this silence was created.
 	pub created_at: Timestamp,
 	/// The operator who created this silence. `None` if not recorded.
@@ -178,6 +268,15 @@ pub struct ClusterSilencedRef {
 	/// silences the whole check.
 	// spec: CHK#silencing-one-instance
 	pub instance: Option<String>,
+	/// The silenced instance's label, as the check's current state names it.
+	/// `None` for a whole-check silence, an instance without a label, or a key
+	/// the check does not currently report.
+	pub instance_label: Option<String>,
+	/// Whether the check currently reports the silenced instance's key. `None`
+	/// for a whole-check silence. A silence that has outlived its instance is
+	/// presented as such, so an operator can clear it.
+	// spec: CHK#silencing-one-instance
+	pub instance_reported: Option<bool>,
 	/// When this silence was created.
 	pub created_at: Timestamp,
 	/// The operator who created this silence. `None` if not recorded.
@@ -298,12 +397,14 @@ pub async fn silenced_health_checks_for_server(
 }
 
 impl ServerSilencedRef {
-	fn from_policy(p: ScopedCheckPolicy) -> Option<Self> {
+	fn from_policy(p: ScopedCheckPolicy, presence: InstancePresence) -> Option<Self> {
 		Some(Self {
 			application_id: p.application_id?,
 			r#ref: check_to_ref(&p.source, &p.check_name),
 			source: p.source,
 			instance: p.instance_key,
+			instance_label: presence.label,
+			instance_reported: presence.reported,
 			created_at: p.created_at,
 			created_by: p.created_by,
 		})
@@ -333,7 +434,11 @@ impl ServerSilencedRef {
 				reevaluate_open_issues_for_server_ref(db, application_id, source, r#ref).await?
 			}
 		}
-		Ok(Self::from_policy(policy).expect("server-scoped silence has a application_id"))
+		let presence = InstancePresence::of(db, &policy).await?;
+		Ok(
+			Self::from_policy(policy, presence)
+				.expect("server-scoped silence has a application_id"),
+		)
 	}
 
 	/// Remove a server-scoped silence of the whole check or of one `instance`,
@@ -363,13 +468,9 @@ impl ServerSilencedRef {
 		db: &mut AsyncPgConnection,
 		application_id: Uuid,
 	) -> Result<Vec<Self>> {
-		Ok(
-			ScopedCheckPolicy::list_silences(db, Scope::Application(application_id))
-				.await?
-				.into_iter()
-				.filter_map(Self::from_policy)
-				.collect(),
-		)
+		let silences =
+			ScopedCheckPolicy::list_silences(db, Scope::Application(application_id)).await?;
+		present(db, silences, Self::from_policy).await
 	}
 
 	/// Every application-scoped silence across these applications.
@@ -396,18 +497,20 @@ impl ServerSilencedRef {
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
-		Ok(rows.into_iter().filter_map(Self::from_policy).collect())
+		present(db, rows, Self::from_policy).await
 	}
 }
 
 impl ServerGroupSilencedRef {
-	fn from_policy(p: ScopedCheckPolicy) -> Option<Self> {
+	fn from_policy(p: ScopedCheckPolicy, presence: InstancePresence) -> Option<Self> {
 		Some(Self {
 			server_group_id: p.server_group_id?,
 			namespace: (&p.namespace().ok()?).into(),
 			r#ref: check_to_ref(&p.source, &p.check_name),
 			source: p.source,
 			instance: p.instance_key,
+			instance_label: presence.label,
+			instance_reported: presence.reported,
 			created_at: p.created_at,
 			created_by: p.created_by,
 		})
@@ -443,7 +546,11 @@ impl ServerGroupSilencedRef {
 				reevaluate_open_issues_for_group_ref(db, server_group_id, source, r#ref).await?
 			}
 		}
-		Ok(Self::from_policy(policy).expect("group-scoped silence has a server_group_id"))
+		let presence = InstancePresence::of(db, &policy).await?;
+		Ok(
+			Self::from_policy(policy, presence)
+				.expect("group-scoped silence has a server_group_id"),
+		)
 	}
 
 	pub async fn remove(
@@ -471,23 +578,20 @@ impl ServerGroupSilencedRef {
 		db: &mut AsyncPgConnection,
 		server_group_id: Uuid,
 	) -> Result<Vec<Self>> {
-		Ok(
-			ScopedCheckPolicy::list_silences(db, Scope::Group(server_group_id))
-				.await?
-				.into_iter()
-				.filter_map(Self::from_policy)
-				.collect(),
-		)
+		let silences = ScopedCheckPolicy::list_silences(db, Scope::Group(server_group_id)).await?;
+		present(db, silences, Self::from_policy).await
 	}
 }
 
 impl MachineSilencedRef {
-	fn from_policy(p: ScopedCheckPolicy) -> Option<Self> {
+	fn from_policy(p: ScopedCheckPolicy, presence: InstancePresence) -> Option<Self> {
 		Some(Self {
 			machine_id: p.machine_id?,
 			r#ref: check_to_ref(&p.source, &p.check_name),
 			source: p.source,
 			instance: p.instance_key,
+			instance_label: presence.label,
+			instance_reported: presence.reported,
 			created_at: p.created_at,
 			created_by: p.created_by,
 		})
@@ -514,7 +618,8 @@ impl MachineSilencedRef {
 			Some(_) => regrade_instanced_states(db, scope, source, &namespace, r#ref).await?,
 			None => reevaluate_open_issues_for_machine_ref(db, machine_id, source, r#ref).await?,
 		}
-		Ok(Self::from_policy(policy).expect("machine-scoped silence has a machine_id"))
+		let presence = InstancePresence::of(db, &policy).await?;
+		Ok(Self::from_policy(policy, presence).expect("machine-scoped silence has a machine_id"))
 	}
 
 	/// Remove a machine-scoped silence of the whole check or of one
@@ -542,23 +647,20 @@ impl MachineSilencedRef {
 		db: &mut AsyncPgConnection,
 		machine_id: Uuid,
 	) -> Result<Vec<Self>> {
-		Ok(
-			ScopedCheckPolicy::list_silences(db, Scope::Machine(machine_id))
-				.await?
-				.into_iter()
-				.filter_map(Self::from_policy)
-				.collect(),
-		)
+		let silences = ScopedCheckPolicy::list_silences(db, Scope::Machine(machine_id)).await?;
+		present(db, silences, Self::from_policy).await
 	}
 }
 
 impl ClusterSilencedRef {
-	fn from_policy(p: ScopedCheckPolicy) -> Option<Self> {
+	fn from_policy(p: ScopedCheckPolicy, presence: InstancePresence) -> Option<Self> {
 		Some(Self {
 			kubernetes_cluster_id: p.kubernetes_cluster_id?,
 			r#ref: check_to_ref(&p.source, &p.check_name),
 			source: p.source,
 			instance: p.instance_key,
+			instance_label: presence.label,
+			instance_reported: presence.reported,
 			created_at: p.created_at,
 			created_by: p.created_by,
 		})
@@ -589,7 +691,8 @@ impl ClusterSilencedRef {
 		if instance.is_some() {
 			regrade_instanced_states(db, scope, source, &namespace, r#ref).await?;
 		}
-		Ok(Self::from_policy(policy).expect("cluster-scoped silence has a cluster id"))
+		let presence = InstancePresence::of(db, &policy).await?;
+		Ok(Self::from_policy(policy, presence).expect("cluster-scoped silence has a cluster id"))
 	}
 
 	/// Remove a cluster-scoped silence of the whole check or of one
@@ -615,12 +718,8 @@ impl ClusterSilencedRef {
 		db: &mut AsyncPgConnection,
 		kubernetes_cluster_id: Uuid,
 	) -> Result<Vec<Self>> {
-		Ok(
-			ScopedCheckPolicy::list_silences(db, Scope::Cluster(kubernetes_cluster_id))
-				.await?
-				.into_iter()
-				.filter_map(Self::from_policy)
-				.collect(),
-		)
+		let silences =
+			ScopedCheckPolicy::list_silences(db, Scope::Cluster(kubernetes_cluster_id)).await?;
+		present(db, silences, Self::from_policy).await
 	}
 }

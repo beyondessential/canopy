@@ -5983,6 +5983,18 @@ export interface components {
              */
             instance?: string | null;
             /**
+             * @description The silenced instance's label, as the check's current state names it.
+             *     `None` for a whole-check silence, an instance without a label, or a key
+             *     the check does not currently report.
+             */
+            instance_label?: string | null;
+            /**
+             * @description Whether the check currently reports the silenced instance's key. `None`
+             *     for a whole-check silence. A silence that has outlived its instance is
+             *     presented as such, so an operator can clear it.
+             */
+            instance_reported?: boolean | null;
+            /**
              * Format: uuid
              * @description The cluster this silence applies to.
              */
@@ -6069,7 +6081,9 @@ export interface components {
             check: string;
             /**
              * @description The detail the source attached to the check (its extra fields), as an
-             *     object. Empty object when the check carried none.
+             *     object. Empty object when the check carried none. For a check with
+             *     instances, the fields its instances share; each instance's own are on
+             *     the instance.
              */
             detail: Record<string, never>;
             /**
@@ -6077,6 +6091,12 @@ export interface components {
              *     the presentation colours by.
              */
             effective: string;
+            /**
+             * @description The check's degraded and silenced instances, most urgent first, each
+             *     graded on its own. Empty for a check without instances, and for one
+             *     none of whose instances is degraded or silenced.
+             */
+            instances?: components["schemas"]["ConsolidatedInstance"][];
             /**
              * @description Which catalog entry this check resolves to. Two application types
              *     reporting one name are two checks, so the name alone does not address
@@ -6088,6 +6108,11 @@ export interface components {
              *     carried no observed result.
              */
             observed?: string | null;
+            /**
+             * @description How many of the check's instances passed, counted rather than listed.
+             *     0 for a check without instances.
+             */
+            passing_instances?: number;
             /**
              * @description How the check reads to an operator: `<type>.<check>` where it is one
              *     application type's, the bare name otherwise.
@@ -6116,6 +6141,38 @@ export interface components {
             checks: components["schemas"]["ConsolidatedCheck"][];
             /** @description The rolled-up health over these checks, by the one classifier. */
             health_state: components["schemas"]["HealthState"];
+        };
+        /**
+         * @description One instance of a check, as a target's checks present it: one of a
+         *     central's devices, one of a machine's backup types.
+         */
+        ConsolidatedInstance: {
+            /**
+             * @description The instance's own fields, as an object; the ones it shares with the
+             *     check's other instances are the check's `detail`.
+             */
+            detail: Record<string, never>;
+            /** @description The instance's result after policy. */
+            effective: string;
+            /**
+             * @description Which instance this is, unique within the check on its target. An
+             *     instance silence names it.
+             */
+            key: string;
+            /**
+             * @description How the instance is named to an operator. Absent where the instance
+             *     carries none, in which case it is named by its key.
+             */
+            label?: string | null;
+            /** @description What the instance observed, before policy. */
+            observed: string;
+            /** @description Whether an instance silence at the target's group quiets this instance. */
+            silenced_on_group: boolean;
+            /**
+             * @description Whether an instance silence at the check's own target (its application,
+             *     machine or cluster) quiets this instance.
+             */
+            silenced_on_target: boolean;
         };
         /**
          * @description A new artifact to register against a version, at a location Canopy records.
@@ -7000,9 +7057,10 @@ export interface components {
          */
         HealthcheckSample: {
             /**
-             * @description The sampled check's own reported fields (excluding its name and
-             *     pass/fail flag), available to conditional rules under the
-             *     `check.<field>` namespace.
+             * @description The sampled check's own reported fields and its `result`, available to
+             *     conditional rules under the `check.<field>` namespace. A check with
+             *     instances is shown as a rule reads its most urgent instance: that
+             *     instance's fields merged over the check's shared ones, and its result.
              */
             check_extra: {
                 [key: string]: components["schemas"]["Value"];
@@ -7554,7 +7612,10 @@ export interface components {
             created_at: string;
             /** @description Short headline describing the issue, if one was given. */
             description?: string | null;
-            /** @description The check's own fields from the latest report, verbatim. */
+            /**
+             * @description The check's own fields from the latest report, verbatim. For a check
+             *     with instances, the fields its instances share.
+             */
             detail?: unknown;
             /**
              * Format: uuid
@@ -7587,6 +7648,11 @@ export interface components {
              *     for issues that never escalated into an incident.
              */
             incidents: components["schemas"]["IssueIncidentLink"][];
+            /**
+             * @description The check's degraded instances, most urgent first, for silencing one of
+             *     them from the issue. Empty for a check without instances.
+             */
+            instances: components["schemas"]["IssueInstanceData"][];
             /**
              * Format: date-time
              * @description When the most recent event for this issue was recorded.
@@ -7712,6 +7778,21 @@ export interface components {
              * @description When the incident was opened.
              */
             opened_at: string;
+        };
+        /** @description One degraded instance of the check behind an issue. */
+        IssueInstanceData: {
+            /** @description The instance's result after policy. */
+            effective: string;
+            /**
+             * @description Which instance this is, unique within the check on its target. An
+             *     instance silence names it.
+             */
+            key: string;
+            /**
+             * @description How the instance is named to an operator. Absent where the instance
+             *     carries none, in which case it is named by its key.
+             */
+            label?: string | null;
         };
         /** @description Filters for listing issues across all applications. */
         IssueListArgs: {
@@ -8410,6 +8491,18 @@ export interface components {
              *     silences the whole check.
              */
             instance?: string | null;
+            /**
+             * @description The silenced instance's label, as the check's current state names it.
+             *     `None` for a whole-check silence, an instance without a label, or a key
+             *     the check does not currently report.
+             */
+            instance_label?: string | null;
+            /**
+             * @description Whether the check currently reports the silenced instance's key. `None`
+             *     for a whole-check silence. A silence that has outlived its instance is
+             *     presented as such, so an operator can clear it.
+             */
+            instance_reported?: boolean | null;
             /**
              * Format: uuid
              * @description The machine this silence applies to.
@@ -10641,6 +10734,18 @@ export interface components {
              */
             instance?: string | null;
             /**
+             * @description The silenced instance's label, as the check's current state names it.
+             *     `None` for a whole-check silence, an instance without a label, or a key
+             *     the check does not currently report.
+             */
+            instance_label?: string | null;
+            /**
+             * @description Whether the check currently reports the silenced instance's key. `None`
+             *     for a whole-check silence. A silence that has outlived its instance is
+             *     presented as such, so an operator can clear it.
+             */
+            instance_reported?: boolean | null;
+            /**
              * @description Which catalog entry this silence quiets. A group covers several
              *     application types, so two of them reporting one check name are two
              *     silences here, and the ref alone does not tell them apart.
@@ -10922,6 +11027,18 @@ export interface components {
              *     silences the whole check.
              */
             instance?: string | null;
+            /**
+             * @description The silenced instance's label, as the check's current state names it.
+             *     `None` for a whole-check silence, an instance without a label, or a key
+             *     the check does not currently report.
+             */
+            instance_label?: string | null;
+            /**
+             * @description Whether the check currently reports the silenced instance's key. `None`
+             *     for a whole-check silence. A silence that has outlived its instance is
+             *     presented as such, so an operator can clear it.
+             */
+            instance_reported?: boolean | null;
             /** @description The issue reference this silence matches. */
             ref: string;
             /** @description The issue source this silence matches. */
@@ -11083,6 +11200,11 @@ export interface components {
          */
         SilenceClusterArgs: {
             /**
+             * @description One instance of the check to silence (or unsilence), by its key.
+             *     Omitted or `null` is the whole check. A key is never empty.
+             */
+            instance?: string | null;
+            /**
              * Format: uuid
              * @description The cluster to silence the issue on.
              */
@@ -11104,6 +11226,11 @@ export interface components {
              *     or a curated source's.
              */
             application_type?: string | null;
+            /**
+             * @description One instance of the check to silence (or unsilence), by its key.
+             *     Omitted or `null` is the whole check. A key is never empty.
+             */
+            instance?: string | null;
             /** @description The specific issue identifier within `source` to silence. */
             ref: string;
             /**
@@ -11123,6 +11250,11 @@ export interface components {
          */
         SilenceMachineArgs: {
             /**
+             * @description One instance of the check to silence (or unsilence), by its key.
+             *     Omitted or `null` is the whole check. A key is never empty.
+             */
+            instance?: string | null;
+            /**
              * Format: uuid
              * @description The machine to silence the issue on.
              */
@@ -11140,6 +11272,11 @@ export interface components {
          *     single server.
          */
         SilenceServerArgs: {
+            /**
+             * @description One instance of the check to silence (or unsilence), by its key.
+             *     Omitted or `null` is the whole check. A key is never empty.
+             */
+            instance?: string | null;
             /** @description The specific issue identifier within `source` to silence. */
             ref: string;
             /**

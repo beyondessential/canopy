@@ -56,6 +56,11 @@ pub struct SilenceMachineArgs {
 	/// The specific issue identifier within `source` to silence.
 	#[serde(rename = "ref")]
 	pub r#ref: String,
+	/// One instance of the check to silence (or unsilence), by its key.
+	/// Omitted or `null` is the whole check. A key is never empty.
+	// spec: CHK#silencing-one-instance
+	#[serde(default)]
+	pub instance: Option<String>,
 }
 
 /// Request body identifying a cluster to look up silences for.
@@ -76,6 +81,11 @@ pub struct SilenceClusterArgs {
 	/// The specific issue identifier within `source` to silence.
 	#[serde(rename = "ref")]
 	pub r#ref: String,
+	/// One instance of the check to silence (or unsilence), by its key.
+	/// Omitted or `null` is the whole check. A key is never empty.
+	// spec: CHK#silencing-one-instance
+	#[serde(default)]
+	pub instance: Option<String>,
 }
 
 /// Request body identifying a server group to look up silences for.
@@ -97,6 +107,11 @@ pub struct SilenceServerArgs {
 	/// The specific issue identifier within `source` to silence.
 	#[serde(rename = "ref")]
 	pub r#ref: String,
+	/// One instance of the check to silence (or unsilence), by its key.
+	/// Omitted or `null` is the whole check. A key is never empty.
+	// spec: CHK#silencing-one-instance
+	#[serde(default)]
+	pub instance: Option<String>,
 }
 
 /// Request body identifying an issue to silence (or unsilence) across a
@@ -118,6 +133,11 @@ pub struct SilenceGroupArgs {
 	#[serde(default)]
 	#[schema(value_type = Option<String>)]
 	pub application_type: Option<ApplicationType>,
+	/// One instance of the check to silence (or unsilence), by its key.
+	/// Omitted or `null` is the whole check. A key is never empty.
+	// spec: CHK#silencing-one-instance
+	#[serde(default)]
+	pub instance: Option<String>,
 }
 
 /// List server-scoped silences for a server.
@@ -232,7 +252,7 @@ pub async fn silence_server(
 		args.server_id,
 		&args.source,
 		&args.r#ref,
-		None,
+		args.instance.as_deref(),
 		Some(&admin.0.login),
 	)
 	.await?;
@@ -260,7 +280,14 @@ pub async fn unsilence_server(
 	Json(args): Json<SilenceServerArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	ServerSilencedRef::remove(&mut conn, args.server_id, &args.source, &args.r#ref, None).await?;
+	ServerSilencedRef::remove(
+		&mut conn,
+		args.server_id,
+		&args.source,
+		&args.r#ref,
+		args.instance.as_deref(),
+	)
+	.await?;
 	Ok(Json(()))
 }
 
@@ -296,7 +323,7 @@ pub async fn silence_group(
 		&args.source,
 		&args.r#ref,
 		args.application_type.as_ref(),
-		None,
+		args.instance.as_deref(),
 		Some(&admin.0.login),
 	)
 	.await?;
@@ -330,7 +357,7 @@ pub async fn unsilence_group(
 		&args.source,
 		&args.r#ref,
 		args.application_type.as_ref(),
-		None,
+		args.instance.as_deref(),
 	)
 	.await?;
 	Ok(Json(()))
@@ -389,7 +416,7 @@ pub async fn silence_machine(
 		args.machine_id,
 		&args.source,
 		&args.r#ref,
-		None,
+		args.instance.as_deref(),
 		Some(&admin.0.login),
 	)
 	.await?;
@@ -418,7 +445,14 @@ pub async fn unsilence_machine(
 	Json(args): Json<SilenceMachineArgs>,
 ) -> Result<axum::http::StatusCode> {
 	let mut conn = state.db.get().await?;
-	MachineSilencedRef::remove(&mut conn, args.machine_id, &args.source, &args.r#ref, None).await?;
+	MachineSilencedRef::remove(
+		&mut conn,
+		args.machine_id,
+		&args.source,
+		&args.r#ref,
+		args.instance.as_deref(),
+	)
+	.await?;
 	Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
@@ -473,7 +507,7 @@ pub async fn silence_cluster(
 		args.kubernetes_cluster_id,
 		&args.source,
 		&args.r#ref,
-		None,
+		args.instance.as_deref(),
 		Some(&admin.0.login),
 	)
 	.await?;
@@ -507,7 +541,7 @@ pub async fn unsilence_cluster(
 		args.kubernetes_cluster_id,
 		&args.source,
 		&args.r#ref,
-		None,
+		args.instance.as_deref(),
 	)
 	.await?;
 	Ok(axum::http::StatusCode::NO_CONTENT)

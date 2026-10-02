@@ -932,9 +932,10 @@ async fn consolidated_checks_at(
 	server: &Application,
 	at: Option<Timestamp>,
 ) -> commons_errors::Result<SnapshotState> {
-	use commons_types::status::{CheckResult, ConsolidatedCheck, ConsolidatedChecks, HealthState};
+	use commons_types::status::{ConsolidatedCheck, ConsolidatedChecks, HealthState};
 	use commons_types::subject::CheckSubject;
-	use database::check_policies::{CheckPolicy, EvaluationContext, ScopedCheckPolicy};
+	use database::check_policies::{CheckPolicy, ScopedCheckPolicy};
+	use database::issues::{CheckGrading, GradingContext, ReportedCheck, grade_instances};
 
 	let statuses = Status::latest_per_source_at(conn, server.id, at).await?;
 	// The box's own reports. A split push files the machine's checks at machine
@@ -1041,9 +1042,6 @@ async fn consolidated_checks_at(
 		.map(|s| (s, false))
 		.chain(machine_statuses.iter().map(|s| (s, true)))
 	{
-		let Some(arr) = status.health.as_array() else {
-			continue;
-		};
 		let application_silenced = database::silenced_refs::silenced_health_checks_for_server(
 			conn,
 			Some(server.id),
@@ -1066,12 +1064,11 @@ async fn consolidated_checks_at(
 			None => std::collections::BTreeSet::new(),
 		};
 		let empty = serde_json::Map::new();
-		let status_extra = status.extra.as_object().unwrap_or(&empty).clone();
-		for raw in arr {
-			let Some(obj) = raw.as_object() else { continue };
-			let Some(name) = obj.get("check").and_then(|v| v.as_str()) else {
-				continue;
-			};
+		let status_extra = status.extra.as_object().unwrap_or(&empty);
+		// Read as ingestion reads a push, so a check's nested `detail` and its
+		// instances are understood here as they were when it was filed.
+		// spec: STA#health-and-detail
+		for (name, reported) in ReportedCheck::all_in(&status.health) {
 			// What this reading asserts about. A row the box filed is the
 			// box's whatever it names; on a unified push the name decides,
 			// which is the same rule ingestion applies.
@@ -1079,70 +1076,95 @@ async fn consolidated_checks_at(
 			let subject = if from_machine_row {
 				CheckSubject::Machine
 			} else {
-				CheckSubject::of(name)
+				CheckSubject::of(&name)
 			};
 			// Which catalog entry this reading belongs to follows the
 			// reporting application's type, the same as it does on ingest: a
 			// machine-subject name lands in the box's entry whatever workload
 			// carried it up.
-			let namespace = Namespace::for_application(&status.source, name, &server.r#type);
-			if !cataloged.contains(&(status.source.clone(), namespace.clone(), name.to_string())) {
+			let namespace = Namespace::for_application(&status.source, &name, &server.r#type);
+			let key = (status.source.clone(), namespace.clone(), name.clone());
+			if !cataloged.contains(&key) {
 				continue;
 			}
-			let Some(observed) = CheckResult::from_entry(obj) else {
-				continue;
+			// Re-grade this entry through current policy, through the one
+			// grading path ingestion uses: each instance (a plain check being
+			// its own single instance) through the catalog entry and the scoped
+			// chain, instance silences included. A past moment has no prior
+			// state to hand it, so a broken check presents as broken, as a
+			// plain one always has here, with no instances held.
+			// spec: CHK#checks-with-instances
+			let scoped = if subject.is_machine() {
+				&machine_chains
+			} else {
+				&chains
 			};
-			// Re-grade this entry through current policy, mirroring ingestion:
-			// the normalised result is injected so rules see a uniform
-			// `check.result` even on legacy stored rows.
-			let mut check_extra = obj.clone();
-			check_extra.remove("check");
-			check_extra.remove("healthy");
-			check_extra.insert(
-				"result".into(),
-				serde_json::Value::String(observed.to_string()),
-			);
-			let ctx = EvaluationContext {
-				status_extra: &status_extra,
-				check_extra: &check_extra,
+			let chain = scoped.get(&key).cloned().unwrap_or_default();
+			let check_grading = CheckGrading {
+				fleet: grading.get(&key).cloned(),
+				chain,
+			};
+			let ctx = GradingContext {
+				source: &status.source,
+				check: &name,
+				status_extra,
 				tags: if subject.is_machine() {
 					&machine_tags
 				} else {
 					&tags
 				},
 			};
-			let key = (status.source.clone(), namespace.clone(), name.to_string());
-			let fleet = CheckPolicy::grade(grading.get(&key), &status.source, name, observed, &ctx);
-			let scoped = if subject.is_machine() {
-				&machine_chains
-			} else {
-				&chains
-			};
-			let graded = CheckPolicy::chain_scoped(
-				fleet,
-				scoped.get(&key).map_or(&[][..], Vec::as_slice),
+			let graded = grade_instances(
+				&check_grading,
 				&ctx,
+				Some(&reported.detail),
+				&reported.outcome,
+				None,
 			);
-			// The check's own detail fields, verbatim.
-			let mut detail = obj.clone();
-			detail.remove("check");
-			detail.remove("healthy");
-			detail.remove("result");
 			let silenced = if subject.is_machine() {
 				&machine_silenced
 			} else {
 				&application_silenced
 			};
+			let is_silenced = silenced.contains(&name);
+			// Which of the chain's instance silences quiet an instance, at the
+			// target's own scope or its group's.
+			// spec: CHK#silencing-one-instance
+			let instance_silenced = |instance: &str| {
+				check_grading
+					.chain
+					.iter()
+					.filter(|p| {
+						p.instance_key.as_deref() == Some(instance)
+							&& p.ceiling.as_deref() == Some("skipped")
+					})
+					.fold((false, false), |(own, group), p| {
+						if p.server_group_id.is_some() {
+							(own, true)
+						} else {
+							(true, group)
+						}
+					})
+			};
+			let (instances, passing_instances) = graded
+				.stored_instances()
+				.map(|stored| stored.presented(is_silenced, instance_silenced))
+				.unwrap_or_default();
 			checks.push(ConsolidatedCheck {
-				silenced: silenced.contains(name),
-				qualified_name: namespace.qualified_name(name),
+				silenced: is_silenced,
+				qualified_name: namespace.qualified_name(&name),
 				namespace: (&namespace).into(),
 				source: status.source.clone(),
-				check: name.to_string(),
-				observed: Some(observed),
+				check: name,
+				observed: Some(graded.observed),
 				effective: graded.effective,
-				detail: serde_json::Value::Object(detail),
+				detail: graded
+					.detail()
+					.filter(serde_json::Value::is_object)
+					.unwrap_or_else(|| serde_json::json!({})),
 				subject,
+				instances,
+				passing_instances,
 			});
 		}
 	}

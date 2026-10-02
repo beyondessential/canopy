@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use commons_errors::Result;
 use commons_types::namespace::Namespace;
-use commons_types::status::CheckResult;
+use commons_types::status::{CheckResult, ConsolidatedInstance};
 use diesel_async::AsyncPgConnection;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -175,6 +175,33 @@ impl ReportedCheck {
 			outcome,
 			detail,
 		})
+	}
+
+	/// The fields a rule reads as `check.<field>` for this check, as the
+	/// rule-authoring sample presents them.
+	///
+	/// A rule is evaluated per instance, so a check with instances is shown as
+	/// a rule reads one of them: its most urgent instance's fields merged over
+	/// the check's shared ones, the instance's winning, with that instance's
+	/// result as `result`. A check without instances reads its own fields and
+	/// result; one that could not run reads `broken`, and one reporting no
+	/// instances at all reads as the pass it grades to.
+	// spec: CHK#checks-with-instances
+	pub fn sample_fields(&self) -> Map<String, Value> {
+		let (mut fields, result) = match &self.outcome {
+			CheckOutcome::Broken => (self.detail.clone(), CheckResult::Broken),
+			CheckOutcome::Instances(instances) => {
+				match instances.iter().min_by_key(|i| i.observed.urgency_rank()) {
+					Some(instance) => (
+						merged(Some(&self.detail), instance.detail.as_ref()),
+						instance.observed,
+					),
+					None => (self.detail.clone(), CheckResult::Passed),
+				}
+			}
+		};
+		fields.insert("result".into(), Value::String(result.to_string()));
+		fields
 	}
 
 	/// Every check a push's `health` array reports, by name. Two entries
@@ -403,6 +430,78 @@ impl StoredInstances {
 			.values()
 			.filter(|i| !matches!(i.effective, CheckResult::Passed | CheckResult::Skipped))
 			.count()
+	}
+
+	/// The instances a target's check presents with it, and how many of the
+	/// rest passed.
+	///
+	/// The degraded instances and the silenced ones are listed, each with its
+	/// own result; the passing ones are counted rather than listed (CHK,
+	/// "Silencing one instance"). `silenced` says, for an instance's key,
+	/// whether an instance silence at the check's own target and at its group
+	/// quiets it. A silenced instance presents as skipped, and so does every
+	/// instance of a check silenced whole (`whole_check_silenced`), as the check
+	/// itself does.
+	///
+	/// Listed most urgent first, then by name.
+	// spec: CHK#silencing-one-instance
+	pub fn presented(
+		&self,
+		whole_check_silenced: bool,
+		silenced: impl Fn(&str) -> (bool, bool),
+	) -> (Vec<ConsolidatedInstance>, usize) {
+		let mut listed = Vec::new();
+		let mut passing = 0;
+		for (key, instance) in &self.0 {
+			let (silenced_on_target, silenced_on_group) = silenced(key);
+			let effective = if whole_check_silenced || silenced_on_target || silenced_on_group {
+				CheckResult::Skipped
+			} else {
+				instance.effective
+			};
+			let degraded = !matches!(effective, CheckResult::Passed | CheckResult::Skipped);
+			if degraded || silenced_on_target || silenced_on_group {
+				listed.push(ConsolidatedInstance {
+					key: key.clone(),
+					label: instance.label.clone(),
+					observed: instance.observed,
+					effective,
+					detail: instance
+						.detail
+						.clone()
+						.filter(Value::is_object)
+						.unwrap_or_else(|| Value::Object(Map::new())),
+					silenced_on_target,
+					silenced_on_group,
+				});
+			} else if effective == CheckResult::Passed {
+				passing += 1;
+			}
+		}
+		listed.sort_by(|a, b| {
+			a.effective
+				.urgency_rank()
+				.cmp(&b.effective.urgency_rank())
+				.then_with(|| {
+					let name = |i: &ConsolidatedInstance| i.label.clone().unwrap_or(i.key.clone());
+					name(a).cmp(&name(b))
+				})
+				.then_with(|| a.key.cmp(&b.key))
+		});
+		(listed, passing)
+	}
+
+	/// The instances in trouble, most urgent first: everything neither passed
+	/// nor skipped, by key, with its label and effective result.
+	pub fn degraded_instances(&self) -> Vec<(&str, &StoredInstance)> {
+		let mut degraded: Vec<(&str, &StoredInstance)> = self
+			.0
+			.iter()
+			.filter(|(_, i)| !matches!(i.effective, CheckResult::Passed | CheckResult::Skipped))
+			.map(|(k, i)| (k.as_str(), i))
+			.collect();
+		degraded.sort_by_key(|(_, i)| i.effective.urgency_rank());
+		degraded
 	}
 
 	/// The instances as last observed, for grading them again (an instance

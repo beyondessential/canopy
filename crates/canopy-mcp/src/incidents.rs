@@ -283,6 +283,49 @@ impl IssueScopeOut {
 	}
 }
 
+/// One degraded instance of an issue's check: one of a central's devices, one
+/// of a machine's backup types. A check with instances is one issue graded
+/// through every instance, so these say which of them are in trouble.
+// spec: CHK#checks-with-instances
+#[derive(Serialize)]
+struct DegradedInstanceOut {
+	/// The instance's identity within the check, as its reporter keyed it.
+	key: String,
+	/// How the instance is named to an operator; `null` where it is named by
+	/// its key.
+	label: Option<String>,
+	/// What policy made of the instance's result.
+	effective_result: CheckResult,
+}
+
+/// One instance of an issue's check, as its state last held it.
+#[derive(Serialize)]
+struct InstanceOut {
+	key: String,
+	label: Option<String>,
+	observed_result: CheckResult,
+	effective_result: CheckResult,
+	/// The instance's own fields; those its check's instances share are the
+	/// issue's `detail`.
+	detail: Option<serde_json::Value>,
+}
+
+/// The degraded instances of an issue's check, most urgent first, or `None`
+/// for a check without instances.
+fn degraded_instances(issue: &Issue) -> Option<Vec<DegradedInstanceOut>> {
+	issue.stored_instances().map(|stored| {
+		stored
+			.degraded_instances()
+			.into_iter()
+			.map(|(key, i)| DegradedInstanceOut {
+				key: key.to_string(),
+				label: i.label.clone(),
+				effective_result: i.effective,
+			})
+			.collect()
+	})
+}
+
 #[derive(Serialize)]
 struct IncidentIssueOut {
 	issue_id: Uuid,
@@ -297,6 +340,10 @@ struct IncidentIssueOut {
 	r#ref: String,
 	description: Option<String>,
 	message: String,
+	/// For a check with instances, the ones in trouble, most urgent first;
+	/// absent for a check without them.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	degraded_instances: Option<Vec<DegradedInstanceOut>>,
 	active: bool,
 	/// Whose failure this is: the box, the software on it, the group, or
 	/// Canopy itself.
@@ -347,6 +394,10 @@ struct IssueSummary {
 	escalates: bool,
 	description: Option<String>,
 	message: String,
+	/// For a check with instances, the ones in trouble, most urgent first;
+	/// absent for a check without them.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	degraded_instances: Option<Vec<DegradedInstanceOut>>,
 	active: bool,
 	first_seen: Timestamp,
 	last_seen: Timestamp,
@@ -380,6 +431,13 @@ struct IssueDetail {
 	escalates: bool,
 	description: Option<String>,
 	message: String,
+	/// The check's own fields from its latest filing; for a check with
+	/// instances, the fields they share.
+	detail: Option<serde_json::Value>,
+	/// For a check with instances, every instance its state holds, by key;
+	/// absent for a check without them.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	instances: Option<Vec<InstanceOut>>,
 	active: bool,
 	first_seen: Timestamp,
 	last_seen: Timestamp,
@@ -509,6 +567,7 @@ impl CanopyMcp {
 				r#ref: iss.r#ref.clone(),
 				description: iss.description.clone(),
 				message: iss.message.clone(),
+				degraded_instances: degraded_instances(iss),
 				active: iss.active,
 				scope: IssueScopeOut::of(
 					iss,
@@ -601,7 +660,11 @@ impl CanopyMcp {
 	#[tool(
 		// Every tool reads; none changes anything (see the SAFE spec).
 		annotations(read_only_hint = true),
-		description = "Full detail for one issue: its fields and the incidents it is or was part of."
+		description = "Full detail for one issue: its fields, the check's detail, and the incidents \
+		               it is or was part of. A check with instances (one check graded across \
+		               several instances of its condition, such as one per device) lists every \
+		               instance with its own result; find_issues and get_incident carry only the \
+		               degraded ones."
 	)]
 	async fn get_issue(
 		&self,
@@ -647,6 +710,20 @@ impl CanopyMcp {
 			escalates: issue.escalates,
 			description: issue.description.clone(),
 			message: issue.message.clone(),
+			detail: issue.detail.clone(),
+			instances: issue.stored_instances().map(|stored| {
+				stored
+					.0
+					.into_iter()
+					.map(|(key, i)| InstanceOut {
+						key,
+						label: i.label,
+						observed_result: i.observed,
+						effective_result: i.effective,
+						detail: i.detail,
+					})
+					.collect()
+			}),
 			active: issue.active,
 			first_seen: issue.first_seen,
 			last_seen: issue.last_seen,
@@ -829,6 +906,7 @@ fn issue_summary(
 		escalates: i.escalates,
 		description: i.description.clone(),
 		message: i.message.clone(),
+		degraded_instances: degraded_instances(i),
 		active: i.active,
 		first_seen: i.first_seen,
 		last_seen: i.last_seen,

@@ -465,6 +465,8 @@ mod tests {
 				silenced: false,
 				subject,
 				detail: serde_json::json!({ "users": users }),
+				instances: Vec::new(),
+				passing_instances: 0,
 			}
 		}
 
@@ -591,9 +593,56 @@ pub struct ConsolidatedCheck {
 	// spec: CHK#a-machines-checks-present-on-its-applications
 	pub subject: CheckSubject,
 	/// The detail the source attached to the check (its extra fields), as an
-	/// object. Empty object when the check carried none.
+	/// object. Empty object when the check carried none. For a check with
+	/// instances, the fields its instances share; each instance's own are on
+	/// the instance.
 	#[schema(value_type = Object)]
 	pub detail: serde_json::Value,
+	/// The check's degraded and silenced instances, most urgent first, each
+	/// graded on its own. Empty for a check without instances, and for one
+	/// none of whose instances is degraded or silenced.
+	// spec: CHK#silencing-one-instance
+	#[serde(default)]
+	pub instances: Vec<ConsolidatedInstance>,
+	/// How many of the check's instances passed, counted rather than listed.
+	/// 0 for a check without instances.
+	#[serde(default)]
+	pub passing_instances: usize,
+}
+
+/// One instance of a check, as a target's checks present it: one of a
+/// central's devices, one of a machine's backup types.
+// spec: CHK#checks-with-instances
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ConsolidatedInstance {
+	/// Which instance this is, unique within the check on its target. An
+	/// instance silence names it.
+	pub key: String,
+	/// How the instance is named to an operator. Absent where the instance
+	/// carries none, in which case it is named by its key.
+	pub label: Option<String>,
+	/// What the instance observed, before policy.
+	#[schema(value_type = String)]
+	pub observed: CheckResult,
+	/// The instance's result after policy.
+	#[schema(value_type = String)]
+	pub effective: CheckResult,
+	/// The instance's own fields, as an object; the ones it shares with the
+	/// check's other instances are the check's `detail`.
+	#[schema(value_type = Object)]
+	pub detail: serde_json::Value,
+	/// Whether an instance silence at the check's own target (its application,
+	/// machine or cluster) quiets this instance.
+	pub silenced_on_target: bool,
+	/// Whether an instance silence at the target's group quiets this instance.
+	pub silenced_on_group: bool,
+}
+
+impl ConsolidatedInstance {
+	/// Whether an instance silence at either scope quiets this instance.
+	pub fn silenced(&self) -> bool {
+		self.silenced_on_target || self.silenced_on_group
+	}
 }
 
 /// A server's checks across every source, graded and classified as one —
