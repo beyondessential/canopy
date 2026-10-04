@@ -112,14 +112,16 @@ export default function ReportingSchemasSection({
 										Build asked for
 									</Typography>
 								) : (
-									isAdmin && (
+									// An awaiting pair is already on the worklist, so asking adds nothing.
+									isAdmin &&
+									pair.state !== "awaiting" && (
 										<GradedAction calls="reporting_schemas/build">
 											<Button
 												size="small"
 												onClick={() => ask(pair.version_id)}
 												disabled={build.pending}
 											>
-												{pair.state === "awaiting" ? "Build sooner" : "Build again"}
+												Build again
 											</Button>
 										</GradedAction>
 									)
