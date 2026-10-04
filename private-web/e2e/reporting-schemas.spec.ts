@@ -111,9 +111,14 @@ test.describe("reporting schemas", () => {
 	///
 	/// spec: RPT#pairs
 	test("asking for a build records the ask", async ({ page, sql }) => {
-		await seedVersion(sql, { major: 2, minor: 60, patch: 0, status: "published" });
+		const version = await seedVersion(sql, {
+			major: 2,
+			minor: 60,
+			patch: 0,
+			status: "published",
+		});
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await declareBuilder(sql, group.id);
+		const consumer = await declareBuilder(sql, group.id);
 		const central = await seedServer(sql, {
 			name: "central",
 			groupId: group.id,
@@ -123,11 +128,20 @@ test.describe("reporting schemas", () => {
 			applicationId: central.id,
 			version: "2.60.0",
 		});
+		await seedReportingSchemaBuild(sql, {
+			consumerDeviceId: consumer,
+			groupId: group.id,
+			machineId: central.machineId,
+			applicationId: central.id,
+			versionId: version.id,
+			built: false,
+			error: "views did not compile",
+		});
 
 		await page.goto(`/groups/${group.id}`);
 
 		const section = page.getByTestId("reporting-schemas");
-		await section.getByRole("button", { name: "Build sooner" }).click();
+		await section.getByRole("button", { name: "Build again" }).click();
 
 		await expect(section.getByText("Build asked for")).toBeVisible();
 

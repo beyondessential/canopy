@@ -127,7 +127,7 @@ describe("which servers a pair covers", () => {
 });
 
 describe("asking for a build", () => {
-	it("offers a first build on an unbuilt pair and a rebuild on a settled one", async () => {
+	it("offers a rebuild on a settled pair and nothing on an awaiting one", async () => {
 		stubApi([
 			pair({ version_id: "1", version: "2.59.0", state: "awaiting" }),
 			pair({ version_id: "2", version: "2.60.0", state: "built" }),
@@ -135,8 +135,7 @@ describe("asking for a build", () => {
 		]);
 		render(<ReportingSchemasSection groupId={GROUP} />);
 
-		expect(await screen.findByText("Build sooner")).toBeTruthy();
-		expect(screen.getAllByText("Build again")).toHaveLength(2);
+		expect(await screen.findAllByText("Build again")).toHaveLength(2);
 	});
 
 	it("offers no build to an operator who cannot ask for one", async () => {
@@ -145,15 +144,14 @@ describe("asking for a build", () => {
 		render(<ReportingSchemasSection groupId={GROUP} />);
 
 		expect(await screen.findByText("Failed")).toBeTruthy();
-		expect(screen.queryByText("Build sooner")).toBeNull();
 		expect(screen.queryByText("Build again")).toBeNull();
 	});
 
 	it("names the pair rather than the group's latest version", async () => {
-		const calls = stubApi([pair({ version_id: "abc", version: "2.59.0" })]);
+		const calls = stubApi([pair({ version_id: "abc", version: "2.59.0", state: "failed" })]);
 		render(<ReportingSchemasSection groupId={GROUP} />);
 
-		fireEvent.click(await screen.findByText("Build sooner"));
+		fireEvent.click(await screen.findByText("Build again"));
 
 		await waitFor(() => {
 			const ask = calls.find((c) => c.url.includes("reporting_schemas/build"));
@@ -162,21 +160,21 @@ describe("asking for a build", () => {
 	});
 
 	it("replaces the control once an ask is recorded, so it is not asked twice", async () => {
-		stubApi([pair({ requested: true })]);
+		stubApi([pair({ state: "failed", requested: true })]);
 		render(<ReportingSchemasSection groupId={GROUP} />);
 
 		expect(await screen.findByText("Build asked for")).toBeTruthy();
-		expect(screen.queryByText("Build sooner")).toBeNull();
+		expect(screen.queryByText("Build again")).toBeNull();
 	});
 
 	it("surfaces a refused ask rather than looking like it worked", async () => {
-		stubApi([pair()], {
+		stubApi([pair({ state: "failed" })], {
 			status: 403,
 			body: { title: "insufficient permissions: admin role required" },
 		});
 		render(<ReportingSchemasSection groupId={GROUP} />);
 
-		fireEvent.click(await screen.findByText("Build sooner"));
+		fireEvent.click(await screen.findByText("Build again"));
 
 		expect(await screen.findByText(/insufficient permissions/)).toBeTruthy();
 	});
