@@ -108,7 +108,7 @@ export default function ReportingSchemasSection({
 							</TableCell>
 							<TableCell align="right">
 								{pair.requested ? (
-									<Typography variant="caption" color="text.secondary">
+									<Typography variant="body2" color="text.secondary">
 										Build asked for
 									</Typography>
 								) : (
@@ -141,7 +141,7 @@ export default function ReportingSchemasSection({
 function Running({ applications }: { applications: string[] }) {
 	if (applications.length === 0) {
 		return (
-			<Typography variant="caption" color="text.secondary">
+			<Typography variant="body2" color="text.secondary">
 				upgrade plan
 			</Typography>
 		);
