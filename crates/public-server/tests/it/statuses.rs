@@ -666,8 +666,8 @@ async fn insert_health_test_server(
 	let server_id = Uuid::new_v4();
 	sql_query(
 		r#"
-		WITH m AS (INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', $1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id)
-		VALUES ($1, 'https://health.example.com', 'tamanu-central', $3, $1)
+		WITH m AS (INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', $1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, group_id, rank, machine_id)
+		VALUES ($1, 'https://health.example.com', 'tamanu-central', $3, 'production', $1)
 	"#,
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
@@ -2579,8 +2579,8 @@ async fn seed_server_in_group(
 		.expect("insert group");
 	let server_id = Uuid::new_v4();
 	sql_query(
-		"WITH m AS (INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', $1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) \
-		 VALUES ($1, 'https://srv.example.com', 'tamanu-central', $3, $1)",
+		"WITH m AS (INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', $1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, group_id, rank, machine_id) \
+		 VALUES ($1, 'https://srv.example.com', 'tamanu-central', $3, 'production', $1)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(device_id))
@@ -2661,8 +2661,8 @@ async fn status_backup_now_reads_the_machine_not_the_application() {
 			.await
 			.expect("insert machine");
 			sql_query(
-				"INSERT INTO applications (id, host, type, group_id, machine_id) \
-				 VALUES ($1, 'https://unequal.example.com', 'tamanu-central', $2, $3)",
+				"INSERT INTO applications (id, host, type, group_id, rank, machine_id) \
+				 VALUES ($1, 'https://unequal.example.com', 'tamanu-central', $2, 'production', $3)",
 			)
 			.bind::<sql_types::Uuid, _>(application_id)
 			.bind::<sql_types::Uuid, _>(group_id)

@@ -148,7 +148,6 @@ pub async fn fleet(
 	let newest = database::versions::Version::newest_published(&mut conn)
 		.await?
 		.map(|version| version.as_semver());
-	let headline = ServerGroup::highest_member_ranks(&mut conn, &ids).await?;
 	// Including drafts: a target yanked since the plan was recorded still has to
 	// render as the version the environment is going to.
 	let versions: HashMap<Uuid, database::versions::Version> =
@@ -224,16 +223,9 @@ pub async fn fleet(
 					.await?;
 					members.insert(env.group_id, live);
 				}
-				// An unranked member belongs to the group's headline environment.
 				let applications: Vec<_> = members[&env.group_id]
 					.iter()
-					.filter(|application| {
-						application
-							.rank
-							.or_else(|| headline.get(&env.group_id).copied())
-							.unwrap_or(database::server_groups::UNRANKED_ENVIRONMENT)
-							== env.rank
-					})
+					.filter(|application| application.rank == Some(env.rank))
 					.cloned()
 					.collect();
 				let per_server = database::migration_tests::verdicts_against(

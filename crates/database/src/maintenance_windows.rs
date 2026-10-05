@@ -31,7 +31,7 @@ use uuid::Uuid;
 use crate::applications::Application;
 use crate::issues::Scope;
 use crate::machines::Machine;
-use crate::server_groups::{ServerGroup, environment_name, rank_priority};
+use crate::server_groups::{ServerGroup, environment_name};
 use crate::slack_outbox::{KIND_MAINTENANCE_DECLARED, KIND_MAINTENANCE_ENDED, SlackOutbox, vars};
 
 /// How long suspension outlasts the window, giving the reporters on a
@@ -749,10 +749,9 @@ fn fleet_columns(scope: Scope) -> Option<(Option<Uuid>, Option<Uuid>, Option<Uui
 }
 
 /// The environment each machine serves, for the machines in the groups these
-/// environments belong to. The group is the one whose work the box carries; the
-/// rank is [`Machine::ranks`], over everything live on the box, so this and
-/// [`MaintenanceWindow::suspends`] read a box carrying another group's work the
-/// same way.
+/// environments belong to: the rank its applications share (see
+/// [`Machine::ranks`]), so this and [`MaintenanceWindow::suspends`] read a box
+/// the same way. A pending machine serves none.
 // spec: MNT#declaring
 async fn environment_of_machines(
 	db: &mut AsyncPgConnection,
@@ -783,20 +782,7 @@ async fn environment_of_machines(
 		let (Some(group), Some(rank)) = (group, rank) else {
 			continue;
 		};
-		serving
-			.entry(machine)
-			.and_modify(|held| {
-				if rank_priority(Some(rank)) < rank_priority(Some(held.1)) {
-					*held = (group, rank);
-				}
-			})
-			.or_insert((group, rank));
+		serving.insert(machine, (group, rank));
 	}
-
-	let machines: Vec<Uuid> = serving.keys().copied().collect();
-	let ranks = Machine::ranks(db, &machines).await?;
-	Ok(serving
-		.into_iter()
-		.filter_map(|(machine, (group, _))| Some((machine, (group, *ranks.get(&machine)?))))
-		.collect())
+	Ok(serving)
 }

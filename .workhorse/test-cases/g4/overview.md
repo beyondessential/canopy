@@ -42,7 +42,7 @@ Most are automated at the database layer (`crates/database/tests/it/`), with the
 
 - [ ] A plan can be recorded for a group's production, and its environment's version reads from the production central (verifies spec: UPG, APP)
 - [ ] Recording a plan for a group with nothing ranked is refused (verifies spec: UPG)
-- [ ] A Postgres on a production box takes the production plan's target as its migration-test candidate (verifies spec: RST)
+- [ ] A Tamanu facility on a production box takes the production plan's target as its migration-test candidate (verifies spec: RST)
 - [ ] A pending application has no migration-test candidate while its group has a production plan open (verifies spec: RST)
 - [ ] The planned upgrades dashboard lists the headline environment of every group with something ranked, and no group with nothing ranked (verifies spec: UPG)
 

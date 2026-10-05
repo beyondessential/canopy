@@ -76,8 +76,8 @@ async fn insert_server(
 	server.id
 }
 
-/// A member carrying no rank at all, so its group resolves to no environment.
-async fn insert_unranked_server(
+/// A member nothing has ranked yet: pending, and so in no environment.
+async fn insert_pending_server(
 	conn: &mut diesel_async::AsyncPgConnection,
 	group: Uuid,
 	host: &str,
@@ -245,36 +245,29 @@ async fn only_tamanu_servers() {
 	.await
 }
 
-/// A group whose members carry no rank has no environment to look a plan up by,
-/// but the migration gives its existing plan one anyway. The plan is the only
-/// environment such a group has, so its members are candidates against it —
-/// otherwise the dashboard lists the plan as open while nothing can ever be
-/// tested against it.
+/// A pending application is in no environment, so a plan for its group's
+/// production says nothing about it: only the production central is tested.
 // spec: RST#candidate-versions
 #[tokio::test(flavor = "multi_thread")]
-async fn an_unranked_group_takes_its_plan_s_environment() {
+async fn a_pending_application_has_no_candidate() {
 	TestDb::run(|mut conn, _url| async move {
 		let target = publish(&mut conn, 2, 63, 0).await;
 		let group = insert_group(&mut conn, "kamaka").await;
-		let central = insert_unranked_server(
+		let central = insert_server(
 			&mut conn,
 			group,
 			"https://central.kamaka.example",
 			ApplicationType::TamanuCentral,
 		)
 		.await;
-		// `record` refuses a group with no production environment, so this state
-		// only ever arrives from the migration's backfill, which forces the
-		// rank on every plan that had none.
-		sql_query(
-			"INSERT INTO upgrade_plans (group_id, rank, target_version_id, created_by) \
-			 VALUES ($1, 'production', $2, 'someone@example.com')",
+		insert_pending_server(
+			&mut conn,
+			group,
+			"https://facility.kamaka.example",
+			ApplicationType::TamanuFacility,
 		)
-		.bind::<sql_types::Uuid, _>(group)
-		.bind::<sql_types::Uuid, _>(target.id)
-		.execute(&mut conn)
-		.await
-		.expect("backfilled plan");
+		.await;
+		plan(&mut conn, group, &target).await;
 
 		assert_eq!(
 			candidates(&mut conn).await.expect("candidates"),
@@ -282,7 +275,7 @@ async fn an_unranked_group_takes_its_plan_s_environment() {
 				server_id: central,
 				version_id: target.id,
 			}],
-			"the group's one plan is the environment its members are tested for",
+			"the pending facility is in no environment, so nothing is tested for it",
 		);
 	})
 	.await

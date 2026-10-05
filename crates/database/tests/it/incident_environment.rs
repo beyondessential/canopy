@@ -1,15 +1,14 @@
-//! An incident targets one of a group's environments, meaning its
-//! applications at one rank, rather than the group as a whole, so a site's
-//! test box and its production central are separate incidents. A group's own
-//! checks, and the members of a group with nothing ranked, target the group
-//! itself.
+//! An incident targets one of a group's environments, meaning its members at
+//! one rank, rather than the group as a whole, so a site's test box and its
+//! production central are separate incidents. A group's own checks belong to its
+//! headline environment, and a pending member, in no environment yet, belongs to
+//! no incident.
 
 use commons_types::{server::rank::ServerRank, status::CheckResult};
-use database::issues::{IncidentTarget, NewEvent, Scope};
+use database::issues::{NewEvent, Scope};
 use database::slack_outbox::KIND_INCIDENT_OPEN;
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
-use jiff::{SignedDuration, Timestamp};
 use uuid::Uuid;
 
 #[derive(QueryableByName)]
@@ -190,192 +189,360 @@ async fn production_trouble_does_not_join_an_open_test_incident() {
 	.await
 }
 
-/// A group check asserts something held once for the group however many
-/// environments it has, so it targets the group rather than any one of them.
+async fn fail_group_check(conn: &mut diesel_async::AsyncPgConnection, group: Uuid) {
+	database::issues::raise_group_event_with_state(
+		conn,
+		group,
+		"backup_stale",
+		None,
+		"the repository is stale",
+		true,
+		Some(&failed_stamp("backup_stale")),
+	)
+	.await
+	.expect("file group check");
+}
+
+async fn live_members(conn: &mut diesel_async::AsyncPgConnection, group: Uuid) -> i64 {
+	let live: Count = sql_query(
+		"SELECT COUNT(*) AS n FROM incident_issues ii \
+		 JOIN incidents inc ON inc.id = ii.incident_id \
+		 WHERE inc.server_group_id = $1 AND ii.left_at IS NULL",
+	)
+	.bind::<sql_types::Uuid, _>(group)
+	.get_result(conn)
+	.await
+	.expect("count links");
+	live.n
+}
+
+/// The shape a database beside a site's production central had: the box going
+/// dark takes its machine's checks, the central, and the database with it, and
+/// that is one incident, not a production incident and a second one for the
+/// database alone.
 // spec: INC#targets
 #[tokio::test(flavor = "multi_thread")]
-async fn a_groups_own_check_targets_the_group_beside_its_environments() {
+async fn a_box_going_down_is_one_incident_for_everything_on_it() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = insert_group(&mut conn).await;
+		let machine = insert_machine(&mut conn, Some(group)).await;
+		let central = insert_application(
+			&mut conn,
+			machine,
+			Some(group),
+			Some("production"),
+			"http://central.invalid/",
+		)
+		.await;
+		let postgres = insert_application(
+			&mut conn,
+			machine,
+			Some(group),
+			Some("production"),
+			"http://postgres.invalid/",
+		)
+		.await;
+
+		database::issues::raise_machine_event_with_state(
+			&mut conn,
+			machine,
+			"alertd",
+			None,
+			"unreachable",
+			None,
+			"the box stopped reporting",
+			true,
+			Some(&failed_stamp("unreachable")),
+		)
+		.await
+		.expect("file machine check");
+		fail_application(&mut conn, central, "unreachable").await;
+		fail_application(&mut conn, postgres, "unreachable").await;
+
+		assert_eq!(
+			open_ranks(&mut conn, group).await,
+			vec![Some("production".to_string())],
+			"one incident, on the environment the box serves",
+		);
+		assert_eq!(live_members(&mut conn, group).await, 3);
+	})
+	.await
+}
+
+/// A group check asserts something held once for the group however many
+/// environments it has, so it belongs to the group's headline environment
+/// rather than to an incident of its own.
+// spec: INC#targets
+#[tokio::test(flavor = "multi_thread")]
+async fn a_groups_own_check_joins_its_headline_environments_incident() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group = insert_group(&mut conn).await;
 		let production =
 			insert_ranked_member(&mut conn, group, Some("production"), "http://prod.invalid/")
 				.await;
+		insert_ranked_member(&mut conn, group, Some("test"), "http://test.invalid/").await;
 
-		database::issues::raise_group_event_with_state(
-			&mut conn,
-			group,
-			"backup_stale",
-			None,
-			"the repository is stale",
-			true,
-			Some(&failed_stamp("backup_stale")),
-		)
-		.await
-		.expect("file group check");
-		fail_application(&mut conn, production, "app_down").await;
-
+		fail_group_check(&mut conn, group).await;
 		assert_eq!(
 			open_ranks(&mut conn, group).await,
-			vec![Some("production".to_string()), None],
-			"the group's own trouble is its own incident, beside production's",
+			vec![Some("production".to_string())],
+			"a failing backup check opens the production incident",
 		);
+
+		fail_application(&mut conn, production, "app_down").await;
+		assert_eq!(
+			open_ranks(&mut conn, group).await,
+			vec![Some("production".to_string())],
+			"and a production failure joins it rather than opening another",
+		);
+		assert_eq!(live_members(&mut conn, group).await, 2);
 	})
 	.await
 }
 
-/// No rank means no environment, so an unranked application targets the group
-/// whether or not the group has environments alongside it. Its trouble still
-/// reaches an incident rather than being quietly filed nowhere.
+/// A group whose highest rank is demo has demo for its headline, so its own
+/// checks join the demo environment's incident.
 // spec: INC#targets
 #[tokio::test(flavor = "multi_thread")]
-async fn an_unranked_application_targets_the_group() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let ranked_group = insert_group(&mut conn).await;
-		insert_ranked_member(
-			&mut conn,
-			ranked_group,
-			Some("production"),
-			"http://prod.invalid/",
-		)
-		.await;
-		let alongside =
-			insert_ranked_member(&mut conn, ranked_group, None, "http://plain.invalid/").await;
-		assert_eq!(
-			Scope::Application(alongside)
-				.resolve_incident_target(&mut conn)
-				.await
-				.expect("resolve"),
-			Some((IncidentTarget::Group(ranked_group), true)),
-			"a group's production environment is not where its unranked members land",
-		);
-
-		let bare_group = insert_group(&mut conn).await;
-		let member =
-			insert_ranked_member(&mut conn, bare_group, None, "http://bare.invalid/").await;
-		assert_eq!(
-			Scope::Application(member)
-				.resolve_incident_target(&mut conn)
-				.await
-				.expect("resolve"),
-			Some((IncidentTarget::Group(bare_group), true)),
-		);
-
-		fail_application(&mut conn, member, "app_down").await;
-		assert_eq!(
-			open_ranks(&mut conn, bare_group).await,
-			vec![None],
-			"an unranked member's trouble still opens an incident",
-		);
-	})
-	.await
-}
-
-/// A box hosting nothing ranked is in no environment either, so its checks
-/// answer to the group.
-// spec: INC#targets
-#[tokio::test(flavor = "multi_thread")]
-async fn a_box_hosting_nothing_ranked_targets_the_group() {
+async fn a_groups_own_check_follows_its_headline_rank() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group = insert_group(&mut conn).await;
-		insert_ranked_member(&mut conn, group, Some("production"), "http://prod.invalid/").await;
-		let machine = insert_machine(&mut conn, Some(group)).await;
-		insert_application(
-			&mut conn,
-			machine,
-			Some(group),
-			None,
-			"http://plain.invalid/",
-		)
-		.await;
+		insert_ranked_member(&mut conn, group, Some("demo"), "http://demo.invalid/").await;
+		insert_ranked_member(&mut conn, group, Some("test"), "http://test.invalid/").await;
 
+		fail_group_check(&mut conn, group).await;
 		assert_eq!(
-			Scope::Machine(machine)
-				.resolve_incident_target(&mut conn)
-				.await
-				.expect("resolve"),
-			Some((IncidentTarget::Group(group), true)),
+			open_ranks(&mut conn, group).await,
+			vec![Some("demo".to_string())],
 		);
 	})
 	.await
 }
 
-/// The group is where an unranked member's incident lives, so the group's own
-/// window is what quiets it. An environment window names a rank the member
-/// does not have, so it cannot reach it and cannot go quiet on a box nobody is
-/// working on.
-// spec: MNT#what-a-window-suspends
+/// Nothing ranked means no environment, so no application is in one and a
+/// group has no headline environment for its own checks to belong to: none of
+/// their trouble belongs to a target, and none opens an incident.
+// spec: INC#targets
 #[tokio::test(flavor = "multi_thread")]
-async fn a_group_window_suspends_an_unranked_members_incident() {
+async fn pending_members_and_a_group_with_nothing_ranked_have_no_target() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group = insert_group(&mut conn).await;
 		let machine = insert_machine(&mut conn, Some(group)).await;
-		let member = insert_application(
-			&mut conn,
-			machine,
-			Some(group),
-			None,
-			"http://plain.invalid/",
-		)
-		.await;
+		let pending =
+			insert_application(&mut conn, machine, Some(group), None, "http://new.invalid/").await;
 
-		fail_application(&mut conn, member, "app_down").await;
-		assert_eq!(open_ranks(&mut conn, group).await, vec![None]);
-
-		database::maintenance_windows::MaintenanceWindow::declare(
-			&mut conn,
+		for scope in [
+			Scope::Application(pending),
+			Scope::Machine(machine),
 			Scope::Group(group),
+		] {
+			assert_eq!(
+				scope
+					.resolve_incident_target(&mut conn)
+					.await
+					.expect("resolve"),
+				None,
+				"{scope:?} belongs to no target while nothing in the group is ranked",
+			);
+		}
+
+		fail_application(&mut conn, pending, "app_down").await;
+		database::issues::raise_machine_event_with_state(
+			&mut conn,
+			machine,
+			"alertd",
 			None,
-			Timestamp::now() + SignedDuration::from_hours(1),
-			Some("upgrading"),
-			Some("op"),
+			"disk_free",
+			None,
+			"disk 2% free",
+			true,
+			Some(&failed_stamp("disk_free")),
 		)
 		.await
-		.expect("declare");
+		.expect("file machine check");
+		fail_group_check(&mut conn, group).await;
 
 		assert!(
 			open_ranks(&mut conn, group).await.is_empty(),
-			"the group's window takes its unranked member out of the incident",
+			"a pending member's trouble opens no incident",
 		);
 	})
 	.await
 }
 
-/// Rank is an application's, so a box takes the rank of the highest-ranked
-/// workload on it: a shared host's disk filling is trouble for the most
-/// important thing it runs.
+/// A pending box beside a ranked one is in no environment, so its trouble does
+/// not reach the incident of the box next to it.
 // spec: INC#targets
 #[tokio::test(flavor = "multi_thread")]
-async fn a_box_takes_the_rank_of_its_highest_ranked_workload() {
+async fn a_pending_box_beside_a_ranked_one_opens_nothing() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = insert_group(&mut conn).await;
+		insert_ranked_member(&mut conn, group, Some("production"), "http://prod.invalid/").await;
+		let pending = insert_ranked_member(&mut conn, group, None, "http://pending.invalid/").await;
+
+		fail_application(&mut conn, pending, "app_down").await;
+		assert!(open_ranks(&mut conn, group).await.is_empty());
+	})
+	.await
+}
+
+/// Ranking a pending box brings the trouble already on it into incident
+/// membership, on the environment it was ranked into.
+// spec: INC#membership
+#[tokio::test(flavor = "multi_thread")]
+async fn ranking_a_pending_box_opens_its_incident() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group = insert_group(&mut conn).await;
 		let machine = insert_machine(&mut conn, Some(group)).await;
-		insert_application(
+		let pending =
+			insert_application(&mut conn, machine, Some(group), None, "http://new.invalid/").await;
+		fail_application(&mut conn, pending, "app_down").await;
+		assert!(open_ranks(&mut conn, group).await.is_empty());
+
+		database::machines::Machine::set_rank(&mut conn, machine, ServerRank::Test, Some("op"))
+			.await
+			.expect("rank the box");
+
+		assert_eq!(
+			open_ranks(&mut conn, group).await,
+			vec![Some("test".to_string())],
+		);
+	})
+	.await
+}
+
+/// Moving a failing box between environments moves the issue with it: the
+/// incident it leaves closes with nothing holding it open.
+// spec: INC#membership
+#[tokio::test(flavor = "multi_thread")]
+async fn ranking_a_box_up_moves_its_issues_into_the_new_environments_incident() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = insert_group(&mut conn).await;
+		let machine = insert_machine(&mut conn, Some(group)).await;
+		let central = insert_application(
 			&mut conn,
 			machine,
 			Some(group),
 			Some("test"),
-			"http://shared-test.invalid/",
+			"http://central.invalid/",
 		)
 		.await;
+		fail_application(&mut conn, central, "app_down").await;
+		assert_eq!(
+			open_ranks(&mut conn, group).await,
+			vec![Some("test".to_string())],
+		);
+
+		database::machines::Machine::set_rank(
+			&mut conn,
+			machine,
+			ServerRank::Production,
+			Some("op"),
+		)
+		.await
+		.expect("rank the box");
+
+		assert_eq!(
+			open_ranks(&mut conn, group).await,
+			vec![Some("production".to_string())],
+			"the test incident closes and production's opens",
+		);
+	})
+	.await
+}
+
+/// The group's own checks follow its headline environment, so when the group's
+/// only production box is ranked down the open backup issue moves to the
+/// environment that is now the headline.
+// spec: INC#membership
+#[tokio::test(flavor = "multi_thread")]
+async fn a_headline_change_moves_the_groups_own_issues() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = insert_group(&mut conn).await;
+		let machine = insert_machine(&mut conn, Some(group)).await;
 		insert_application(
 			&mut conn,
 			machine,
 			Some(group),
 			Some("production"),
-			"http://shared-prod.invalid/",
+			"http://prod.invalid/",
 		)
 		.await;
+		insert_ranked_member(&mut conn, group, Some("test"), "http://test.invalid/").await;
+		fail_group_check(&mut conn, group).await;
+		assert_eq!(
+			open_ranks(&mut conn, group).await,
+			vec![Some("production".to_string())],
+		);
+
+		database::machines::Machine::set_rank(&mut conn, machine, ServerRank::Clone, Some("op"))
+			.await
+			.expect("rank the box down");
 
 		assert_eq!(
-			Scope::Machine(machine)
-				.resolve_incident_target(&mut conn)
-				.await
-				.expect("resolve"),
-			Some((
-				IncidentTarget::Environment(group, ServerRank::Production),
-				true
-			)),
+			open_ranks(&mut conn, group).await,
+			vec![Some("clone".to_string())],
+			"the backup issue follows the new headline",
 		);
+	})
+	.await
+}
+
+/// The group's own checks follow its headline environment however it moves:
+/// archiving the box that carried it, or moving that box to another group,
+/// leaves the open backup issue in the environment that is the headline now.
+// spec: INC#membership
+#[tokio::test(flavor = "multi_thread")]
+async fn archiving_or_moving_the_headline_box_moves_the_groups_own_issues() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		for move_it in [false, true] {
+			let group = insert_group(&mut conn).await;
+			let machine = insert_machine(&mut conn, Some(group)).await;
+			insert_application(
+				&mut conn,
+				machine,
+				Some(group),
+				Some("production"),
+				&format!("http://prod-{move_it}.invalid/"),
+			)
+			.await;
+			insert_ranked_member(
+				&mut conn,
+				group,
+				Some("test"),
+				&format!("http://test-{move_it}.invalid/"),
+			)
+			.await;
+			fail_group_check(&mut conn, group).await;
+			assert_eq!(
+				open_ranks(&mut conn, group).await,
+				vec![Some("production".to_string())],
+			);
+
+			if move_it {
+				let elsewhere = insert_group(&mut conn).await;
+				database::machines::Machine::update(
+					&mut conn,
+					machine,
+					database::machines::MachineUpdate {
+						group_id: Some(Some(elsewhere)),
+						..Default::default()
+					},
+				)
+				.await
+				.expect("move the box");
+			} else {
+				database::machines::Machine::archive(&mut conn, machine)
+					.await
+					.expect("archive the box");
+			}
+
+			assert_eq!(
+				open_ranks(&mut conn, group).await,
+				vec![Some("test".to_string())],
+				"the backup issue follows the headline (moved: {move_it})",
+			);
+		}
 	})
 	.await
 }
@@ -441,11 +608,11 @@ async fn a_notice_names_the_environment_it_is_about() {
 		let production =
 			insert_ranked_member(&mut conn, group, Some("production"), "http://prod.invalid/")
 				.await;
-		let test =
-			insert_ranked_member(&mut conn, group, Some("test"), "http://test.invalid/").await;
+		let clone =
+			insert_ranked_member(&mut conn, group, Some("clone"), "http://clone.invalid/").await;
 
 		fail_application(&mut conn, production, "app_down").await;
-		fail_application(&mut conn, test, "app_down").await;
+		fail_application(&mut conn, clone, "app_down").await;
 
 		let rows: Vec<Payload> = sql_query("SELECT payload FROM slack_outbox WHERE kind = $1")
 			.bind::<sql_types::Text, _>(KIND_INCIDENT_OPEN)
@@ -459,8 +626,8 @@ async fn a_notice_names_the_environment_it_is_about() {
 		labels.sort();
 		assert_eq!(
 			labels,
-			vec!["site".to_string(), "site test".to_string()],
-			"production reads as the site, and test reads as the site's test",
+			vec!["site".to_string(), "site clone".to_string()],
+			"production reads as the site, and clone reads as the site's clone",
 		);
 		// The application an issue is on is named on its line in the summary,
 		// not in the target.

@@ -221,6 +221,17 @@ impl Machine {
 		}
 
 		let before = Self::get_by_id(db, machine_id).await?;
+		// The headline of each group the box may leave or join, since a group's
+		// own checks follow it.
+		let moving_to = updates.group_id.flatten();
+		let mut headlines = Vec::new();
+		for group in [before.group_id, moving_to].into_iter().flatten() {
+			if !headlines.iter().any(|(held, _)| *held == group) {
+				let headline =
+					crate::server_groups::ServerGroup::headline_rank(db, Some(group)).await?;
+				headlines.push((group, headline));
+			}
+		}
 
 		diesel::update(dsl::machines.filter(dsl::id.eq(machine_id)))
 			.set(updates)
@@ -249,6 +260,9 @@ impl Machine {
 
 			for group in [before.group_id, after.group_id].into_iter().flatten() {
 				crate::server_groups::ServerGroup::recompute_version(db, group).await?;
+			}
+			for (group, headline) in headlines {
+				crate::issues::reevaluate_after_headline_change(db, Some(group), headline).await?;
 			}
 		}
 
@@ -547,12 +561,73 @@ impl Machine {
 			.map_err(AppError::from)
 	}
 
-	/// The environment this machine serves: the highest rank among the live
-	/// applications on it, and none where they are all unranked.
+	/// Rank the machine: every live application on it takes `rank` in one
+	/// write, since a box serves one environment and its applications share
+	/// the rank (see [`Self::rank`]).
 	///
-	/// A box is not given a production workload and a demo one, so deriving
-	/// the rank leaves a mixed box well-defined without anyone keeping a
-	/// machine's rank in step with what runs on it.
+	/// A machine holds no rank of its own, so one with no live application
+	/// has nothing to rank and is refused. Open issues of the machine and of
+	/// everything on it are re-evaluated against the environment they now
+	/// belong to, and so are the group's own checks when its headline rank
+	/// moved, `by` attributing an incident that closes as a result.
+	// spec: GRP#environments
+	pub async fn set_rank(
+		db: &mut AsyncPgConnection,
+		machine_id: Uuid,
+		rank: commons_types::server::rank::ServerRank,
+		by: Option<&str>,
+	) -> Result<()> {
+		use crate::schema::applications::dsl;
+		use diesel_async::AsyncConnection;
+
+		let (group_id, headline, changed) = db
+			.transaction::<_, AppError, _>(async |conn| {
+				// The box's row serialises this against a report adopting beside it.
+				let machine = Self::get_by_id_for_update(conn, machine_id).await?;
+				let live: i64 = dsl::applications
+					.filter(dsl::machine_id.eq(machine_id))
+					.filter(dsl::deleted_at.is_null())
+					.count()
+					.get_result(conn)
+					.await?;
+				if live == 0 {
+					return Err(AppError::BadRequest(
+						"a machine takes its rank from the applications on it, and none has reported yet".into(),
+					));
+				}
+				let headline =
+					crate::server_groups::ServerGroup::headline_rank(conn, machine.group_id)
+						.await?;
+				let changed = diesel::update(dsl::applications)
+					.filter(dsl::machine_id.eq(machine_id))
+					.filter(dsl::deleted_at.is_null())
+					.filter(dsl::rank.is_distinct_from(rank))
+					.set(dsl::rank.eq(rank))
+					.execute(conn)
+					.await?;
+				Ok((machine.group_id, headline, changed))
+			})
+			.await?;
+		if changed == 0 {
+			return Ok(());
+		}
+
+		crate::applications::recompute_groups(db, [group_id]).await?;
+		crate::issues::reevaluate_after_rank_change(
+			db,
+			crate::issues::Scope::Machine(machine_id),
+			group_id,
+			headline,
+			by,
+		)
+		.await
+	}
+
+	/// The environment this machine serves: the rank its live applications
+	/// share, and none while they are all pending (or there are none).
+	///
+	/// The applications on a box share one rank, which the schema holds, so
+	/// reading the highest of them is reading the one.
 	// spec: FLT#environments
 	pub async fn rank(
 		db: &mut AsyncPgConnection,
@@ -563,8 +638,8 @@ impl Machine {
 
 	/// The rank each of `machines` serves, by the same rule as [`Self::rank`].
 	///
-	/// A box carrying nothing ranked is absent from the map rather than
-	/// present with a default: it serves no environment.
+	/// A pending box is absent from the map rather than present with a
+	/// default: it serves no environment.
 	// spec: FLT#environments
 	pub async fn ranks(
 		db: &mut AsyncPgConnection,
@@ -633,6 +708,8 @@ impl Machine {
 	pub async fn archive(db: &mut AsyncPgConnection, machine_id: Uuid) -> Result<()> {
 		use diesel_async::AsyncConnection;
 
+		let group_id = Self::get_by_id(db, machine_id).await?.group_id;
+		let headline = crate::server_groups::ServerGroup::headline_rank(db, group_id).await?;
 		db.transaction::<_, AppError, _>(async |conn| {
 			let machine = Self::get_by_id_for_update(conn, machine_id).await?;
 			if machine.deleted_at.is_some() {
@@ -661,6 +738,9 @@ impl Machine {
 				.await?;
 			Ok(())
 		})
-		.await
+		.await?;
+		// The group's own checks follow its headline environment, which may have
+		// been this box's.
+		crate::issues::reevaluate_after_headline_change(db, group_id, headline).await
 	}
 }

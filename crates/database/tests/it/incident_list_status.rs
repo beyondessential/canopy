@@ -23,14 +23,14 @@ async fn the_status_filter_is_applied_before_the_limit() {
 		// opened in the last hour. Newest-opened first, the open one sorts last.
 		let mut sql = format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
-			 INSERT INTO incidents (id, server_group_id, opened_at) \
-			   VALUES ('{old_open}', '{group_id}', NOW() - interval '6 days');"
+			 INSERT INTO incidents (id, server_group_id, rank, opened_at) \
+			   VALUES ('{old_open}', '{group_id}', 'production', NOW() - interval '6 days');"
 		);
 		for i in 0..10 {
 			let id = Uuid::new_v4();
 			sql.push_str(&format!(
-				"INSERT INTO incidents (id, server_group_id, opened_at, closed_at) VALUES \
-				 ('{id}', '{group_id}', NOW() - interval '{i} minutes', NOW());"
+				"INSERT INTO incidents (id, server_group_id, rank, opened_at, closed_at) VALUES \
+				 ('{id}', '{group_id}', 'production', NOW() - interval '{i} minutes', NOW());"
 			));
 		}
 		conn.batch_execute(&sql).await.expect("seed incidents");
@@ -70,12 +70,12 @@ async fn the_status_filter_selects_the_right_incidents() {
 
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_a}', 'a'), ('{group_b}', 'b'); \
-			 INSERT INTO incidents (id, server_group_id, opened_at) \
-			   VALUES ('{still_open}', '{group_a}', NOW() - interval '3 hours'); \
-			 INSERT INTO incidents (id, server_group_id, opened_at, closed_at) \
-			   VALUES ('{closed}', '{group_a}', NOW() - interval '2 hours', NOW()); \
-			 INSERT INTO incidents (id, server_group_id, opened_at, resolved_at, resolved_by) \
-			   VALUES ('{resolved}', '{group_b}', NOW() - interval '1 hour', NOW(), 'op');"
+			 INSERT INTO incidents (id, server_group_id, rank, opened_at) \
+			   VALUES ('{still_open}', '{group_a}', 'production', NOW() - interval '3 hours'); \
+			 INSERT INTO incidents (id, server_group_id, rank, opened_at, closed_at) \
+			   VALUES ('{closed}', '{group_a}', 'production', NOW() - interval '2 hours', NOW()); \
+			 INSERT INTO incidents (id, server_group_id, rank, opened_at, resolved_at, resolved_by) \
+			   VALUES ('{resolved}', '{group_b}', 'production', NOW() - interval '1 hour', NOW(), 'op');"
 		))
 		.await
 		.expect("seed incidents");

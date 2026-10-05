@@ -84,7 +84,6 @@ async fn server_update_rejects_reserved_tag_keys() {
 		let updates = PartialServer {
 			id: server.id,
 			name: None,
-			rank: None,
 			host: None,
 			group_id: None,
 			public_name: None,

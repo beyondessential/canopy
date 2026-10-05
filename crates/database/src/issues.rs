@@ -223,9 +223,8 @@ pub struct Incident {
 	/// The group this incident targets, or `None` for a canopy-wide
 	/// incident (aggregating canopy-wide issues — self-alerts).
 	pub server_group_id: Option<Uuid>,
-	/// Which of the group's environments this incident targets. `None` with a
-	/// group is the group itself: its own checks, and the members of a group
-	/// with no ranked application.
+	/// Which of the group's environments this incident targets: always set
+	/// where there is a group, and `None` for a canopy-wide incident.
 	// spec: INC#targets
 	pub rank: Option<ServerRank>,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
@@ -620,10 +619,10 @@ impl NewEvent {
 			//    ingest path enqueues the server for the reeval worker instead
 			//    (see `enqueue_incident_reeval`), keeping the per-group lock off
 			//    the request path.
-			if let Some(gid) = server_group_id
+			if let Some(target) =
+				server_group_id.and_then(|gid| IncidentTarget::of_member(gid, server_rank))
 				&& !defer_incident_eval
 			{
-				let target = IncidentTarget::of_member(gid, server_rank);
 				re_evaluate_incident_membership(
 					conn,
 					&issue,
@@ -774,15 +773,11 @@ pub async fn raise_group_event_with_state(
 		};
 
 		// 2. group-aware incident evaluation — monitored = true unconditionally.
-		re_evaluate_incident_membership(
-			conn,
-			&issue,
-			IncidentTarget::Group(group_id),
-			true,
-			now,
-			None,
-		)
-		.await?;
+		// A group's own checks belong to its headline environment, so a group
+		// with nothing ranked has no incident to open or join.
+		if let Some(target) = group_headline_target(conn, group_id).await? {
+			re_evaluate_incident_membership(conn, &issue, target, true, now, None).await?;
+		}
 
 		Ok(issue)
 	})
@@ -1242,9 +1237,10 @@ impl Scope {
 	/// Resolve this scope to the incident target it contributes to and
 	/// whether that contribution is monitored. An application or a machine
 	/// maps to the environment it is in, carrying that target's own
-	/// `is_monitored`; a group targets itself and a canopy-wide scope the
-	/// global target, both always monitored. An ungrouped application or
-	/// machine has no target and no incident path.
+	/// `is_monitored`; a group targets its headline environment and a
+	/// canopy-wide scope the global target, both always monitored. An
+	/// ungrouped or pending application or machine has no target and no
+	/// incident path, and neither has a group with nothing ranked.
 	///
 	/// A machine carries its own monitoring switch, so excusing a box from
 	/// monitoring does not quiet the applications on it, and vice versa.
@@ -1271,6 +1267,8 @@ struct ScopeTargets {
 	applications: std::collections::HashMap<Uuid, Application>,
 	/// Each machine with the rank it serves (see [`crate::machines::Machine::rank`]).
 	machines: std::collections::HashMap<Uuid, (crate::machines::Machine, Option<ServerRank>)>,
+	/// The headline rank of each group a scope names that has one.
+	group_headlines: std::collections::HashMap<Uuid, ServerRank>,
 }
 
 impl ScopeTargets {
@@ -1282,17 +1280,21 @@ impl ScopeTargets {
 
 		let mut application_ids = Vec::new();
 		let mut machine_ids = Vec::new();
+		let mut group_ids = Vec::new();
 		for scope in scopes {
 			match scope {
 				Scope::Application(id) => application_ids.push(id),
 				Scope::Machine(id) => machine_ids.push(id),
-				Scope::Group(_) | Scope::Cluster(_) | Scope::Global => {}
+				Scope::Group(id) => group_ids.push(id),
+				Scope::Cluster(_) | Scope::Global => {}
 			}
 		}
 		application_ids.sort_unstable();
 		application_ids.dedup();
 		machine_ids.sort_unstable();
 		machine_ids.dedup();
+		group_ids.sort_unstable();
+		group_ids.dedup();
 
 		let mut targets = Self::default();
 		if !application_ids.is_empty() {
@@ -1312,6 +1314,9 @@ impl ScopeTargets {
 					(machine.id, (machine, rank))
 				})
 				.collect();
+		}
+		if !group_ids.is_empty() {
+			targets.group_headlines = ServerGroup::highest_member_ranks(conn, &group_ids).await?;
 		}
 		Ok(targets)
 	}
@@ -1358,14 +1363,17 @@ impl ScopeTargets {
 	// spec: INC#targets
 	fn incident_target(&self, scope: Scope) -> Result<Option<(IncidentTarget, bool)>> {
 		Ok(match scope {
-			Scope::Group(gid) => Some((IncidentTarget::Group(gid), true)),
+			// A group's own checks belong to its headline environment.
+			Scope::Group(gid) => self
+				.group_headlines
+				.get(&gid)
+				.map(|rank| (IncidentTarget::Environment(gid, *rank), true)),
 			Scope::Application(sid) => {
 				let server = self.application(sid)?;
 				member_target(server.group_id, server.rank, server.is_monitored)
 			}
 			Scope::Machine(mid) => {
-				// A box's rank is the highest of the workloads on it: a check
-				// on the box is trouble for the most important thing it runs.
+				// A box serves the one rank its workloads share.
 				let (machine, rank) = self.machine(mid)?;
 				member_target(machine.group_id, *rank, machine.is_monitored)
 			}
@@ -1376,14 +1384,27 @@ impl ScopeTargets {
 }
 
 /// The target and monitoring switch a grouped member contributes to. An
-/// ungrouped one has neither, and no incident path.
+/// ungrouped or pending one has neither, and no incident path.
 // spec: INC#targets
 fn member_target(
 	group_id: Option<Uuid>,
 	rank: Option<ServerRank>,
 	monitored: bool,
 ) -> Option<(IncidentTarget, bool)> {
-	Some((IncidentTarget::of_member(group_id?, rank), monitored))
+	Some((IncidentTarget::of_member(group_id?, rank)?, monitored))
+}
+
+/// The environment a group's own checks belong to: its headline environment,
+/// and none while nothing in the group is ranked.
+// spec: INC#targets
+async fn group_headline_target(
+	conn: &mut AsyncPgConnection,
+	group_id: Uuid,
+) -> Result<Option<IncidentTarget>> {
+	Ok(ServerGroup::highest_member_ranks(conn, &[group_id])
+		.await?
+		.get(&group_id)
+		.map(|rank| IncidentTarget::Environment(group_id, *rank)))
 }
 
 /// The source operator-raised manual conditions file under.
@@ -3678,7 +3699,9 @@ pub async fn reevaluate_open_issues_for_server(
 		return Ok(());
 	};
 	let monitored = server.is_monitored;
-	let target = IncidentTarget::of_member(gid, server.rank);
+	let Some(target) = IncidentTarget::of_member(gid, server.rank) else {
+		return Ok(());
+	};
 
 	let open_issues: Vec<Issue> = dsl::issues
 		.select(Issue::as_select())
@@ -3745,7 +3768,9 @@ pub async fn reevaluate_incidents_for_server(
 		return Ok(());
 	};
 	let monitored = server.is_monitored;
-	let target = IncidentTarget::of_member(gid, server.rank);
+	let Some(target) = IncidentTarget::of_member(gid, server.rank) else {
+		return Ok(());
+	};
 
 	let mut candidates: Vec<Issue> = issues::table
 		.select(Issue::as_select())
@@ -3840,7 +3865,9 @@ pub async fn reevaluate_open_issues_for_server_ref(
 		return Ok(());
 	};
 	let monitored = server.is_monitored;
-	let target = IncidentTarget::of_member(gid, server.rank);
+	let Some(target) = IncidentTarget::of_member(gid, server.rank) else {
+		return Ok(());
+	};
 
 	let open_issues: Vec<Issue> = dsl::issues
 		.select(Issue::as_select())
@@ -3880,7 +3907,9 @@ pub async fn reevaluate_open_issues_for_machine_ref(
 	};
 	let monitored = machine.is_monitored;
 	let rank = crate::machines::Machine::rank(db, machine_id).await?;
-	let target = IncidentTarget::of_member(gid, rank);
+	let Some(target) = IncidentTarget::of_member(gid, rank) else {
+		return Ok(());
+	};
 
 	let open_issues: Vec<Issue> = dsl::issues
 		.select(Issue::as_select())
@@ -3953,7 +3982,7 @@ pub async fn reevaluate_open_issues_for_group_ref(
 }
 
 /// Re-evaluate every currently-open issue on a scope against incident
-/// membership: one server's, or a whole group's plus the group's own. Used
+/// membership: one server's, or a whole group's plus its own checks. Used
 /// when something about the target changes what counts, rather than
 /// something about one check: a maintenance window declared over it (see
 /// [`crate::maintenance_windows`]), or a rank change moving which
@@ -4035,6 +4064,53 @@ pub async fn reevaluate_open_issues_for_scope(
 		re_evaluate_incident_membership(db, &issue, target, monitored, now, by).await?;
 	}
 	Ok(())
+}
+
+/// Re-evaluate what a rank change moved: the issues at `scope`, and the
+/// group's own checks too when its headline rank is no longer `headline_before`,
+/// since those follow the headline environment.
+///
+/// `by` is the operator's login, attributing an incident that closes as a
+/// result, so the notice says what happened instead of reading as the trouble
+/// having passed.
+// spec: INC#membership
+pub async fn reevaluate_after_rank_change(
+	db: &mut AsyncPgConnection,
+	scope: Scope,
+	group_id: Option<Uuid>,
+	headline_before: Option<ServerRank>,
+	by: Option<&str>,
+) -> Result<()> {
+	let by = by.map(|login| format!("rank changed by {login}"));
+	let Some(group_id) = group_id else {
+		return Ok(());
+	};
+	let headline_moved = ServerGroup::headline_rank(db, Some(group_id)).await? != headline_before;
+	let scope = if headline_moved {
+		Scope::Group(group_id)
+	} else {
+		scope
+	};
+	reevaluate_open_issues_for_scope(db, scope, by.as_deref()).await
+}
+
+/// Re-evaluate a group's issues when something other than a rank change (a
+/// machine joining or leaving it, an application archived or restored) moved
+/// its headline rank away from `headline_before`: its own checks follow the
+/// headline environment, so they change environment with it.
+// spec: INC#membership
+pub async fn reevaluate_after_headline_change(
+	db: &mut AsyncPgConnection,
+	group_id: Option<Uuid>,
+	headline_before: Option<ServerRank>,
+) -> Result<()> {
+	let Some(group_id) = group_id else {
+		return Ok(());
+	};
+	if ServerGroup::headline_rank(db, Some(group_id)).await? == headline_before {
+		return Ok(());
+	}
+	reevaluate_open_issues_for_scope(db, Scope::Group(group_id), None).await
 }
 
 /// Re-evaluate every currently-open issue in the database against incident
@@ -4140,11 +4216,21 @@ async fn issue_targets_and_monitored(
 			.map(|machine| (machine.id, machine))
 			.collect();
 	let ranks = crate::machines::Machine::ranks(conn, &machine_ids).await?;
+	let group_ids: Vec<Uuid> = scopes
+		.iter()
+		.filter_map(|(_, scope)| match scope {
+			Scope::Group(gid) => Some(*gid),
+			_ => None,
+		})
+		.collect();
+	let headlines = ServerGroup::highest_member_ranks(conn, &group_ids).await?;
 
 	let mut out = HashMap::new();
 	for (issue_id, scope) in scopes {
 		let resolved = match scope {
-			Scope::Group(gid) => Some((IncidentTarget::Group(gid), true)),
+			Scope::Group(gid) => headlines
+				.get(&gid)
+				.map(|rank| (IncidentTarget::Environment(gid, *rank), true)),
 			Scope::Global => Some((IncidentTarget::Global, true)),
 			Scope::Application(sid) => applications.get(&sid).and_then(|application| {
 				member_target(
@@ -4409,14 +4495,13 @@ async fn open_incident_holding(
 }
 
 /// What an issue's incident contribution attaches to: one of a group's
-/// environments, the group itself, or canopy as a whole for canopy-wide
-/// issues (self-alerts). Issues on ungrouped applications and machines have
-/// no target and no incident path.
+/// environments, or canopy as a whole for canopy-wide issues (self-alerts).
+/// Issues on ungrouped applications and machines, and on pending ones with no
+/// rank yet, have no target and no incident path.
 // spec: INC#targets
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IncidentTarget {
 	Environment(Uuid, ServerRank),
-	Group(Uuid),
 	Global,
 }
 
@@ -4424,7 +4509,7 @@ impl IncidentTarget {
 	/// The `incidents.server_group_id` value for this target.
 	fn group_id(self) -> Option<Uuid> {
 		match self {
-			Self::Environment(gid, _) | Self::Group(gid) => Some(gid),
+			Self::Environment(gid, _) => Some(gid),
 			Self::Global => None,
 		}
 	}
@@ -4433,28 +4518,24 @@ impl IncidentTarget {
 	fn rank(self) -> Option<ServerRank> {
 		match self {
 			Self::Environment(_, rank) => Some(rank),
-			Self::Group(_) | Self::Global => None,
+			Self::Global => None,
 		}
 	}
 
-	/// The target an existing incident row belongs to.
+	/// The target an existing incident row belongs to. The schema holds a
+	/// rank wherever an incident has a group.
 	pub fn of_incident(incident: &Incident) -> Self {
 		match (incident.server_group_id, incident.rank) {
 			(Some(gid), Some(rank)) => Self::Environment(gid, rank),
-			(Some(gid), None) => Self::Group(gid),
-			(None, _) => Self::Global,
+			_ => Self::Global,
 		}
 	}
 
 	/// The target a member of `group_id` carrying `rank` contributes to: the
-	/// environment its rank names, and the group itself where it carries none,
-	/// there being no environment for it to be in.
+	/// environment its rank names, and none while it is pending.
 	// spec: INC#targets
-	pub fn of_member(group_id: Uuid, rank: Option<ServerRank>) -> Self {
-		match rank {
-			Some(rank) => Self::Environment(group_id, rank),
-			None => Self::Group(group_id),
-		}
+	pub fn of_member(group_id: Uuid, rank: Option<ServerRank>) -> Option<Self> {
+		Some(Self::Environment(group_id, rank?))
 	}
 }
 
@@ -4469,9 +4550,6 @@ async fn target_has_open_incident(
 		IncidentTarget::Environment(gid, rank) => q
 			.filter(dsl::server_group_id.eq(gid))
 			.filter(dsl::rank.eq(rank)),
-		IncidentTarget::Group(gid) => q
-			.filter(dsl::server_group_id.eq(gid))
-			.filter(dsl::rank.is_null()),
 		IncidentTarget::Global => q.filter(dsl::server_group_id.is_null()),
 	};
 	let count: i64 = q.count().get_result(db).await?;
@@ -4504,8 +4582,8 @@ async fn target_has_open_incident(
 /// Lock `target` and, where it is a different one, `other`, in a stable order.
 ///
 /// Ordering by group is what makes two concurrent moves between the same pair
-/// of groups safe; the same group's own target and its environments' share one
-/// lock, so their relative order does not matter.
+/// of groups safe; a group's environments share one lock, so their relative
+/// order does not matter.
 async fn lock_targets(
 	db: &mut AsyncPgConnection,
 	target: IncidentTarget,
@@ -4525,9 +4603,9 @@ async fn lock_targets(
 async fn lock_target(db: &mut AsyncPgConnection, target: IncidentTarget) -> Result<()> {
 	use crate::schema::server_groups;
 	match target {
-		// One lock per group, so a group's own target and its environments'
-		// serialise against each other as well as against themselves.
-		IncidentTarget::Environment(gid, _) | IncidentTarget::Group(gid) => {
+		// One lock per group, so a group's environments serialise against each
+		// other as well as against themselves.
+		IncidentTarget::Environment(gid, _) => {
 			let _group_lock: Uuid = server_groups::table
 				.select(server_groups::id)
 				.filter(server_groups::id.eq(gid))
@@ -4563,9 +4641,6 @@ async fn find_or_open_incident(
 		IncidentTarget::Environment(gid, rank) => q
 			.filter(incidents::server_group_id.eq(gid))
 			.filter(incidents::rank.eq(rank)),
-		IncidentTarget::Group(gid) => q
-			.filter(incidents::server_group_id.eq(gid))
-			.filter(incidents::rank.is_null()),
 		IncidentTarget::Global => q.filter(incidents::server_group_id.is_null()),
 	};
 	let open: Option<Incident> = q
@@ -4604,7 +4679,7 @@ async fn linger_window(
 	target: IncidentTarget,
 ) -> Result<SignedDuration> {
 	Ok(match target {
-		IncidentTarget::Environment(gid, _) | IncidentTarget::Group(gid) => {
+		IncidentTarget::Environment(gid, _) => {
 			ServerGroup::get_by_id(conn, gid).await?.slack_close_delay.0
 		}
 		IncidentTarget::Global => GLOBAL_CLOSE_GRACE,
@@ -4621,7 +4696,7 @@ async fn enqueue_slack_open(
 	issue: &Issue,
 ) -> Result<()> {
 	let open_delay = match target {
-		IncidentTarget::Environment(gid, _) | IncidentTarget::Group(gid) => {
+		IncidentTarget::Environment(gid, _) => {
 			ServerGroup::get_by_id(conn, gid).await?.slack_open_delay.0
 		}
 		IncidentTarget::Global => GLOBAL_OPEN_GRACE,
@@ -4736,16 +4811,6 @@ async fn enqueue_slack_resolve_inner(
 	Ok(())
 }
 
-/// How an incident's target reads in a notification: the environment, or the
-/// group itself where the incident carries no rank.
-// spec: INC#notification
-fn format_group_label(group: &ServerGroup, rank: Option<ServerRank>) -> String {
-	match rank {
-		Some(rank) => crate::server_groups::environment_name(&group.name, rank),
-		None => group.name.clone(),
-	}
-}
-
 impl Incident {
 	pub async fn get_by_id(db: &mut AsyncPgConnection, incident_id: Uuid) -> Result<Self> {
 		use crate::schema::incidents;
@@ -4757,13 +4822,16 @@ impl Incident {
 			.map_err(AppError::from)
 	}
 
-	/// How this incident's target reads in a notification: its environment
-	/// or group, or Canopy for a Canopy-wide incident.
+	/// How this incident's target reads in a notification: its environment,
+	/// or Canopy for a Canopy-wide incident.
 	// spec: INC#notification
 	pub async fn target_label(&self, db: &mut AsyncPgConnection) -> Result<String> {
-		Ok(match self.server_group_id {
-			Some(gid) => format_group_label(&ServerGroup::get_by_id(db, gid).await?, self.rank),
-			None => "Canopy".to_string(),
+		Ok(match IncidentTarget::of_incident(self) {
+			IncidentTarget::Environment(gid, rank) => {
+				let group = ServerGroup::get_by_id(db, gid).await?;
+				crate::server_groups::environment_name(&group.name, rank)
+			}
+			IncidentTarget::Global => "Canopy".to_string(),
 		})
 	}
 }
@@ -5582,8 +5650,8 @@ impl Incident {
 impl Incident {
 	/// An incident is owned by the environment an application is in, so a
 	/// caller asking for one application's incidents wants that
-	/// environment's, and the group's own where the application belongs to no
-	/// environment. Ungrouped applications return an empty Vec.
+	/// environment's. Ungrouped and pending applications belong to no
+	/// environment and return an empty Vec.
 	// spec: INC#targets
 	pub async fn list_for_server(
 		db: &mut AsyncPgConnection,
@@ -5594,13 +5662,13 @@ impl Incident {
 		use crate::schema::incidents::dsl;
 
 		let application = Application::get_by_id(db, application_id).await?;
-		let Some(gid) = application.group_id else {
+		let (Some(gid), Some(rank)) = (application.group_id, application.rank) else {
 			return Ok(Vec::new());
 		};
 		let mut q = dsl::incidents
 			.select(Self::as_select())
 			.filter(dsl::server_group_id.eq(gid))
-			.filter(dsl::rank.is_not_distinct_from(application.rank))
+			.filter(dsl::rank.eq(rank))
 			.into_boxed();
 		if !include_closed {
 			q = q.filter(dsl::closed_at.is_null());

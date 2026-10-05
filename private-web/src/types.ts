@@ -186,8 +186,8 @@ export function isIncidentLingering(
 	return incident.closed_at == null && incident.lingering_since != null;
 }
 /// How an incident's target reads: the group's name for a production
-/// environment and for the group itself, and the group's name with the rank
-/// after it for every other environment.
+/// environment, and the group's name with the rank after it for every other
+/// environment.
 /// spec: INC#notification
 export function incidentTargetName(
 	incident: Pick<IncidentData, "server_group_name" | "rank">,
@@ -389,7 +389,8 @@ export function compareServersByRankThenType<
 
 /// Group a flat application list into rank buckets in display order, with
 /// each bucket internally sorted by type (centrals first) then name.
-/// Applications without a rank land in a trailing `null` bucket.
+/// Pending applications, which have no rank yet, land in a trailing `null`
+/// bucket.
 export function groupServersByRank<
 	T extends {
 		rank?: ServerRank | null;
@@ -426,12 +427,12 @@ export interface RankedMachine {
 	name: string;
 }
 
-/// Give each machine the rank of its highest-ranked workload, so a box sorts
-/// into the same bands the fleet uses everywhere else.
+/// Give each machine the rank its workloads share, so a box sorts into the same
+/// bands the fleet uses everywhere else.
 ///
-/// Rank is a workload's property, so a box shared by a production and a test
-/// workload is a production box. A machine carrying nothing yet has no rank to
-/// take and sorts last: awaiting check-in, not an error.
+/// A box serves one environment, so every workload on it carries the same rank.
+/// A box where nothing is ranked yet, or that carries nothing yet, has no rank
+/// to take and sorts last.
 /// spec: FLT
 export function rankMachines(
 	machines: readonly GroupMachine[],

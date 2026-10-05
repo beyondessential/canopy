@@ -135,13 +135,12 @@ async fn detail_billing_labels_are_the_servers_own() {
 }
 
 /// A box is not a piece of software, so it carries no product however many
-/// workloads run on it. Its stage is the highest rank among them: a box shared
-/// by a production and a test workload bills as production, because that is
-/// what the spend is really supporting.
+/// workloads run on it. Its stage is the rank its workloads share, so every
+/// application on a production box carries the same stage as the box.
 ///
 /// spec: APP#billing-attribution
 #[tokio::test(flavor = "multi_thread")]
-async fn a_machines_labels_carry_no_type_and_take_the_highest_rank_on_it() {
+async fn a_machines_labels_carry_no_type_and_take_the_rank_its_workloads_share() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		let group = private
 			.post("/api/fleet/groups/create")
@@ -151,15 +150,17 @@ async fn a_machines_labels_carry_no_type_and_take_the_highest_rank_on_it() {
 		let group_body: serde_json::Value = group.json();
 		let group_id = group_body["id"].as_str().unwrap().to_string();
 
-		// One box, two workloads of different software and different ranks.
+		// One box, two workloads of different software at the rank they share.
 		let machine = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO machines (name, id, group_id) VALUES ('box', '{machine}', '{group_id}')"
 		))
 		.await
 		.expect("insert machine");
-		for (r#type, rank) in [("tamanu-central", "test"), ("senaite", "production")] {
+		let mut ids = Vec::new();
+		for (r#type, rank) in [("tamanu-central", "production"), ("senaite", "production")] {
 			let id = Uuid::new_v4();
+			ids.push(id);
 			conn.batch_execute(&format!(
 				"INSERT INTO applications (id, host, type, rank, group_id, machine_id) \
 				 VALUES ('{id}', 'https://{id}.example.com', '{type}', '{rank}', '{group_id}', '{machine}')"
@@ -194,12 +195,74 @@ async fn a_machines_labels_carry_no_type_and_take_the_highest_rank_on_it() {
 		assert_eq!(
 			labels.get("billing.stage").map(String::as_str),
 			Some("prod"),
-			"the highest rank on the box, not the lowest and not the first"
+			"the rank the box's workloads share"
 		);
 		assert_eq!(
 			labels.get("billing.deployment").map(String::as_str),
 			Some("pacific")
 		);
+
+		for id in ids {
+			let response = private
+				.post("/api/fleet/applications/get_detail")
+				.json(&json!({ "server_id": id.to_string() }))
+				.await;
+			response.assert_status_ok();
+			let body: serde_json::Value = response.json();
+			let stage = body["billing_labels"]
+				.as_array()
+				.expect("billing labels")
+				.iter()
+				.find(|t| t["key"] == "billing.stage")
+				.map(|t| t["value"].as_str().unwrap().to_string());
+			assert_eq!(
+				stage.as_deref(),
+				Some("prod"),
+				"every application on the box carries the box's stage"
+			);
+		}
+	})
+	.await
+}
+
+/// A pending box serves no environment yet, so its labels carry no stage.
+///
+/// spec: APP#billing-attribution
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pending_machine_carries_no_stage_label() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		let group = private
+			.post("/api/fleet/groups/create")
+			.json(&json!({ "name": "Pacific" }))
+			.await;
+		group.assert_status_ok();
+		let group_body: serde_json::Value = group.json();
+		let group_id = group_body["id"].as_str().unwrap().to_string();
+
+		let machine = Uuid::new_v4();
+		let id = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (name, id, group_id) VALUES ('box', '{machine}', '{group_id}'); \
+			 INSERT INTO applications (id, host, type, group_id, machine_id) \
+			 VALUES ('{id}', 'https://{id}.example.com', 'tamanu-central', '{group_id}', '{machine}')"
+		))
+		.await
+		.expect("insert a pending box");
+
+		let response = private
+			.post("/api/fleet/machines/get_detail")
+			.json(&json!({ "machine_id": machine.to_string() }))
+			.await;
+		response.assert_status_ok();
+		let body: serde_json::Value = response.json();
+		let keys: Vec<&str> = body["billing_labels"]
+			.as_array()
+			.expect("billing labels")
+			.iter()
+			.map(|t| t["key"].as_str().unwrap())
+			.collect();
+		assert!(!keys.contains(&"billing.stage"), "{keys:?}");
+		assert!(keys.contains(&"billing.deployment"), "{keys:?}");
 	})
 	.await
 }

@@ -49,7 +49,7 @@ async fn insert_grouped_server(conn: &mut diesel_async::AsyncPgConnection) -> (U
 	.await
 	.expect("group");
 	let server: RowId = sql_query(
-		"WITH m AS (INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id) INSERT INTO applications (type, host, group_id, machine_id) SELECT 'tamanu-central', 'http://stranded.invalid/', $1, m.id FROM m RETURNING id",
+		"WITH m AS (INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id) INSERT INTO applications (type, host, group_id, rank, machine_id) SELECT 'tamanu-central', 'http://stranded.invalid/', $1, 'production', m.id FROM m RETURNING id",
 	)
 	.bind::<sql_types::Uuid, _>(group.id)
 	.get_result(conn)
@@ -287,16 +287,16 @@ async fn the_backfill_releases_stranded_members_and_spares_live_ones() {
 		let live_issue = issue_id(&mut conn, server_id, "health/live").await;
 
 		let closed: RowId = sql_query(
-			"INSERT INTO incidents (server_group_id, opened_at, closed_at) \
-			 VALUES ($1, now() - INTERVAL '3 days', now() - INTERVAL '2 days') RETURNING id",
+			"INSERT INTO incidents (server_group_id, rank, opened_at, closed_at) \
+			 VALUES ($1, 'production', now() - INTERVAL '3 days', now() - INTERVAL '2 days') RETURNING id",
 		)
 		.bind::<sql_types::Uuid, _>(group_id)
 		.get_result(&mut conn)
 		.await
 		.expect("closed incident");
 		let open: RowId = sql_query(
-			"INSERT INTO incidents (server_group_id, opened_at) \
-			 VALUES ($1, now() - INTERVAL '1 hour') RETURNING id",
+			"INSERT INTO incidents (server_group_id, rank, opened_at) \
+			 VALUES ($1, 'production', now() - INTERVAL '1 hour') RETURNING id",
 		)
 		.bind::<sql_types::Uuid, _>(group_id)
 		.get_result(&mut conn)

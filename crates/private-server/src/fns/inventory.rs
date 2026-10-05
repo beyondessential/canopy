@@ -71,7 +71,7 @@ pub struct EnvironmentArgs {
 	#[serde(default)]
 	pub group: Option<String>,
 	/// Rank of the environment within the group. Required only where the
-	/// group's live applications span more than one rank.
+	/// group's ranked applications span more than one rank.
 	#[serde(default)]
 	pub rank: Option<ServerRank>,
 }
@@ -245,11 +245,12 @@ async fn resolve_environment(
 		)));
 	}
 
-	// An application carrying no rank is at ServerRank's own default, so every
-	// live application belongs to exactly one of its group's environments.
+	// A pending application is in no environment, so the group's environments
+	// are the ranks its ranked applications sit at.
+	// spec: GRP#environments
 	let ranks: BTreeSet<ServerRank> = members
 		.iter()
-		.map(|application| application.rank.unwrap_or_default())
+		.filter_map(|application| application.rank)
 		.collect();
 	let rank = match args.rank {
 		Some(rank) => rank,
@@ -265,12 +266,17 @@ async fn resolve_environment(
 					.join(", ")
 			)));
 		}
-		None => ranks.into_iter().next().unwrap_or_default(),
+		None => ranks.into_iter().next().ok_or_else(|| {
+			AppError::Conflict(format!(
+				"server group {:?} has nothing ranked yet, so it has no environment",
+				group.name
+			))
+		})?,
 	};
 
 	let applications: Vec<Application> = members
 		.into_iter()
-		.filter(|application| application.rank.unwrap_or_default() == rank)
+		.filter(|application| application.rank == Some(rank))
 		.collect();
 	if applications.is_empty() {
 		return Err(AppError::Conflict(format!(

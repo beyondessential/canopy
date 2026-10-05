@@ -18,7 +18,7 @@ use commons_types::{
 	Uuid,
 	device::DeviceRole,
 	geo::GeoPoint,
-	server::TagMap,
+	server::{TagMap, rank::ServerRank},
 	status::{HealthState, ShortStatus},
 };
 use database::applications::Application;
@@ -125,9 +125,8 @@ pub async fn get(
 /// A machine's effective billing labels.
 ///
 /// A box is not a piece of software, so it carries no product. Its stage is the
-/// highest rank among the applications on it — a box shared by a production and
-/// a test workload bills as production — and its deployment label comes from its
-/// group. An ungrouped machine carries no attribution at all, there being no
+/// rank its applications share, and none while it is pending; its deployment
+/// label comes from its group. An ungrouped machine carries no attribution at all, there being no
 /// group to attribute it to.
 // spec: APP#billing-attribution
 async fn machine_billing_labels(
@@ -473,12 +472,18 @@ pub struct MachineUpdateArgs {
 	pub notes: Option<String>,
 	/// New set of key/value tags. Replaces the whole set.
 	pub tags: Option<TagMap>,
+	/// New rank for the box, which every application on it takes. Omit to
+	/// leave unchanged. A rank can be changed but not cleared, so `null` is
+	/// refused, and a box with no application on it has nothing to rank.
+	#[serde(default, deserialize_with = "super::applications::deserialize_some")]
+	pub rank: Option<Option<ServerRank>>,
 }
 
 /// Edit a machine.
 ///
 /// Moving a machine to another group moves the applications on it: an
-/// application's group is never set independently of its machine's.
+/// application's group is never set independently of its machine's, and
+/// neither is its rank.
 #[utoipa::path(
 	post,
 	path = "/update",
@@ -495,10 +500,23 @@ pub struct MachineUpdateArgs {
 )]
 pub async fn update(
 	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
+	admin: TailscaleAdmin,
 	Json(args): Json<MachineUpdateArgs>,
 ) -> Result<Json<Machine>> {
 	let mut conn = state.db.get().await?;
+	// Ranked first, so a refusal leaves the rest of the edit unapplied.
+	// spec: GRP#environments
+	match args.rank {
+		Some(None) => {
+			return Err(AppError::BadRequest(
+				"a rank can be changed but not cleared".into(),
+			));
+		}
+		Some(Some(rank)) => {
+			Machine::set_rank(&mut conn, args.machine_id, rank, Some(&admin.0.login)).await?;
+		}
+		None => {}
+	}
 	let updated = Machine::update(
 		&mut conn,
 		args.machine_id,

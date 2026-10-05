@@ -52,10 +52,34 @@ async fn insert_server(
 			.await
 			.expect("insert machine");
 	let application: RowId = sql_query(
-		"INSERT INTO applications (type, host, group_id, machine_id) \
-		 VALUES ('tamanu-central', 'http://maint.invalid/', $1, $2) RETURNING id",
+		"INSERT INTO applications (type, host, group_id, rank, machine_id) \
+		 VALUES ('tamanu-central', 'http://maint.invalid/', $1, 'production', $2) RETURNING id",
 	)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)
+	.bind::<sql_types::Uuid, _>(machine.id)
+	.get_result(conn)
+	.await
+	.expect("insert application");
+	(machine.id, application.id)
+}
+
+/// A machine and the one application on it that nothing has ranked, as
+/// `(machine, application)`: pending, and so in no environment.
+async fn insert_pending_server(
+	conn: &mut diesel_async::AsyncPgConnection,
+	group_id: Uuid,
+) -> (Uuid, Uuid) {
+	let machine: RowId =
+		sql_query("INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id")
+			.bind::<sql_types::Uuid, _>(group_id)
+			.get_result(conn)
+			.await
+			.expect("insert machine");
+	let application: RowId = sql_query(
+		"INSERT INTO applications (type, host, group_id, machine_id) \
+		 VALUES ('tamanu-central', 'http://pending.invalid/', $1, $2) RETURNING id",
+	)
+	.bind::<sql_types::Uuid, _>(group_id)
 	.bind::<sql_types::Uuid, _>(machine.id)
 	.get_result(conn)
 	.await
@@ -710,8 +734,8 @@ async fn a_machine_window_covers_every_application_on_the_box() {
 
 		// A second workload on the same box.
 		let second: RowId = sql_query(
-			"INSERT INTO applications (type, host, group_id, machine_id) \
-			 VALUES ('tamanu-central', 'http://maint2.invalid/', $1, $2) RETURNING id",
+			"INSERT INTO applications (type, host, group_id, rank, machine_id) \
+			 VALUES ('tamanu-central', 'http://maint2.invalid/', $1, 'production', $2) RETURNING id",
 		)
 		.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(group_id))
 		.bind::<sql_types::Uuid, _>(machine_id)
@@ -778,8 +802,8 @@ async fn an_application_window_leaves_the_rest_of_the_box_alerting() {
 
 		// The other product on the same box, which nobody declared over.
 		let beside: RowId = sql_query(
-			"INSERT INTO applications (type, host, group_id, machine_id) \
-			 VALUES ('tamanu-central', 'http://beside.invalid/', $1, $2) RETURNING id",
+			"INSERT INTO applications (type, host, group_id, rank, machine_id) \
+			 VALUES ('tamanu-central', 'http://beside.invalid/', $1, 'production', $2) RETURNING id",
 		)
 		.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(group_id))
 		.bind::<sql_types::Uuid, _>(machine_id)
@@ -979,16 +1003,16 @@ async fn a_legacy_rank_spelling_falls_under_its_environment_window() {
 	.await
 }
 
-/// An application with no rank serves no environment, so an environment's
-/// window says nothing about it: only the group's own window covers it.
+/// A pending box serves no environment, so an environment's window says
+/// nothing about it, and the group's own window and one over the box itself
+/// are what cover it. Its trouble belongs to no incident either way.
 // spec: MNT#declaring
 #[tokio::test(flavor = "multi_thread")]
-async fn an_environment_window_does_not_suspend_an_unranked_member() {
+async fn a_pending_box_is_in_no_environments_window() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn).await;
-		let (unranked_box, unranked) = insert_server(&mut conn, Some(group_id)).await;
-		let (production_box, production) =
-			insert_ranked_server(&mut conn, group_id, "production").await;
+		let (pending_box, pending) = insert_pending_server(&mut conn, group_id).await;
+		let (production_box, _) = insert_ranked_server(&mut conn, group_id, "production").await;
 		MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Group(group_id),
@@ -1000,36 +1024,29 @@ async fn an_environment_window_does_not_suspend_an_unranked_member() {
 		.await
 		.expect("declare");
 
-		for application in [production, unranked] {
-			file_check(
-				&mut conn,
-				filing(application, "reachability", CheckResult::Failed),
-			)
-			.await
-			.expect("file check");
-		}
+		file_check(
+			&mut conn,
+			filing(pending, "reachability", CheckResult::Failed),
+		)
+		.await
+		.expect("file check");
 		assert_eq!(
 			open_incidents(&mut conn, group_id).await,
-			1,
-			"the unranked application's failure opens an incident"
-		);
-		assert_eq!(
-			live_members(&mut conn, group_id).await,
-			1,
-			"and is the only issue in it: production is under the window"
+			0,
+			"a pending application's failure belongs to no incident"
 		);
 
 		assert!(
-			!MaintenanceWindow::suspends(&mut conn, None, Some(unranked_box), Some(group_id))
+			!MaintenanceWindow::suspends(&mut conn, None, Some(pending_box), Some(group_id))
 				.await
 				.expect("suspends"),
-			"an unranked application is in no environment's window"
+			"a pending box is in no environment's window"
 		);
 		assert!(
 			MaintenanceWindow::suspends(&mut conn, None, Some(production_box), Some(group_id))
 				.await
 				.expect("suspends"),
-			"the environment's own members are"
+			"the environment's own boxes are"
 		);
 
 		MaintenanceWindow::declare(
@@ -1043,10 +1060,127 @@ async fn an_environment_window_does_not_suspend_an_unranked_member() {
 		.await
 		.expect("declare group-wide");
 		assert!(
-			MaintenanceWindow::suspends(&mut conn, None, Some(unranked_box), Some(group_id))
+			MaintenanceWindow::suspends(&mut conn, None, Some(pending_box), Some(group_id))
 				.await
 				.expect("suspends"),
-			"the group's own window covers every member, ranked or not"
+			"the group's own window covers every member"
+		);
+
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Machine(pending_box),
+			None,
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare over the box");
+		assert!(
+			MaintenanceWindow::suspends(&mut conn, None, Some(pending_box), None)
+				.await
+				.expect("suspends"),
+			"and so does a window over the box itself"
+		);
+	})
+	.await
+}
+
+/// A database beside a site's production central is part of the site's
+/// production, so a window over it covers the database and its failure joins
+/// no incident while the window holds.
+// spec: MNT#declaring
+#[tokio::test(flavor = "multi_thread")]
+async fn a_window_over_production_covers_the_database_on_a_production_box() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let (machine_id, _) = insert_ranked_server(&mut conn, group_id, "production").await;
+		let database: RowId = sql_query(
+			"INSERT INTO applications (type, host, group_id, rank, machine_id) \
+			 VALUES ('postgres', 'http://database.invalid/', $1, 'production', $2) RETURNING id",
+		)
+		.bind::<sql_types::Uuid, _>(group_id)
+		.bind::<sql_types::Uuid, _>(machine_id)
+		.get_result(&mut conn)
+		.await
+		.expect("database beside the central");
+
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			Some(ServerRank::Production),
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare over production");
+
+		file_check(
+			&mut conn,
+			filing(database.id, "reachability", CheckResult::Failed),
+		)
+		.await
+		.expect("file check");
+		assert_eq!(open_incidents(&mut conn, group_id).await, 0);
+	})
+	.await
+}
+
+/// A group's own checks are on none of its environment's machines, so a window
+/// over the headline environment leaves a failing backup check in the incident
+/// and only the group's own window suspends it.
+// spec: MNT#declaring
+#[tokio::test(flavor = "multi_thread")]
+async fn a_window_over_the_headline_environment_leaves_a_group_check_watched() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		insert_ranked_server(&mut conn, group_id, "production").await;
+		file_check(
+			&mut conn,
+			CheckFiling {
+				scope: Scope::Group(group_id),
+				..filing(Uuid::nil(), "backup-staleness", CheckResult::Failed)
+			},
+		)
+		.await
+		.expect("file group check");
+		assert_eq!(
+			open_incidents(&mut conn, group_id).await,
+			1,
+			"the group's check opens the headline environment's incident"
+		);
+
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			Some(ServerRank::Production),
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare over production");
+		assert_eq!(
+			open_incidents(&mut conn, group_id).await,
+			1,
+			"the production window does not reach the group's own check"
+		);
+
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			None,
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare group-wide");
+		assert_eq!(
+			open_incidents(&mut conn, group_id).await,
+			0,
+			"the group's own window suspends it"
 		);
 	})
 	.await
@@ -1238,53 +1372,6 @@ async fn a_box_whose_group_window_still_holds_is_not_settling() {
 		assert!(
 			!targets.settling(machine_id, Some(group_id)),
 			"the group's window still holds over it"
-		);
-	})
-	.await
-}
-
-/// A box also carrying an application of another group, or of none, serves the
-/// highest rank on it, so a window over a lesser environment does not reach it.
-/// Reading the box two ways would mark it as handed over on the status page
-/// while its checks still page.
-// spec: MNT#declaring
-#[tokio::test(flavor = "multi_thread")]
-async fn a_box_serving_a_higher_rank_is_outside_a_lesser_environment_s_window() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let group_id = insert_group(&mut conn).await;
-		let (machine_id, _) = insert_ranked_server(&mut conn, group_id, "test").await;
-		sql_query(
-			"INSERT INTO applications (type, host, rank, machine_id) \
-			 VALUES ('tamanu-central', 'http://neighbour.invalid/', 'production', $1)",
-		)
-		.bind::<sql_types::Uuid, _>(machine_id)
-		.execute(&mut conn)
-		.await
-		.expect("a production application of no group on the same box");
-
-		MaintenanceWindow::declare(
-			&mut conn,
-			Scope::Group(group_id),
-			Some(ServerRank::Test),
-			in_an_hour(),
-			None,
-			Some("op"),
-		)
-		.await
-		.expect("declare over the test environment");
-
-		let targets = MaintenanceWindow::suspended_targets(&mut conn)
-			.await
-			.expect("suspended");
-		assert!(
-			!targets.suspends(machine_id, Some(group_id)),
-			"the box serves production, which no window is over"
-		);
-		assert!(
-			!MaintenanceWindow::suspends(&mut conn, None, Some(machine_id), Some(group_id))
-				.await
-				.expect("suspends"),
-			"and an incident reads the box the same way"
 		);
 	})
 	.await

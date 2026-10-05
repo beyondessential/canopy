@@ -403,3 +403,122 @@ async fn update_server_blank_name_clears_it() {
 	})
 	.await
 }
+
+const BOX: &str = "66666666-6666-6666-6666-666666666666";
+const CENTRAL: &str = "66666666-6666-6666-6666-666666666601";
+const DATABASE: &str = "66666666-6666-6666-6666-666666666602";
+
+async fn seed_box(conn: &mut commons_tests::diesel_async::AsyncPgConnection, rank: &str) {
+	conn.batch_execute(&format!(
+		"INSERT INTO machines (name, id) VALUES ('box', '{BOX}'); \
+		 INSERT INTO applications (id, host, type, rank, machine_id) VALUES \
+		 ('{CENTRAL}', 'https://central.example.com', 'tamanu-central', '{rank}', '{BOX}'), \
+		 ('{DATABASE}', 'https://database.example.com', 'postgres', '{rank}', '{BOX}')"
+	))
+	.await
+	.unwrap();
+}
+
+async fn ranks_on_the_box(
+	conn: &mut commons_tests::diesel_async::AsyncPgConnection,
+) -> Vec<Option<commons_types::server::rank::ServerRank>> {
+	let machine = BOX.parse().unwrap();
+	Machine::get_by_id(conn, machine)
+		.await
+		.unwrap()
+		.applications(conn)
+		.await
+		.unwrap()
+		.into_iter()
+		.map(|application| application.rank)
+		.collect()
+}
+
+/// A box serves one environment, so ranking one application ranks every
+/// application on it.
+// spec: GRP#environments
+#[tokio::test(flavor = "multi_thread")]
+async fn ranking_an_application_ranks_its_whole_box() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		seed_box(&mut conn, "test").await;
+
+		private
+			.post("/api/fleet/applications/update")
+			.json(&json!({ "server_id": DATABASE, "data": { "rank": "demo" } }))
+			.await
+			.assert_status_ok();
+		assert!(
+			ranks_on_the_box(&mut conn)
+				.await
+				.iter()
+				.all(|rank| *rank == Some(commons_types::server::rank::ServerRank::Demo))
+		);
+
+		private
+			.post("/api/fleet/machines/update")
+			.json(&json!({ "machine_id": BOX, "rank": "clone" }))
+			.await
+			.assert_status_ok();
+		assert!(
+			ranks_on_the_box(&mut conn)
+				.await
+				.iter()
+				.all(|rank| *rank == Some(commons_types::server::rank::ServerRank::Clone))
+		);
+	})
+	.await
+}
+
+/// A rank is changed and never cleared: asking for it is refused and leaves the
+/// box as it was.
+// spec: GRP#environments
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rank_cannot_be_cleared() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		seed_box(&mut conn, "production").await;
+		let before = ranks_on_the_box(&mut conn).await;
+
+		private
+			.post("/api/fleet/applications/update")
+			.json(&json!({ "server_id": CENTRAL, "data": { "rank": null } }))
+			.await
+			.assert_status_bad_request();
+		private
+			.post("/api/fleet/machines/update")
+			.json(&json!({ "machine_id": BOX, "rank": null, "name": "renamed" }))
+			.await
+			.assert_status_bad_request();
+
+		assert_eq!(ranks_on_the_box(&mut conn).await, before);
+		assert_eq!(
+			Machine::get_by_id(&mut conn, BOX.parse().unwrap())
+				.await
+				.unwrap()
+				.name,
+			"box",
+			"a refused edit applies none of it"
+		);
+	})
+	.await
+}
+
+/// A machine holds its rank through the applications on it, so one with none
+/// has nothing to rank.
+// spec: FLT#editing
+#[tokio::test(flavor = "multi_thread")]
+async fn a_machine_with_no_application_cannot_be_ranked() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (name, id) VALUES ('empty', '{BOX}')"
+		))
+		.await
+		.unwrap();
+
+		private
+			.post("/api/fleet/machines/update")
+			.json(&json!({ "machine_id": BOX, "rank": "test" }))
+			.await
+			.assert_status_bad_request();
+	})
+	.await
+}

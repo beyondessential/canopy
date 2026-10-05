@@ -340,6 +340,9 @@ export async function seedServer(
 		host?: string;
 		/** What the application is. Defaults to a Tamanu central. */
 		type?: ApplicationType;
+		/** Defaults to the rank of the other workloads on the box, or production
+		 * for a box of its own. Pass `null` for a pending application: one
+		 * nothing has ranked yet. */
 		rank?: ServerRank | null;
 		groupId?: string | null;
 		deviceId?: string;
@@ -365,7 +368,21 @@ export async function seedServer(
 	const name = opts.name === null ? null : (opts.name ?? randomLabel("srv"));
 	const host = opts.host ?? `https://${randomLabel("host")}.e2e.invalid`;
 	const type = opts.type ?? "tamanu-central";
-	const rank = opts.rank ?? "production";
+	let rank: ServerRank | null;
+	if (opts.rank !== undefined) {
+		rank = opts.rank;
+	} else if (opts.machineId !== undefined) {
+		// A box's workloads share one rank, which the schema holds.
+		const rows = await sql.query<{ rank: ServerRank }>(
+			`SELECT rank FROM applications
+			 WHERE machine_id = $1 AND deleted_at IS NULL AND rank IS NOT NULL
+			 LIMIT 1`,
+			[opts.machineId],
+		);
+		rank = rows[0]?.rank ?? "production";
+	} else {
+		rank = "production";
+	}
 	const isMonitored = opts.isMonitored ?? false;
 	const alertWhenDownFor = opts.alertWhenDownFor ?? 600;
 	// A box of its own for each seeded workload unless the caller names one,
@@ -1056,7 +1073,8 @@ export async function seedIncident(
 	opts: {
 		/** Group the incident targets; null/absent seeds a canopy-wide one. */
 		serverGroupId?: string | null;
-		/** Which of the group's environments; absent targets the group itself. */
+		/** Which of the group's environments; production when absent. A canopy-wide
+		 * incident has none. */
 		rank?: ServerRank | null;
 		/** ISO 8601; defaults to NOW(). */
 		openedAt?: string;
@@ -1077,7 +1095,7 @@ export async function seedIncident(
 		[
 			id,
 			opts.serverGroupId ?? null,
-			opts.rank ?? null,
+			opts.serverGroupId ? (opts.rank ?? "production") : null,
 			opts.openedAt ?? null,
 			opts.closingAt ?? null,
 		],

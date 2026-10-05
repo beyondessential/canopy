@@ -33,9 +33,9 @@ async fn seed(conn: &mut AsyncPgConnection) -> (Uuid, Uuid) {
 
 		 INSERT INTO machines (id, name, group_id) VALUES ('{MACHINE}', 'box', '{GROUP}');
 
-		 INSERT INTO applications (id, type, name, host, machine_id, group_id) VALUES
-		 ('{CENTRAL}', 'tamanu-central', 'central', 'https://c', '{MACHINE}', '{GROUP}'),
-		 ('{FACILITY}', 'tamanu-facility', 'facility', 'https://f', '{MACHINE}', '{GROUP}');
+		 INSERT INTO applications (id, type, name, host, machine_id, group_id, rank) VALUES
+		 ('{CENTRAL}', 'tamanu-central', 'central', 'https://c', '{MACHINE}', '{GROUP}', 'production'),
+		 ('{FACILITY}', 'tamanu-facility', 'facility', 'https://f', '{MACHINE}', '{GROUP}', 'production');
 
 		 INSERT INTO application_reported_detail (application_id, source, reported_at, version) VALUES
 		 ('{CENTRAL}', 'tamanu', NOW(), '2.60.0'),
