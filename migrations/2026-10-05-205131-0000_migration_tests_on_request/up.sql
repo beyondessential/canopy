@@ -1,13 +1,10 @@
 -- ── Migration tests on request ──────────────────────────────────────────────
 --
--- A migrating declaration either tests every new snapshot while its
--- environment has a plan open, or only when an operator asks. A test costs a
--- full restore and migrate, so asking is the cheaper default; the column's own
--- default keeps a declaration that does not say on the original behaviour.
+-- A migrating declaration tests on a schedule while its environment has a plan
+-- open (weekly, and once in the day before the upgrade), or only when an
+-- operator asks, for trying a version out or a group too large to test weekly.
 ALTER TABLE restore_replicas
 	ADD COLUMN migrates_on_request BOOLEAN NOT NULL DEFAULT FALSE;
-
-UPDATE restore_replicas SET migrates_on_request = TRUE;
 
 -- An operator asking for a machine's data to be tested against a version. Held
 -- until a verdict for the pair lands, and reinstates a pair already settled

@@ -18460,7 +18460,7 @@
         "properties": {
           "can_migrate_on_request": {
             "type": "boolean",
-            "description": "True when the intent migration-tests candidate versions, so the\ndeclaration can choose between every snapshot and on request."
+            "description": "True when the intent migration-tests candidate versions, so the\ndeclaration can choose between the schedule and on request."
           },
           "can_publish_schemas": {
             "type": "boolean",
@@ -18602,7 +18602,7 @@
           },
           "migrates_on_request": {
             "type": "boolean",
-            "description": "Whether a migrating declaration tests only when an operator asks from\nthe upgrades view, rather than every new snapshot while its environment\nhas a plan open. Defaults to false."
+            "description": "Whether a migrating declaration tests only when an operator asks from\nthe upgrades view, rather than weekly and in the day before the upgrade\nwhile its environment has a plan open. Defaults to false."
           },
           "name": {
             "type": "string",
@@ -18693,7 +18693,7 @@
           },
           "migrates_on_request": {
             "type": "boolean",
-            "description": "Whether a migrating declaration tests only when an operator asks from\nthe upgrades view, rather than every new snapshot while its environment\nhas a plan open. Defaults to false."
+            "description": "Whether a migrating declaration tests only when an operator asks from\nthe upgrades view, rather than weekly and in the day before the upgrade\nwhile its environment has a plan open. Defaults to false."
           },
           "name": {
             "type": "string",

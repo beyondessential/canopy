@@ -181,11 +181,8 @@ test.describe("restore replicas", () => {
 		expect(rows[0]?.redacts).toBe(true);
 	});
 
-	/// A test costs a full restore and migrate, so a migrating declaration
-	/// waits to be asked unless the operator says otherwise.
-	///
 	/// spec: RST#dispatching-a-migration-test
-	test("a migrating declaration tests on request unless told otherwise", async ({
+	test("a migrating declaration tests on the schedule unless told otherwise", async ({
 		page,
 		sql,
 	}) => {
@@ -202,9 +199,9 @@ test.describe("restore replicas", () => {
 
 		const dialog = page.getByRole("dialog");
 		await expect(
-			dialog.getByRole("radio", { name: /when requested/i }),
+			dialog.getByRole("radio", { name: /weekly, and the day before/i }),
 		).toBeChecked();
-		await dialog.getByRole("radio", { name: /on every new backup/i }).check();
+		await dialog.getByRole("radio", { name: /when requested/i }).check();
 		await dialog.getByRole("button", { name: "Declare" }).click();
 
 		await expect(dialog).toHaveCount(0);
@@ -212,7 +209,7 @@ test.describe("restore replicas", () => {
 			`SELECT migrates_on_request FROM restore_replicas WHERE consumer_device_id = $1`,
 			[consumer.id],
 		);
-		expect(rows[0]?.migrates_on_request).toBe(false);
+		expect(rows[0]?.migrates_on_request).toBe(true);
 	});
 
 	/** A consumer advertising an intent that builds reporting schemas. */

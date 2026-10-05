@@ -10,7 +10,7 @@ use commons_errors::Result;
 use commons_types::backup::{BackupType, RestoreIntent, RunOutcome};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use jiff::Timestamp;
+use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -447,6 +447,77 @@ pub async fn has_verdict(
 		.optional()?;
 
 	Ok(existing.is_some())
+}
+
+/// How long a declaration on the schedule goes between tests of a pair.
+pub const SCHEDULED_EVERY: SignedDuration = SignedDuration::from_hours(7 * 24);
+
+/// How far ahead of a plan's start a declaration on the schedule tests again,
+/// so the last answer before the upgrade is against the latest data.
+pub const BEFORE_UPGRADE: SignedDuration = SignedDuration::from_hours(24);
+
+/// When a pair under a declaration on the schedule fell due, or `None` while
+/// it is not due.
+///
+/// Due once a week, and once more in the day before its environment's plan
+/// starts. A snapshot that already has a verdict is never due, so backups that
+/// stopped arriving do not spend a restore a week on an answer already held.
+// spec: RST#dispatching-a-migration-test
+pub async fn scheduled_due(
+	db: &mut AsyncPgConnection,
+	machine_id: Uuid,
+	application: &Application,
+	version: &Version,
+	snapshot_id: &str,
+	snapshot_at: Timestamp,
+	now: Timestamp,
+) -> Result<Option<Timestamp>> {
+	if has_verdict(db, machine_id, snapshot_id, version.id).await? {
+		return Ok(None);
+	}
+	let last = last_tested_at(db, machine_id, version.id).await?;
+
+	let plan = match (
+		application.group_id,
+		crate::server_groups::ServerGroup::environment_of(db, application).await?,
+	) {
+		(Some(group), Some(rank)) => {
+			crate::upgrade_plans::UpgradePlan::open_for_environment(db, group, rank).await?
+		}
+		_ => None,
+	};
+	if let Some(start) = plan.as_ref().and_then(crate::upgrade_plans::planned_start) {
+		let lead = start - BEFORE_UPGRADE;
+		if now >= lead && now < start && last.is_none_or(|tested| tested < lead) {
+			return Ok(Some(lead));
+		}
+	}
+
+	Ok(match last {
+		None => Some(snapshot_at),
+		Some(tested) if now.duration_since(tested) >= SCHEDULED_EVERY => {
+			Some(tested + SCHEDULED_EVERY)
+		}
+		Some(_) => None,
+	})
+}
+
+/// When the most recent test of a pair began, whatever its snapshot.
+async fn last_tested_at(
+	db: &mut AsyncPgConnection,
+	machine_id: Uuid,
+	target_version_id: Uuid,
+) -> Result<Option<Timestamp>> {
+	use crate::schema::{backup_restore_checks, migration_tests};
+
+	let at: Option<jiff_diesel::Timestamp> = migration_tests::table
+		.inner_join(backup_restore_checks::table)
+		.filter(migration_tests::target_version_id.eq(target_version_id))
+		.filter(backup_restore_checks::machine_id.eq(machine_id))
+		.select(diesel::dsl::max(backup_restore_checks::observed_at))
+		.first(db)
+		.await?;
+	Ok(at.map(Timestamp::from))
 }
 
 /// An operator asking for a machine's data to be tested against a version.

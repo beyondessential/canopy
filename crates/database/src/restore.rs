@@ -89,7 +89,7 @@ pub struct RestoreReplica {
 	// spec: RPT#the-build-contract
 	pub publishes_schemas: bool,
 	/// Whether a migrating declaration tests only when an operator asks, rather
-	/// than every new snapshot while its environment has a plan open.
+	/// than on the schedule while its environment has a plan open.
 	// spec: RST#dispatching-a-migration-test
 	pub migrates_on_request: bool,
 	/// Whether this declaration is currently active. When disabled, it
@@ -1552,26 +1552,35 @@ async fn untried_candidate(
 	let mut candidate = None;
 	for application in machine.applications(db).await? {
 		if let Some(version) = crate::migration_tests::candidate_for(db, &application).await? {
-			candidate = Some(version);
+			candidate = Some((application, version));
 			break;
 		}
 	}
-	let Some(version) = candidate else {
+	let Some((application, version)) = candidate else {
 		return Ok(None);
 	};
 	let request =
 		crate::migration_tests::MigrationTestRequest::pending(db, machine.id, version.id).await?;
-	// Measured from when the snapshot landed, which is when it became available
-	// to migrate, not how old the data inside it is; or from the ask, for a
-	// declaration that tests only when asked.
+	// Measured from when the pair fell due on the schedule, or from the ask, for
+	// a declaration that tests only when asked.
 	let since = match (&request, declaration.migrates_on_request) {
 		(Some(request), _) => request.requested_at.max(run.reported_at),
 		(None, true) => return Ok(None),
 		(None, false) => {
-			if crate::migration_tests::has_verdict(db, machine.id, snapshot_id, version.id).await? {
-				return Ok(None);
+			match crate::migration_tests::scheduled_due(
+				db,
+				machine.id,
+				&application,
+				&version,
+				snapshot_id,
+				run.reported_at,
+				now,
+			)
+			.await?
+			{
+				Some(due) => due,
+				None => return Ok(None),
 			}
-			run.reported_at
 		}
 	};
 	if now.duration_since(since) <= bound.0 {

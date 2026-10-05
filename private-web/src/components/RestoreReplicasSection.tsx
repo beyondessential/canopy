@@ -596,8 +596,9 @@ function PublishesSchemasField({
 	);
 }
 
-/** When a migrating declaration tests: every new snapshot while its
- * environment has a plan open, or only when asked from the upgrades view. */
+/** When a migrating declaration tests: weekly and in the day before the
+ * upgrade while its environment has a plan open, or only when asked from the
+ * upgrades view. */
 // spec: RST#dispatching-a-migration-test
 function MigrationScheduleField({
 	value,
@@ -610,9 +611,24 @@ function MigrationScheduleField({
 		<FormControl data-testid="migration-schedule">
 			<FormLabel sx={{ typography: "body2" }}>Run migration tests</FormLabel>
 			<RadioGroup
-				value={value ? "request" : "snapshot"}
+				value={value ? "request" : "schedule"}
 				onChange={(e) => onChange(e.target.value === "request")}
 			>
+				<FormControlLabel
+					value="schedule"
+					control={<Radio size="small" />}
+					label={
+						<Stack>
+							<Typography variant="body2">
+								Weekly, and the day before the upgrade
+							</Typography>
+							<Typography variant="caption" color="text.secondary">
+								While an upgrade is planned: once a week, and once more in the
+								24 hours before it starts.
+							</Typography>
+						</Stack>
+					}
+				/>
 				<FormControlLabel
 					value="request"
 					control={<Radio size="small" />}
@@ -620,19 +636,8 @@ function MigrationScheduleField({
 						<Stack>
 							<Typography variant="body2">When requested</Typography>
 							<Typography variant="caption" color="text.secondary">
-								Only when someone asks from the Upgrades page.
-							</Typography>
-						</Stack>
-					}
-				/>
-				<FormControlLabel
-					value="snapshot"
-					control={<Radio size="small" />}
-					label={
-						<Stack>
-							<Typography variant="body2">On every new backup</Typography>
-							<Typography variant="caption" color="text.secondary">
-								A restore and migrate per snapshot while an upgrade is planned.
+								Only when someone asks from the Upgrades page. For trying a
+								version out, or a group too large to test weekly.
 							</Typography>
 						</Stack>
 					}
@@ -909,7 +914,7 @@ function CreateReplicaDialog({
 	const [paramValues, setParamValues] = useState<Record<string, string>>({});
 	const [redacts, setRedacts] = useState(false);
 	const [publishesSchemas, setPublishesSchemas] = useState(false);
-	const [migratesOnRequest, setMigratesOnRequest] = useState(true);
+	const [migratesOnRequest, setMigratesOnRequest] = useState(false);
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 

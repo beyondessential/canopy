@@ -463,23 +463,23 @@ async fn worklist(
 			// whose candidate it carries alongside the machine whose snapshot it
 			// restores: the one place the two grains interleave.
 			// spec: RST#dispatching-a-migration-test
-			let target = if migrates {
-				let mut found = None;
+			let mut candidate = None;
+			if migrates {
 				for application in &on_box {
 					if let Some(version) =
 						migration_tests::candidate_for(&mut conn, application).await?
 					{
-						found = Some((application.r#type.clone(), version.id, version.as_semver()));
+						candidate = Some((application, version));
 						break;
 					}
 				}
-				match found {
-					Some(t) => Some(t),
-					None => continue,
+				if candidate.is_none() {
+					continue;
 				}
-			} else {
-				None
-			};
+			}
+			let target = candidate.as_ref().map(|(application, version)| {
+				(application.r#type.clone(), version.id, version.as_semver())
+			});
 
 			// An operator's ask reinstates a pair already settled against the
 			// latest snapshot, and is the only thing that dispatches a
@@ -522,17 +522,28 @@ async fn worklist(
 			};
 
 			// A `once` intent drops off the worklist once its work is settled for
-			// the latest snapshot, and reappears only when a newer one exists. For
-			// a `migrate` intent that settling is keyed to the target version too,
-			// and a failure settles it as firmly as a pass.
+			// the latest snapshot, and reappears only when a newer one exists. A
+			// `migrate` intent on the schedule is settled until its pair falls due
+			// again, and a failure settles it as firmly as a pass.
 			if once && !requested {
-				let settled = match (&target, latest.and_then(|r| r.snapshot_id.as_ref())) {
-					(Some((_, version_id, _)), Some(snapshot)) => {
-						migration_tests::has_verdict(&mut conn, machine.id, snapshot, *version_id)
-							.await?
+				let snapshot = latest.and_then(|r| r.snapshot_id.as_ref().map(|id| (id, r)));
+				let settled = match (&candidate, snapshot) {
+					(Some((application, version)), Some((snapshot, run))) => {
+						migration_tests::scheduled_due(
+							&mut conn,
+							machine.id,
+							application,
+							version,
+							snapshot,
+							run.reported_at,
+							jiff::Timestamp::now(),
+						)
+						.await?
+						.is_none()
 					}
 					(Some(_), None) => false,
 					(None, snapshot) => {
+						let snapshot = snapshot.map(|(id, _)| id);
 						// Keyed by name as well: each named replica of a scope
 						// verifies its own snapshot, so one of them settling does
 						// not take its siblings off the worklist.

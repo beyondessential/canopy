@@ -271,7 +271,7 @@ An intent that verifies backups therefore does not also migrate: it would go und
 An intent that keeps a replica queryable does not migrate either: a migrated replica sits at a version its group is not running, so a declaration promoted to it would give an operator a schema that does not match production.
 
 A verifying intent and a migrating intent restore the same snapshot separately.
-A verifying intent restores once per snapshot, and a migrating intent's `once` is keyed to the snapshot and target version together, so it restores when a new candidate version appears rather than on every snapshot.
+A verifying intent restores once per snapshot, and a migrating intent's `once` is keyed to the snapshot and target version together and paced by the declaration's schedule, so it restores when a new candidate version appears or its pair falls due rather than on every snapshot.
 
 An entry for a `migrate` intent names the target version alongside the snapshot, and the application whose candidate it is.
 A report echoes that application back, so the finding lands on the workload the version belongs to rather than being re-derived; a consumer that does not send it has it resolved from the machine and the version.
@@ -280,17 +280,22 @@ A consumer obtains that version's migrations from its published artifacts, the s
 A machine none of whose applications has a candidate version contributes no entry, whatever its declaration says.
 There is nothing to migrate to, and an entry naming no version would ask a consumer to restore a database for no reason.
 
-`once` is keyed to the pair of snapshot and target version: an entry is omitted once that pair has a verdict, and reinstated when either a newer snapshot or a new candidate version appears.
+`once` is keyed to the pair of snapshot and target version: an entry is omitted once that pair has a verdict, and reinstated when a new candidate version appears or, for a newer snapshot, when the declaration's schedule says the pair is due.
 A failed verdict settles that pair rather than leaving it retryable.
 A restore can fail for transient reasons and is worth retrying, but a migration failing against a fixed snapshot fails the same way every time, and a retry costs a full restore for an answer already held.
 
-A migrating declaration says when it tests: on every new snapshot while its environment has a plan open, or only when an operator asks.
-A test costs a full restore and migrate per machine, and most of a plan's life is spent waiting on the upgrade window rather than on a new answer, so asking is the default for a new declaration.
+A migrating declaration says when it tests: on a schedule while its environment has a plan open, or only when an operator asks.
+A test costs a full restore and migrate per machine, and a group's data rarely changes in a way that alters the answer from one day's snapshot to the next, so a declaration does not test every snapshot.
+On the schedule, a pair falls due once a week, and once more in the day before its environment's plan starts, so the last answer before the upgrade is against the latest data.
+A plan's start is the opening of its window where it recorded an hour, and the start of its planned day otherwise.
+A snapshot that already has a verdict for the version is never due, so backups that stopped arriving do not spend a restore a week on an answer already held.
+The schedule is the default; asking is for trying a version out, and for a group too large to restore weekly.
+
 An operator asks from the environment's row in the upgrades view, and the ask covers every machine whose application the plan applies to.
 An ask puts each of those machines on the worklist against its latest snapshot, including one whose pair is already settled, since an ask after a fix to the pipeline or to the data is a request for a new answer.
 It is answered for a machine once a verdict for that machine and version lands from a test that began after the ask, and until then the environment's row says it is waiting.
 A restore that fails before migrating leaves the ask standing, as it leaves the pair retryable.
-A declaration that tests on request is never overdue for want of a test nobody asked for; an ask that goes unanswered past the bound is.
+A declaration is overdue when a pair it is due to test, by the schedule or by an ask, goes untried past the bound; one that tests on request is never overdue for want of a test nobody asked for.
 
 ### What a migration test reports
 

@@ -103,7 +103,7 @@ pub struct RestoreReplicaView {
 	/// Whether this migrating declaration tests only when an operator asks.
 	pub migrates_on_request: bool,
 	/// True when the intent migration-tests candidate versions, so the
-	/// declaration can choose between every snapshot and on request.
+	/// declaration can choose between the schedule and on request.
 	pub can_migrate_on_request: bool,
 	/// Servers this declaration covers that cannot currently be redacted:
 	/// either their product publishes no masking manifest, or the version
@@ -209,8 +209,8 @@ pub struct RestoreReplicasCreateArgs {
 	#[serde(default)]
 	pub publishes_schemas: bool,
 	/// Whether a migrating declaration tests only when an operator asks from
-	/// the upgrades view, rather than every new snapshot while its environment
-	/// has a plan open. Defaults to false.
+	/// the upgrades view, rather than weekly and in the day before the upgrade
+	/// while its environment has a plan open. Defaults to false.
 	#[serde(default)]
 	pub migrates_on_request: bool,
 }
@@ -264,8 +264,8 @@ pub struct RestoreReplicasUpdateArgs {
 	#[serde(default)]
 	pub publishes_schemas: bool,
 	/// Whether a migrating declaration tests only when an operator asks from
-	/// the upgrades view, rather than every new snapshot while its environment
-	/// has a plan open. Defaults to false.
+	/// the upgrades view, rather than weekly and in the day before the upgrade
+	/// while its environment has a plan open. Defaults to false.
 	#[serde(default)]
 	pub migrates_on_request: bool,
 	/// Whether the declaration should be active.

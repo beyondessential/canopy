@@ -1190,14 +1190,17 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 	.await;
 }
 
-/// A migration test against the planned version on `snap-1`, failing where a
-/// migration is named.
+/// A migration test against the planned version, begun `hours_ago`, failing
+/// where a migration is named.
+#[allow(clippy::too_many_arguments)]
 async fn record_migration_test(
 	conn: &mut AsyncPgConnection,
 	device_id: Uuid,
 	group: Uuid,
 	server: Uuid,
 	planned: Uuid,
+	snapshot: &str,
+	hours_ago: i64,
 	failed_migration: Option<&str>,
 ) {
 	database::migration_tests::MigrationTest::record(
@@ -1210,12 +1213,12 @@ async fn record_migration_test(
 			machine_id: Some(server),
 			r#type: commons_types::backup::BackupType::TamanuPostgres,
 			intent: commons_types::backup::RestoreIntent::from("verify"),
-			snapshot_id: Some("snap-1".into()),
+			snapshot_id: Some(snapshot.into()),
 			outcome: commons_types::backup::RunOutcome::Success,
 			error: None,
 			replica_healthy: true,
 			postgres_version: Some("18".into()),
-			observed_at: jiff::Timestamp::now(),
+			observed_at: jiff::Timestamp::now() - jiff::SignedDuration::from_hours(hours_ago),
 			s3_sent_raw_bytes: None,
 			s3_sent_payload_bytes: None,
 			s3_received_raw_bytes: None,
@@ -1289,7 +1292,10 @@ async fn a_declaration_migrating_on_request_waits_to_be_asked() {
 			assert_eq!(asked.len(), 1, "got {asked:?}");
 			assert_eq!(asked[0]["target_version_id"], planned.to_string());
 
-			record_migration_test(&mut conn, device_id, group, server, planned, None).await;
+			record_migration_test(
+				&mut conn, device_id, group, server, planned, "snap-1", 0, None,
+			)
+			.await;
 
 			let answered = worklist(&public, &cert).await;
 			assert!(
@@ -1322,6 +1328,8 @@ async fn a_request_reinstates_a_pair_already_settled() {
 				group,
 				server,
 				planned,
+				"snap-1",
+				0,
 				Some("backfillNoteTypeIds"),
 			)
 			.await;
@@ -1339,6 +1347,121 @@ async fn a_request_reinstates_a_pair_already_settled() {
 			let retried = worklist(&public, &cert).await;
 			assert_eq!(retried.len(), 1, "got {retried:?}");
 			assert_eq!(retried[0]["snapshot_id"], "snap-1");
+		},
+	)
+	.await;
+}
+
+/// A group tested `hours_ago` on `snap-1`, with a newer `snap-2` since, and an
+/// open plan on a declaration left on the schedule.
+async fn scheduled_after_a_test(
+	conn: &mut AsyncPgConnection,
+	public: &axum_test::TestServer,
+	cert: &str,
+	device_id: Uuid,
+	hours_ago: i64,
+) -> Uuid {
+	let group = make_group(conn).await;
+	make_config(conn, group, "ready").await;
+	let server = make_server(conn, group).await;
+	make_success_run(conn, device_id, group, server, "snap-1").await;
+	sql_query("UPDATE backup_runs SET reported_at = NOW() - INTERVAL '30 days'")
+		.execute(conn)
+		.await
+		.expect("age snap-1");
+	make_success_run(conn, device_id, group, server, "snap-2").await;
+	report_version(conn, server, "2.62.0").await;
+	let planned = publish_version(conn, 63, 2).await;
+	plan_upgrade(conn, group, planned).await;
+	declare_replica(conn, device_id, group, "verify").await;
+	register_migrate_intent(public, cert).await;
+	record_migration_test(
+		conn, device_id, group, server, planned, "snap-1", hours_ago, None,
+	)
+	.await;
+	group
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_newer_snapshot_waits_for_the_week() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			scheduled_after_a_test(&mut conn, &public, &cert, device_id, 3 * 24).await;
+
+			let entries = worklist(&public, &cert).await;
+			assert!(
+				entries.is_empty(),
+				"tested three days ago, so not due: got {entries:?}"
+			);
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pair_untested_for_a_week_falls_due() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			scheduled_after_a_test(&mut conn, &public, &cert, device_id, 8 * 24).await;
+
+			let entries = worklist(&public, &cert).await;
+			assert_eq!(entries.len(), 1, "got {entries:?}");
+			assert_eq!(entries[0]["snapshot_id"], "snap-2");
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_day_before_the_upgrade_tests_again() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = scheduled_after_a_test(&mut conn, &public, &cert, device_id, 3 * 24).await;
+			// Starts in twelve hours, so the day before it began twelve hours ago.
+			sql_query(
+				"UPDATE upgrade_plans SET planned_zone = 'UTC',
+				   planned_for = ((NOW() AT TIME ZONE 'UTC') + INTERVAL '12 hours')::date,
+				   planned_time = ((NOW() AT TIME ZONE 'UTC') + INTERVAL '12 hours')::time
+				 WHERE group_id = $1",
+			)
+			.bind::<sql_types::Uuid, _>(group)
+			.execute(&mut conn)
+			.await
+			.expect("plan starts in 12h");
+
+			let entries = worklist(&public, &cert).await;
+			assert_eq!(entries.len(), 1, "got {entries:?}");
+			assert_eq!(entries[0]["snapshot_id"], "snap-2");
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_test_inside_the_day_before_satisfies_it() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = scheduled_after_a_test(&mut conn, &public, &cert, device_id, 2).await;
+			sql_query(
+				"UPDATE upgrade_plans SET planned_zone = 'UTC',
+				   planned_for = ((NOW() AT TIME ZONE 'UTC') + INTERVAL '12 hours')::date,
+				   planned_time = ((NOW() AT TIME ZONE 'UTC') + INTERVAL '12 hours')::time
+				 WHERE group_id = $1",
+			)
+			.bind::<sql_types::Uuid, _>(group)
+			.execute(&mut conn)
+			.await
+			.expect("plan starts in 12h");
+
+			let entries = worklist(&public, &cert).await;
+			assert!(
+				entries.is_empty(),
+				"tested two hours ago, inside the day before: got {entries:?}"
+			);
 		},
 	)
 	.await;

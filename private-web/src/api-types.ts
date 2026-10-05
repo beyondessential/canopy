@@ -10142,7 +10142,7 @@ export interface components {
         RestoreReplicaView: {
             /**
              * @description True when the intent migration-tests candidate versions, so the
-             *     declaration can choose between every snapshot and on request.
+             *     declaration can choose between the schedule and on request.
              */
             can_migrate_on_request: boolean;
             /**
@@ -10265,8 +10265,8 @@ export interface components {
             machine_id?: string | null;
             /**
              * @description Whether a migrating declaration tests only when an operator asks from
-             *     the upgrades view, rather than every new snapshot while its environment
-             *     has a plan open. Defaults to false.
+             *     the upgrades view, rather than weekly and in the day before the upgrade
+             *     while its environment has a plan open. Defaults to false.
              */
             migrates_on_request?: boolean;
             /**
@@ -10351,8 +10351,8 @@ export interface components {
             machine_id?: string | null;
             /**
              * @description Whether a migrating declaration tests only when an operator asks from
-             *     the upgrades view, rather than every new snapshot while its environment
-             *     has a plan open. Defaults to false.
+             *     the upgrades view, rather than weekly and in the day before the upgrade
+             *     while its environment has a plan open. Defaults to false.
              */
             migrates_on_request?: boolean;
             /**
