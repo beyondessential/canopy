@@ -27,7 +27,7 @@ async fn two_workloads_on_a_box(conn: &mut AsyncPgConnection) -> (Uuid, Uuid) {
 	(ids[0], ids[1])
 }
 
-// spec: CRT#declared-names
+// spec: CRT#declared-dns-names
 #[tokio::test(flavor = "multi_thread")]
 async fn declare_release_roundtrip() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
@@ -83,7 +83,7 @@ async fn declare_release_roundtrip() {
 	.await;
 }
 
-// spec: CRT#declared-names
+// spec: CRT#declared-dns-names
 #[tokio::test(flavor = "multi_thread")]
 async fn releasing_a_name_an_application_does_not_hold_is_a_404() {
 	commons_tests::server::run(async move |mut conn, _public, private| {

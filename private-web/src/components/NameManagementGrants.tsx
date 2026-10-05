@@ -19,7 +19,7 @@ import { useApi } from "../api";
 ///
 /// Keyed on the *selected* group rather than the saved one, so moving the server
 /// into a group that controls a domain makes the grants available before saving.
-// spec: DOM#permission-for-a-server-to-manage-its-own-names
+// spec: DOM#permission-for-an-application-to-manage-its-own-dns-names
 export default function NameManagementGrants({
 	groupId,
 	mayManageDns,

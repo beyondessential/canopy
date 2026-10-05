@@ -505,7 +505,7 @@ pub struct PauseArgs {
 ///
 /// A second pause leaves the first in place, so the original reason and time are
 /// not overwritten by a later one.
-// spec: CRT#pausing-a-server
+// spec: CRT#pausing-an-application
 #[utoipa::path(
 	post,
 	path = "/pause",
@@ -530,7 +530,7 @@ pub async fn pause(
 ///
 /// Only an operator can do this: Canopy never lifts a pause itself, however long
 /// it has been in place and however much is expiring under it.
-// spec: CRT#pausing-a-server
+// spec: CRT#pausing-an-application
 #[utoipa::path(
 	post,
 	path = "/resume",
@@ -651,7 +651,7 @@ pub struct DeclarationArgs {
 /// Declaring a name the same application already holds changes nothing. A name
 /// another application holds is refused, and the refusal names the holder so an
 /// operator can see what to release first.
-// spec: CRT#declared-names
+// spec: CRT#declared-dns-names
 #[utoipa::path(
 	post,
 	path = "/declare",
@@ -681,7 +681,7 @@ pub async fn declare(
 /// published stay published and the certificates held stay held until they
 /// expire. What ends is Canopy treating the name as this application's, which
 /// frees it to be declared elsewhere.
-// spec: CRT#declared-names
+// spec: CRT#declared-dns-names
 #[utoipa::path(
 	post,
 	path = "/release",

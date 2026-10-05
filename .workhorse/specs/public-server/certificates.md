@@ -2,62 +2,62 @@
 id: CRT
 ---
 
-# Application names and certificates
+# Application DNS names and certificates
 
-An application reaches Canopy for the two things it cannot do for itself about its own public name: publishing the address records that make the name resolve, and obtaining a TLS certificate for it.
-Both are confined to names within the domains the application's group controls, and both are refused unless an operator has granted that application the matching permission (see [DOM](../servers/domains.md)).
+An application reaches Canopy for the two things it cannot do for itself about its own DNS names: publishing the address records that make a DNS name resolve, and obtaining a TLS certificate for it.
+Both are confined to DNS names within the domains the application's group controls, and both are refused unless an operator has granted that application the matching permission (see [DOM](../servers/domains.md)).
 
 Canopy is the only holder of DNS write access and of the certificate authority account.
 An application holds neither, which is the point: a fleet where every application carried zone credentials would put the whole zone at the mercy of its least-defended member.
 
 ## Why Canopy issues
 
-An application's name resolves to an address that may not be reachable from the public internet, and often is not: a facility application sits behind someone else's NAT.
-So the challenge types that prove control by answering on the name's own address are unavailable, and proving control through DNS is the only route left.
+An application's DNS name resolves to an address that may not be reachable from the public internet, and often is not: a facility application sits behind someone else's NAT.
+So the challenge types that prove control by answering on the DNS name's own address are unavailable, and proving control through DNS is the only route left.
 Proving control through DNS means writing to the zone, and Canopy already holds that access on the group's behalf.
 
 Centralising issuance also puts the authority's rate limits, the record of every certificate's expiry, and the alerting when renewal stops working in one place — the same place that already watches the fleet.
 
-## Declared names
+## Declared DNS names
 
-An operator declares the names an application serves, and an application's own first registration of a name declares it where that is unambiguous (see "Identity and authorisation").
-A declared name is what ties a name to the software that answers on it, and it is what an address registration or a certificate request is resolved against.
+An operator declares the DNS names an application serves, and an application's own first registration of a DNS name declares it where that is unambiguous (see "Identity and authorisation").
+A declared DNS name is what ties a DNS name to the software that answers on it, and it is what an address registration or a certificate request is resolved against.
 
-A name is declared by at most one application across the whole fleet.
-Declaring a name another application already holds is refused, and the refusal names the application holding it, so an operator can see what to release first.
-Exclusivity is what makes a name resolve to one application without Canopy having to guess which of a machine's workloads a request is about.
+A DNS name is declared by at most one application across the whole fleet.
+Declaring a DNS name another application already holds is refused, and the refusal names the application holding it, so an operator can see what to release first.
+Exclusivity is what makes a DNS name resolve to one application without Canopy having to guess which of a machine's workloads a request is about.
 
-An application may declare several names, each held exclusively.
-Releasing a name ends the application's hold on it and leaves the records and certificates already in place, as revoking a grant does.
+An application may declare several DNS names, each held exclusively.
+Releasing a DNS name ends the application's hold on it and leaves the records and certificates already in place, as revoking a grant does.
 What was published stays published and what was issued stays held and collectable until it expires.
-What stops is Canopy acting on that name for that application: its certificates are no longer renewed and no longer raised as running out, since renewing past a release would order for a name another application may now serve, and reporting a deliberate release as a fault is noise.
+What stops is Canopy acting on that DNS name for that application: its certificates are no longer renewed and no longer raised as running out, since renewing past a release would order for a DNS name another application may now serve, and reporting a deliberate release as a fault is noise.
 
 ## Identity and authorisation
 
 A certificate or address request authenticates as the machine the requesting application runs on, by either transport Canopy already accepts for devices (see [DID](machine-identity.md)).
-An identity belongs to a machine rather than to the software on it (see [FLT](../servers/overview.md), "Identities"), so which application a request concerns is resolved from the name it asks about rather than from the credential it presents.
-Because a name is held by one application, that resolution is unambiguous however many applications the machine hosts.
+An identity belongs to a machine rather than to the software on it (see [FLT](../servers/overview.md), "Identities"), so which application a request concerns is resolved from the DNS name it asks about rather than from the credential it presents.
+Because a DNS name is held by one application, that resolution is unambiguous however many applications the machine hosts.
 
 Every request is checked in the same order, and each check is reported distinctly so a misconfiguration is diagnosable from the refusal alone:
 
 1. The caller authenticates as an identity belonging to a live machine.
-2. An application on that machine declares the requested name, or the machine hosts exactly one application.
+2. An application on that machine declares the requested DNS name, or the machine hosts exactly one application.
 3. That application has the grant the request needs — DNS management for addresses, certificate issuance for certificates.
-4. The requested name lies at or beneath a domain the application's *own group* controls.
-5. A managed zone covers that domain, so Canopy can act on the name at all.
+4. The requested DNS name lies at or beneath a domain the application's *own group* controls.
+5. A managed zone covers that domain, so Canopy can act on the DNS name at all.
 
-A machine hosting exactly one application resolves to it even for a name nothing declares yet, and registering the name declares it.
-There is nothing to disambiguate on such a machine, and an agent's own registration is how most names come to be declared.
-On a machine hosting several, an undeclared name is genuinely ambiguous, so it is refused rather than guessed at and an operator declares it first.
+A machine hosting exactly one application resolves to it even for a DNS name nothing declares yet, and registering the DNS name declares it.
+There is nothing to disambiguate on such a machine, and an agent's own registration is how most DNS names come to be declared.
+On a machine hosting several, an undeclared DNS name is genuinely ambiguous, so it is refused rather than guessed at and an operator declares it first.
 
-A machine asking about a name none of its applications declares is refused the same way whether the name is held by an application elsewhere or by nobody, so the endpoint is not a directory of what other machines serve.
+A machine asking about a DNS name none of its applications declares is refused the same way whether the DNS name is held by an application elsewhere or by nobody, so the endpoint is not a directory of what other machines serve.
 
-A name within another group's domain is refused as if unclaimed: the refusal says the application's group does not control the name, and never that another group does, so the endpoint is not a directory of other groups' names.
+A DNS name within another group's domain is refused as if unclaimed: the refusal says the application's group does not control it, and never that another group does, so the endpoint is not a directory of other groups' DNS names.
 
 ## What an application may act on
 
-An agent can ask Canopy what names the applications on its machine are entitled to, rather than discovering the boundary by being refused.
-The answer is given per application, since the grants and the declared names are each an application's own: for every application on the machine, the domains its group controls, the names it declares, which of the two grants it holds, and the names it already has addresses registered or certificates issued for, each with when the certificate expires.
+An agent can ask Canopy what DNS names the applications on its machine are entitled to, rather than discovering the boundary by being refused.
+The answer is given per application, since the grants and the declared DNS names are each an application's own: for every application on the machine, the domains its group controls, the DNS names it declares, which of the two grants it holds, and the DNS names it already has addresses registered or certificates issued for, each with when the certificate expires.
 
 Answering for every application on the machine is what lets one agent serve a box running several: it learns what each of its workloads may do without knowing in advance which of them Canopy holds a grant for.
 
@@ -94,26 +94,26 @@ And a pause old enough that something has lapsed underneath it is reported again
 
 ## Addresses
 
-An application registers the name it should be reachable at together with the external addresses it is reachable at, and Canopy publishes the address records: the IPv4 addresses as A records, the IPv6 addresses as AAAA records, at that name, in the managed zone the name resolves to.
+An application registers the DNS name it should be reachable at together with the external addresses it is reachable at, and Canopy publishes the address records: the IPv4 addresses as A records, the IPv6 addresses as AAAA records, at that DNS name, in the managed zone it resolves to.
 
-Registering replaces the addresses previously registered for the name, so an application announces a change of address by registering again, and a registration naming no addresses withdraws the name.
+Registering replaces the addresses previously registered for the DNS name, so an application announces a change of address by registering again, and a registration naming no addresses withdraws the DNS name.
 Canopy publishes what it is told: it does not verify that an address is really the application's, the grant being the trust boundary rather than any proof of possession.
 
 Canopy changes only records it created itself.
-Because zones are shared, a name may be served by records Canopy knows nothing about, and Canopy neither rewrites nor removes those; it records what it has published so it can tell its own records from everyone else's.
+Because zones are shared, a DNS name may be served by records Canopy knows nothing about, and Canopy neither rewrites nor removes those; it records what it has published so it can tell its own records from everyone else's.
 
-A name's addresses are the addresses of the one application that declares it, so two applications cannot fight over where one name points.
+A DNS name's addresses are the addresses of the one application that declares it, so two applications cannot fight over where one DNS name points.
 
 ## Certificates
 
 ### Requesting
 
-An application generates its own key pair and asks Canopy to certify it, submitting a certificate signing request for a single name.
-The private key never leaves the application and Canopy never asks for it: Canopy's part is to prove control of the name and return the signed chain.
+An application generates its own key pair and asks Canopy to certify it, submitting a certificate signing request for a single DNS name.
+The private key never leaves the application and Canopy never asks for it: Canopy's part is to prove control of the DNS name and return the signed chain.
 
-The signing request is honoured only for exactly the name requested.
-Canopy certifies that one name and no other: a request whose subject or alternative names carry anything beyond the requested name is refused rather than trimmed, because silently issuing something narrower than asked would leave an application serving a certificate it does not expect, and issuing something wider would let one application smuggle another group's name past the authorisation check.
-Wildcards are refused: a certificate valid for every name in a group is not something one member should be able to mint.
+The signing request is honoured only for exactly the DNS name requested.
+Canopy certifies that one DNS name and no other: a request whose subject or alternative names carry anything beyond the requested DNS name is refused rather than trimmed, because silently issuing something narrower than asked would leave an application serving a certificate it does not expect, and issuing something wider would let one application smuggle another group's DNS name past the authorisation check.
+Wildcards are refused: a certificate valid for every DNS name in a group is not something one member should be able to mint.
 
 The key the request certifies must be strong enough to be worth certifying, and Canopy states what it accepts rather than deferring to whatever the authority happens to allow that year.
 
@@ -125,12 +125,12 @@ That is far longer than any client will wait mid-handshake, so requesting a cert
 An application therefore holds a certificate before it needs one, rather than obtaining one at the moment a client arrives.
 Canopy's contract is only that a request is durable once accepted and that its outcome becomes collectable; scheduling requests early enough to be useful is the application's business.
 
-Repeating a request for a name Canopy already holds a valid certificate for returns the one it holds rather than ordering another, so an application that has lost its local copy — restarted, redeployed, cache cleared — is served without spending the authority's budget.
+Repeating a request for a DNS name Canopy already holds a valid certificate for returns the one it holds rather than ordering another, so an application that has lost its local copy — restarted, redeployed, cache cleared — is served without spending the authority's budget.
 A request naming a key different from the one already certified is a new order, since the stored chain certifies a key the application no longer holds.
 
 ### What Canopy keeps
 
-Canopy keeps the certificate it obtained, the name it covers, the application it was issued for, and when it expires.
+Canopy keeps the certificate it obtained, the DNS name it covers, the application it was issued for, and when it expires.
 It keeps no private key, having never held one.
 
 Holding the chain is what lets Canopy answer a repeat request without a fresh order, renew before expiry without being asked, and report a certificate that is running out.
@@ -153,7 +153,7 @@ Failing that, Canopy renews after a fixed fraction of the certificate's own life
 Neither is a fixed interval, because a fixed interval cannot serve both lifetimes: a window measured in weeks would leave a certificate that lives days permanently overdue, and one measured in hours would renew a long-lived certificate hundreds of times over.
 Where the authority accounts for a renewal as replacing a particular certificate, Canopy tells it which, so a renewal is not mistaken for an additional certificate.
 
-Renewal stops when the certificate is no longer wanted: a name whose group has released the domain it sits under is not renewed, nor is a certificate for a name its application no longer declares, or for an application whose grant has been revoked or that has been archived.
+Renewal stops when the certificate is no longer wanted: a DNS name whose group has released the domain it sits under is not renewed, nor is a certificate for a DNS name its application no longer declares, or for an application whose grant has been revoked or that has been archived.
 A grant revoked does not withdraw the certificate already issued — it cannot be recalled once it exists — but it does end the renewals that would extend it.
 
 ### Revocation
@@ -170,7 +170,7 @@ An application collecting a certificate it holds locally is told that it has bee
 The two are different instructions: any revocation means ask for a replacement, but only a compromised key means the key pair has to be discarded first.
 Everything else can be re-requested with the key the application already holds.
 
-Where the reason given is that the key is compromised, that key is not certified again — for any name, by any application, since a leaked key is leaked whoever asks next.
+Where the reason given is that the key is compromised, that key is not certified again, for any DNS name, by any application, since a leaked key is leaked whoever asks next.
 A request naming it is refused distinguishably from every other refusal, so an agent can generate a fresh key and ask again on the strength of the refusal alone, without a human reading it and without waiting for an operator to intervene on the application.
 Recovering from a leaked key is exactly the moment when nobody has attention to spare, so it is the moment the machinery has to work unattended.
 Any other reason leaves the key usable, since a certificate superseded or a group retired says nothing about the key itself.
@@ -185,24 +185,24 @@ A certificate that has expired outright fails regardless.
 
 A paused application raises none of this either, for the same reason: Canopy has been told to stop acting on its behalf, so a certificate running down is the expected consequence rather than a failure. What is reported instead is the pause, and eventually the pause having been forgotten.
 
-Except that a certificate for a name the application is no longer entitled to raises nothing at all, however far past expiry it is.
-Its group may have released the domain it sat under, its application may have released the name, the application's grant may have been revoked, or the application may have been archived — and in each case Canopy deliberately stopped renewing it, so its running out is the intended outcome rather than a failure to report.
+Except that a certificate for a DNS name the application is no longer entitled to raises nothing at all, however far past expiry it is.
+Its group may have released the domain it sat under, its application may have released the DNS name, the application's grant may have been revoked, or the application may have been archived — and in each case Canopy deliberately stopped renewing it, so its running out is the intended outcome rather than a failure to report.
 Alerting on it would mean every deliberate withdrawal left an alert behind that no action could clear, which teaches an operator to ignore the alert that matters.
-Whether the name is still entitled is asked when the alert is evaluated rather than remembered from when renewal stopped, so a domain reclaimed by its group brings its certificates back into scope.
+Whether the DNS name is still entitled is asked when the alert is evaluated rather than remembered from when renewal stopped, so a domain reclaimed by its group brings its certificates back into scope.
 
 An order that has never produced a certificate is distinguished from one extending a certificate that already exists, so an operator can tell a group that never came up from one about to go dark.
 
 Canopy's own inability to issue is not any one application's fault and is reported against Canopy instead (see [SELF](../private-server/self-alerts.md)): an authority that cannot be reached, an account Canopy cannot use, and the authority's rate limits being exhausted.
-Those limits are shared across every group whose domain sits in the same zone, so running them down is a fleet-wide fault rather than one group's: Canopy reports being throttled, and does not consume what remains retrying a name that has just failed.
+Those limits are shared across every group whose domain sits in the same zone, so running them down is a fleet-wide fault rather than one group's: Canopy reports being throttled, and does not consume what remains retrying a DNS name that has just failed.
 Reporting the two apart matters because they call for different people — an application's certificate running out is that group's problem to notice, and Canopy being unable to issue at all is Canopy's.
 
 ## Presentation
 
-An application presents the names it declares — with the addresses published for each, and whether the zone has caught up with what it asked for — and the certificates Canopy holds for it, each with the name it covers, the profile it was issued under, and when it expires, given both as an instant and as how long is left.
-An operator declares and releases an application's names from the same place.
+An application presents the DNS names it declares, with the addresses published for each and whether the zone has caught up with what it asked for, and the certificates Canopy holds for it, each with the DNS name it covers, the profile it was issued under, and when it expires, given both as an instant and as how long is left.
+An operator declares and releases an application's DNS names from the same place.
 A request that has not yet produced a certificate presents as pending, or as failed with the reason.
 An operator sets the application's profile where its other permissions are set, and pauses or unpauses it from the same place, a pause showing who set it, when, and why.
 
-A group presents, under each domain it controls, the names in use beneath it and which of them hold a current certificate, so whether a group's names are healthy is answerable without visiting each of its applications.
+A group presents, under each domain it controls, the DNS names in use beneath it and which of them hold a current certificate, so whether a group's DNS names are healthy is answerable without visiting each of its applications.
 
 The authority Canopy is configured to use is presented to operators along with the profiles it advertises and whether Canopy's account with it is usable, since that is where a misconfiguration of issuance shows up rather than on any one application.

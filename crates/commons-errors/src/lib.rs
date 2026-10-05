@@ -165,7 +165,7 @@ pub enum AppError {
 	/// from *not you* — a withheld grant is permanent until an operator grants it,
 	/// where a pause is expected to lift — and back off instead of hammering.
 	/// Maps to 409.
-	// spec: CRT#pausing-a-server
+	// spec: CRT#pausing-an-application
 	#[error("name management is paused for this server: {0}")]
 	NameManagementPaused(String),
 

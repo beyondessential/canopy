@@ -332,7 +332,7 @@ pub fn spawn() -> JoinHandle<()> {
 
 			// And the pause nobody remembers, which is Canopy's to report because
 			// only an operator can lift one.
-			// spec: CRT#pausing-a-server
+			// spec: CRT#pausing-an-application
 			match database::self_alerts::sweep_forgotten_pauses(&mut db).await {
 				Ok(_) => {}
 				Err(err) => error!("forgotten-pause self-alert sweep failed: {err}"),

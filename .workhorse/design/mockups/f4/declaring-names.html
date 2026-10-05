@@ -3,7 +3,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Declaring names</title>
+<title>Declaring DNS names</title>
 <style>
 	body { margin: 0; background: #fafafa; font-family: Roboto, Helvetica, Arial, sans-serif; color: rgba(0,0,0,0.87); font-size: 14px; }
 	.page { max-width: 1040px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
@@ -60,7 +60,7 @@
 	</div>
 
 	<div class="paper">
-		<h2 class="h6">Names</h2>
+		<h2 class="h6">DNS names</h2>
 		<div class="stack">
 
 			<div>
@@ -71,7 +71,7 @@
 				</div>
 				<table>
 					<thead>
-						<tr><th>Name</th><th>Last asked</th><th></th></tr>
+						<tr><th>DNS name</th><th>Last asked</th><th></th></tr>
 					</thead>
 					<tbody>
 						<tr>
@@ -102,7 +102,7 @@
 				<h3>Declared</h3>
 				<table>
 					<thead>
-						<tr><th>Name</th><th>Application</th><th>Certificate</th></tr>
+						<tr><th>DNS name</th><th>Application</th><th>Certificate</th></tr>
 					</thead>
 					<tbody>
 						<tr>
@@ -119,10 +119,10 @@
 
 	<div class="note">Shown only while the machine hosts several applications; on a single-application machine there is nothing to declare. The application chooser preselects the application whose group controls a covering domain when exactly one does.</div>
 
-	<div class="label">Application page: Names and certificates</div>
+	<div class="label">Application page: DNS names and certificates</div>
 
 	<div class="paper">
-		<h2 class="h6">Names and certificates<span class="aside">— the public names this server has registered, and the TLS certificates Canopy holds for them.</span></h2>
+		<h2 class="h6">DNS names and certificates<span class="aside">— the DNS names this application serves, and the TLS certificates Canopy holds for them.</span></h2>
 		<div class="stack">
 			<div class="row">
 				<span class="chip">may not manage DNS records</span>
@@ -134,9 +134,9 @@
 
 			<div>
 				<div class="row" style="margin-bottom: 8px">
-					<h3 style="margin: 0">Names</h3>
+					<h3 style="margin: 0">DNS names</h3>
 					<span class="grow"></span>
-					<input class="input" placeholder="name.example.tamanu.app" value="">
+					<input class="input" placeholder="app.example.tamanu.app" value="">
 					<button class="btn outlined">Declare</button>
 				</div>
 				<div class="stack-1">
@@ -181,7 +181,7 @@
 		</div>
 	</div>
 
-	<div class="note">The last row shows a name declared outside the group's domains: allowed, but flagged until the group controls a covering domain. The alert is the endpoint's existing 409 for a name another application holds.</div>
+	<div class="note">The last row shows a DNS name declared outside the group's domains: allowed, but flagged until the group controls a covering domain. The alert is the endpoint's existing 409 for a DNS name another application holds.</div>
 
 </div>
 </body>

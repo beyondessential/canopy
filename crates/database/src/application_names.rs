@@ -93,7 +93,7 @@ impl ApplicationName {
 	/// holder — safe here, and not on the device-facing path, because an
 	/// operator already sees the whole fleet and needs to know what to release
 	/// first.
-	// spec: CRT#declared-names
+	// spec: CRT#declared-dns-names
 	pub async fn declare(
 		db: &mut AsyncPgConnection,
 		application_id: Uuid,
@@ -138,7 +138,7 @@ impl ApplicationName {
 	/// the records published stay published and the certificates held stay
 	/// held. What ends is Canopy treating the name as this application's, which
 	/// frees it to be declared by another.
-	// spec: CRT#declared-names
+	// spec: CRT#declared-dns-names
 	pub async fn release(
 		db: &mut AsyncPgConnection,
 		application_id: Uuid,
@@ -263,7 +263,7 @@ impl ApplicationName {
 	///
 	/// Skips paused applications: while a server is paused Canopy changes no record of
 	/// its, though everything already published stays published.
-	// spec: CRT#pausing-a-server
+	// spec: CRT#pausing-an-application
 	pub async fn needing_publish(db: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Self>> {
 		use crate::schema::{application_names, applications};
 		let rows: Vec<Self> = application_names::table
