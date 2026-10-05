@@ -625,15 +625,17 @@ async fn create(
 						&status.extra,
 					)
 					.await?;
+					let machine_grading_tags = json_tags(&machine_tags);
 					file_health_events(
 						conn,
 						None,
-						machine.id,
-						machine.group_id,
-						None,
+						&machine,
 						Some(id),
 						&status,
-						&json_tags(&machine_tags),
+						GrainTags {
+							application: &machine_grading_tags,
+							machine: &machine_grading_tags,
+						},
 						SubjectSplit::AsGiven,
 					)
 					.await?;
@@ -664,15 +666,17 @@ async fn create(
 							status.version.as_ref(),
 						)
 						.await?;
+						let application_tags = json_tags(tags);
 						file_health_events(
 							conn,
-							Some(application.id),
-							machine.id,
-							application.group_id,
-							Some(&application.r#type),
+							Some(application),
+							&machine,
 							Some(id),
 							&status,
-							&json_tags(tags),
+							GrainTags {
+								application: &application_tags,
+								machine: &application_tags,
+							},
 							SubjectSplit::AsGiven,
 						)
 						.await?;
@@ -721,9 +725,6 @@ async fn create(
 			// body. Either may be absent.
 			let version = resolve_version(&extra, current_version.map(|v| v.0));
 			let server_id = application.as_ref().map(|s| s.id);
-			let group_id = application
-				.as_ref()
-				.map_or(machine.group_id, |s| s.group_id);
 
 			// A push with no application is the box's, so it grades and
 			// answers against the box's own tags rather than borrowing a
@@ -735,6 +736,14 @@ async fn create(
 				None => crate::tags::effective_tags_for_machine(&mut db, &machine).await?,
 			};
 			let tags = json_tags(&effective_tags);
+			// The box's checks on this push are graded against the box's own
+			// tags, as they would be on a split push.
+			let machine_grading_tags = match &application {
+				Some(_) => {
+					json_tags(&crate::tags::effective_tags_for_machine(&mut db, &machine).await?)
+				}
+				None => tags.clone(),
+			};
 
 			// Only the recording is conditional on ingest mode; everything
 			// else — backup instructions, tags, severities computed below — is
@@ -770,13 +779,14 @@ async fn create(
 
 					file_health_events(
 						conn,
-						server_id,
-						machine.id,
-						group_id,
-						application.as_ref().map(|s| &s.r#type),
+						application.as_ref(),
+						&machine,
 						Some(id),
 						&status,
-						&tags,
+						GrainTags {
+							application: &tags,
+							machine: &machine_grading_tags,
+						},
 						SubjectSplit::BySubject,
 					)
 					.await?;
@@ -1048,16 +1058,13 @@ enum SubjectSplit {
 /// escalates), warning and broken → warning; passed and skipped file
 /// nothing and close prior issues.
 // spec: CHK#checks-with-instances
-#[allow(clippy::too_many_arguments)]
 async fn file_health_events(
 	conn: &mut AsyncPgConnection,
-	server_id: Option<Uuid>,
-	machine_id: Uuid,
-	group_id: Option<Uuid>,
-	application_type: Option<&ApplicationType>,
+	application: Option<&Application>,
+	machine: &Machine,
 	device_id: Option<Uuid>,
 	status: &Status,
-	tags: &std::collections::HashMap<String, serde_json::Value>,
+	tags: GrainTags<'_>,
 	subject: SubjectSplit,
 ) -> Result<()> {
 	let reported = ReportedCheck::all_in(&status.health);
@@ -1077,25 +1084,32 @@ async fn file_health_events(
 	// what lets a reporter carry a check Canopy does not recognise as
 	// machine-subject.
 	// spec: STA#transitional-unified-pushes
-	let on_machine = |check: &str| match subject {
-		SubjectSplit::BySubject => server_id.is_none() || CheckSubject::of(check).is_machine(),
-		SubjectSplit::AsGiven => server_id.is_none(),
+	let server_id = application.map(|a| a.id);
+	let machine_id = machine.id;
+	// The application a check files against, or `None` for the box's. Every
+	// other fact about where a check goes is read off this one answer: a
+	// check off the machine always has an application to file against, since
+	// with no application every check is the machine's.
+	let filed_against = |check: &str| -> Option<&Application> {
+		let on_machine = match subject {
+			SubjectSplit::BySubject => CheckSubject::of(check).is_machine(),
+			SubjectSplit::AsGiven => false,
+		};
+		application.filter(|_| !on_machine)
 	};
+	let on_machine = |check: &str| filed_against(check).is_none();
 	// The namespace follows the grain the check files at, never its name: a
 	// check filed against an application is that application type's entry.
 	// spec: CHK#names
-	let namespace_of = |check: &str| {
-		Namespace::of(
-			&status.source,
-			application_type.filter(|_| !on_machine(check)),
-		)
+	let namespace_of =
+		|check: &str| Namespace::of(&status.source, filed_against(check).map(|a| &a.r#type));
+	let scope_of = |check: &str| match filed_against(check) {
+		Some(application) => Scope::Application(application.id),
+		None => Scope::Machine(machine_id),
 	};
-	// The scope a check files at. A check off the machine always has an
-	// application to file against: with no application, every check is the
-	// machine's.
-	let scope_of = |check: &str| match server_id {
-		Some(server_id) if !on_machine(check) => Scope::Application(server_id),
-		_ => Scope::Machine(machine_id),
+	let tags_of = |check: &str| match filed_against(check) {
+		Some(_) => tags.application,
+		None => tags.machine,
 	};
 
 	// Upsert a catalog row for every check name seen on this push,
@@ -1141,11 +1155,11 @@ async fn file_health_events(
 				// A unified push carries both grains' checks. Grade each at
 				// the grain its subject belongs to, so a machine check is
 				// graded against the box's tags and silenced by the box's
-				// policy.
+				// policy and its group's.
 				// spec: STA
-				application_id: (!on_machine).then_some(server_id).flatten(),
+				application_id: filed_against(check).map(|a| a.id),
 				machine_id: on_machine.then_some(machine_id),
-				group_id,
+				group_id: filed_against(check).map_or(machine.group_id, |a| a.group_id),
 				// A device push is a machine's; a cluster's checks arrive over
 				// the relay path, never here.
 				kubernetes_cluster_id: None,
@@ -1171,7 +1185,7 @@ async fn file_health_events(
 		};
 		let mut graded = grade_instances(
 			&grading,
-			&context(status, status_extra, tags, check),
+			&context(status, status_extra, tags_of(check), check),
 			Some(&reported.detail),
 			&reported.outcome,
 			prior.as_ref(),
@@ -1311,7 +1325,7 @@ async fn file_health_events(
 		let stamp = CheckStateStamp::of_graded(
 			check,
 			graded,
-			&context(status, status_extra, tags, check),
+			&context(status, status_extra, tags_of(check), check),
 			title.as_deref(),
 		);
 		let r#ref = format!("{HEALTH_REF}/{check}");
@@ -1405,13 +1419,21 @@ async fn file_health_events(
 	// the per-group `server_groups` lock — is handed to the reeval worker so
 	// concurrent check-ins never convoy on that lock. Only grouped applications
 	// participate in incidents.
-	if let Some(server_id) = server_id
-		&& group_id.is_some()
+	if let Some(application) = application
+		&& application.group_id.is_some()
 	{
-		database::issues::enqueue_incident_reeval(conn, server_id).await?;
+		database::issues::enqueue_incident_reeval(conn, application.id).await?;
 	}
 
 	Ok(())
+}
+
+/// The tags a push's checks are graded against, per grain: an application's
+/// checks read the application's effective tags and the box's read the box's.
+#[derive(Clone, Copy)]
+struct GrainTags<'a> {
+	application: &'a std::collections::HashMap<String, serde_json::Value>,
+	machine: &'a std::collections::HashMap<String, serde_json::Value>,
 }
 
 /// A degraded check's message: its fields, one per line.

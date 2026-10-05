@@ -220,9 +220,9 @@ async fn status_response_carries_check_severities() {
 	.await
 }
 
-/// A unified push answers a box check from the box's grain, so the box's
-/// group decides its silences even when the application on it is in another
-/// group.
+/// A unified push answers and grades a box check at the box's grain, so the
+/// box's group decides its silences even when the application on it is in
+/// another group.
 // spec: STA#transitional-unified-pushes
 #[tokio::test(flavor = "multi_thread")]
 async fn unified_answer_reads_a_box_check_through_the_boxs_group() {
@@ -288,6 +288,45 @@ async fn unified_answer_reads_a_box_check_through_the_boxs_group() {
 			assert_eq!(
 				map,
 				serde_json::json!({ "disk_free": "skip", "memory": "fail" }),
+			);
+
+			// The push itself grades the box's checks the same way.
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({"health": [
+					{"check": "disk_free", "result": "failed"},
+					{"check": "memory", "result": "failed"},
+				]}))
+				.await
+				.assert_status_ok();
+			#[derive(diesel::QueryableByName, Debug, PartialEq)]
+			struct State {
+				#[diesel(sql_type = sql_types::Text)]
+				check_name: String,
+				#[diesel(sql_type = sql_types::Text)]
+				effective_result: String,
+			}
+			let states: Vec<State> = sql_query(
+				"SELECT check_name, effective_result FROM issues \
+				 WHERE machine_id = $1 AND source = 'alertd' ORDER BY check_name",
+			)
+			.bind::<sql_types::Uuid, _>(machine_id)
+			.load(&mut conn)
+			.await
+			.expect("box check states");
+			assert_eq!(
+				states,
+				vec![
+					State {
+						check_name: "disk_free".into(),
+						effective_result: "skipped".into(),
+					},
+					State {
+						check_name: "memory".into(),
+						effective_result: "failed".into(),
+					},
+				],
 			);
 		},
 	)
