@@ -1135,6 +1135,49 @@ async fn snapshot_takes_a_split_pushs_application_row_as_given() {
 	.await
 }
 
+/// A machine keeps reporting after it stops naming an application, so whether
+/// the application's last report was a split push is a question about that
+/// report's moment, not about the machine's latest.
+// spec: STA#transitional-unified-pushes
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_reads_a_split_push_as_split_after_the_machine_moves_on() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"WITH m AS (INSERT INTO machines (id) VALUES ('20000000-0000-0000-0000-000000000043') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			('20000000-0000-0000-0000-000000000043', 'https://moved.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000043');
+
+			INSERT INTO check_policies (source, subject, application_type, check_name) VALUES
+			('alertd', 'machine', NULL, 'memory');
+
+			INSERT INTO statuses (server_id, machine_id, source, created_at, healthy, health) VALUES
+			(NULL, '20000000-0000-0000-0000-000000000043', 'alertd', NOW() - INTERVAL '2 hours', true, '[]'::jsonb),
+			('20000000-0000-0000-0000-000000000043', '20000000-0000-0000-0000-000000000043', 'alertd', NOW() - INTERVAL '2 hours', true,
+				'[{\"check\":\"memory\",\"result\":\"passed\"}]'::jsonb),
+			(NULL, '20000000-0000-0000-0000-000000000043', 'alertd', NOW() - INTERVAL '1 minute', true, '[]'::jsonb)",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/snapshot")
+			.json(&serde_json::json!({
+				"server_id": "20000000-0000-0000-0000-000000000043"
+			}))
+			.await;
+		r.assert_status_ok();
+		let data: Option<SnapshotData> = r.json();
+		let checks = data.expect("snapshot").checks.expect("checks");
+		let names: Vec<&str> = checks["checks"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|c| c["check"].as_str().unwrap())
+			.collect();
+		assert_eq!(names, vec!["memory"], "the application's own check, from its split push");
+	})
+	.await
+}
+
 /// A silence on the box is the box's: it does not quiet a same-named check the
 /// application reports about itself, in a past moment any more than now.
 // spec: CHK#silences-follow-the-event

@@ -34,7 +34,7 @@ Resolving rather than deleting keeps check-detail history and incident membershi
 It also resolves the `health-broken/*` rows `merge_broken_thread` missed (it only resolved the active ones) and clears `check_name` on all of them, so they stop reading as check-states while staying in issue and incident history.
 
 There is no machine-namespace guard or migration criterion.
-On a split push, a check reported under an application is that application's check, whatever it is called, even `memory` (STA). That state is held at application scope; `Namespace::of` still files it in the machine namespace by name, which is a separate question from this card.
+On a split push, a check reported under an application is that application's check, whatever it is called, even `memory` (STA). That state is held at application scope; `Namespace::of` still files it in the machine namespace by name, which card D4 changes.
 The frozen copies of reported machine checks fall out by the read-time comparison instead.
 
 ### Quiet is reachability's clock
@@ -50,7 +50,7 @@ A quiet source's states keep counting towards health at their last effective res
 `consolidated_checks_at` presents the application's own checks only.
 A unified push's machine-subject checks sit in the application's status row and are skipped by name.
 A split push's application row is taken as given: every check in it is the application's, whatever it is called.
-A split push records the machine's row and the application's in one transaction, so a machine row from the same source with the same `created_at` marks the push as split.
+A split push records the machine's row and the application's in one transaction, so a machine row from the same source at the application row's own `created_at` marks the push as split (`Status::split_push_moments`). Matching against the machine's latest row instead misreads an application whose machine kept pushing after it stopped naming the application.
 Quiet is judged against `at` (or now).
 This also fixes the snapshot's health, which had counted the machine's checks.
 

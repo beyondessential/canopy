@@ -768,6 +768,45 @@ impl Status {
 			.map_err(AppError::from)
 	}
 
+	/// Which of these application status rows came from a split push.
+	///
+	/// A split push records the machine's row and each application's in one
+	/// transaction, so the machine carries a row from the same source at the
+	/// same moment; a unified push records the application's alone. Asked of
+	/// each row's own moment, not of the machine's latest, since a machine
+	/// keeps reporting after it stops naming an application.
+	// spec: STA#transitional-unified-pushes
+	pub async fn split_push_moments(
+		db: &mut AsyncPgConnection,
+		machine: Uuid,
+		rows: &[&Status],
+	) -> Result<std::collections::HashSet<(String, Timestamp)>> {
+		use crate::schema::statuses::dsl::*;
+
+		if rows.is_empty() {
+			return Ok(Default::default());
+		}
+		let moments: Vec<jiff_diesel::Timestamp> = rows
+			.iter()
+			.map(|row| jiff_diesel::Timestamp::from(row.created_at))
+			.collect();
+		let found: Vec<(String, jiff_diesel::Timestamp)> = statuses
+			.select((source, created_at))
+			.filter(
+				machine_id
+					.eq(machine)
+					.and(server_id.is_null())
+					.and(created_at.eq_any(moments)),
+			)
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(found
+			.into_iter()
+			.map(|(src, at)| (src, at.into()))
+			.collect())
+	}
+
 	/// The machine-grain equivalent of [`Self::latest_for_servers`]: when each
 	/// box last had a status row recorded against it, whatever it described.
 	pub async fn latest_for_machines(

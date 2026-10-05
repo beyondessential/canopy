@@ -942,22 +942,24 @@ async fn consolidated_checks_at(
 	use database::issues::{CheckGradingRef, GradingContext, ReportedCheck, grade_instances};
 
 	let statuses = Status::latest_per_source_at(conn, server.id, at).await?;
-	// The box's own reports. They carry the box's figures, which a past moment
-	// presents alongside the application's; and they say which of the
-	// application's reports were split pushes. A split push records a row per
-	// target in one transaction, so its machine row shares the application
-	// row's timestamp. A unified push records only the application's row, and
-	// its machine checks sit among the application's, told apart by name — the
-	// same rule ingestion applies.
-	// spec: STA#transitional-unified-pushes
+	// The box's own reports, for the box's figures, which a past moment
+	// presents alongside the application's.
 	let machine_statuses = match server.machine_id {
 		Some(machine_id) => Status::machine_latest_per_source_at(conn, machine_id, at).await?,
 		None => Vec::new(),
 	};
-	let split_pushes: std::collections::HashSet<(&str, Timestamp)> = machine_statuses
-		.iter()
-		.map(|st| (st.source.as_str(), st.created_at))
-		.collect();
+	// Which of the application's reports were split pushes. On a split push
+	// every check under the application is the application's, whatever it is
+	// called; a unified push carries the box's checks among the application's,
+	// told apart by name — the same rule ingestion applies.
+	// spec: STA#transitional-unified-pushes
+	let split_pushes = match server.machine_id {
+		Some(machine_id) => {
+			Status::split_push_moments(conn, machine_id, &statuses.iter().collect::<Vec<_>>())
+				.await?
+		}
+		None => Default::default(),
+	};
 
 	// The figures come from the same set of statuses the checks do, so the
 	// snapshot presents each figure as of `at` from whichever source last
@@ -1026,7 +1028,7 @@ async fn consolidated_checks_at(
 
 	let mut checks: Vec<ConsolidatedCheck> = Vec::new();
 	for status in &statuses {
-		let split = split_pushes.contains(&(status.source.as_str(), status.created_at));
+		let split = split_pushes.contains(&(status.source.clone(), status.created_at));
 		let quiet = as_of.duration_since(status.created_at) >= down_after;
 		// The application's own silences and its group's: the box's are the
 		// box's, as in the live view.

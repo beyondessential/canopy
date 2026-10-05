@@ -13,6 +13,7 @@
 - [x] A cluster's relay checks filed at different cadences all stay listed (verifies spec: CHK)
 - [x] Machine and cluster pages follow the same membership rules (verifies spec: CHK)
 - [x] The point-in-time view for an application lists its own checks only, for both split and unified pushes (verifies spec: CHK)
+- [x] A split push still reads as split in the point-in-time view after the machine has pushed again without the application (verifies spec: STA)
 - [x] Fleet figures read check fields only from states the target's list presents (verifies spec: FIG)
 
 ## Abandoned-grain migration
