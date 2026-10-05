@@ -195,31 +195,6 @@ fn scoped_identity(
 	)
 }
 
-/// The namespaces a reporter for an application of `application_type` can file
-/// into: the machine's, its own type's, and the flat one a curated source uses.
-///
-/// This is the reverse of [`Namespace::of`] — the set a bare check name coming
-/// off the wire could resolve to — and is what narrows the catalog for the
-/// device-facing map and for a report's scoped chains. A reporter with no
-/// application (a machine's own agent) admits only the machine and flat
-/// namespaces.
-fn reported_by(
-	application_type: Option<&ApplicationType>,
-) -> Predicate<crate::schema::check_policies::table> {
-	use crate::schema::check_policies::dsl;
-	let machine_or_flat = dsl::subject
-		.is_null()
-		.or(dsl::subject.is_not_distinct_from(commons_types::namespace::SUBJECT_MACHINE));
-	match application_type {
-		None => Box::new(machine_or_flat),
-		Some(ty) => Box::new(
-			machine_or_flat.or(dsl::subject
-				.is_not_distinct_from(commons_types::namespace::SUBJECT_APPLICATION)
-				.and(dsl::application_type.is_not_distinct_from(ty.to_string()))),
-		),
-	}
-}
-
 /// The outcome of applying a check's policy to an observed result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GradedResult {
@@ -279,9 +254,9 @@ impl CheckPolicy {
 		// A filing names a target, not a namespace, so the namespace is
 		// derived here the same way ingest derives it — through
 		// `Namespace::of`, in Rust. Deriving it in the SQL instead would put a
-		// second copy of the machine-check list in a second language, free to
-		// drift from the one ingest uses; an entry it disagreed about would
-		// simply stop being refreshed and decommission itself a week later.
+		// second copy of the rule in a second language, free to drift from the
+		// one ingest uses; an entry it disagreed about would simply stop being
+		// refreshed and decommission itself a week later.
 		//
 		// A machine filing has no application, so the type comes back null and
 		// the outer join keeps the row: the earlier
@@ -314,18 +289,16 @@ impl CheckPolicy {
 		.load(db)
 		.await?;
 
-		// Several triples can fold into one entry — every application type on a
-		// box reports the box's `disk_free`, and they share the machine entry —
-		// so take the max per entry before writing.
+		// Several triples can fold into one entry — a curated source's names are
+		// flat, so its states on every application type are one entry — so take
+		// the max per entry before writing.
 		let mut latest: HashMap<CatalogKey, Timestamp> = HashMap::new();
 		for row in reported {
 			let ty = row
 				.application_type
 				.as_deref()
 				.and_then(|t| t.parse::<ApplicationType>().ok());
-			let Some(ns) = Namespace::of(&row.source, &row.check_name, ty.as_ref()) else {
-				continue;
-			};
+			let ns = Namespace::of(&row.source, ty.as_ref());
 			let seen = Timestamp::from(row.max_seen);
 			latest
 				.entry((row.source, ns, row.check_name))
@@ -405,18 +378,18 @@ impl CheckPolicy {
 	/// a check-state rather than a filing: a state row records the bare check
 	/// name, and which catalog row backs it follows the target's application
 	/// type. `None` is a machine's own check, which no type bears on.
-	///
-	/// A name that resolves to no namespace at all (an application-subject check
-	/// against a target with no application) is not live: nothing could have
-	/// filed it there.
 	pub fn live_for(
 		cataloged: &CatalogKeys,
 		source: &str,
 		check_name: &str,
 		application_type: Option<&ApplicationType>,
 	) -> bool {
-		Namespace::of(source, check_name, application_type)
-			.is_some_and(|ns| Self::live_in(cataloged, source, &ns, check_name))
+		Self::live_in(
+			cataloged,
+			source,
+			&Namespace::of(source, application_type),
+			check_name,
+		)
 	}
 
 	/// As [`Self::live_for`], for a caller that has already derived the
@@ -956,8 +929,8 @@ impl CheckPolicy {
 			.map_err(AppError::from)
 	}
 
-	/// One source's catalog as `check_name → ceiling`, for building the
-	/// device-facing effective check map for an application of `application_type`.
+	/// One source's catalog in one namespace as `check_name → ceiling`, for
+	/// building the device-facing effective check map for one target.
 	/// Deliberately reads only the
 	/// static `ceiling` column: conditional `rules` ladders are
 	/// expressions evaluated per push against the report's contents, so
@@ -965,20 +938,21 @@ impl CheckPolicy {
 	/// unparseable ceiling falls back to warning, same as [`Self::apply`].
 	///
 	/// Keyed by the bare check name, because that is what a reporter sends and
-	/// what it reads this map back with. Names cannot collide across the
-	/// namespaces [`reported_by`] admits: a name is machine-subject or
-	/// application-subject and never both, and only the one application type is
-	/// in play.
+	/// what it reads this map back with. One namespace at a time, because a
+	/// name can be in two: the box's `memory` and the `memory` an application
+	/// reports for itself are separate entries.
 	pub async fn ceiling_map_for_source(
 		db: &mut AsyncPgConnection,
 		source: &str,
-		application_type: Option<&ApplicationType>,
+		namespace: &Namespace,
 	) -> Result<BTreeMap<String, CheckResult>> {
 		use crate::schema::check_policies::dsl;
+		let (subject, application_type) = namespace.to_columns();
 		let rows: Vec<(String, String)> = dsl::check_policies
 			.select((dsl::check_name, dsl::ceiling))
 			.filter(dsl::source.eq(source))
-			.filter(reported_by(application_type))
+			.filter(dsl::subject.is_not_distinct_from(subject.map(str::to_owned)))
+			.filter(dsl::application_type.is_not_distinct_from(application_type))
 			.load(db)
 			.await
 			.map_err(AppError::from)?;

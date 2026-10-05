@@ -14557,7 +14557,7 @@
               },
               {
                 "$ref": "#/components/schemas/NamespaceRef",
-                "description": "Which catalog entry the check behind this issue resolves to, when the\nissue is a check's. Absent for an issue that is not a check's, and for\none whose namespace cannot be derived — a structured source's\napplication-subject check filed at a grain with no application type."
+                "description": "Which catalog entry the check behind this issue resolves to, when the\nissue is a check's. Absent for an issue that is not a check's."
               }
             ]
           },

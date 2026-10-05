@@ -55,8 +55,7 @@ async fn seed_catalog(
 	// The servers here are facilities, so that is the namespace their pushes
 	// will read these ceilings back out of.
 	let (subject, application_type) =
-		Namespace::for_application("alertd", check_name, &ApplicationType::TamanuFacility)
-			.to_columns();
+		Namespace::of("alertd", Some(&ApplicationType::TamanuFacility)).to_columns();
 	sql_query(
 		"INSERT INTO check_policies \
 		 (source, subject, application_type, check_name, ceiling, rules, reviewed_at, reviewed_by) \
@@ -215,6 +214,119 @@ async fn status_response_carries_check_severities() {
 					"cert_expiry": "skip",
 					"brand_new": "warn",
 				})),
+			);
+		},
+	)
+	.await
+}
+
+/// A unified push answers and grades a box check at the box's grain, so the
+/// box's group decides its silences even when the application on it is in
+/// another group.
+// spec: STA#transitional-unified-pushes
+#[tokio::test(flavor = "multi_thread")]
+async fn unified_answer_reads_a_box_check_through_the_boxs_group() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let box_group = Uuid::new_v4();
+			let application_group = Uuid::new_v4();
+			let machine_id = Uuid::new_v4();
+			sql_query(
+				"INSERT INTO server_groups (id, name) VALUES ($1, 'box-group'), ($2, 'application-group')",
+			)
+			.bind::<sql_types::Uuid, _>(box_group)
+			.bind::<sql_types::Uuid, _>(application_group)
+			.execute(&mut conn)
+			.await
+			.expect("insert groups");
+			sql_query(
+				"INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', $1, $2, $3)",
+			)
+			.bind::<sql_types::Uuid, _>(machine_id)
+			.bind::<sql_types::Uuid, _>(box_group)
+			.bind::<sql_types::Uuid, _>(device_id)
+			.execute(&mut conn)
+			.await
+			.expect("insert machine");
+			sql_query(
+				"INSERT INTO applications (id, host, type, group_id, machine_id) \
+				 VALUES ($1, 'https://checks.example.com', 'tamanu-facility', $2, $1)",
+			)
+			.bind::<sql_types::Uuid, _>(machine_id)
+			.bind::<sql_types::Uuid, _>(application_group)
+			.execute(&mut conn)
+			.await
+			.expect("insert application");
+			sql_query(
+				"INSERT INTO check_policies \
+				 (source, subject, application_type, check_name, ceiling, reviewed_at, reviewed_by) VALUES \
+				 ('alertd', 'machine', NULL, 'disk_free', 'failed', NOW(), 'test'), \
+				 ('alertd', 'machine', NULL, 'memory', 'failed', NOW(), 'test')",
+			)
+			.execute(&mut conn)
+			.await
+			.expect("seed the box's catalog");
+
+			for group in [box_group, application_group] {
+				let check = if group == box_group {
+					"health/disk_free"
+				} else {
+					"health/memory"
+				};
+				ServerGroupSilencedRef::add(&mut conn, group, "alertd", check, None, None, None)
+					.await
+					.expect("group silence");
+			}
+
+			let response = public
+				.get(&format!("/status/{machine_id}/check-severities"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.await;
+			response.assert_status_ok();
+			let map: serde_json::Value = response.json();
+			assert_eq!(
+				map,
+				serde_json::json!({ "disk_free": "skip", "memory": "fail" }),
+			);
+
+			// The push itself grades the box's checks the same way.
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({"health": [
+					{"check": "disk_free", "result": "failed"},
+					{"check": "memory", "result": "failed"},
+				]}))
+				.await
+				.assert_status_ok();
+			#[derive(diesel::QueryableByName, Debug, PartialEq)]
+			struct State {
+				#[diesel(sql_type = sql_types::Text)]
+				check_name: String,
+				#[diesel(sql_type = sql_types::Text)]
+				effective_result: String,
+			}
+			let states: Vec<State> = sql_query(
+				"SELECT check_name, effective_result FROM issues \
+				 WHERE machine_id = $1 AND source = 'alertd' ORDER BY check_name",
+			)
+			.bind::<sql_types::Uuid, _>(machine_id)
+			.load(&mut conn)
+			.await
+			.expect("box check states");
+			assert_eq!(
+				states,
+				vec![
+					State {
+						check_name: "disk_free".into(),
+						effective_result: "skipped".into(),
+					},
+					State {
+						check_name: "memory".into(),
+						effective_result: "failed".into(),
+					},
+				],
 			);
 		},
 	)

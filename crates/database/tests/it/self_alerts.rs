@@ -302,11 +302,27 @@ async fn insert_server(conn: &mut diesel_async::AsyncPgConnection) -> uuid::Uuid
 /// `last_seen` to `hours_ago`, simulating a check that went quiet.
 async fn quiet_check(conn: &mut diesel_async::AsyncPgConnection, check: &str, hours_ago: i64) {
 	let server_id = insert_server(conn).await;
+	quiet_check_at(
+		conn,
+		database::issues::Scope::Application(server_id),
+		check,
+		hours_ago,
+	)
+	.await;
+}
+
+/// [`quiet_check`], filed at `scope`.
+async fn quiet_check_at(
+	conn: &mut diesel_async::AsyncPgConnection,
+	scope: database::issues::Scope,
+	check: &str,
+	hours_ago: i64,
+) {
 	database::issues::file_check(
 		conn,
 		database::issues::CheckFiling {
 			source: "alertd",
-			scope: database::issues::Scope::Application(server_id),
+			scope,
 			device_id: None,
 			check,
 			observed: CheckResult::Passed,
@@ -403,9 +419,25 @@ async fn a_quiet_check_no_live_application_could_report_is_ignored() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_quiet_machine_check_still_raises_with_no_applications_left() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		// `disk_free` is a machine-subject name, so its entry is the machine
-		// namespace's and names no type.
-		quiet_check(&mut conn, "disk_free", 24 * 40).await;
+		// Filed against a machine, so its entry is the machine namespace's and
+		// names no type.
+		#[derive(diesel::QueryableByName)]
+		struct RowId {
+			#[diesel(sql_type = diesel::sql_types::Uuid)]
+			id: uuid::Uuid,
+		}
+		let machine: RowId =
+			diesel::sql_query("INSERT INTO machines (name) VALUES ('box') RETURNING id")
+				.get_result(&mut conn)
+				.await
+				.expect("insert machine");
+		quiet_check_at(
+			&mut conn,
+			database::issues::Scope::Machine(machine.id),
+			"disk_free",
+			24 * 40,
+		)
+		.await;
 		diesel::sql_query("UPDATE applications SET deleted_at = now()")
 			.execute(&mut conn)
 			.await

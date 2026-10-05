@@ -59,9 +59,7 @@ pub struct IssueData {
 	/// manually submitted event).
 	pub source: String,
 	/// Which catalog entry the check behind this issue resolves to, when the
-	/// issue is a check's. Absent for an issue that is not a check's, and for
-	/// one whose namespace cannot be derived — a structured source's
-	/// application-subject check filed at a grain with no application type.
+	/// issue is a check's. Absent for an issue that is not a check's.
 	pub namespace: Option<NamespaceRef>,
 	/// How the check behind this issue reads to an operator: `<type>:<check>`
 	/// where it is one application type's, the bare name otherwise. Absent
@@ -165,8 +163,8 @@ impl From<IssueIncidentRef> for IssueIncidentLink {
 
 /// All the non-Issue extras we tuck into an `IssueData`.
 struct IssueEnrichment<'a> {
-	/// The namespace of the check behind this issue, derived from its source,
-	/// name, and its target's application type. Issues carry no namespace
+	/// The namespace of the check behind this issue, derived from its source
+	/// and its target's application type. Issues carry no namespace
 	/// columns of their own: a check-state's namespace is a function of what
 	/// it is filed against, and deriving it through the one function is what
 	/// keeps it agreeing with the catalog.
@@ -310,9 +308,10 @@ pub(crate) async fn enrich_issues(
 			// A check's namespace follows its target's application type, the
 			// same as it does on ingest, so an issue links to the catalog
 			// entry the check actually files into.
-			let namespace = i.check_name.as_deref().and_then(|check| {
-				Namespace::of(&i.source, check, naming.and_then(|n| n.r#type.as_ref()))
-			});
+			let namespace = i
+				.check_name
+				.is_some()
+				.then(|| Namespace::of(&i.source, naming.and_then(|n| n.r#type.as_ref())));
 			IssueData::from_with(
 				i,
 				IssueEnrichment {

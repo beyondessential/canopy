@@ -26,7 +26,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{server::app_type::ApplicationType, source::SUBSTRATE_SOURCE, subject::CheckSubject};
+use crate::{server::app_type::ApplicationType, source::SUBSTRATE_SOURCE};
 
 /// Source value canopy uses for conditions it determines itself:
 /// reachability, backup health, key expiry, self-monitoring.
@@ -81,57 +81,31 @@ pub enum Namespace {
 }
 
 impl Namespace {
-	/// The namespace a filing from `source` about `check_name` belongs to.
+	/// The namespace a filing from `source` belongs to.
 	///
-	/// `application_type` is the type of the application the check was
-	/// reported for, and is `None` when it was reported for a machine.
+	/// `application_type` is the type of the application the check was filed
+	/// against, and is `None` when it was filed against a machine. The check's
+	/// name plays no part: a check reported under an application is that
+	/// application's whatever it is called, so `memory` reported for a Tamanu
+	/// is that Tamanu's entry and not the box's. Which target a unified push's
+	/// check files at is decided by name, at ingest (see
+	/// [`CheckSubject`](crate::subject::CheckSubject)); once it is filed, the
+	/// target is the answer.
 	///
-	/// Returns `None` in exactly one case: a structured source's
-	/// application-subject check with no application to name a type. That is
-	/// the undrivable entry the migration drops; ingest cannot produce one,
-	/// because a check reported for an application has an application.
-	///
-	/// **This function is the whole compatibility guarantee between the
-	/// migration and ingest.** Both derive through it, so an entry the
-	/// migration created and the next report of that check land in the same
-	/// namespace. Two rules that merely agree today would drift.
-	pub fn of(
-		source: &str,
-		check_name: &str,
-		application_type: Option<&ApplicationType>,
-	) -> Option<Self> {
+	/// **This function is the whole compatibility guarantee between ingest and
+	/// every reader.** A check state records its target and not its namespace,
+	/// so each reader derives it again through here. Two rules that merely
+	/// agree today would drift.
+	// spec: CHK#names
+	pub fn of(source: &str, application_type: Option<&ApplicationType>) -> Self {
 		if is_reserved(source) {
-			return Some(Self::Flat);
+			return Self::Flat;
 		}
 
-		match CheckSubject::of(check_name) {
-			CheckSubject::Machine => Some(Self::Machine),
-			CheckSubject::Application => application_type.cloned().map(Self::Application),
+		match application_type {
+			Some(ty) => Self::Application(ty.clone()),
+			None => Self::Machine,
 		}
-	}
-
-	/// The namespace of a check reported for an application of this type.
-	///
-	/// Total, unlike [`Self::of`]: the only case that has no namespace is an
-	/// application-subject check with no type to qualify by, and a check
-	/// reported for an application has one. Ingest goes through here.
-	pub fn for_application(
-		source: &str,
-		check_name: &str,
-		application_type: &ApplicationType,
-	) -> Self {
-		Self::of(source, check_name, Some(application_type))
-			.unwrap_or_else(|| Self::Application(application_type.clone()))
-	}
-
-	/// The namespace of a check on a push that names no application.
-	///
-	/// Total for the same reason [`Self::for_application`] is, from the other
-	/// side. A box Canopy holds no application for reports about itself, so
-	/// every check on such a push is the box's, including one whose name is
-	/// not in the machine set: there is no application for it to belong to.
-	pub fn for_machine(source: &str, check_name: &str) -> Self {
-		Self::of(source, check_name, None).unwrap_or(Self::Machine)
 	}
 
 	/// The `(subject, application_type)` storage columns for this namespace.
@@ -259,26 +233,14 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn a_reserved_source_is_flat_whatever_the_check_is_about() {
-		// `disk_free` is a machine-subject name, but canopy curates its own
-		// names, so a canopy `disk_free` is identified by that name alone.
-		assert_eq!(
-			Namespace::of(CANOPY_SOURCE, "disk_free", None),
-			Some(Namespace::Flat)
-		);
-		assert_eq!(
-			Namespace::of(MANUAL_SOURCE, "anything_at_all", None),
-			Some(Namespace::Flat)
-		);
+	fn a_reserved_source_is_flat_wherever_it_files() {
+		assert_eq!(Namespace::of(CANOPY_SOURCE, None), Namespace::Flat);
+		assert_eq!(Namespace::of(MANUAL_SOURCE, None), Namespace::Flat);
 		// A substrate check is one catalog entry fleet-wide, whichever
 		// application type it happens to be filed against.
 		assert_eq!(
-			Namespace::of(
-				SUBSTRATE_SOURCE,
-				"pod-unschedulable",
-				Some(&ApplicationType::TamanuCentral)
-			),
-			Some(Namespace::Flat)
+			Namespace::of(SUBSTRATE_SOURCE, Some(&ApplicationType::TamanuCentral)),
+			Namespace::Flat
 		);
 	}
 
@@ -289,53 +251,19 @@ mod tests {
 	}
 
 	#[test]
-	fn a_structured_source_splits_by_subject() {
+	fn a_structured_source_follows_the_target_it_filed_at() {
+		assert_eq!(Namespace::of("alertd", None), Namespace::Machine);
 		assert_eq!(
-			Namespace::of("alertd", "disk_free", None),
-			Some(Namespace::Machine)
-		);
-		assert_eq!(
-			Namespace::of("alertd", "version", Some(&ApplicationType::TamanuCentral)),
-			Some(Namespace::Application(ApplicationType::TamanuCentral))
+			Namespace::of("alertd", Some(&ApplicationType::TamanuCentral)),
+			Namespace::Application(ApplicationType::TamanuCentral)
 		);
 	}
 
 	#[test]
 	fn two_types_reporting_one_name_are_two_namespaces() {
-		let central = Namespace::of("alertd", "version", Some(&ApplicationType::TamanuCentral));
-		let facility = Namespace::of("alertd", "version", Some(&ApplicationType::TamanuFacility));
+		let central = Namespace::of("alertd", Some(&ApplicationType::TamanuCentral));
+		let facility = Namespace::of("alertd", Some(&ApplicationType::TamanuFacility));
 		assert_ne!(central, facility);
-	}
-
-	#[test]
-	fn a_machine_check_does_not_vary_by_the_type_that_reported_it() {
-		// The machine namespace has nothing to vary over: one box, one entry,
-		// however many workloads present the check.
-		assert_eq!(
-			Namespace::of("alertd", "disk_free", Some(&ApplicationType::TamanuCentral)),
-			Namespace::of("alertd", "disk_free", Some(&ApplicationType::Senaite)),
-		);
-	}
-
-	#[test]
-	fn an_application_check_with_no_type_has_no_namespace() {
-		assert_eq!(Namespace::of("alertd", "version", None), None);
-	}
-
-	#[test]
-	fn the_application_form_agrees_with_the_general_one() {
-		for (source, check) in [
-			(CANOPY_SOURCE, "version"),
-			("alertd", "disk_free"),
-			("alertd", "version"),
-		] {
-			let ty = ApplicationType::TamanuCentral;
-			assert_eq!(
-				Some(Namespace::for_application(source, check, &ty)),
-				Namespace::of(source, check, Some(&ty)),
-				"{source}/{check} derived two ways"
-			);
-		}
 	}
 
 	#[test]

@@ -117,8 +117,7 @@ async fn set_check_severity(
 	// Every server that grades against this seed is a tamanu-central, so the
 	// row has to land in the namespace ingest will look it up under.
 	let (subject, application_type) =
-		Namespace::for_application("alertd", check_name, &ApplicationType::TamanuCentral)
-			.to_columns();
+		Namespace::of("alertd", Some(&ApplicationType::TamanuCentral)).to_columns();
 	sql_query(
 		"INSERT INTO check_policies \
 		 (source, subject, application_type, check_name, ceiling, escalates, reviewed_at, reviewed_by) \
@@ -1264,7 +1263,7 @@ async fn submit_status_with_all_failing_checks_silenced_opens_no_incident() {
 					&mut conn,
 					Scope::Application(server_id),
 					"alertd",
-					&Namespace::for_application("alertd", check, &ApplicationType::TamanuCentral),
+					&Namespace::of("alertd", Some(&ApplicationType::TamanuCentral)),
 					check,
 					None,
 					None,
@@ -1324,7 +1323,7 @@ async fn submit_status_with_partial_silence_opens_incident_for_unsilenced() {
 				&mut conn,
 				Scope::Application(server_id),
 				"alertd",
-				&Namespace::for_application("alertd", "database", &ApplicationType::TamanuCentral),
+				&Namespace::of("alertd", Some(&ApplicationType::TamanuCentral)),
 				"database",
 				None,
 				None,
@@ -1828,7 +1827,7 @@ async fn set_check_rules(
 	CheckPolicy::upsert_default(
 		conn,
 		"alertd",
-		&Namespace::for_application("alertd", check_name, &ApplicationType::TamanuCentral),
+		&Namespace::of("alertd", Some(&ApplicationType::TamanuCentral)),
 		check_name,
 	)
 	.await

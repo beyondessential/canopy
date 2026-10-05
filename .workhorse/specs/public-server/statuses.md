@@ -99,6 +99,8 @@ An empty set of health checks is a different thing: the reporter is describing t
 
 Canopy holds the list of check names and detail fields that are machine-subject in order to do that separation.
 Everything not on that list is application-subject, so a check or field Canopy does not recognise is filed against the application, which is where an unrecognised one has always gone.
+The list applies to unified pushes only.
+A push in the current format is taken as given, so a check it reports under an application is that application's whatever it is called, a name on the list included.
 
 A unified push describes at most one application, the format having no way to say otherwise, and Canopy works out which one from the push itself.
 

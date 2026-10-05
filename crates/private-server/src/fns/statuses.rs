@@ -940,6 +940,7 @@ async fn consolidated_checks_at(
 	use commons_types::subject::CheckSubject;
 	use database::check_policies::{CheckPolicy, ScopedCheckPolicy};
 	use database::issues::{CheckGradingRef, GradingContext, ReportedCheck, grade_instances};
+	use database::silenced_refs::silenced_health_checks_of_application;
 
 	let statuses = Status::latest_per_source_at(conn, server.id, at).await?;
 	// The box's own reports, for the box's figures, which a past moment
@@ -1033,14 +1034,7 @@ async fn consolidated_checks_at(
 		// The application's own silences and its group's: the box's are the
 		// box's, as in the live view.
 		// spec: CHK#silences-follow-the-event
-		let silenced = database::silenced_refs::silenced_health_checks_for_server(
-			conn,
-			Some(server.id),
-			None,
-			server.group_id,
-			&status.source,
-		)
-		.await?;
+		let silenced = silenced_health_checks_of_application(conn, server, &status.source).await?;
 		let empty = serde_json::Map::new();
 		let status_extra = status.extra.as_object().unwrap_or(&empty);
 		// Read as ingestion reads a push, so a check's nested `detail` and its
@@ -1053,9 +1047,10 @@ async fn consolidated_checks_at(
 			if !split && CheckSubject::of(&name).is_machine() {
 				continue;
 			}
-			// Which catalog entry this reading belongs to follows the
-			// reporting application's type, the same as it does on ingest.
-			let namespace = Namespace::for_application(&status.source, &name, &server.r#type);
+			// Everything presented here was filed against the application, so
+			// it is in the application type's namespace, as on ingest.
+			// spec: CHK#names
+			let namespace = Namespace::of(&status.source, Some(&server.r#type));
 			let key = (status.source.clone(), namespace.clone(), name.clone());
 			if !cataloged.contains(&key) {
 				continue;

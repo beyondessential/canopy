@@ -1095,6 +1095,7 @@ async fn snapshot_takes_a_split_pushs_application_row_as_given() {
 
 			INSERT INTO check_policies (source, subject, application_type, check_name) VALUES
 			('alertd', 'application', 'tamanu-central', 'db'),
+			('alertd', 'application', 'tamanu-central', 'memory'),
 			('alertd', 'machine', NULL, 'memory'),
 			('alertd', 'machine', NULL, 'disk_free');
 
@@ -1122,7 +1123,7 @@ async fn snapshot_takes_a_split_pushs_application_row_as_given() {
 			.iter()
 			.map(|c| c["qualified_name"].as_str().unwrap())
 			.collect();
-		assert_eq!(names, vec!["memory", "tamanu-central:db"]);
+		assert_eq!(names, vec!["tamanu-central:db", "tamanu-central:memory"]);
 		assert_eq!(checks["health_state"], "healthy");
 		assert!(
 			checks["checks"]
@@ -1147,7 +1148,7 @@ async fn snapshot_reads_a_split_push_as_split_after_the_machine_moves_on() {
 			('20000000-0000-0000-0000-000000000043', 'https://moved.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000043');
 
 			INSERT INTO check_policies (source, subject, application_type, check_name) VALUES
-			('alertd', 'machine', NULL, 'memory');
+			('alertd', 'application', 'tamanu-central', 'memory');
 
 			INSERT INTO statuses (server_id, machine_id, source, created_at, healthy, health) VALUES
 			(NULL, '20000000-0000-0000-0000-000000000043', 'alertd', NOW() - INTERVAL '2 hours', true, '[]'::jsonb),
@@ -1189,7 +1190,8 @@ async fn snapshot_reads_the_applications_own_silences_not_the_boxs() {
 			('20000000-0000-0000-0000-000000000042', 'https://boxsilence.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000042');
 
 			INSERT INTO check_policies (source, subject, application_type, check_name) VALUES
-			('alertd', 'machine', NULL, 'memory');
+			('alertd', 'machine', NULL, 'memory'),
+			('alertd', 'application', 'tamanu-central', 'memory');
 
 			INSERT INTO scoped_check_policies (machine_id, source, subject, check_name, ceiling) VALUES
 			('20000000-0000-0000-0000-000000000042', 'alertd', 'machine', 'memory', 'skipped');
@@ -2092,6 +2094,59 @@ async fn snapshot_surfaces_per_check_results() {
 		assert_eq!(eff("version_gated"), serde_json::json!("failed"));
 		// Passing checks now appear too, graded passed.
 		assert_eq!(eff("passing"), serde_json::json!("passed"));
+	})
+	.await
+}
+
+/// A check a split push reports under the application is graded through the
+/// application type's entry, not the box's entry of the same name.
+// spec: CHK#names
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_grades_a_split_pushs_machine_named_check_through_its_types_entry() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO check_policies (source, subject, application_type, check_name, ceiling, reviewed_at, reviewed_by) VALUES \
+				('alertd', 'machine', NULL, 'disk_free', 'warning', NOW(), 'test'), \
+				('alertd', 'application', 'tamanu-central', 'disk_free', 'failed', NOW(), 'test'); \
+			 INSERT INTO machines (id, name) VALUES ('30000000-0000-0000-0000-000000000041', 'split-box'); \
+			 INSERT INTO applications (id, host, type, machine_id) VALUES \
+				('30000000-0000-0000-0000-000000000041', 'https://split-snap.example.com', 'tamanu-central', '30000000-0000-0000-0000-000000000041'); \
+			 INSERT INTO statuses (server_id, machine_id, source, created_at, healthy, health, extra) VALUES \
+				(NULL, '30000000-0000-0000-0000-000000000041', 'alertd', '2026-10-01T00:00:00Z', false, \
+				 '[{\"check\":\"disk_free\",\"result\":\"failed\"}]'::jsonb, '{}'::jsonb), \
+				('30000000-0000-0000-0000-000000000041', '30000000-0000-0000-0000-000000000041', 'alertd', '2026-10-01T00:00:00Z', false, \
+				 '[{\"check\":\"disk_free\",\"result\":\"failed\"}]'::jsonb, '{}'::jsonb);",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/snapshot")
+			.json(&serde_json::json!({
+				"server_id": "30000000-0000-0000-0000-000000000041",
+				"at": "2026-10-01T00:05:00Z",
+			}))
+			.await;
+		r.assert_status_ok();
+		let body: serde_json::Value = r.json();
+		let checks: Vec<_> = body["checks"]["checks"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|c| {
+				serde_json::json!({
+					"qualified_name": c["qualified_name"],
+					"effective": c["effective"],
+				})
+			})
+			.collect();
+		assert_eq!(
+			checks,
+			vec![serde_json::json!({
+				"qualified_name": "tamanu-central:disk_free",
+				"effective": "failed",
+			})],
+		);
 	})
 	.await
 }

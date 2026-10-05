@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use crate::helpers::silenced_of_application;
 use commons_tests::db::TestDb;
 use commons_types::namespace::Namespace;
 use commons_types::server::app_type::ApplicationType;
@@ -18,10 +19,7 @@ use database::{
 		GradingInputs, Incident, InstancedCheckFiling, Issue, NewEvent, Scope, StoredInstances,
 		file_check, file_check_instances, grade_instances,
 	},
-	silenced_refs::{
-		MachineSilencedRef, ServerGroupSilencedRef, ServerSilencedRef, is_silenced,
-		silenced_health_checks_for_server,
-	},
+	silenced_refs::{MachineSilencedRef, ServerGroupSilencedRef, ServerSilencedRef, is_silenced},
 	statuses::CANOPY_SOURCE,
 };
 use diesel::prelude::*;
@@ -501,16 +499,10 @@ async fn an_instance_silence_on_an_application_quiets_that_instance_and_regrades
 				.expect("is_silenced")
 		);
 		assert!(
-			!silenced_health_checks_for_server(
-				&mut conn,
-				Some(s.application),
-				Some(s.machine),
-				Some(s.group),
-				CANOPY_SOURCE,
-			)
-			.await
-			.expect("silenced checks")
-			.contains(CHECK)
+			!silenced_of_application(&mut conn, s.application, CANOPY_SOURCE)
+				.await
+				.expect("silenced checks")
+				.contains(CHECK)
 		);
 
 		// The next filing applies it too.

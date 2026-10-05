@@ -1,6 +1,7 @@
 import {
 	resetSeededTables,
 	seedGroupSilencedRef,
+	seedIssue,
 	seedServer,
 	seedServerGroup,
 	seedStatus,
@@ -84,12 +85,13 @@ test.describe("The check namespace in the catalog", () => {
 		);
 	});
 
-	/// A check that describes the box is one check however many workloads sit
-	/// on it, so it catalogues once and reads by its bare name: qualifying it
-	/// by a reporter's type would claim a distinction that isn't there.
+	/// A unified push's check that describes the box is one check however many
+	/// workloads sit on it, so it catalogues once and reads by its bare name:
+	/// qualifying it by a reporter's type would claim a distinction that isn't
+	/// there.
 	///
-	/// spec: CHK
-	test("a machine-subject name is one entry, whatever reports it", async ({
+	/// spec: CHK, STA#transitional-unified-pushes
+	test("a machine-subject name on a unified push is one entry, whatever reports it", async ({
 		page,
 		sql,
 	}) => {
@@ -114,6 +116,42 @@ test.describe("The check namespace in the catalog", () => {
 		await expect(
 			page.getByRole("link", { name: "disk_free", exact: true }),
 		).toHaveAttribute("href", "/settings/healthchecks/alertd/machine/disk_free");
+	});
+
+	/// A check reported under an application is that application's, whatever it
+	/// is called, so it is its type's own entry beside the box's namesake.
+	///
+	/// spec: CHK#names
+	test("a box check's name reported under an application is its type's entry", async ({
+		page,
+		sql,
+	}) => {
+		const server = await seedServer(sql, {
+			name: "split-central",
+			type: "tamanu-central",
+		});
+		await seedIssue(sql, {
+			machineId: server.machineId,
+			ref: "health/disk_free",
+			message: "The box's disk",
+		});
+		await seedIssue(sql, {
+			serverId: server.id,
+			ref: "health/disk_free",
+			message: "The application's own disk",
+		});
+
+		await page.goto("/settings/healthchecks");
+
+		await expect(
+			page.getByRole("link", { name: "disk_free", exact: true }),
+		).toHaveAttribute("href", "/settings/healthchecks/alertd/machine/disk_free");
+		await expect(
+			page.getByRole("link", { name: "tamanu-central:disk_free", exact: true }),
+		).toHaveAttribute(
+			"href",
+			"/settings/healthchecks/alertd/application.tamanu-central/disk_free",
+		);
 	});
 
 	/// A source canopy curates itself names its checks fleet-wide, so its

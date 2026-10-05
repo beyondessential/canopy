@@ -13,6 +13,7 @@ mod artifact_scopes;
 mod backfill_registered_at_migration;
 mod backup_detection;
 mod backups;
+mod box_check_silence_migration;
 mod certificate_alerts;
 mod check_liveness;
 mod check_namespace;

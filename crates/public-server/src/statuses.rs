@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr as _;
 
 use axum::{
@@ -30,7 +30,7 @@ use database::{
 		ReportedCheck, Scope, grade_instances, is_health_structure,
 	},
 	machines::Machine,
-	silenced_refs::silenced_health_checks_for_server,
+	silenced_refs::{silenced_health_checks_of_application, silenced_health_checks_of_machine},
 	statuses::{NewStatus, Status},
 };
 use jiff::Timestamp;
@@ -625,15 +625,17 @@ async fn create(
 						&status.extra,
 					)
 					.await?;
+					let machine_grading_tags = json_tags(&machine_tags);
 					file_health_events(
 						conn,
 						None,
-						machine.id,
-						machine.group_id,
-						None,
+						&machine,
 						Some(id),
 						&status,
-						&json_tags(&machine_tags),
+						GrainTags {
+							application: &machine_grading_tags,
+							machine: &machine_grading_tags,
+						},
 						SubjectSplit::AsGiven,
 					)
 					.await?;
@@ -664,15 +666,17 @@ async fn create(
 							status.version.as_ref(),
 						)
 						.await?;
+						let application_tags = json_tags(tags);
 						file_health_events(
 							conn,
-							Some(application.id),
-							machine.id,
-							application.group_id,
-							Some(&application.r#type),
+							Some(application),
+							&machine,
 							Some(id),
 							&status,
-							&json_tags(tags),
+							GrainTags {
+								application: &application_tags,
+								machine: &application_tags,
+							},
 							SubjectSplit::AsGiven,
 						)
 						.await?;
@@ -685,26 +689,11 @@ async fn create(
 
 			// Computed after the transaction so checks first seen on this very
 			// push (upserted into the catalog above) are already in the map.
-			let machine_severities = effective_check_severities(
-				&mut db,
-				None,
-				machine.id,
-				machine.group_id,
-				None,
-				&source,
-			)
-			.await?;
+			let machine_severities = machine_check_severities(&mut db, &machine, &source).await?;
 			let mut responses = BTreeMap::new();
 			for (key, application, _, tags) in apps {
-				let check_severities = effective_check_severities(
-					&mut db,
-					Some(application.id),
-					machine.id,
-					application.group_id,
-					Some(&application.r#type),
-					&source,
-				)
-				.await?;
+				let check_severities =
+					application_check_severities(&mut db, &application, &source).await?;
 				responses.insert(
 					key,
 					TargetResponse {
@@ -736,9 +725,6 @@ async fn create(
 			// body. Either may be absent.
 			let version = resolve_version(&extra, current_version.map(|v| v.0));
 			let server_id = application.as_ref().map(|s| s.id);
-			let group_id = application
-				.as_ref()
-				.map_or(machine.group_id, |s| s.group_id);
 
 			// A push with no application is the box's, so it grades and
 			// answers against the box's own tags rather than borrowing a
@@ -750,6 +736,14 @@ async fn create(
 				None => crate::tags::effective_tags_for_machine(&mut db, &machine).await?,
 			};
 			let tags = json_tags(&effective_tags);
+			// The box's checks on this push are graded against the box's own
+			// tags, as they would be on a split push.
+			let machine_grading_tags = match &application {
+				Some(_) => {
+					json_tags(&crate::tags::effective_tags_for_machine(&mut db, &machine).await?)
+				}
+				None => tags.clone(),
+			};
 
 			// Only the recording is conditional on ingest mode; everything
 			// else — backup instructions, tags, severities computed below — is
@@ -785,13 +779,14 @@ async fn create(
 
 					file_health_events(
 						conn,
-						server_id,
-						machine.id,
-						group_id,
-						application.as_ref().map(|s| &s.r#type),
+						application.as_ref(),
+						&machine,
 						Some(id),
 						&status,
-						&tags,
+						GrainTags {
+							application: &tags,
+							machine: &machine_grading_tags,
+						},
 						SubjectSplit::BySubject,
 					)
 					.await?;
@@ -801,15 +796,8 @@ async fn create(
 				.await?;
 			}
 
-			let check_severities = effective_check_severities(
-				&mut db,
-				server_id,
-				machine.id,
-				group_id,
-				application.as_ref().map(|s| &s.r#type),
-				&source,
-			)
-			.await?;
+			let check_severities =
+				unified_check_severities(&mut db, application.as_ref(), &machine, &source).await?;
 
 			(effective_tags, check_severities, None, None)
 		}
@@ -937,41 +925,29 @@ async fn check_severities(
 	let server =
 		resolve_unified_application(&mut db, &machine, &serde_json::Value::Null, false).await?;
 
-	let map = effective_check_severities(
-		&mut db,
-		server.as_ref().map(|s| s.id),
-		machine.id,
-		server.as_ref().map_or(machine.group_id, |s| s.group_id),
-		server.as_ref().map(|s| &s.r#type),
-		DEFAULT_SOURCE,
-	)
-	.await?;
+	let map = unified_check_severities(&mut db, server.as_ref(), &machine, DEFAULT_SOURCE).await?;
 	Ok(Json(map))
 }
 
-/// Build the effective per-check map for a server and source: every check
-/// in the source's catalog mapped from its static policy ceiling (`failed`
-/// → `fail`, `warning`/`broken` → `warn`, `passed`/`skipped` → `skip`),
-/// then any check silenced for this server (at application, machine, or group
-/// scope)
-/// forced to `skip`. Conditional rules are deliberately not consulted —
-/// they depend on each push's contents, so only the static ceiling can be
-/// mapped ahead of time.
+/// Build the effective per-check map for one target and source: every check
+/// in the source's catalog in the target's namespace, mapped from its static
+/// policy ceiling (`failed` → `fail`, `warning`/`broken` → `warn`,
+/// `passed`/`skipped` → `skip`), then the target's `silenced` checks forced to
+/// `skip`. Conditional rules are deliberately not consulted — they depend on
+/// each push's contents, so only the static ceiling can be mapped ahead of
+/// time.
 async fn effective_check_severities(
 	db: &mut AsyncPgConnection,
-	server_id: Option<Uuid>,
-	machine_id: Uuid,
-	group_id: Option<Uuid>,
-	application_type: Option<&ApplicationType>,
 	source: &str,
+	namespace: &Namespace,
+	silenced: BTreeSet<String>,
 ) -> Result<BTreeMap<String, CheckSeverity>> {
 	// Keyed by bare check name, because that is what the reporter sends and
-	// reads back. The catalog is narrowed to the namespaces this reporter can
-	// file into, so another application type's same-named check is not in here
-	// to collide with. A box with no application can file into the machine's
-	// namespace only.
+	// reads back. The catalog is narrowed to the one namespace this target's
+	// checks file into, so the box's `memory` and an application's own
+	// `memory` do not collide here.
 	let mut map: BTreeMap<String, CheckSeverity> =
-		CheckPolicy::ceiling_map_for_source(db, source, application_type)
+		CheckPolicy::ceiling_map_for_source(db, source, namespace)
 			.await?
 			.into_iter()
 			.map(|(name, ceiling)| (name, ceiling.into()))
@@ -979,13 +955,58 @@ async fn effective_check_severities(
 
 	// Silences are keyed per (source, check): only this source's own
 	// silences force its checks to skip.
-	for check in
-		silenced_health_checks_for_server(db, server_id, Some(machine_id), group_id, source).await?
-	{
+	for check in silenced {
 		map.insert(check, CheckSeverity::Skip);
 	}
 
 	Ok(map)
+}
+
+/// The effective check map for a machine's own checks under one source.
+async fn machine_check_severities(
+	db: &mut AsyncPgConnection,
+	machine: &Machine,
+	source: &str,
+) -> Result<BTreeMap<String, CheckSeverity>> {
+	let silenced = silenced_health_checks_of_machine(db, machine, source).await?;
+	effective_check_severities(db, source, &Namespace::of(source, None), silenced).await
+}
+
+/// The effective check map for an application's own checks under one source.
+async fn application_check_severities(
+	db: &mut AsyncPgConnection,
+	application: &Application,
+	source: &str,
+) -> Result<BTreeMap<String, CheckSeverity>> {
+	let silenced = silenced_health_checks_of_application(db, application, source).await?;
+	let namespace = Namespace::of(source, Some(&application.r#type));
+	effective_check_severities(db, source, &namespace, silenced).await
+}
+
+/// The effective check map for a unified push, which gets one answer for both
+/// grains: each name is answered from the grain ingest files it at, the
+/// machine's for a machine-subject name and the application's for the rest.
+/// A push naming no application is the box's in full.
+// spec: STA#transitional-unified-pushes
+async fn unified_check_severities(
+	db: &mut AsyncPgConnection,
+	application: Option<&Application>,
+	machine: &Machine,
+	source: &str,
+) -> Result<BTreeMap<String, CheckSeverity>> {
+	let on_machine = machine_check_severities(db, machine, source).await?;
+	let Some(application) = application else {
+		return Ok(on_machine);
+	};
+	let own = application_check_severities(db, application, source).await?;
+	Ok(on_machine
+		.into_iter()
+		.filter(|(name, _)| CheckSubject::of(name).is_machine())
+		.chain(
+			own.into_iter()
+				.filter(|(name, _)| !CheckSubject::of(name).is_machine()),
+		)
+		.collect())
 }
 
 /// Resolve the server version to record on this status. Prefers the payload's
@@ -1037,16 +1058,13 @@ enum SubjectSplit {
 /// escalates), warning and broken → warning; passed and skipped file
 /// nothing and close prior issues.
 // spec: CHK#checks-with-instances
-#[allow(clippy::too_many_arguments)]
 async fn file_health_events(
 	conn: &mut AsyncPgConnection,
-	server_id: Option<Uuid>,
-	machine_id: Uuid,
-	group_id: Option<Uuid>,
-	application_type: Option<&ApplicationType>,
+	application: Option<&Application>,
+	machine: &Machine,
 	device_id: Option<Uuid>,
 	status: &Status,
-	tags: &std::collections::HashMap<String, serde_json::Value>,
+	tags: GrainTags<'_>,
 	subject: SubjectSplit,
 ) -> Result<()> {
 	let reported = ReportedCheck::all_in(&status.health);
@@ -1066,28 +1084,40 @@ async fn file_health_events(
 	// what lets a reporter carry a check Canopy does not recognise as
 	// machine-subject.
 	// spec: STA#transitional-unified-pushes
-	let on_machine = |check: &str| match subject {
-		SubjectSplit::BySubject => server_id.is_none() || CheckSubject::of(check).is_machine(),
-		SubjectSplit::AsGiven => server_id.is_none(),
+	let server_id = application.map(|a| a.id);
+	let machine_id = machine.id;
+	// The application a check files against, or `None` for the box's. Every
+	// other fact about where a check goes is read off this one answer: a
+	// check off the machine always has an application to file against, since
+	// with no application every check is the machine's.
+	let filed_against = |check: &str| -> Option<&Application> {
+		let on_machine = match subject {
+			SubjectSplit::BySubject => CheckSubject::of(check).is_machine(),
+			SubjectSplit::AsGiven => false,
+		};
+		application.filter(|_| !on_machine)
 	};
-	let namespace_of = |check: &str| match application_type {
-		Some(ty) if !on_machine(check) => Namespace::for_application(&status.source, check, ty),
-		_ => Namespace::for_machine(&status.source, check),
+	let on_machine = |check: &str| filed_against(check).is_none();
+	// The namespace follows the grain the check files at, never its name: a
+	// check filed against an application is that application type's entry.
+	// spec: CHK#names
+	let namespace_of =
+		|check: &str| Namespace::of(&status.source, filed_against(check).map(|a| &a.r#type));
+	let scope_of = |check: &str| match filed_against(check) {
+		Some(application) => Scope::Application(application.id),
+		None => Scope::Machine(machine_id),
 	};
-	// The scope a check files at. A check off the machine always has an
-	// application to file against: with no application, every check is the
-	// machine's.
-	let scope_of = |check: &str| match server_id {
-		Some(server_id) if !on_machine(check) => Scope::Application(server_id),
-		_ => Scope::Machine(machine_id),
+	let tags_of = |check: &str| match filed_against(check) {
+		Some(_) => tags.application,
+		None => tags.machine,
 	};
 
 	// Upsert a catalog row for every check name seen on this push,
 	// whatever its result. New checks land at the default warning
 	// ceiling; operators can review and adjust from the /healthchecks
-	// page. A name resolves to the namespace its subject and this
-	// source put it in, so a machine check on a Tamanu push is the
-	// box's entry and not one Tamanu owns.
+	// page. A name resolves to the namespace of the grain it files at,
+	// so a machine check on a Tamanu push is the box's entry and not one
+	// Tamanu owns.
 	for check_name in reported.keys() {
 		let namespace = namespace_of(check_name);
 		CheckPolicy::upsert_default(conn, &status.source, &namespace, check_name).await?;
@@ -1125,11 +1155,11 @@ async fn file_health_events(
 				// A unified push carries both grains' checks. Grade each at
 				// the grain its subject belongs to, so a machine check is
 				// graded against the box's tags and silenced by the box's
-				// policy.
+				// policy and its group's.
 				// spec: STA
-				application_id: (!on_machine).then_some(server_id).flatten(),
+				application_id: filed_against(check).map(|a| a.id),
 				machine_id: on_machine.then_some(machine_id),
-				group_id,
+				group_id: filed_against(check).map_or(machine.group_id, |a| a.group_id),
 				// A device push is a machine's; a cluster's checks arrive over
 				// the relay path, never here.
 				kubernetes_cluster_id: None,
@@ -1155,7 +1185,7 @@ async fn file_health_events(
 		};
 		let mut graded = grade_instances(
 			&grading,
-			&context(status, status_extra, tags, check),
+			&context(status, status_extra, tags_of(check), check),
 			Some(&reported.detail),
 			&reported.outcome,
 			prior.as_ref(),
@@ -1185,7 +1215,7 @@ async fn file_health_events(
 	// grain read as unmentioned on the grain it left, closing and reopening it
 	// as a new issue on every push.
 	let health_prefix = format!("{HEALTH_REF}/");
-	let strip = |refs: Vec<String>| -> std::collections::BTreeSet<String> {
+	let strip = |refs: Vec<String>| -> BTreeSet<String> {
 		refs.into_iter()
 			.filter_map(|r| {
 				r.strip_prefix(&health_prefix)
@@ -1295,7 +1325,7 @@ async fn file_health_events(
 		let stamp = CheckStateStamp::of_graded(
 			check,
 			graded,
-			&context(status, status_extra, tags, check),
+			&context(status, status_extra, tags_of(check), check),
 			title.as_deref(),
 		);
 		let r#ref = format!("{HEALTH_REF}/{check}");
@@ -1389,13 +1419,21 @@ async fn file_health_events(
 	// the per-group `server_groups` lock — is handed to the reeval worker so
 	// concurrent check-ins never convoy on that lock. Only grouped applications
 	// participate in incidents.
-	if let Some(server_id) = server_id
-		&& group_id.is_some()
+	if let Some(application) = application
+		&& application.group_id.is_some()
 	{
-		database::issues::enqueue_incident_reeval(conn, server_id).await?;
+		database::issues::enqueue_incident_reeval(conn, application.id).await?;
 	}
 
 	Ok(())
+}
+
+/// The tags a push's checks are graded against, per grain: an application's
+/// checks read the application's effective tags and the box's read the box's.
+#[derive(Clone, Copy)]
+struct GrainTags<'a> {
+	application: &'a std::collections::HashMap<String, serde_json::Value>,
+	machine: &'a std::collections::HashMap<String, serde_json::Value>,
 }
 
 /// A degraded check's message: its fields, one per line.

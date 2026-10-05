@@ -293,6 +293,117 @@ async fn a_machine_named_check_under_an_application_is_the_applications() {
 	.await
 }
 
+/// A check reported under an application is that application type's catalog
+/// entry, apart from the box's entry of the same name: each is graded,
+/// silenced and answered on its own.
+/// spec: CHK#names
+#[tokio::test(flavor = "multi_thread")]
+async fn a_machine_named_check_under_an_application_is_its_types_own_entry() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let machine_id = machine_for(&mut conn, device_id).await;
+			let push = serde_json::json!({
+				"source": "alertd",
+				"machine": { "health": [{ "check": "disk_free", "result": "passed" }] },
+				"applications": {
+					"central": {
+						"type": "tamanu-central",
+						"health": [{ "check": "disk_free", "result": "passed" }],
+					},
+				},
+			});
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&push)
+				.await
+				.assert_status_ok();
+
+			#[derive(QueryableByName, Debug, PartialEq)]
+			struct Entry {
+				#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+				subject: Option<String>,
+				#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+				application_type: Option<String>,
+			}
+			let entries: Vec<Entry> = sql_query(
+				"SELECT subject, application_type FROM check_policies \
+				 WHERE source = 'alertd' AND check_name = 'disk_free' \
+				 ORDER BY subject DESC",
+			)
+			.load(&mut conn)
+			.await
+			.expect("catalog");
+			assert_eq!(
+				entries,
+				vec![
+					Entry {
+						subject: Some("machine".into()),
+						application_type: None,
+					},
+					Entry {
+						subject: Some("application".into()),
+						application_type: Some("tamanu-central".into()),
+					},
+				],
+			);
+
+			// The box's entry is raised to a failure and silenced on the box;
+			// neither reaches the application's.
+			sql_query(
+				"UPDATE check_policies SET ceiling = 'failed', reviewed_at = NOW() \
+				 WHERE source = 'alertd' AND check_name = 'disk_free' AND subject = 'machine'",
+			)
+			.execute(&mut conn)
+			.await
+			.expect("raise the box's ceiling");
+			let response: SplitResponse = public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&push)
+				.await
+				.json();
+			assert_eq!(
+				response.machine.expect("machine").check_severities["disk_free"],
+				"fail"
+			);
+			let applications = response.applications.expect("applications");
+			assert_eq!(
+				applications["central"].check_severities["disk_free"],
+				"warn"
+			);
+
+			database::silenced_refs::MachineSilencedRef::add(
+				&mut conn,
+				machine_id,
+				"alertd",
+				"health/disk_free",
+				None,
+				None,
+			)
+			.await
+			.expect("silence the box's check");
+			let response: SplitResponse = public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&push)
+				.await
+				.json();
+			assert_eq!(
+				response.machine.expect("machine").check_severities["disk_free"],
+				"skip"
+			);
+			let applications = response.applications.expect("applications");
+			assert_eq!(
+				applications["central"].check_severities["disk_free"],
+				"warn"
+			);
+		},
+	)
+	.await
+}
+
 /// A push's application section says nothing about the machine's checks. If it
 /// did, every filing for a workload would close the box's open issues as
 /// unmentioned.
