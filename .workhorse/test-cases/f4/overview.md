@@ -18,7 +18,10 @@ Scenarios for how a machine's address and certificate requests resolve to one of
 
 ## Denial
 
-- [x] A denied DNS name is refused as `dns-name-denied` with its note, however often asked, places no order, and records nothing (verifies spec: CRT#denied-dns-names)
+- [x] A denied DNS name is refused as `dns-name-denied` without the operator's note, however often asked, places no order, and records nothing (verifies spec: CRT#denied-dns-names)
+- [x] A single-application machine naming a type it does not host is refused as `dns-name-type-mismatch`, naming the type it does, and declares nothing (verifies spec: CRT#resolving-the-application)
+- [x] Outside the group's domains, a DNS name declared on another machine and one declared nowhere are both refused as `name-not-entitled`, and neither is recorded (verifies spec: CRT#resolving-the-application)
+- [x] The monitor sweep drops undeclared records not asked about for a day (verifies spec: CRT#undeclared-requests)
 - [x] Denying ends the undeclared record; lifting removes the denial; lifting again is a 404 (verifies spec: CRT#denied-dns-names)
 - [x] Denying a DNS name declared on one of the machine's applications is refused, naming it (verifies spec: CRT#denied-dns-names)
 - [x] Declaring a DNS name ends both its undeclared record and its denial on the declaring application's machine (verifies spec: CRT#denied-dns-names)

@@ -63,11 +63,12 @@ A request starts from every application on the machine and is narrowed in this o
 
 A request left with no application, or with several, is refused as undeclared.
 
-A machine hosting exactly one application resolves to it before anything narrows, and its requests go on to the checks that follow, so a missing grant or an uncovered domain is refused as that rather than as undeclared.
+A machine hosting exactly one application resolves to it before anything narrows, unless the request contradicts it (see below), and its requests go on to the checks that follow, so a missing grant or an uncovered domain is refused as that rather than as undeclared.
 Naming a type is optional, because an agent on a single-application machine has nothing to tell apart, and an agent that cannot tell which of its workloads serves a DNS name may still be resolved by the grants alone.
 
-A request naming a type other than that of the application declaring the DNS name on the same machine is refused, and the refusal names the declaring application's type.
-That is the machine's own business, already in its entitlements, and following the declaration silently would leave an agent serving a certificate attributed to the workload it said it was not.
+A request naming a type the machine contradicts is refused before it is narrowed: one other than the type of the application on the machine declaring the DNS name, or one none of the machine's applications is.
+The refusal names the declaring application's type, or the types the machine's applications are, and is distinguishable from every other refusal, since its remedy is correcting the agent or registering the application rather than waiting.
+That is the machine's own business, already in its entitlements, and following the request silently would leave an agent serving a certificate attributed to the workload it said it was not, and declare the DNS name for that workload.
 
 A request that resolves declares its DNS name for the application it resolved to, so later requests and renewals resolve from the declaration.
 A DNS name another application holds cannot be declared that way, and the request is refused as undeclared.
@@ -76,6 +77,7 @@ The undeclared refusal is distinguishable from every other refusal.
 Its remedy is an operator declaring the DNS name, or the agent naming the type, so an agent can tell a DNS name waiting on that from one it is not entitled to, and wait rather than report a fault.
 
 The refusal reads the same whether the DNS name is held by an application elsewhere or by nobody, so the endpoint is not a directory of what other machines serve.
+A DNS name an application on another machine holds narrows exactly as one nobody holds, so its request meets the same checks in the same order, and is refused as undeclared only where it would otherwise have declared the DNS name.
 
 ### Undeclared requests
 
@@ -95,9 +97,9 @@ It goes when an application on the machine declares the DNS name, when the DNS n
 ### Denied DNS names
 
 An operator can deny a DNS name to a machine, for a DNS name the machine asks about that none of its applications should serve.
-A denial covers both address and certificate requests about that DNS name from that machine, and records who made it, when, and an optional note saying why.
+A denial covers both address and certificate requests about that DNS name from that machine, and records who made it, when, and an optional note saying why, which is for operators and stays in Canopy.
 
-A request about a denied DNS name is refused as denied, distinguishably from every other refusal, so an agent can tell a decision against it from a declaration it is waiting on.
+A request about a denied DNS name is refused as denied, naming the DNS name, distinguishably from every other refusal, so an agent can tell a decision against it from a declaration it is waiting on.
 Such a request is not recorded as undeclared, so a machine that keeps asking raises nothing however often it asks.
 
 A denial stands until an operator lifts it, or until an operator declares the DNS name on one of the machine's applications, which is the opposite decision and ends it.
