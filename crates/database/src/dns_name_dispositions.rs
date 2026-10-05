@@ -9,7 +9,7 @@
 
 use commons_errors::{AppError, Result};
 use commons_types::dns::normalize_domain;
-use diesel::prelude::*;
+use diesel::{prelude::*, sql_types};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::{SignedDuration, Timestamp};
 use serde::Serialize;
@@ -47,6 +47,18 @@ impl AskedFor {
 	}
 }
 
+impl TryFrom<String> for AskedFor {
+	type Error = String;
+
+	fn try_from(value: String) -> std::result::Result<Self, Self::Error> {
+		match value.as_str() {
+			"addresses" => Ok(Self::Addresses),
+			"certificate" => Ok(Self::Certificate),
+			_ => Err(format!("unknown asked_for {value:?}")),
+		}
+	}
+}
+
 /// A request a machine made about a DNS name that resolved to no single one of
 /// its applications.
 #[derive(Debug, Clone, Serialize, Queryable, Selectable, utoipa::ToSchema)]
@@ -57,8 +69,9 @@ pub struct UndeclaredDnsName {
 	pub machine_id: Uuid,
 	/// Normalised: lower case, no trailing dot.
 	pub dns_name: String,
-	/// What the latest refused request was for: `addresses` or `certificate`.
-	pub asked_for: String,
+	/// What the latest refused request was for.
+	#[diesel(deserialize_as = String)]
+	pub asked_for: AskedFor,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	#[schema(value_type = String)]
 	pub first_asked_at: Timestamp,
@@ -69,17 +82,19 @@ pub struct UndeclaredDnsName {
 
 /// How many undeclared requests one machine has, with what an operator needs to
 /// reach it.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, QueryableByName)]
 pub struct UndeclaredOnMachine {
+	#[diesel(sql_type = sql_types::Uuid)]
 	pub machine_id: Uuid,
+	#[diesel(sql_type = sql_types::Text)]
 	pub machine_name: String,
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Uuid>)]
 	pub group_id: Option<Uuid>,
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
 	pub group_name: Option<String>,
+	#[diesel(sql_type = sql_types::BigInt)]
 	pub count: i64,
 }
-
-/// A machine's id and name, and its group's, per undeclared request.
-type MachineRow = (Uuid, String, Option<Uuid>, Option<String>);
 
 fn cutoff() -> Timestamp {
 	Timestamp::now() - UNDECLARED_LIFETIME
@@ -88,64 +103,96 @@ fn cutoff() -> Timestamp {
 impl UndeclaredDnsName {
 	/// Record that `machine_id` asked about `dns_name` and could not be resolved.
 	///
-	/// A repeat ask updates the one record. Records not asked about within
-	/// [`UNDECLARED_LIFETIME`] are pruned on the way, so the table holds only
-	/// what still counts, and a machine holds at most
-	/// [`UNDECLARED_PER_MACHINE`].
+	/// A repeat ask updates the one record, and a machine holds at most
+	/// [`UNDECLARED_PER_MACHINE`] that still count. The machine's row is locked
+	/// for the duration, so two refusals arriving together cannot both pass the
+	/// bound.
 	pub async fn record(
 		db: &mut AsyncPgConnection,
 		machine_id: Uuid,
 		dns_name: &str,
 		asked_for: AskedFor,
 	) -> Result<()> {
-		use crate::schema::undeclared_dns_names::dsl;
+		use crate::schema::{machines, undeclared_dns_names::dsl};
+		use diesel_async::AsyncConnection;
 
 		let dns_name = normalize_domain(dns_name)?;
-		let now = Timestamp::now();
+		let now = jiff_diesel::Timestamp::from(Timestamp::now());
+		let cutoff = jiff_diesel::Timestamp::from(cutoff());
 
+		db.transaction::<_, AppError, _>(async |conn| {
+			machines::table
+				.filter(machines::id.eq(machine_id))
+				.select(machines::id)
+				.for_update()
+				.first::<Uuid>(conn)
+				.await?;
+
+			// This machine's lapsed records go first, so one asked about again
+			// after lapsing starts over rather than carrying its old first ask.
+			// The rest of the table is pruned by the monitor's sweep.
+			diesel::delete(
+				dsl::undeclared_dns_names
+					.filter(dsl::machine_id.eq(machine_id))
+					.filter(dsl::last_asked_at.lt(cutoff)),
+			)
+			.execute(conn)
+			.await?;
+
+			let held: i64 = dsl::undeclared_dns_names
+				.filter(dsl::machine_id.eq(machine_id))
+				.count()
+				.get_result(conn)
+				.await?;
+			if held >= UNDECLARED_PER_MACHINE {
+				// Only a DNS name already recorded is refreshed; a new one is dropped.
+				diesel::update(
+					dsl::undeclared_dns_names
+						.filter(dsl::machine_id.eq(machine_id))
+						.filter(dsl::dns_name.eq(&dns_name)),
+				)
+				.set((
+					dsl::asked_for.eq(asked_for.as_str()),
+					dsl::last_asked_at.eq(now),
+				))
+				.execute(conn)
+				.await?;
+				return Ok(());
+			}
+
+			diesel::insert_into(dsl::undeclared_dns_names)
+				.values((
+					dsl::machine_id.eq(machine_id),
+					dsl::dns_name.eq(&dns_name),
+					dsl::asked_for.eq(asked_for.as_str()),
+				))
+				.on_conflict((dsl::machine_id, dsl::dns_name))
+				.do_update()
+				.set((
+					dsl::asked_for.eq(asked_for.as_str()),
+					dsl::last_asked_at.eq(now),
+				))
+				.execute(conn)
+				.await?;
+			Ok(())
+		})
+		.await
+	}
+
+	/// Drop every record that no longer counts, for the monitor's sweep.
+	///
+	/// Reads already pass over them, so this only keeps the table to what
+	/// still counts.
+	// spec: CRT#undeclared-requests
+	pub async fn prune(db: &mut AsyncPgConnection) -> Result<usize> {
+		use crate::schema::undeclared_dns_names::dsl;
 		diesel::delete(
 			dsl::undeclared_dns_names
 				.filter(dsl::last_asked_at.lt(jiff_diesel::Timestamp::from(cutoff()))),
 		)
 		.execute(db)
-		.await?;
-
-		let held: i64 = dsl::undeclared_dns_names
-			.filter(dsl::machine_id.eq(machine_id))
-			.count()
-			.get_result(db)
-			.await?;
-		if held >= UNDECLARED_PER_MACHINE {
-			// Only a DNS name already recorded is refreshed; a new one is dropped.
-			diesel::update(
-				dsl::undeclared_dns_names
-					.filter(dsl::machine_id.eq(machine_id))
-					.filter(dsl::dns_name.eq(&dns_name)),
-			)
-			.set((
-				dsl::asked_for.eq(asked_for.as_str()),
-				dsl::last_asked_at.eq(jiff_diesel::Timestamp::from(now)),
-			))
-			.execute(db)
-			.await?;
-			return Ok(());
-		}
-
-		diesel::insert_into(dsl::undeclared_dns_names)
-			.values((
-				dsl::machine_id.eq(machine_id),
-				dsl::dns_name.eq(&dns_name),
-				dsl::asked_for.eq(asked_for.as_str()),
-			))
-			.on_conflict((dsl::machine_id, dsl::dns_name))
-			.do_update()
-			.set((
-				dsl::asked_for.eq(asked_for.as_str()),
-				dsl::last_asked_at.eq(jiff_diesel::Timestamp::from(now)),
-			))
-			.execute(db)
-			.await?;
-		Ok(())
+		.await
+		.map_err(AppError::from)
 	}
 
 	/// Forget the record for `machine_id` and `dns_name`, if there is one.
@@ -184,45 +231,25 @@ impl UndeclaredDnsName {
 		db: &mut AsyncPgConnection,
 		group_id: Option<Uuid>,
 	) -> Result<Vec<UndeclaredOnMachine>> {
-		use crate::schema::{machines, server_groups, undeclared_dns_names};
-
-		let mut query = undeclared_dns_names::table
-			.inner_join(machines::table)
-			.left_join(server_groups::table.on(machines::group_id.eq(server_groups::id.nullable())))
-			.filter(machines::deleted_at.is_null())
-			.filter(undeclared_dns_names::last_asked_at.ge(jiff_diesel::Timestamp::from(cutoff())))
-			.select((
-				machines::id,
-				machines::name,
-				machines::group_id,
-				server_groups::name.nullable(),
-			))
-			.into_boxed();
-		if let Some(group) = group_id {
-			query = query.filter(machines::group_id.eq(group));
-		}
-		let rows: Vec<MachineRow> = query.load(db).await?;
-
-		// One row per request; a box carries few, so counting here is cheaper to
-		// read than a grouped query across the join.
-		let mut by_machine: Vec<UndeclaredOnMachine> = Vec::new();
-		for (machine_id, machine_name, group_id, group_name) in rows {
-			match by_machine.iter_mut().find(|m| m.machine_id == machine_id) {
-				Some(entry) => entry.count += 1,
-				None => by_machine.push(UndeclaredOnMachine {
-					machine_id,
-					machine_name,
-					group_id,
-					group_name,
-					count: 1,
-				}),
-			}
-		}
-		by_machine.sort_by(|a, b| {
-			(a.group_name.as_deref(), a.machine_name.as_str())
-				.cmp(&(b.group_name.as_deref(), b.machine_name.as_str()))
-		});
-		Ok(by_machine)
+		// Grouped by primary keys, so the machine's and group's other columns
+		// come along without being grouped on.
+		diesel::sql_query(
+			"SELECT m.id AS machine_id, m.name AS machine_name, m.group_id, \
+			        g.name AS group_name, count(*) AS count \
+			 FROM undeclared_dns_names u \
+			 JOIN machines m ON m.id = u.machine_id \
+			 LEFT JOIN server_groups g ON g.id = m.group_id \
+			 WHERE m.deleted_at IS NULL \
+			   AND u.last_asked_at >= $1 \
+			   AND ($2::uuid IS NULL OR m.group_id = $2) \
+			 GROUP BY m.id, g.id \
+			 ORDER BY g.name ASC NULLS FIRST, m.name ASC",
+		)
+		.bind::<sql_types::Timestamptz, _>(jiff_diesel::Timestamp::from(cutoff()))
+		.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)
+		.load(db)
+		.await
+		.map_err(AppError::from)
 	}
 }
 

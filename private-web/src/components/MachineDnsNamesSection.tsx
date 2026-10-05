@@ -21,12 +21,18 @@ import {
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
 import type {
+	AskedFor,
 	MachineApplicationView as MachineApplication,
 	MachineDnsNamesView as View,
 	UndeclaredView as Undeclared,
 } from "../types";
 import { GradedAction } from "./GradedAction";
 import TimeAgo from "./TimeAgo";
+
+const ASKED_FOR_LABELS: Record<AskedFor, string> = {
+	addresses: "Addresses",
+	certificate: "Certificate",
+};
 
 /// The DNS names asked about from a machine: the requests that resolved to none
 /// of its applications, waiting on an operator to declare or deny each, the
@@ -47,16 +53,10 @@ export default function MachineDnsNamesSection({
 	refreshKey: number;
 	onChanged: () => void;
 }) {
-	const [tick, setTick] = useState(0);
 	const view = useApi("certificates", "for_machine", { machine_id: machineId }, [
 		machineId,
-		tick,
 		refreshKey,
 	]);
-	const changed = () => {
-		setTick((t) => t + 1);
-		onChanged();
-	};
 
 	if (view.status !== "ok") return null;
 	const data: View = view.data;
@@ -95,7 +95,7 @@ export default function MachineDnsNamesSection({
 										row={row}
 										applications={data.applications}
 										isAdmin={isAdmin}
-										onChanged={changed}
+										onChanged={onChanged}
 									/>
 								))}
 							</TableBody>
@@ -172,7 +172,7 @@ export default function MachineDnsNamesSection({
 										deniedAt={row.denied_at}
 										note={row.note ?? null}
 										isAdmin={isAdmin}
-										onChanged={changed}
+										onChanged={onChanged}
 									/>
 								))}
 							</TableBody>
@@ -215,7 +215,7 @@ function UndeclaredRow({
 			<TableCell sx={{ fontFamily: "monospace" }}>{row.name}</TableCell>
 			<TableCell>
 				<Typography variant="caption" color="text.secondary">
-					{row.asked_for}, <TimeAgo timestamp={row.last_asked_at} />
+					{ASKED_FOR_LABELS[row.asked_for]}, <TimeAgo timestamp={row.last_asked_at} />
 				</Typography>
 			</TableCell>
 			<TableCell align="right">

@@ -13,6 +13,8 @@
 //! - **tailnet key-expiry** — when the Tailscale directory is configured.
 //! - **incident linger and reminders** — close incidents whose linger window
 //!   has elapsed, and queue the daily reminder for long-open ones.
+//! - **undeclared DNS names** — drops requests no machine has repeated for a
+//!   day.
 //! - **operator sessions** — retires safety-mode sessions no client has
 //!   presented for a day, on its own hourly timer (see `jobs::session_sweep`).
 //!
@@ -262,6 +264,13 @@ pub fn spawn() -> JoinHandle<()> {
 					debug!("maintenance: ended {ended} window(s), settled {settled}")
 				}
 				Err(err) => error!("maintenance window sweep failed: {err}"),
+			}
+
+			// Undeclared DNS name requests no machine has repeated for a day.
+			match database::UndeclaredDnsName::prune(&mut db).await {
+				Ok(0) => {}
+				Ok(n) => debug!("undeclared DNS names: pruned {n} lapsed request(s)"),
+				Err(err) => error!("undeclared DNS name prune failed: {err}"),
 			}
 
 			// Backstop drain of the incident-reeval queue in case the dedicated

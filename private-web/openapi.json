@@ -10466,6 +10466,14 @@
           }
         }
       },
+      "AskedFor": {
+        "type": "string",
+        "description": "What a refused request was for.",
+        "enum": [
+          "addresses",
+          "certificate"
+        ]
+      },
       "AttachTailscaleArgs": {
         "type": "object",
         "description": "Request to attach a device to a Tailscale network node.",
@@ -21184,7 +21192,7 @@
           },
           "machine_name": {
             "type": "string",
-            "description": "The machine's name. Null for a machine its operator never named."
+            "description": "The machine's name."
           }
         }
       },
@@ -21213,8 +21221,8 @@
         ],
         "properties": {
           "asked_for": {
-            "type": "string",
-            "description": "What the latest refused request was for: `addresses` or `certificate`."
+            "$ref": "#/components/schemas/AskedFor",
+            "description": "What the latest refused request was for."
           },
           "first_asked_at": {
             "type": "string",

@@ -195,6 +195,15 @@ pub enum AppError {
 	#[error("this DNS name is denied to this machine: {0}")]
 	DnsNameDenied(String),
 
+	/// The request names an application type the asking machine contradicts:
+	/// the application on it declaring the DNS name is of another type, or none
+	/// of its applications is of that type. Its own problem type because the
+	/// remedy is correcting the agent's configuration or registering the
+	/// application, neither of which waiting fixes. Maps to 409.
+	// spec: CRT#resolving-the-application
+	#[error("this machine contradicts the application type named: {0}")]
+	DnsNameTypeMismatch(String),
+
 	/// Deliberately opaque failure for the public enrollment endpoints. Every
 	/// pre-completion reason (unknown/archived server, invalid/expired/consumed
 	/// token, bad/expired/used challenge nonce, bad signature) collapses to this
@@ -316,6 +325,7 @@ impl AppError {
 			Self::NameNotEntitled(_) => StatusCode::FORBIDDEN,
 			Self::DnsNameUndeclared(_) => StatusCode::FORBIDDEN,
 			Self::DnsNameDenied(_) => StatusCode::FORBIDDEN,
+			Self::DnsNameTypeMismatch(_) => StatusCode::CONFLICT,
 			Self::EnrollmentFailed => StatusCode::FORBIDDEN,
 			Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
 			Self::Upstream(_) => StatusCode::BAD_GATEWAY,
@@ -390,6 +400,7 @@ impl AppError {
 						Self::NameNotEntitled(_) => "name-not-entitled",
 						Self::DnsNameUndeclared(_) => "dns-name-undeclared",
 						Self::DnsNameDenied(_) => "dns-name-denied",
+						Self::DnsNameTypeMismatch(_) => "dns-name-type-mismatch",
 						Self::EnrollmentFailed => "enrollment-failed",
 						Self::RateLimited => "rate-limited",
 						Self::Upstream(_) => "upstream",

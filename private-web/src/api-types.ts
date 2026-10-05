@@ -5152,6 +5152,11 @@ export interface components {
              */
             artifact_id: string;
         };
+        /**
+         * @description What a refused request was for.
+         * @enum {string}
+         */
+        AskedFor: "addresses" | "certificate";
         /** @description Request to attach a device to a Tailscale network node. */
         AttachTailscaleArgs: {
             /**
@@ -11930,7 +11935,7 @@ export interface components {
              * @description The machine with requests waiting on a declaration.
              */
             machine_id: string;
-            /** @description The machine's name. Null for a machine its operator never named. */
+            /** @description The machine's name. */
             machine_name: string;
         };
         /** @description Which machines have undeclared requests, optionally within one group. */
@@ -11943,8 +11948,8 @@ export interface components {
         };
         /** @description A request the machine made that resolved to no single application. */
         UndeclaredView: {
-            /** @description What the latest refused request was for: `addresses` or `certificate`. */
-            asked_for: string;
+            /** @description What the latest refused request was for. */
+            asked_for: components["schemas"]["AskedFor"];
             /** @description When the machine first asked. */
             first_asked_at: string;
             /**

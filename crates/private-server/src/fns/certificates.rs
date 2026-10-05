@@ -221,14 +221,7 @@ pub async fn for_server(
 	let mut conn = state.db_read.get().await?;
 	let server = Application::get_by_id(&mut conn, args.server_id).await?;
 
-	let domains = match server.group_id {
-		Some(group) => ServerGroupDomain::list_for_group(&mut conn, group)
-			.await?
-			.into_iter()
-			.map(|claim| claim.domain)
-			.collect(),
-		None => Vec::new(),
-	};
+	let domains = group_domains(&mut conn, server.group_id).await?;
 	let names = ApplicationName::for_server(&mut conn, args.server_id).await?;
 	let certificates = ApplicationCertificate::for_server(&mut conn, args.server_id).await?;
 
@@ -686,7 +679,8 @@ pub async fn declare(
 ) -> Result<Json<NameView>> {
 	let mut conn = state.db.get().await?;
 	let row = ApplicationName::declare(&mut conn, args.application_id, &args.name).await?;
-	let domains = group_domains(&mut conn, args.application_id).await?;
+	let application = Application::get_by_id(&mut conn, args.application_id).await?;
+	let domains = group_domains(&mut conn, application.group_id).await?;
 	Ok(Json(name_view(row, &state.dns_zones, &domains)))
 }
 
@@ -716,14 +710,12 @@ pub async fn release(
 	Ok(Json(()))
 }
 
-/// The domains an application's group controls, or none for an application in
-/// no group.
+/// The domains a group controls, or none for an application in no group.
 async fn group_domains(
 	conn: &mut database::diesel_async::AsyncPgConnection,
-	application_id: Uuid,
+	group_id: Option<Uuid>,
 ) -> Result<Vec<String>> {
-	let application = Application::get_by_id(conn, application_id).await?;
-	Ok(match application.group_id {
+	Ok(match group_id {
 		Some(group) => ServerGroupDomain::list_for_group(conn, group)
 			.await?
 			.into_iter()
@@ -764,8 +756,8 @@ pub struct MachineDeclaredView {
 pub struct UndeclaredView {
 	/// The DNS name asked about, normalised.
 	pub name: String,
-	/// What the latest refused request was for: `addresses` or `certificate`.
-	pub asked_for: String,
+	/// What the latest refused request was for.
+	pub asked_for: database::AskedFor,
 	/// When the machine first asked.
 	#[schema(value_type = String)]
 	pub first_asked_at: Timestamp,
@@ -902,7 +894,7 @@ pub struct UndeclaredNoticesArgs {
 pub struct UndeclaredNoticeView {
 	/// The machine with requests waiting on a declaration.
 	pub machine_id: Uuid,
-	/// The machine's name. Null for a machine its operator never named.
+	/// The machine's name.
 	pub machine_name: String,
 	/// The machine's group. Null for a machine in none.
 	pub group_id: Option<Uuid>,

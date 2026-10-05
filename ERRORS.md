@@ -192,7 +192,20 @@ it or declares the DNS name on one of the machine's applications.
 
 Distinct from an undeclared DNS name so a client can tell a decision
 against the DNS name from a declaration it is waiting on. A denied
-request is not recorded, so asking again raises nothing.
+request is not recorded, so asking again raises nothing. The refusal
+names the DNS name only; the operator's note stays in Canopy.
+
+## DNS name type mismatch
+
+Issued when a machine asks Canopy to act on a DNS name and names an
+application type the machine contradicts: the application on that
+machine declaring the DNS name is of another type, or none of the
+machine's applications is of the named type. The refusal names the
+types the machine's applications actually are.
+
+Distinct from an undeclared DNS name because waiting does not fix it:
+either the client is configured with the wrong type, or the
+application it means is not registered on the machine in Canopy.
 
 ## Auth: tailnet identity missing
 

@@ -88,7 +88,7 @@ test.describe("DNS names", () => {
 		const section = page.getByTestId("machine-dns-names");
 		const row = section.getByTestId("undeclared-row");
 		await expect(row.getByText("lab.fiji.tamanu.app")).toBeVisible();
-		await expect(row.getByText(/certificate/)).toBeVisible();
+		await expect(row.getByText(/certificate/i)).toBeVisible();
 
 		await row.getByLabel("Application to declare it on").click();
 		await page.getByRole("option", { name: "lab" }).click();

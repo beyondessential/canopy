@@ -933,6 +933,7 @@ async fn a_type_contradicting_the_declaration_is_refused_naming_it() {
 				.await;
 			resp.assert_status(axum::http::StatusCode::CONFLICT);
 			let body: serde_json::Value = resp.json();
+			assert_eq!(problem_type(&body), "dns-name-type-mismatch");
 			assert!(
 				body["title"]
 					.as_str()
@@ -981,6 +982,87 @@ async fn a_name_held_elsewhere_is_undeclared_on_a_single_application_machine() {
 	.await
 }
 
+/// On a single-application machine, a name another machine's application
+/// holds meets the same checks as one nobody holds, so outside the group's
+/// domains both are refused as unentitled and nothing tells them apart.
+// spec: CRT#resolving-the-application
+#[tokio::test(flavor = "multi_thread")]
+async fn a_name_held_elsewhere_outside_the_domains_is_unentitled_as_an_unheld_one() {
+	configure_zones("tamanu.app=Z1");
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			entitled(&mut conn, device_id, Some("fiji.tamanu.app"), true, true).await;
+			let elsewhere = Uuid::new_v4();
+			conn.batch_execute(&format!(
+				"INSERT INTO machines (id, name) VALUES ('{elsewhere}', 'elsewhere'); \
+				 INSERT INTO applications (id, name, host, type, machine_id) \
+				 VALUES ('{elsewhere}', 'theirs', 'https://{elsewhere}.example.invalid', 'tamanu-central', '{elsewhere}'); \
+				 INSERT INTO application_names (application_id, name) \
+				 VALUES ('{elsewhere}', 'theirs.samoa.tamanu.app')"
+			))
+			.await
+			.expect("another machine's name");
+
+			for name in ["theirs.samoa.tamanu.app", "nobody.samoa.tamanu.app"] {
+				let resp = public
+					.post("/certificates/request")
+					.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+					.json(&serde_json::json!({
+						"name": name,
+						"csr": csr_for(&[name]),
+					}))
+					.await;
+				assert_eq!(problem_type(&resp.json()), "name-not-entitled", "{name}");
+			}
+			assert!(undeclared(&mut conn).await.is_empty());
+			assert_eq!(count_certificates(&mut conn).await, 0);
+		},
+	)
+	.await
+}
+
+/// A single-application machine naming a type other than its one
+/// application's is refused, naming the type it hosts, and declares nothing.
+// spec: CRT#resolving-the-application
+#[tokio::test(flavor = "multi_thread")]
+async fn a_type_the_machine_does_not_host_is_refused_naming_what_it_does() {
+	configure_zones("tamanu.app=Z1");
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			entitled(&mut conn, device_id, Some("fiji.tamanu.app"), true, true).await;
+
+			let resp = public
+				.post("/certificates/request")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"name": "msupply.fiji.tamanu.app",
+					"csr": csr_for(&["msupply.fiji.tamanu.app"]),
+					"application_type": "msupply",
+				}))
+				.await;
+			resp.assert_status(axum::http::StatusCode::CONFLICT);
+			let body: serde_json::Value = resp.json();
+			assert_eq!(problem_type(&body), "dns-name-type-mismatch");
+			assert!(
+				body["title"]
+					.as_str()
+					.unwrap_or_default()
+					.contains("tamanu-central"),
+				"the refusal names the type the machine hosts: {body}"
+			);
+			assert_eq!(
+				declared_by(&mut conn, "msupply.fiji.tamanu.app").await,
+				None
+			);
+			assert_eq!(count_certificates(&mut conn).await, 0);
+			assert!(undeclared(&mut conn).await.is_empty());
+		},
+	)
+	.await
+}
+
 /// A denied name is refused as denied, whatever would otherwise resolve it,
 /// and is not recorded, so asking again raises nothing.
 // spec: CRT#denied-dns-names
@@ -1012,11 +1094,8 @@ async fn a_denied_name_is_refused_as_denied_and_not_recorded() {
 				let body: serde_json::Value = resp.json();
 				assert_eq!(problem_type(&body), "dns-name-denied");
 				assert!(
-					body["title"]
-						.as_str()
-						.unwrap_or_default()
-						.contains("site retired"),
-					"the note travels with the refusal: {body}"
+					!body.to_string().contains("site retired"),
+					"the operator's note stays in Canopy: {body}"
 				);
 			}
 			assert_eq!(count_certificates(&mut conn).await, 0);

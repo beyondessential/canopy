@@ -712,7 +712,7 @@
             }
           },
           "409": {
-            "description": "The server is paused, no managed zone covers the name, the request names a type other than that of the application on this machine declaring it, or the key was revoked as compromised and will not be certified again.",
+            "description": "The server is paused, no managed zone covers the name, the request names an application type this machine contradicts, or the key was revoked as compromised and will not be certified again.",
             "content": {
               "application/json": {
                 "schema": {
@@ -863,7 +863,7 @@
             }
           },
           "409": {
-            "description": "The server is paused, no managed zone covers the name, or the request names a type other than that of the application on this machine declaring it.",
+            "description": "The server is paused, no managed zone covers the name, or the request names an application type this machine contradicts.",
             "content": {
               "application/json": {
                 "schema": {

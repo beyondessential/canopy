@@ -1540,9 +1540,38 @@ async fn undeclared_records_are_bounded_per_machine() {
 		assert_eq!(
 			held.iter()
 				.find(|r| r.dns_name == "n0.example.org")
-				.map(|r| r.asked_for.as_str()),
-			Some("addresses")
+				.map(|r| r.asked_for),
+			Some(AskedFor::Addresses)
 		);
+	})
+	.await;
+}
+
+/// The monitor's prune drops records not asked about within the lifetime and
+/// keeps the rest, whichever machine they belong to.
+// spec: CRT#undeclared-requests
+#[tokio::test(flavor = "multi_thread")]
+async fn lapsed_undeclared_records_are_pruned() {
+	use database::dns_name_dispositions::UndeclaredDnsName;
+	TestDb::run(|mut conn, _url| async move {
+		let machine = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (id, name) VALUES ('{machine}', 'box'); \
+			 INSERT INTO undeclared_dns_names (machine_id, dns_name, asked_for, first_asked_at, last_asked_at) VALUES \
+			   ('{machine}', 'lapsed.example.org', 'certificate', now() - interval '3 days', now() - interval '25 hours'), \
+			   ('{machine}', 'fresh.example.org', 'addresses', now() - interval '3 days', now() - interval '1 hour')"
+		))
+		.await
+		.expect("seed");
+
+		assert_eq!(UndeclaredDnsName::prune(&mut conn).await.expect("prune"), 1);
+		let held: Vec<String> = UndeclaredDnsName::for_machine(&mut conn, machine)
+			.await
+			.expect("list")
+			.into_iter()
+			.map(|r| r.dns_name)
+			.collect();
+		assert_eq!(held, vec!["fresh.example.org".to_string()]);
 	})
 	.await;
 }
