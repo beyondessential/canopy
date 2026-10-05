@@ -56,6 +56,7 @@
 
 ## UI
 
+- [x] A box-scoped silence does not quiet a same-named application check in the point-in-time view (verifies spec: CHK)
 - [ ] No React duplicate-key warning on an application with leftover duplicate rows
 - [x] The application page has no machine check rows
 - [x] Silencing a check from the application page offers application and group scopes only

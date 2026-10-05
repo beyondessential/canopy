@@ -1135,6 +1135,47 @@ async fn snapshot_takes_a_split_pushs_application_row_as_given() {
 	.await
 }
 
+/// A silence on the box is the box's: it does not quiet a same-named check the
+/// application reports about itself, in a past moment any more than now.
+// spec: CHK#silences-follow-the-event
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_reads_the_applications_own_silences_not_the_boxs() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"WITH m AS (INSERT INTO machines (id) VALUES ('20000000-0000-0000-0000-000000000042') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			('20000000-0000-0000-0000-000000000042', 'https://boxsilence.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000042');
+
+			INSERT INTO check_policies (source, subject, application_type, check_name) VALUES
+			('alertd', 'machine', NULL, 'memory');
+
+			INSERT INTO scoped_check_policies (machine_id, source, subject, check_name, ceiling) VALUES
+			('20000000-0000-0000-0000-000000000042', 'alertd', 'machine', 'memory', 'skipped');
+
+			INSERT INTO statuses (server_id, machine_id, source, created_at, healthy, health) VALUES
+			(NULL, '20000000-0000-0000-0000-000000000042', 'alertd', NOW() - INTERVAL '1 minute', true, '[]'::jsonb),
+			('20000000-0000-0000-0000-000000000042', '20000000-0000-0000-0000-000000000042', 'alertd', NOW() - INTERVAL '1 minute', false,
+				'[{\"check\":\"memory\",\"result\":\"failed\"}]'::jsonb)",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/snapshot")
+			.json(&serde_json::json!({
+				"server_id": "20000000-0000-0000-0000-000000000042"
+			}))
+			.await;
+		r.assert_status_ok();
+		let data: Option<SnapshotData> = r.json();
+		let checks = data.expect("snapshot").checks.expect("checks");
+		let memory = &checks["checks"].as_array().unwrap()[0];
+		assert_eq!(memory["check"], "memory");
+		assert_eq!(memory["silenced"], false);
+		assert_ne!(checks["health_state"], "healthy", "the failure counts");
+	})
+	.await
+}
+
 /// The snapshot's figures are resolved across sources: a later push from a
 /// source carrying none of them doesn't blank out what bestool reported.
 // spec: FIG#sourcing

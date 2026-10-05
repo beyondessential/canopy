@@ -1028,10 +1028,13 @@ async fn consolidated_checks_at(
 	for status in &statuses {
 		let split = split_pushes.contains(&(status.source.as_str(), status.created_at));
 		let quiet = as_of.duration_since(status.created_at) >= down_after;
+		// The application's own silences and its group's: the box's are the
+		// box's, as in the live view.
+		// spec: CHK#silences-follow-the-event
 		let silenced = database::silenced_refs::silenced_health_checks_for_server(
 			conn,
 			Some(server.id),
-			server.machine_id,
+			None,
 			server.group_id,
 			&status.source,
 		)
