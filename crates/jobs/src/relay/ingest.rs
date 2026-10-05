@@ -215,7 +215,7 @@ async fn ingest_substrate(
 			outcome,
 		},
 		&|graded| match &message {
-			Some(message) if graded.is_plain() => message.clone(),
+			Some(message) if graded.broken || graded.is_plain() => message.clone(),
 			_ => graded.message(&substrate.check),
 		},
 	)

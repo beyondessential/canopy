@@ -300,7 +300,8 @@ async fn an_instanced_substrate_checks_message_is_canopys() {
 
 /// A check the relay cannot read is broken as a whole: it keeps the instances
 /// it held, each presented as broken, recovers none of them, and retains the
-/// failure it had.
+/// failure it had. The relay's account of why is the message, as for a check
+/// that holds once.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_unreadable_substrate_check_is_broken_at_check_level() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
@@ -363,6 +364,11 @@ async fn an_unreadable_substrate_check_is_broken_at_check_level() {
 			issue.detail,
 			Some(refused),
 			"what was refused is the check's"
+		);
+		assert_eq!(
+			issue.message, "the relay is not permitted to list nodepools.karpenter.sh",
+			"the relay's account of why it could not read the check is what an operator reads, \
+			 though the check held instances",
 		);
 
 		// A check that held no instances is broken as the check that holds
