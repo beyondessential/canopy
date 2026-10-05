@@ -58,10 +58,10 @@ test.describe("The check namespace in the catalog", () => {
 
 		// Each reads qualified by the type that reports it.
 		const centralRow = page.getByRole("row", {
-			name: /tamanu-central\.postgres/,
+			name: /tamanu-central:postgres/,
 		});
 		const facilityRow = page.getByRole("row", {
-			name: /tamanu-facility\.postgres/,
+			name: /tamanu-facility:postgres/,
 		});
 		await expect(centralRow).toBeVisible();
 		await expect(facilityRow).toBeVisible();
@@ -164,7 +164,7 @@ test.describe("Links predating the namespace", () => {
 			/\/healthchecks\/alertd\/application\.tamanu-central\/postgres$/,
 		);
 		await expect(
-			page.getByRole("heading", { name: "tamanu-central.postgres", exact: true }),
+			page.getByRole("heading", { name: "tamanu-central:postgres", exact: true }),
 		).toBeVisible();
 	});
 
@@ -197,7 +197,7 @@ test.describe("Links predating the namespace", () => {
 		).toBeVisible();
 
 		await page
-			.getByRole("link", { name: "tamanu-facility.postgres", exact: true })
+			.getByRole("link", { name: "tamanu-facility:postgres", exact: true })
 			.click();
 		await expect(page).toHaveURL(
 			/\/healthchecks\/alertd\/application\.tamanu-facility\/postgres$/,

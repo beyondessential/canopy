@@ -21,9 +21,8 @@ Canopy-wide checks are Canopy monitoring its own operation (see [SELF](../privat
 ### Each check is held at one grain
 
 A check is held against the target it is about and no other.
-A check in the machine namespace is a machine's, so its state is only ever held against a machine, however many applications run on that machine.
-Each check in the backup sphere is held at the grain its spec files it at (see [BKJ](../jobs/backup.md)).
-A state of a check held against any other target is resolved, and contributes to nothing.
+A reported check is held against the target its report put it under (see [STA](../public-server/statuses.md)).
+Each of Canopy's own checks is filed at one grain, the backup checks at the grains their spec files them at (see [BKJ](../jobs/backup.md)), and a state of one held against a target of any other grain is resolved and contributes to nothing.
 
 There is one filing per machine check however many applications run on the machine, so a degraded machine check contributes one issue at machine scope rather than one per application (see [INC](incidents.md)).
 A machine's checks are read and silenced on the machine.
@@ -298,11 +297,12 @@ A target presents its own checks and no other target's, so every check on its li
 An application's machine is linked from the application, and the machine's checks are read there.
 
 A target presents each of its checks once, as it currently stands.
-A check is current when its source included it in that source's latest report about the target, or, for one of Canopy's own determinations, while its state is unresolved.
+A check is current when its source included it in that source's latest report about the target, or, for a check under one of the reserved sources, while its state is unresolved.
 A resolved state, a state held at a grain the check is not held at, and a check its source has stopped reporting are not presented.
 
 A check whose source has not reported about the target within the target's down threshold is presented at its last result, muted and marked with how long ago it was last reported, so a stale pass never reads as a live one.
-Whether a source is quiet is judged on the same clock and threshold as reachability, so the muted checks and the reachability check always agree.
+Canopy's own determinations and manual conditions are not reported, so they are never muted this way.
+Whether a source is quiet is judged on the same clock and threshold as reachability, so every source reachability names as stale has its checks muted.
 
 Checks are ordered by effective result, most urgent first, and alphabetically by presented name within each result.
 

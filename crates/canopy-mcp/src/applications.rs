@@ -89,8 +89,11 @@ struct StatusOut {
 	health: HealthState,
 	healthy: bool,
 	reachability: ShortStatus,
-	/// Raw per-check breakdown from the status push.
-	checks: serde_json::Value,
+	/// The application's own checks as the operator UI presents them: each
+	/// current check once, graded, most urgent first, with a quiet source's
+	/// checks marked. The machine's are read on the machine.
+	// spec: MCP#detail
+	checks: Vec<commons_types::status::ConsolidatedCheck>,
 }
 
 /// What the server currently reports about the software it runs. Resolved
@@ -298,24 +301,22 @@ impl CanopyMcp {
 		};
 		let sibling_count = server.siblings(&mut conn).await.map_err(mcp_err)?.len();
 
-		// Health rolls up current check state across every source
-		// (silenced checks skipped in the rollup); `checks` still carries
-		// the latest push's raw results verbatim.
-		let health =
-			database::issues::health_from_check_state(&mut conn, &[(server.id, server.group_id)])
+		// Health and the per-check list are what the operator UI presents for
+		// the application, read through the same function, so the two never
+		// tell an agent and an operator different things.
+		// spec: MCP#detail
+		let consolidated =
+			database::issues::consolidated_checks_latest(&mut conn, server.id, server.group_id)
 				.await
-				.map_err(mcp_err)?
-				.get(&server.id)
-				.copied()
-				.unwrap_or_default();
+				.map_err(mcp_err)?;
 
 		let latest_status = latest.as_ref().map(|s| StatusOut {
 			reported_at: s.created_at,
 			version: version.clone(),
-			health,
+			health: consolidated.health_state,
 			healthy: s.healthy,
 			reachability: server.reachability(last_reported_at),
-			checks: s.health.clone(),
+			checks: consolidated.checks.clone(),
 		});
 
 		// Resolved across every source, not read off the latest push: sources
@@ -352,7 +353,7 @@ impl CanopyMcp {
 			group_name: group.as_ref().map(|g| g.name.clone()),
 			sibling_count,
 			reachability: server.reachability(last_reported_at),
-			health,
+			health: consolidated.health_state,
 			figures,
 			latest_status,
 		})

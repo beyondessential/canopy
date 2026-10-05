@@ -63,7 +63,7 @@ pub struct IssueData {
 	/// one whose namespace cannot be derived — a structured source's
 	/// application-subject check filed at a grain with no application type.
 	pub namespace: Option<NamespaceRef>,
-	/// How the check behind this issue reads to an operator: `<type>.<check>`
+	/// How the check behind this issue reads to an operator: `<type>:<check>`
 	/// where it is one application type's, the bare name otherwise. Absent
 	/// alongside `namespace`.
 	pub qualified_name: Option<String>,

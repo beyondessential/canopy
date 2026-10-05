@@ -6,7 +6,10 @@ use commons_types::status::{CheckResult, HealthState};
 use database::check_policies::{CheckPolicy, ScopedCheckPolicy};
 
 use crate::helpers::app_ns;
-use database::issues::{CheckFiling, Scope, consolidated_checks_latest, file_check};
+use database::issues::{
+	CheckFiling, Scope, consolidated_checks_latest, consolidated_checks_latest_for_machine,
+	file_check,
+};
 use database::statuses::{CANOPY_SOURCE, REACHABILITY_REF};
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
@@ -345,12 +348,13 @@ fn machine_filing<'a>(
 	}
 }
 
+/// An application presents its own checks and no other target's. The box's
+/// are read on the machine, and an application's own reachability is still
+/// there.
+// spec: CHK#presentation
 #[tokio::test(flavor = "multi_thread")]
-async fn an_application_presents_its_machines_checks_as_the_machines() {
+async fn an_application_lists_none_of_its_machines_checks() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		// An operator triaging an application sees the box's checks among its
-		// own, marked as the box's so it's clear the fact is shared with every
-		// workload on it.
 		CheckPolicy::seed_own_checks(&mut conn)
 			.await
 			.expect("seed canopy's own checks");
@@ -369,9 +373,6 @@ async fn an_application_presents_its_machines_checks_as_the_machines() {
 		)
 		.await
 		.expect("file the machine's");
-		// The box has gone quiet in its own right. That already reaches the
-		// application as its own unreachability, so the box's must not appear
-		// a second time under the application.
 		file_check(
 			&mut conn,
 			machine_filing(
@@ -387,47 +388,39 @@ async fn an_application_presents_its_machines_checks_as_the_machines() {
 		let consolidated = consolidated_checks_latest(&mut conn, server_id, None)
 			.await
 			.expect("consolidated");
-
-		let by_check: std::collections::HashMap<&str, &commons_types::status::ConsolidatedCheck> =
-			consolidated
-				.checks
-				.iter()
-				.map(|c| (c.check.as_str(), c))
-				.collect();
-
-		let own = by_check.get("tasks").expect("the application's own check");
-		assert_eq!(
-			own.subject,
-			commons_types::subject::CheckSubject::Application
-		);
-		let boxs = by_check.get("disk_free").expect("the machine's check");
-		assert_eq!(boxs.subject, commons_types::subject::CheckSubject::Machine);
-		assert_eq!(boxs.effective, CheckResult::Failed);
-
-		// Exactly one reachability, the application's own, unaffected by the
-		// box's.
-		let reachabilities: Vec<_> = consolidated
+		let names: Vec<&str> = consolidated
+			.checks
+			.iter()
+			.map(|c| c.check.as_str())
+			.collect();
+		assert!(names.contains(&"tasks"), "the application's own: {names:?}");
+		assert!(!names.contains(&"disk_free"), "not the box's: {names:?}");
+		let reachability: Vec<_> = consolidated
 			.checks
 			.iter()
 			.filter(|c| c.source == CANOPY_SOURCE && c.check == REACHABILITY_REF)
 			.collect();
+		assert_eq!(reachability.len(), 1, "the application's own reachability");
 		assert_eq!(
-			reachabilities.len(),
-			1,
-			"one reachability, the application's"
+			reachability[0].effective,
+			CheckResult::Passed,
+			"the box's failing reachability is the box's"
 		);
-		assert_eq!(
-			reachabilities[0].subject,
-			commons_types::subject::CheckSubject::Application
+
+		let machine = consolidated_checks_latest_for_machine(&mut conn, machine_id, None)
+			.await
+			.expect("machine's consolidated");
+		assert!(
+			machine.checks.iter().any(|c| c.check == "disk_free"),
+			"the box's check is read on the box"
 		);
 	})
 	.await
 }
 
-/// A box in trouble is the box's trouble. The application presents its
-/// machine's checks so an operator reads them where they matter, and is graded
-/// on its own, so a warning on the box does not read as a warning in every
-/// workload on it.
+/// A box in trouble is the box's trouble: the application is graded on its own
+/// checks, so a failure on the box does not read as one in every workload on
+/// it.
 // spec: CHK#health-rollup
 #[tokio::test(flavor = "multi_thread")]
 async fn an_applications_rollup_leaves_out_its_machines_checks() {
@@ -447,34 +440,11 @@ async fn an_applications_rollup_leaves_out_its_machines_checks() {
 		.await
 		.expect("file the machine's");
 
-		let health = database::issues::health_from_check_state(&mut conn, &[(server_id, None)])
-			.await
-			.expect("rollup");
-		// Absent from the rollup is how "nothing against it" reads; callers
-		// default that healthy, as the consolidated read below does.
-		assert_eq!(
-			health
-				.get(&server_id)
-				.copied()
-				.unwrap_or(HealthState::Healthy),
-			HealthState::Healthy,
-		);
-
 		let consolidated = consolidated_checks_latest(&mut conn, server_id, None)
 			.await
 			.expect("consolidated");
 		assert_eq!(consolidated.health_state, HealthState::Healthy);
-		// The box's check is still on the application's list, marked as the
-		// box's, so nothing is hidden by not being counted.
-		let boxs = consolidated
-			.checks
-			.iter()
-			.find(|c| c.check == "disk_free")
-			.expect("the machine's check on the application's list");
-		assert_eq!(boxs.subject, commons_types::subject::CheckSubject::Machine);
-		assert_eq!(boxs.effective, CheckResult::Failed);
 
-		// And the box itself is graded down by it.
 		let machine_health =
 			database::issues::machine_health_from_check_state(&mut conn, &[(machine_id, None)])
 				.await
@@ -483,6 +453,369 @@ async fn an_applications_rollup_leaves_out_its_machines_checks() {
 			machine_health.get(&machine_id).copied(),
 			Some(HealthState::Unhealthy),
 		);
+	})
+	.await
+}
+
+/// Move a state's last stamp back, as though its source's later reports had
+/// not carried it.
+async fn age_state(
+	conn: &mut diesel_async::AsyncPgConnection,
+	application: Uuid,
+	source: &str,
+	check: &str,
+	by: &str,
+) {
+	sql_query(
+		"UPDATE issues SET last_seen = last_seen - $4::interval \
+		 WHERE application_id = $1 AND source = $2 AND check_name = $3",
+	)
+	.bind::<sql_types::Uuid, _>(application)
+	.bind::<sql_types::Text, _>(source)
+	.bind::<sql_types::Text, _>(check)
+	.bind::<sql_types::Text, _>(by)
+	.execute(conn)
+	.await
+	.expect("age state");
+}
+
+fn names(consolidated: &commons_types::status::ConsolidatedChecks) -> Vec<&str> {
+	consolidated
+		.checks
+		.iter()
+		.filter(|c| !(c.source == CANOPY_SOURCE && c.check == REACHABILITY_REF))
+		.map(|c| c.check.as_str())
+		.collect()
+}
+
+/// A resolved state has been dealt with and presents nowhere, whatever its
+/// last result was.
+// spec: CHK#presentation
+#[tokio::test(flavor = "multi_thread")]
+async fn a_resolved_state_is_not_listed() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn).await;
+		file_check(
+			&mut conn,
+			filing(server_id, "alertd", "db", CheckResult::Failed),
+		)
+		.await
+		.expect("file");
+		file_check(
+			&mut conn,
+			filing(server_id, "alertd", "disk", CheckResult::Passed),
+		)
+		.await
+		.expect("file");
+		sql_query(
+			"UPDATE issues SET resolved_at = NOW(), resolved_by = 'test' \
+			 WHERE application_id = $1 AND check_name = 'db'",
+		)
+		.bind::<sql_types::Uuid, _>(server_id)
+		.execute(&mut conn)
+		.await
+		.expect("resolve");
+
+		let consolidated = consolidated_checks_latest(&mut conn, server_id, None)
+			.await
+			.expect("consolidated");
+		assert_eq!(names(&consolidated), vec!["disk"]);
+	})
+	.await
+}
+
+/// A check its source no longer carries drops off the list, while the source's
+/// other checks stay.
+// spec: CHK#presentation
+#[tokio::test(flavor = "multi_thread")]
+async fn a_check_its_source_stopped_reporting_is_not_listed() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn).await;
+		for check in ["db", "disk"] {
+			file_check(
+				&mut conn,
+				filing(server_id, "alertd", check, CheckResult::Passed),
+			)
+			.await
+			.expect("file");
+		}
+		age_state(&mut conn, server_id, "alertd", "db", "1 hour").await;
+
+		let consolidated = consolidated_checks_latest(&mut conn, server_id, None)
+			.await
+			.expect("consolidated");
+		assert_eq!(names(&consolidated), vec!["disk"]);
+	})
+	.await
+}
+
+/// A retired thread sharing a check's name beside its live state presents the
+/// check once: the live state, with its detail.
+// spec: CHK#state
+#[tokio::test(flavor = "multi_thread")]
+async fn a_retired_thread_does_not_present_a_check_twice() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn).await;
+		file_check(
+			&mut conn,
+			filing(server_id, "alertd", "caddy_version", CheckResult::Passed),
+		)
+		.await
+		.expect("file");
+		sql_query(
+			"INSERT INTO issues (application_id, source, ref, message, active, first_seen, last_seen, \
+			 check_name, observed_result, effective_result) \
+			 VALUES ($1, 'alertd', 'health-broken/caddy_version', 'retired', false, \
+			 NOW() - interval '90 days', NOW() - interval '90 days', 'caddy_version', 'passed', 'passed')",
+		)
+		.bind::<sql_types::Uuid, _>(server_id)
+		.execute(&mut conn)
+		.await
+		.expect("insert the retired thread");
+
+		let consolidated = consolidated_checks_latest(&mut conn, server_id, None)
+			.await
+			.expect("consolidated");
+		assert_eq!(names(&consolidated), vec!["caddy_version"]);
+	})
+	.await
+}
+
+/// Canopy's own determinations aren't reports, so how long ago one was filed
+/// says nothing about whether it is current: unresolved is current.
+// spec: CHK#presentation
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reserved_sources_unresolved_state_stays_listed() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn).await;
+		file_check(
+			&mut conn,
+			filing(
+				server_id,
+				CANOPY_SOURCE,
+				"certificate-expiry",
+				CheckResult::Warning,
+			),
+		)
+		.await
+		.expect("file canopy's");
+		file_check(
+			&mut conn,
+			filing(server_id, CANOPY_SOURCE, "dns-records", CheckResult::Passed),
+		)
+		.await
+		.expect("file canopy's");
+		age_state(
+			&mut conn,
+			server_id,
+			CANOPY_SOURCE,
+			"certificate-expiry",
+			"30 days",
+		)
+		.await;
+
+		let consolidated = consolidated_checks_latest(&mut conn, server_id, None)
+			.await
+			.expect("consolidated");
+		let listed = names(&consolidated);
+		assert!(listed.contains(&"certificate-expiry"), "{listed:?}");
+		assert!(listed.contains(&"dns-records"), "{listed:?}");
+		assert!(consolidated.checks.iter().all(|c| !c.quiet));
+	})
+	.await
+}
+
+/// A source that hasn't reported within the application's down threshold has
+/// its checks presented at their last result, marked quiet, and its last
+/// failure still counts against the application: last known bad stays bad.
+// spec: CHK#presentation
+// spec: CHK#health-rollup
+#[tokio::test(flavor = "multi_thread")]
+async fn a_quiet_sources_checks_are_marked_and_still_count() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn).await;
+		file_check(
+			&mut conn,
+			filing(server_id, "tamanu", "tasks", CheckResult::Failed),
+		)
+		.await
+		.expect("file");
+		file_check(
+			&mut conn,
+			filing(server_id, "alertd", "db", CheckResult::Passed),
+		)
+		.await
+		.expect("file");
+		age_state(&mut conn, server_id, "tamanu", "tasks", "46 days").await;
+
+		let consolidated = consolidated_checks_latest(&mut conn, server_id, None)
+			.await
+			.expect("consolidated");
+		let by_check: std::collections::HashMap<&str, &commons_types::status::ConsolidatedCheck> =
+			consolidated
+				.checks
+				.iter()
+				.map(|c| (c.check.as_str(), c))
+				.collect();
+		let tasks = by_check.get("tasks").expect("the quiet source's check");
+		assert!(tasks.quiet);
+		assert_eq!(tasks.effective, CheckResult::Failed);
+		let reported = tasks.last_reported_at.expect("when it was last reported");
+		assert!(
+			jiff::Timestamp::now().duration_since(reported)
+				> jiff::SignedDuration::from_hours(24 * 45)
+		);
+		assert!(!by_check.get("db").expect("the live source's check").quiet);
+		assert_eq!(consolidated.health_state, HealthState::Unhealthy);
+	})
+	.await
+}
+
+/// Most urgent first, then by presented name: a bare name and an application
+/// type's interleave alphabetically on what an operator reads.
+// spec: CHK#presentation
+#[tokio::test(flavor = "multi_thread")]
+async fn checks_order_by_result_then_presented_name() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		CheckPolicy::seed_own_checks(&mut conn)
+			.await
+			.expect("seed canopy's own checks");
+		let server_id = insert_server(&mut conn).await;
+		for (check, result) in [
+			("caddy_certs", CheckResult::Passed),
+			("sync_facility_stale", CheckResult::Failed),
+			("memory", CheckResult::Passed),
+		] {
+			file_check(&mut conn, filing(server_id, "alertd", check, result))
+				.await
+				.expect("file");
+		}
+		file_check(
+			&mut conn,
+			filing(
+				server_id,
+				CANOPY_SOURCE,
+				"certificate-expiry",
+				CheckResult::Warning,
+			),
+		)
+		.await
+		.expect("file canopy's");
+
+		let consolidated = consolidated_checks_latest(&mut conn, server_id, None)
+			.await
+			.expect("consolidated");
+		let order: Vec<&str> = consolidated
+			.checks
+			.iter()
+			.map(|c| c.qualified_name.as_str())
+			.collect();
+		assert_eq!(
+			order,
+			vec![
+				"tamanu-central:sync_facility_stale",
+				"certificate-expiry",
+				"memory",
+				"reachability",
+				"tamanu-central:caddy_certs",
+			]
+		);
+	})
+	.await
+}
+
+/// A machine's own list follows the same rules as an application's: a check
+/// its source no longer reports, and a resolved one, are not presented.
+// spec: CHK#presentation
+#[tokio::test(flavor = "multi_thread")]
+async fn a_machines_list_presents_only_current_checks() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn).await;
+		let machine_id = machine_of(&mut conn, server_id).await;
+		for check in ["disk_free", "memory", "load"] {
+			file_check(
+				&mut conn,
+				machine_filing(machine_id, "alertd", check, CheckResult::Passed),
+			)
+			.await
+			.expect("file the machine's");
+		}
+		sql_query(
+			"UPDATE issues SET last_seen = last_seen - INTERVAL '1 hour' \
+			 WHERE machine_id = $1 AND check_name = 'memory'",
+		)
+		.bind::<sql_types::Uuid, _>(machine_id)
+		.execute(&mut conn)
+		.await
+		.expect("age");
+		sql_query(
+			"UPDATE issues SET resolved_at = NOW(), resolved_by = 'test' \
+			 WHERE machine_id = $1 AND check_name = 'load'",
+		)
+		.bind::<sql_types::Uuid, _>(machine_id)
+		.execute(&mut conn)
+		.await
+		.expect("resolve");
+
+		let machine = consolidated_checks_latest_for_machine(&mut conn, machine_id, None)
+			.await
+			.expect("machine's consolidated");
+		assert_eq!(names(&machine), vec!["disk_free"]);
+	})
+	.await
+}
+
+/// The muted checks and the reachability check read one clock: every source
+/// reachability names as stale has its checks muted.
+// spec: CHK#presentation
+// spec: CHK#reachability
+#[tokio::test(flavor = "multi_thread")]
+async fn every_source_reachability_names_stale_is_muted() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		CheckPolicy::seed_own_checks(&mut conn)
+			.await
+			.expect("seed canopy's own checks");
+		let server_id = insert_server(&mut conn).await;
+		file_check(
+			&mut conn,
+			filing(server_id, "otheragent", "ping", CheckResult::Passed),
+		)
+		.await
+		.expect("file");
+		file_check(
+			&mut conn,
+			filing(server_id, "alertd", "db", CheckResult::Passed),
+		)
+		.await
+		.expect("file");
+		age_state(&mut conn, server_id, "otheragent", "ping", "46 days").await;
+
+		database::statuses::Status::sweep_staleness(&mut conn)
+			.await
+			.expect("sweep");
+
+		let consolidated = consolidated_checks_latest(&mut conn, server_id, None)
+			.await
+			.expect("consolidated");
+		let reachability = consolidated
+			.checks
+			.iter()
+			.find(|c| c.source == CANOPY_SOURCE && c.check == REACHABILITY_REF)
+			.expect("reachability");
+		let stale: Vec<&str> = reachability.detail["stale_sources"]
+			.as_array()
+			.expect("stale sources named")
+			.iter()
+			.map(|s| s["source"].as_str().unwrap())
+			.collect();
+		assert_eq!(stale, vec!["otheragent"]);
+		for check in &consolidated.checks {
+			if stale.contains(&check.source.as_str()) {
+				assert!(check.quiet, "{} is from a stale source", check.check);
+			} else if check.source != CANOPY_SOURCE {
+				assert!(!check.quiet, "{} is from a live source", check.check);
+			}
+		}
 	})
 	.await
 }

@@ -947,6 +947,10 @@ export async function seedIssue(
 		 * the past to test "since when" displays (e.g. the per-healthcheck
 		 * page's failing-since column). */
 		firstSeen?: string;
+		/** ISO 8601 timestamp for `last_seen`: when the source last reported
+		 * the check. Defaults to NOW(). Set it in the past to seed a source gone
+		 * quiet, or a check its source has stopped reporting. */
+		lastSeen?: string;
 		/** Structured detail the condition attached, as the filing path stores
 		 * it. The self-alert surface links from this. */
 		detail?: unknown;
@@ -992,7 +996,7 @@ export async function seedIssue(
 	await sql.query(
 		`INSERT INTO issues
 		 (id, application_id, machine_id, server_group_id, kubernetes_cluster_id, device_id, source, ref, check_name, observed_result, effective_result, escalates, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason, degraded_since, last_degraded_at, detail)
-		 VALUES ($1, $2, $3, $4, $20, $5, $6, $7, $8, $9, $9, $10, $11, $12, $13, COALESCE($14::timestamptz, NOW()), NOW(), $15, $16, $17, $18, NOW(), $19)`,
+		 VALUES ($1, $2, $3, $4, $20, $5, $6, $7, $8, $9, $9, $10, $11, $12, $13, COALESCE($14::timestamptz, NOW()), COALESCE($21::timestamptz, NOW()), $15, $16, $17, $18, NOW(), $19)`,
 		[
 			id,
 			opts.serverId ?? null,
@@ -1014,6 +1018,7 @@ export async function seedIssue(
 			active ? (opts.firstSeen ?? new Date().toISOString()) : null,
 			opts.detail === undefined ? null : JSON.stringify(opts.detail),
 			opts.clusterId ?? null,
+			opts.lastSeen ?? null,
 		],
 	);
 	return { id };

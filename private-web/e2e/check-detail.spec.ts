@@ -24,7 +24,7 @@ test.describe("check detail page", () => {
 		// An application's check reads qualified by the type that reports it:
 		// another type's postgres is a different check with its own page.
 		await expect(
-			page.getByRole("heading", { name: "tamanu-central.postgres", exact: true }),
+			page.getByRole("heading", { name: "tamanu-central:postgres", exact: true }),
 		).toBeVisible();
 	});
 

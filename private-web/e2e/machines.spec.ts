@@ -343,11 +343,10 @@ test.describe("machine detail", () => {
 		await expect(page.getByText("Silenced for this machine")).toBeVisible();
 	});
 
-	/// An operator triaging a workload sees everything bearing on it, the box's
-	/// checks among its own, each marked as the box's.
+	/// An application presents its own checks; the box's are read on the box.
 	///
-	/// spec: CHK#a-machines-checks-present-on-its-applications
-	test("an application lists its box's checks, marked as the box's", async ({
+	/// spec: CHK#presentation
+	test("an application lists none of its box's checks", async ({
 		page,
 		sql,
 	}) => {
@@ -374,12 +373,10 @@ test.describe("machine detail", () => {
 
 		await page.goto(`/fleet/applications/${server.id}`);
 
-		// Both are here, and only the box's is marked as the box's.
-		await expect(page.getByText("disk_free")).toBeVisible();
-		await expect(page.getByText("tamanu_version")).toBeVisible();
 		await expect(
-			page.getByTestId("check-machine-subject"),
-		).toHaveCount(1);
+			page.getByText("tamanu-central:tamanu_version", { exact: true }),
+		).toBeVisible();
+		await expect(page.getByText("disk_free", { exact: true })).toHaveCount(0);
 
 		// The headline is the workload's own: its version check is warning, and
 		// the failing disk under it is the box's to answer for.
@@ -388,48 +385,44 @@ test.describe("machine detail", () => {
 		await expect(
 			page.getByText("Unhealthy", { exact: true }),
 		).toHaveCount(0);
+
+		// The box's check is on the box.
+		await page.goto(`/fleet/machines/${server.machineId}`);
+		await expect(page.getByText("disk_free", { exact: true })).toBeVisible();
 	});
 
-	/// The box's check is the box's wherever it is presented from, so silencing
-	/// it on a workload silences it on the box.
+	/// An application's check is silenced on the application or its group.
 	///
-	/// spec: CHK#a-machines-checks-present-on-its-applications
-	test("silencing a box's check from an application silences it on the box", async ({
+	/// spec: CHK#silences-follow-the-event
+	test("an application's check offers the application and group scopes", async ({
 		page,
 		sql,
 	}) => {
-		const group = await seedServerGroup(sql, { name: "cross-silence-group" });
+		const group = await seedServerGroup(sql, { name: "app-silence-group" });
 		const server = await seedServer(sql, {
 			name: "workload-b",
 			groupId: group.id,
 		});
 		await seedIssue(sql, {
-			machineId: server.machineId,
+			serverId: server.id,
 			source: "alertd",
-			ref: "health/disk_free",
-			message: "Disk nearly full",
+			ref: "health/tamanu_version",
+			message: "Behind the release train",
 		});
 
 		await page.goto(`/fleet/applications/${server.id}`);
 
-		// The scopes offered are the box's, not the workload's: this check is
-		// filed against the box.
-		await page.getByRole("button", { name: "Silence disk_free" }).click();
+		await page
+			.getByRole("button", { name: "Silence tamanu_version" })
+			.click();
+		await expect(
+			page.getByRole("button", { name: "For this server" }),
+		).toBeVisible();
+		await expect(
+			page.getByRole("button", { name: "For this group" }),
+		).toBeVisible();
 		await expect(
 			page.getByRole("button", { name: "For this machine" }),
-		).toBeVisible();
-		await page.getByRole("button", { name: "For this machine" }).click();
-
-		// The row reads back as silenced here first: the write has landed and
-		// the application has refetched the box's silences.
-		await expect(
-			page.getByRole("button", { name: "Manage silence for disk_free" }),
-		).toBeVisible();
-
-		// And it lands on the box, where the same check now reads as silenced.
-		await page.goto(`/fleet/machines/${server.machineId}`);
-		await expect(
-			page.getByRole("button", { name: "Manage silence for disk_free" }),
-		).toBeVisible();
+		).toHaveCount(0);
 	});
 });

@@ -438,7 +438,7 @@ async fn the_alert_names_each_check_by_its_whole_identity() {
 			.expect("an alert");
 
 		assert!(
-			issue.message.contains("alertd/tamanu-central.db_version"),
+			issue.message.contains("alertd/tamanu-central:db_version"),
 			"the message qualifies the name by the type whose check it is: {}",
 			issue.message,
 		);

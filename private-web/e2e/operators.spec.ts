@@ -73,6 +73,10 @@ test.describe("operator presence", () => {
 			page.getByText("2 operators in the machine right now"),
 		).toBeVisible();
 
+		// The sessions are the box's check, read on the box.
+		// spec: CHK#presentation
+		await page.goto(`/fleet/machines/${server.machineId}`);
+
 		// The check row formats sessions instead of dumping `users` JSON:
 		// identified sessions by Tailscale login (one row per session)...
 		await expect(page.getByText("alice@example.com")).toHaveCount(2);
@@ -98,9 +102,15 @@ test.describe("operator presence", () => {
 
 		await page.goto(`/fleet/applications/${server.id}`);
 
-		// The sessions still show in the checks table (last known data)…
+		// A 45-minutes-old push can't claim "right now"…
+		await expect(
+			page.getByText(/operators? in the machine right now/),
+		).not.toBeVisible();
+
+		// …though the box's checks table still shows the sessions as last
+		// known.
+		await page.goto(`/fleet/machines/${server.machineId}`);
 		await expect(page.getByText("bob@example.com")).toBeVisible();
-		// …but a 45-minutes-old push can't claim "right now".
 		await expect(
 			page.getByText(/operators? in the machine right now/),
 		).not.toBeVisible();

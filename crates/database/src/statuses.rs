@@ -738,9 +738,10 @@ impl Status {
 	///
 	/// Only rows the box filed for itself count, so a workload's own report
 	/// carried on the same machine is not read back as the box's. A reporter
-	/// still pushing the unified shape files no such row at all; its machine
-	/// checks are recognised by subject in the application's rows instead.
-	// spec: CHK#a-machines-checks-present-on-its-applications
+	/// still pushing the unified shape files no such row at all, which is how a
+	/// split push is told from a unified one when reading history back.
+	// spec: FIG#point-in-time
+	// spec: STA#transitional-unified-pushes
 	pub async fn machine_latest_per_source_at(
 		db: &mut AsyncPgConnection,
 		machine: Uuid,

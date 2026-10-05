@@ -51,13 +51,13 @@ test.describe("self-alerts", () => {
 			severity: "warning",
 			description: "Healthchecks gone quiet",
 			message:
-				"1 healthcheck(s) unreported fleet-wide for 30 days: alertd/tamanu-central.db_version",
+				"1 healthcheck(s) unreported fleet-wide for 30 days: alertd/tamanu-central:db_version",
 			detail: {
 				checks: [
 					{
 						source: "alertd",
 						check: "db_version",
-						qualified_name: "tamanu-central.db_version",
+						qualified_name: "tamanu-central:db_version",
 						subject: "application",
 						application_type: "tamanu-central",
 					},
@@ -68,7 +68,7 @@ test.describe("self-alerts", () => {
 		await page.goto("/alerts");
 
 		const link = page.getByRole("link", {
-			name: "alertd/tamanu-central.db_version",
+			name: "alertd/tamanu-central:db_version",
 		});
 		await expect(link).toBeVisible();
 		await link.click();

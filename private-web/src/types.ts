@@ -562,15 +562,16 @@ export function sameNamespace(a: NamespaceRef | undefined, b: NamespaceRef | und
 	);
 }
 
-/// How a check reads to an operator: `<type>.<check>` where it is one
+/// How a check reads to an operator: `<type>:<check>` where it is one
 /// application type's, the bare name otherwise. The qualification is
 /// presentation — the name is stored on its own.
+// spec: CHK#names
 export function qualifiedCheckName(
 	namespace: NamespaceRef | undefined,
 	check: string,
 ): string {
 	return namespace?.subject === "application" && namespace.application_type
-		? `${namespace.application_type}.${check}`
+		? `${namespace.application_type}:${check}`
 		: check;
 }
 

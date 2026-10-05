@@ -55,9 +55,9 @@ pub struct FindIssuesArgs {
 	/// Restrict to issues whose target is in this group's id: its
 	/// applications', its machines', and the group's own.
 	pub group_id: Option<String>,
-	/// Restrict to one application's id. Returns the issues of the machine it
-	/// runs on among its own, matching what that application presents: a box's
-	/// disk filling degrades the software on it.
+	/// Restrict to one application's id, its own issues only, matching what
+	/// that application presents. Ask about the machine it runs on with
+	/// `machine_id` for the box's.
 	pub application_id: Option<String>,
 	/// Restrict to one machine's id, its own issues only. Ask this to find out
 	/// what is wrong with a box rather than with any workload on it.
@@ -72,7 +72,10 @@ pub struct FindIssuesArgs {
 pub struct CheckDocArgs {
 	/// The source that reports the check (e.g. `alertd`, `canopy`).
 	pub source: String,
-	/// The check's name.
+	/// The check's presented name, as every other tool returns it in
+	/// `qualified_name`: `<type>:<check>` for an application type's check
+	/// (`<type>.<check>` is accepted too), the bare name for a machine's or
+	/// Canopy's own.
 	pub check_name: String,
 }
 
@@ -80,7 +83,7 @@ pub struct CheckDocArgs {
 struct CheckDocOut {
 	source: String,
 	check_name: String,
-	/// How the check presents: `<type>.<check>` where it is one application
+	/// How the check presents: `<type>:<check>` where it is one application
 	/// type's, the bare name otherwise.
 	qualified_name: String,
 	/// The application type this entry is for, or `null` where the check is the
@@ -740,6 +743,8 @@ impl CanopyMcp {
 		annotations(read_only_hint = true),
 		description = "Get the operator-authored documentation for a (source, check): what the \
 		               check observes, what each result means, and hints for solving a failure. \
+		               Name the check as other tools present it (`qualified_name`): \
+		               `<type>:<check>` for an application type's check, the bare name otherwise. \
 		               Prefer this curated knowledge over inferring what a check does from its \
 		               name. Also returns the check's current policy (ceiling, escalates)."
 	)]
@@ -747,15 +752,47 @@ impl CanopyMcp {
 		&self,
 		Parameters(args): Parameters<CheckDocArgs>,
 	) -> Result<CallToolResult, McpError> {
+		use commons_types::namespace::Namespace;
 		use database::check_policies::CheckPolicy;
 		let mut conn = self.conn().await?;
-		// A name can be several entries: an application-subject check is one per
-		// type, each with its own ceiling and documentation. Return them all
-		// rather than picking one, so the caller sees what it is choosing between.
-		let policies =
-			CheckPolicy::get_across_namespaces(&mut conn, &args.source, &args.check_name)
+
+		// A presented name names one entry. An application type's check carries
+		// its type as a prefix; read the prefix as a type only where the catalog
+		// holds that type's entry, since a reported check name may contain the
+		// separator without naming a type at all.
+		// spec: MCP#incidents-and-issues
+		let mut policies = Vec::new();
+		if let Some((ty, check)) = Namespace::split_presented(&args.check_name) {
+			let typed = Namespace::Application(ty);
+			policies = CheckPolicy::get_across_namespaces(&mut conn, &args.source, check)
 				.await
-				.map_err(mcp_err)?;
+				.map_err(mcp_err)?
+				.into_iter()
+				.filter(|policy| policy.namespace().ok().as_ref() == Some(&typed))
+				.collect();
+		}
+		if policies.is_empty() {
+			let named =
+				CheckPolicy::get_across_namespaces(&mut conn, &args.source, &args.check_name)
+					.await
+					.map_err(mcp_err)?;
+			let (typed, untyped): (Vec<_>, Vec<_>) = named
+				.into_iter()
+				.partition(|policy| matches!(policy.namespace(), Ok(Namespace::Application(_))));
+			if untyped.is_empty() && !typed.is_empty() {
+				let candidates: Vec<String> =
+					typed.iter().map(|policy| policy.qualified_name()).collect();
+				return Err(McpError::invalid_params(
+					format!(
+						"{} names a check of several application types; ask again with one of: {}",
+						args.check_name,
+						candidates.join(", "),
+					),
+					None,
+				));
+			}
+			policies = untyped;
+		}
 		if policies.is_empty() {
 			return Ok(not_found(format!(
 				"no catalog entry for ({}, {}) — that source has never reported that check",

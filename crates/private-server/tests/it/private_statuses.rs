@@ -1025,6 +1025,116 @@ async fn snapshot_returns_latest_when_at_omitted() {
 	.await
 }
 
+/// A past moment presents the application's own checks, as the live view
+/// does. On a unified push the box's checks sit among the application's and
+/// are told apart by name; they were filed against the box, so they are the
+/// box's to present.
+// spec: CHK#presentation
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_leaves_a_unified_pushs_machine_checks_to_the_machine() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"WITH m AS (INSERT INTO machines (id) VALUES ('20000000-0000-0000-0000-000000000040') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			('20000000-0000-0000-0000-000000000040', 'https://unified.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000040');
+
+			INSERT INTO check_policies (source, subject, application_type, check_name) VALUES
+			('alertd', 'application', 'tamanu-central', 'db'),
+			('alertd', 'application', 'tamanu-central', 'caddy_certs'),
+			('alertd', 'machine', NULL, 'disk_free');
+
+			INSERT INTO statuses (server_id, machine_id, source, created_at, healthy, health) VALUES
+			('20000000-0000-0000-0000-000000000040', '20000000-0000-0000-0000-000000000040', 'alertd', NOW() - INTERVAL '2 hours', false,
+				'[{\"check\":\"db\",\"result\":\"passed\"},{\"check\":\"caddy_certs\",\"result\":\"failed\"},{\"check\":\"disk_free\",\"result\":\"failed\"}]'::jsonb)",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/snapshot")
+			.json(&serde_json::json!({
+				"server_id": "20000000-0000-0000-0000-000000000040"
+			}))
+			.await;
+		r.assert_status_ok();
+		let data: Option<SnapshotData> = r.json();
+		let checks = data.expect("snapshot").checks.expect("checks");
+		let names: Vec<&str> = checks["checks"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|c| c["qualified_name"].as_str().unwrap())
+			.collect();
+		// Most urgent first, then by presented name, and none of the box's.
+		assert_eq!(
+			names,
+			vec!["tamanu-central:caddy_certs", "tamanu-central:db"]
+		);
+		// A report two hours old is past the application's threshold.
+		assert!(
+			checks["checks"]
+				.as_array()
+				.unwrap()
+				.iter()
+				.all(|c| c["quiet"] == true)
+		);
+	})
+	.await
+}
+
+/// A split push says which target each check is about, so a machine-set name
+/// reported under the application is the application's, and the box's own
+/// row stays the box's.
+// spec: CHK#presentation
+// spec: STA#transitional-unified-pushes
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_takes_a_split_pushs_application_row_as_given() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"WITH m AS (INSERT INTO machines (id) VALUES ('20000000-0000-0000-0000-000000000041') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			('20000000-0000-0000-0000-000000000041', 'https://given.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000041');
+
+			INSERT INTO check_policies (source, subject, application_type, check_name) VALUES
+			('alertd', 'application', 'tamanu-central', 'db'),
+			('alertd', 'machine', NULL, 'memory'),
+			('alertd', 'machine', NULL, 'disk_free');
+
+			INSERT INTO statuses (server_id, machine_id, source, created_at, healthy, health) VALUES
+			(NULL, '20000000-0000-0000-0000-000000000041', 'alertd', NOW() - INTERVAL '1 minute', false,
+				'[{\"check\":\"disk_free\",\"result\":\"failed\"}]'::jsonb),
+			('20000000-0000-0000-0000-000000000041', '20000000-0000-0000-0000-000000000041', 'alertd', NOW() - INTERVAL '1 minute', true,
+				'[{\"check\":\"db\",\"result\":\"passed\"},{\"check\":\"memory\",\"result\":\"passed\"}]'::jsonb)",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/snapshot")
+			.json(&serde_json::json!({
+				"server_id": "20000000-0000-0000-0000-000000000041"
+			}))
+			.await;
+		r.assert_status_ok();
+		let data: Option<SnapshotData> = r.json();
+		let checks = data.expect("snapshot").checks.expect("checks");
+		let names: Vec<&str> = checks["checks"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|c| c["qualified_name"].as_str().unwrap())
+			.collect();
+		assert_eq!(names, vec!["memory", "tamanu-central:db"]);
+		assert_eq!(checks["health_state"], "healthy");
+		assert!(
+			checks["checks"]
+				.as_array()
+				.unwrap()
+				.iter()
+				.all(|c| c["quiet"] == false)
+		);
+	})
+	.await
+}
+
 /// The snapshot's figures are resolved across sources: a later push from a
 /// source carrying none of them doesn't blank out what bestool reported.
 // spec: FIG#sourcing

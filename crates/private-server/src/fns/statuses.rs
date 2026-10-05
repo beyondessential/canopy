@@ -927,6 +927,10 @@ struct SnapshotState {
 /// before `at`, every check re-graded through current policy — the same
 /// shape the live path builds from current state. The point-in-time side
 /// of the consolidated checks view.
+///
+/// The application's own checks only, as the live view presents them: the
+/// box's are read on the machine.
+// spec: CHK#presentation
 async fn consolidated_checks_at(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	server: &Application,
@@ -938,34 +942,34 @@ async fn consolidated_checks_at(
 	use database::issues::{CheckGradingRef, GradingContext, ReportedCheck, grade_instances};
 
 	let statuses = Status::latest_per_source_at(conn, server.id, at).await?;
-	// The box's own reports. A split push files the machine's checks at machine
-	// scope rather than on any workload, so they are only here; a reporter
-	// still pushing the unified shape files none of these rows and its machine
-	// checks are recognised by subject in the application's own. Either shape
-	// reconstructs the same list.
-	// spec: CHK#a-machines-checks-present-on-its-applications
-	// An application on a cluster has no box, so it has no machine checks to
-	// present alongside its own; its cluster's checks are read on the cluster.
-	let machine = match server.machine_id {
-		Some(machine_id) => Some(Machine::get_by_id(conn, machine_id).await?),
-		None => None,
-	};
-	let machine_statuses = match &machine {
-		Some(machine) => Status::machine_latest_per_source_at(conn, machine.id, at).await?,
+	// The box's own reports. They carry the box's figures, which a past moment
+	// presents alongside the application's; and they say which of the
+	// application's reports were split pushes. A split push records a row per
+	// target in one transaction, so its machine row shares the application
+	// row's timestamp. A unified push records only the application's row, and
+	// its machine checks sit among the application's, told apart by name — the
+	// same rule ingestion applies.
+	// spec: STA#transitional-unified-pushes
+	let machine_statuses = match server.machine_id {
+		Some(machine_id) => Status::machine_latest_per_source_at(conn, machine_id, at).await?,
 		None => Vec::new(),
 	};
+	let split_pushes: std::collections::HashSet<(&str, Timestamp)> = machine_statuses
+		.iter()
+		.map(|st| (st.source.as_str(), st.created_at))
+		.collect();
 
 	// The figures come from the same set of statuses the checks do, so the
 	// snapshot presents each figure as of `at` from whichever source last
 	// reported it, rather than from whichever source happened to push last.
 	//
-	// Both grains' rows, for the reason the checks read both: a split push
-	// records the box's detail on the machine's rows, so reading only the
-	// application's would drop platform, timezone and the agent's version out
-	// of a past moment. A unified push carries them on the application's rows
-	// and files no machine rows at all, so nothing is read twice; where a
-	// source pushed both shapes across the window, newest-wins per key
-	// resolves them as it resolves any two reports.
+	// Both grains' rows: a split push records the box's detail on the
+	// machine's rows, so reading only the application's would drop platform,
+	// timezone and the agent's version out of a past moment. A unified push
+	// carries them on the application's rows and files no machine rows at
+	// all, so nothing is read twice; where a source pushed both shapes across
+	// the window, newest-wins per key resolves them as it resolves any two
+	// reports.
 	// spec: FIG#point-in-time
 	let figures = MergedDetail::from_reports(
 		statuses
@@ -987,19 +991,14 @@ async fn consolidated_checks_at(
 	}
 
 	// Tags for rule evaluation, as private-server's other rule-eval sites
-	// resolve them. Each grain grades against its own: a rule predicating on a
-	// tag reads the box's tags for the box's checks.
-	let tags_for = |map: commons_types::server::TagMap| -> std::collections::HashMap<String, serde_json::Value> {
-		map.0
-			.into_iter()
-			.map(|(k, v)| (k, serde_json::Value::String(v)))
-			.collect()
-	};
-	let tags = tags_for(server.tags_merged_with_group(conn).await?);
-	let machine_tags = match &machine {
-		Some(machine) => tags_for(machine.tags_merged_with_group(conn).await?),
-		None => Default::default(),
-	};
+	// resolve them.
+	let tags: std::collections::HashMap<String, serde_json::Value> = server
+		.tags_merged_with_group(conn)
+		.await?
+		.0
+		.into_iter()
+		.map(|(k, v)| (k, serde_json::Value::String(v)))
+		.collect();
 	// Only present checks backed by a live catalog row, matching the live
 	// consolidated view: this drops decommissioned checks and orphaned
 	// check-states (a source's catalog rows removed out from under its
@@ -1009,9 +1008,6 @@ async fn consolidated_checks_at(
 	// dozens of checks, and re-querying the catalog and the scoped chain for
 	// each one turned this reconstruction into a few hundred round-trips.
 	let grading = CheckPolicy::grading_table(conn).await?;
-	// One chain per grain. An application's checks are graded through the
-	// application and group chains; the box's through its own and its group's,
-	// which need not be the same group.
 	let chains = ScopedCheckPolicy::chains_for_scope(
 		conn,
 		database::check_policies::FilingScope {
@@ -1021,28 +1017,18 @@ async fn consolidated_checks_at(
 		},
 	)
 	.await?;
-	let machine_chains = match &machine {
-		Some(machine) => {
-			ScopedCheckPolicy::chains_for_scope(
-				conn,
-				database::check_policies::FilingScope {
-					machine_id: Some(machine.id),
-					group_id: machine.group_id,
-					..Default::default()
-				},
-			)
-			.await?
-		}
-		None => Default::default(),
-	};
+
+	// A source is quiet as of the moment being read when its report then was
+	// older than the application's down threshold.
+	// spec: CHK#presentation
+	let as_of = at.unwrap_or_else(Timestamp::now);
+	let down_after = server.alert_when_down_for.0;
 
 	let mut checks: Vec<ConsolidatedCheck> = Vec::new();
-	for (status, from_machine_row) in statuses
-		.iter()
-		.map(|s| (s, false))
-		.chain(machine_statuses.iter().map(|s| (s, true)))
-	{
-		let application_silenced = database::silenced_refs::silenced_health_checks_for_server(
+	for status in &statuses {
+		let split = split_pushes.contains(&(status.source.as_str(), status.created_at));
+		let quiet = as_of.duration_since(status.created_at) >= down_after;
+		let silenced = database::silenced_refs::silenced_health_checks_for_server(
 			conn,
 			Some(server.id),
 			server.machine_id,
@@ -1050,38 +1036,20 @@ async fn consolidated_checks_at(
 			&status.source,
 		)
 		.await?;
-		let machine_silenced = match &machine {
-			Some(machine) => {
-				database::silenced_refs::silenced_health_checks_for_server(
-					conn,
-					None,
-					Some(machine.id),
-					machine.group_id,
-					&status.source,
-				)
-				.await?
-			}
-			None => std::collections::BTreeSet::new(),
-		};
 		let empty = serde_json::Map::new();
 		let status_extra = status.extra.as_object().unwrap_or(&empty);
 		// Read as ingestion reads a push, so a check's nested `detail` and its
 		// instances are understood here as they were when it was filed.
 		// spec: STA#health-and-detail
 		for (name, reported) in ReportedCheck::all_in(&status.health) {
-			// What this reading asserts about. A row the box filed is the
-			// box's whatever it names; on a unified push the name decides,
-			// which is the same rule ingestion applies.
-			// spec: STA
-			let subject = if from_machine_row {
-				CheckSubject::Machine
-			} else {
-				CheckSubject::of(&name)
-			};
+			// A unified push's machine-subject checks were filed against the
+			// box, so they are the machine's to present.
+			// spec: STA#transitional-unified-pushes
+			if !split && CheckSubject::of(&name).is_machine() {
+				continue;
+			}
 			// Which catalog entry this reading belongs to follows the
-			// reporting application's type, the same as it does on ingest: a
-			// machine-subject name lands in the box's entry whatever workload
-			// carried it up.
+			// reporting application's type, the same as it does on ingest.
 			let namespace = Namespace::for_application(&status.source, &name, &server.r#type);
 			let key = (status.source.clone(), namespace.clone(), name.clone());
 			if !cataloged.contains(&key) {
@@ -1094,24 +1062,15 @@ async fn consolidated_checks_at(
 			// state to hand it, so a broken check presents as broken, as a
 			// plain one always has here, with no instances held.
 			// spec: CHK#checks-with-instances
-			let scoped = if subject.is_machine() {
-				&machine_chains
-			} else {
-				&chains
-			};
 			let check_grading = CheckGradingRef {
 				fleet: grading.get(&key),
-				chain: scoped.get(&key).map(Vec::as_slice).unwrap_or_default(),
+				chain: chains.get(&key).map(Vec::as_slice).unwrap_or_default(),
 			};
 			let ctx = GradingContext {
 				source: &status.source,
 				check: &name,
 				status_extra,
-				tags: if subject.is_machine() {
-					&machine_tags
-				} else {
-					&tags
-				},
+				tags: &tags,
 			};
 			let graded = grade_instances(
 				check_grading,
@@ -1120,11 +1079,6 @@ async fn consolidated_checks_at(
 				reported.outcome,
 				None,
 			);
-			let silenced = if subject.is_machine() {
-				&machine_silenced
-			} else {
-				&application_silenced
-			};
 			let is_silenced = silenced.contains(&name);
 			// Which of the chain's instance silences quiet an instance, at the
 			// target's own scope or its group's.
@@ -1161,20 +1115,15 @@ async fn consolidated_checks_at(
 					.detail()
 					.filter(serde_json::Value::is_object)
 					.unwrap_or_else(|| serde_json::json!({})),
-				subject,
+				last_reported_at: Some(status.created_at),
+				quiet,
 				instances: presented.listed,
 				passing_instances: presented.passing,
 				skipped_instances: presented.skipped,
 			});
 		}
 	}
-	checks.sort_by(|a, b| {
-		a.effective
-			.urgency_rank()
-			.cmp(&b.effective.urgency_rank())
-			.then_with(|| a.source.cmp(&b.source))
-			.then_with(|| a.check.cmp(&b.check))
-	});
+	ConsolidatedChecks::sort(&mut checks);
 	let health_state =
 		HealthState::from_results(checks.iter().filter(|c| !c.silenced).map(|c| c.effective));
 	Ok(SnapshotState {

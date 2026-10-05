@@ -272,7 +272,7 @@ test.describe("silenced healthchecks", () => {
 		// section also shows the full "alertd/health/a-silenced" ref, which
 		// substring-matches the bare name.
 		await expect(
-			page.getByText("tamanu-central.a-silenced", { exact: true }),
+			page.getByText("tamanu-central:a-silenced", { exact: true }),
 		).toBeVisible();
 		await expect(
 			page.getByText("silenced (application)"),
@@ -287,10 +287,10 @@ test.describe("silenced healthchecks", () => {
 		await expect(page.getByTestId("CancelIcon")).toHaveCount(0);
 
 		// And it sorts with the skipped tail, after passing checks.
-		const passed = page.getByText("tamanu-central.m-passes", {
+		const passed = page.getByText("tamanu-central:m-passes", {
 			exact: true,
 		});
-		const silenced = page.getByText("tamanu-central.a-silenced", {
+		const silenced = page.getByText("tamanu-central:a-silenced", {
 			exact: true,
 		});
 		const passedY = (await passed.boundingBox())!.y;

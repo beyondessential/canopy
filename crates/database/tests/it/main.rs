@@ -3,6 +3,7 @@
 // file, which keeps rebuilds from swamping the machine with I/O.
 // Nextest still runs every #[tokio::test] in parallel as usual.
 
+mod abandoned_grain_migration;
 mod admins;
 mod application_certificates;
 mod application_empty_update;

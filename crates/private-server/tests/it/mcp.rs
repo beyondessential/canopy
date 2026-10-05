@@ -1342,12 +1342,11 @@ async fn find_machines_reports_how_many_applications_each_carries() {
 	.await
 }
 
-/// A box's disk filling is the application's problem too, so asking about an
-/// application returns its machine's issues among its own. Asking about the
-/// machine returns only the machine's.
+/// Asking about an application returns its own issues, matching what it
+/// presents; asking about the machine returns the box's.
 // spec: MCP#incidents-and-issues
 #[tokio::test(flavor = "multi_thread")]
-async fn find_issues_by_application_includes_its_machines_issues() {
+async fn find_issues_by_application_returns_its_own_issues() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		seed_two_workload_box(&mut conn).await;
 		conn.batch_execute(&format!(
@@ -1379,20 +1378,11 @@ async fn find_issues_by_application_includes_its_machines_issues() {
 			.iter()
 			.map(|i| i["ref"].as_str().unwrap())
 			.collect();
-		assert!(
-			refs.contains(&"disk") && refs.contains(&"ver"),
-			"the box's disk and the software's version both: {refs:?}"
+		assert_eq!(
+			refs,
+			vec!["ver"],
+			"the software's version, not the box's disk"
 		);
-
-		// And each says whose failure it is.
-		let disk = for_app["issues"]
-			.as_array()
-			.unwrap()
-			.iter()
-			.find(|i| i["ref"] == "disk")
-			.expect("the disk issue");
-		assert_eq!(disk["scope"]["grain"], "machine");
-		assert_eq!(disk["scope"]["name"], "box-one");
 
 		// The machine's own view is the box's checks only.
 		let for_machine = call_tool!(
@@ -1412,20 +1402,14 @@ async fn find_issues_by_application_includes_its_machines_issues() {
 			"asking what is wrong with the box does not answer about its software"
 		);
 
-		// The other workload on the same box sees the disk too: it is that
-		// box's failure, and both workloads run on it.
-		let for_sibling = call_tool!(
-			private,
-			"find_issues",
-			serde_json::json!({ "application_id": MAPP_B })
-		);
-		assert!(
-			for_sibling["issues"]
-				.as_array()
-				.unwrap()
-				.iter()
-				.any(|i| i["ref"] == "disk")
-		);
+		let disk = for_machine["issues"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|i| i["ref"] == "disk")
+			.expect("the disk issue");
+		assert_eq!(disk["scope"]["grain"], "machine");
+		assert_eq!(disk["scope"]["name"], "box-one");
 	})
 	.await
 }
@@ -1647,6 +1631,127 @@ async fn the_interface_needs_no_raised_session() {
 		let env = parse_envelope(&resp.text());
 		assert!(env.get("error").is_none(), "rpc error: {env}");
 		assert_ne!(env["result"]["isError"], serde_json::Value::Bool(true));
+	})
+	.await
+}
+
+/// Check documentation is asked for by the name every other tool presents a
+/// check as, so an agent can pass back what it just read.
+// spec: MCP#incidents-and-issues
+#[tokio::test(flavor = "multi_thread")]
+async fn check_documentation_takes_the_presented_name() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO check_policies (source, subject, application_type, check_name, documentation) VALUES \
+				('alertd', 'application', 'tamanu-central', 'caddy_certs', 'central certs'), \
+				('alertd', 'application', 'tamanu-facility', 'caddy_certs', 'facility certs'), \
+				('alertd', 'machine', NULL, 'disk_free', 'the disk'), \
+				('alertd', 'machine', NULL, 'probe.latency', 'a dotted name');",
+		)
+		.await
+		.expect("seed catalog");
+
+		let documentation = |out: serde_json::Value| -> Vec<String> {
+			out.as_array()
+				.expect("entries")
+				.iter()
+				.map(|e| e["documentation"].as_str().unwrap().to_string())
+				.collect()
+		};
+
+		for name in ["tamanu-central:caddy_certs", "tamanu-central.caddy_certs"] {
+			let out = call_tool!(
+				private,
+				"get_check_documentation",
+				serde_json::json!({ "source": "alertd", "check_name": name })
+			);
+			assert_eq!(documentation(out), vec!["central certs"], "for {name}");
+		}
+
+		let out = call_tool!(
+			private,
+			"get_check_documentation",
+			serde_json::json!({ "source": "alertd", "check_name": "disk_free" })
+		);
+		assert_eq!(documentation(out), vec!["the disk"]);
+
+		// A separator in a name whose prefix names no catalogued type is part
+		// of the name.
+		let out = call_tool!(
+			private,
+			"get_check_documentation",
+			serde_json::json!({ "source": "alertd", "check_name": "probe.latency" })
+		);
+		assert_eq!(documentation(out), vec!["a dotted name"]);
+
+		// A bare name that only application types carry is refused, naming the
+		// checks it could mean.
+		let resp = private
+			.post("/api/mcp")
+			.add_header("accept", ACCEPT)
+			.add_header("mcp-protocol-version", PROTO)
+			.json(&serde_json::json!({
+				"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+				"params": {
+					"name": "get_check_documentation",
+					"arguments": { "source": "alertd", "check_name": "caddy_certs" },
+				}
+			}))
+			.await;
+		let env = parse_envelope(&resp.text());
+		let message = env["error"]["message"].as_str().expect("an error").to_string();
+		assert!(
+			message.contains("tamanu-central:caddy_certs")
+				&& message.contains("tamanu-facility:caddy_certs"),
+			"{message}"
+		);
+	})
+	.await
+}
+
+/// An application's detail carries its own checks as the operator UI presents
+/// them, and none of the box's.
+// spec: MCP#detail
+#[tokio::test(flavor = "multi_thread")]
+async fn get_server_returns_its_own_checks() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		seed_two_workload_box(&mut conn).await;
+		conn.batch_execute(&format!(
+			"INSERT INTO check_policies (source, subject, application_type, check_name) VALUES \
+				('alertd', 'machine', NULL, 'disk_free'), \
+				('alertd', 'application', 'tamanu-central', 'tamanu_version'); \
+			 INSERT INTO issues \
+				(machine_id, source, ref, check_name, observed_result, effective_result, \
+				 message, active, first_seen, last_seen) \
+				VALUES ('{MACHINE}', 'alertd', 'health/disk_free', 'disk_free', 'failed', 'failed', \
+				 'disk full', true, NOW(), NOW()); \
+			 INSERT INTO issues \
+				(application_id, source, ref, check_name, observed_result, effective_result, \
+				 message, active, first_seen, last_seen) \
+				VALUES ('{MAPP_A}', 'alertd', 'health/tamanu_version', 'tamanu_version', 'warning', \
+				 'warning', 'behind', true, NOW(), NOW()); \
+			 INSERT INTO statuses (machine_id, server_id, source, healthy, health, extra) \
+				VALUES ('{MACHINE}', '{MAPP_A}', 'alertd', false, '[]', '{{}}');"
+		))
+		.await
+		.expect("seed");
+
+		let out = call_tool!(
+			private,
+			"get_server",
+			serde_json::json!({ "server_id": MAPP_A })
+		);
+		let names: Vec<&str> = out["latest_status"]["checks"]
+			.as_array()
+			.expect("checks")
+			.iter()
+			.map(|c| c["qualified_name"].as_str().unwrap())
+			.collect();
+		assert!(
+			names.contains(&"tamanu-central:tamanu_version"),
+			"{names:?}"
+		);
+		assert!(!names.contains(&"disk_free"), "{names:?}");
 	})
 	.await
 }

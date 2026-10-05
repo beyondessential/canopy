@@ -11361,7 +11361,7 @@
           },
           "qualified_name": {
             "type": "string",
-            "description": "How the entry reads to an operator: `<type>.<check>` where it is one\napplication type's, the bare name otherwise."
+            "description": "How the entry reads to an operator: `<type>:<check>` where it is one\napplication type's, the bare name otherwise."
           },
           "reviewed_at": {
             "type": [
@@ -11407,14 +11407,6 @@
           "failed",
           "broken",
           "skipped"
-        ]
-      },
-      "CheckSubject": {
-        "type": "string",
-        "description": "The grain a check's result belongs to.",
-        "enum": [
-          "machine",
-          "application"
         ]
       },
       "ClearScheduleArgs": {
@@ -11835,7 +11827,7 @@
           "qualified_name",
           "effective",
           "silenced",
-          "subject",
+          "quiet",
           "detail"
         ],
         "properties": {
@@ -11858,6 +11850,14 @@
             },
             "description": "The check's degraded and silenced instances, most urgent first, each\ngraded on its own. Empty for a check without instances, and for one\nnone of whose instances is degraded or silenced."
           },
+          "last_reported_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the check's source last reported it about this target. `None`\nfor a state Canopy presents without one having been filed, such as a\nreachability that has never degraded."
+          },
           "namespace": {
             "$ref": "#/components/schemas/NamespaceRef",
             "description": "Which catalog entry this check resolves to. Two application types\nreporting one name are two checks, so the name alone does not address\na policy, a silence or a document — this does."
@@ -11876,7 +11876,11 @@
           },
           "qualified_name": {
             "type": "string",
-            "description": "How the check reads to an operator: `<type>.<check>` where it is one\napplication type's, the bare name otherwise."
+            "description": "How the check reads to an operator: `<type>:<check>` where it is one\napplication type's, the bare name otherwise."
+          },
+          "quiet": {
+            "type": "boolean",
+            "description": "Whether the check's source has gone quiet about this target: its last\nreport is older than the target's down threshold, on the same clock\nreachability reads. The check is presented at its last result, muted.\nAlways false for Canopy's own determinations and manual conditions,\nwhich no report carries."
           },
           "silenced": {
             "type": "boolean",
@@ -11890,10 +11894,6 @@
           "source": {
             "type": "string",
             "description": "The source that reports this check."
-          },
-          "subject": {
-            "$ref": "#/components/schemas/CheckSubject",
-            "description": "Which grain this check is filed against.\n\nAn application presents its machine's checks among its own, and this is\nwhat marks them: a `machine` entry in an application's list is the\nbox's, one filing seen from each workload the box carries rather than a\ncopy per workload, and graded against the box rather than the workload."
           }
         }
       },
@@ -11910,7 +11910,7 @@
             "items": {
               "$ref": "#/components/schemas/ConsolidatedCheck"
             },
-            "description": "Every source's checks, most urgent first."
+            "description": "Every source's checks, most urgent first, then by presented name."
           },
           "health_state": {
             "$ref": "#/components/schemas/HealthState",
@@ -14321,7 +14321,7 @@
               "string",
               "null"
             ],
-            "description": "How the check behind this issue reads to an operator: `<type>.<check>`\nwhere it is one application type's, the bare name otherwise. Absent\nalongside `namespace`."
+            "description": "How the check behind this issue reads to an operator: `<type>:<check>`\nwhere it is one application type's, the bare name otherwise. Absent\nalongside `namespace`."
           },
           "ref": {
             "type": "string",
