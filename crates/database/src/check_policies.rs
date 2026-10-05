@@ -289,9 +289,9 @@ impl CheckPolicy {
 		.load(db)
 		.await?;
 
-		// Several triples can fold into one entry — every application type on a
-		// box reports the box's `disk_free`, and they share the machine entry —
-		// so take the max per entry before writing.
+		// Several triples can fold into one entry — a curated source's names are
+		// flat, so its states on every application type are one entry — so take
+		// the max per entry before writing.
 		let mut latest: HashMap<CatalogKey, Timestamp> = HashMap::new();
 		for row in reported {
 			let ty = row

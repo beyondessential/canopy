@@ -310,8 +310,8 @@ pub(crate) async fn enrich_issues(
 			// entry the check actually files into.
 			let namespace = i
 				.check_name
-				.as_ref()
-				.map(|_| Namespace::of(&i.source, naming.and_then(|n| n.r#type.as_ref())));
+				.is_some()
+				.then(|| Namespace::of(&i.source, naming.and_then(|n| n.r#type.as_ref())));
 			IssueData::from_with(
 				i,
 				IssueEnrichment {
