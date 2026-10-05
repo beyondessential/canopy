@@ -332,9 +332,7 @@ impl ApplicationCertificate {
 		crate::application_names::ApplicationName::declare(db, application_id, &name)
 			.await
 			.map_err(|err| match err {
-				AppError::Conflict(_) => AppError::NameNotEntitled(format!(
-					"no application on this machine declares {name}"
-				)),
+				AppError::Conflict(_) => AppError::DnsNameUndeclared(name.clone()),
 				other => other,
 			})?;
 

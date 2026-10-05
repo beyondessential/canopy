@@ -177,6 +177,24 @@ pub enum AppError {
 	#[error("not entitled to this name: {0}")]
 	NameNotEntitled(String),
 
+	/// The request resolves to no single application on the asking machine: no
+	/// application there declares the DNS name, and neither the type the request
+	/// named nor the grants narrowed it to one. Reported the same whether the
+	/// DNS name is declared on another machine or by nobody. Its own problem type
+	/// because the remedy is an operator declaring the DNS name, or the agent
+	/// naming its application, so an agent waits rather than reporting a fault.
+	/// Maps to 403.
+	// spec: CRT#resolving-the-application
+	#[error("no application on this machine declares this DNS name: {0}")]
+	DnsNameUndeclared(String),
+
+	/// An operator has denied the DNS name to the asking machine. Its own problem
+	/// type so an agent can tell a decision against the DNS name from a
+	/// declaration it is waiting on. Maps to 403.
+	// spec: CRT#denied-dns-names
+	#[error("this DNS name is denied to this machine: {0}")]
+	DnsNameDenied(String),
+
 	/// Deliberately opaque failure for the public enrollment endpoints. Every
 	/// pre-completion reason (unknown/archived server, invalid/expired/consumed
 	/// token, bad/expired/used challenge nonce, bad signature) collapses to this
@@ -296,6 +314,8 @@ impl AppError {
 			Self::CertificateKeyCompromised(_) => StatusCode::CONFLICT,
 			Self::NameManagementPaused(_) => StatusCode::CONFLICT,
 			Self::NameNotEntitled(_) => StatusCode::FORBIDDEN,
+			Self::DnsNameUndeclared(_) => StatusCode::FORBIDDEN,
+			Self::DnsNameDenied(_) => StatusCode::FORBIDDEN,
 			Self::EnrollmentFailed => StatusCode::FORBIDDEN,
 			Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
 			Self::Upstream(_) => StatusCode::BAD_GATEWAY,
@@ -368,6 +388,8 @@ impl AppError {
 						Self::CertificateKeyCompromised(_) => "certificate-key-compromised",
 						Self::NameManagementPaused(_) => "name-management-paused",
 						Self::NameNotEntitled(_) => "name-not-entitled",
+						Self::DnsNameUndeclared(_) => "dns-name-undeclared",
+						Self::DnsNameDenied(_) => "dns-name-denied",
 						Self::EnrollmentFailed => "enrollment-failed",
 						Self::RateLimited => "rate-limited",
 						Self::Upstream(_) => "upstream",

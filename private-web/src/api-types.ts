@@ -869,6 +869,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/certificates/deny": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deny a DNS name to a machine.
+         * @description Every address and certificate request about it from that machine is then
+         *     refused as denied, and is not recorded, so it raises no notice. Refused while
+         *     one of the machine's applications declares the name.
+         */
+        post: operations["certificates_deny"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/certificates/for_group": {
         parameters: {
             query?: never;
@@ -891,6 +913,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/certificates/for_machine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What a machine's page shows about its DNS names.
+         * @description The DNS names its applications declare, the requests it made that resolved
+         *     to none of them, and the DNS names denied to it.
+         */
+        post: operations["certificates_for_machine"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/certificates/for_server": {
         parameters: {
             query?: never;
@@ -907,6 +950,26 @@ export interface paths {
          *     why it is not renewing.
          */
         post: operations["certificates_for_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/certificates/lift_denial": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Lift a denial.
+         * @description The machine's requests about the name then resolve as any other's do.
+         */
+        post: operations["certificates_lift_denial"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1035,6 +1098,27 @@ export interface paths {
          *     Responds 409 for a profile the authority does not advertise.
          */
         post: operations["certificates_set_profile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/certificates/undeclared_notices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The machines with requests waiting on a declaration.
+         * @description For the notices on the group page and the Status page. Empty when there
+         *     are none.
+         */
+        post: operations["certificates_undeclared_notices"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6320,6 +6404,29 @@ export interface components {
             /** @description The email address to remove from the admin allow-list. */
             email: string;
         };
+        /** @description A DNS name an operator has denied to the machine. */
+        DeniedView: {
+            /** @description When it was denied. */
+            denied_at: string;
+            /** @description The operator who denied it. */
+            denied_by: string;
+            /** @description The DNS name, normalised. */
+            name: string;
+            /** @description Why, if they said. */
+            note?: string | null;
+        };
+        /** @description A DNS name to deny to a machine. */
+        DenyArgs: {
+            /**
+             * Format: uuid
+             * @description The machine to deny it to.
+             */
+            machine_id: string;
+            /** @description The name, in any case and with or without a trailing dot. */
+            name: string;
+            /** @description Why, optionally. */
+            note?: string | null;
+        };
         /** @description A single recorded connection from a device to the API. */
         DeviceConnectionData: {
             /**
@@ -8257,6 +8364,18 @@ export interface components {
              */
             tags?: components["schemas"]["TagMap"];
         };
+        /** @description One of a machine's applications, as a choice to declare a DNS name on. */
+        MachineApplicationView: {
+            /**
+             * Format: uuid
+             * @description The application's identifier.
+             */
+            id: string;
+            /** @description What to call it. */
+            name: string;
+            /** @description Its type's slug. */
+            type: string;
+        };
         /** @description Identifies a server. */
         MachineArgs: {
             /**
@@ -8362,6 +8481,19 @@ export interface components {
              */
             tailscale_identifier?: string | null;
         };
+        /** @description A DNS name declared by one of a machine's applications. */
+        MachineDeclaredView: {
+            /**
+             * Format: uuid
+             * @description The application declaring it.
+             */
+            application_id: string;
+            /** @description The declaring application, for display. */
+            application_name: string;
+            certificate?: null | components["schemas"]["CertificateView"];
+            /** @description The DNS name, normalised. */
+            name: string;
+        };
         /** @description A machine together with the applications running on it. */
         MachineDetail: components["schemas"]["Machine"] & {
             /**
@@ -8457,6 +8589,27 @@ export interface components {
             own_window: boolean;
             /** @description Whether the box is currently reporting, on its own threshold. */
             up: components["schemas"]["ShortStatus"];
+        };
+        /** @description A machine and one DNS name. */
+        MachineDnsNameArgs: {
+            /**
+             * Format: uuid
+             * @description The machine.
+             */
+            machine_id: string;
+            /** @description The name, in any case and with or without a trailing dot. */
+            name: string;
+        };
+        /** @description Everything a machine's page needs about the DNS names asked about from it. */
+        MachineDnsNamesView: {
+            /** @description The machine's applications, to declare a DNS name on. */
+            applications: components["schemas"]["MachineApplicationView"][];
+            /** @description The DNS names its applications declare, by name. */
+            declared: components["schemas"]["MachineDeclaredView"][];
+            /** @description The DNS names denied to it. */
+            denied: components["schemas"]["DeniedView"][];
+            /** @description Its requests that resolved to no single application and still count. */
+            undeclared: components["schemas"]["UndeclaredView"][];
         };
         /** @description Identifies one machine. */
         MachineIdArgs: {
@@ -8818,6 +8971,12 @@ export interface components {
             published_addresses: string[];
             /** @description When Canopy last published this name's records. */
             published_at?: string | null;
+            /**
+             * @description Whether the name lies at or beneath a domain the application's group
+             *     controls. An operator may declare one that does not, ahead of the group
+             *     claiming its domain; nothing is published or certified for it until then.
+             */
+            within_domains: boolean;
             /**
              * @description Apex of the managed zone covering this name, or null where no configured
              *     zone does — in which case Canopy can publish nothing for it.
@@ -11752,6 +11911,50 @@ export interface components {
             /** @description Backup type these defaults apply to. */
             type: string;
         };
+        /** @description How many undeclared requests one machine has. */
+        UndeclaredNoticeView: {
+            /**
+             * Format: int64
+             * @description How many of its requests are waiting.
+             */
+            count: number;
+            /**
+             * Format: uuid
+             * @description The machine's group. Null for a machine in none.
+             */
+            group_id?: string | null;
+            /** @description That group's name. */
+            group_name?: string | null;
+            /**
+             * Format: uuid
+             * @description The machine with requests waiting on a declaration.
+             */
+            machine_id: string;
+            /** @description The machine's name. Null for a machine its operator never named. */
+            machine_name: string;
+        };
+        /** @description Which machines have undeclared requests, optionally within one group. */
+        UndeclaredNoticesArgs: {
+            /**
+             * Format: uuid
+             * @description Narrow to one group's machines. Omitted for the whole fleet.
+             */
+            server_group_id?: string | null;
+        };
+        /** @description A request the machine made that resolved to no single application. */
+        UndeclaredView: {
+            /** @description What the latest refused request was for: `addresses` or `certificate`. */
+            asked_for: string;
+            /** @description When the machine first asked. */
+            first_asked_at: string;
+            /**
+             * @description When the machine last asked. A request not repeated for a day no longer
+             *     counts.
+             */
+            last_asked_at: string;
+            /** @description The DNS name asked about, normalised. */
+            name: string;
+        };
         /** @description Changes to apply to an existing artifact. */
         UpdateArtifactArgs: {
             /**
@@ -13306,6 +13509,46 @@ export interface operations {
             };
         };
     };
+    certificates_deny: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DenyArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeniedView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description One of the machine's applications declares this name. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     certificates_for_group: {
         parameters: {
             query?: never;
@@ -13325,6 +13568,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DomainHealthView"][];
+                };
+            };
+        };
+    };
+    certificates_for_machine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineDnsNamesView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
         };
@@ -13349,6 +13623,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ApplicationNamesView"];
                 };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    certificates_lift_denial: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineDnsNameArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             404: {
                 headers: {
@@ -13528,6 +13831,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    certificates_undeclared_notices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UndeclaredNoticesArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UndeclaredNoticeView"][];
                 };
             };
         };

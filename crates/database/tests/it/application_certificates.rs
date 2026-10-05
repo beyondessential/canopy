@@ -162,8 +162,7 @@ async fn a_name_belongs_to_one_server_at_a_time() {
 		assert!(
 			matches!(
 				&err,
-				commons_errors::AppError::NameNotEntitled(m)
-					if m == "no application on this machine declares a.tamanu.app"
+				commons_errors::AppError::DnsNameUndeclared(m) if m == "a.tamanu.app"
 			),
 			"got {err:?}"
 		);
@@ -1485,8 +1484,7 @@ async fn ordering_declares_the_name_without_naming_another_holder() {
 		assert!(
 			matches!(
 				&refusal,
-				commons_errors::AppError::NameNotEntitled(m)
-					if m == "no application on this machine declares elsewhere.fiji.tamanu.app"
+				commons_errors::AppError::DnsNameUndeclared(m) if m == "elsewhere.fiji.tamanu.app"
 			),
 			"got {refusal:?}"
 		);
@@ -1496,4 +1494,53 @@ async fn ordering_declares_the_name_without_naming_another_holder() {
 		);
 	})
 	.await
+}
+
+/// A machine's undeclared records are bounded: past the bound a new DNS name is
+/// not recorded, and one already held is still refreshed.
+// spec: CRT#undeclared-requests
+#[tokio::test(flavor = "multi_thread")]
+async fn undeclared_records_are_bounded_per_machine() {
+	use database::dns_name_dispositions::{AskedFor, UNDECLARED_PER_MACHINE, UndeclaredDnsName};
+	TestDb::run(|mut conn, _url| async move {
+		let machine = Uuid::new_v4();
+		conn.batch_execute(&format!("INSERT INTO machines (id) VALUES ('{machine}')"))
+			.await
+			.expect("machine");
+
+		for i in 0..UNDECLARED_PER_MACHINE {
+			UndeclaredDnsName::record(
+				&mut conn,
+				machine,
+				&format!("n{i}.example.org"),
+				AskedFor::Certificate,
+			)
+			.await
+			.expect("record");
+		}
+		UndeclaredDnsName::record(
+			&mut conn,
+			machine,
+			"overflow.example.org",
+			AskedFor::Certificate,
+		)
+		.await
+		.expect("past the bound is not an error");
+		UndeclaredDnsName::record(&mut conn, machine, "n0.example.org", AskedFor::Addresses)
+			.await
+			.expect("refresh");
+
+		let held = UndeclaredDnsName::for_machine(&mut conn, machine)
+			.await
+			.expect("list");
+		assert_eq!(held.len() as i64, UNDECLARED_PER_MACHINE);
+		assert!(held.iter().all(|r| r.dns_name != "overflow.example.org"));
+		assert_eq!(
+			held.iter()
+				.find(|r| r.dns_name == "n0.example.org")
+				.map(|r| r.asked_for.as_str()),
+			Some("addresses")
+		);
+	})
+	.await;
 }

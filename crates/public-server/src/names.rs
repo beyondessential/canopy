@@ -25,7 +25,8 @@ use commons_types::server::app_type::ApplicationType;
 use database::application_certificates::OrderState;
 use database::diesel_async::AsyncPgConnection;
 use database::{
-	ApplicationCertificate, ApplicationName, ServerGroupDomain, applications::Application,
+	ApplicationCertificate, ApplicationName, AskedFor, DeniedDnsName, ServerGroupDomain,
+	UndeclaredDnsName, applications::Application,
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -60,6 +61,13 @@ impl Grant {
 		}
 	}
 
+	fn asked_for(self) -> AskedFor {
+		match self {
+			Self::Dns => AskedFor::Addresses,
+			Self::Tls => AskedFor::Certificate,
+		}
+	}
+
 	fn describe(self) -> &'static str {
 		match self {
 			Self::Dns => "manage its own DNS records",
@@ -84,6 +92,7 @@ async fn authorise(
 	conn: &mut AsyncPgConnection,
 	device_id: Uuid,
 	name: &str,
+	named_type: Option<&ApplicationType>,
 	grant: Grant,
 	zones: &[ManagedZone],
 ) -> Result<Authorised> {
@@ -96,33 +105,25 @@ async fn authorise(
 		.await?
 		.filter(|m| m.deleted_at.is_none())
 		.ok_or(AppError::DeviceHasNoServer)?;
-	let on_machine = machine.applications(conn).await?;
 
-	// 2. The application on that machine declaring the requested name. Which
-	// application a request concerns is resolved from the name, not from the
-	// credential, and a name is held by one application fleet-wide, so this is
-	// unambiguous however many workloads the box hosts.
-	//
-	// A machine hosting exactly one application resolves to it even for a name
-	// nothing declares yet, because there is nothing to disambiguate and the
-	// agent's own registration is still how a name first gets declared. The
-	// moment a box hosts two, an undeclared name is genuinely ambiguous and is
-	// refused rather than guessed at.
-	//
-	// TRAP: this refusal must not distinguish "declared by an application
-	// elsewhere" from "declared by nobody". The fleet-wide unique index makes
-	// the former cheap to detect, which is exactly the temptation; reporting it
-	// would turn this endpoint into a directory of what other machines serve.
-	// spec: CRT#identity-and-authorisation
-	let declared = ApplicationName::for_name(conn, &name).await?;
-	let server = match declared {
-		Some(row) => on_machine.into_iter().find(|a| a.id == row.application_id),
-		None if on_machine.len() == 1 => on_machine.into_iter().next(),
-		None => None,
+	// A denial is an operator's decision about this box and this DNS name, so it
+	// holds however the request would otherwise resolve.
+	// spec: CRT#denied-dns-names
+	if let Some(denial) = DeniedDnsName::get(conn, machine.id, &name).await? {
+		return Err(AppError::DnsNameDenied(match denial.note {
+			Some(note) => format!("{name}: {note}"),
+			None => name,
+		}));
 	}
-	.ok_or_else(|| {
-		AppError::NameNotEntitled(format!("no application on this machine declares {name}"))
-	})?;
+
+	// 2. The one application on the machine the request is about.
+	let server = match resolve(conn, &machine, &name, named_type, grant).await? {
+		Some(server) => server,
+		None => {
+			UndeclaredDnsName::record(conn, machine.id, &name, grant.asked_for()).await?;
+			return Err(AppError::DnsNameUndeclared(name));
+		}
+	};
 
 	// 3. Paused before grants: a paused server is being looked into, and telling
 	// it about a missing grant would send an operator chasing the wrong thing.
@@ -154,14 +155,7 @@ async fn authorise(
 	// 5. The name has to sit under a domain this application's *own* group controls.
 	// A name another group controls is refused exactly as an unclaimed one is, so
 	// the endpoint is not a directory of other groups' names.
-	let entitled = match server.group_id {
-		None => false,
-		Some(group) => ServerGroupDomain::list_for_group(conn, group)
-			.await?
-			.iter()
-			.any(|claim| is_within(&name, &claim.domain)),
-	};
-	if !entitled {
+	if !group_covers(conn, &server, &name).await? {
 		return Err(AppError::NameNotEntitled(format!(
 			"{name} is not within any domain this server's group controls"
 		)));
@@ -175,7 +169,94 @@ async fn authorise(
 		)));
 	}
 
+	// The request is answered, so whatever it was waiting on is no longer wanted.
+	// spec: CRT#undeclared-requests
+	UndeclaredDnsName::clear(conn, machine.id, &name).await?;
+
 	Ok(Authorised { server, name })
+}
+
+/// Which application on `machine` a request about `name` concerns, if exactly
+/// one.
+///
+/// Starts from every application on the machine and narrows, stopping as soon as
+/// one remains: to the one declaring the name, to the type the request named,
+/// then to those holding the grant whose group covers the name. A machine
+/// hosting one application is resolved before anything narrows, so its
+/// requests reach the grant and domain checks and are refused as what they are.
+///
+/// TRAP: a name declared by an application on another machine must come back
+/// `None` exactly as a name nobody declares does. The fleet-wide unique index
+/// makes the former cheap to detect, which is exactly the temptation; reporting
+/// it would turn this endpoint into a directory of what other machines serve.
+// spec: CRT#resolving-the-application
+async fn resolve(
+	conn: &mut AsyncPgConnection,
+	machine: &database::machines::Machine,
+	name: &str,
+	named_type: Option<&ApplicationType>,
+	grant: Grant,
+) -> Result<Option<Application>> {
+	let mut candidates = machine.applications(conn).await?;
+
+	if let Some(declared) = ApplicationName::for_name(conn, name).await? {
+		let Some(declaring) = candidates
+			.into_iter()
+			.find(|a| a.id == declared.application_id)
+		else {
+			return Ok(None);
+		};
+		// The machine's own business, already in its entitlements: following the
+		// declaration quietly would serve the agent a certificate attributed to
+		// the workload it said it was not.
+		if let Some(named) = named_type
+			&& *named != declaring.r#type
+		{
+			return Err(AppError::Conflict(format!(
+				"{name} is declared by this machine's {} application, not its {named} one",
+				declaring.r#type
+			)));
+		}
+		return Ok(Some(declaring));
+	}
+
+	if candidates.len() == 1 {
+		return Ok(candidates.pop());
+	}
+
+	if let Some(named) = named_type {
+		candidates.retain(|a| a.r#type == *named);
+		if candidates.len() == 1 {
+			return Ok(candidates.pop());
+		}
+	}
+
+	let mut eligible = Vec::new();
+	for candidate in candidates {
+		if grant.held_by(&candidate) && group_covers(conn, &candidate, name).await? {
+			eligible.push(candidate);
+		}
+	}
+	Ok(if eligible.len() == 1 {
+		eligible.pop()
+	} else {
+		None
+	})
+}
+
+/// Whether `name` lies at or beneath a domain `server`'s own group controls.
+async fn group_covers(
+	conn: &mut AsyncPgConnection,
+	server: &Application,
+	name: &str,
+) -> Result<bool> {
+	Ok(match server.group_id {
+		None => false,
+		Some(group) => ServerGroupDomain::list_for_group(conn, group)
+			.await?
+			.iter()
+			.any(|claim| is_within(name, &claim.domain)),
+	})
 }
 
 // ── What a server may act on ────────────────────────────────────────────────
@@ -400,6 +481,12 @@ pub struct RegisterNameArgs {
 	/// registered before. An empty list withdraws the name.
 	#[schema(value_type = Vec<String>)]
 	pub addresses: Vec<IpAddr>,
+	/// The type of the application on this machine the name is for, where the
+	/// machine hosts several and the agent knows which serves it. Unneeded once
+	/// the name is declared, and on a machine hosting one application.
+	// spec: CRT#resolving-the-application
+	#[serde(default)]
+	pub application_type: Option<ApplicationType>,
 }
 
 /// What Canopy holds for a registered name.
@@ -437,8 +524,8 @@ pub struct RegisteredName {
 	request_body = RegisterNameArgs,
 	responses(
 		(status = 200, body = RegisteredName),
-		(status = 403, description = "The server lacks the DNS grant, or the name is not within its group's domains.", body = ProblemDetailsSchema),
-		(status = 409, description = "The server is paused, another server holds the name, or no managed zone covers it.", body = ProblemDetailsSchema),
+		(status = 403, description = "The server lacks the DNS grant, the name is not within its group's domains, the request resolves to no single application on the machine, or the name is denied to the machine.", body = ProblemDetailsSchema),
+		(status = 409, description = "The server is paused, no managed zone covers the name, or the request names a type other than that of the application on this machine declaring it.", body = ProblemDetailsSchema),
 		(status = 412, description = "The device is not attached to any live server.", body = ProblemDetailsSchema),
 	),
 )]
@@ -452,6 +539,7 @@ pub async fn register_name(
 		&mut conn,
 		auth.0.id,
 		&args.name,
+		args.application_type.as_ref(),
 		Grant::Dns,
 		&state.dns_zones,
 	)
@@ -486,6 +574,12 @@ pub struct RequestCertificateArgs {
 	/// and nothing else — a request carrying any other name is refused rather
 	/// than trimmed.
 	pub csr: String,
+	/// The type of the application on this machine the name is for, where the
+	/// machine hosts several and the agent knows which serves it. Unneeded once
+	/// the name is declared, and on a machine hosting one application.
+	// spec: CRT#resolving-the-application
+	#[serde(default)]
+	pub application_type: Option<ApplicationType>,
 }
 
 /// Where a certificate request stands, and the chain once there is one.
@@ -551,8 +645,8 @@ fn certificate_response(cert: &ApplicationCertificate) -> CertificateResponse {
 	responses(
 		(status = 200, description = "The order as it stands, with the chain if there is one.", body = CertificateResponse),
 		(status = 400, description = "The signing request is unparseable, unsigned, asks for another name, or carries a name besides the one requested.", body = ProblemDetailsSchema),
-		(status = 403, description = "The server lacks the TLS grant, or the name is not within its group's domains.", body = ProblemDetailsSchema),
-		(status = 409, description = "The server is paused, no managed zone covers the name, or the key was revoked as compromised and will not be certified again.", body = ProblemDetailsSchema),
+		(status = 403, description = "The server lacks the TLS grant, the name is not within its group's domains, the request resolves to no single application on the machine, or the name is denied to the machine.", body = ProblemDetailsSchema),
+		(status = 409, description = "The server is paused, no managed zone covers the name, the request names a type other than that of the application on this machine declaring it, or the key was revoked as compromised and will not be certified again.", body = ProblemDetailsSchema),
 		(status = 412, description = "The device is not attached to any live server.", body = ProblemDetailsSchema),
 	),
 )]
@@ -566,6 +660,7 @@ pub async fn request_certificate(
 		&mut conn,
 		auth.0.id,
 		&args.name,
+		args.application_type.as_ref(),
 		Grant::Tls,
 		&state.dns_zones,
 	)

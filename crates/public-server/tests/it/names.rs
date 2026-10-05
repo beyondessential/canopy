@@ -727,3 +727,361 @@ async fn the_push_response_carries_the_whole_entitlements_answer() {
 	)
 	.await
 }
+
+// ── Resolving the application ───────────────────────────────────────────────
+
+/// A second workload on the same box as `first`, in the same group.
+async fn sibling(conn: &mut AsyncPgConnection, first: Uuid, r#type: &str, tls: bool) -> Uuid {
+	let id = Uuid::new_v4();
+	conn.batch_execute(&format!(
+		"INSERT INTO applications \
+		   (id, name, host, type, group_id, may_manage_dns, may_manage_tls, machine_id) \
+		 SELECT '{id}', 'crt-sibling', 'https://{id}.example.invalid', '{type}', \
+		        group_id, true, {tls}, machine_id \
+		 FROM applications WHERE id = '{first}'"
+	))
+	.await
+	.expect("sibling workload");
+	id
+}
+
+#[derive(diesel::QueryableByName)]
+struct Undeclared {
+	#[diesel(sql_type = sql_types::Text)]
+	dns_name: String,
+	#[diesel(sql_type = sql_types::Text)]
+	asked_for: String,
+}
+
+async fn undeclared(conn: &mut AsyncPgConnection) -> Vec<(String, String)> {
+	sql_query("SELECT dns_name, asked_for FROM undeclared_dns_names ORDER BY dns_name")
+		.load::<Undeclared>(conn)
+		.await
+		.expect("undeclared")
+		.into_iter()
+		.map(|r| (r.dns_name, r.asked_for))
+		.collect()
+}
+
+async fn declared_by(conn: &mut AsyncPgConnection, name: &str) -> Option<Uuid> {
+	#[derive(diesel::QueryableByName)]
+	struct Owner {
+		#[diesel(sql_type = sql_types::Uuid)]
+		application_id: Uuid,
+	}
+	sql_query("SELECT application_id FROM application_names WHERE name = $1")
+		.bind::<sql_types::Text, _>(name)
+		.get_result::<Owner>(conn)
+		.await
+		.ok()
+		.map(|o| o.application_id)
+}
+
+/// Two workloads with the same grants under the same domains cannot be told
+/// apart, so the request is refused as undeclared and recorded for an operator.
+// spec: CRT#resolving-the-application
+// spec: CRT#undeclared-requests
+#[tokio::test(flavor = "multi_thread")]
+async fn an_ambiguous_request_is_refused_as_undeclared_and_recorded() {
+	configure_zones("tamanu.app=Z1");
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			let first = entitled(&mut conn, device_id, Some("fiji.tamanu.app"), true, true).await;
+			sibling(&mut conn, first, "senaite", true).await;
+
+			let csr = csr_for(&["lab.fiji.tamanu.app"]);
+			let resp = public
+				.post("/certificates/request")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({"name": "lab.fiji.tamanu.app", "csr": csr}))
+				.await;
+			resp.assert_status(axum::http::StatusCode::FORBIDDEN);
+			assert_eq!(problem_type(&resp.json()), "dns-name-undeclared");
+			assert_eq!(count_certificates(&mut conn).await, 0);
+			assert_eq!(
+				undeclared(&mut conn).await,
+				vec![("lab.fiji.tamanu.app".to_string(), "certificate".to_string())]
+			);
+
+			// Asking again updates the one record rather than adding another, and
+			// says what the latest ask was for.
+			public
+				.post("/names/register")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(
+					&serde_json::json!({"name": "lab.fiji.tamanu.app", "addresses": ["192.0.2.7"]}),
+				)
+				.await
+				.assert_status(axum::http::StatusCode::FORBIDDEN);
+			assert_eq!(
+				undeclared(&mut conn).await,
+				vec![("lab.fiji.tamanu.app".to_string(), "addresses".to_string())]
+			);
+		},
+	)
+	.await
+}
+
+/// Naming the application type tells two workloads apart, and the request
+/// declares the name for the one it named, ending the undeclared record.
+// spec: CRT#resolving-the-application
+#[tokio::test(flavor = "multi_thread")]
+async fn a_named_type_resolves_and_declares() {
+	configure_zones("tamanu.app=Z1");
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			let first = entitled(&mut conn, device_id, Some("fiji.tamanu.app"), true, true).await;
+			let lab = sibling(&mut conn, first, "senaite", true).await;
+
+			let csr = csr_for(&["lab.fiji.tamanu.app"]);
+			public
+				.post("/certificates/request")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({"name": "lab.fiji.tamanu.app", "csr": csr}))
+				.await
+				.assert_status(axum::http::StatusCode::FORBIDDEN);
+			assert_eq!(undeclared(&mut conn).await.len(), 1);
+
+			public
+				.post("/certificates/request")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"name": "lab.fiji.tamanu.app",
+					"csr": csr,
+					"application_type": "senaite",
+				}))
+				.await
+				.assert_status(axum::http::StatusCode::ACCEPTED);
+
+			assert_eq!(
+				declared_by(&mut conn, "lab.fiji.tamanu.app").await,
+				Some(lab)
+			);
+			assert!(
+				undeclared(&mut conn).await.is_empty(),
+				"an answered request is no longer waiting on anyone"
+			);
+
+			// Once declared, the type is unneeded.
+			public
+				.post("/certificates/request")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({"name": "lab.fiji.tamanu.app", "csr": csr}))
+				.await
+				.assert_status(axum::http::StatusCode::ACCEPTED);
+		},
+	)
+	.await
+}
+
+/// Where only one workload on the box holds the grant the request needs and
+/// covers the name, that is the one, with no type and no operator.
+// spec: CRT#resolving-the-application
+#[tokio::test(flavor = "multi_thread")]
+async fn the_grants_resolve_when_only_one_application_could_act() {
+	configure_zones("tamanu.app=Z1");
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			let first = entitled(&mut conn, device_id, Some("fiji.tamanu.app"), true, true).await;
+			sibling(&mut conn, first, "senaite", false).await;
+
+			let csr = csr_for(&["central.fiji.tamanu.app"]);
+			public
+				.post("/certificates/request")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({"name": "central.fiji.tamanu.app", "csr": csr}))
+				.await
+				.assert_status(axum::http::StatusCode::ACCEPTED);
+			assert_eq!(
+				declared_by(&mut conn, "central.fiji.tamanu.app").await,
+				Some(first)
+			);
+		},
+	)
+	.await
+}
+
+/// A type contradicting the declaration on the same machine is refused, naming
+/// the declaring application's type, rather than quietly following either.
+// spec: CRT#resolving-the-application
+#[tokio::test(flavor = "multi_thread")]
+async fn a_type_contradicting_the_declaration_is_refused_naming_it() {
+	configure_zones("tamanu.app=Z1");
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			let first = entitled(&mut conn, device_id, Some("fiji.tamanu.app"), true, true).await;
+			let lab = sibling(&mut conn, first, "senaite", true).await;
+			conn.batch_execute(&format!(
+				"INSERT INTO application_names (application_id, name) \
+				 VALUES ('{lab}', 'lab.fiji.tamanu.app')"
+			))
+			.await
+			.expect("declare");
+
+			let resp = public
+				.post("/certificates/request")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"name": "lab.fiji.tamanu.app",
+					"csr": csr_for(&["lab.fiji.tamanu.app"]),
+					"application_type": "tamanu-central",
+				}))
+				.await;
+			resp.assert_status(axum::http::StatusCode::CONFLICT);
+			let body: serde_json::Value = resp.json();
+			assert!(
+				body["title"]
+					.as_str()
+					.unwrap_or_default()
+					.contains("senaite"),
+				"the refusal names the declaring type: {body}"
+			);
+		},
+	)
+	.await
+}
+
+/// A single-application machine asking for a name another machine's
+/// application holds is refused as undeclared, as on any machine.
+// spec: CRT#resolving-the-application
+#[tokio::test(flavor = "multi_thread")]
+async fn a_name_held_elsewhere_is_undeclared_on_a_single_application_machine() {
+	configure_zones("tamanu.app=Z1");
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			entitled(&mut conn, device_id, Some("fiji.tamanu.app"), true, true).await;
+			let elsewhere = Uuid::new_v4();
+			conn.batch_execute(&format!(
+				"INSERT INTO machines (id) VALUES ('{elsewhere}'); \
+				 INSERT INTO applications (id, name, host, type, machine_id) \
+				 VALUES ('{elsewhere}', 'theirs', 'https://{elsewhere}.example.invalid', 'tamanu-central', '{elsewhere}'); \
+				 INSERT INTO application_names (application_id, name) \
+				 VALUES ('{elsewhere}', 'theirs.fiji.tamanu.app')"
+			))
+			.await
+			.expect("another machine's name");
+
+			let resp = public
+				.post("/certificates/request")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"name": "theirs.fiji.tamanu.app",
+					"csr": csr_for(&["theirs.fiji.tamanu.app"]),
+				}))
+				.await;
+			assert_eq!(problem_type(&resp.json()), "dns-name-undeclared");
+			assert_eq!(undeclared(&mut conn).await.len(), 1);
+		},
+	)
+	.await
+}
+
+/// A denied name is refused as denied, whatever would otherwise resolve it,
+/// and is not recorded, so asking again raises nothing.
+// spec: CRT#denied-dns-names
+#[tokio::test(flavor = "multi_thread")]
+async fn a_denied_name_is_refused_as_denied_and_not_recorded() {
+	configure_zones("tamanu.app=Z1");
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			let server = entitled(&mut conn, device_id, Some("fiji.tamanu.app"), true, true).await;
+			conn.batch_execute(&format!(
+				"INSERT INTO denied_dns_names (machine_id, dns_name, denied_by, note) \
+				 SELECT machine_id, 'old.fiji.tamanu.app', 'admin@localhost', 'site retired' \
+				 FROM applications WHERE id = '{server}'"
+			))
+			.await
+			.expect("deny");
+
+			for _ in 0..2 {
+				let resp = public
+					.post("/certificates/request")
+					.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+					.json(&serde_json::json!({
+						"name": "old.fiji.tamanu.app",
+						"csr": csr_for(&["old.fiji.tamanu.app"]),
+					}))
+					.await;
+				resp.assert_status(axum::http::StatusCode::FORBIDDEN);
+				let body: serde_json::Value = resp.json();
+				assert_eq!(problem_type(&body), "dns-name-denied");
+				assert!(
+					body["title"]
+						.as_str()
+						.unwrap_or_default()
+						.contains("site retired"),
+					"the note travels with the refusal: {body}"
+				);
+			}
+			assert_eq!(count_certificates(&mut conn).await, 0);
+			assert!(undeclared(&mut conn).await.is_empty());
+		},
+	)
+	.await
+}
+
+/// An address registration resolves by a named type as a certificate request
+/// does, and declares the name for the application it named.
+// spec: CRT#resolving-the-application
+#[tokio::test(flavor = "multi_thread")]
+async fn an_address_registration_resolves_by_a_named_type() {
+	configure_zones("tamanu.app=Z1");
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			let first = entitled(&mut conn, device_id, Some("fiji.tamanu.app"), true, true).await;
+			let lab = sibling(&mut conn, first, "senaite", true).await;
+
+			public
+				.post("/names/register")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"name": "lab.fiji.tamanu.app",
+					"addresses": ["192.0.2.7"],
+					"application_type": "senaite",
+				}))
+				.await
+				.assert_status_ok();
+			assert_eq!(
+				declared_by(&mut conn, "lab.fiji.tamanu.app").await,
+				Some(lab)
+			);
+		},
+	)
+	.await
+}
+
+/// A denial records a decision rather than an observation, so it stands long
+/// after the machine stopped asking.
+// spec: CRT#denied-dns-names
+#[tokio::test(flavor = "multi_thread")]
+async fn a_denial_outlasts_a_day_without_asking() {
+	configure_zones("tamanu.app=Z1");
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			let server = entitled(&mut conn, device_id, Some("fiji.tamanu.app"), true, true).await;
+			conn.batch_execute(&format!(
+				"INSERT INTO denied_dns_names (machine_id, dns_name, denied_by, created_at) \
+				 SELECT machine_id, 'old.fiji.tamanu.app', 'admin@localhost', now() - interval '30 days' \
+				 FROM applications WHERE id = '{server}'"
+			))
+			.await
+			.expect("deny long ago");
+
+			let resp = public
+				.post("/names/register")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({"name": "old.fiji.tamanu.app", "addresses": []}))
+				.await;
+			assert_eq!(problem_type(&resp.json()), "dns-name-denied");
+		},
+	)
+	.await
+}

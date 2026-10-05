@@ -82,6 +82,7 @@ The refusal reads the same whether the DNS name is held by an application elsewh
 A request refused as undeclared is recorded against the machine that made it, so an operator learns that a declaration is wanted from Canopy rather than from the agent's alerts.
 The record holds the DNS name, whether it was asked about for addresses or for a certificate, and when the machine last asked.
 A machine asking again about the same DNS name updates the one record rather than adding another.
+A machine's records are bounded, since the DNS name is the machine's own input: past the bound a new DNS name is refused as usual without being recorded, and the records already held stand.
 
 The record reads the same whether the DNS name is declared by an application on another machine or by nobody.
 It is presented to operators alone, who already see the whole fleet, so it tells the asking machine nothing it was not already told.
@@ -259,7 +260,6 @@ A group presents, under each domain it controls, the DNS names in use beneath it
 A machine hosting several applications presents their DNS names together, since that is where a request about a DNS name is resolved to one of them.
 Each declared DNS name shows the application declaring it and the state of its certificate.
 Any machine with undeclared requests presents them, each with what was asked for and when, with a control to declare the DNS name on one of the machine's applications and a control to deny it.
-Where the domains of exactly one of those applications' groups cover the DNS name, that application is offered first.
 A machine hosting one application has them only for a DNS name another application holds, and declaring there is refused with the holder named, which is what an operator needs to release it first.
 Declaring from the machine is the same declaration as declaring from the application, refused the same way.
 A machine presents the DNS names denied to it, each with who denied it, when, and the note, and a control to lift the denial.

@@ -169,6 +169,31 @@ groups' names. Distinct from a withheld grant so a client can
 tell "this name is not yours" from "you may not manage names at
 all".
 
+## DNS name undeclared
+
+Issued when a machine asks Canopy to act on a DNS name, and the request
+resolves to no single application on that machine: none of its
+applications declares the DNS name, and neither the application type
+the request named nor the grants narrowed it to one.
+
+Reported identically whether the DNS name is declared by an
+application on another machine or by nobody, so the endpoint cannot
+be used to discover what other machines serve. The remedy is an
+operator declaring the DNS name on one of the machine's applications,
+or the request naming its application's type, so the client should
+wait and try later rather than treat the refusal as a fault. Canopy
+records the request so operators see that a declaration is wanted.
+
+## DNS name denied
+
+Issued when a machine asks Canopy to act on a DNS name an operator
+has denied to that machine. The denial stands until an operator lifts
+it or declares the DNS name on one of the machine's applications.
+
+Distinct from an undeclared DNS name so a client can tell a decision
+against the DNS name from a declaration it is waiting on. A denied
+request is not recorded, so asking again raises nothing.
+
 ## Auth: tailnet identity missing
 
 Issued on the private-server's `/public/...` mount when the

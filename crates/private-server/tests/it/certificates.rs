@@ -100,3 +100,245 @@ async fn releasing_a_name_an_application_does_not_hold_is_a_404() {
 	})
 	.await;
 }
+
+// ── Undeclared requests and denials ─────────────────────────────────────────
+
+/// A group claiming `domain`, and a machine in it carrying two applications of
+/// different types, both in the group.
+async fn shared_box_in_group(conn: &mut AsyncPgConnection, domain: &str) -> (Uuid, Uuid, Uuid) {
+	let group = Uuid::new_v4();
+	let machine = Uuid::new_v4();
+	let (tamanu, lab) = (Uuid::new_v4(), Uuid::new_v4());
+	conn.batch_execute(&format!(
+		"INSERT INTO server_groups (id, name) VALUES ('{group}', 'grp-{group}'); \
+		 INSERT INTO server_group_domains (group_id, domain) VALUES ('{group}', '{domain}'); \
+		 INSERT INTO machines (id, name, group_id) VALUES ('{machine}', 'box', '{group}'); \
+		 INSERT INTO applications (id, name, host, type, group_id, machine_id) VALUES \
+		   ('{tamanu}', 'central', 'https://{tamanu}.example.invalid', 'tamanu-central', '{group}', '{machine}'), \
+		   ('{lab}', 'lab', 'https://{lab}.example.invalid', 'senaite', '{group}', '{machine}')"
+	))
+	.await
+	.expect("seed shared box");
+	(machine, tamanu, lab)
+}
+
+async fn record_undeclared(conn: &mut AsyncPgConnection, machine: Uuid, name: &str, age: &str) {
+	conn.batch_execute(&format!(
+		"INSERT INTO undeclared_dns_names (machine_id, dns_name, asked_for, first_asked_at, last_asked_at) \
+		 VALUES ('{machine}', '{name}', 'certificate', now() - interval '{age}', now() - interval '{age}')"
+	))
+	.await
+	.expect("record undeclared");
+}
+
+// spec: CRT#denied-dns-names
+#[tokio::test(flavor = "multi_thread")]
+async fn deny_lift_roundtrip() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let (machine, _, _) = shared_box_in_group(&mut conn, "fiji.tamanu.app").await;
+		record_undeclared(&mut conn, machine, "old.fiji.tamanu.app", "1 minute").await;
+
+		let resp = private
+			.post("/api/certificates/deny")
+			.json(&serde_json::json!({
+				"machine_id": machine,
+				"name": "Old.Fiji.Tamanu.App.",
+				"note": "site retired",
+			}))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		assert_eq!(body["name"], "old.fiji.tamanu.app");
+		assert_eq!(body["note"], "site retired");
+		assert_eq!(body["denied_by"], "admin@localhost");
+
+		let view: serde_json::Value = private
+			.post("/api/certificates/for_machine")
+			.json(&serde_json::json!({"machine_id": machine}))
+			.await
+			.json();
+		assert!(
+			view["undeclared"].as_array().unwrap().is_empty(),
+			"denying ends the undeclared record: {view}"
+		);
+		assert_eq!(view["denied"][0]["name"], "old.fiji.tamanu.app");
+
+		private
+			.post("/api/certificates/lift_denial")
+			.json(&serde_json::json!({"machine_id": machine, "name": "old.fiji.tamanu.app"}))
+			.await
+			.assert_status_ok();
+		private
+			.post("/api/certificates/lift_denial")
+			.json(&serde_json::json!({"machine_id": machine, "name": "old.fiji.tamanu.app"}))
+			.await
+			.assert_status(axum::http::StatusCode::NOT_FOUND);
+	})
+	.await
+}
+
+/// A declaration is the answer an undeclared request waited for and the
+/// opposite of a denial, so it ends both for the declaring application's box.
+// spec: CRT#denied-dns-names
+// spec: CRT#undeclared-requests
+#[tokio::test(flavor = "multi_thread")]
+async fn declaring_ends_the_undeclared_record_and_the_denial() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let (machine, tamanu, lab) = shared_box_in_group(&mut conn, "fiji.tamanu.app").await;
+		record_undeclared(&mut conn, machine, "central.fiji.tamanu.app", "1 minute").await;
+		private
+			.post("/api/certificates/deny")
+			.json(&serde_json::json!({"machine_id": machine, "name": "lab.fiji.tamanu.app"}))
+			.await
+			.assert_status_ok();
+
+		for (application, name) in [
+			(tamanu, "central.fiji.tamanu.app"),
+			(lab, "lab.fiji.tamanu.app"),
+		] {
+			private
+				.post("/api/certificates/declare")
+				.json(&serde_json::json!({"application_id": application, "name": name}))
+				.await
+				.assert_status_ok();
+		}
+
+		let view: serde_json::Value = private
+			.post("/api/certificates/for_machine")
+			.json(&serde_json::json!({"machine_id": machine}))
+			.await
+			.json();
+		assert!(view["undeclared"].as_array().unwrap().is_empty(), "{view}");
+		assert!(view["denied"].as_array().unwrap().is_empty(), "{view}");
+		let declared: Vec<(&str, &str)> = view["declared"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|d| {
+				(
+					d["name"].as_str().unwrap(),
+					d["application_name"].as_str().unwrap(),
+				)
+			})
+			.collect();
+		assert_eq!(
+			declared,
+			vec![
+				("central.fiji.tamanu.app", "central"),
+				("lab.fiji.tamanu.app", "lab")
+			]
+		);
+	})
+	.await
+}
+
+/// Denying contradicts a declaration on the same box, which has to go first.
+// spec: CRT#denied-dns-names
+#[tokio::test(flavor = "multi_thread")]
+async fn denying_a_name_declared_on_the_machine_is_refused() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let (machine, tamanu, _) = shared_box_in_group(&mut conn, "fiji.tamanu.app").await;
+		private
+			.post("/api/certificates/declare")
+			.json(&serde_json::json!({"application_id": tamanu, "name": "central.fiji.tamanu.app"}))
+			.await
+			.assert_status_ok();
+
+		let resp = private
+			.post("/api/certificates/deny")
+			.json(&serde_json::json!({"machine_id": machine, "name": "central.fiji.tamanu.app"}))
+			.await;
+		resp.assert_status(axum::http::StatusCode::CONFLICT);
+		let body: serde_json::Value = resp.json();
+		assert!(
+			body["title"]
+				.as_str()
+				.unwrap_or_default()
+				.contains("central"),
+			"the refusal names the declaring application: {body}"
+		);
+	})
+	.await
+}
+
+/// Declaring a name outside the group's domains is allowed and flagged, since
+/// nothing can be published or certified for it until the group claims one.
+// spec: CRT#declared-dns-names
+// spec: CRT#presentation
+#[tokio::test(flavor = "multi_thread")]
+async fn a_declaration_outside_the_group_domains_is_flagged() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let (_, tamanu, _) = shared_box_in_group(&mut conn, "fiji.tamanu.app").await;
+
+		let outside: serde_json::Value = private
+			.post("/api/certificates/declare")
+			.json(
+				&serde_json::json!({"application_id": tamanu, "name": "central.samoa.tamanu.app"}),
+			)
+			.await
+			.json();
+		assert_eq!(outside["within_domains"], false);
+
+		let inside: serde_json::Value = private
+			.post("/api/certificates/declare")
+			.json(&serde_json::json!({"application_id": tamanu, "name": "central.fiji.tamanu.app"}))
+			.await
+			.json();
+		assert_eq!(inside["within_domains"], true);
+	})
+	.await
+}
+
+/// Notices count each machine's requests that still count, fleet-wide or within
+/// one group; a request not repeated for a day no longer counts.
+// spec: CRT#presentation
+// spec: CRT#undeclared-requests
+#[tokio::test(flavor = "multi_thread")]
+async fn notices_count_live_undeclared_requests() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let (first, _, _) = shared_box_in_group(&mut conn, "fiji.tamanu.app").await;
+		let (second, _, _) = shared_box_in_group(&mut conn, "samoa.tamanu.app").await;
+		record_undeclared(&mut conn, first, "a.fiji.tamanu.app", "1 minute").await;
+		record_undeclared(&mut conn, first, "b.fiji.tamanu.app", "1 hour").await;
+		record_undeclared(&mut conn, first, "stale.fiji.tamanu.app", "25 hours").await;
+		record_undeclared(&mut conn, second, "a.samoa.tamanu.app", "1 minute").await;
+
+		let all: serde_json::Value = private
+			.post("/api/certificates/undeclared_notices")
+			.json(&serde_json::json!({}))
+			.await
+			.json();
+		let mut counts: Vec<(String, i64)> = all
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|n| {
+				(
+					n["machine_id"].as_str().unwrap().to_string(),
+					n["count"].as_i64().unwrap(),
+				)
+			})
+			.collect();
+		counts.sort();
+		let mut expected = vec![(first.to_string(), 2), (second.to_string(), 1)];
+		expected.sort();
+		assert_eq!(counts, expected);
+
+		let second_group = all
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|n| n["machine_id"] == second.to_string())
+			.map(|n| n["group_id"].clone())
+			.expect("the second machine's group");
+		let one: serde_json::Value = private
+			.post("/api/certificates/undeclared_notices")
+			.json(&serde_json::json!({"server_group_id": second_group}))
+			.await
+			.json();
+		assert_eq!(one.as_array().unwrap().len(), 1);
+		assert_eq!(one[0]["machine_id"], second.to_string());
+		assert_eq!(one[0]["machine_name"], "box");
+	})
+	.await
+}

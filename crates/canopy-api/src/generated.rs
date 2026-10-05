@@ -7,7 +7,7 @@ pub const OPENAPI_VERSION: &str = "1.0.3";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "8f274deada1f4357dcdf20d631ccdeedf582d30a45a9cc5b4bc5c2f3ae9f1360";
+pub const OPENAPI_BLAKE3: &str = "c4f517a584c17950cf25584c1acc86d65cb4cf762055505f647efdb38bfa96d3";
 
 /// Error types.
 pub mod error {
@@ -2314,6 +2314,17 @@ version to resolve.*/
 ///        "type": "string"
 ///      }
 ///    },
+///    "application_type": {
+///      "oneOf": [
+///        {
+///          "type": "null"
+///        },
+///        {
+///          "description": "The type of the application on this machine the name is for, where the\nmachine hosts several and the agent knows which serves it. Unneeded once\nthe name is declared, and on a machine hosting one application.",
+///          "$ref": "#/components/schemas/ApplicationType"
+///        }
+///      ]
+///    },
 ///    "name": {
 ///      "description": "The name to publish records at. Must sit within a domain this server's\ngroup controls.",
 ///      "type": "string"
@@ -2330,6 +2341,8 @@ pub struct RegisterNameArgs {
 A records and IPv6 addresses AAAA records, replacing whatever was
 registered before. An empty list withdraws the name.*/
     pub addresses: ::std::vec::Vec<::std::string::String>,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub application_type: ::std::option::Option<ApplicationType>,
     /**The name to publish records at. Must sit within a domain this server's
 group controls.*/
     pub name: ::std::string::String,
@@ -2635,6 +2648,17 @@ Accepted for a consumer that reports the identifier; omit it when
 ///    "name"
 ///  ],
 ///  "properties": {
+///    "application_type": {
+///      "oneOf": [
+///        {
+///          "type": "null"
+///        },
+///        {
+///          "description": "The type of the application on this machine the name is for, where the\nmachine hosts several and the agent knows which serves it. Unneeded once\nthe name is declared, and on a machine hosting one application.",
+///          "$ref": "#/components/schemas/ApplicationType"
+///        }
+///      ]
+///    },
 ///    "csr": {
 ///      "description": "The certificate signing request, DER, base64. Must ask for exactly `name`\nand nothing else — a request carrying any other name is refused rather\nthan trimmed.",
 ///      "type": "string"
@@ -2651,6 +2675,8 @@ Accepted for a consumer that reports the identifier; omit it when
 #[derive(::bon::Builder)]
 #[non_exhaustive]
 pub struct RequestCertificateArgs {
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub application_type: ::std::option::Option<ApplicationType>,
     /**The certificate signing request, DER, base64. Must ask for exactly `name`
 and nothing else — a request carrying any other name is refused rather
 than trimmed.*/

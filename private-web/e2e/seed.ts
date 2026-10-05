@@ -2052,3 +2052,35 @@ export async function seedServerCertificate(
 	);
 	return { id, name: opts.name };
 }
+
+/** Seed an `undeclared_dns_names` row: a request a machine made about a DNS name
+ * that resolved to none of its applications. `askedMinutesAgo` places the last
+ * ask; past a day it no longer counts. */
+export async function seedUndeclaredDnsName(
+	sql: Sql,
+	opts: {
+		machineId: string;
+		name: string;
+		askedFor?: "addresses" | "certificate";
+		askedMinutesAgo?: number;
+	},
+): Promise<void> {
+	const asked = new Date(Date.now() - (opts.askedMinutesAgo ?? 2) * 60_000);
+	await sql.query(
+		`INSERT INTO undeclared_dns_names (machine_id, dns_name, asked_for, first_asked_at, last_asked_at)
+		 VALUES ($1, $2, $3, $4, $4)`,
+		[opts.machineId, opts.name, opts.askedFor ?? "certificate", asked],
+	);
+}
+
+/** Seed a `denied_dns_names` row: a DNS name an operator denied to a machine. */
+export async function seedDeniedDnsName(
+	sql: Sql,
+	opts: { machineId: string; name: string; deniedBy?: string; note?: string },
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO denied_dns_names (machine_id, dns_name, denied_by, note)
+		 VALUES ($1, $2, $3, $4)`,
+		[opts.machineId, opts.name, opts.deniedBy ?? "admin@localhost", opts.note ?? null],
+	);
+}

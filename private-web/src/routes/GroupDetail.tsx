@@ -16,6 +16,7 @@ import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
 import { useState } from "react";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import GroupDomainsSection from "../components/GroupDomainsSection";
+import UndeclaredDnsNamesNotice from "../components/UndeclaredDnsNamesNotice";
 import { MaintenanceMarker } from "../components/HealthChip";
 import GroupInventorySection from "../components/GroupInventorySection";
 import MigrationTestsSection from "../components/MigrationTestsSection";
@@ -170,6 +171,8 @@ export default function GroupDetail() {
 			{archive.error && (
 				<Alert severity="error">{archive.error.message}</Alert>
 			)}
+
+			<UndeclaredDnsNamesNotice groupId={group.id} />
 
 			{group.deleted_at && (
 				<ArchivedGroupBanner

@@ -365,6 +365,17 @@ diesel::table! {
 }
 
 diesel::table! {
+	denied_dns_names (id) {
+		id -> Uuid,
+		machine_id -> Uuid,
+		dns_name -> Text,
+		denied_by -> Text,
+		note -> Nullable<Text>,
+		created_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	device_connections (id, created_at) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -868,6 +879,17 @@ diesel::table! {
 }
 
 diesel::table! {
+	undeclared_dns_names (id) {
+		id -> Uuid,
+		machine_id -> Uuid,
+		dns_name -> Text,
+		asked_for -> Text,
+		first_asked_at -> Timestamptz,
+		last_asked_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	upgrade_plans (id) {
 		id -> Uuid,
 		group_id -> Uuid,
@@ -950,6 +972,7 @@ diesel::joinable!(backup_runs -> machines (machine_id));
 diesel::joinable!(backup_runs -> server_groups (group_id));
 diesel::joinable!(check_stability -> issues (issue_id));
 diesel::joinable!(compromised_keys -> application_certificates (certificate_id));
+diesel::joinable!(denied_dns_names -> machines (machine_id));
 diesel::joinable!(device_connections -> devices (device_id));
 diesel::joinable!(device_keys -> devices (device_id));
 diesel::joinable!(incident_issues -> incidents (incident_id));
@@ -1003,6 +1026,7 @@ diesel::joinable!(slack_outbox -> issues (issue_id));
 diesel::joinable!(statuses -> applications (server_id));
 diesel::joinable!(statuses -> devices (device_id));
 diesel::joinable!(statuses -> machines (machine_id));
+diesel::joinable!(undeclared_dns_names -> machines (machine_id));
 diesel::joinable!(upgrade_plans -> server_groups (group_id));
 diesel::joinable!(upgrade_plans -> versions (target_version_id));
 diesel::joinable!(version_known_issues -> applications (application_id));
@@ -1032,6 +1056,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	check_stability_backfill,
 	chrome_releases,
 	compromised_keys,
+	denied_dns_names,
 	device_connections,
 	device_keys,
 	devices,
@@ -1069,6 +1094,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	sql_playground_history,
 	statuses,
 	tailscale_users,
+	undeclared_dns_names,
 	upgrade_plans,
 	version_known_issues,
 	versions,

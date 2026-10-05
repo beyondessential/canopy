@@ -38,3 +38,22 @@ Code identifiers (`ApplicationName`, `application_names`, the `names` API module
 - An undeclared ask is recorded per machine and DNS name, with when it was last asked and whether for an address or a certificate. It goes when an application on the machine declares the DNS name, when the machine's next request about it is accepted, or after a day without the machine asking about it, so a site removed from Caddy drops off without anyone acting. Any machine can have one: a single-application machine is refused as undeclared for a DNS name another application holds.
 - Declaring a DNS name outside every domain the application's group controls is allowed, and it presents with a warning that nothing can be published or certified for it until the group controls a covering domain. The device path still refuses it at step 5.
 - The device-facing refusal for a DNS name no application on the machine declares gets its own problem type, `dns-name-undeclared` (403, with an ERRORS.md entry under the matching heading), implementing CRT's existing rule that each authorisation check is reported distinctly (today step 2 and step 4 both answer `name-not-entitled`). It reads the same whether the DNS name is declared on another machine or nowhere. The public API document gains it as a documented refusal; a new problem type is additive, so no compatibility break. A bestool follow-up card (bestool Q3) has it skip rather than fail on that refusal.
+
+## Build
+
+- [x] Errors: `DnsNameUndeclared` and `DnsNameDenied` (403, problem types `dns-name-undeclared` / `dns-name-denied`), ERRORS.md entries
+- [x] Migration: `undeclared_dns_names` (machine, DNS name, what it was asked for, first/last asked) and `denied_dns_names` (machine, DNS name, who, when, note), both unique per machine and DNS name, cascading on machine delete
+- [x] Database models: record/clear/list undeclared requests (reads ignore ones older than a day; recording prunes them), deny/lift/list denials; declaring a DNS name for an application clears both for the application's machine
+- [x] `authorise` rewrite: denial first, then resolution (declaration, named type, grant + covering domain), refusing and recording undeclared; type mismatch against a declaration refused naming the declaring type; accepted request clears its record
+- [x] Public API: optional `application_type` on `RequestCertificateArgs` and `RegisterNameArgs`; documented refusals; `just gen-openapi && just gen-api`
+- [x] `register` / `request` race refusals answer `dns-name-undeclared`
+- [x] Public-server tests for each resolution path, denial, recording and clearing
+- [x] canopy-api: `CanopyHttpError` message includes the problem detail
+- [x] Private API: `certificates/for_machine` (declared DNS names across the machine's applications, undeclared requests, denials), `certificates/deny`, `certificates/lift_denial`, `certificates/undeclared_notices` (optional group filter); `NameView` says whether the DNS name lies within the group's domains
+- [x] Private-server tests
+- [x] SPA application page: DNS names relabel, Declare field, Release per row, declared-without-addresses and out-of-domain states
+- [x] SPA machine page: DNS names section with undeclared requests (declare to an application, deny with note), declared DNS names when several applications, denials with Lift
+- [x] SPA notices on the group page and the Status page
+- [x] Playwright coverage for the above, seed helpers for undeclared requests and denials
+- [x] Test cases file
+- [x] `just check`, `cargo fmt`, `just typecheck`, tests

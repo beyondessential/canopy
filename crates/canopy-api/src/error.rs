@@ -93,9 +93,12 @@ impl Error {
 /// A non-2xx response from a canopy endpoint.
 ///
 /// Endpoints give meaning to specific codes, so this carries the status and the
-/// body rather than flattening them into a message.
+/// body rather than flattening them into a message. The message does include
+/// the reason canopy gave where the body is a problem document, so a consumer
+/// that reports the error as text says why the request was refused.
+// spec: APIC#the-consumer-supplies-the-transport
 #[derive(Debug, thiserror::Error)]
-#[error("canopy returned {status} for {path}")]
+#[error("canopy returned {status} for {path}{}", self.reason().map(|r| format!(": {r}")).unwrap_or_default())]
 pub struct CanopyHttpError {
 	/// HTTP status returned by canopy.
 	pub status: http::StatusCode,
@@ -109,5 +112,19 @@ impl CanopyHttpError {
 	/// The response body as UTF-8 text, lossily.
 	pub fn body_text(&self) -> std::borrow::Cow<'_, str> {
 		String::from_utf8_lossy(&self.body)
+	}
+
+	/// The reason canopy gave, where the body is a problem document.
+	///
+	/// Canopy puts the occurrence's own message in the document's title, so that
+	/// is what this reads, falling back to the detail for a document without one.
+	pub fn reason(&self) -> Option<String> {
+		let document: serde_json::Value = serde_json::from_slice(&self.body).ok()?;
+		["title", "detail"]
+			.iter()
+			.find_map(|key| document.get(key)?.as_str())
+			.map(str::trim)
+			.filter(|reason| !reason.is_empty())
+			.map(ToOwned::to_owned)
 	}
 }
