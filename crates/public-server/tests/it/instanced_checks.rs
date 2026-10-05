@@ -207,14 +207,6 @@ async fn malformed_checks_are_refused() {
 					"`latency_ms`",
 				),
 				(
-					json!({ "check": "c", "result": "passed", "detail": [1] }),
-					"`health[0].detail` must be an object",
-				),
-				(
-					json!({ "check": "c", "result": "passed", "detail": null }),
-					"`health[0].detail` must be an object",
-				),
-				(
 					json!({ "check": "c", "instances": { "a": { "result": "passed", "detail": "x" } } }),
 					"`health[0].instances.a.detail` must be an object",
 				),
@@ -252,7 +244,11 @@ async fn malformed_checks_are_refused() {
 				),
 				(
 					json!({ "check": "c", "instances": [instance] }),
-					"`health[0].instances` must be an object",
+					"`health[0]` must have a `result`",
+				),
+				(
+					json!({ "check": "c", "result": "passed", "instances": [1], "detail": { "x": 1 } }),
+					"`instances`",
 				),
 				(
 					json!({ "check": "c", "instances": too_many }),
@@ -358,6 +354,54 @@ async fn nested_and_flat_detail_read_alike() {
 				seen.push((state.detail, state.message));
 			}
 			assert_eq!(seen[0], seen[1]);
+		},
+	)
+	.await
+}
+
+/// A field named `instances` or `detail` that is not an object is one of a
+/// plain check's flat fields, as reporters already in the field send them:
+/// alertd's `version_drift` carries its containers as an `instances` array.
+// spec: STA#health-and-detail
+#[tokio::test(flavor = "multi_thread")]
+async fn non_object_structure_names_are_flat_fields() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let id = central(&mut conn, device_id).await;
+			let containers = json!([{ "name": "tamanu-central-api", "version": "2.64.3" }]);
+			push(
+				&public,
+				&cert,
+				&mut conn,
+				id,
+				json!({ "health": [
+					{
+						"check": "version_drift",
+						"result": "passed",
+						"expected": { "tamanu": "2.64.3", "frontend": "2.64.3" },
+						"instances": containers,
+						"summary": "1 container(s) on expected version 2.64.3",
+					},
+					{ "check": "db", "result": "passed", "detail": "fine", "latency_ms": 3 },
+				] }),
+			)
+			.await;
+
+			let drift = state(&mut conn, id, "health/version_drift").await;
+			assert!(
+				drift.instances.is_none(),
+				"a flat `instances` is not a set of instances"
+			);
+			let detail = drift.detail.expect("the check's fields are its detail");
+			assert_eq!(detail["instances"], containers);
+			assert_eq!(detail["expected"]["tamanu"], "2.64.3");
+
+			let db = state(&mut conn, id, "health/db").await;
+			assert_eq!(
+				db.detail,
+				Some(json!({ "detail": "fine", "latency_ms": 3 }))
+			);
 		},
 	)
 	.await

@@ -2252,7 +2252,7 @@
               },
               "detail": {
                 "type": "object",
-                "description": "The check's own fields (shown in the status UI as a key/value block,\nand read by operator-defined policy rules as `check.<field>`). For a\ncheck with `instances`, the fields its instances share; a rule reads an\ninstance's own field of the same name over it.\n\nMust be an object. A check with a single result may instead carry its\nfields flat beside `check` and `result` (see `extra`), but not both\nways at once; a check with `instances` carries its fields here only."
+                "description": "The check's own fields (shown in the status UI as a key/value block,\nand read by operator-defined policy rules as `check.<field>`). For a\ncheck with `instances`, the fields its instances share; a rule reads an\ninstance's own field of the same name over it.\n\nAn object. A check with a single result may instead carry its fields\nflat beside `check` and `result` (see `extra`), but not both ways at\nonce; a check with `instances` carries its fields here only. A `detail`\nholding anything but an object is one of those flat fields."
               },
               "healthy": {
                 "type": [
@@ -2266,7 +2266,7 @@
                   "object",
                   "null"
                 ],
-                "description": "The check's instances, in place of a `result`: one entry per instance\nof the check's condition (one per device, per resource, per mount),\nkeyed by an instance key the reporter chooses. A key must not be empty,\nmust be unique within the check, and must identify the same instance\nacross this reporter's pushes.\n\nThe set is the check's complete one: an instance left out of a push\nhas recovered, so passing instances are sent too, and an empty object\nrecovers every instance the check held. Each instance is graded\nthrough the check's policy on its own, and the check takes the most\nurgent result among the instances that were not skipped. Canopy writes\nthe check's message from its graded instances, naming the degraded ones\nby label.\n\nA check that could not run reports `result: broken` without instances:\nbrokenness belongs to the whole check, never to one instance.",
+                "description": "The check's instances, in place of a `result`: one entry per instance\nof the check's condition (one per device, per resource, per mount),\nkeyed by an instance key the reporter chooses. A key must not be empty,\nmust be unique within the check, and must identify the same instance\nacross this reporter's pushes.\n\nThe set is the check's complete one: an instance left out of a push\nhas recovered, so passing instances are sent too, and an empty object\nrecovers every instance the check held. Each instance is graded\nthrough the check's policy on its own, and the check takes the most\nurgent result among the instances that were not skipped. Canopy writes\nthe check's message from its graded instances, naming the degraded ones\nby label.\n\nA check that could not run reports `result: broken` without instances:\nbrokenness belongs to the whole check, never to one instance.\n\nOnly an object is a set of instances. An `instances` holding anything\nelse beside a single result is one of the check's flat fields.",
                 "additionalProperties": {
                   "$ref": "#/components/schemas/HealthCheckInstance"
                 },

@@ -27,7 +27,7 @@ use database::{
 	diesel_async::{AsyncConnection, AsyncPgConnection},
 	issues::{
 		CheckGrading, CheckOutcome, CheckStateStamp, GradedCheck, GradingContext, Issue, NewEvent,
-		ReportedCheck, Scope, grade_instances,
+		ReportedCheck, Scope, grade_instances, is_health_structure,
 	},
 	machines::Machine,
 	silenced_refs::silenced_health_checks_for_server,
@@ -185,9 +185,10 @@ pub struct HealthCheck {
 	/// check with `instances`, the fields its instances share; a rule reads an
 	/// instance's own field of the same name over it.
 	///
-	/// Must be an object. A check with a single result may instead carry its
-	/// fields flat beside `check` and `result` (see `extra`), but not both
-	/// ways at once; a check with `instances` carries its fields here only.
+	/// An object. A check with a single result may instead carry its fields
+	/// flat beside `check` and `result` (see `extra`), but not both ways at
+	/// once; a check with `instances` carries its fields here only. A `detail`
+	/// holding anything but an object is one of those flat fields.
 	#[schema(additional_properties = true, value_type = Object, required = false)]
 	pub detail: Option<serde_json::Map<String, serde_json::Value>>,
 	/// The check's instances, in place of a `result`: one entry per instance
@@ -206,6 +207,9 @@ pub struct HealthCheck {
 	///
 	/// A check that could not run reports `result: broken` without instances:
 	/// brokenness belongs to the whole check, never to one instance.
+	///
+	/// Only an object is a set of instances. An `instances` holding anything
+	/// else beside a single result is one of the check's flat fields.
 	pub instances: Option<BTreeMap<String, HealthCheckInstance>>,
 	/// A check with a single result may carry its fields flat beside `check`
 	/// and `result`, outside `detail`, and they are read as its detail. Not
@@ -1639,24 +1643,19 @@ fn parse_health_entry(entry: &serde_json::Value, path: &str) -> Result<()> {
 		Some(_) | None => return bad(format!("`{path}.check` must be a non-empty string")),
 	}
 
-	let has_detail = entry.contains_key("detail");
-	if let Some(detail) = entry.get("detail")
-		&& !detail.is_object()
-	{
-		return bad(format!("`{path}.detail` must be an object"));
-	}
+	let has_detail = entry.get("detail").is_some_and(|d| d.is_object());
 	// Fields beside the structure are the flat form of a check's detail, which
 	// only a check with a single result may use, and only in place of `detail`.
 	let flat = entry
-		.keys()
-		.filter(|k| !["check", "result", "healthy", "detail", "instances"].contains(&k.as_str()))
-		.map(|k| format!("`{k}`"))
+		.iter()
+		.filter(|(k, v)| !is_health_structure(k, v))
+		.map(|(k, _)| format!("`{k}`"))
 		.collect::<Vec<_>>();
 
 	match (
 		entry.get("result"),
 		entry.get("healthy"),
-		entry.get("instances"),
+		entry.get("instances").and_then(|i| i.as_object()),
 	) {
 		(Some(_), Some(_), None) => {
 			return bad(format!(
@@ -1685,9 +1684,6 @@ fn parse_health_entry(entry: &serde_json::Value, path: &str) -> Result<()> {
 					flat.join(", "),
 				));
 			}
-			let Some(instances) = instances.as_object() else {
-				return bad(format!("`{path}.instances` must be an object"));
-			};
 			if instances.len() > MAX_INSTANCES_PER_CHECK {
 				return bad(format!(
 					"`{path}.instances` has {} instances, more than the {MAX_INSTANCES_PER_CHECK} a check may carry",

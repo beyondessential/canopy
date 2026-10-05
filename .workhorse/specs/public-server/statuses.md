@@ -42,6 +42,7 @@ A reporter can therefore report a field of any name, including one the envelope 
 A check with a single result may instead carry its fields beside its name and result, outside any `detail` object, and Canopy reads them as that check's detail.
 A check carrying fields both beside its name and in a `detail` object is refused, since Canopy cannot tell which was meant.
 A check with instances carries its fields in its `detail` object only, and one with fields beside its instances is refused.
+Only an object is a check's `detail` or its set of instances: a field named `detail` or `instances` holding anything else, beside a single result, is one of that check's fields, since reporters already in the field send such fields.
 
 Detail is recorded verbatim against the check or target it was attached to.
 Policy rules and the fleet spread reach a check's fields as `check.<field>`, matching where they sit in the payload.
