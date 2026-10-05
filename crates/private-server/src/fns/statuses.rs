@@ -1117,7 +1117,7 @@ async fn consolidated_checks_at(
 				check_grading,
 				&ctx,
 				Some(&reported.detail),
-				&reported.outcome,
+				reported.outcome,
 				None,
 			);
 			let silenced = if subject.is_machine() {

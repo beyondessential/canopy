@@ -686,6 +686,188 @@ async fn a_group_instance_silence_quiets_that_key_on_every_application_in_the_gr
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_group_instance_silence_regrades_every_covered_state_through_its_own_chain() {
+	TestDb::run(async |mut conn, _| {
+		let s = seed(&mut conn).await;
+		let second = another_application(&mut conn, s.group).await;
+		let third = another_application(&mut conn, s.group).await;
+		let applications = [s.application, second, third];
+		// A curated source's check is flat, so a group silence of it reaches the
+		// group's machines as well as its applications.
+		let scopes = applications
+			.map(Scope::Application)
+			.into_iter()
+			.chain([Scope::Machine(s.machine)]);
+		for scope in scopes.clone() {
+			file(&mut conn, scope, CheckOutcome::Instances(devices())).await;
+		}
+		// One application has already silenced the other instance itself, which
+		// its state alone is graded through.
+		ServerSilencedRef::add(
+			&mut conn,
+			second,
+			CANOPY_SOURCE,
+			CHECK,
+			Some("dev-harbour"),
+			Some("op"),
+		)
+		.await
+		.expect("application instance silence");
+
+		ServerGroupSilencedRef::add(
+			&mut conn,
+			s.group,
+			CANOPY_SOURCE,
+			CHECK,
+			None,
+			Some("dev-north"),
+			Some("op"),
+		)
+		.await
+		.expect("group instance silence");
+		for scope in scopes.clone() {
+			let issue = state(&mut conn, scope).await;
+			let held = stored(&issue);
+			assert_eq!(
+				held.0["dev-north"].effective,
+				CheckResult::Skipped,
+				"{scope:?}"
+			);
+			if scope == Scope::Application(second) {
+				assert_eq!(held.0["dev-harbour"].effective, CheckResult::Skipped);
+				assert_eq!(issue.effective_result, Some(CheckResult::Skipped));
+			} else {
+				assert_eq!(
+					held.0["dev-harbour"].effective,
+					CheckResult::Passed,
+					"{scope:?}"
+				);
+				assert_eq!(
+					issue.effective_result,
+					Some(CheckResult::Passed),
+					"{scope:?}"
+				);
+			}
+		}
+
+		ServerGroupSilencedRef::remove(
+			&mut conn,
+			s.group,
+			CANOPY_SOURCE,
+			CHECK,
+			None,
+			Some("dev-north"),
+		)
+		.await
+		.expect("lift");
+		for scope in scopes {
+			let issue = state(&mut conn, scope).await;
+			assert_eq!(
+				issue.effective_result,
+				Some(CheckResult::Failed),
+				"{scope:?}"
+			);
+			assert_eq!(
+				stored(&issue).0["dev-harbour"].effective,
+				if scope == Scope::Application(second) {
+					CheckResult::Skipped
+				} else {
+					CheckResult::Passed
+				},
+				"{scope:?}"
+			);
+		}
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn silences_listed_together_each_present_their_own_instance() {
+	TestDb::run(async |mut conn, _| {
+		let s = seed(&mut conn).await;
+		let second = another_application(&mut conn, s.group).await;
+		let third = another_application(&mut conn, s.group).await;
+		let unfiled = another_application(&mut conn, s.group).await;
+		for application in [s.application, second, third] {
+			file(
+				&mut conn,
+				Scope::Application(application),
+				CheckOutcome::Instances(devices()),
+			)
+			.await;
+		}
+		for (application, instance) in [
+			(s.application, Some("dev-north")),
+			(second, Some("dev-harbour")),
+			(second, Some("dev-gone")),
+			(third, None),
+			(unfiled, Some("dev-north")),
+		] {
+			let added = ServerSilencedRef::add(
+				&mut conn,
+				application,
+				CANOPY_SOURCE,
+				CHECK,
+				instance,
+				None,
+			)
+			.await
+			.expect("silence");
+			// What setting a silence presents agrees with what listing it does.
+			let listed = ServerSilencedRef::list_for_server(&mut conn, application)
+				.await
+				.expect("list one")
+				.into_iter()
+				.find(|l| l.instance == added.instance)
+				.expect("listed");
+			assert_eq!(
+				(added.instance_label, added.instance_reported),
+				(listed.instance_label, listed.instance_reported),
+			);
+		}
+
+		let listed = ServerSilencedRef::list_for_servers(
+			&mut conn,
+			&[s.application, second, third, unfiled],
+		)
+		.await
+		.expect("list");
+		let mut presented: Vec<(Uuid, Option<String>, Option<String>, Option<bool>)> = listed
+			.into_iter()
+			.map(|l| {
+				(
+					l.application_id,
+					l.instance,
+					l.instance_label,
+					l.instance_reported,
+				)
+			})
+			.collect();
+		presented.sort();
+		let mut expected = vec![
+			(
+				s.application,
+				Some("dev-north".to_string()),
+				Some("Northgate Clinic".to_string()),
+				Some(true),
+			),
+			(
+				second,
+				Some("dev-harbour".to_string()),
+				Some("Harbour Hospital".to_string()),
+				Some(true),
+			),
+			(second, Some("dev-gone".to_string()), None, Some(false)),
+			(third, None, None, None),
+			(unfiled, Some("dev-north".to_string()), None, Some(false)),
+		];
+		expected.sort();
+		assert_eq!(presented, expected);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_machine_instance_silence_quiets_that_key_on_the_machine() {
 	TestDb::run(async |mut conn, _| {
 		let s = seed(&mut conn).await;

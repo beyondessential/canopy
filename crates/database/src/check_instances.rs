@@ -13,6 +13,7 @@
 //! tags). Canopy's own filings reach it through
 //! [`crate::issues::file_check_instances`]; push ingestion calls it directly.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 
 use commons_errors::Result;
@@ -100,6 +101,18 @@ pub enum CheckOutcome {
 	/// presented as broken, and recovers none of them.
 	// spec: CHK#checks-with-instances
 	Broken,
+}
+
+impl From<CheckOutcome> for Cow<'_, CheckOutcome> {
+	fn from(outcome: CheckOutcome) -> Self {
+		Cow::Owned(outcome)
+	}
+}
+
+impl<'a> From<&'a CheckOutcome> for Cow<'a, CheckOutcome> {
+	fn from(outcome: &'a CheckOutcome) -> Self {
+		Cow::Borrowed(outcome)
+	}
 }
 
 /// One check as a status push reported it: its name, what it observed, and its
@@ -647,16 +660,24 @@ impl GradingInputs {
 /// when the check came out broken.
 // spec: CHK#checks-with-instances
 // spec: CHK#stability
-pub fn grade_instances<'g>(
+pub fn grade_instances<'g, 'o>(
 	grading: impl Into<CheckGradingRef<'g>>,
 	ctx: &GradingContext<'_>,
 	shared: Option<&Map<String, Value>>,
-	outcome: &CheckOutcome,
+	outcome: impl Into<Cow<'o, CheckOutcome>>,
 	prior: Option<&Issue>,
 ) -> GradedCheck {
 	let grading = grading.into();
-	let (instances, broken) = match outcome {
-		CheckOutcome::Instances(instances) => {
+	// Each graded instance keeps its key, label and fields, so an outcome
+	// handed over by value is graded in place, and only one the caller keeps
+	// is copied.
+	let ran = match outcome.into() {
+		Cow::Owned(CheckOutcome::Instances(instances)) => Some(instances),
+		Cow::Borrowed(CheckOutcome::Instances(instances)) => Some(instances.clone()),
+		Cow::Owned(CheckOutcome::Broken) | Cow::Borrowed(CheckOutcome::Broken) => None,
+	};
+	let (instances, broken) = match ran {
+		Some(instances) => {
 			debug_assert!(
 				instances.iter().all(|i| i.observed != CheckResult::Broken),
 				"brokenness is the whole check's: file CheckOutcome::Broken rather than a broken instance",
@@ -669,9 +690,9 @@ pub fn grade_instances<'g>(
 				},
 				"an instance key is unique within its check",
 			);
-			(instances.clone(), false)
+			(instances, false)
 		}
-		CheckOutcome::Broken => {
+		None => {
 			let held = prior
 				.and_then(Issue::stored_instances)
 				.map(|held| held.observed_instances())

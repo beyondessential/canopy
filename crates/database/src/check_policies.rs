@@ -1151,6 +1151,16 @@ pub struct FilingScope {
 	pub kubernetes_cluster_id: Option<Uuid>,
 }
 
+impl FilingScope {
+	/// A canopy-wide filing, which sits in no narrower scope.
+	fn is_global(&self) -> bool {
+		self.application_id.is_none()
+			&& self.machine_id.is_none()
+			&& self.group_id.is_none()
+			&& self.kubernetes_cluster_id.is_none()
+	}
+}
+
 impl ScopedCheckPolicy {
 	/// This transform's namespace, from its two columns. Same shape rule as
 	/// [`CheckPolicy::namespace`], so a pair outside the three shapes errors
@@ -1384,6 +1394,77 @@ impl ScopedCheckPolicy {
 			Self::order_chain(chain);
 		}
 		Ok(chains)
+	}
+
+	/// [`Self::chain_for`] for one check filed at each of `scopes`: every
+	/// scope's chain, in the order the scopes are given, from one query for the
+	/// lot rather than one per scope. For re-grading a check across every
+	/// target a group-wide change reaches.
+	pub async fn chains_for_filings(
+		db: &mut AsyncPgConnection,
+		source: &str,
+		namespace: &Namespace,
+		check_name: &str,
+		scopes: &[FilingScope],
+	) -> Result<Vec<Vec<Self>>> {
+		use crate::schema::scoped_check_policies::dsl;
+		if scopes.is_empty() {
+			return Ok(Vec::new());
+		}
+		let ids = |of: fn(&FilingScope) -> Option<Uuid>| -> Vec<Uuid> {
+			scopes.iter().filter_map(of).collect()
+		};
+		let mut covering: Predicate<crate::schema::scoped_check_policies::table> = Box::new(
+			dsl::application_id
+				.eq_any(ids(|s| s.application_id))
+				.or(dsl::machine_id.eq_any(ids(|s| s.machine_id)))
+				.or(dsl::server_group_id.eq_any(ids(|s| s.group_id)))
+				.or(dsl::kubernetes_cluster_id.eq_any(ids(|s| s.kubernetes_cluster_id)))
+				// A null column matches nothing here, as false would.
+				.assume_not_null(),
+		);
+		if scopes.iter().any(FilingScope::is_global) {
+			covering = Box::new(
+				covering.or(dsl::application_id
+					.is_null()
+					.and(dsl::machine_id.is_null())
+					.and(dsl::server_group_id.is_null())
+					.and(dsl::kubernetes_cluster_id.is_null())),
+			);
+		}
+		let rows: Vec<Self> = dsl::scoped_check_policies
+			.select(Self::as_select())
+			.filter(scoped_identity(source, namespace, check_name))
+			.filter(covering)
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(scopes
+			.iter()
+			.map(|scope| {
+				let mut chain: Vec<Self> =
+					rows.iter().filter(|r| r.covers(scope)).cloned().collect();
+				Self::order_chain(&mut chain);
+				chain
+			})
+			.collect())
+	}
+
+	/// Whether this transform is in the chain of a filing at `scope`: the
+	/// in-memory form of [`Self::scoped_to`], which it must agree with.
+	fn covers(&self, scope: &FilingScope) -> bool {
+		let at = |row: Option<Uuid>, filing: Option<Uuid>| row.is_some() && row == filing;
+		if scope.is_global() {
+			self.application_id.is_none()
+				&& self.machine_id.is_none()
+				&& self.server_group_id.is_none()
+				&& self.kubernetes_cluster_id.is_none()
+		} else {
+			at(self.application_id, scope.application_id)
+				|| at(self.machine_id, scope.machine_id)
+				|| at(self.server_group_id, scope.group_id)
+				|| at(self.kubernetes_cluster_id, scope.kubernetes_cluster_id)
+		}
 	}
 
 	/// The scope half of the chain predicate: the rows whose scope covers a

@@ -1193,7 +1193,7 @@ pub async fn raise_global_event_with_state(
 /// cluster is likewise its own target: a substrate check about the cluster is
 /// read on the cluster, not on the applications scheduled across it.
 // spec: CHK
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Scope {
 	Application(Uuid),
 	Machine(Uuid),
@@ -1258,26 +1258,121 @@ impl Scope {
 		self,
 		conn: &mut AsyncPgConnection,
 	) -> Result<Option<(IncidentTarget, bool)>> {
-		match self {
-			Scope::Group(gid) => Ok(Some((IncidentTarget::Group(gid), true))),
+		ScopeTargets::load(conn, [self])
+			.await?
+			.incident_target(self)
+	}
+}
+
+/// The applications and machines a set of scopes names, loaded once, so that
+/// each scope's policy chain and incident target are read from memory rather
+/// than with a query per scope.
+#[derive(Debug, Default)]
+struct ScopeTargets {
+	applications: std::collections::HashMap<Uuid, Application>,
+	/// Each machine with the rank it serves (see [`crate::machines::Machine::rank`]).
+	machines: std::collections::HashMap<Uuid, (crate::machines::Machine, Option<ServerRank>)>,
+}
+
+impl ScopeTargets {
+	async fn load(
+		conn: &mut AsyncPgConnection,
+		scopes: impl IntoIterator<Item = Scope>,
+	) -> Result<Self> {
+		use crate::machines::Machine;
+
+		let mut application_ids = Vec::new();
+		let mut machine_ids = Vec::new();
+		for scope in scopes {
+			match scope {
+				Scope::Application(id) => application_ids.push(id),
+				Scope::Machine(id) => machine_ids.push(id),
+				Scope::Group(_) | Scope::Cluster(_) | Scope::Global => {}
+			}
+		}
+		application_ids.sort_unstable();
+		application_ids.dedup();
+		machine_ids.sort_unstable();
+		machine_ids.dedup();
+
+		let mut targets = Self::default();
+		if !application_ids.is_empty() {
+			targets.applications = Application::get_by_ids(conn, &application_ids)
+				.await?
+				.into_iter()
+				.map(|application| (application.id, application))
+				.collect();
+		}
+		if !machine_ids.is_empty() {
+			let mut ranks = Machine::ranks(conn, &machine_ids).await?;
+			targets.machines = Machine::get_by_ids(conn, &machine_ids)
+				.await?
+				.into_iter()
+				.map(|machine| {
+					let rank = ranks.remove(&machine.id);
+					(machine.id, (machine, rank))
+				})
+				.collect();
+		}
+		Ok(targets)
+	}
+
+	fn application(&self, id: Uuid) -> Result<&Application> {
+		self.applications
+			.get(&id)
+			.ok_or_else(|| diesel::result::Error::NotFound.into())
+	}
+
+	fn machine(&self, id: Uuid) -> Result<&(crate::machines::Machine, Option<ServerRank>)> {
+		self.machines
+			.get(&id)
+			.ok_or_else(|| diesel::result::Error::NotFound.into())
+	}
+
+	/// The scopes a check filed at `scope` chains its policy from.
+	fn filing_scope(&self, scope: Scope) -> Result<crate::check_policies::FilingScope> {
+		use crate::check_policies::FilingScope;
+		Ok(match scope {
+			Scope::Application(application_id) => FilingScope {
+				application_id: Some(application_id),
+				group_id: self.application(application_id)?.group_id,
+				..Default::default()
+			},
+			Scope::Machine(machine_id) => FilingScope {
+				machine_id: Some(machine_id),
+				group_id: self.machine(machine_id)?.0.group_id,
+				..Default::default()
+			},
+			Scope::Group(group_id) => FilingScope {
+				group_id: Some(group_id),
+				..Default::default()
+			},
+			Scope::Cluster(cluster_id) => FilingScope {
+				kubernetes_cluster_id: Some(cluster_id),
+				..Default::default()
+			},
+			Scope::Global => FilingScope::default(),
+		})
+	}
+
+	/// See [`Scope::resolve_incident_target`].
+	// spec: INC#targets
+	fn incident_target(&self, scope: Scope) -> Result<Option<(IncidentTarget, bool)>> {
+		Ok(match scope {
+			Scope::Group(gid) => Some((IncidentTarget::Group(gid), true)),
 			Scope::Application(sid) => {
-				let server = Application::get_by_id(conn, sid).await?;
-				Ok(member_target(
-					server.group_id,
-					server.rank,
-					server.is_monitored,
-				))
+				let server = self.application(sid)?;
+				member_target(server.group_id, server.rank, server.is_monitored)
 			}
 			Scope::Machine(mid) => {
-				let machine = crate::machines::Machine::get_by_id(conn, mid).await?;
 				// A box's rank is the highest of the workloads on it: a check
 				// on the box is trouble for the most important thing it runs.
-				let rank = crate::machines::Machine::rank(conn, mid).await?;
-				Ok(member_target(machine.group_id, rank, machine.is_monitored))
+				let (machine, rank) = self.machine(mid)?;
+				member_target(machine.group_id, *rank, machine.is_monitored)
 			}
-			Scope::Cluster(_) => Ok(None),
-			Scope::Global => Ok(Some((IncidentTarget::Global, true))),
-		}
+			Scope::Cluster(_) => None,
+			Scope::Global => Some((IncidentTarget::Global, true)),
+		})
 	}
 }
 
@@ -1475,7 +1570,7 @@ pub async fn file_check_instances(
 		&grading,
 		&ctx,
 		filing.detail.as_ref(),
-		&filing.outcome,
+		filing.outcome,
 		prior.as_ref(),
 	);
 	// A check that ran but that policy graded broken keeps an open failure as
@@ -1664,37 +1759,6 @@ impl GradingTarget {
 	}
 }
 
-/// The scopes a check filed at `scope` chains its policy from.
-async fn filing_scope_for(
-	conn: &mut AsyncPgConnection,
-	scope: Scope,
-) -> Result<crate::check_policies::FilingScope> {
-	use crate::check_policies::FilingScope;
-	Ok(match scope {
-		Scope::Application(application_id) => FilingScope {
-			application_id: Some(application_id),
-			group_id: Application::get_by_id(conn, application_id).await?.group_id,
-			..Default::default()
-		},
-		Scope::Machine(machine_id) => FilingScope {
-			machine_id: Some(machine_id),
-			group_id: crate::machines::Machine::get_by_id(conn, machine_id)
-				.await?
-				.group_id,
-			..Default::default()
-		},
-		Scope::Group(group_id) => FilingScope {
-			group_id: Some(group_id),
-			..Default::default()
-		},
-		Scope::Cluster(cluster_id) => FilingScope {
-			kubernetes_cluster_id: Some(cluster_id),
-			..Default::default()
-		},
-		Scope::Global => FilingScope::default(),
-	})
-}
-
 impl Issue {
 	/// The check state for `(source, ref)` at exactly this scope, if it has
 	/// ever been filed.
@@ -1753,10 +1817,12 @@ pub async fn instanced_states_covered_by(
 		Scope::Application(aid) => query.filter(issues::application_id.eq(aid)),
 		Scope::Machine(mid) => query.filter(issues::machine_id.eq(mid)),
 		Scope::Cluster(cid) => query.filter(issues::kubernetes_cluster_id.eq(cid)),
+		// The group's members are read in the same statement, so a group of
+		// any size is still one round trip.
 		Scope::Group(gid) => {
 			let applications_of = |ty: Option<String>| {
 				let mut members = applications::table
-					.select(applications::id)
+					.select(applications::id.nullable())
 					.filter(applications::group_id.eq(gid))
 					.into_boxed();
 				if let Some(ty) = ty {
@@ -1764,34 +1830,116 @@ pub async fn instanced_states_covered_by(
 				}
 				members
 			};
-			let machines_in_group = machines::table
-				.select(machines::id)
-				.filter(machines::group_id.eq(gid));
+			let machines_in_group = || {
+				machines::table
+					.select(machines::id.nullable())
+					.filter(machines::group_id.eq(gid))
+			};
 			match namespace {
-				Namespace::Application(ty) => {
-					let ids: Vec<Uuid> = applications_of(Some(ty.to_string())).load(conn).await?;
-					query.filter(issues::application_id.eq_any(ids))
-				}
-				Namespace::Machine => {
-					let ids: Vec<Uuid> = machines_in_group.load(conn).await?;
-					query.filter(issues::machine_id.eq_any(ids))
-				}
-				Namespace::Flat => {
-					let application_ids: Vec<Uuid> = applications_of(None).load(conn).await?;
-					let machine_ids: Vec<Uuid> = machines_in_group.load(conn).await?;
-					query.filter(
-						issues::application_id
-							.eq_any(application_ids)
-							.or(issues::machine_id.eq_any(machine_ids))
-							.or(issues::server_group_id.eq(gid)),
-					)
-				}
+				Namespace::Application(ty) => query
+					.filter(issues::application_id.eq_any(applications_of(Some(ty.to_string())))),
+				Namespace::Machine => query.filter(issues::machine_id.eq_any(machines_in_group())),
+				Namespace::Flat => query.filter(
+					issues::application_id
+						.eq_any(applications_of(None))
+						.or(issues::machine_id.eq_any(machines_in_group()))
+						.or(issues::server_group_id.eq(gid)),
+				),
 			}
 		}
 		// No instance silence is offered above the group.
 		Scope::Global => return Ok(Vec::new()),
 	};
 	Ok(query.load(conn).await?)
+}
+
+/// [`instanced_states_covered_by`] for many silences at once: the states each
+/// of `silences` covers, in the order given.
+///
+/// Silences of a target's own check are read in one query for the lot, and a
+/// group silence in one query of its own, so presenting a page of silences
+/// costs a round trip per group silence rather than one per silence.
+// spec: CHK#silencing-one-instance
+pub async fn instanced_states_covered_by_each(
+	conn: &mut AsyncPgConnection,
+	silences: &[(Scope, &str, &Namespace, &str)],
+) -> Result<Vec<Vec<Issue>>> {
+	use crate::schema::issues;
+	use std::collections::HashMap;
+
+	let mut covered: Vec<Vec<Issue>> = vec![Vec::new(); silences.len()];
+	// Which silences name each target's own check. A target's state is the one
+	// filed at it, whatever the namespace, as in the single form.
+	let mut of_targets: HashMap<(Scope, &str, &str), Vec<usize>> = HashMap::new();
+	for (n, &(scope, source, namespace, r#ref)) in silences.iter().enumerate() {
+		match scope {
+			Scope::Application(_) | Scope::Machine(_) | Scope::Cluster(_) => {
+				of_targets
+					.entry((scope, source, r#ref))
+					.or_default()
+					.push(n);
+			}
+			Scope::Group(_) => {
+				covered[n] =
+					instanced_states_covered_by(conn, scope, source, namespace, r#ref).await?;
+			}
+			Scope::Global => {}
+		}
+	}
+	if of_targets.is_empty() {
+		return Ok(covered);
+	}
+
+	let mut application_ids = Vec::new();
+	let mut machine_ids = Vec::new();
+	let mut cluster_ids = Vec::new();
+	let mut sources = Vec::new();
+	let mut refs = Vec::new();
+	for &(scope, source, r#ref) in of_targets.keys() {
+		match scope {
+			Scope::Application(id) => application_ids.push(id),
+			Scope::Machine(id) => machine_ids.push(id),
+			Scope::Cluster(id) => cluster_ids.push(id),
+			Scope::Group(_) | Scope::Global => unreachable!("only targets are batched"),
+		}
+		sources.push(source);
+		refs.push(r#ref);
+	}
+	// The product of the three lists is wider than the pairs asked for, so
+	// each state is matched back to the silences naming exactly it.
+	let states: Vec<Issue> = issues::table
+		.select(Issue::as_select())
+		.filter(issues::instances.is_not_null())
+		.filter(issues::source.eq_any(&sources))
+		.filter(issues::ref_.eq_any(&refs))
+		.filter(
+			issues::application_id
+				.eq_any(&application_ids)
+				.or(issues::machine_id.eq_any(&machine_ids))
+				.or(issues::kubernetes_cluster_id.eq_any(&cluster_ids)),
+		)
+		.load(conn)
+		.await?;
+	for state in states {
+		let scope = Scope::from_columns(
+			state.application_id,
+			state.machine_id,
+			state.server_group_id,
+			state.kubernetes_cluster_id,
+		);
+		let Some(naming) = of_targets
+			.get(&(scope, state.source.as_str(), state.r#ref.as_str()))
+			.cloned()
+		else {
+			continue;
+		};
+		let (last, rest) = naming.split_last().expect("every entry names a silence");
+		for &n in rest {
+			covered[n].push(state.clone());
+		}
+		covered[*last].push(state);
+	}
+	Ok(covered)
 }
 
 /// Grade a check's stored states again from the instances they hold, after an
@@ -1814,6 +1962,10 @@ pub async fn instanced_states_covered_by(
 /// A state holding no instances is a check without them, which an instance
 /// silence never reaches, and is left alone.
 ///
+/// Returns every state the silence covers ([`instanced_states_covered_by`]) as
+/// it now stands, so a caller presenting the silence reads them without asking
+/// again.
+///
 /// The message is Canopy's generic one for an instanced check, from the
 /// re-graded instances ([`GradedCheck::message`]). That is what a reported
 /// instanced check is filed with; Canopy's own instanced checks are filed with
@@ -1825,27 +1977,73 @@ pub async fn regrade_instanced_states(
 	source: &str,
 	namespace: &Namespace,
 	r#ref: &str,
-) -> Result<()> {
+) -> Result<Vec<Issue>> {
+	use crate::check_policies::{CheckPolicy, ScopedCheckPolicy};
 	use crate::schema::issues;
+	use std::collections::HashMap;
 
-	let states = instanced_states_covered_by(conn, scope, source, namespace, r#ref).await?;
-
-	for state in states {
-		let (Some(held), Some(inputs)) = (state.stored_instances(), state.grading_inputs()) else {
-			continue;
-		};
-		let state_scope = Scope::from_columns(
+	let mut states = instanced_states_covered_by(conn, scope, source, namespace, r#ref).await?;
+	let state_scope = |state: &Issue| {
+		Scope::from_columns(
 			state.application_id,
 			state.machine_id,
 			state.server_group_id,
 			state.kubernetes_cluster_id,
-		);
-		let check = state
+		)
+	};
+	let regradable: Vec<(usize, StoredInstances, GradingInputs)> = states
+		.iter()
+		.enumerate()
+		.filter_map(|(at, state)| Some((at, state.stored_instances()?, state.grading_inputs()?)))
+		.collect();
+	if regradable.is_empty() {
+		return Ok(states);
+	}
+
+	// A group silence covers every target in the group filing the check, so
+	// everything a state's grading reads that is not its own is loaded once
+	// for the lot: the targets, and per check name the catalog entry and
+	// every state's chain.
+	let targets = ScopeTargets::load(
+		conn,
+		regradable.iter().map(|(at, ..)| state_scope(&states[*at])),
+	)
+	.await?;
+	let check_of = |state: &Issue| {
+		state
 			.check_name
 			.clone()
-			.unwrap_or_else(|| r#ref.to_string());
-		let filing_scope = filing_scope_for(conn, state_scope).await?;
-		let grading = CheckGrading::load(conn, source, namespace, &check, filing_scope).await?;
+			.unwrap_or_else(|| r#ref.to_string())
+	};
+	let mut by_check: HashMap<String, Vec<usize>> = HashMap::new();
+	for (n, (at, ..)) in regradable.iter().enumerate() {
+		by_check.entry(check_of(&states[*at])).or_default().push(n);
+	}
+	let mut fleet = HashMap::with_capacity(by_check.len());
+	let mut chains: Vec<Vec<ScopedCheckPolicy>> = vec![Vec::new(); regradable.len()];
+	for (check, of) in &by_check {
+		fleet.insert(
+			check.clone(),
+			CheckPolicy::fleet_grading(conn, source, namespace, check).await?,
+		);
+		let scopes = of
+			.iter()
+			.map(|&n| targets.filing_scope(state_scope(&states[regradable[n].0])))
+			.collect::<Result<Vec<_>>>()?;
+		let loaded =
+			ScopedCheckPolicy::chains_for_filings(conn, source, namespace, check, &scopes).await?;
+		for (&n, chain) in of.iter().zip(loaded) {
+			chains[n] = chain;
+		}
+	}
+
+	for ((at, held, inputs), chain) in regradable.into_iter().zip(chains) {
+		let state = &states[at];
+		let check = check_of(state);
+		let grading = CheckGradingRef {
+			fleet: fleet.get(&check).and_then(Option::as_ref),
+			chain: &chain,
+		};
 		let outcome = if state.observed_result == Some(CheckResult::Broken) {
 			CheckOutcome::Broken
 		} else {
@@ -1856,11 +2054,11 @@ pub async fn regrade_instanced_states(
 			_ => None,
 		};
 		let graded = grade_instances(
-			&grading,
+			grading,
 			&inputs.context(source, &check),
 			shared,
-			&outcome,
-			Some(&state),
+			outcome,
+			Some(state),
 		);
 		let active = matches!(
 			graded.effective,
@@ -1890,7 +2088,7 @@ pub async fn regrade_instanced_states(
 			.get_result(conn)
 			.await?;
 
-		if let Some((target, monitored)) = issue_target_and_monitored(conn, &regraded).await? {
+		if let Some((target, monitored)) = targets.incident_target(state_scope(&regraded))? {
 			re_evaluate_membership(
 				conn,
 				&regraded,
@@ -1902,8 +2100,9 @@ pub async fn regrade_instanced_states(
 			)
 			.await?;
 		}
+		states[at] = regraded;
 	}
-	Ok(())
+	Ok(states)
 }
 
 /// Whether a `(source, check)` pair is Canopy's own reachability determination.
@@ -2717,22 +2916,31 @@ async fn checks_at_scope(
 	// An instance silence quiets one instance, never the whole check, so it is
 	// kept apart, by key and by whether it is the target's own or its group's.
 	// spec: CHK#silencing-one-instance
-	let mut silenced: HashSet<(Namespace, String, String)> = HashSet::new();
+	//
+	// Both are keyed on borrowed data so that looking a check, or each of its
+	// instances, up allocates nothing.
+	let silence_rows: Vec<(Namespace, String, String, Option<String>, Option<Uuid>)> = silence_rows
+		.into_iter()
+		.filter_map(|(subject, ty, source, check, instance, group)| {
+			let ns = Namespace::from_columns(subject.as_deref(), ty.as_deref()).ok()?;
+			Some((ns, source, check, instance, group))
+		})
+		.collect();
+	let mut silenced: HashSet<(&Namespace, &str, &str)> = HashSet::new();
 	let mut instance_silences: std::collections::HashMap<
-		(Namespace, String, String, String),
-		(bool, bool),
+		(&Namespace, &str, &str),
+		std::collections::HashMap<&str, (bool, bool)>,
 	> = std::collections::HashMap::new();
-	for (subject, ty, source, check, instance, group) in silence_rows {
-		let Ok(ns) = Namespace::from_columns(subject.as_deref(), ty.as_deref()) else {
-			continue;
-		};
+	for (ns, source, check, instance, group) in &silence_rows {
 		match instance {
 			None => {
-				silenced.insert((ns, source, check));
+				silenced.insert((ns, source.as_str(), check.as_str()));
 			}
 			Some(key) => {
 				let flags = instance_silences
-					.entry((ns, source, check, key))
+					.entry((ns, source.as_str(), check.as_str()))
+					.or_default()
+					.entry(key.as_str())
 					.or_default();
 				if group.is_some() {
 					flags.1 = true;
@@ -2758,8 +2966,7 @@ async fn checks_at_scope(
 					return None;
 				}
 				let stored: CheckResult = effective.as_deref().and_then(|e| e.parse().ok())?;
-				let is_silenced =
-					silenced.contains(&(namespace.clone(), source.clone(), check.clone()));
+				let is_silenced = silenced.contains(&(&namespace, source.as_str(), check.as_str()));
 				// A silence is a scoped ceiling of `skipped`: cap the effective
 				// result here so the live view matches both the health rollup
 				// (which excludes silenced checks) and the snapshot path (which
@@ -2781,14 +2988,11 @@ async fn checks_at_scope(
 							.ok()
 					})
 					.map(|stored| {
+						let check_silences =
+							instance_silences.get(&(&namespace, source.as_str(), check.as_str()));
 						stored.presented(is_silenced, |key| {
-							instance_silences
-								.get(&(
-									namespace.clone(),
-									source.clone(),
-									check.clone(),
-									key.to_string(),
-								))
+							check_silences
+								.and_then(|silences| silences.get(key))
 								.copied()
 								.unwrap_or_default()
 						})
@@ -2835,9 +3039,9 @@ async fn checks_at_scope(
 	{
 		// Reachability is canopy's own, so it is flat whatever the target.
 		let is_silenced = silenced.contains(&(
-			Namespace::Flat,
-			reachability.0.clone(),
-			reachability.1.clone(),
+			&Namespace::Flat,
+			reachability.0.as_str(),
+			reachability.1.as_str(),
 		));
 		checks.push(ConsolidatedCheck {
 			silenced: is_silenced,
