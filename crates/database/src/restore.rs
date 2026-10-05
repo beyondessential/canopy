@@ -23,7 +23,8 @@ use uuid::Uuid;
 use crate::backup::refs;
 use crate::backups::BackupRun;
 use crate::issues::{
-	CheckInstance, GradedInstance, InstancedCheckFiling, Scope, file_check_instances,
+	CheckInstance, CheckOutcome, GradedCheck, GradedInstance, InstancedCheckFiling, Scope,
+	file_check_instances,
 };
 use crate::pg_duration::PgDuration;
 
@@ -1567,11 +1568,16 @@ async fn untried_candidate(
 
 /// The fields every instance of a restore check carries, whichever check it is:
 /// what identifies the replica, for an operator reading the detail and for a
-/// rule or silence written against one replica.
+/// rule written against some of the replicas. A rule never reads an instance's
+/// key, so these are the replica's identity as far as a rule goes; a silence
+/// for one replica names its key instead (see [`replica_instance_key`]).
 ///
-/// `replica_key` is the two dimensions joined, because a rule condition takes
-/// one variable and a silence for one replica has to pin both (see
-/// [`crate::check_policies::Condition`]).
+/// `replica_key` is the type and intent joined as `type:intent`, because a rule
+/// condition takes one variable and a rule pinning one replica has to match
+/// both (see [`crate::check_policies::Condition`]). The rules the
+/// `collapse_restore_check_names` migration rewrote operators' per-replica
+/// silences into match on it, so its format is fixed.
+// spec: RST#alerting
 fn instance_identity(key: &ReplicaKey) -> serde_json::Value {
 	let (_, r#type, intent, declared_as) = key;
 	serde_json::json!({
@@ -1580,6 +1586,27 @@ fn instance_identity(key: &ReplicaKey) -> serde_json::Value {
 		"replica_key": format!("{type}:{intent}"),
 		"replica": declared_as,
 	})
+}
+
+/// The key a replica's instance goes by: its type, intent and declared name
+/// together, which is what tells two replicas of one type and intent on one
+/// machine apart, and what a silence for one replica names.
+///
+/// Written `type:intent:name`, or `type:intent` for a replica no declaration
+/// names. Each part is an open string, so a `%` or `:` within one is
+/// percent-encoded, which keeps every replica's key distinct and leaves the
+/// usual keys readable as they are.
+// spec: RST#alerting
+fn replica_instance_key((_, r#type, intent, declared_as): &ReplicaKey) -> String {
+	fn part(s: &str) -> String {
+		s.replace('%', "%25").replace(':', "%3A")
+	}
+	let mut key = format!("{}:{}", part(r#type.as_str()), part(intent.as_str()));
+	if let Some(name) = declared_as {
+		key.push(':');
+		key.push_str(&part(name));
+	}
+	key
 }
 
 /// Merge `extra` into an instance's identity fields.
@@ -1621,7 +1648,8 @@ fn verification_instance(
 		"healthy".into()
 	};
 	CheckInstance {
-		label: label.to_owned(),
+		key: replica_instance_key(key),
+		label: Some(label.to_owned()),
 		observed,
 		detail: instance_detail(
 			key,
@@ -1651,7 +1679,8 @@ fn redaction_instance(
 		RedactionOutcome::Partial | RedactionOutcome::Failed => CheckResult::Warning,
 	};
 	Some(CheckInstance {
-		label: label.to_owned(),
+		key: replica_instance_key(key),
+		label: Some(label.to_owned()),
 		observed,
 		detail: instance_detail(
 			key,
@@ -1718,7 +1747,8 @@ fn migration_instance(
 	};
 
 	Some(CheckInstance {
-		label: label.to_owned(),
+		key: replica_instance_key(key),
+		label: Some(label.to_owned()),
 		observed,
 		detail: instance_detail(
 			key,
@@ -1749,11 +1779,11 @@ async fn file_verification(
 			gone: &format!("No restore replica of {label} is tracked any more"),
 		},
 		instances,
-		&|degraded| match degraded {
+		&|graded| match graded.degraded().as_slice() {
 			[] => format!("Every restore replica of {label} is verifying healthily"),
 			[one] => format!(
 				"Restore verification failed for {label}: {} — {}",
-				one.label,
+				one.name(),
 				instance_why(one),
 			),
 			many => format!(
@@ -1783,11 +1813,11 @@ async fn file_redaction(
 			gone: &format!("No redacting replica of {label} is tracked any more"),
 		},
 		instances,
-		&|degraded| match degraded {
+		&|graded| match graded.degraded().as_slice() {
 			[] => format!("Every redacting replica of {label} is fully masked"),
 			[one] => format!(
 				"Replica {} of {label} did not fully redact: {}",
-				one.label,
+				one.name(),
 				instance_field(one, "outcome"),
 			),
 			many => format!(
@@ -1817,11 +1847,11 @@ async fn file_migration(
 			gone: &format!("No candidate version is under test against {label}'s data"),
 		},
 		instances,
-		&|degraded| match degraded {
+		&|graded| match graded.degraded().as_slice() {
 			[] => format!("Candidate versions have been migration-tested against {label}"),
 			[one] => format!(
 				"Candidate version not clean against {label}'s data: {} — {}",
-				one.label,
+				one.name(),
 				instance_why(one),
 			),
 			many => format!(
@@ -1858,7 +1888,7 @@ pub(crate) async fn file_restore_check(
 	scope: Scope,
 	check: RestoreCheck<'_>,
 	instances: Vec<CheckInstance>,
-	message: &(dyn Fn(&[GradedInstance]) -> String + Sync),
+	message: &(dyn Fn(&GradedCheck) -> String + Sync),
 ) -> Result<usize> {
 	let RestoreCheck {
 		r#ref,
@@ -1910,7 +1940,8 @@ pub(crate) async fn file_restore_check(
 				device_id: None,
 				check: r#ref,
 				title: Some(title),
-				instances,
+				detail: None,
+				outcome: CheckOutcome::Instances(instances),
 				default_ceiling: CheckResult::Warning,
 				default_escalates: false,
 				documentation: Some(documentation),
@@ -1938,10 +1969,50 @@ fn instance_field(instance: &GradedInstance, field: &str) -> String {
 		.to_owned()
 }
 
-fn instance_labels(instances: &[GradedInstance]) -> String {
+fn instance_labels(instances: &[&GradedInstance]) -> String {
 	instances
 		.iter()
-		.map(|i| i.label.as_str())
+		.map(|i| i.name())
 		.collect::<Vec<_>>()
 		.join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn key(r#type: &str, intent: &str, name: Option<&str>) -> String {
+		replica_instance_key(&(
+			Uuid::nil(),
+			r#type.into(),
+			intent.into(),
+			name.map(str::to_owned),
+		))
+	}
+
+	#[test]
+	fn a_replica_is_keyed_by_its_type_intent_and_name() {
+		assert_eq!(
+			key("tamanu-postgres", "verify", Some("nightly")),
+			"tamanu-postgres:verify:nightly"
+		);
+		assert_eq!(
+			key("tamanu-postgres", "verify", None),
+			"tamanu-postgres:verify"
+		);
+	}
+
+	#[test]
+	fn no_two_replicas_share_a_key() {
+		let keys = [
+			key("a", "b:c", None),
+			key("a", "b", Some("c")),
+			key("a:b", "c", None),
+			key("a", "b", Some("")),
+			key("a", "b", None),
+			key("a", "b%3Ac", None),
+		];
+		let distinct: std::collections::HashSet<&String> = keys.iter().collect();
+		assert_eq!(distinct.len(), keys.len(), "{keys:?}");
+	}
 }

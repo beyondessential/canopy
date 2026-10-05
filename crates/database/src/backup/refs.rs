@@ -307,7 +307,7 @@ One of this server's managed restore replicas reported a failed restorability ch
 
 ## Solve
 
-Read the detail for the replicas named: restore errors point at the snapshot or credentials, staleness at the consumer itself. To handle one replica differently from the rest, write a rule or silence against its `check.replica_key` rather than the check as a whole.";
+Read the detail for the replicas named: restore errors point at the snapshot or credentials, staleness at the consumer itself. To quiet one replica, silence its instance rather than the check as a whole; to grade some replicas differently from the rest, write a rule against their `check.type`, `check.intent` or `check.replica`, or `check.replica_key` (the type and intent joined as `type:intent`) to match both in one condition.";
 
 pub const REPORTING_SCHEMA_DOC: &str = "## Description
 

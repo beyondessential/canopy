@@ -33,14 +33,37 @@ A push is recorded once per target it describes, each record carrying that targe
 
 Wherever the payload describes a machine or an application, it does so the same way: a set of health checks, and a `detail` object.
 
-A health check carries its name, exactly one result (`passed`, `warning`, `failed`, `broken`, or `skipped`), and its own `detail` object.
-The set may be empty, meaning the source currently has no checks for that target — which recovers every check it previously reported for it.
+A health check carries its name, its own `detail` object, and either exactly one result (`passed`, `warning`, `failed`, `broken`, or `skipped`) or a set of instances.
+The set of checks may be empty, meaning the source currently has no checks for that target — which recovers every check it previously reported for it.
 
 Everything a reporter has to say beyond the structure sits inside a `detail` object, and nothing is spread across the envelope.
 A reporter can therefore report a field of any name, including one the envelope itself uses, and Canopy can gain a sibling of `health` and `detail` later without ambiguity about what an unrecognised key meant.
 
+A check with a single result may instead carry its fields beside its name and result, outside any `detail` object, and Canopy reads them as that check's detail.
+A check carrying fields both beside its name and in a `detail` object is refused, since Canopy cannot tell which was meant.
+A check with instances carries its fields in its `detail` object only, and one with fields beside its instances is refused.
+
 Detail is recorded verbatim against the check or target it was attached to.
 Policy rules and the fleet spread reach a check's fields as `check.<field>`, matching where they sit in the payload.
+
+### Instances
+
+A check reporting several instances of its condition carries them as an object keyed by each instance's key, in place of a result (see [CHK](../monitoring/checks.md), "Checks with instances").
+The key is the reporter's to choose: it must be unique within the check, must not be empty, and must identify the same instance across that reporter's pushes, as an application's key does.
+An object keyed this way cannot express two instances sharing a key.
+A check carrying more instances than Canopy accepts is refused, as is an instance whose key or label is longer than it accepts: an instance is graded, kept and graded again whenever the check or one of its silences is touched, so the count a reporter sends bounds work well beyond the push itself.
+The bounds are generous enough that only a reporter gone wrong meets them.
+
+Each instance carries exactly one result (`passed`, `warning`, `failed`, or `skipped`), an optional `label` naming it to an operator, and its own `detail` object.
+A check carrying both a result and instances is refused, as is an instance without a result.
+
+Brokenness belongs to the whole check (see [CHK](../monitoring/checks.md), "Checks with instances"), so a check that could not run reports `broken` as its own result, without instances, and an instance reporting `broken` is refused.
+A broken check recovers none of the instances it previously reported, since it could not see them.
+
+A check's instances are the source's complete set for it, so a reporter sends its passing instances as well as its degraded ones.
+An empty set says the check currently has no instances, which recovers every instance it previously reported.
+The check's own `detail` holds what its instances share, and a rule reaches an instance's fields and the check's alike as `check.<field>`, the instance's taking precedence, so the same rule grades a check whether or not it reports instances (see [CHK](../monitoring/checks.md), "Checks with instances").
+A check is reported with or without instances push by push, and it remains one check either way.
 
 A check's name is reported bare.
 Canopy qualifies an application's checks with that application's type when cataloguing them (see [CHK](../monitoring/checks.md), "Names").
@@ -98,6 +121,7 @@ It is recorded with its detail like any other status, and is treated as the sour
 The response to a push carries only what the pushing source needs; a source is sent nothing meant for another source, and relies on receiving nothing beyond its own concerns.
 
 - Each check in the push is answered with the policy applied to it (see [CHK](../monitoring/checks.md), "Policy"), so a source sees how its reports are graded and can stop running checks whose policy is `skipped`.
+  A check with instances is answered once, with the check's policy, since a source runs the check rather than its instances one by one.
 - Whether a backup should start now is returned only to the source that runs backups (`alertd`).
 - The effective tags of the machine and of each application described are returned to every source, so an agent can read the classification Canopy holds for what it reports on.
   A source is answered about each target under the same key it named that target by, so it can tell which answer is about what.

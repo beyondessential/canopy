@@ -148,6 +148,8 @@ export type FleetMachineDetailData = Solidify<
 export type FleetDetailData = Solidify<Schemas["FleetDetailData"]>;
 export type ServerSilencedRef = Solidify<Schemas["ServerSilencedRef"]>;
 export type ServerGroupSilencedRef = Solidify<Schemas["ServerGroupSilencedRef"]>;
+export type MachineSilencedRef = Solidify<Schemas["MachineSilencedRef"]>;
+export type ClusterSilencedRef = Solidify<Schemas["ClusterSilencedRef"]>;
 
 export type EnrollmentTicket = Solidify<Schemas["EnrollmentTicket"]>;
 export type EnrollmentStatus = Solidify<Schemas["EnrollmentStatus"]>;
@@ -161,6 +163,7 @@ export type TailnetLiveInfo = Solidify<Schemas["TailnetLiveInfo"]>;
 export type CheckPolicyData = Solidify<Schemas["CheckPolicyData"]>;
 export type SourceData = Solidify<Schemas["SourceData"]>;
 export type ConsolidatedCheck = Solidify<Schemas["ConsolidatedCheck"]>;
+export type ConsolidatedInstance = Solidify<Schemas["ConsolidatedInstance"]>;
 export type ConsolidatedChecks = Solidify<Schemas["ConsolidatedChecks"]>;
 export type ReachabilityMode = Solidify<Schemas["ReachabilityMode"]>;
 export type IngestMode = Solidify<Schemas["IngestMode"]>;
@@ -169,6 +172,7 @@ export type HealthcheckSample = Solidify<Schemas["HealthcheckSample"]>;
 export type HealthcheckSampleResponse = Solidify<Schemas["HealthcheckSampleResponse"]>;
 
 export type IssueData = Solidify<Schemas["IssueData"]>;
+export type IssueInstanceData = Solidify<Schemas["IssueInstanceData"]>;
 export type IssueIncidentLink = Solidify<Schemas["IssueIncidentLink"]>;
 export type IncidentData = Solidify<Schemas["IncidentData"]>;
 
@@ -626,6 +630,22 @@ export const RESERVED_SOURCES = ["canopy", "manual", "kubernetes"];
 /// ref silently fails to match an existing silence.
 export function silenceRef(source: string, check: string): string {
 	return RESERVED_SOURCES.includes(source) ? check : `health/${check}`;
+}
+
+/// How one instance of a check is named to an operator: its label, falling
+/// back to its key where it carries none.
+/// spec: CHK#checks-with-instances
+export function instanceName(instance: {
+	key: string;
+	label: string | null;
+}): string {
+	return instance.label ?? instance.key;
+}
+
+/// An instance key shortened for display, keeping its ends: keys are often
+/// opaque identifiers whose head and tail are what an operator compares.
+export function shortInstanceKey(key: string): string {
+	return key.length > 14 ? `${key.slice(0, 8)}…${key.slice(-4)}` : key;
 }
 
 /// A silence ref as it reads to an operator: the `health/` prefix, where the

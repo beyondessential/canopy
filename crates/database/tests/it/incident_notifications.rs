@@ -56,6 +56,8 @@ async fn file(
 		effective: result,
 		escalates,
 		detail: None,
+		title: None,
+		instanced: None,
 	};
 	NewEvent {
 		source: "test".into(),

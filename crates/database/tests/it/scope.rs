@@ -358,6 +358,8 @@ fn failed_stamp(check: &str) -> database::issues::CheckStateStamp {
 		effective: commons_types::status::CheckResult::Failed,
 		escalates: false,
 		detail: None,
+		title: None,
+		instanced: None,
 	}
 }
 

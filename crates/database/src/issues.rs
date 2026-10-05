@@ -124,9 +124,42 @@ pub struct Issue {
 	/// notifies immediately, bypassing incident grace. Stamped from the
 	/// catalog on every filing.
 	pub escalates: bool,
+	/// The headline the last filing gave the check, kept whatever its result:
+	/// `description` is the headline only while the state is degraded.
+	pub title: Option<String>,
+	/// The check's instances, by key (see [`StoredInstances`]). `None` for a
+	/// check without instances, whose fields are all in `detail`; for one
+	/// with them, `detail` holds the fields they share.
+	pub instances: Option<serde_json::Value>,
+	/// What the rules grading the instances read beyond each instance, as
+	/// the last filing gave them (see [`GradingInputs`]). Set exactly when
+	/// `instances` is. Internal to grading, so never presented.
+	#[serde(skip)]
+	pub grading_context: Option<serde_json::Value>,
 }
 
 impl Issue {
+	/// This state's instances, or `None` for a check without them.
+	///
+	/// A stored value that does not read back is written outside the model;
+	/// it is logged and read as no instances rather than failing the reader.
+	pub fn stored_instances(&self) -> Option<StoredInstances> {
+		let stored = self.instances.as_ref()?;
+		serde_json::from_value(stored.clone())
+			.inspect_err(
+				|err| tracing::warn!(issue = %self.id, ?err, "unreadable stored instances"),
+			)
+			.ok()
+	}
+
+	/// The inputs this state's instances were last graded with.
+	pub fn grading_inputs(&self) -> Option<GradingInputs> {
+		let stored = self.grading_context.as_ref()?;
+		serde_json::from_value(stored.clone())
+			.inspect_err(|err| tracing::warn!(issue = %self.id, ?err, "unreadable grading context"))
+			.ok()
+	}
+
 	/// Does this state open an incident on its own? An effective failure
 	/// does; anything less joins an already-open incident but doesn't
 	/// create (or hold open) one.
@@ -301,7 +334,71 @@ pub struct CheckStateStamp {
 	pub effective: CheckResult,
 	/// Whether the check's policy escalates (see [`Issue::escalates`]).
 	pub escalates: bool,
+	/// A plain check's fields, or the fields an instanced check shares.
 	pub detail: Option<serde_json::Value>,
+	/// The headline this filing gives the check, kept whatever its result
+	/// (see [`Issue::title`]). `None` keeps the one already stored.
+	pub title: Option<String>,
+	/// The check's instances and what their rules read, or `None` for a check
+	/// without instances, which clears any the state held.
+	pub instanced: Option<InstancedState>,
+}
+
+impl CheckStateStamp {
+	/// The stamp for a check graded through [`grade_instances`] with `ctx`.
+	pub fn of_graded(
+		check: &str,
+		graded: &GradedCheck,
+		ctx: &GradingContext<'_>,
+		title: Option<&str>,
+	) -> Self {
+		Self {
+			check: check.to_string(),
+			observed: graded.observed,
+			effective: graded.effective,
+			escalates: graded.escalates,
+			detail: graded.detail(),
+			title: title.map(str::to_string),
+			instanced: graded.stored_instances().map(|instances| InstancedState {
+				instances,
+				inputs: GradingInputs::of(ctx),
+			}),
+		}
+	}
+}
+
+/// A state's degraded-streak timestamps once it takes an effective result at
+/// `at`: `degraded_since` holds while degraded (starting a fresh streak on the
+/// healthy → degraded transition) and clears on recovery; `last_degraded_at`
+/// never clears.
+struct DegradedStreak {
+	degraded_since: Option<jiff_diesel::Timestamp>,
+	last_degraded_at: Option<jiff_diesel::Timestamp>,
+}
+
+impl DegradedStreak {
+	fn after(
+		prior_degraded_since: Option<Timestamp>,
+		prior_last_degraded: Option<Timestamp>,
+		effective: CheckResult,
+		at: Timestamp,
+	) -> Self {
+		let degraded = matches!(
+			effective,
+			CheckResult::Warning | CheckResult::Failed | CheckResult::Broken
+		);
+		if degraded {
+			Self {
+				degraded_since: Some(prior_degraded_since.unwrap_or(at).into()),
+				last_degraded_at: Some(at.into()),
+			}
+		} else {
+			Self {
+				degraded_since: None,
+				last_degraded_at: prior_last_degraded.map(jiff_diesel::Timestamp::from),
+			}
+		}
+	}
 }
 
 /// Write a filing's check-state stamp onto its issue row, maintaining the
@@ -318,32 +415,33 @@ async fn stamp_check_state(
 ) -> Result<Issue> {
 	use crate::schema::issues;
 
-	let degraded = matches!(
-		stamp.effective,
-		CheckResult::Warning | CheckResult::Failed | CheckResult::Broken
-	);
 	let (prior_degraded_since, prior_last_degraded) = prior.unwrap_or((None, None));
-	let degraded_since = if degraded {
-		Some(jiff_diesel::Timestamp::from(
-			prior_degraded_since.unwrap_or(at),
-		))
-	} else {
-		None
-	};
-	let last_degraded_at = if degraded {
-		Some(jiff_diesel::Timestamp::from(at))
-	} else {
-		prior_last_degraded.map(jiff_diesel::Timestamp::from)
+	let streak = DegradedStreak::after(
+		prior_degraded_since,
+		prior_last_degraded,
+		stamp.effective,
+		at,
+	);
+	let (instances, grading_context) = match &stamp.instanced {
+		Some(state) => (
+			Some(serde_json::to_value(&state.instances).expect("instances serialise")),
+			Some(serde_json::to_value(&state.inputs).expect("grading inputs serialise")),
+		),
+		None => (None, None),
 	};
 	let issue = diesel::update(issues::table.filter(issues::id.eq(issue_id)))
 		.set((
 			issues::check_name.eq(&stamp.check),
+			issues::instances.eq(instances),
+			issues::grading_context.eq(grading_context),
 			issues::observed_result.eq(stamp.observed.to_string()),
 			issues::effective_result.eq(stamp.effective.to_string()),
 			issues::escalates.eq(stamp.escalates),
 			issues::detail.eq(&stamp.detail),
-			issues::degraded_since.eq(degraded_since),
-			issues::last_degraded_at.eq(last_degraded_at),
+			issues::degraded_since.eq(streak.degraded_since),
+			issues::last_degraded_at.eq(streak.last_degraded_at),
+			// `None` leaves the stored title as it is.
+			stamp.title.as_ref().map(|title| issues::title.eq(title)),
 		))
 		.returning(Issue::as_select())
 		.get_result(conn)
@@ -1095,7 +1193,7 @@ pub async fn raise_global_event_with_state(
 /// cluster is likewise its own target: a substrate check about the cluster is
 /// read on the cluster, not on the applications scheduled across it.
 // spec: CHK
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Scope {
 	Application(Uuid),
 	Machine(Uuid),
@@ -1160,26 +1258,121 @@ impl Scope {
 		self,
 		conn: &mut AsyncPgConnection,
 	) -> Result<Option<(IncidentTarget, bool)>> {
-		match self {
-			Scope::Group(gid) => Ok(Some((IncidentTarget::Group(gid), true))),
+		ScopeTargets::load(conn, [self])
+			.await?
+			.incident_target(self)
+	}
+}
+
+/// The applications and machines a set of scopes names, loaded once, so that
+/// each scope's policy chain and incident target are read from memory rather
+/// than with a query per scope.
+#[derive(Debug, Default)]
+struct ScopeTargets {
+	applications: std::collections::HashMap<Uuid, Application>,
+	/// Each machine with the rank it serves (see [`crate::machines::Machine::rank`]).
+	machines: std::collections::HashMap<Uuid, (crate::machines::Machine, Option<ServerRank>)>,
+}
+
+impl ScopeTargets {
+	async fn load(
+		conn: &mut AsyncPgConnection,
+		scopes: impl IntoIterator<Item = Scope>,
+	) -> Result<Self> {
+		use crate::machines::Machine;
+
+		let mut application_ids = Vec::new();
+		let mut machine_ids = Vec::new();
+		for scope in scopes {
+			match scope {
+				Scope::Application(id) => application_ids.push(id),
+				Scope::Machine(id) => machine_ids.push(id),
+				Scope::Group(_) | Scope::Cluster(_) | Scope::Global => {}
+			}
+		}
+		application_ids.sort_unstable();
+		application_ids.dedup();
+		machine_ids.sort_unstable();
+		machine_ids.dedup();
+
+		let mut targets = Self::default();
+		if !application_ids.is_empty() {
+			targets.applications = Application::get_by_ids(conn, &application_ids)
+				.await?
+				.into_iter()
+				.map(|application| (application.id, application))
+				.collect();
+		}
+		if !machine_ids.is_empty() {
+			let mut ranks = Machine::ranks(conn, &machine_ids).await?;
+			targets.machines = Machine::get_by_ids(conn, &machine_ids)
+				.await?
+				.into_iter()
+				.map(|machine| {
+					let rank = ranks.remove(&machine.id);
+					(machine.id, (machine, rank))
+				})
+				.collect();
+		}
+		Ok(targets)
+	}
+
+	fn application(&self, id: Uuid) -> Result<&Application> {
+		self.applications
+			.get(&id)
+			.ok_or_else(|| diesel::result::Error::NotFound.into())
+	}
+
+	fn machine(&self, id: Uuid) -> Result<&(crate::machines::Machine, Option<ServerRank>)> {
+		self.machines
+			.get(&id)
+			.ok_or_else(|| diesel::result::Error::NotFound.into())
+	}
+
+	/// The scopes a check filed at `scope` chains its policy from.
+	fn filing_scope(&self, scope: Scope) -> Result<crate::check_policies::FilingScope> {
+		use crate::check_policies::FilingScope;
+		Ok(match scope {
+			Scope::Application(application_id) => FilingScope {
+				application_id: Some(application_id),
+				group_id: self.application(application_id)?.group_id,
+				..Default::default()
+			},
+			Scope::Machine(machine_id) => FilingScope {
+				machine_id: Some(machine_id),
+				group_id: self.machine(machine_id)?.0.group_id,
+				..Default::default()
+			},
+			Scope::Group(group_id) => FilingScope {
+				group_id: Some(group_id),
+				..Default::default()
+			},
+			Scope::Cluster(cluster_id) => FilingScope {
+				kubernetes_cluster_id: Some(cluster_id),
+				..Default::default()
+			},
+			Scope::Global => FilingScope::default(),
+		})
+	}
+
+	/// See [`Scope::resolve_incident_target`].
+	// spec: INC#targets
+	fn incident_target(&self, scope: Scope) -> Result<Option<(IncidentTarget, bool)>> {
+		Ok(match scope {
+			Scope::Group(gid) => Some((IncidentTarget::Group(gid), true)),
 			Scope::Application(sid) => {
-				let server = Application::get_by_id(conn, sid).await?;
-				Ok(member_target(
-					server.group_id,
-					server.rank,
-					server.is_monitored,
-				))
+				let server = self.application(sid)?;
+				member_target(server.group_id, server.rank, server.is_monitored)
 			}
 			Scope::Machine(mid) => {
-				let machine = crate::machines::Machine::get_by_id(conn, mid).await?;
 				// A box's rank is the highest of the workloads on it: a check
 				// on the box is trouble for the most important thing it runs.
-				let rank = crate::machines::Machine::rank(conn, mid).await?;
-				Ok(member_target(machine.group_id, rank, machine.is_monitored))
+				let (machine, rank) = self.machine(mid)?;
+				member_target(machine.group_id, *rank, machine.is_monitored)
 			}
-			Scope::Cluster(_) => Ok(None),
-			Scope::Global => Ok(Some((IncidentTarget::Global, true))),
-		}
+			Scope::Cluster(_) => None,
+			Scope::Global => Some((IncidentTarget::Global, true)),
+		})
 	}
 }
 
@@ -1222,8 +1415,8 @@ pub struct CheckFiling<'a> {
 	pub title: Option<&'a str>,
 	pub message: &'a str,
 	/// The check's own fields, available to policy rules as `check.*`
-	/// and displayed alongside the state.
-	pub detail: Option<serde_json::Value>,
+	/// and displayed alongside the state. Build one with [`check_detail!`].
+	pub detail: Option<serde_json::Map<String, serde_json::Value>>,
 	/// The policy this check registers with on first sight — the ceiling
 	/// and escalation its condition warrants. Operator edits stick;
 	/// these only seed the catalog row.
@@ -1234,6 +1427,22 @@ pub struct CheckFiling<'a> {
 	/// the CHK spec's Documentation section for the convention.
 	pub documentation: Option<&'a str>,
 }
+
+/// A check's fields for [`CheckFiling::detail`], written as the body of a
+/// `serde_json::json!` object literal. The braces are the macro's, so what it
+/// builds is always an object.
+///
+/// [`CheckFiling::detail`]: crate::issues::CheckFiling::detail
+#[macro_export]
+macro_rules! check_detail {
+	($($body:tt)*) => {
+		match ::serde_json::json!({ $($body)* }) {
+			::serde_json::Value::Object(fields) => fields,
+			_ => unreachable!("a JSON object literal builds an object"),
+		}
+	};
+}
+pub use check_detail;
 
 /// File one canopy-determined or operator-raised check result: register
 /// its catalog entry (first sight only), grade the observation through
@@ -1248,10 +1457,18 @@ pub struct CheckFiling<'a> {
 /// error (critical when the policy escalates), warning/broken →
 /// warning; passed and skipped record healthy state and close.
 pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -> Result<Issue> {
-	let instance = CheckInstance {
-		label: String::new(),
-		observed: filing.observed,
-		detail: filing.detail.clone(),
+	// Brokenness is the whole check's, so a broken filing is not an instance
+	// but the check failing to run; its fields are what the check shares.
+	let (shared, outcome) = if filing.observed == CheckResult::Broken {
+		(filing.detail, CheckOutcome::Broken)
+	} else {
+		(
+			None,
+			CheckOutcome::Instances(vec![CheckInstance::plain(
+				filing.observed,
+				filing.detail.map(serde_json::Value::Object),
+			)]),
+		)
 	};
 	let message = filing.message;
 	file_check_instances(
@@ -1262,82 +1479,61 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 			device_id: filing.device_id,
 			check: filing.check,
 			title: filing.title,
+			detail: shared,
+			outcome,
 			default_ceiling: filing.default_ceiling,
 			default_escalates: filing.default_escalates,
 			documentation: filing.documentation,
-			instances: vec![instance],
 		},
 		&|_| message.to_string(),
 	)
 	.await
 }
 
-/// One instance of a check the target has several of: one of a server's
-/// backup types, one of its restore intents.
-///
-/// Instances exist so a check can stay a single named category — see the
-/// Names section of the CHK spec. Never spell an instance into the check
-/// name.
-#[derive(Debug, Clone)]
-pub struct CheckInstance {
-	/// How this instance is named in the check's message, e.g. the backup
-	/// type. Not read by policy — the fields policy matches on live in
-	/// `detail`.
-	pub label: String,
-	/// What this instance observed this pass.
-	pub observed: CheckResult,
-	/// This instance's own fields. Policy rules reach them as `check.*`, so
-	/// whatever identifies the instance (`type`, `intent`, …) must be in
-	/// here for an operator to be able to grade or silence it on its own.
-	pub detail: Option<serde_json::Value>,
-}
+pub use crate::check_instances::{
+	CheckGrading, CheckGradingRef, CheckInstance, CheckOutcome, GradedCheck, GradedInstance,
+	GradingContext, GradingInputs, InstancedState, PresentedInstances, ReportedCheck,
+	StoredInstance, StoredInstances, grade_instances,
+};
 
-/// What grading an instance produced, for building the check's message.
-#[derive(Debug, Clone)]
-pub struct GradedInstance {
-	pub label: String,
-	pub observed: CheckResult,
-	pub effective: CheckResult,
-	pub detail: Option<serde_json::Value>,
-}
-
-/// A check filed from several instances. Everything except the per-instance
-/// fields is shared, because there is one check and one catalog entry
-/// however many instances the target has.
+/// A check filed from its instances. Everything except the instances is
+/// shared, because there is one check and one catalog entry however many
+/// instances the target has.
 pub struct InstancedCheckFiling<'a> {
 	pub source: &'a str,
 	pub scope: Scope,
 	pub device_id: Option<Uuid>,
 	pub check: &'a str,
 	pub title: Option<&'a str>,
-	pub instances: Vec<CheckInstance>,
+	/// The fields the check shares across its instances. Rules read them as
+	/// `check.<field>` beneath each instance's own.
+	pub detail: Option<serde_json::Map<String, serde_json::Value>>,
+	/// What the check observed this pass: its instances, or that it could not
+	/// run at all.
+	pub outcome: CheckOutcome,
 	pub default_ceiling: CheckResult,
 	pub default_escalates: bool,
 	pub documentation: Option<&'a str>,
 }
 
-/// File one check from several instances of its condition, grading each
-/// instance on its own and settling on the most urgent of them.
+/// File one check from its instances, grading each on its own and settling
+/// on the most urgent of them (see [`grade_instances`]).
 ///
 /// This is what keeps a check a category instead of a name per instance: one
 /// catalog entry, one state, one thing for an operator to configure, however
-/// many backup types or restore intents the target has. Because each instance
+/// many backup types or restore replicas the target has. Because each instance
 /// is graded separately against its own detail, a rule or silence written for
 /// one instance still applies to only that instance.
 ///
-/// Skipped instances (a silence matched) drop out of the aggregate entirely
-/// rather than counting as healthy. If every instance is skipped, so is the
-/// check.
-///
-/// `message` is called with the instances that are not passing, most urgent
-/// first, and is what the operator reads; it gets an empty slice when
-/// everything is healthy, which is the recovery message.
+/// `message` is called with the check as graded and is what the operator
+/// reads. Most filers name what [`GradedCheck::degraded`] lists, most urgent
+/// first, which is empty when everything is healthy: the recovery message.
 pub async fn file_check_instances(
 	conn: &mut AsyncPgConnection,
 	filing: InstancedCheckFiling<'_>,
-	message: &(dyn Fn(&[GradedInstance]) -> String + Sync),
+	message: &(dyn Fn(&GradedCheck) -> String + Sync),
 ) -> Result<Issue> {
-	use crate::check_policies::{CheckPolicy, EvaluationContext, FilingScope, ScopedCheckPolicy};
+	use crate::check_policies::CheckPolicy;
 
 	let source = filing.source;
 	debug_assert!(
@@ -1347,86 +1543,8 @@ pub async fn file_check_instances(
 		) || source == crate::statuses::CANOPY_SOURCE,
 		"group- and canopy-wide filings are canopy's own; an application's, a machine's and a cluster's come from a reporter",
 	);
-	debug_assert!(
-		!filing.instances.is_empty(),
-		"a filing with no instances says nothing; skip the call instead",
-	);
-	let status_extra = serde_json::Map::new();
-	// The application type comes out of the same load the tags do, because the
-	// check's namespace needs it: an application-subject check from a structured
-	// source is one catalog entry per type.
-	let mut application_type = None;
-	let (tags, scope): (
-		std::collections::HashMap<String, serde_json::Value>,
-		FilingScope,
-	) = match filing.scope {
-		Scope::Application(application_id) => {
-			let server = Application::get_by_id(conn, application_id).await?;
-			let group_id = server.group_id;
-			application_type = Some(server.r#type.clone());
-			let tags = server
-				.tags_merged_with_group(conn)
-				.await?
-				.0
-				.into_iter()
-				.map(|(k, v)| (k, serde_json::Value::String(v)))
-				.collect();
-			(
-				tags,
-				FilingScope {
-					application_id: Some(application_id),
-					group_id,
-					..Default::default()
-				},
-			)
-		}
-		// Graded against the machine's own tags, not against any application
-		// that happens to run on it.
-		Scope::Machine(machine_id) => {
-			let machine = crate::machines::Machine::get_by_id(conn, machine_id).await?;
-			let group_id = machine.group_id;
-			let tags = machine
-				.tags_merged_with_group(conn)
-				.await?
-				.0
-				.into_iter()
-				.map(|(k, v)| (k, serde_json::Value::String(v)))
-				.collect();
-			(
-				tags,
-				FilingScope {
-					machine_id: Some(machine_id),
-					group_id,
-					..Default::default()
-				},
-			)
-		}
-		Scope::Group(group_id) => (
-			Default::default(),
-			FilingScope {
-				group_id: Some(group_id),
-				..Default::default()
-			},
-		),
-		// A cluster carries no tags of its own, so a substrate check about it is
-		// graded on fleet and cluster-scoped policy alone, as a group's is.
-		Scope::Cluster(cluster_id) => (
-			Default::default(),
-			FilingScope {
-				kubernetes_cluster_id: Some(cluster_id),
-				..Default::default()
-			},
-		),
-		Scope::Global => (Default::default(), FilingScope::default()),
-	};
-
-	let namespace =
-		Namespace::of(source, filing.check, application_type.as_ref()).ok_or_else(|| {
-			AppError::Custom(format!(
-				"{} from {source} is an application check, so it cannot be filed against {:?}",
-				filing.check, filing.scope
-			))
-		})?;
+	let target = GradingTarget::load(conn, filing.scope).await?;
+	let namespace = target.namespace(source, filing.check, filing.scope)?;
 
 	CheckPolicy::register(
 		conn,
@@ -1442,115 +1560,85 @@ pub async fn file_check_instances(
 	// The catalog entry and the scoped chain are properties of the check, not
 	// of any one instance: read them once and grade purely from there, so a
 	// server with a dozen backup types still costs two queries.
-	let fleet = CheckPolicy::fleet_grading(conn, source, &namespace, filing.check).await?;
-	let chain = ScopedCheckPolicy::chain_for(conn, source, &namespace, filing.check, scope).await?;
-
-	let mut graded_instances: Vec<GradedInstance> = Vec::with_capacity(filing.instances.len());
-	let mut escalates = false;
-	for instance in &filing.instances {
-		// Rule-evaluation context: the instance's detail (with the normalised
-		// result injected, mirroring status ingestion), no report-wide extras,
-		// and the server's tags where there is a server.
-		let mut check_extra = instance
-			.detail
-			.as_ref()
-			.and_then(|d| d.as_object().cloned())
-			.unwrap_or_default();
-		check_extra.insert(
-			"result".into(),
-			serde_json::Value::String(instance.observed.to_string()),
-		);
-		let ctx = EvaluationContext {
-			status_extra: &status_extra,
-			check_extra: &check_extra,
-			tags: &tags,
-		};
-		let fleet_graded = CheckPolicy::grade(
-			fleet.as_ref(),
-			source,
-			filing.check,
-			instance.observed,
-			&ctx,
-		);
-		let graded = CheckPolicy::chain_scoped(fleet_graded, &chain, &ctx);
-		escalates |= graded.escalates;
-		graded_instances.push(GradedInstance {
-			label: instance.label.clone(),
-			observed: instance.observed,
-			effective: graded.effective,
-			detail: instance.detail.clone(),
-		});
+	let grading =
+		CheckGrading::load(conn, source, &namespace, filing.check, target.filing_scope).await?;
+	// A broken check presents the instances its state holds, so only then is
+	// the state read before it is written.
+	let prior = match filing.outcome {
+		CheckOutcome::Broken => {
+			Issue::check_state_at(conn, filing.scope, source, filing.check).await?
+		}
+		CheckOutcome::Instances(_) => None,
+	};
+	// Canopy's own determinations come from no report, so a rule's `status.*`
+	// reads nothing for them.
+	let status_extra = serde_json::Map::new();
+	let ctx = GradingContext {
+		source,
+		check: filing.check,
+		status_extra: &status_extra,
+		tags: &target.tags,
+	};
+	let mut graded = grade_instances(
+		&grading,
+		&ctx,
+		filing.detail.as_ref(),
+		filing.outcome,
+		prior.as_ref(),
+	);
+	// A check that ran but that policy graded broken keeps an open failure as
+	// a reported-broken one does, so its state is read once that is known.
+	// spec: CHK#stability
+	if prior.is_none() && graded.effective == CheckResult::Broken {
+		let prior = Issue::check_state_at(conn, filing.scope, source, filing.check).await?;
+		graded.retain_through_brokenness(prior.as_ref());
 	}
 
-	// The check settles on its most urgent instance. A skipped instance is
-	// silenced, not healthy, so it neither drags the check down nor props it
-	// up; a check whose instances are all skipped is itself skipped.
-	let considered: Vec<&GradedInstance> = graded_instances
-		.iter()
-		.filter(|i| i.effective != CheckResult::Skipped)
-		.collect();
-	let effective = considered
-		.iter()
-		.map(|i| i.effective)
-		.min_by_key(|r| r.urgency_rank())
-		.unwrap_or(CheckResult::Skipped);
-
-	// The observed result is always recorded as observed, so it spans every
-	// instance including the silenced ones: silencing a check changes what
-	// Canopy acts on, never what it saw.
-	let observed = graded_instances
-		.iter()
-		.map(|i| i.observed)
-		.min_by_key(|r| r.urgency_rank())
-		.unwrap_or(CheckResult::Skipped);
-
-	let mut degraded: Vec<GradedInstance> = considered
-		.iter()
-		.filter(|i| i.effective != CheckResult::Passed)
-		.map(|i| (*i).clone())
-		.collect();
-	degraded.sort_by_key(|i| i.effective.urgency_rank());
-
-	let detail = instance_detail(&graded_instances, &degraded);
-	let rendered = message(&degraded);
-
+	let rendered = message(&graded);
 	let active = matches!(
-		effective,
+		graded.effective,
 		CheckResult::Failed | CheckResult::Warning | CheckResult::Broken
 	);
-	let description = if active { filing.title } else { None };
-	let stamp = CheckStateStamp {
-		check: filing.check.to_string(),
-		observed,
-		effective,
-		escalates,
-		detail: detail.clone(),
-	};
-	let filing = CheckFiling {
+	let stamp = CheckStateStamp::of_graded(filing.check, &graded, &ctx, filing.title);
+	write_check_state(
+		conn,
+		filing.scope,
 		source,
-		scope: filing.scope,
-		device_id: filing.device_id,
-		check: filing.check,
-		observed,
-		title: filing.title,
-		message: &rendered,
-		detail,
-		default_ceiling: filing.default_ceiling,
-		default_escalates: filing.default_escalates,
-		documentation: filing.documentation,
-	};
+		filing.device_id,
+		filing.check,
+		if active { filing.title } else { None },
+		&rendered,
+		active,
+		&stamp,
+	)
+	.await
+}
 
-	match filing.scope {
+/// Record one filing's check state at its scope, through the scope's own
+/// find-or-create, which also drives incident membership.
+#[allow(clippy::too_many_arguments)]
+async fn write_check_state(
+	conn: &mut AsyncPgConnection,
+	scope: Scope,
+	source: &str,
+	device_id: Option<Uuid>,
+	check: &str,
+	description: Option<&str>,
+	message: &str,
+	active: bool,
+	stamp: &CheckStateStamp,
+) -> Result<Issue> {
+	match scope {
 		Scope::Application(application_id) => {
 			NewEvent {
 				source: source.to_string(),
-				r#ref: filing.check.to_string(),
+				r#ref: check.to_string(),
 				description: description.map(str::to_string),
-				message: filing.message.to_string(),
+				message: message.to_string(),
 				active: Some(active),
 				occurred_at: None,
 			}
-			.save_with_state(conn, application_id, filing.device_id, Some(&stamp), false)
+			.save_with_state(conn, application_id, device_id, Some(stamp), false)
 			.await
 		}
 		Scope::Machine(machine_id) => {
@@ -1558,12 +1646,12 @@ pub async fn file_check_instances(
 				conn,
 				machine_id,
 				source,
-				filing.device_id,
-				filing.check,
+				device_id,
+				check,
 				description,
-				filing.message,
+				message,
 				active,
-				Some(&stamp),
+				Some(stamp),
 			)
 			.await
 		}
@@ -1571,11 +1659,11 @@ pub async fn file_check_instances(
 			raise_group_event_with_state(
 				conn,
 				gid,
-				filing.check,
+				check,
 				description,
-				filing.message,
+				message,
 				active,
-				Some(&stamp),
+				Some(stamp),
 			)
 			.await
 		}
@@ -1584,70 +1672,450 @@ pub async fn file_check_instances(
 				conn,
 				cluster_id,
 				source,
-				filing.device_id,
-				filing.check,
+				device_id,
+				check,
 				description,
-				filing.message,
+				message,
 				active,
-				Some(&stamp),
+				Some(stamp),
 			)
 			.await
 		}
 		Scope::Global => {
-			raise_global_event_with_state(
-				conn,
-				filing.check,
-				description,
-				filing.message,
-				active,
-				Some(&stamp),
-			)
-			.await
+			raise_global_event_with_state(conn, check, description, message, active, Some(stamp))
+				.await
 		}
 	}
 }
 
-/// The detail an instanced check stores: every instance that is not passing,
-/// each with its own result, plus how many there were in total. That is what
-/// lets an operator see which backup types a server is stale for without
-/// opening anything else — the thing a check name per type used to convey.
-///
-/// A single unlabelled instance is an ordinary check filed through this path,
-/// so its detail passes straight through unchanged.
-fn instance_detail(
-	all: &[GradedInstance],
-	degraded: &[GradedInstance],
-) -> Option<serde_json::Value> {
-	if let [only] = all
-		&& only.label.is_empty()
-	{
-		return only.detail.clone();
-	}
-	if degraded.is_empty() {
-		return None;
-	}
-	let instances: Vec<serde_json::Value> = degraded
-		.iter()
-		.map(|i| {
-			let mut obj = i
-				.detail
-				.as_ref()
-				.and_then(|d| d.as_object().cloned())
-				.unwrap_or_default();
-			obj.insert(
-				"result".into(),
-				serde_json::Value::String(i.effective.to_string()),
-			);
-			obj.entry("instance")
-				.or_insert_with(|| serde_json::Value::String(i.label.clone()));
-			serde_json::Value::Object(obj)
+/// What grading a check at one target reads about the target: its tags, the
+/// scopes its policy is chained from, and the application type that
+/// qualifies an application's checks.
+struct GradingTarget {
+	tags: std::collections::HashMap<String, serde_json::Value>,
+	filing_scope: crate::check_policies::FilingScope,
+	application_type: Option<commons_types::server::app_type::ApplicationType>,
+}
+
+impl GradingTarget {
+	async fn load(conn: &mut AsyncPgConnection, scope: Scope) -> Result<Self> {
+		use crate::check_policies::FilingScope;
+		let as_json = |tags: commons_types::server::TagMap| {
+			tags.0
+				.into_iter()
+				.map(|(k, v)| (k, serde_json::Value::String(v)))
+				.collect()
+		};
+		Ok(match scope {
+			// The application type comes out of the same load the tags do,
+			// because the check's namespace needs it: an application-subject
+			// check from a structured source is one catalog entry per type.
+			Scope::Application(application_id) => {
+				let server = Application::get_by_id(conn, application_id).await?;
+				Self {
+					tags: as_json(server.tags_merged_with_group(conn).await?),
+					filing_scope: FilingScope {
+						application_id: Some(application_id),
+						group_id: server.group_id,
+						..Default::default()
+					},
+					application_type: Some(server.r#type),
+				}
+			}
+			// Graded against the machine's own tags, not against any
+			// application that happens to run on it.
+			Scope::Machine(machine_id) => {
+				let machine = crate::machines::Machine::get_by_id(conn, machine_id).await?;
+				Self {
+					tags: as_json(machine.tags_merged_with_group(conn).await?),
+					filing_scope: FilingScope {
+						machine_id: Some(machine_id),
+						group_id: machine.group_id,
+						..Default::default()
+					},
+					application_type: None,
+				}
+			}
+			Scope::Group(group_id) => Self {
+				tags: Default::default(),
+				filing_scope: FilingScope {
+					group_id: Some(group_id),
+					..Default::default()
+				},
+				application_type: None,
+			},
+			// A cluster carries no tags of its own, so a substrate check about
+			// it is graded on fleet and cluster-scoped policy alone, as a
+			// group's is.
+			Scope::Cluster(cluster_id) => Self {
+				tags: Default::default(),
+				filing_scope: FilingScope {
+					kubernetes_cluster_id: Some(cluster_id),
+					..Default::default()
+				},
+				application_type: None,
+			},
+			Scope::Global => Self {
+				tags: Default::default(),
+				filing_scope: FilingScope::default(),
+				application_type: None,
+			},
 		})
+	}
+
+	fn namespace(&self, source: &str, check: &str, scope: Scope) -> Result<Namespace> {
+		Namespace::of(source, check, self.application_type.as_ref()).ok_or_else(|| {
+			AppError::Custom(format!(
+				"{check} from {source} is an application check, so it cannot be filed against {scope:?}"
+			))
+		})
+	}
+}
+
+impl Issue {
+	/// The check state for `(source, ref)` at exactly this scope, if it has
+	/// ever been filed.
+	pub async fn check_state_at(
+		conn: &mut AsyncPgConnection,
+		scope: Scope,
+		source: &str,
+		r#ref: &str,
+	) -> Result<Option<Issue>> {
+		use crate::schema::issues::dsl;
+		let (application, machine, group, cluster) = scope.to_columns();
+		dsl::issues
+			.select(Issue::as_select())
+			.filter(
+				dsl::application_id
+					.is_not_distinct_from(application)
+					.and(dsl::machine_id.is_not_distinct_from(machine))
+					.and(dsl::server_group_id.is_not_distinct_from(group))
+					.and(dsl::kubernetes_cluster_id.is_not_distinct_from(cluster))
+					.and(dsl::source.eq(source))
+					.and(dsl::ref_.eq(r#ref)),
+			)
+			.first(conn)
+			.await
+			.optional()
+			.map_err(AppError::from)
+	}
+}
+
+/// The check states holding instances that a silence of `(source, ref)` at
+/// `scope` covers.
+///
+/// A target's silence covers that target's state. A group silence covers every
+/// target in the group filing the check it names: one application type's
+/// applications for an application check, the group's machines for a machine
+/// check, and for a curated source's check every target in the group and the
+/// group itself. A state holding no instances is a check without them, which an
+/// instance silence never reaches, and is left out.
+// spec: CHK#silencing-one-instance
+pub async fn instanced_states_covered_by(
+	conn: &mut AsyncPgConnection,
+	scope: Scope,
+	source: &str,
+	namespace: &Namespace,
+	r#ref: &str,
+) -> Result<Vec<Issue>> {
+	use crate::schema::{applications, issues, machines};
+
+	let mut query = issues::table
+		.select(Issue::as_select())
+		.filter(issues::source.eq(source))
+		.filter(issues::ref_.eq(r#ref))
+		.filter(issues::instances.is_not_null())
+		.into_boxed();
+	query = match scope {
+		Scope::Application(aid) => query.filter(issues::application_id.eq(aid)),
+		Scope::Machine(mid) => query.filter(issues::machine_id.eq(mid)),
+		Scope::Cluster(cid) => query.filter(issues::kubernetes_cluster_id.eq(cid)),
+		// The group's members are read in the same statement, so a group of
+		// any size is still one round trip.
+		Scope::Group(gid) => {
+			let applications_of = |ty: Option<String>| {
+				let mut members = applications::table
+					.select(applications::id.nullable())
+					.filter(applications::group_id.eq(gid))
+					.into_boxed();
+				if let Some(ty) = ty {
+					members = members.filter(applications::type_.eq(ty));
+				}
+				members
+			};
+			let machines_in_group = || {
+				machines::table
+					.select(machines::id.nullable())
+					.filter(machines::group_id.eq(gid))
+			};
+			match namespace {
+				Namespace::Application(ty) => query
+					.filter(issues::application_id.eq_any(applications_of(Some(ty.to_string())))),
+				Namespace::Machine => query.filter(issues::machine_id.eq_any(machines_in_group())),
+				Namespace::Flat => query.filter(
+					issues::application_id
+						.eq_any(applications_of(None))
+						.or(issues::machine_id.eq_any(machines_in_group()))
+						.or(issues::server_group_id.eq(gid)),
+				),
+			}
+		}
+		// No instance silence is offered above the group.
+		Scope::Global => return Ok(Vec::new()),
+	};
+	Ok(query.load(conn).await?)
+}
+
+/// [`instanced_states_covered_by`] for many silences at once: the states each
+/// of `silences` covers, in the order given.
+///
+/// Silences of a target's own check are read in one query for the lot, and a
+/// group silence in one query of its own, so presenting a page of silences
+/// costs a round trip per group silence rather than one per silence.
+// spec: CHK#silencing-one-instance
+pub async fn instanced_states_covered_by_each(
+	conn: &mut AsyncPgConnection,
+	silences: &[(Scope, &str, &Namespace, &str)],
+) -> Result<Vec<Vec<Issue>>> {
+	use crate::schema::issues;
+	use std::collections::HashMap;
+
+	let mut covered: Vec<Vec<Issue>> = vec![Vec::new(); silences.len()];
+	// Which silences name each target's own check. A target's state is the one
+	// filed at it, whatever the namespace, as in the single form.
+	let mut of_targets: HashMap<(Scope, &str, &str), Vec<usize>> = HashMap::new();
+	for (n, &(scope, source, namespace, r#ref)) in silences.iter().enumerate() {
+		match scope {
+			Scope::Application(_) | Scope::Machine(_) | Scope::Cluster(_) => {
+				of_targets
+					.entry((scope, source, r#ref))
+					.or_default()
+					.push(n);
+			}
+			Scope::Group(_) => {
+				covered[n] =
+					instanced_states_covered_by(conn, scope, source, namespace, r#ref).await?;
+			}
+			Scope::Global => {}
+		}
+	}
+	if of_targets.is_empty() {
+		return Ok(covered);
+	}
+
+	let mut application_ids = Vec::new();
+	let mut machine_ids = Vec::new();
+	let mut cluster_ids = Vec::new();
+	let mut sources = Vec::new();
+	let mut refs = Vec::new();
+	for &(scope, source, r#ref) in of_targets.keys() {
+		match scope {
+			Scope::Application(id) => application_ids.push(id),
+			Scope::Machine(id) => machine_ids.push(id),
+			Scope::Cluster(id) => cluster_ids.push(id),
+			Scope::Group(_) | Scope::Global => unreachable!("only targets are batched"),
+		}
+		sources.push(source);
+		refs.push(r#ref);
+	}
+	// The product of the three lists is wider than the pairs asked for, so
+	// each state is matched back to the silences naming exactly it.
+	let states: Vec<Issue> = issues::table
+		.select(Issue::as_select())
+		.filter(issues::instances.is_not_null())
+		.filter(issues::source.eq_any(&sources))
+		.filter(issues::ref_.eq_any(&refs))
+		.filter(
+			issues::application_id
+				.eq_any(&application_ids)
+				.or(issues::machine_id.eq_any(&machine_ids))
+				.or(issues::kubernetes_cluster_id.eq_any(&cluster_ids)),
+		)
+		.load(conn)
+		.await?;
+	for state in states {
+		let scope = Scope::from_columns(
+			state.application_id,
+			state.machine_id,
+			state.server_group_id,
+			state.kubernetes_cluster_id,
+		);
+		let Some(naming) = of_targets
+			.get(&(scope, state.source.as_str(), state.r#ref.as_str()))
+			.cloned()
+		else {
+			continue;
+		};
+		let (last, rest) = naming.split_last().expect("every entry names a silence");
+		for &n in rest {
+			covered[n].push(state.clone());
+		}
+		covered[*last].push(state);
+	}
+	Ok(covered)
+}
+
+/// Grade a check's stored states again from the instances they hold, after an
+/// instance silence covering them was set or lifted, and settle their incident
+/// membership on the result.
+///
+/// An instance silence can change what the whole check comes to: silencing
+/// the one failing instance leaves the check graded on the rest, so its
+/// effective result moves without any new observation. Re-checking membership
+/// alone, as a whole-check silence needs, would leave the state graded as it
+/// was until the next filing. So each state covered by `scope` is re-graded
+/// from its instances as last observed (their results and fields) and the
+/// inputs its last filing gave their rules ([`GradingInputs`]: the report's
+/// fields and the target's tags), through the policy as it now stands, so the
+/// silence is the only thing that changes. It is written back without counting
+/// as an observation: its stability record and when it was last reported are
+/// untouched. A state brought back into trouble presents the title its last
+/// filing gave it.
+///
+/// A state holding no instances is a check without them, which an instance
+/// silence never reaches, and is left alone.
+///
+/// Returns every state the silence covers ([`instanced_states_covered_by`]) as
+/// it now stands, so a caller presenting the silence reads them without asking
+/// again.
+///
+/// The message is Canopy's generic one for an instanced check, from the
+/// re-graded instances ([`GradedCheck::message`]). That is what a reported
+/// instanced check is filed with; Canopy's own instanced checks are filed with
+/// wording of their own, which their next sweep restores.
+// spec: CHK#silencing-one-instance
+pub async fn regrade_instanced_states(
+	conn: &mut AsyncPgConnection,
+	scope: Scope,
+	source: &str,
+	namespace: &Namespace,
+	r#ref: &str,
+) -> Result<Vec<Issue>> {
+	use crate::check_policies::{CheckPolicy, ScopedCheckPolicy};
+	use crate::schema::issues;
+	use std::collections::HashMap;
+
+	let mut states = instanced_states_covered_by(conn, scope, source, namespace, r#ref).await?;
+	let state_scope = |state: &Issue| {
+		Scope::from_columns(
+			state.application_id,
+			state.machine_id,
+			state.server_group_id,
+			state.kubernetes_cluster_id,
+		)
+	};
+	let regradable: Vec<(usize, StoredInstances, GradingInputs)> = states
+		.iter()
+		.enumerate()
+		.filter_map(|(at, state)| Some((at, state.stored_instances()?, state.grading_inputs()?)))
 		.collect();
-	Some(serde_json::json!({
-		"instances": instances,
-		"degraded": degraded.len(),
-		"total": all.len(),
-	}))
+	if regradable.is_empty() {
+		return Ok(states);
+	}
+
+	// A group silence covers every target in the group filing the check, so
+	// everything a state's grading reads that is not its own is loaded once
+	// for the lot: the targets, and per check name the catalog entry and
+	// every state's chain.
+	let targets = ScopeTargets::load(
+		conn,
+		regradable.iter().map(|(at, ..)| state_scope(&states[*at])),
+	)
+	.await?;
+	let check_of = |state: &Issue| {
+		state
+			.check_name
+			.clone()
+			.unwrap_or_else(|| r#ref.to_string())
+	};
+	let mut by_check: HashMap<String, Vec<usize>> = HashMap::new();
+	for (n, (at, ..)) in regradable.iter().enumerate() {
+		by_check.entry(check_of(&states[*at])).or_default().push(n);
+	}
+	let mut fleet = HashMap::with_capacity(by_check.len());
+	let mut chains: Vec<Vec<ScopedCheckPolicy>> = vec![Vec::new(); regradable.len()];
+	for (check, of) in &by_check {
+		fleet.insert(
+			check.clone(),
+			CheckPolicy::fleet_grading(conn, source, namespace, check).await?,
+		);
+		let scopes = of
+			.iter()
+			.map(|&n| targets.filing_scope(state_scope(&states[regradable[n].0])))
+			.collect::<Result<Vec<_>>>()?;
+		let loaded =
+			ScopedCheckPolicy::chains_for_filings(conn, source, namespace, check, &scopes).await?;
+		for (&n, chain) in of.iter().zip(loaded) {
+			chains[n] = chain;
+		}
+	}
+
+	for ((at, held, inputs), chain) in regradable.into_iter().zip(chains) {
+		let state = &states[at];
+		let check = check_of(state);
+		let grading = CheckGradingRef {
+			fleet: fleet.get(&check).and_then(Option::as_ref),
+			chain: &chain,
+		};
+		let outcome = if state.observed_result == Some(CheckResult::Broken) {
+			CheckOutcome::Broken
+		} else {
+			CheckOutcome::Instances(held.observed_instances())
+		};
+		let shared = match &state.detail {
+			Some(serde_json::Value::Object(shared)) => Some(shared),
+			_ => None,
+		};
+		let graded = grade_instances(
+			grading,
+			&inputs.context(source, &check),
+			shared,
+			outcome,
+			Some(state),
+		);
+		let active = matches!(
+			graded.effective,
+			CheckResult::Failed | CheckResult::Warning | CheckResult::Broken
+		);
+		let streak = DegradedStreak::after(
+			state.degraded_since,
+			state.last_degraded_at,
+			graded.effective,
+			Timestamp::now(),
+		);
+		let regraded: Issue = diesel::update(issues::table.filter(issues::id.eq(state.id)))
+			.set((
+				issues::observed_result.eq(graded.observed.to_string()),
+				issues::effective_result.eq(graded.effective.to_string()),
+				issues::escalates.eq(graded.escalates),
+				issues::instances.eq(graded
+					.stored_instances()
+					.map(|i| serde_json::to_value(i).expect("instances serialise"))),
+				issues::degraded_since.eq(streak.degraded_since),
+				issues::last_degraded_at.eq(streak.last_degraded_at),
+				issues::active.eq(active),
+				issues::message.eq(graded.message(&check)),
+				issues::description.eq(if active { state.title.clone() } else { None }),
+			))
+			.returning(Issue::as_select())
+			.get_result(conn)
+			.await?;
+
+		if let Some((target, monitored)) = targets.incident_target(state_scope(&regraded))? {
+			re_evaluate_membership(
+				conn,
+				&regraded,
+				target,
+				monitored,
+				Timestamp::now(),
+				None,
+				true,
+			)
+			.await?;
+		}
+		states[at] = regraded;
+	}
+	Ok(states)
 }
 
 /// Whether a `(source, check)` pair is Canopy's own reachability determination.
@@ -1727,6 +2195,8 @@ pub async fn health_from_check_state(
 			scoped_check_policies::check_name,
 		))
 		.filter(scoped_check_policies::ceiling.eq("skipped"))
+		// An instance silence quiets one instance, never the whole check.
+		.filter(scoped_check_policies::instance_key.is_null())
 		.filter(
 			scoped_check_policies::application_id
 				.eq_any(&server_ids)
@@ -1852,6 +2322,8 @@ pub async fn machine_health_from_check_state(
 				scoped_check_policies::check_name,
 			))
 			.filter(scoped_check_policies::ceiling.eq("skipped"))
+			// An instance silence quiets one instance, never the whole check.
+			.filter(scoped_check_policies::instance_key.is_null())
 			.filter(
 				scoped_check_policies::machine_id
 					.eq_any(&machine_ids)
@@ -1949,6 +2421,8 @@ pub async fn cluster_health_from_check_state(
 			scoped_check_policies::check_name,
 		))
 		.filter(scoped_check_policies::ceiling.eq("skipped"))
+		// An instance silence quiets one instance, never the whole check.
+		.filter(scoped_check_policies::instance_key.is_null())
 		.filter(scoped_check_policies::kubernetes_cluster_id.eq_any(cluster_ids))
 		.load::<(Uuid, String, String)>(conn)
 		.await?
@@ -2112,6 +2586,8 @@ async fn check_detail_at_grain(
 					scoped_check_policies::check_name,
 				))
 				.filter(scoped_check_policies::ceiling.eq("skipped"))
+				// An instance silence quiets one instance, never the whole check.
+				.filter(scoped_check_policies::instance_key.is_null())
 				.filter(
 					scoped_check_policies::application_id
 						.eq_any(&target_ids)
@@ -2131,6 +2607,8 @@ async fn check_detail_at_grain(
 					scoped_check_policies::check_name,
 				))
 				.filter(scoped_check_policies::ceiling.eq("skipped"))
+				// An instance silence quiets one instance, never the whole check.
+				.filter(scoped_check_policies::instance_key.is_null())
 				.filter(
 					scoped_check_policies::machine_id
 						.eq_any(&target_ids)
@@ -2218,6 +2696,7 @@ type ConsolidatedRow = (
 	Option<String>,
 	Option<String>,
 	Option<String>,
+	Option<serde_json::Value>,
 	Option<serde_json::Value>,
 );
 
@@ -2392,6 +2871,7 @@ async fn checks_at_scope(
 			issues::observed_result,
 			issues::effective_result,
 			issues::detail,
+			issues::instances,
 		))
 		.filter(issues::application_id.is_not_distinct_from(target_application))
 		.filter(issues::machine_id.is_not_distinct_from(target_machine))
@@ -2410,78 +2890,144 @@ async fn checks_at_scope(
 	};
 
 	let group_ids: Vec<Uuid> = group_id.into_iter().collect();
-	let silence_rows: Vec<(Option<String>, Option<String>, String, String)> =
-		scoped_check_policies::table
-			.select((
-				scoped_check_policies::subject,
-				scoped_check_policies::application_type,
-				scoped_check_policies::source,
-				scoped_check_policies::check_name,
-			))
-			.filter(scoped_check_policies::ceiling.eq("skipped"))
-			.filter(
-				scoped_check_policies::application_id
-					.is_not_distinct_from(target_application)
-					.and(scoped_check_policies::machine_id.is_not_distinct_from(target_machine))
-					.and(scoped_check_policies::server_group_id.is_null())
-					.and(
-						scoped_check_policies::kubernetes_cluster_id
-							.is_not_distinct_from(target_cluster),
-					)
-					.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
-			)
-			.load(conn)
-			.await?;
+	#[allow(clippy::type_complexity)]
+	let silence_rows: Vec<(
+		Option<String>,
+		Option<String>,
+		String,
+		String,
+		Option<String>,
+		Option<Uuid>,
+	)> = scoped_check_policies::table
+		.select((
+			scoped_check_policies::subject,
+			scoped_check_policies::application_type,
+			scoped_check_policies::source,
+			scoped_check_policies::check_name,
+			scoped_check_policies::instance_key,
+			scoped_check_policies::server_group_id,
+		))
+		.filter(scoped_check_policies::ceiling.eq("skipped"))
+		.filter(
+			scoped_check_policies::application_id
+				.is_not_distinct_from(target_application)
+				.and(scoped_check_policies::machine_id.is_not_distinct_from(target_machine))
+				.and(scoped_check_policies::server_group_id.is_null())
+				.and(
+					scoped_check_policies::kubernetes_cluster_id
+						.is_not_distinct_from(target_cluster),
+				)
+				.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
+		)
+		.load(conn)
+		.await?;
 	// This is one target, so a matching check at either its own scope or its
 	// group's means silenced here. The namespace has to match too: a group
 	// spans several application types, so a silence on one type's `version` is
 	// not a silence on another type's.
-	let silenced: HashSet<(Namespace, String, String)> = silence_rows
+	//
+	// An instance silence quiets one instance, never the whole check, so it is
+	// kept apart, by key and by whether it is the target's own or its group's.
+	// spec: CHK#silencing-one-instance
+	//
+	// Both are keyed on borrowed data so that looking a check, or each of its
+	// instances, up allocates nothing.
+	let silence_rows: Vec<_> = silence_rows
 		.into_iter()
-		.filter_map(|(subject, ty, source, check)| {
+		.filter_map(|(subject, ty, source, check, instance, group)| {
 			let ns = Namespace::from_columns(subject.as_deref(), ty.as_deref()).ok()?;
-			Some((ns, source, check))
+			Some((ns, source, check, instance, group))
 		})
 		.collect();
+	type CheckKey<'a> = (&'a Namespace, &'a str, &'a str);
+	let mut silenced: HashSet<CheckKey<'_>> = HashSet::new();
+	let mut instance_silences: std::collections::HashMap<
+		CheckKey<'_>,
+		std::collections::HashMap<&str, (bool, bool)>,
+	> = std::collections::HashMap::new();
+	for (ns, source, check, instance, group) in &silence_rows {
+		match instance {
+			None => {
+				silenced.insert((ns, source.as_str(), check.as_str()));
+			}
+			Some(key) => {
+				let flags = instance_silences
+					.entry((ns, source.as_str(), check.as_str()))
+					.or_default()
+					.entry(key.as_str())
+					.or_default();
+				if group.is_some() {
+					flags.1 = true;
+				} else {
+					flags.0 = true;
+				}
+			}
+		}
+	}
 
 	let mut checks: Vec<ConsolidatedCheck> = rows
 		.into_iter()
-		.filter_map(|(source, check_name, observed, effective, detail)| {
-			let check = check_name?;
-			if !include_reachability && is_reachability(&source, &check) {
-				return None;
-			}
-			let namespace = Namespace::of(&source, &check, application_type.as_ref())?;
-			if !crate::check_policies::CheckPolicy::live_in(cataloged, &source, &namespace, &check)
-			{
-				return None;
-			}
-			let stored: CheckResult = effective.as_deref().and_then(|e| e.parse().ok())?;
-			let is_silenced =
-				silenced.contains(&(namespace.clone(), source.clone(), check.clone()));
-			// A silence is a scoped ceiling of `skipped`: cap the effective
-			// result here so the live view matches both the health rollup
-			// (which excludes silenced checks) and the snapshot path (which
-			// re-grades through `apply_scoped`). The stored effective may
-			// still read failed/warning if the silence post-dates the last
-			// push — the observed result keeps what was reported.
-			let effective = if is_silenced {
-				CheckResult::Skipped
-			} else {
-				stored
-			};
-			Some(ConsolidatedCheck {
-				silenced: is_silenced,
-				observed: observed.as_deref().and_then(|o| o.parse().ok()),
-				qualified_name: namespace.qualified_name(&check),
-				namespace: (&namespace).into(),
-				source,
-				check,
-				effective,
-				detail: detail.unwrap_or_else(|| serde_json::json!({})),
-				subject,
-			})
-		})
+		.filter_map(
+			|(source, check_name, observed, effective, detail, instances)| {
+				let check = check_name?;
+				if !include_reachability && is_reachability(&source, &check) {
+					return None;
+				}
+				let namespace = Namespace::of(&source, &check, application_type.as_ref())?;
+				if !crate::check_policies::CheckPolicy::live_in(
+					cataloged, &source, &namespace, &check,
+				) {
+					return None;
+				}
+				let stored: CheckResult = effective.as_deref().and_then(|e| e.parse().ok())?;
+				let is_silenced = silenced.contains(&(&namespace, source.as_str(), check.as_str()));
+				// A silence is a scoped ceiling of `skipped`: cap the effective
+				// result here so the live view matches both the health rollup
+				// (which excludes silenced checks) and the snapshot path (which
+				// re-grades through `apply_scoped`). The stored effective may
+				// still read failed/warning if the silence post-dates the last
+				// push — the observed result keeps what was reported.
+				let effective = if is_silenced {
+					CheckResult::Skipped
+				} else {
+					stored
+				};
+				// The state's instances as their last grading left them: an
+				// instance silence re-grades the state when it is set or lifted,
+				// so the stored results already account for it.
+				let presented = instances
+					.and_then(|stored| {
+						serde_json::from_value::<StoredInstances>(stored)
+							.inspect_err(|err| tracing::warn!(?err, "unreadable stored instances"))
+							.ok()
+					})
+					.map(|stored| {
+						let check_silences =
+							instance_silences.get(&(&namespace, source.as_str(), check.as_str()));
+						stored.presented(is_silenced, |key| {
+							check_silences
+								.and_then(|silences| silences.get(key))
+								.copied()
+								.unwrap_or_default()
+						})
+					})
+					.unwrap_or_default();
+				Some(ConsolidatedCheck {
+					silenced: is_silenced,
+					observed: observed.as_deref().and_then(|o| o.parse().ok()),
+					qualified_name: namespace.qualified_name(&check),
+					namespace: (&namespace).into(),
+					source,
+					check,
+					effective,
+					detail: detail.unwrap_or_else(|| serde_json::json!({})),
+					subject,
+					instances: presented.listed,
+					passing_instances: presented.passing,
+					skipped_instances: presented.skipped,
+				})
+			},
+		)
 		.collect();
 	// Reachability presents for every target, whether or not a reporter has
 	// ever gone quiet. The sweep only files this check while it's degraded
@@ -2507,9 +3053,9 @@ async fn checks_at_scope(
 	{
 		// Reachability is canopy's own, so it is flat whatever the target.
 		let is_silenced = silenced.contains(&(
-			Namespace::Flat,
-			reachability.0.clone(),
-			reachability.1.clone(),
+			&Namespace::Flat,
+			reachability.0.as_str(),
+			reachability.1.as_str(),
 		));
 		checks.push(ConsolidatedCheck {
 			silenced: is_silenced,
@@ -2525,6 +3071,9 @@ async fn checks_at_scope(
 			},
 			detail: serde_json::json!({}),
 			subject,
+			instances: Vec::new(),
+			passing_instances: 0,
+			skipped_instances: 0,
 		});
 	}
 
@@ -2657,6 +3206,25 @@ async fn re_evaluate_incident_membership(
 	monitored: bool,
 	transition_time: Timestamp,
 	by: Option<&str>,
+) -> Result<()> {
+	re_evaluate_membership(conn, issue, target, monitored, transition_time, by, false).await
+}
+
+/// [`re_evaluate_incident_membership`], told whether the issue's current state
+/// is an operator's doing rather than the check's own.
+///
+/// An instance silence re-grades a state (see [`regrade_instanced_states`]),
+/// so a state it leaves passing reads as recovered. It is an operator's
+/// action all the same, and like any silence it closes the incident rather
+/// than lingering as a recovery would.
+async fn re_evaluate_membership(
+	conn: &mut AsyncPgConnection,
+	issue: &Issue,
+	target: IncidentTarget,
+	monitored: bool,
+	transition_time: Timestamp,
+	by: Option<&str>,
+	operator_regraded: bool,
 ) -> Result<()> {
 	use crate::schema::{incident_issues, incidents};
 
@@ -2802,8 +3370,10 @@ async fn re_evaluate_incident_membership(
 			// silence, and monitoring-off are explicit operator actions — not
 			// flaps — and close immediately, Slack resolve attributed where
 			// `by` is known.
-			let check_recovery =
-				!issue.active && issue.resolved_at.is_none() && !snoozed && !silenced && monitored;
+			let check_recovery = !issue.active
+				&& issue.resolved_at.is_none()
+				&& !snoozed && !silenced
+				&& monitored && !operator_regraded;
 			leave_open_incident(conn, issue, transition_time, by, check_recovery).await?;
 		}
 		_ => {
@@ -3230,21 +3800,30 @@ pub async fn reevaluate_open_issues_for_group_ref(
 	source: &str,
 	r#ref: &str,
 ) -> Result<()> {
-	use crate::schema::{applications, issues};
+	use crate::schema::{applications, issues, machines};
 
 	let server_ids: Vec<Uuid> = applications::table
 		.select(applications::id)
 		.filter(applications::group_id.eq(server_group_id))
 		.load(db)
 		.await?;
+	let machine_ids: Vec<Uuid> = machines::table
+		.select(machines::id)
+		.filter(machines::group_id.eq(server_group_id))
+		.load(db)
+		.await?;
 
-	// Both the group's server-scoped issues and any group-scoped issues
-	// (server_group_id = this group) that match the silenced (source, ref).
+	// The group's application- and machine-scoped issues, and any
+	// group-scoped issues (server_group_id = this group), that match the
+	// silenced (source, ref). A machine's checks are silenced against its
+	// group as an application's are.
+	// spec: CHK#silences-follow-the-event
 	let open_issues: Vec<Issue> = issues::table
 		.select(Issue::as_select())
 		.filter(
 			issues::application_id
 				.eq_any(&server_ids)
+				.or(issues::machine_id.eq_any(&machine_ids))
 				.or(issues::server_group_id.eq(server_group_id)),
 		)
 		.filter(issues::source.eq(source))

@@ -58,6 +58,8 @@ async fn record_check(
 		effective: result,
 		escalates: false,
 		detail: None,
+		title: None,
+		instanced: None,
 	};
 	NewEvent {
 		source: "test".into(),

@@ -42,7 +42,7 @@ pub fn conditions(object: &Value) -> Vec<Condition> {
 		.collect()
 }
 
-/// Grade one pool.
+/// Grade one pool, as the instance its name keys.
 ///
 /// A pool fails when it is not ready, or when the nodes it launches do not
 /// register. A pool that is not ready only because its node class is not is
@@ -73,7 +73,8 @@ pub fn grade(pool: &str, conditions: &[Condition]) -> SubstrateInstance {
 
 	match failing {
 		Some(condition) => SubstrateInstance {
-			label: pool.to_owned(),
+			key: pool.to_owned(),
+			label: None,
 			observed: CheckResult::Failed,
 			detail: Some(json!({
 				"pool": pool,
@@ -83,37 +84,11 @@ pub fn grade(pool: &str, conditions: &[Condition]) -> SubstrateInstance {
 			})),
 		},
 		None => SubstrateInstance {
-			label: pool.to_owned(),
+			key: pool.to_owned(),
+			label: None,
 			observed: CheckResult::Passed,
 			detail: Some(json!({ "pool": pool })),
 		},
-	}
-}
-
-/// What an operator reads for the check as a whole: the failing pools, each
-/// with what Karpenter said about it.
-pub fn message(instances: &[SubstrateInstance]) -> String {
-	let failing: Vec<String> = instances
-		.iter()
-		.filter(|i| i.observed != CheckResult::Passed)
-		.map(|i| {
-			let said = i
-				.detail
-				.as_ref()
-				.and_then(|d| d.get("message").and_then(Value::as_str))
-				.or_else(|| {
-					i.detail
-						.as_ref()
-						.and_then(|d| d.get("condition").and_then(Value::as_str))
-				})
-				.unwrap_or("not ready");
-			format!("{}: {said}", i.label)
-		})
-		.collect();
-	if failing.is_empty() {
-		format!("{} node pools healthy", instances.len())
-	} else {
-		failing.join("; ")
 	}
 }
 
@@ -152,7 +127,7 @@ mod tests {
 			],
 		);
 		assert_eq!(i.observed, CheckResult::Passed);
-		assert_eq!(i.label, "general");
+		assert_eq!(i.key, "general");
 	}
 
 	#[test]
@@ -207,14 +182,5 @@ mod tests {
 			grade("new", &[cond(READY, "Unknown")]).observed,
 			CheckResult::Passed
 		);
-	}
-
-	#[test]
-	fn the_message_names_each_failing_pool() {
-		let instances = [
-			grade("general", &[cond(READY, "True")]),
-			grade("gpu", &[cond(NODE_REGISTRATION_HEALTHY, "False")]),
-		];
-		assert_eq!(message(&instances), "gpu: NodeRegistrationHealthy is False");
 	}
 }

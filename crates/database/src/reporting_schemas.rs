@@ -522,7 +522,7 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 	use crate::{
 		applications::Application,
 		backup::{refs, staleness::applications_with_open_issue},
-		issues::{CheckInstance, GradedInstance, Scope},
+		issues::{CheckInstance, GradedCheck, Scope},
 		restore::{RestoreCheck, file_restore_check},
 		server_groups::ServerGroup,
 	};
@@ -586,7 +586,8 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 				}
 
 				CheckInstance {
-					label: pair.version.clone(),
+					key: pair.version.clone(),
+					label: None,
 					observed: match pair.state {
 						PairState::Built => CheckResult::Passed,
 						_ => CheckResult::Warning,
@@ -608,11 +609,11 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 				gone: &format!("No reporting schema is owed for {}", group.name),
 			},
 			instances,
-			&move |degraded: &[GradedInstance]| match degraded {
+			&move |graded: &GradedCheck| match graded.degraded().as_slice() {
 				[] => format!("Reporting schemas are built for every version {name} runs"),
 				[one] => format!(
 					"No reporting schema for {name} on {}: {}",
-					one.label,
+					one.name(),
 					one.detail
 						.as_ref()
 						.and_then(|d| d.get("why"))
@@ -622,10 +623,7 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 				many => format!(
 					"No reporting schema for {} of {total} versions {name} runs: {}",
 					many.len(),
-					many.iter()
-						.map(|i| i.label.as_str())
-						.collect::<Vec<_>>()
-						.join(", ")
+					many.iter().map(|i| i.name()).collect::<Vec<_>>().join(", ")
 				),
 			},
 		)

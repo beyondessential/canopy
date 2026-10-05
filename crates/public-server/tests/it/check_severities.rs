@@ -103,7 +103,7 @@ async fn endpoint_maps_catalog_severities_and_silences() {
 			// Silences: flaky at server scope, groupwide at group scope; a
 			// silence on a canopy check (a reserved source, outside the
 			// health/ namespace) must not leak into alertd's map.
-			ServerSilencedRef::add(&mut conn, server_id, "alertd", "health/flaky", None)
+			ServerSilencedRef::add(&mut conn, server_id, "alertd", "health/flaky", None, None)
 				.await
 				.expect("server silence");
 			ServerGroupSilencedRef::add(
@@ -113,10 +113,11 @@ async fn endpoint_maps_catalog_severities_and_silences() {
 				"health/groupwide",
 				Some(&ApplicationType::TamanuFacility),
 				None,
+				None,
 			)
 			.await
 			.expect("group silence");
-			ServerSilencedRef::add(&mut conn, server_id, "canopy", "reachability", None)
+			ServerSilencedRef::add(&mut conn, server_id, "canopy", "reachability", None, None)
 				.await
 				.expect("canopy silence");
 
@@ -150,9 +151,16 @@ async fn endpoint_works_for_ungrouped_server() {
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = insert_server(&mut conn, Some(device_id), None).await;
 			seed_catalog(&mut conn, "disk_space", "failed", None).await;
-			ServerSilencedRef::add(&mut conn, server_id, "alertd", "health/disk_space", None)
-				.await
-				.expect("silence");
+			ServerSilencedRef::add(
+				&mut conn,
+				server_id,
+				"alertd",
+				"health/disk_space",
+				None,
+				None,
+			)
+			.await
+			.expect("silence");
 
 			let response = public
 				.get(&format!("/status/{server_id}/check-severities"))
@@ -176,9 +184,16 @@ async fn status_response_carries_check_severities() {
 
 			seed_catalog(&mut conn, "disk_space", "failed", None).await;
 			seed_catalog(&mut conn, "cert_expiry", "failed", None).await;
-			ServerSilencedRef::add(&mut conn, server_id, "alertd", "health/cert_expiry", None)
-				.await
-				.expect("silence");
+			ServerSilencedRef::add(
+				&mut conn,
+				server_id,
+				"alertd",
+				"health/cert_expiry",
+				None,
+				None,
+			)
+			.await
+			.expect("silence");
 
 			let response = public
 				.post(&format!("/status/{server_id}"))

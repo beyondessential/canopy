@@ -815,6 +815,8 @@ mod tests {
 			effective: CheckResult::Failed,
 			escalates: false,
 			detail: None,
+			title: None,
+			instanced: None,
 		};
 		database::issues::NewEvent {
 			source: "test".into(),

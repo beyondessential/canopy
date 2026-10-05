@@ -2,6 +2,7 @@ import {
 	Alert,
 	Box,
 	Button,
+	Chip,
 	LinearProgress,
 	Paper,
 	Stack,
@@ -13,6 +14,7 @@ import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { qualifiedSilenceRef, namespaceSegment, type NamespaceRef } from "../types";
 import { GradedAction } from "./GradedAction";
+import InstanceName from "./InstanceName";
 import TimeAgo from "./TimeAgo";
 
 type SilenceScope = "server" | "machine" | "cluster" | "group";
@@ -111,12 +113,15 @@ export default function SilencedRefsSection({
 					<SilencedRow
 						key={`${row.source}\x00${namespaceSegment(
 							"namespace" in row ? row.namespace : undefined,
-						)}\x00${row.ref}`}
+						)}\x00${row.ref}\x00${row.instance ?? ""}`}
 						scope={scope}
 						id={id}
 						source={row.source}
 						namespace={"namespace" in row ? row.namespace : null}
 						refName={row.ref}
+						instance={row.instance ?? null}
+						instanceLabel={row.instance_label ?? null}
+						instanceReported={row.instance_reported ?? null}
 						createdAt={row.created_at}
 						createdBy={row.created_by ?? null}
 						isAdmin={isAdmin}
@@ -160,6 +165,9 @@ function SilencedRow({
 	source,
 	namespace,
 	refName,
+	instance,
+	instanceLabel,
+	instanceReported,
 	createdAt,
 	createdBy,
 	isAdmin,
@@ -173,6 +181,13 @@ function SilencedRow({
 	 * or machine's own silences need none: the target fixes the namespace. */
 	namespace: NamespaceRef | null;
 	refName: string;
+	/** The instance key an instance silence names; `null` for the whole check. */
+	instance: string | null;
+	/** The silenced instance's label, where the check reports one for it. */
+	instanceLabel: string | null;
+	/** Whether the check currently reports the silenced instance's key;
+	 * `null` for a whole-check silence. */
+	instanceReported: boolean | null;
 	createdAt: string;
 	createdBy: string | null;
 	isAdmin: boolean;
@@ -203,14 +218,15 @@ function SilencedRow({
 	const unsilence = async () => {
 		try {
 			if (scope === "server") {
-				await unsilenceServer.call({ server_id: id, source, ref: refName });
+				await unsilenceServer.call({ server_id: id, source, ref: refName, instance });
 			} else if (scope === "machine") {
-				await unsilenceMachine.call({ machine_id: id, source, ref: refName });
+				await unsilenceMachine.call({ machine_id: id, source, ref: refName, instance });
 			} else if (scope === "cluster") {
 				await unsilenceCluster.call({
 					kubernetes_cluster_id: id,
 					source,
 					ref: refName,
+					instance,
 				});
 			} else {
 				await unsilenceGroup.call({
@@ -218,6 +234,7 @@ function SilencedRow({
 					source,
 					ref: refName,
 					application_type: namespace?.application_type ?? null,
+					instance,
 				});
 			}
 			onChanged();
@@ -247,6 +264,22 @@ function SilencedRow({
 				>
 					{source}/{qualifiedSilenceRef(namespace ?? undefined, refName)}
 				</Typography>
+				{instance && (
+					<Stack
+						direction="row"
+						spacing={1}
+						sx={{ alignItems: "center" }}
+						data-testid="silenced-instance"
+					>
+						<InstanceName instanceKey={instance} label={instanceLabel} />
+						{/* A silence that has outlived its instance stays until an
+						    operator clears it, so it says so.
+						    spec: CHK#silencing-one-instance */}
+						{instanceReported === false && (
+							<Chip size="small" variant="outlined" label="not reported" />
+						)}
+					</Stack>
+				)}
 				<Box sx={{ flex: 1 }} />
 				<Typography variant="caption" color="text.secondary">
 					silenced <TimeAgo timestamp={createdAt} />

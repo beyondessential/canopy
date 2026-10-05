@@ -39,6 +39,7 @@ mod incident_reeval_queue;
 mod incident_result_semantics;
 mod incident_stats;
 mod incident_stranded_membership;
+mod instanced_checks;
 mod inventory_variables;
 mod issue_list_filters;
 mod machine_enrollment;

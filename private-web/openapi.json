@@ -11665,6 +11665,27 @@
             ],
             "description": "The operator who created this silence. `None` if not recorded."
           },
+          "instance": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The one instance of the check this silence quiets, by key. `None`\nsilences the whole check."
+          },
+          "instance_label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The silenced instance's label, as the check's current state names it.\n`None` for a whole-check silence, an instance without a label, or a key\nthe check does not currently report."
+          },
+          "instance_reported": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the check currently reports the silenced instance's key. `None`\nfor a whole-check silence. A silence that has outlived its instance is\npresented as such, so an operator can clear it."
+          },
           "kubernetes_cluster_id": {
             "type": "string",
             "format": "uuid",
@@ -11814,11 +11835,18 @@
           },
           "detail": {
             "type": "object",
-            "description": "The detail the source attached to the check (its extra fields), as an\nobject. Empty object when the check carried none."
+            "description": "The detail the source attached to the check (its extra fields), as an\nobject. Empty object when the check carried none. For a check with\ninstances, the fields its instances share; each instance's own are on\nthe instance."
           },
           "effective": {
             "type": "string",
             "description": "The result after policy grading — what everything acts on and what\nthe presentation colours by."
+          },
+          "instances": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConsolidatedInstance"
+            },
+            "description": "The check's degraded and silenced instances, most urgent first, each\ngraded on its own. Empty for a check without instances, and for one\nnone of whose instances is degraded or silenced."
           },
           "namespace": {
             "$ref": "#/components/schemas/NamespaceRef",
@@ -11831,6 +11859,11 @@
             ],
             "description": "What the source reported, before policy. `None` if the stored state\ncarried no observed result."
           },
+          "passing_instances": {
+            "type": "integer",
+            "description": "How many of the check's instances passed, counted rather than listed.\n0 for a check without instances.",
+            "minimum": 0
+          },
           "qualified_name": {
             "type": "string",
             "description": "How the check reads to an operator: `<type>.<check>` where it is one\napplication type's, the bare name otherwise."
@@ -11838,6 +11871,11 @@
           "silenced": {
             "type": "boolean",
             "description": "Whether this check is silenced at server or group scope."
+          },
+          "skipped_instances": {
+            "type": "integer",
+            "description": "How many of the check's instances were skipped other than by a silence\n(reported skipped, or graded skipped by a rule), counted rather than\nlisted. Silenced instances are listed in `instances` instead, and a\ncheck silenced whole counts none. 0 for a check without instances.",
+            "minimum": 0
           },
           "source": {
             "type": "string",
@@ -11867,6 +11905,51 @@
           "health_state": {
             "$ref": "#/components/schemas/HealthState",
             "description": "The rolled-up health over these checks, by the one classifier."
+          }
+        }
+      },
+      "ConsolidatedInstance": {
+        "type": "object",
+        "description": "One instance of a check, as a target's checks present it: one of a\ncentral's devices, one of a machine's backup types.",
+        "required": [
+          "key",
+          "observed",
+          "effective",
+          "detail",
+          "silenced_on_target",
+          "silenced_on_group"
+        ],
+        "properties": {
+          "detail": {
+            "type": "object",
+            "description": "The instance's own fields, as an object; the ones it shares with the\ncheck's other instances are the check's `detail`."
+          },
+          "effective": {
+            "type": "string",
+            "description": "The instance's result after policy."
+          },
+          "key": {
+            "type": "string",
+            "description": "Which instance this is, unique within the check on its target. An\ninstance silence names it."
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "How the instance is named to an operator. Absent where the instance\ncarries none, in which case it is named by its key."
+          },
+          "observed": {
+            "type": "string",
+            "description": "What the instance observed, before policy."
+          },
+          "silenced_on_group": {
+            "type": "boolean",
+            "description": "Whether an instance silence at the target's group quiets this instance."
+          },
+          "silenced_on_target": {
+            "type": "boolean",
+            "description": "Whether an instance silence at the check's own target (its application,\nmachine or cluster) quiets this instance."
           }
         }
       },
@@ -13275,7 +13358,7 @@
         "properties": {
           "check_extra": {
             "type": "object",
-            "description": "The sampled check's own reported fields (excluding its name and\npass/fail flag), available to conditional rules under the\n`check.<field>` namespace.",
+            "description": "The sampled check's own reported fields and its `result`, available to\nconditional rules under the `check.<field>` namespace. A check with\ninstances is shown as a rule reads its most urgent instance: that\ninstance's fields merged over the check's shared ones, and its result.",
             "additionalProperties": {
               "$ref": "#/components/schemas/Value"
             },
@@ -14104,6 +14187,7 @@
           "last_seen",
           "created_at",
           "updated_at",
+          "instances",
           "incidents"
         ],
         "properties": {
@@ -14139,7 +14223,7 @@
             "description": "Short headline describing the issue, if one was given."
           },
           "detail": {
-            "description": "The check's own fields from the latest report, verbatim."
+            "description": "The check's own fields from the latest report, verbatim. For a check\nwith instances, the fields its instances share."
           },
           "device_id": {
             "type": [
@@ -14176,6 +14260,13 @@
               "$ref": "#/components/schemas/IssueIncidentLink"
             },
             "description": "Incidents this issue is or was attached to, most recent first. Empty\nfor issues that never escalated into an incident."
+          },
+          "instances": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IssueInstanceData"
+            },
+            "description": "The check's degraded instances, most urgent first, for silencing one of\nthem from the issue. Empty for a check without instances."
           },
           "last_seen": {
             "type": "string",
@@ -14364,6 +14455,31 @@
             "type": "string",
             "format": "date-time",
             "description": "When the incident was opened."
+          }
+        }
+      },
+      "IssueInstanceData": {
+        "type": "object",
+        "description": "One degraded instance of the check behind an issue.",
+        "required": [
+          "key",
+          "effective"
+        ],
+        "properties": {
+          "effective": {
+            "type": "string",
+            "description": "The instance's result after policy."
+          },
+          "key": {
+            "type": "string",
+            "description": "Which instance this is, unique within the check on its target. An\ninstance silence names it."
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "How the instance is named to an operator. Absent where the instance\ncarries none, in which case it is named by its key."
           }
         }
       },
@@ -15422,6 +15538,27 @@
               "null"
             ],
             "description": "The operator who created this silence. `None` if not recorded."
+          },
+          "instance": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The one instance of the check this silence quiets, by key. `None`\nsilences the whole check."
+          },
+          "instance_label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The silenced instance's label, as the check's current state names it.\n`None` for a whole-check silence, an instance without a label, or a key\nthe check does not currently report."
+          },
+          "instance_reported": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the check currently reports the silenced instance's key. `None`\nfor a whole-check silence. A silence that has outlived its instance is\npresented as such, so an operator can clear it."
           },
           "machine_id": {
             "type": "string",
@@ -19004,6 +19141,27 @@
             ],
             "description": "The operator who created this silence. `None` if not recorded."
           },
+          "instance": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The one instance of the check this silence quiets, by key. `None`\nsilences the whole check."
+          },
+          "instance_label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The silenced instance's label, as the check's current state names it.\n`None` for a whole-check silence, an instance without a label, or a key\nthe check does not currently report."
+          },
+          "instance_reported": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the check currently reports the silenced instance's key. `None`\nfor a whole-check silence. A silence that has outlived its instance is\npresented as such, so an operator can clear it."
+          },
           "namespace": {
             "$ref": "#/components/schemas/NamespaceRef",
             "description": "Which catalog entry this silence quiets. A group covers several\napplication types, so two of them reporting one check name are two\nsilences here, and the ref alone does not tell them apart."
@@ -19489,6 +19647,27 @@
             ],
             "description": "The operator who created this silence. `None` if not recorded."
           },
+          "instance": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The one instance of the check this silence quiets, by key. `None`\nsilences the whole check."
+          },
+          "instance_label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The silenced instance's label, as the check's current state names it.\n`None` for a whole-check silence, an instance without a label, or a key\nthe check does not currently report."
+          },
+          "instance_reported": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the check currently reports the silenced instance's key. `None`\nfor a whole-check silence. A silence that has outlived its instance is\npresented as such, so an operator can clear it."
+          },
           "ref": {
             "type": "string",
             "description": "The issue reference this silence matches."
@@ -19747,6 +19926,13 @@
           "ref"
         ],
         "properties": {
+          "instance": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "One instance of the check to silence (or unsilence), by its key.\nOmitted or `null` is the whole check. A key is never empty."
+          },
           "kubernetes_cluster_id": {
             "type": "string",
             "format": "uuid",
@@ -19778,6 +19964,13 @@
             ],
             "description": "Which application type's check is meant, for a check named by an\napplication rather than by a box. A group covers several types, so the\ncaller names the one it is silencing from; `null` is a machine's check\nor a curated source's."
           },
+          "instance": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "One instance of the check to silence (or unsilence), by its key.\nOmitted or `null` is the whole check. A key is never empty."
+          },
           "ref": {
             "type": "string",
             "description": "The specific issue identifier within `source` to silence."
@@ -19802,6 +19995,13 @@
           "ref"
         ],
         "properties": {
+          "instance": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "One instance of the check to silence (or unsilence), by its key.\nOmitted or `null` is the whole check. A key is never empty."
+          },
           "machine_id": {
             "type": "string",
             "format": "uuid",
@@ -19826,6 +20026,13 @@
           "ref"
         ],
         "properties": {
+          "instance": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "One instance of the check to silence (or unsilence), by its key.\nOmitted or `null` is the whole check. A key is never empty."
+          },
           "ref": {
             "type": "string",
             "description": "The specific issue identifier within `source` to silence."

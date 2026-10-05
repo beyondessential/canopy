@@ -12,7 +12,6 @@
 //!   read, and the detail says the tailnet half was not.
 
 use commons_types::status::CheckResult;
-use relay_protocol::SubstrateInstance;
 use serde_json::{Value, json};
 
 use super::{Determination, workloads::Replicas};
@@ -115,19 +114,17 @@ fn proxy_groups(groups: &[ProxyGroup]) -> Determination {
 			),
 		),
 	};
-	Determination {
-		instances: vec![SubstrateInstance::only(
-			observed,
-			Some(json!({
-				"mode": "proxy-group",
-				"proxy": shown.name,
-				"ready": shown.available,
-				"connected": !shown.devices.is_empty(),
-				"devices": shown.devices,
-			})),
-		)],
+	Determination::once(
+		observed,
+		json!({
+			"mode": "proxy-group",
+			"proxy": shown.name,
+			"ready": shown.available,
+			"connected": !shown.devices.is_empty(),
+			"devices": shown.devices,
+		}),
 		message,
-	}
+	)
 }
 
 fn operator(name: &str, replicas: Replicas) -> Determination {
@@ -143,20 +140,18 @@ fn operator(name: &str, replicas: Replicas) -> Determination {
 			format!("the Tailscale operator {name}, which serves the API proxy, is not ready"),
 		)
 	};
-	Determination {
-		instances: vec![SubstrateInstance::only(
-			observed,
-			Some(json!({
-				"mode": "in-process",
-				"proxy": name,
-				"ready": ready,
-				// The operator reports nothing about its own tailnet
-				// connection, so this half is not read.
-				"connected": null,
-			})),
-		)],
+	Determination::once(
+		observed,
+		json!({
+			"mode": "in-process",
+			"proxy": name,
+			"ready": ready,
+			// The operator reports nothing about its own tailnet
+			// connection, so this half is not read.
+			"connected": null,
+		}),
 		message,
-	}
+	)
 }
 
 #[cfg(test)]
@@ -190,20 +185,17 @@ mod tests {
 	fn a_proxy_group_serving_on_the_tailnet_passes() {
 		let g = ProxyGroup::read("api", &group("True", connected())).unwrap();
 		let d = determine(&[g], None).unwrap();
-		assert_eq!(d.instances[0].observed, CheckResult::Passed);
-		assert_eq!(
-			d.instances[0].detail.as_ref().unwrap()["mode"],
-			"proxy-group"
-		);
+		assert_eq!(d.single().observed, CheckResult::Passed);
+		assert_eq!(d.single().detail.as_ref().unwrap()["mode"], "proxy-group");
 	}
 
 	#[test]
 	fn a_proxy_group_not_ready_fails_and_says_so() {
 		let g = ProxyGroup::read("api", &group("False", connected())).unwrap();
 		let d = determine(&[g], None).unwrap();
-		assert_eq!(d.instances[0].observed, CheckResult::Failed);
-		assert_eq!(d.instances[0].detail.as_ref().unwrap()["ready"], false);
-		assert!(d.message.contains("no proxy ready"));
+		assert_eq!(d.single().observed, CheckResult::Failed);
+		assert_eq!(d.single().detail.as_ref().unwrap()["ready"], false);
+		assert!(d.message.as_deref().unwrap().contains("no proxy ready"));
 	}
 
 	#[test]
@@ -211,33 +203,38 @@ mod tests {
 		let off = json!([{"hostname": "api.tailnet.ts.net", "tailnetIPs": []}]);
 		let g = ProxyGroup::read("api", &group("True", off)).unwrap();
 		let d = determine(&[g], None).unwrap();
-		assert_eq!(d.instances[0].observed, CheckResult::Failed);
-		let detail = d.instances[0].detail.as_ref().unwrap();
+		assert_eq!(d.single().observed, CheckResult::Failed);
+		let detail = d.single().detail.as_ref().unwrap();
 		assert_eq!(detail["ready"], true);
 		assert_eq!(detail["connected"], false);
-		assert!(d.message.contains("not connected to the tailnet"));
+		assert!(
+			d.message
+				.as_deref()
+				.unwrap()
+				.contains("not connected to the tailnet")
+		);
 	}
 
 	#[test]
 	fn a_proxy_group_is_read_in_preference_to_the_operator() {
 		let g = ProxyGroup::read("api", &group("True", connected())).unwrap();
 		let d = determine(&[g], Some(("operator", Replicas::new(1, 0)))).unwrap();
-		assert_eq!(d.instances[0].observed, CheckResult::Passed);
+		assert_eq!(d.single().observed, CheckResult::Passed);
 	}
 
 	#[test]
 	fn an_in_process_proxy_is_graded_on_the_operators_readiness() {
 		let d = determine(&[], Some(("operator", Replicas::new(1, 1)))).unwrap();
-		assert_eq!(d.instances[0].observed, CheckResult::Passed);
-		let detail = d.instances[0].detail.as_ref().unwrap();
+		assert_eq!(d.single().observed, CheckResult::Passed);
+		let detail = d.single().detail.as_ref().unwrap();
 		assert_eq!(detail["mode"], "in-process");
 		assert_eq!(detail["connected"], Value::Null);
 
 		let d = determine(&[], Some(("operator", Replicas::new(1, 0)))).unwrap();
-		assert_eq!(d.instances[0].observed, CheckResult::Failed);
+		assert_eq!(d.single().observed, CheckResult::Failed);
 		let d = determine(&[], Some(("operator", Replicas::new(0, 0)))).unwrap();
 		assert_eq!(
-			d.instances[0].observed,
+			d.single().observed,
 			CheckResult::Failed,
 			"an operator scaled away serves no proxy",
 		);

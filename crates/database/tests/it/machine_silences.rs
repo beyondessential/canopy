@@ -90,7 +90,7 @@ async fn one_machine_silence_is_read_the_same_everywhere() {
 			"an unsilenced machine check counts toward an incident"
 		);
 
-		MachineSilencedRef::add(&mut conn, machine, SOURCE, REF, Some("op"))
+		MachineSilencedRef::add(&mut conn, machine, SOURCE, REF, None, Some("op"))
 			.await
 			.expect("silence");
 
@@ -142,7 +142,7 @@ async fn one_machine_silence_is_read_the_same_everywhere() {
 async fn a_machine_silence_does_not_reach_the_applications_on_it() {
 	TestDb::run(async |mut conn, _url| {
 		let (group, machine, application) = seed(&mut conn).await;
-		MachineSilencedRef::add(&mut conn, machine, SOURCE, REF, Some("op"))
+		MachineSilencedRef::add(&mut conn, machine, SOURCE, REF, None, Some("op"))
 			.await
 			.expect("silence");
 
@@ -174,6 +174,7 @@ async fn a_group_silence_covers_a_machine_in_it() {
 			REF,
 			// `disk_free` is the box's check, so there is no type to name.
 			None,
+			None,
 			Some("op"),
 		)
 		.await
@@ -198,7 +199,7 @@ async fn a_machine_silence_lists_and_lifts() {
 		// has to have been reported once.
 		file_machine_failure(&mut conn, machine).await;
 
-		MachineSilencedRef::add(&mut conn, machine, SOURCE, REF, Some("op"))
+		MachineSilencedRef::add(&mut conn, machine, SOURCE, REF, None, Some("op"))
 			.await
 			.expect("silence");
 		let listed = MachineSilencedRef::list_for_machine(&mut conn, machine)
@@ -209,7 +210,7 @@ async fn a_machine_silence_lists_and_lifts() {
 		assert_eq!(listed[0].r#ref, REF);
 		assert_eq!(listed[0].created_by.as_deref(), Some("op"));
 
-		MachineSilencedRef::remove(&mut conn, machine, SOURCE, REF)
+		MachineSilencedRef::remove(&mut conn, machine, SOURCE, REF, None)
 			.await
 			.expect("unsilence");
 		assert!(

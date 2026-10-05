@@ -2238,7 +2238,7 @@
         "allOf": [
           {
             "type": "object",
-            "description": "Arbitrary additional fields specific to this check (shown in the\nstatus UI as a key/value block, and available to operator-defined\nseverity rules)."
+            "description": "A check with a single result may carry its fields flat beside `check`\nand `result`, outside `detail`, and they are read as its detail. Not\naccepted together with `detail` or beside `instances`."
           },
           {
             "type": "object",
@@ -2250,12 +2250,29 @@
                 "type": "string",
                 "description": "Name of the check. Must be a non-empty string, and should stay stable\nacross pushes: results for the same name are correlated over time, so\nsuccessive failures and the eventual recovery land on the same issue."
               },
+              "detail": {
+                "type": "object",
+                "description": "The check's own fields (shown in the status UI as a key/value block,\nand read by operator-defined policy rules as `check.<field>`). For a\ncheck with `instances`, the fields its instances share; a rule reads an\ninstance's own field of the same name over it.\n\nMust be an object. A check with a single result may instead carry its\nfields flat beside `check` and `result` (see `extra`), but not both\nways at once; a check with `instances` carries its fields here only."
+              },
               "healthy": {
                 "type": [
                   "boolean",
                   "null"
                 ],
-                "description": "Legacy pass/fail form: `true` means `passed`, `false` means `failed`.\nMutually exclusive with `result`."
+                "description": "Legacy pass/fail form: `true` means `passed`, `false` means `failed`.\nMutually exclusive with `result` and `instances`."
+              },
+              "instances": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "The check's instances, in place of a `result`: one entry per instance\nof the check's condition (one per device, per resource, per mount),\nkeyed by an instance key the reporter chooses. A key must not be empty,\nmust be unique within the check, and must identify the same instance\nacross this reporter's pushes.\n\nThe set is the check's complete one: an instance left out of a push\nhas recovered, so passing instances are sent too, and an empty object\nrecovers every instance the check held. Each instance is graded\nthrough the check's policy on its own, and the check takes the most\nurgent result among the instances that were not skipped. Canopy writes\nthe check's message from its graded instances, naming the degraded ones\nby label.\n\nA check that could not run reports `result: broken` without instances:\nbrokenness belongs to the whole check, never to one instance.",
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/HealthCheckInstance"
+                },
+                "propertyNames": {
+                  "type": "string"
+                }
               },
               "result": {
                 "oneOf": [
@@ -2264,14 +2281,38 @@
                   },
                   {
                     "$ref": "#/components/schemas/CheckResult",
-                    "description": "Outcome of the check: `passed`, `warning`, `failed`, `broken`, or\n`skipped`. Exactly one of `result` / `healthy` must be present per\nentry. `warning` and `failed` open the check's issue as graded by\nits policy; `broken` (the check itself errored, not the system under\ntest) neither confirms nor clears a known failure — the issue stays\nopen, retaining its contribution; `skipped` (a precondition was\nnot met) and `passed` open nothing and close prior issues."
+                    "description": "Outcome of the check: `passed`, `warning`, `failed`, `broken`, or\n`skipped`. Exactly one of `result` / `healthy` / `instances` must be\npresent per entry. `warning` and `failed` open the check's issue as\ngraded by its policy; `broken` (the check itself errored, not the\nsystem under test) neither confirms nor clears a known failure — the\nissue stays open, retaining its contribution; `skipped` (a precondition\nwas not met) and `passed` open nothing and close prior issues."
                   }
                 ]
               }
             }
           }
         ],
-        "description": "One health-check result within a status push."
+        "description": "One health check within a status push: its name, its own detail, and either\na single result or a set of instances.\n\nExactly one of `result`, `healthy` and `instances` must be present."
+      },
+      "HealthCheckInstance": {
+        "type": "object",
+        "description": "One instance of a health check.",
+        "required": [
+          "result"
+        ],
+        "properties": {
+          "detail": {
+            "type": "object",
+            "description": "This instance's own fields. Must be an object. A rule reads them as\n`check.<field>`, over the check's shared `detail`."
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "How the instance is named to an operator, in the check's message and\nwherever it is listed. Without one, the instance is named by its key."
+          },
+          "result": {
+            "$ref": "#/components/schemas/CheckResult",
+            "description": "What this instance observed: `passed`, `warning`, `failed`, or\n`skipped`. Required. `broken` is refused, being the whole check's\nresult (report it as the check's own `result`, without instances), and\nthe legacy `healthy` boolean is not accepted on an instance."
+          }
+        }
       },
       "HeldCertificate": {
         "type": "object",
@@ -3096,7 +3137,7 @@
                 "items": {
                   "$ref": "#/components/schemas/HealthCheck"
                 },
-                "description": "Per-check breakdown. A push without a `health` array is the legacy\nTamanu direct-report format: it is treated as the `tamanu` source\nreporting a single always-passing `tasks` heartbeat check. May be\nempty (`[]`) for a source that genuinely runs no checks — which\nrecovers every check it previously reported. Each entry must\ninclude a non-empty `check` name and exactly one of `result` /\n`healthy`; any additional fields per check (latency, free disk %,\ncertificate expiry, etc.) are passed through verbatim and shown in the\nstatus UI.\n\nEvery check name seen — whatever its result — is added to the\noperator-facing check catalog, where the policy grading its results\ncan be reviewed and adjusted. A check whose effective result is\nfailed or warning opens (or keeps open) its issue; a broken check\nkeeps the same issue open, retaining a known failure's contribution\nwhile warning the check itself is broken; effective passed and\nskipped results open nothing and close prior issues."
+                "description": "Per-check breakdown. A push without a `health` array is the legacy\nTamanu direct-report format: it is treated as the `tamanu` source\nreporting a single always-passing `tasks` heartbeat check. May be\nempty (`[]`) for a source that genuinely runs no checks — which\nrecovers every check it previously reported. Each entry must\ninclude a non-empty `check` name and exactly one of `result` /\n`healthy` / `instances`; a check's own fields (latency, free disk %,\ncertificate expiry, etc.) go in its `detail`, or flat beside a single\nresult, and are recorded verbatim and shown in the status UI.\n\nEvery check name seen — whatever its result — is added to the\noperator-facing check catalog, where the policy grading its results\ncan be reviewed and adjusted. A check whose effective result is\nfailed or warning opens (or keeps open) its issue; a broken check\nkeeps the same issue open, retaining a known failure's contribution\nwhile warning the check itself is broken; effective passed and\nskipped results open nothing and close prior issues."
               },
               "healthy": {
                 "type": [

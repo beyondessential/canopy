@@ -115,11 +115,30 @@ pub struct IssueData {
 	/// acts on.
 	#[schema(value_type = Option<String>)]
 	pub effective_result: Option<CheckResult>,
-	/// The check's own fields from the latest report, verbatim.
+	/// The check's own fields from the latest report, verbatim. For a check
+	/// with instances, the fields its instances share.
 	pub detail: Option<serde_json::Value>,
+	/// The check's degraded instances, most urgent first, for silencing one of
+	/// them from the issue. Empty for a check without instances.
+	// spec: CHK#silencing-one-instance
+	pub instances: Vec<IssueInstanceData>,
 	/// Incidents this issue is or was attached to, most recent first. Empty
 	/// for issues that never escalated into an incident.
 	pub incidents: Vec<IssueIncidentLink>,
+}
+
+/// One degraded instance of the check behind an issue.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct IssueInstanceData {
+	/// Which instance this is, unique within the check on its target. An
+	/// instance silence names it.
+	pub key: String,
+	/// How the instance is named to an operator. Absent where the instance
+	/// carries none, in which case it is named by its key.
+	pub label: Option<String>,
+	/// The instance's result after policy.
+	#[schema(value_type = String)]
+	pub effective: CheckResult,
 }
 
 /// A reference to an incident that a given issue is or was part of, enough
@@ -164,6 +183,20 @@ struct IssueEnrichment<'a> {
 impl IssueData {
 	fn from_with(i: Issue, e: IssueEnrichment<'_>) -> Self {
 		let (res_name, res_pic) = lookup_user(e.users, i.resolved_by.as_deref());
+		let instances = i
+			.stored_instances()
+			.map(|stored| {
+				stored
+					.degraded_instances()
+					.into_iter()
+					.map(|(key, instance)| IssueInstanceData {
+						key: key.to_string(),
+						label: instance.label.clone(),
+						effective: instance.effective,
+					})
+					.collect()
+			})
+			.unwrap_or_default();
 		Self {
 			id: i.id,
 			application_id: i.application_id,
@@ -200,6 +233,7 @@ impl IssueData {
 			observed_result: i.observed_result,
 			effective_result: i.effective_result,
 			detail: i.detail,
+			instances,
 			incidents: e.incidents,
 		}
 	}

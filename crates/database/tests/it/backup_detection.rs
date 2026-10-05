@@ -409,14 +409,14 @@ struct DetailRow {
 	detail: Option<serde_json::Value>,
 }
 
-/// A check's stored detail, which is where the per-instance results live.
-async fn issue_detail(
+/// The instances a machine's check state holds, by key.
+async fn issue_instances(
 	conn: &mut AsyncPgConnection,
 	machine_id: Uuid,
 	r#ref: &str,
 ) -> Option<serde_json::Value> {
 	sql_query(
-		"SELECT detail FROM issues \
+		"SELECT instances AS detail FROM issues \
 		 WHERE machine_id = $1 AND source = $2 AND \"ref\" = $3",
 	)
 	.bind::<sql_types::Uuid, _>(machine_id)
@@ -936,12 +936,28 @@ async fn reconcile_files_missing_when_the_reported_snapshot_is_absent_from_the_r
 			message.contains("its snapshot is not in the repo"),
 			"the message describes the lookup that was made: {message}",
 		);
-		let detail = issue_detail(&mut conn, machine_id, mref)
+		let detail = issue_instances(&mut conn, machine_id, mref)
 			.await
-			.expect("detail recorded");
+			.expect("instances recorded");
+		let degraded: Vec<&serde_json::Value> = detail
+			.as_object()
+			.expect("instances by key")
+			.values()
+			.filter(|i| i["effective"] != "passed")
+			.collect();
 		assert_eq!(
-			detail["instances"][0]["snapshot_id"], "snap-reported",
+			degraded[0]["detail"]["snapshot_id"], "snap-reported",
 			"the id looked up is in the detail: {detail}",
+		);
+		assert_eq!(
+			detail
+				.as_object()
+				.unwrap()
+				.keys()
+				.map(String::as_str)
+				.collect::<Vec<_>>(),
+			[pg.as_str()],
+			"the instance is keyed by its backup type",
 		);
 	})
 	.await;
@@ -1652,6 +1668,8 @@ async fn group_event_pages_even_when_all_members_unmonitored() {
 			effective: CheckResult::Failed,
 			escalates: true,
 			detail: None,
+			title: None,
+			instanced: None,
 		};
 		let issue = database::issues::raise_group_event_with_state(
 			&mut conn,
@@ -1691,6 +1709,8 @@ async fn group_event_pages_even_when_all_members_unmonitored() {
 			effective: CheckResult::Passed,
 			escalates: true,
 			detail: None,
+			title: None,
+			instanced: None,
 		};
 		database::issues::raise_group_event_with_state(
 			&mut conn,
@@ -2072,26 +2092,30 @@ async fn staleness_is_one_check_per_server_with_the_types_as_instances() {
 			"the fresh type is not named: {message}",
 		);
 
-		let detail = issue_detail(&mut conn, machine_id, refs::STALENESS)
+		let detail = issue_instances(&mut conn, machine_id, refs::STALENESS)
 			.await
-			.expect("detail");
-		assert_eq!(detail["total"], 4, "four instances were considered");
-		assert_eq!(detail["degraded"], 3, "three of them are stale");
-		let listed: Vec<&str> = detail["instances"]
-			.as_array()
-			.expect("instances array")
-			.iter()
-			.map(|i| i["type"].as_str().expect("type"))
-			.collect();
+			.expect("instances");
+		let instances = detail.as_object().expect("instances by key");
+		assert_eq!(instances.len(), 4, "four instances were considered");
+		assert_eq!(
+			instances
+				.values()
+				.filter(|i| i["effective"] != "passed")
+				.count(),
+			3,
+			"three of them are stale",
+		);
 		for ty in &stale_types {
-			assert!(
-				listed.contains(&ty.to_string().as_str()),
-				"detail lists {ty}"
+			assert_eq!(
+				instances[&ty.to_string()]["effective"],
+				"warning",
+				"detail holds {ty} as degraded",
 			);
 		}
-		assert!(
-			!listed.contains(&fresh_type.to_string().as_str()),
-			"detail omits the healthy type",
+		assert_eq!(
+			instances[&fresh_type.to_string()]["effective"],
+			"passed",
+			"detail holds the healthy type as passing",
 		);
 
 		// And the catalog gained one entry, not one per type.
@@ -2101,6 +2125,119 @@ async fn staleness_is_one_check_per_server_with_the_types_as_instances() {
 			vec![refs::STALENESS.to_string()],
 			"one catalog entry to configure, not one per backup type",
 		);
+	})
+	.await;
+}
+
+/// A backup type is an instance of the staleness check, keyed by the type, so
+/// silencing one type on a machine quiets that type alone: its siblings still
+/// grade, the message stops naming it, and the check passes only once every
+/// stale type is quiet.
+// spec: CHK#silencing-one-instance
+#[tokio::test(flavor = "multi_thread")]
+async fn an_instance_silence_on_one_backup_type_quiets_that_type_only() {
+	TestDb::run(|mut conn, _url| async move {
+		let interval = SignedDuration::from_hours(12);
+		let pg = BackupType::TamanuPostgres;
+		let config = BackupType::Custom("tamanu-config".into());
+
+		let group_id = insert_group(&mut conn, "g").await;
+		let machine_id = insert_server(&mut conn, group_id, true).await;
+		let device_id = insert_device(&mut conn).await;
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
+		for ty in [&pg, &config] {
+			insert_schedule(&mut conn, group_id, ty, interval).await;
+			enable_capability(&mut conn, machine_id, ty).await;
+			insert_backup_success_aged(
+				&mut conn,
+				device_id,
+				group_id,
+				machine_id,
+				ty,
+				SignedDuration::from_hours(72),
+			)
+			.await;
+		}
+
+		let sweep = async |conn: &mut AsyncPgConnection| {
+			let rows = database::backup::staleness::scan_rows(conn)
+				.await
+				.expect("scan");
+			database::backup::staleness::sweep(conn, &rows)
+				.await
+				.expect("sweep");
+		};
+		sweep(&mut conn).await;
+		let instances = issue_instances(&mut conn, machine_id, refs::STALENESS)
+			.await
+			.expect("instances");
+		assert_eq!(
+			instances
+				.as_object()
+				.unwrap()
+				.keys()
+				.map(String::as_str)
+				.collect::<Vec<_>>(),
+			[config.as_str(), pg.as_str()],
+			"keyed by backup type",
+		);
+
+		database::silenced_refs::MachineSilencedRef::add(
+			&mut conn,
+			machine_id,
+			refs::CANOPY_SOURCE,
+			refs::STALENESS,
+			Some(pg.as_str()),
+			Some("op@example.com"),
+		)
+		.await
+		.expect("silence one type");
+		sweep(&mut conn).await;
+
+		let instances = issue_instances(&mut conn, machine_id, refs::STALENESS)
+			.await
+			.expect("instances");
+		assert_eq!(instances[pg.as_str()]["observed"], "failed");
+		assert_eq!(
+			instances[pg.as_str()]["effective"],
+			"skipped",
+			"the silenced type is quiet",
+		);
+		assert_eq!(
+			instances[config.as_str()]["effective"],
+			"warning",
+			"its sibling still grades",
+		);
+		let issue = machine_issue(&mut conn, machine_id, refs::STALENESS)
+			.await
+			.expect("staleness issue");
+		assert!(issue.active);
+		assert_eq!(issue.effective_result.as_deref(), Some("warning"));
+		let message = issue_message(&mut conn, machine_id, refs::STALENESS)
+			.await
+			.expect("message");
+		assert!(message.contains(config.as_str()), "{message}");
+		assert!(
+			!message.contains(pg.as_str()),
+			"the silenced type is not named: {message}",
+		);
+
+		database::silenced_refs::MachineSilencedRef::add(
+			&mut conn,
+			machine_id,
+			refs::CANOPY_SOURCE,
+			refs::STALENESS,
+			Some(config.as_str()),
+			Some("op@example.com"),
+		)
+		.await
+		.expect("silence the other type");
+		sweep(&mut conn).await;
+		let issue = machine_issue(&mut conn, machine_id, refs::STALENESS)
+			.await
+			.expect("staleness issue");
+		assert!(!issue.active, "every stale type is quiet");
+		assert_eq!(issue.effective_result.as_deref(), Some("skipped"));
 	})
 	.await;
 }

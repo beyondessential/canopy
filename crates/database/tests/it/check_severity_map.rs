@@ -138,7 +138,7 @@ async fn silenced_checks_combine_scopes_and_stay_per_source() {
 		let m_server_id = machine_of(&mut conn, server_id).await;
 		let other_server_id = insert_server(&mut conn, None).await;
 
-		ServerSilencedRef::add(&mut conn, server_id, "alertd", "health/flaky", None)
+		ServerSilencedRef::add(&mut conn, server_id, "alertd", "health/flaky", None, None)
 			.await
 			.expect("server silence");
 		ServerGroupSilencedRef::add(
@@ -147,6 +147,7 @@ async fn silenced_checks_combine_scopes_and_stay_per_source() {
 			"alertd",
 			"health/groupwide",
 			Some(&ty()),
+			None,
 			None,
 		)
 		.await
@@ -160,15 +161,23 @@ async fn silenced_checks_combine_scopes_and_stay_per_source() {
 			"seedling",
 			"health/other-source",
 			None,
+			None,
 		)
 		.await
 		.expect("other-source silence");
-		ServerSilencedRef::add(&mut conn, server_id, "canopy", "reachability", None)
+		ServerSilencedRef::add(&mut conn, server_id, "canopy", "reachability", None, None)
 			.await
 			.expect("canopy silence");
-		ServerSilencedRef::add(&mut conn, other_server_id, "alertd", "health/other", None)
-			.await
-			.expect("other-server silence");
+		ServerSilencedRef::add(
+			&mut conn,
+			other_server_id,
+			"alertd",
+			"health/other",
+			None,
+			None,
+		)
+		.await
+		.expect("other-server silence");
 
 		let checks = silenced_health_checks_for_server(
 			&mut conn,

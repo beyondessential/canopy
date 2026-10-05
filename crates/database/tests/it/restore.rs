@@ -1638,7 +1638,7 @@ struct FiledRow {
 	#[diesel(sql_type = sql_types::Text)]
 	message: String,
 	#[diesel(sql_type = sql_types::Nullable<sql_types::Jsonb>)]
-	detail: Option<serde_json::Value>,
+	instances: Option<serde_json::Value>,
 }
 
 /// The filed check for a target, looked up on the column its grain files on:
@@ -1650,7 +1650,7 @@ async fn filed(conn: &mut AsyncPgConnection, target_id: Uuid, r#ref: &str) -> Fi
 		_ => "machine_id",
 	};
 	sql_query(format!(
-		"SELECT message, detail FROM issues \
+		"SELECT message, instances FROM issues \
 		 WHERE {column} = $1 AND source = 'canopy' AND \"ref\" = $2 AND active"
 	))
 	.bind::<sql_types::Uuid, _>(target_id)
@@ -1732,12 +1732,35 @@ async fn same_scope_replicas_grade_separately_by_name() {
 			.expect("sweep");
 
 		let verification = filed(&mut conn, server, "restore-verification").await;
-		let detail = verification.detail.expect("detail");
-		assert_eq!(detail["total"], 2, "two replicas, not one merged key");
-		assert_eq!(detail["degraded"], 1);
-		let instances = detail["instances"].as_array().expect("instances");
+		let detail = verification.instances.clone().expect("instances");
+		let by_key = detail.as_object().unwrap();
+		// jsonb orders object keys by length before content, so compare the
+		// keys as a set rather than in whatever order they come back.
+		let mut keys = by_key.keys().map(String::as_str).collect::<Vec<_>>();
+		keys.sort_unstable();
+		assert_eq!(
+			keys,
+			[
+				"tamanu-postgres:verify:nightly",
+				"tamanu-postgres:verify:weekly"
+			],
+			"two replicas keyed apart by name, not one merged key"
+		);
+		assert_eq!(
+			by_key["tamanu-postgres:verify:nightly"]["effective"],
+			"warning"
+		);
+		assert_eq!(
+			by_key["tamanu-postgres:verify:weekly"]["effective"],
+			"passed"
+		);
+		assert_eq!(
+			by_key["tamanu-postgres:verify:nightly"]["label"], "nightly (tamanu-postgres / verify)",
+			"the key identifies the replica; the label still names it"
+		);
+		let instances = degraded_instances(&detail);
 		assert_eq!(instances.len(), 1);
-		assert_eq!(instances[0]["replica"], "nightly");
+		assert_eq!(instances[0]["detail"]["replica"], "nightly");
 		assert!(
 			verification.message.contains("nightly"),
 			"names the failing replica: {}",
@@ -1747,6 +1770,92 @@ async fn same_scope_replicas_grade_separately_by_name() {
 			!verification.message.contains("weekly"),
 			"and not its healthy sibling: {}",
 			verification.message,
+		);
+	})
+	.await;
+}
+
+/// The `collapse_restore_check_names` migration rewrote a silence on one
+/// replica's parameterised check into a keyless scoped rule on the collapsed
+/// check, matching `check.replica_key` against the replica's type and intent.
+/// Those rules go on skipping exactly that replica's instance.
+// spec: RST#alerting
+#[tokio::test(flavor = "multi_thread")]
+async fn a_migrated_per_replica_silence_still_skips_only_its_replica() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let (server, _application) = insert_server(&mut conn, group).await;
+		RestoreConsumerCapability::register(
+			&mut conn,
+			consumer,
+			&[
+				descriptor("verify", &["check"]),
+				descriptor("dr", &["check"]),
+			],
+		)
+		.await
+		.expect("register caps");
+
+		for intent in ["verify", "dr"] {
+			let replica = RestoreReplica::create(
+				&mut conn,
+				new_replica(
+					consumer,
+					group,
+					Some(server),
+					RestoreIntent::from(intent),
+					&format!("{intent}-copy"),
+				),
+			)
+			.await
+			.expect("declare replica")
+			.id;
+			BackupRestoreCheck::record_report(
+				&mut conn,
+				new_check_for(
+					Some(replica),
+					consumer,
+					group,
+					server,
+					RestoreIntent::from(intent),
+					RunOutcome::Failure,
+					false,
+				),
+			)
+			.await
+			.expect("record report");
+		}
+
+		// The row exactly as the migration leaves a ceiling-only silence on
+		// restore-verification:tamanu-postgres:verify.
+		sql_query(
+			"INSERT INTO scoped_check_policies (source, check_name, machine_id, ceiling, rules) \
+			 VALUES ('canopy', 'restore-verification', $1, NULL, $2)",
+		)
+		.bind::<sql_types::Uuid, _>(server)
+		.bind::<sql_types::Jsonb, _>(serde_json::json!({"if": [
+			{"==": [{"var": "check.replica_key"}, "tamanu-postgres:verify"]},
+			"skipped",
+		]}))
+		.execute(&mut conn)
+		.await
+		.expect("migrated per-replica silence");
+
+		database::restore::sweep_restore_checks(&mut conn)
+			.await
+			.expect("sweep");
+
+		let verification = filed(&mut conn, server, "restore-verification").await;
+		let detail = verification.instances.expect("instances");
+		let by_key = detail.as_object().unwrap();
+		assert_eq!(
+			by_key["tamanu-postgres:verify:verify-copy"]["effective"], "skipped",
+			"the replica the silence was written for stays silenced: {detail}",
+		);
+		assert_eq!(
+			by_key["tamanu-postgres:dr:dr-copy"]["effective"], "warning",
+			"and its sibling of another intent is untouched: {detail}",
 		);
 	})
 	.await;
@@ -1904,14 +2013,18 @@ async fn one_check_of_each_kind_per_machine_with_the_replicas_as_instances() {
 		// Restore verification: three replicas considered, one of them degraded,
 		// and the message names it rather than the healthy ones.
 		let verification = filed(&mut conn, server, "restore-verification").await;
-		let detail = verification.detail.expect("detail");
-		assert_eq!(detail["total"], 3);
-		assert_eq!(detail["degraded"], 1);
-		let instances = detail["instances"].as_array().expect("instances");
+		let detail = verification.instances.clone().expect("instances");
+		assert_eq!(detail.as_object().unwrap().len(), 3);
+		assert_eq!(degraded_instances(&detail).len(), 1);
+		let instances = degraded_instances(&detail);
 		assert_eq!(instances.len(), 1);
-		assert_eq!(instances[0]["intent"], "verify");
-		assert_eq!(instances[0]["replica"], "nightly-verify");
-		assert_eq!(instances[0]["replica_key"], "tamanu-postgres:verify");
+		assert_eq!(instances[0]["detail"]["intent"], "verify");
+		assert_eq!(instances[0]["detail"]["replica"], "nightly-verify");
+		assert_eq!(instances[0]["detail"]["type"], "tamanu-postgres");
+		assert_eq!(
+			instances[0]["detail"]["replica_key"], "tamanu-postgres:verify",
+			"the type and intent joined, which the migrated per-replica rules match on"
+		);
 		assert!(
 			verification.message.contains("nightly-verify"),
 			"names the degraded replica: {}",
@@ -1926,17 +2039,31 @@ async fn one_check_of_each_kind_per_machine_with_the_replicas_as_instances() {
 		// Redaction only counts the replicas that reported one, so the check is
 		// about the analytics copy alone.
 		let redaction = filed(&mut conn, server, "redaction").await;
-		let detail = redaction.detail.expect("detail");
-		assert_eq!(detail["total"], 1);
-		assert_eq!(detail["instances"][0]["intent"], "analytics");
-		assert_eq!(detail["instances"][0]["columns_skipped"], 3);
+		let detail = redaction.instances.clone().expect("instances");
+		assert_eq!(
+			detail.as_object().unwrap().keys().collect::<Vec<_>>(),
+			["tamanu-postgres:analytics:analytics-copy"],
+			"keyed by the replica's type, intent and name",
+		);
+		let instances = degraded_instances(&detail);
+		assert_eq!(instances[0]["detail"]["intent"], "analytics");
+		assert_eq!(instances[0]["detail"]["columns_skipped"], 3);
 
 		// The migration finding carries the version in its detail, not its name.
 		let migration = filed(&mut conn, application, "migration-test").await;
-		let detail = migration.detail.expect("detail");
-		assert_eq!(detail["instances"][0]["target_version"], "2.63.0");
+		let detail = migration.instances.clone().expect("instances");
+		assert!(
+			detail
+				.as_object()
+				.unwrap()
+				.keys()
+				.all(|k| k.starts_with("tamanu-postgres:migrate")),
+			"keyed by the replica's type and intent, then its name: {detail}",
+		);
+		let instances = degraded_instances(&detail);
+		assert_eq!(instances[0]["detail"]["target_version"], "2.63.0");
 		assert_eq!(
-			detail["instances"][0]["failed_migration"],
+			instances[0]["detail"]["failed_migration"],
 			"backfillNoteTypeIds"
 		);
 	})
@@ -2214,4 +2341,14 @@ async fn a_declaration_that_does_not_migrate_leaves_its_environment_untested() {
 		);
 	})
 	.await;
+}
+
+/// The instances a check's state holds that are not passing.
+fn degraded_instances(instances: &serde_json::Value) -> Vec<&serde_json::Value> {
+	instances
+		.as_object()
+		.expect("instances by key")
+		.values()
+		.filter(|i| i["effective"] != "passed" && i["effective"] != "skipped")
+		.collect()
 }

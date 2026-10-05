@@ -14,6 +14,7 @@ pub mod backup;
 pub mod backups;
 pub mod bestool_snippets;
 pub mod certificate_alerts;
+pub mod check_instances;
 pub mod check_policies;
 pub mod chrome_releases;
 pub mod devices;

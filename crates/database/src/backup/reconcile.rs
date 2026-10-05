@@ -59,7 +59,7 @@ use crate::{
 		refs,
 		staleness::{ScanRow, label_list},
 	},
-	issues::{CheckInstance, InstancedCheckFiling, Scope, file_check_instances},
+	issues::{CheckInstance, CheckOutcome, InstancedCheckFiling, Scope, file_check_instances},
 };
 
 /// Slack allowed when comparing a snapshot's recorded time against the moment
@@ -264,7 +264,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				missing_detail.insert("snapshot_id".into(), id.into());
 			}
 			missing_instances.push(CheckInstance {
-				label: row.r#type.to_string(),
+				key: row.r#type.to_string(),
+				label: None,
 				observed: match missing {
 					Some(true) => CheckResult::Warning,
 					Some(false) => CheckResult::Passed,
@@ -299,7 +300,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				recency_detail.insert("latest_snapshot_at".into(), at.to_string().into());
 			}
 			recency_instances.push(CheckInstance {
-				label: row.r#type.to_string(),
+				key: row.r#type.to_string(),
+				label: None,
 				observed: match behind {
 					Some(true) => CheckResult::Warning,
 					Some(false) => CheckResult::Passed,
@@ -313,7 +315,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 			let gap = !report_fresh && snapshot_fresh;
 			any_gap |= gap;
 			gap_instances.push(CheckInstance {
-				label: row.r#type.to_string(),
+				key: row.r#type.to_string(),
+				label: None,
 				observed: if gap {
 					CheckResult::Warning
 				} else {
@@ -336,7 +339,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				size_detail.insert("observed_bytes".into(), observed.into());
 			}
 			size_instances.push(CheckInstance {
-				label: row.r#type.to_string(),
+				key: row.r#type.to_string(),
+				label: None,
 				observed: if mismatch {
 					CheckResult::Warning
 				} else {
@@ -359,16 +363,17 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					device_id,
 					check: refs::RECONCILE_MISSING,
 					title: None,
-					instances: missing_instances,
+					detail: None,
+					outcome: CheckOutcome::Instances(missing_instances),
 					default_ceiling: CheckResult::Warning,
 					default_escalates: false,
 					documentation: Some(refs::RECONCILE_MISSING_DOC),
 				},
-				&|degraded| match degraded {
+				&|graded| match graded.degraded().as_slice() {
 					[] => format!("Application {label} backup reports and repo snapshots agree again"),
 					[one] => format!(
 						"Application {label} reported a successful {} backup but its snapshot is not in the repo",
-						one.label
+						one.name()
 					),
 					many => format!(
 						"Application {label} reported {} of its {total} backups successful with snapshots the repo doesn't hold: {}",
@@ -395,7 +400,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					device_id,
 					check: refs::RECONCILE_RECENCY,
 					title: None,
-					instances: recency_instances,
+					detail: None,
+					outcome: CheckOutcome::Instances(recency_instances),
 					// Recorded and visible, never alerting: this compares
 					// timestamps from two independent cadences, which supports
 					// "the repo looks behind" and not "a backup is missing".
@@ -403,11 +409,11 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					default_escalates: false,
 					documentation: Some(refs::RECONCILE_RECENCY_DOC),
 				},
-				&|degraded| match degraded {
+				&|graded| match graded.degraded().as_slice() {
 					[] => format!("Repo snapshots for {label} are as new as the runs it reported"),
 					[one] => format!(
 						"The repo holds no {} snapshot for {label} as new as the run it reported",
-						one.label
+						one.name()
 					),
 					many => format!(
 						"The repo holds no snapshot as new as the reported run for {} of {label}'s {total} backups: {}",
@@ -430,16 +436,17 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					device_id,
 					check: refs::RECONCILE_REPORT_GAP,
 					title: None,
-					instances: gap_instances,
+					detail: None,
+					outcome: CheckOutcome::Instances(gap_instances),
 					default_ceiling: CheckResult::Warning,
 					default_escalates: false,
 					documentation: Some(refs::RECONCILE_REPORT_GAP_DOC),
 				},
-				&|degraded| match degraded {
+				&|graded| match graded.degraded().as_slice() {
 					[] => format!("Backup reporting for {label} recovered"),
 					[one] => format!(
 						"A fresh {} repo snapshot exists for {label} but no backup run was reported",
-						one.label
+						one.name()
 					),
 					many => format!(
 						"Fresh repo snapshots exist for {} of {label}'s {total} types with no backup run reported: {}",
@@ -462,16 +469,17 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					device_id,
 					check: refs::RECONCILE_SIZE_MISMATCH,
 					title: None,
-					instances: size_instances,
+					detail: None,
+					outcome: CheckOutcome::Instances(size_instances),
 					default_ceiling: CheckResult::Warning,
 					default_escalates: false,
 					documentation: Some(refs::RECONCILE_SIZE_MISMATCH_DOC),
 				},
-				&|degraded| match degraded {
+				&|graded| match graded.degraded().as_slice() {
 					[] => format!("Reported and repo snapshot sizes for {label} agree again"),
 					[one] => format!(
 						"Application {label} reported a {} snapshot size that disagrees with the repo",
-						one.label
+						one.name()
 					),
 					many => format!(
 						"Application {label} reported snapshot sizes disagreeing with the repo for {} of its {total} types: {}",

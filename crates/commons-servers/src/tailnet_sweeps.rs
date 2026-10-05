@@ -116,10 +116,10 @@ pub async fn sweep_key_expiry(
 				observed,
 				title: title.as_deref(),
 				message: &message,
-				detail: Some(serde_json::json!({
+				detail: Some(database::check_detail! {
 					"node_id": entry.node_id,
 					"node_name": entry.node_name,
-				})),
+				}),
 				default_ceiling: CheckResult::Failed,
 				default_escalates: true,
 				documentation: Some(KEY_EXPIRY_DOC),

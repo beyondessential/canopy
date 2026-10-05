@@ -360,13 +360,24 @@ fn secrets_to_ref(schemas: &mut Map<String, Value>) -> Result<(), String> {
 ///
 /// Only named-field structs get this: a builder cannot be derived on an enum or a
 /// tuple struct, and an empty struct has nothing to build.
+///
+/// A property the schema does not require is one a caller may leave unset, so
+/// the builder must not demand it either. The builder already leaves an
+/// `Option` field optional; typify renders an optional object or array as the
+/// bare collection with `#[serde(default)]`, which the builder would otherwise
+/// require, making the property's addition a break for every call site.
 fn relax_construction(items: &mut [syn::Item]) {
 	for item in items {
 		match item {
 			syn::Item::Struct(item) => {
-				if let syn::Fields::Named(fields) = &item.fields
+				if let syn::Fields::Named(fields) = &mut item.fields
 					&& !fields.named.is_empty()
 				{
+					for field in fields.named.iter_mut() {
+						if defaults_on_the_wire(field) && !builder_configured(field) {
+							field.attrs.push(syn::parse_quote!(#[builder(default)]));
+						}
+					}
 					item.attrs
 						.push(syn::parse_quote!(#[derive(::bon::Builder)]));
 					item.attrs.push(syn::parse_quote!(#[non_exhaustive]));
@@ -380,6 +391,40 @@ fn relax_construction(items: &mut [syn::Item]) {
 			_ => {}
 		}
 	}
+}
+
+/// Whether a field is one the wire may leave out and serde fills with its
+/// default: `#[serde(default)]` on anything but an `Option`, which the builder
+/// already treats as optional.
+fn defaults_on_the_wire(field: &syn::Field) -> bool {
+	let is_option = matches!(&field.ty, syn::Type::Path(path)
+		if path.path.segments.last().is_some_and(|segment| segment.ident == "Option"));
+	!is_option
+		&& field.attrs.iter().any(|attr| {
+			let mut default = false;
+			if attr.path().is_ident("serde") {
+				let _ = attr.parse_nested_meta(|meta| {
+					if meta.path.is_ident("default") {
+						default = true;
+					}
+					// Skip any value (`skip_serializing_if = "…"`) so the
+					// remaining entries still parse.
+					if meta.input.peek(syn::Token![=]) {
+						meta.value()?.parse::<syn::Expr>()?;
+					}
+					Ok(())
+				});
+			}
+			default
+		})
+}
+
+/// Whether a field already says how the builder treats it.
+fn builder_configured(field: &syn::Field) -> bool {
+	field
+		.attrs
+		.iter()
+		.any(|attr| attr.path().is_ident("builder"))
 }
 
 /// Operations whose method was published before this generator could express

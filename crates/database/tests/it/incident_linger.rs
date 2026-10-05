@@ -60,6 +60,8 @@ async fn save_event(
 		effective: result,
 		escalates: false,
 		detail: None,
+		title: None,
+		instanced: None,
 	};
 	NewEvent {
 		source: "test".into(),

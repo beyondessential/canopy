@@ -37,7 +37,7 @@ fn filing<'a>(
 	source: &'a str,
 	check: &'a str,
 	observed: CheckResult,
-	detail: serde_json::Value,
+	detail: serde_json::Map<String, serde_json::Value>,
 ) -> CheckFiling<'a> {
 	CheckFiling {
 		source,
@@ -68,7 +68,7 @@ async fn detail_is_keyed_by_check_with_the_graded_result() {
 				"alertd",
 				"diskspace",
 				CheckResult::Warning,
-				json!({"check": "diskspace", "result": "warning", "percent": 91, "path": "/"}),
+				database::check_detail! {"check": "diskspace", "result": "warning", "percent": 91, "path": "/"},
 			),
 		)
 		.await
@@ -80,7 +80,7 @@ async fn detail_is_keyed_by_check_with_the_graded_result() {
 				"alertd",
 				"diskspace",
 				CheckResult::Passed,
-				json!({"check": "diskspace", "result": "passed", "percent": 12, "path": "/"}),
+				database::check_detail! {"check": "diskspace", "result": "passed", "percent": 12, "path": "/"},
 			),
 		)
 		.await
@@ -132,7 +132,7 @@ async fn silenced_reads_skipped_and_decommissioned_is_absent() {
 				"alertd",
 				"hushed",
 				CheckResult::Failed,
-				json!({"percent": 99}),
+				database::check_detail! {"percent": 99},
 			),
 		)
 		.await
@@ -144,7 +144,7 @@ async fn silenced_reads_skipped_and_decommissioned_is_absent() {
 				"alertd",
 				"gone",
 				CheckResult::Warning,
-				json!({"percent": 50}),
+				database::check_detail! {"percent": 50},
 			),
 		)
 		.await
@@ -156,6 +156,7 @@ async fn silenced_reads_skipped_and_decommissioned_is_absent() {
 			"alertd",
 			&app_ns(),
 			"hushed",
+			None,
 			Some("op"),
 		)
 		.await
@@ -202,7 +203,7 @@ async fn same_check_name_from_two_sources_merges_newest_first() {
 				"alertd",
 				"sync",
 				CheckResult::Passed,
-				json!({"lagSecs": 30, "onlyAlertd": true}),
+				database::check_detail! {"lagSecs": 30, "onlyAlertd": true},
 			),
 		)
 		.await
@@ -214,7 +215,7 @@ async fn same_check_name_from_two_sources_merges_newest_first() {
 				"tamanu",
 				"sync",
 				CheckResult::Warning,
-				json!({"lagSecs": 900}),
+				database::check_detail! {"lagSecs": 900},
 			),
 		)
 		.await

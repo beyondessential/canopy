@@ -66,10 +66,10 @@ async fn combines_server_and_group_scopes() {
 		let unsilenced = insert_server(&mut conn, Some(group)).await;
 		let m_unsilenced = machine_of(&mut conn, unsilenced).await;
 
-		ServerSilencedRef::add(&mut conn, grouped, "alertd", "health/postgres", None)
+		ServerSilencedRef::add(&mut conn, grouped, "alertd", "health/postgres", None, None)
 			.await
 			.unwrap();
-		ServerSilencedRef::add(&mut conn, ungrouped, "alertd", "health/disk", None)
+		ServerSilencedRef::add(&mut conn, ungrouped, "alertd", "health/disk", None, None)
 			.await
 			.unwrap();
 		ServerGroupSilencedRef::add(
@@ -78,6 +78,7 @@ async fn combines_server_and_group_scopes() {
 			"alertd",
 			"health/uploads",
 			Some(&ApplicationType::TamanuCentral),
+			None,
 			None,
 		)
 		.await
@@ -136,13 +137,13 @@ async fn scoped_to_the_reporting_source() {
 		let server = insert_server(&mut conn, None).await;
 		let m_server = machine_of(&mut conn, server).await;
 
-		ServerSilencedRef::add(&mut conn, server, "canopy", "reachability", None)
+		ServerSilencedRef::add(&mut conn, server, "canopy", "reachability", None, None)
 			.await
 			.unwrap();
-		ServerSilencedRef::add(&mut conn, server, "seedling", "health/postgres", None)
+		ServerSilencedRef::add(&mut conn, server, "seedling", "health/postgres", None, None)
 			.await
 			.unwrap();
-		ServerSilencedRef::add(&mut conn, server, "alertd", "health/disk", None)
+		ServerSilencedRef::add(&mut conn, server, "alertd", "health/disk", None, None)
 			.await
 			.unwrap();
 
@@ -182,7 +183,7 @@ async fn unsilencing_removes_the_check() {
 		let server = insert_server(&mut conn, None).await;
 		let m_server = machine_of(&mut conn, server).await;
 
-		ServerSilencedRef::add(&mut conn, server, "alertd", "health/postgres", None)
+		ServerSilencedRef::add(&mut conn, server, "alertd", "health/postgres", None, None)
 			.await
 			.unwrap();
 		assert_eq!(
@@ -198,7 +199,7 @@ async fn unsilencing_removes_the_check() {
 			checks(&["postgres"]),
 		);
 
-		ServerSilencedRef::remove(&mut conn, server, "alertd", "health/postgres")
+		ServerSilencedRef::remove(&mut conn, server, "alertd", "health/postgres", None)
 			.await
 			.unwrap();
 		assert_eq!(

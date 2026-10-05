@@ -1153,6 +1153,8 @@ async fn seed_issues_and_incidents(
 			effective: result,
 			escalates,
 			detail: None,
+			title: None,
+			instanced: None,
 		};
 		let active = matches!(
 			result,
@@ -1326,6 +1328,7 @@ async fn seed_silences(
 		applications.demo_server,
 		"app",
 		"debug-trace",
+		None,
 		Some(&admins[0]),
 	)
 	.await?;
@@ -1336,6 +1339,7 @@ async fn seed_silences(
 		"healthcheck",
 		"backup_freshness",
 		Some(&ApplicationType::TamanuFacility),
+		None,
 		Some(&admins[0]),
 	)
 	.await?;

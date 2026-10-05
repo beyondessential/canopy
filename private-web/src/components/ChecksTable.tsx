@@ -32,21 +32,27 @@ import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import type { GradedEndpoint } from "../safety-modes";
 import CheckDocButton from "./CheckDocButton";
-import CheckExtrasList, { checkEntryExtras } from "./CheckExtras";
+import CheckExtrasList, {
+	checkEntryExtras,
+	renderCheckValue,
+} from "./CheckExtras";
 import { type Calls, GradedAction } from "./GradedAction";
 import ExternalUsersDetails, {
 	parseExternalUserSessions,
 } from "./ExternalUsersDetails";
 import HealthChip from "./HealthChip";
+import InstanceName from "./InstanceName";
 import OperatorAvatars from "./OperatorAvatars";
 import TimeAgo from "./TimeAgo";
 import {
 	healthcheckPath,
+	instanceName,
 	sameNamespace,
 	silenceRef,
 	type CheckResult,
 	type ConsolidatedCheck,
 	type ConsolidatedChecks,
+	type ConsolidatedInstance,
 	type HealthState,
 	type NamespaceRef,
 	type OperatorPresence,
@@ -121,7 +127,13 @@ export type CheckTarget =
 	| { kind: "cluster"; id: string };
 
 /** A silence as this table reads one, whichever scope it came from. */
-type Silence = { source: string; ref: string; created_at: string; created_by: string | null };
+type Silence = {
+	source: string;
+	ref: string;
+	instance?: string | null;
+	created_at: string;
+	created_by: string | null;
+};
 
 export function ChecksTable(props: {
 	checks: ConsolidatedChecks;
@@ -266,20 +278,23 @@ function ChecksTableBody({
 					// different check, and canopy's own checks are silenced
 					// at a bare ref rather than under `health/`.
 					const refName = silenceRef(entry.source, entry.check);
-					const ownSilence =
-						rowOwnSilences.find(
-							(s) => s.source === entry.source && s.ref === refName,
-						) ?? null;
+					const rowSilences = rowOwnSilences.filter(
+						(s) => s.source === entry.source && s.ref === refName,
+					);
 					// A group covers several application types, so its silences
 					// are matched on the namespace too: the same check name
 					// silenced for another type is another check.
+					const rowGroupSilences = groupSilences.filter(
+						(s) =>
+							s.source === entry.source &&
+							s.ref === refName &&
+							sameNamespace(s.namespace, entry.namespace),
+					);
+					// An instance silence quiets one instance, not the row's check.
+					// spec: CHK#silencing-one-instance
+					const ownSilence = rowSilences.find((s) => !s.instance) ?? null;
 					const groupSilence =
-						groupSilences.find(
-							(s) =>
-								s.source === entry.source &&
-								s.ref === refName &&
-								sameNamespace(s.namespace, entry.namespace),
-						) ?? null;
+						rowGroupSilences.find((s) => !s.instance) ?? null;
 					return (
 						<CheckRow
 							key={`${entry.subject}:${entry.source}:${entry.check}`}
@@ -291,6 +306,10 @@ function ChecksTableBody({
 							onSilenced={onSilenced}
 							ownSilence={ownSilence}
 							groupSilence={groupSilence}
+							ownInstanceSilences={rowSilences.filter((s) => !!s.instance)}
+							groupInstanceSilences={rowGroupSilences.filter(
+								(s) => !!s.instance,
+							)}
 						/>
 					);
 				})}
@@ -326,6 +345,8 @@ function CheckRow({
 	onSilenced,
 	ownSilence,
 	groupSilence,
+	ownInstanceSilences,
+	groupInstanceSilences,
 }: {
 	entry: ConsolidatedCheck;
 	operators: OperatorPresence[];
@@ -336,6 +357,10 @@ function CheckRow({
 	onSilenced: () => void;
 	ownSilence: Silence | null;
 	groupSilence: ServerGroupSilencedRef | null;
+	/** This check's instance silences at the row's own target. */
+	ownInstanceSilences: Silence[];
+	/** This check's instance silences at the target's group. */
+	groupInstanceSilences: ServerGroupSilencedRef[];
 }) {
 	const isAdmin = useIsAdmin() === true;
 	// `external_users` gets a formatted session list instead of the raw
@@ -410,6 +435,15 @@ function CheckRow({
 					/>
 				)}
 				<CheckExtrasList extras={extras} />
+				<InstanceList
+					entry={entry}
+					target={target}
+					groupId={groupId}
+					onSilenced={onSilenced}
+					isAdmin={isAdmin}
+					ownSilences={ownInstanceSilences}
+					groupSilences={groupInstanceSilences}
+				/>
 			</Box>
 			{isAdmin && (
 				<SilenceCheckButton
@@ -421,6 +455,138 @@ function CheckRow({
 					onSilenced={onSilenced}
 					ownSilence={ownSilence}
 					groupSilence={groupSilence}
+				/>
+			)}
+		</Stack>
+	);
+}
+
+/** An instanced check's degraded and silenced instances, each with its own
+ * result and silence control, and a count of the rest. Renders nothing for a
+ * check without instances.
+ * spec: CHK#silencing-one-instance */
+function InstanceList({
+	entry,
+	target,
+	groupId,
+	onSilenced,
+	isAdmin,
+	ownSilences,
+	groupSilences,
+}: {
+	entry: ConsolidatedCheck;
+	target: CheckTarget;
+	groupId: string | null;
+	onSilenced: () => void;
+	isAdmin: boolean;
+	ownSilences: Silence[];
+	groupSilences: ServerGroupSilencedRef[];
+}) {
+	const counts = [
+		entry.passing_instances > 0 && `${entry.passing_instances} passing`,
+		entry.skipped_instances > 0 && `${entry.skipped_instances} skipped`,
+	].filter(Boolean);
+	if (entry.instances.length === 0 && counts.length === 0) return null;
+	return (
+		<Stack sx={{ mt: 1 }}>
+			{entry.instances.map((instance) => (
+				<InstanceRow
+					key={instance.key}
+					entry={entry}
+					instance={instance}
+					target={target}
+					groupId={groupId}
+					onSilenced={onSilenced}
+					isAdmin={isAdmin}
+					ownSilence={
+						ownSilences.find((s) => s.instance === instance.key) ?? null
+					}
+					groupSilence={
+						groupSilences.find((s) => s.instance === instance.key) ?? null
+					}
+				/>
+			))}
+			{counts.length > 0 && (
+				<Typography
+					variant="caption"
+					color="text.secondary"
+					sx={{ pt: 0.5, pl: 3.5 }}
+				>
+					{counts.join(", ")}
+				</Typography>
+			)}
+		</Stack>
+	);
+}
+
+function InstanceRow({
+	entry,
+	instance,
+	target,
+	groupId,
+	onSilenced,
+	isAdmin,
+	ownSilence,
+	groupSilence,
+}: {
+	entry: ConsolidatedCheck;
+	instance: ConsolidatedInstance;
+	target: CheckTarget;
+	groupId: string | null;
+	onSilenced: () => void;
+	isAdmin: boolean;
+	ownSilence: Silence | null;
+	groupSilence: ServerGroupSilencedRef | null;
+}) {
+	const silenced = instance.silenced_on_target || instance.silenced_on_group;
+	const facts = Object.entries(
+		(instance.detail ?? {}) as Record<string, unknown>,
+	)
+		.map(([k, v]) => `${k} ${renderCheckValue(v)}`)
+		.join(" · ");
+	return (
+		<Stack
+			direction="row"
+			spacing={1}
+			data-testid="check-instance"
+			sx={{ alignItems: "center", py: 0.25, minWidth: 0 }}
+		>
+			<CheckResultIcon
+				observed={instance.observed as CheckResult}
+				effective={instance.effective as CheckResult}
+				silenced={silenced}
+			/>
+			<InstanceName
+				instanceKey={instance.key}
+				label={instance.label}
+				quiet={silenced}
+			/>
+			<SilencedChip
+				targetKind={target.kind}
+				ownSilence={ownSilence}
+				groupSilence={groupSilence}
+			/>
+			<Box sx={{ flex: 1 }} />
+			{facts && (
+				<Typography
+					variant="caption"
+					color="text.secondary"
+					sx={{ fontFamily: "monospace", overflowWrap: "anywhere" }}
+				>
+					{facts}
+				</Typography>
+			)}
+			{isAdmin && (
+				<SilenceCheckButton
+					check={entry.check}
+					namespace={entry.namespace}
+					target={target}
+					groupId={groupId}
+					source={entry.source}
+					onSilenced={onSilenced}
+					ownSilence={ownSilence}
+					groupSilence={groupSilence}
+					instance={instance}
 				/>
 			)}
 		</Stack>
@@ -580,6 +746,7 @@ function SilenceCheckButton({
 	onSilenced,
 	ownSilence,
 	groupSilence,
+	instance,
 }: {
 	check: string;
 	namespace: NamespaceRef;
@@ -589,6 +756,9 @@ function SilenceCheckButton({
 	onSilenced: () => void;
 	ownSilence: Silence | null;
 	groupSilence: ServerGroupSilencedRef | null;
+	/** The one instance this control silences; unset for the whole check.
+	 * spec: CHK#silencing-one-instance */
+	instance?: { key: string; label: string | null };
 }) {
 	const silenceServer = useApiAction("silenced_refs", "silence_server");
 	const silenceMachine = useApiAction("silenced_refs", "silence_machine");
@@ -610,6 +780,8 @@ function SilenceCheckButton({
 		unsilenceCluster.error;
 	const refName = silenceRef(source, check);
 	const silenced = !!ownSilence || !!groupSilence;
+	const name = instance ? instanceName(instance) : null;
+	const instanceArg = instance ? { instance: instance.key } : {};
 	const ownSilenceCall =
 		target.kind === "machine"
 			? "silenced_refs/silence_machine"
@@ -647,21 +819,34 @@ function SilenceCheckButton({
 		<>
 			<GradedAction opens={offered}>
 				<Tooltip
-					title={silenced ? "Silenced — manage…" : "Silence this check…"}
+					title={
+						silenced
+							? "Silenced — manage…"
+							: instance
+								? "Silence this instance…"
+								: "Silence this check…"
+					}
 				>
 					<IconButton
 						size="small"
 						aria-label={
 							silenced
-								? `Manage silence for ${check}`
-								: `Silence ${check}`
+								? `Manage silence for ${name ? `${name} in ` : ""}${check}`
+								: `Silence ${name ? `${name} in ` : ""}${check}`
 						}
 						onClick={(e) => setAnchorEl(e.currentTarget)}
+						sx={instance ? { p: 0.5 } : undefined}
 					>
 						{silenced ? (
-							<NotificationsOffIcon fontSize="small" />
+							<NotificationsOffIcon
+								fontSize="small"
+								sx={instance ? { fontSize: 16 } : undefined}
+							/>
 						) : (
-							<NotificationsOffOutlinedIcon fontSize="small" />
+							<NotificationsOffOutlinedIcon
+								fontSize="small"
+								sx={instance ? { fontSize: 16 } : undefined}
+							/>
 						)}
 					</IconButton>
 				</Tooltip>
@@ -674,13 +859,24 @@ function SilenceCheckButton({
 				transformOrigin={{ vertical: "top", horizontal: "right" }}
 			>
 				<Box sx={{ p: 1.5, maxWidth: 360 }}>
-					<Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-						Permanently ignore <code>
-							{source}/{refName}
-						</code>
-						. The check still records, but no longer triggers or joins
-						incidents.
-					</Typography>
+					{name ? (
+						<Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+							Permanently ignore <b>{name}</b> in{" "}
+							<code>
+								{source}/{refName}
+							</code>
+							. The instance still records, but no longer triggers or joins
+							incidents.
+						</Typography>
+					) : (
+						<Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+							Permanently ignore <code>
+								{source}/{refName}
+							</code>
+							. The check still records, but no longer triggers or joins
+							incidents.
+						</Typography>
+					)}
 					<Stack spacing={0.75}>
 						<SilenceScopeRow
 							scopeLabel={
@@ -695,7 +891,7 @@ function SilenceCheckButton({
 							unsilenceCalls={ownUnsilenceCall}
 							onSilence={() =>
 								handle(() => {
-									const args = { source, ref: refName };
+									const args = { source, ref: refName, ...instanceArg };
 									switch (target.kind) {
 										case "machine":
 											return silenceMachine.call({ machine_id: target.id, ...args });
@@ -711,7 +907,7 @@ function SilenceCheckButton({
 							}
 							onUnsilence={() =>
 								handle(() => {
-									const args = { source, ref: refName };
+									const args = { source, ref: refName, ...instanceArg };
 									switch (target.kind) {
 										case "machine":
 											return unsilenceMachine.call({ machine_id: target.id, ...args });
@@ -740,6 +936,7 @@ function SilenceCheckButton({
 											ref: refName,
 											application_type:
 												namespace.application_type,
+											...instanceArg,
 										}),
 									)
 								}
@@ -751,6 +948,7 @@ function SilenceCheckButton({
 											ref: refName,
 											application_type:
 												namespace.application_type,
+											...instanceArg,
 										}),
 									)
 								}

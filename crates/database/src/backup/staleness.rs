@@ -29,8 +29,8 @@ use crate::{
 	applications::Application,
 	backup::refs,
 	issues::{
-		CheckFiling, CheckInstance, GradedInstance, InstancedCheckFiling, Scope, file_check,
-		file_check_instances,
+		CheckFiling, CheckInstance, CheckOutcome, GradedInstance, InstancedCheckFiling, Scope,
+		file_check, file_check_instances,
 	},
 };
 
@@ -302,10 +302,10 @@ fn last_success_of(instance: &GradedInstance) -> String {
 /// Join instance labels for a message, in the order they were graded (most
 /// urgent first). Shared with [`crate::backup::reconcile`] so every backup
 /// check names its degraded instances the same way.
-pub(super) fn label_list(instances: &[GradedInstance]) -> String {
+pub(super) fn label_list(instances: &[&GradedInstance]) -> String {
 	instances
 		.iter()
-		.map(|i| i.label.as_str())
+		.map(|i| i.name())
 		.collect::<Vec<_>>()
 		.join(", ")
 }
@@ -361,7 +361,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 			let stale = verdict == StalenessVerdict::Stale;
 			any_stale |= stale;
 			stale_instances.push(CheckInstance {
-				label: row.r#type.to_string(),
+				key: row.r#type.to_string(),
+				label: None,
 				observed: if stale {
 					CheckResult::Failed
 				} else {
@@ -381,7 +382,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 			let never = verdict == StalenessVerdict::Never;
 			any_never |= never;
 			never_instances.push(CheckInstance {
-				label: row.r#type.to_string(),
+				key: row.r#type.to_string(),
+				label: None,
 				observed: if never {
 					CheckResult::Warning
 				} else {
@@ -406,16 +408,17 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					device_id,
 					check: refs::STALENESS,
 					title: None,
-					instances: stale_instances,
+					detail: None,
+					outcome: CheckOutcome::Instances(stale_instances),
 					default_ceiling: CheckResult::Warning,
 					default_escalates: false,
 					documentation: Some(refs::STALENESS_DOC),
 				},
-				&|degraded| match degraded {
+				&|graded| match graded.degraded().as_slice() {
 					[] => format!("Application {label} is backing up on schedule again"),
 					[one] => format!(
 						"Application {label} has no recent {} backup (last success {})",
-						one.label,
+						one.name(),
 						last_success_of(one),
 					),
 					many => format!(
@@ -439,18 +442,19 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					device_id,
 					check: refs::NEVER,
 					title: None,
-					instances: never_instances,
+					detail: None,
+					outcome: CheckOutcome::Instances(never_instances),
 					default_ceiling: CheckResult::Warning,
 					default_escalates: false,
 					documentation: Some(refs::NEVER_DOC),
 				},
-				&|degraded| match degraded {
+				&|graded| match graded.degraded().as_slice() {
 					[] => {
 						format!("Application {label} has now backed up everything expected of it")
 					}
 					[one] => format!(
 						"Application {label} has never reported a successful {} backup",
-						one.label
+						one.name()
 					),
 					many => format!(
 						"Application {label} has never backed up {} of its {total} types: {}",
@@ -520,10 +524,10 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 							.map(|t| Timestamp::from(t).to_string())
 							.unwrap_or_else(|| "never".into()),
 					),
-					detail: Some(serde_json::json!({
+					detail: Some(crate::check_detail! {
 						"threshold_secs": MAINTENANCE_STALE_AFTER.as_secs(),
 						"last_success_at": latest_success.map(|t| Timestamp::from(t).to_string()),
-					})),
+					}),
 					default_ceiling: CheckResult::Warning,
 					default_escalates: false,
 					documentation: Some(refs::MAINTENANCE_STALE_DOC),
@@ -574,10 +578,10 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 							run.kind,
 							run.error.as_deref().unwrap_or("(no detail reported)"),
 						),
-						detail: Some(serde_json::json!({
+						detail: Some(crate::check_detail! {
 							"kind": run.kind,
 							"error": run.error,
-						})),
+						}),
 						default_ceiling: CheckResult::Warning,
 						default_escalates: false,
 						documentation: Some(refs::MAINTENANCE_ERROR_DOC),

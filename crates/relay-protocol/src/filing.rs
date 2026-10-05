@@ -108,21 +108,47 @@ pub struct SubstrateFiling {
 	/// a name with a parameter spelled into it. Whatever varies per instance
 	/// goes in `detail`, where a policy rule reaches it.
 	pub check: String,
-	/// Every instance of the check, which is its complete set: canopy holds
-	/// exactly the instances a filing names, so a check with several (one per
-	/// node pool, say) files them all together rather than one at a time. A
-	/// check that holds once files one instance with an empty label.
-	pub instances: Vec<SubstrateInstance>,
+	/// What the relay determined of the check: its instances, or that it could
+	/// not read the check at all.
+	pub outcome: SubstrateOutcome,
 	/// Single-line headline for a degraded filing.
 	pub title: Option<String>,
-	/// What an operator reads.
-	pub message: String,
+	/// What an operator reads, for a check that holds once or could not be
+	/// read. A check with instances carries none: canopy writes its message
+	/// from the instances as it graded them, so an instance a silence has
+	/// taken out is never counted in it (spec `CHK`, "Checks with
+	/// instances").
+	pub message: Option<String>,
 	/// The policy this check registers with on first sight.
 	pub default_ceiling: CheckResult,
 	pub default_escalates: bool,
 	/// The documentation the check ships with, seeded into the catalog on
 	/// first sight and never overwriting an operator's edit.
 	pub documentation: Option<String>,
+}
+
+/// What the relay determined of one substrate check.
+///
+/// Brokenness is the whole check's and never one instance's, so it is an
+/// outcome of its own rather than a result an instance carries: an instance is
+/// passed, warning, failed or skipped (spec `CHK`, "Checks with instances").
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SubstrateOutcome {
+	/// The relay read the check, and these are its instances: the complete
+	/// set, so canopy holds exactly the instances a filing names, and a check
+	/// with several (one per node pool, say) files them all together rather
+	/// than one at a time. A check that holds once files the one
+	/// [`SubstrateInstance::only`].
+	Instances(Vec<SubstrateInstance>),
+	/// The relay could not read the check, such as for a permission the
+	/// cluster refused it. It says nothing about which instances exist, so
+	/// canopy keeps those it held, presented as broken.
+	Broken {
+		/// What stopped the relay reading the check, available to policy
+		/// rules as `check.*`.
+		detail: Option<serde_json::Value>,
+	},
 }
 
 /// One instance of a substrate check.
@@ -132,14 +158,21 @@ pub struct SubstrateFiling {
 /// instances").
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SubstrateInstance {
-	/// How the instance is named to an operator, e.g. the node pool. Empty
-	/// for a check that holds once.
-	pub label: String,
-	/// What the relay observed. Canopy grades it through the operator's
-	/// policy from there.
+	/// Which instance this is, e.g. the node pool's name: unique within the
+	/// check and the same from one filing to the next, since an instance
+	/// silence names it. Empty only for the one instance of a check that holds
+	/// once.
+	pub key: String,
+	/// How the instance is named to an operator, where its key does not say
+	/// it well enough. Without one, the instance is named by its key.
+	pub label: Option<String>,
+	/// What the relay observed: passed, warning, failed or skipped, never
+	/// broken (see [`SubstrateOutcome::Broken`]). Canopy grades it through the
+	/// operator's policy from there.
 	pub observed: CheckResult,
-	/// The instance's own fields, available to policy rules as `check.*`, so
-	/// whatever identifies the instance belongs here too.
+	/// The instance's own fields, available to policy rules as `check.*`. A
+	/// rule never reads the key, so whatever identifies the instance belongs
+	/// here too.
 	pub detail: Option<serde_json::Value>,
 }
 
@@ -147,7 +180,8 @@ impl SubstrateInstance {
 	/// The one instance of a check that holds once.
 	pub fn only(observed: CheckResult, detail: Option<serde_json::Value>) -> Self {
 		Self {
-			label: String::new(),
+			key: String::new(),
+			label: None,
 			observed,
 			detail,
 		}
@@ -211,12 +245,12 @@ mod tests {
 			let filing = Filing::Substrate(SubstrateFiling {
 				target: target.clone(),
 				check: "pod-unschedulable".into(),
-				instances: vec![SubstrateInstance::only(
+				outcome: SubstrateOutcome::Instances(vec![SubstrateInstance::only(
 					CheckResult::Failed,
 					Some(serde_json::json!({"pod": "central-api-0"})),
-				)],
+				)]),
 				title: Some("A pod cannot be placed".into()),
-				message: "no node has capacity".into(),
+				message: Some("no node has capacity".into()),
 				default_ceiling: CheckResult::Failed,
 				default_escalates: false,
 				documentation: None,
@@ -226,7 +260,10 @@ mod tests {
 				panic!("family changed across the wire");
 			};
 			assert_eq!(back.target, target);
-			assert_eq!(back.instances[0].observed, CheckResult::Failed);
+			let SubstrateOutcome::Instances(instances) = back.outcome else {
+				panic!("outcome changed across the wire");
+			};
+			assert_eq!(instances[0].observed, CheckResult::Failed);
 		}
 	}
 
@@ -234,12 +271,14 @@ mod tests {
 	async fn a_substrate_filing_carries_every_instance_unchanged() {
 		let instances = vec![
 			SubstrateInstance {
-				label: "general".into(),
+				key: "general".into(),
+				label: None,
 				observed: CheckResult::Passed,
 				detail: Some(serde_json::json!({"pool": "general"})),
 			},
 			SubstrateInstance {
-				label: "gpu".into(),
+				key: "gpu".into(),
+				label: Some("GPU pool".into()),
 				observed: CheckResult::Failed,
 				detail: Some(serde_json::json!({
 					"pool": "gpu",
@@ -251,9 +290,9 @@ mod tests {
 		let filing = Filing::Substrate(SubstrateFiling {
 			target: FilingTarget::Cluster,
 			check: "node-pools".into(),
-			instances: instances.clone(),
+			outcome: SubstrateOutcome::Instances(instances.clone()),
 			title: Some("A node pool is failing".into()),
-			message: "gpu: nodes launched but never registered".into(),
+			message: None,
 			default_ceiling: CheckResult::Failed,
 			default_escalates: false,
 			documentation: Some("docs".into()),
@@ -262,6 +301,36 @@ mod tests {
 		let Filing::Substrate(back) = round_trip(&filing).await else {
 			panic!("family changed across the wire");
 		};
-		assert_eq!(back.instances, instances);
+		assert_eq!(back.outcome, SubstrateOutcome::Instances(instances));
+	}
+
+	#[tokio::test]
+	async fn a_check_the_relay_cannot_read_crosses_as_broken_at_check_level() {
+		let detail = serde_json::json!({
+			"refused": {"verb": "list", "resource": "nodepools.karpenter.sh"},
+		});
+		let filing = Filing::Substrate(SubstrateFiling {
+			target: FilingTarget::Cluster,
+			check: "node-pools".into(),
+			outcome: SubstrateOutcome::Broken {
+				detail: Some(detail.clone()),
+			},
+			title: Some("A node pool is failing".into()),
+			message: Some("the relay is not permitted to list nodepools.karpenter.sh".into()),
+			default_ceiling: CheckResult::Failed,
+			default_escalates: false,
+			documentation: None,
+		});
+
+		let Filing::Substrate(back) = round_trip(&filing).await else {
+			panic!("family changed across the wire");
+		};
+		assert_eq!(
+			back.outcome,
+			SubstrateOutcome::Broken {
+				detail: Some(detail)
+			},
+			"brokenness is the check's, carrying no instance",
+		);
 	}
 }
