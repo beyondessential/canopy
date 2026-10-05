@@ -172,6 +172,10 @@ async fn authorise(
 /// because declaring the DNS name, which comes after, is itself what refuses a
 /// DNS name another application holds. A request accepted ends the record;
 /// one refused as undeclared, wherever, is recorded.
+///
+/// The record is for operators, not part of the answer, so failing to keep it
+/// is logged and the request's own outcome stands: an undeclared refusal stays
+/// distinguishable, and a request already carried out is not reported failed.
 // spec: CRT#undeclared-requests
 async fn settle_undeclared<T>(
 	conn: &mut AsyncPgConnection,
@@ -179,13 +183,16 @@ async fn settle_undeclared<T>(
 	name: &str,
 	grant: Grant,
 	outcome: &Result<T>,
-) -> Result<()> {
-	match outcome {
+) {
+	let kept = match outcome {
 		Ok(_) => UndeclaredDnsName::clear(conn, machine_id, name).await,
 		Err(AppError::DnsNameUndeclared(_)) => {
 			UndeclaredDnsName::record(conn, machine_id, name, grant.asked_for()).await
 		}
 		Err(_) => Ok(()),
+	};
+	if let Err(err) = kept {
+		tracing::warn!(%machine_id, dns_name = name, "keeping the undeclared record failed: {err}");
 	}
 }
 
@@ -587,7 +594,7 @@ pub async fn register_name(
 		ApplicationName::register(&mut conn, server.id, &name, &args.addresses).await
 	}
 	.await;
-	settle_undeclared(&mut conn, machine.id, &name, Grant::Dns, &outcome).await?;
+	settle_undeclared(&mut conn, machine.id, &name, Grant::Dns, &outcome).await;
 	let row = outcome?;
 
 	Ok(Json(RegisteredName {
@@ -726,7 +733,7 @@ pub async fn request_certificate(
 		.await
 	}
 	.await;
-	settle_undeclared(&mut conn, machine.id, &name, Grant::Tls, &outcome).await?;
+	settle_undeclared(&mut conn, machine.id, &name, Grant::Tls, &outcome).await;
 	let cert = outcome?;
 
 	// 202 while there is nothing to collect yet, so an agent can tell "come
