@@ -4,7 +4,7 @@ id: GRP
 
 # Groups
 
-A group is what Canopy holds shared state against: one backup repository with its passphrase and retention, one notification channel with the delays before an incident on it opens and closes, the domain names it claims, and one billing identity.
+A group is what Canopy holds shared state against: one backup repository with its passphrase and retention, one notification channel with the delays before an incident on it opens and closes, the domains it claims, and one billing identity.
 The fleet is grouped so that what is true of several machines at once is watched, alerted, and paid for in one place.
 
 ## Scope
@@ -21,7 +21,7 @@ Against a group Canopy holds:
 
 - one backup configuration and the repository it names, with the group's passphrase, retention, and placement (see [BKO](../private-server/backup.md));
 - one channel its trouble is announced on and the delays before an incident opens and closes, carrying the incidents of the group and of every environment in it (see [INC](../monitoring/incidents.md));
-- the domain names it claims, and the name-management grants that work from them (see [DOM](domains.md));
+- the domains it claims, and the DNS name grants that work from them (see [DOM](domains.md));
 - one billing identity, which every member's effective labels derive from (see [APP](application-types.md), "Billing attribution").
 
 A machine belonging to no group carries none of it: its issues reach no incident target and contribute to no incident (see [INC](../monitoring/incidents.md)), and it has no billing attribution (see [APP](application-types.md)).

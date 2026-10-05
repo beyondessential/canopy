@@ -702,7 +702,7 @@
             }
           },
           "403": {
-            "description": "The server lacks the TLS grant, or the name is not within its group's domains.",
+            "description": "The server lacks the TLS grant, the name is not within its group's domains, the request resolves to no single application on the machine, or the name is denied to the machine.",
             "content": {
               "application/json": {
                 "schema": {
@@ -712,7 +712,7 @@
             }
           },
           "409": {
-            "description": "The server is paused, no managed zone covers the name, or the key was revoked as compromised and will not be certified again.",
+            "description": "The server is paused, no managed zone covers the name, the request names an application type this machine contradicts, or the key was revoked as compromised and will not be certified again.",
             "content": {
               "application/json": {
                 "schema": {
@@ -853,7 +853,7 @@
             }
           },
           "403": {
-            "description": "The server lacks the DNS grant, or the name is not within its group's domains.",
+            "description": "The server lacks the DNS grant, the name is not within its group's domains, the request resolves to no single application on the machine, or the name is denied to the machine.",
             "content": {
               "application/json": {
                 "schema": {
@@ -863,7 +863,7 @@
             }
           },
           "409": {
-            "description": "The server is paused, another server holds the name, or no managed zone covers it.",
+            "description": "The server is paused, no managed zone covers the name, or the request names an application type this machine contradicts.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2788,6 +2788,17 @@
             },
             "description": "Every external address this server is reachable at. IPv4 addresses become\nA records and IPv6 addresses AAAA records, replacing whatever was\nregistered before. An empty list withdraws the name."
           },
+          "application_type": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ApplicationType",
+                "description": "The type of the application on this machine the name is for, where the\nmachine hosts several and the agent knows which serves it. Unneeded once\nthe name is declared, and on a machine hosting one application."
+              }
+            ]
+          },
           "name": {
             "type": "string",
             "description": "The name to publish records at. Must sit within a domain this server's\ngroup controls."
@@ -2977,6 +2988,17 @@
           "csr"
         ],
         "properties": {
+          "application_type": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ApplicationType",
+                "description": "The type of the application on this machine the name is for, where the\nmachine hosts several and the agent knows which serves it. Unneeded once\nthe name is declared, and on a machine hosting one application."
+              }
+            ]
+          },
           "csr": {
             "type": "string",
             "description": "The certificate signing request, DER, base64. Must ask for exactly `name`\nand nothing else — a request carrying any other name is refused rather\nthan trimmed."

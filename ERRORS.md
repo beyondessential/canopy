@@ -169,6 +169,44 @@ groups' names. Distinct from a withheld grant so a client can
 tell "this name is not yours" from "you may not manage names at
 all".
 
+## DNS name undeclared
+
+Issued when a machine asks Canopy to act on a DNS name, and the request
+resolves to no single application on that machine: none of its
+applications declares the DNS name, and neither the application type
+the request named nor the grants narrowed it to one.
+
+Reported identically whether the DNS name is declared by an
+application on another machine or by nobody, so the endpoint cannot
+be used to discover what other machines serve. The remedy is an
+operator declaring the DNS name on one of the machine's applications,
+or the request naming its application's type, so the client should
+wait and try later rather than treat the refusal as a fault. Canopy
+records the request so operators see that a declaration is wanted.
+
+## DNS name denied
+
+Issued when a machine asks Canopy to act on a DNS name an operator
+has denied to that machine. The denial stands until an operator lifts
+it or declares the DNS name on one of the machine's applications.
+
+Distinct from an undeclared DNS name so a client can tell a decision
+against the DNS name from a declaration it is waiting on. A denied
+request is not recorded, so asking again raises nothing. The refusal
+names the DNS name only; the operator's note stays in Canopy.
+
+## DNS name type mismatch
+
+Issued when a machine asks Canopy to act on a DNS name and names an
+application type the machine contradicts: the application on that
+machine declaring the DNS name is of another type, or none of the
+machine's applications is of the named type. The refusal names the
+types the machine's applications actually are.
+
+Distinct from an undeclared DNS name because waiting does not fix it:
+either the client is configured with the wrong type, or the
+application it means is not registered on the machine in Canopy.
+
 ## Auth: tailnet identity missing
 
 Issued on the private-server's `/public/...` mount when the

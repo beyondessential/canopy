@@ -162,8 +162,7 @@ async fn a_name_belongs_to_one_server_at_a_time() {
 		assert!(
 			matches!(
 				&err,
-				commons_errors::AppError::NameNotEntitled(m)
-					if m == "no application on this machine declares a.tamanu.app"
+				commons_errors::AppError::DnsNameUndeclared(m) if m == "a.tamanu.app"
 			),
 			"got {err:?}"
 		);
@@ -1271,7 +1270,7 @@ async fn a_renewal_in_flight_does_not_stop_the_old_chain_being_collectable() {
 
 /// An operator ties a name to the software answering on it, so a box running
 /// several workloads has its later requests routed to the right one.
-// spec: CRT#declared-names
+// spec: CRT#declared-dns-names
 #[tokio::test(flavor = "multi_thread")]
 async fn declaring_a_name_ties_it_to_one_application() {
 	TestDb::run(|mut conn, _url| async move {
@@ -1299,7 +1298,7 @@ async fn declaring_a_name_ties_it_to_one_application() {
 
 /// Safe to name the holder here, and only here: an operator already sees the
 /// whole fleet, and needs to know what to release first.
-// spec: CRT#declared-names
+// spec: CRT#declared-dns-names
 #[tokio::test(flavor = "multi_thread")]
 async fn declaring_a_name_another_application_holds_names_the_holder() {
 	TestDb::run(|mut conn, _url| async move {
@@ -1325,7 +1324,7 @@ async fn declaring_a_name_another_application_holds_names_the_holder() {
 
 /// Releasing withdraws nothing already in place, exactly as revoking a grant
 /// leaves it. What ends is Canopy treating the name as this application's.
-// spec: CRT#declared-names
+// spec: CRT#declared-dns-names
 #[tokio::test(flavor = "multi_thread")]
 async fn releasing_a_name_leaves_its_certificates_in_place_and_frees_it() {
 	TestDb::run(|mut conn, _url| async move {
@@ -1454,7 +1453,7 @@ async fn releasing_a_name_leaves_its_certificates_in_place_and_frees_it() {
 /// The certificate path declares the name it orders for, and does so without
 /// telling a device who else holds it — the same refusal a name nobody declares
 /// gets, so the endpoint is not a directory of what other machines serve.
-// spec: CRT#declared-names
+// spec: CRT#declared-dns-names
 #[tokio::test(flavor = "multi_thread")]
 async fn ordering_declares_the_name_without_naming_another_holder() {
 	TestDb::run(|mut conn, _url| async move {
@@ -1485,8 +1484,7 @@ async fn ordering_declares_the_name_without_naming_another_holder() {
 		assert!(
 			matches!(
 				&refusal,
-				commons_errors::AppError::NameNotEntitled(m)
-					if m == "no application on this machine declares elsewhere.fiji.tamanu.app"
+				commons_errors::AppError::DnsNameUndeclared(m) if m == "elsewhere.fiji.tamanu.app"
 			),
 			"got {refusal:?}"
 		);
@@ -1496,4 +1494,84 @@ async fn ordering_declares_the_name_without_naming_another_holder() {
 		);
 	})
 	.await
+}
+
+/// A machine's undeclared records are bounded: past the bound a new DNS name is
+/// not recorded, and one already held is still refreshed.
+// spec: CRT#undeclared-requests
+#[tokio::test(flavor = "multi_thread")]
+async fn undeclared_records_are_bounded_per_machine() {
+	use database::dns_name_dispositions::{AskedFor, UNDECLARED_PER_MACHINE, UndeclaredDnsName};
+	TestDb::run(|mut conn, _url| async move {
+		let machine = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (id, name) VALUES ('{machine}', 'box')"
+		))
+		.await
+		.expect("machine");
+
+		for i in 0..UNDECLARED_PER_MACHINE {
+			UndeclaredDnsName::record(
+				&mut conn,
+				machine,
+				&format!("n{i}.example.org"),
+				AskedFor::Certificate,
+			)
+			.await
+			.expect("record");
+		}
+		UndeclaredDnsName::record(
+			&mut conn,
+			machine,
+			"overflow.example.org",
+			AskedFor::Certificate,
+		)
+		.await
+		.expect("past the bound is not an error");
+		UndeclaredDnsName::record(&mut conn, machine, "n0.example.org", AskedFor::Addresses)
+			.await
+			.expect("refresh");
+
+		let held = UndeclaredDnsName::for_machine(&mut conn, machine)
+			.await
+			.expect("list");
+		assert_eq!(held.len() as i64, UNDECLARED_PER_MACHINE);
+		assert!(held.iter().all(|r| r.dns_name != "overflow.example.org"));
+		assert_eq!(
+			held.iter()
+				.find(|r| r.dns_name == "n0.example.org")
+				.map(|r| r.asked_for),
+			Some(AskedFor::Addresses)
+		);
+	})
+	.await;
+}
+
+/// The monitor's prune drops records not asked about within the lifetime and
+/// keeps the rest, whichever machine they belong to.
+// spec: CRT#undeclared-requests
+#[tokio::test(flavor = "multi_thread")]
+async fn lapsed_undeclared_records_are_pruned() {
+	use database::dns_name_dispositions::UndeclaredDnsName;
+	TestDb::run(|mut conn, _url| async move {
+		let machine = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (id, name) VALUES ('{machine}', 'box'); \
+			 INSERT INTO undeclared_dns_names (machine_id, dns_name, asked_for, first_asked_at, last_asked_at) VALUES \
+			   ('{machine}', 'lapsed.example.org', 'certificate', now() - interval '3 days', now() - interval '25 hours'), \
+			   ('{machine}', 'fresh.example.org', 'addresses', now() - interval '3 days', now() - interval '1 hour')"
+		))
+		.await
+		.expect("seed");
+
+		assert_eq!(UndeclaredDnsName::prune(&mut conn).await.expect("prune"), 1);
+		let held: Vec<String> = UndeclaredDnsName::for_machine(&mut conn, machine)
+			.await
+			.expect("list")
+			.into_iter()
+			.map(|r| r.dns_name)
+			.collect();
+		assert_eq!(held, vec!["fresh.example.org".to_string()]);
+	})
+	.await;
 }

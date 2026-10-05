@@ -58,6 +58,81 @@ async fn an_unsuccessful_status_carries_the_status_and_body() {
 }
 
 #[tokio::test]
+async fn a_refusal_reports_the_reason_canopy_gave() {
+	let recorder = Recorder::json(
+		403,
+		r#"{"type":"/errors/dns-name-undeclared","status":403,"title":"no application on this machine declares this DNS name: a.example.org","detail":"DnsNameUndeclared(\"a.example.org\")"}"#,
+	);
+	let client = CanopyClient::new(recorder);
+
+	let err = client
+		.status_check_severities("a-server")
+		.await
+		.expect_err("a 403 is not a success");
+
+	assert_eq!(
+		err.to_string(),
+		"canopy returned 403 Forbidden for /status/a-server/check-severities: \
+		 no application on this machine declares this DNS name: a.example.org"
+	);
+}
+
+#[tokio::test]
+async fn a_blank_title_falls_back_to_the_detail() {
+	let recorder = Recorder::json(
+		403,
+		r#"{"type":"/errors/forbidden","status":403,"title":"  ","detail":"not yours"}"#,
+	);
+	let client = CanopyClient::new(recorder);
+
+	let err = client
+		.status_check_severities("a-server")
+		.await
+		.expect_err("a 403 is not a success");
+
+	assert_eq!(
+		err.to_string(),
+		"canopy returned 403 Forbidden for /status/a-server/check-severities: not yours"
+	);
+}
+
+#[tokio::test]
+async fn a_server_fault_reports_its_status_alone() {
+	let recorder = Recorder::json(
+		500,
+		r#"{"type":"/errors/database-query","status":500,"title":"database: duplicate key value violates unique constraint \"secret_idx\"","detail":"DatabaseQuery(..)"}"#,
+	);
+	let client = CanopyClient::new(recorder);
+
+	let err = client
+		.status_check_severities("a-server")
+		.await
+		.expect_err("a 500 is not a success");
+
+	assert_eq!(
+		err.to_string(),
+		"canopy returned 500 Internal Server Error for /status/a-server/check-severities"
+	);
+	assert!(err.http().expect("http").body_text().contains("secret_idx"));
+}
+
+#[tokio::test]
+async fn a_refusal_without_a_problem_document_reports_the_status_alone() {
+	let recorder = Recorder::json(412, "device is dormant");
+	let client = CanopyClient::new(recorder);
+
+	let err = client
+		.status_check_severities("a-server")
+		.await
+		.expect_err("a 412 is not a success");
+
+	assert_eq!(
+		err.to_string(),
+		"canopy returned 412 Precondition Failed for /status/a-server/check-severities"
+	);
+}
+
+#[tokio::test]
 async fn a_body_that_is_not_the_declared_json_is_a_decode_error_not_an_http_error() {
 	let recorder = Recorder::json(200, "not json at all");
 	let client = CanopyClient::new(recorder);

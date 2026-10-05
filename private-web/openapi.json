@@ -1812,6 +1812,64 @@
         "x-canopy-safety-mode": "write"
       }
     },
+    "/api/certificates/deny": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Deny a DNS name to a machine.",
+        "description": "Every address and certificate request about it from that machine is then\nrefused as denied, and is not recorded, so it raises no notice. Refused while\none of the machine's applications declares the name.",
+        "operationId": "certificates_deny",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DenyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeniedView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "One of the machine's applications declares this name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
     "/api/certificates/for_group": {
       "post": {
         "tags": [
@@ -1840,6 +1898,54 @@
                   "items": {
                     "$ref": "#/components/schemas/DomainHealthView"
                   }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/certificates/for_machine": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "What a machine's page shows about its DNS names.",
+        "description": "The DNS names its applications declare, the requests it made that resolved\nto none of them, and the DNS names denied to it.",
+        "operationId": "certificates_for_machine",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineDnsNamesView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
                 }
               }
             }
@@ -1899,6 +2005,47 @@
           }
         ],
         "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/certificates/lift_denial": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Lift a denial.",
+        "description": "The machine's requests about the name then resolve as any other's do.",
+        "operationId": "certificates_lift_denial",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineDnsNameArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/certificates/pause": {
@@ -2134,6 +2281,47 @@
           }
         ],
         "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/certificates/undeclared_notices": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "The machines with requests waiting on a declaration.",
+        "description": "For the notices on the group page and the Status page. Empty when there\nare none.",
+        "operationId": "certificates_undeclared_notices",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UndeclaredNoticesArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UndeclaredNoticeView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/commons/calendar_url": {
@@ -10278,6 +10466,14 @@
           }
         }
       },
+      "AskedFor": {
+        "type": "string",
+        "description": "What a refused request was for.",
+        "enum": [
+          "addresses",
+          "certificate"
+        ]
+      },
       "AttachTailscaleArgs": {
         "type": "object",
         "description": "Request to attach a device to a Tailscale network node.",
@@ -12179,6 +12375,62 @@
           "email": {
             "type": "string",
             "description": "The email address to remove from the admin allow-list."
+          }
+        }
+      },
+      "DeniedView": {
+        "type": "object",
+        "description": "A DNS name an operator has denied to the machine.",
+        "required": [
+          "name",
+          "denied_by",
+          "denied_at"
+        ],
+        "properties": {
+          "denied_at": {
+            "type": "string",
+            "description": "When it was denied."
+          },
+          "denied_by": {
+            "type": "string",
+            "description": "The operator who denied it."
+          },
+          "name": {
+            "type": "string",
+            "description": "The DNS name, normalised."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why, if they said."
+          }
+        }
+      },
+      "DenyArgs": {
+        "type": "object",
+        "description": "A DNS name to deny to a machine.",
+        "required": [
+          "machine_id",
+          "name"
+        ],
+        "properties": {
+          "machine_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The machine to deny it to."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name, in any case and with or without a trailing dot."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why, optionally."
           }
         }
       },
@@ -15172,6 +15424,30 @@
           }
         }
       },
+      "MachineApplicationView": {
+        "type": "object",
+        "description": "One of a machine's applications, as a choice to declare a DNS name on.",
+        "required": [
+          "id",
+          "name",
+          "type"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The application's identifier."
+          },
+          "name": {
+            "type": "string",
+            "description": "What to call it."
+          },
+          "type": {
+            "type": "string",
+            "description": "Its type's slug."
+          }
+        }
+      },
       "MachineArgs": {
         "type": "object",
         "description": "Identifies a server.",
@@ -15339,6 +15615,41 @@
           }
         }
       },
+      "MachineDeclaredView": {
+        "type": "object",
+        "description": "A DNS name declared by one of a machine's applications.",
+        "required": [
+          "name",
+          "application_id",
+          "application_name"
+        ],
+        "properties": {
+          "application_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The application declaring it."
+          },
+          "application_name": {
+            "type": "string",
+            "description": "The declaring application, for display."
+          },
+          "certificate": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CertificateView",
+                "description": "The newest certificate Canopy holds or is ordering for it, if any."
+              }
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "The DNS name, normalised."
+          }
+        }
+      },
       "MachineDetail": {
         "allOf": [
           {
@@ -15490,6 +15801,65 @@
           "up": {
             "$ref": "#/components/schemas/ShortStatus",
             "description": "Whether the box is currently reporting, on its own threshold."
+          }
+        }
+      },
+      "MachineDnsNameArgs": {
+        "type": "object",
+        "description": "A machine and one DNS name.",
+        "required": [
+          "machine_id",
+          "name"
+        ],
+        "properties": {
+          "machine_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The machine."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name, in any case and with or without a trailing dot."
+          }
+        }
+      },
+      "MachineDnsNamesView": {
+        "type": "object",
+        "description": "Everything a machine's page needs about the DNS names asked about from it.",
+        "required": [
+          "applications",
+          "declared",
+          "undeclared",
+          "denied"
+        ],
+        "properties": {
+          "applications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MachineApplicationView"
+            },
+            "description": "The machine's applications, to declare a DNS name on."
+          },
+          "declared": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MachineDeclaredView"
+            },
+            "description": "The DNS names its applications declare, by name."
+          },
+          "denied": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeniedView"
+            },
+            "description": "The DNS names denied to it."
+          },
+          "undeclared": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UndeclaredView"
+            },
+            "description": "Its requests that resolved to no single application and still count."
           }
         }
       },
@@ -16017,7 +16387,8 @@
           "name",
           "addresses",
           "published_addresses",
-          "published"
+          "published",
+          "within_domains"
         ],
         "properties": {
           "addresses": {
@@ -16060,6 +16431,10 @@
               "null"
             ],
             "description": "When Canopy last published this name's records."
+          },
+          "within_domains": {
+            "type": "boolean",
+            "description": "Whether the name lies at or beneath a domain the application's group\ncontrols. An operator may declare one that does not, ahead of the group\nclaiming its domain; nothing is published or certified for it until then."
           },
           "zone": {
             "type": [
@@ -20778,6 +21153,88 @@
           "type": {
             "type": "string",
             "description": "Backup type these defaults apply to."
+          }
+        }
+      },
+      "UndeclaredNoticeView": {
+        "type": "object",
+        "description": "How many undeclared requests one machine has.",
+        "required": [
+          "machine_id",
+          "machine_name",
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many of its requests are waiting."
+          },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The machine's group. Null for a machine in none."
+          },
+          "group_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "That group's name."
+          },
+          "machine_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The machine with requests waiting on a declaration."
+          },
+          "machine_name": {
+            "type": "string",
+            "description": "The machine's name."
+          }
+        }
+      },
+      "UndeclaredNoticesArgs": {
+        "type": "object",
+        "description": "Which machines have undeclared requests, optionally within one group.",
+        "properties": {
+          "server_group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Narrow to one group's machines. Omitted for the whole fleet."
+          }
+        }
+      },
+      "UndeclaredView": {
+        "type": "object",
+        "description": "A request the machine made that resolved to no single application.",
+        "required": [
+          "name",
+          "asked_for",
+          "first_asked_at",
+          "last_asked_at"
+        ],
+        "properties": {
+          "asked_for": {
+            "$ref": "#/components/schemas/AskedFor",
+            "description": "What the latest refused request was for."
+          },
+          "first_asked_at": {
+            "type": "string",
+            "description": "When the machine first asked."
+          },
+          "last_asked_at": {
+            "type": "string",
+            "description": "When the machine last asked. A request not repeated for a day no longer\ncounts."
+          },
+          "name": {
+            "type": "string",
+            "description": "The DNS name asked about, normalised."
           }
         }
       },

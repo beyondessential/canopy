@@ -13,6 +13,8 @@
 //! - **tailnet key-expiry** — when the Tailscale directory is configured.
 //! - **incident linger and reminders** — close incidents whose linger window
 //!   has elapsed, and queue the daily reminder for long-open ones.
+//! - **undeclared DNS names** — drops requests no machine has repeated for a
+//!   day.
 //! - **operator sessions** — retires safety-mode sessions no client has
 //!   presented for a day, on its own hourly timer (see `jobs::session_sweep`).
 //!
@@ -264,6 +266,13 @@ pub fn spawn() -> JoinHandle<()> {
 				Err(err) => error!("maintenance window sweep failed: {err}"),
 			}
 
+			// Undeclared DNS name requests no machine has repeated for a day.
+			match database::UndeclaredDnsName::prune(&mut db).await {
+				Ok(0) => {}
+				Ok(n) => debug!("undeclared DNS names: pruned {n} lapsed request(s)"),
+				Err(err) => error!("undeclared DNS name prune failed: {err}"),
+			}
+
 			// Backstop drain of the incident-reeval queue in case the dedicated
 			// worker task above has died. Safe to run concurrently with it:
 			// `process_incident_reeval_queue` claims rows `FOR UPDATE SKIP
@@ -332,7 +341,7 @@ pub fn spawn() -> JoinHandle<()> {
 
 			// And the pause nobody remembers, which is Canopy's to report because
 			// only an operator can lift one.
-			// spec: CRT#pausing-a-server
+			// spec: CRT#pausing-an-application
 			match database::self_alerts::sweep_forgotten_pauses(&mut db).await {
 				Ok(_) => {}
 				Err(err) => error!("forgotten-pause self-alert sweep failed: {err}"),

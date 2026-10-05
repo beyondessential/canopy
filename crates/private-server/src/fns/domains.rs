@@ -168,7 +168,7 @@ pub struct MaybeGroupIdArgs {
 /// where the Canopy instance has no zones at all — presents a control that cannot do
 /// anything. The rule lives here rather than in the UI so there is one answer
 /// to it.
-// spec: DOM#permission-for-a-server-to-manage-its-own-names
+// spec: DOM#permission-for-an-application-to-manage-its-own-dns-names
 #[utoipa::path(
 	post,
 	path = "/grant_availability",

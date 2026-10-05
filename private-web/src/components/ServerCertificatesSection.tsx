@@ -27,8 +27,8 @@ import { GradedAction } from "./GradedAction";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import TimeAgo from "./TimeAgo";
 
-/// The public names a server has registered and the certificates Canopy holds
-/// for it, on the server detail page. Also where an operator sets the profile
+/// The DNS names an application declares and the certificates Canopy holds
+/// for it, on the application's page. Also where an operator sets the profile
 /// its certificates are issued under, pauses and unpauses Canopy's work on its
 /// behalf, and revokes a certificate.
 ///
@@ -140,7 +140,12 @@ export default function ServerCertificatesSection({
 					</Alert>
 				)}
 
-				<NamesTable names={data.names} />
+				<NamesTable
+					serverId={serverId}
+					names={data.names}
+					isAdmin={isAdmin}
+					onChanged={reload}
+				/>
 				<CertificatesTable
 					certificates={data.certificates}
 					isAdmin={isAdmin}
@@ -161,8 +166,8 @@ function SectionHeading() {
 				color="text.secondary"
 				sx={{ ml: 1 }}
 			>
-				— the public names this server has registered, and the TLS certificates
-				Canopy holds for them.
+				— the DNS names this application serves, and the TLS certificates Canopy
+				holds for them.
 			</Typography>
 		</Typography>
 	);
@@ -415,90 +420,241 @@ type NameRow = {
 	published_at: string | null;
 	last_error: string | null;
 	zone: string | null;
+	within_domains: boolean;
 };
 
-function NamesTable({ names }: { names: NameRow[] }) {
-	if (names.length === 0) {
-		return (
-			<Alert severity="info">
-				This server has registered no public names.
-			</Alert>
-		);
-	}
+/// The DNS names an application declares. A declaration is routing only: one
+/// with no addresses registered is declared, not withdrawn, and publishes
+/// nothing.
+// spec: CRT#presentation
+function NamesTable({
+	serverId,
+	names,
+	isAdmin,
+	onChanged,
+}: {
+	serverId: string;
+	names: NameRow[];
+	isAdmin: boolean;
+	onChanged: () => void;
+}) {
+	return (
+		<Box>
+			<Stack
+				direction="row"
+				spacing={1}
+				sx={{ alignItems: "flex-start", mb: 1, flexWrap: "wrap", rowGap: 1 }}
+			>
+				<Typography variant="subtitle2" sx={{ pt: 1 }}>
+					DNS names
+				</Typography>
+				<Box sx={{ flex: 1 }} />
+				{isAdmin && <DeclareField serverId={serverId} onChanged={onChanged} />}
+			</Stack>
+			{names.length === 0 ? (
+				<Alert severity="info">This application declares no DNS names.</Alert>
+			) : (
+				<Stack spacing={1}>
+					{names.map((row) => (
+						<NameRowView
+							key={row.id}
+							serverId={serverId}
+							row={row}
+							isAdmin={isAdmin}
+							onChanged={onChanged}
+						/>
+					))}
+				</Stack>
+			)}
+		</Box>
+	);
+}
+
+function DeclareField({
+	serverId,
+	onChanged,
+}: {
+	serverId: string;
+	onChanged: () => void;
+}) {
+	const [name, setName] = useState("");
+	const declare = useApiAction("certificates", "declare");
+
+	const onDeclare = async () => {
+		try {
+			await declare.call({ application_id: serverId, name: name.trim() });
+			setName("");
+			onChanged();
+		} catch {
+			/* surfaced via declare.error */
+		}
+	};
 
 	return (
 		<Box>
-			<Typography variant="subtitle2" gutterBottom>
-				Registered names
-			</Typography>
-			<Stack spacing={1}>
-				{names.map((row) => (
-					<Box key={row.id}>
-						<Stack
-							direction="row"
-							spacing={1}
-							sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 0.5 }}
-						>
-							<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-								{row.name}
-							</Typography>
-							{row.published ? (
-								<Chip
-									size="small"
-									variant="outlined"
-									color="success"
-									label="published"
-								/>
-							) : (
-								<Tooltip title="Canopy has not yet written what this server asked for into the zone. It retries every pass.">
-									<Chip
-										size="small"
-										variant="outlined"
-										color="warning"
-										label="waiting to publish"
-									/>
-								</Tooltip>
-							)}
-							{!row.zone && (
-								<Tooltip title="No configured DNS zone covers this name, so Canopy can publish nothing for it.">
-									<Chip
-										size="small"
-										variant="outlined"
-										color="error"
-										icon={<WarningAmberIcon />}
-										label="no matching zone"
-									/>
-								</Tooltip>
-							)}
-							<Box sx={{ flex: 1 }} />
-							<Typography variant="caption" color="text.secondary">
-								{row.published_at ? (
-									<>
-										published <TimeAgo timestamp={row.published_at} />
-									</>
-								) : (
-									"never published"
-								)}
-							</Typography>
-						</Stack>
-						<Typography
-							variant="caption"
-							color="text.secondary"
-							sx={{ fontFamily: "monospace" }}
-						>
-							{row.addresses.length > 0 ? row.addresses.join(", ") : "withdrawn"}
-							{!row.published &&
-								row.published_addresses.length > 0 &&
-								` (currently ${row.published_addresses.join(", ")})`}
-						</Typography>
-						{row.last_error && (
-							<Alert severity="error" sx={{ mt: 0.5 }} icon={<ErrorOutlineIcon />}>
-								{row.last_error}
-							</Alert>
-						)}
-					</Box>
-				))}
+			<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+				<TextField
+					size="small"
+					placeholder="app.example.tamanu.app"
+					value={name}
+					onChange={(e) => setName(e.target.value)}
+					onKeyDown={(e) => {
+						if (e.key === "Enter" && name.trim() !== "") onDeclare();
+					}}
+					disabled={declare.pending}
+					slotProps={{ htmlInput: { "aria-label": "DNS name to declare" } }}
+					sx={{ minWidth: 280, "& input": { fontFamily: "monospace" } }}
+				/>
+				<GradedAction calls="certificates/declare">
+					<Button
+						variant="outlined"
+						size="small"
+						onClick={onDeclare}
+						disabled={declare.pending || name.trim() === ""}
+					>
+						Declare
+					</Button>
+				</GradedAction>
 			</Stack>
+			{declare.error && (
+				<Alert severity="error" sx={{ mt: 1 }}>
+					{declare.error.message}
+				</Alert>
+			)}
+		</Box>
+	);
+}
+
+function NameRowView({
+	serverId,
+	row,
+	isAdmin,
+	onChanged,
+}: {
+	serverId: string;
+	row: NameRow;
+	isAdmin: boolean;
+	onChanged: () => void;
+}) {
+	const release = useApiAction("certificates", "release");
+	// Nothing wanted and nothing published: an operator's declaration, or an
+	// agent's certificate request, with no addresses ever registered.
+	const declaredOnly =
+		row.addresses.length === 0 && row.published_addresses.length === 0;
+
+	const onRelease = async () => {
+		if (
+			!confirm(
+				`Release ${row.name}? Canopy stops renewing its certificates. Records and certificates already in place stay.`,
+			)
+		)
+			return;
+		try {
+			await release.call({ application_id: serverId, name: row.name });
+			onChanged();
+		} catch {
+			/* surfaced via release.error */
+		}
+	};
+
+	return (
+		<Box data-testid="dns-name-row">
+			<Stack
+				direction="row"
+				spacing={1}
+				sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 0.5 }}
+			>
+				<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+					{row.name}
+				</Typography>
+				{declaredOnly ? (
+					<Chip size="small" label="declared" />
+				) : row.published ? (
+					<Chip
+						size="small"
+						variant="outlined"
+						color="success"
+						label="published"
+					/>
+				) : (
+					<Tooltip title="Canopy has not yet written what this server asked for into the zone. It retries every pass.">
+						<Chip
+							size="small"
+							variant="outlined"
+							color="warning"
+							label="waiting to publish"
+						/>
+					</Tooltip>
+				)}
+				{!row.within_domains && (
+					<Tooltip title="Nothing can be published or certified for it until the group controls a domain covering it.">
+						<Chip
+							size="small"
+							variant="outlined"
+							color="warning"
+							icon={<WarningAmberIcon />}
+							label="outside the group's domains"
+						/>
+					</Tooltip>
+				)}
+				{!row.zone && (
+					<Tooltip title="No configured DNS zone covers this name, so Canopy can publish nothing for it.">
+						<Chip
+							size="small"
+							variant="outlined"
+							color="error"
+							icon={<WarningAmberIcon />}
+							label="no matching zone"
+						/>
+					</Tooltip>
+				)}
+				<Box sx={{ flex: 1 }} />
+				<Typography variant="caption" color="text.secondary">
+					{declaredOnly ? (
+						"no addresses registered"
+					) : row.published_at ? (
+						<>
+							published <TimeAgo timestamp={row.published_at} />
+						</>
+					) : (
+						"never published"
+					)}
+				</Typography>
+				{isAdmin && (
+					<GradedAction calls="certificates/release">
+						<Button
+							size="small"
+							color="error"
+							onClick={onRelease}
+							disabled={release.pending}
+						>
+							Release
+						</Button>
+					</GradedAction>
+				)}
+			</Stack>
+			{!declaredOnly && (
+				<Typography
+					variant="caption"
+					color="text.secondary"
+					sx={{ fontFamily: "monospace" }}
+				>
+					{row.addresses.length > 0 ? row.addresses.join(", ") : "withdrawn"}
+					{!row.published &&
+						row.published_addresses.length > 0 &&
+						` (currently ${row.published_addresses.join(", ")})`}
+				</Typography>
+			)}
+			{row.last_error && (
+				<Alert severity="error" sx={{ mt: 0.5 }} icon={<ErrorOutlineIcon />}>
+					{row.last_error}
+				</Alert>
+			)}
+			{release.error && (
+				<Alert severity="error" sx={{ mt: 0.5 }}>
+					{release.error.message}
+				</Alert>
+			)}
 		</Box>
 	);
 }

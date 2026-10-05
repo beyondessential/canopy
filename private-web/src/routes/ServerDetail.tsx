@@ -530,7 +530,7 @@ function InfoSection({
 				{/* Only where something has been granted. "Not permitted" on every
 				    server in the fleet advertises a feature that a Canopy instance
 				    without DNS zones does not have.
-				    spec: DOM#permission-for-a-server-to-manage-its-own-names */}
+				    spec: DOM#permission-for-an-application-to-manage-its-own-dns-names */}
 				{(server.may_manage_dns || server.may_manage_tls) && (
 					<InfoItem
 						label="Name management"
@@ -679,7 +679,7 @@ function renderLocation(server: ServerInfo): string {
 
 /// What this server is trusted to do with names under its group's domains. Only
 /// called where it is trusted with one of them, so there is no "none" reading.
-// spec: DOM#permission-for-a-server-to-manage-its-own-names
+// spec: DOM#permission-for-an-application-to-manage-its-own-dns-names
 function nameManagementLabel(server: ServerInfo): string {
 	if (server.may_manage_dns && server.may_manage_tls) return "DNS and TLS";
 	return server.may_manage_dns ? "DNS only" : "TLS only";

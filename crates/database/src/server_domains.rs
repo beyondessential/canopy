@@ -194,7 +194,7 @@ impl ServerGroupDomain {
 	/// all: a claim can only be made against a configured zone, but one made
 	/// before a zone was withdrawn outlives it, so "no zones" alone is not the
 	/// same as "not in use".
-	// spec: DOM#permission-for-a-server-to-manage-its-own-names
+	// spec: DOM#permission-for-an-application-to-manage-its-own-dns-names
 	pub async fn any_claimed(db: &mut AsyncPgConnection) -> Result<bool> {
 		use crate::schema::server_group_domains::dsl;
 		use diesel::dsl::{exists, select};

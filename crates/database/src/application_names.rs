@@ -93,7 +93,7 @@ impl ApplicationName {
 	/// holder — safe here, and not on the device-facing path, because an
 	/// operator already sees the whole fleet and needs to know what to release
 	/// first.
-	// spec: CRT#declared-names
+	// spec: CRT#declared-dns-names
 	pub async fn declare(
 		db: &mut AsyncPgConnection,
 		application_id: Uuid,
@@ -106,6 +106,7 @@ impl ApplicationName {
 			if existing.application_id != application_id {
 				return Err(Self::held_elsewhere(db, &name, existing.application_id).await);
 			}
+			crate::dns_name_dispositions::clear_for_declaration(db, application_id, &name).await?;
 			return Ok(existing);
 		}
 
@@ -119,7 +120,11 @@ impl ApplicationName {
 			.get_result(db)
 			.await
 		{
-			Ok(row) => Ok(row),
+			Ok(row) => {
+				crate::dns_name_dispositions::clear_for_declaration(db, application_id, &name)
+					.await?;
+				Ok(row)
+			}
 			// Declared from elsewhere between the read and the insert.
 			Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => {
 				let holder = Self::for_name(db, &name).await?.map(|r| r.application_id);
@@ -138,7 +143,7 @@ impl ApplicationName {
 	/// the records published stay published and the certificates held stay
 	/// held. What ends is Canopy treating the name as this application's, which
 	/// frees it to be declared by another.
-	// spec: CRT#declared-names
+	// spec: CRT#declared-dns-names
 	pub async fn release(
 		db: &mut AsyncPgConnection,
 		application_id: Uuid,
@@ -179,9 +184,10 @@ impl ApplicationName {
 	/// Register `name` for a server with the addresses it is reachable at,
 	/// replacing whatever addresses were registered before.
 	///
-	/// An empty address list withdraws the name. `409` when the name is
-	/// registered to a different server: a name's addresses are one server's to
-	/// set at a time.
+	/// An empty address list withdraws the name. Refused as undeclared when
+	/// another application holds the name, word for word as a name nobody
+	/// declares: a name's addresses are one application's to set at a time, and
+	/// this path is device-facing.
 	pub async fn register(
 		db: &mut AsyncPgConnection,
 		application_id: Uuid,
@@ -195,9 +201,7 @@ impl ApplicationName {
 
 		if let Some(existing) = Self::for_name(db, &name).await? {
 			if existing.application_id != application_id {
-				return Err(AppError::NameNotEntitled(format!(
-					"no application on this machine declares {name}"
-				)));
+				return Err(AppError::DnsNameUndeclared(name));
 			}
 			return diesel::update(dsl::application_names.filter(dsl::id.eq(existing.id)))
 				.set((
@@ -222,13 +226,15 @@ impl ApplicationName {
 			.get_result(db)
 			.await
 		{
-			Ok(row) => Ok(row),
+			Ok(row) => {
+				crate::dns_name_dispositions::clear_for_declaration(db, application_id, &name)
+					.await?;
+				Ok(row)
+			}
 			// Another server registered the same name between the read and the
 			// insert.
 			Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => {
-				Err(AppError::NameNotEntitled(format!(
-					"no application on this machine declares {name}"
-				)))
+				Err(AppError::DnsNameUndeclared(name))
 			}
 			Err(e) => Err(AppError::from(e)),
 		}
@@ -263,7 +269,7 @@ impl ApplicationName {
 	///
 	/// Skips paused applications: while a server is paused Canopy changes no record of
 	/// its, though everything already published stays published.
-	// spec: CRT#pausing-a-server
+	// spec: CRT#pausing-an-application
 	pub async fn needing_publish(db: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Self>> {
 		use crate::schema::{application_names, applications};
 		let rows: Vec<Self> = application_names::table

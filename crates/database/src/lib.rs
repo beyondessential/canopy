@@ -18,6 +18,7 @@ pub mod check_instances;
 pub mod check_policies;
 pub mod chrome_releases;
 pub mod devices;
+pub mod dns_name_dispositions;
 pub mod inventory_leases;
 pub mod inventory_variables;
 pub mod issues;
@@ -71,6 +72,7 @@ pub use commons_types::backup::{
 	RunOutcome,
 };
 pub use devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
+pub use dns_name_dispositions::{AskedFor, DeniedDnsName, UndeclaredDnsName};
 pub use kubernetes_clusters::KubernetesCluster;
 pub use machines::{Machine, MachineUpdate, NewMachine};
 pub use operator_sessions::OperatorSession;

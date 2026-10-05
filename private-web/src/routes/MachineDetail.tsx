@@ -22,6 +22,7 @@ import {
 	StatusLegend,
 } from "../components/Legends";
 import MachineBackupSection from "../components/MachineBackupSection";
+import MachineDnsNamesSection from "../components/MachineDnsNamesSection";
 import MachineIdentitySection from "../components/MachineIdentitySection";
 import MachineSetupInstructions from "../components/MachineSetupInstructions";
 import MaintenanceSection from "../components/MaintenanceSection";
@@ -257,6 +258,13 @@ export default function MachineDetail() {
 						? heldByLabel({ kind: "machine", name: data.machine.name })
 						: null
 				}
+			/>
+
+			<MachineDnsNamesSection
+				machineId={data.machine.id}
+				isAdmin={isAdmin}
+				refreshKey={refreshTick}
+				onChanged={bumpRefresh}
 			/>
 
 			<MachineBackupSection

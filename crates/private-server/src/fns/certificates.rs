@@ -39,6 +39,10 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(danger: revoke))
 		.routes(routes!(write: declare))
 		.routes(routes!(write: release))
+		.routes(routes!(read_only: for_machine))
+		.routes(routes!(read_only: undeclared_notices))
+		.routes(routes!(write: deny))
+		.routes(routes!(write: lift_denial))
 }
 
 /// A name a server has registered, and how far Canopy has got with it.
@@ -63,6 +67,11 @@ pub struct NameView {
 	/// Apex of the managed zone covering this name, or null where no configured
 	/// zone does — in which case Canopy can publish nothing for it.
 	pub zone: Option<String>,
+	/// Whether the name lies at or beneath a domain the application's group
+	/// controls. An operator may declare one that does not, ahead of the group
+	/// claiming its domain; nothing is published or certified for it until then.
+	// spec: CRT#presentation
+	pub within_domains: bool,
 }
 
 /// A certificate Canopy holds for a server, or an order in flight.
@@ -142,8 +151,13 @@ pub struct ApplicationNamesView {
 	pub certificates: Vec<CertificateView>,
 }
 
-fn name_view(row: ApplicationName, zones: &[commons_types::dns::ManagedZone]) -> NameView {
+fn name_view(
+	row: ApplicationName,
+	zones: &[commons_types::dns::ManagedZone],
+	domains: &[String],
+) -> NameView {
 	NameView {
+		within_domains: domains.iter().any(|domain| is_within(&row.name, domain)),
 		published: row.is_reconciled(),
 		addresses: row.wanted().iter().map(|a| a.to_string()).collect(),
 		published_addresses: row.published().iter().map(|a| a.to_string()).collect(),
@@ -207,14 +221,7 @@ pub async fn for_server(
 	let mut conn = state.db_read.get().await?;
 	let server = Application::get_by_id(&mut conn, args.server_id).await?;
 
-	let domains = match server.group_id {
-		Some(group) => ServerGroupDomain::list_for_group(&mut conn, group)
-			.await?
-			.into_iter()
-			.map(|claim| claim.domain)
-			.collect(),
-		None => Vec::new(),
-	};
+	let domains = group_domains(&mut conn, server.group_id).await?;
 	let names = ApplicationName::for_server(&mut conn, args.server_id).await?;
 	let certificates = ApplicationCertificate::for_server(&mut conn, args.server_id).await?;
 
@@ -226,11 +233,11 @@ pub async fn for_server(
 		paused_at: server.name_management_paused_at,
 		paused_by: server.name_management_paused_by,
 		pause_reason: server.name_management_pause_reason,
-		domains,
 		names: names
 			.into_iter()
-			.map(|row| name_view(row, &state.dns_zones))
+			.map(|row| name_view(row, &state.dns_zones, &domains))
 			.collect(),
+		domains,
 		certificates: certificates.into_iter().map(certificate_view).collect(),
 	}))
 }
@@ -505,7 +512,7 @@ pub struct PauseArgs {
 ///
 /// A second pause leaves the first in place, so the original reason and time are
 /// not overwritten by a later one.
-// spec: CRT#pausing-a-server
+// spec: CRT#pausing-an-application
 #[utoipa::path(
 	post,
 	path = "/pause",
@@ -530,7 +537,7 @@ pub async fn pause(
 ///
 /// Only an operator can do this: Canopy never lifts a pause itself, however long
 /// it has been in place and however much is expiring under it.
-// spec: CRT#pausing-a-server
+// spec: CRT#pausing-an-application
 #[utoipa::path(
 	post,
 	path = "/resume",
@@ -651,7 +658,7 @@ pub struct DeclarationArgs {
 /// Declaring a name the same application already holds changes nothing. A name
 /// another application holds is refused, and the refusal names the holder so an
 /// operator can see what to release first.
-// spec: CRT#declared-names
+// spec: CRT#declared-dns-names
 #[utoipa::path(
 	post,
 	path = "/declare",
@@ -672,7 +679,9 @@ pub async fn declare(
 ) -> Result<Json<NameView>> {
 	let mut conn = state.db.get().await?;
 	let row = ApplicationName::declare(&mut conn, args.application_id, &args.name).await?;
-	Ok(Json(name_view(row, &state.dns_zones)))
+	let application = Application::get_by_id(&mut conn, args.application_id).await?;
+	let domains = group_domains(&mut conn, application.group_id).await?;
+	Ok(Json(name_view(row, &state.dns_zones, &domains)))
 }
 
 /// End an application's hold on a name.
@@ -681,7 +690,7 @@ pub async fn declare(
 /// published stay published and the certificates held stay held until they
 /// expire. What ends is Canopy treating the name as this application's, which
 /// frees it to be declared elsewhere.
-// spec: CRT#declared-names
+// spec: CRT#declared-dns-names
 #[utoipa::path(
 	post,
 	path = "/release",
@@ -698,5 +707,316 @@ pub async fn release(
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
 	ApplicationName::release(&mut conn, args.application_id, &args.name).await?;
+	Ok(Json(()))
+}
+
+/// The domains a group controls, or none for an application in no group.
+async fn group_domains(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	group_id: Option<Uuid>,
+) -> Result<Vec<String>> {
+	Ok(match group_id {
+		Some(group) => ServerGroupDomain::list_for_group(conn, group)
+			.await?
+			.into_iter()
+			.map(|claim| claim.domain)
+			.collect(),
+		None => Vec::new(),
+	})
+}
+
+// ── A machine's DNS names ───────────────────────────────────────────────────
+
+/// One of a machine's applications, as a choice to declare a DNS name on.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct MachineApplicationView {
+	/// The application's identifier.
+	pub id: Uuid,
+	/// What to call it.
+	pub name: String,
+	/// Its type's slug.
+	pub r#type: String,
+}
+
+/// A DNS name declared by one of a machine's applications.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct MachineDeclaredView {
+	/// The DNS name, normalised.
+	pub name: String,
+	/// The application declaring it.
+	pub application_id: Uuid,
+	/// The declaring application, for display.
+	pub application_name: String,
+	/// The newest certificate Canopy holds or is ordering for it, if any.
+	pub certificate: Option<CertificateView>,
+}
+
+/// A request the machine made that resolved to no single application.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct UndeclaredView {
+	/// The DNS name asked about, normalised.
+	pub name: String,
+	/// What the latest refused request was for.
+	pub asked_for: database::AskedFor,
+	/// When the machine first asked.
+	#[schema(value_type = String)]
+	pub first_asked_at: Timestamp,
+	/// When the machine last asked. A request not repeated for a day no longer
+	/// counts.
+	#[schema(value_type = String)]
+	pub last_asked_at: Timestamp,
+}
+
+/// A DNS name an operator has denied to the machine.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct DeniedView {
+	/// The DNS name, normalised.
+	pub name: String,
+	/// The operator who denied it.
+	pub denied_by: String,
+	/// Why, if they said.
+	pub note: Option<String>,
+	/// When it was denied.
+	#[schema(value_type = String)]
+	pub denied_at: Timestamp,
+}
+
+fn denied_view(row: database::DeniedDnsName) -> DeniedView {
+	DeniedView {
+		name: row.dns_name,
+		denied_by: row.denied_by,
+		note: row.note,
+		denied_at: row.created_at,
+	}
+}
+
+/// Everything a machine's page needs about the DNS names asked about from it.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct MachineDnsNamesView {
+	/// The machine's applications, to declare a DNS name on.
+	pub applications: Vec<MachineApplicationView>,
+	/// The DNS names its applications declare, by name.
+	pub declared: Vec<MachineDeclaredView>,
+	/// Its requests that resolved to no single application and still count.
+	pub undeclared: Vec<UndeclaredView>,
+	/// The DNS names denied to it.
+	pub denied: Vec<DeniedView>,
+}
+
+/// What a machine's page shows about its DNS names.
+///
+/// The DNS names its applications declare, the requests it made that resolved
+/// to none of them, and the DNS names denied to it.
+// spec: CRT#presentation
+#[utoipa::path(
+	post,
+	path = "/for_machine",
+	operation_id = "certificates_for_machine",
+	tag = "certificates",
+	security(("tailscale-user" = [])),
+	request_body = crate::fns::machines::MachineIdArgs,
+	responses(
+		(status = 200, body = MachineDnsNamesView),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn for_machine(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+	Json(args): Json<crate::fns::machines::MachineIdArgs>,
+) -> Result<Json<MachineDnsNamesView>> {
+	let mut conn = state.db_read.get().await?;
+	let machine = database::Machine::get_by_id(&mut conn, args.machine_id).await?;
+	let applications = machine.applications(&mut conn).await?;
+
+	let mut declared = Vec::new();
+	for application in &applications {
+		let certificates = ApplicationCertificate::for_server(&mut conn, application.id).await?;
+		for row in ApplicationName::for_server(&mut conn, application.id).await? {
+			// Newest first, so the first match is the one in play.
+			let certificate = certificates
+				.iter()
+				.find(|cert| cert.name == row.name)
+				.cloned()
+				.map(certificate_view);
+			declared.push(MachineDeclaredView {
+				name: row.name,
+				application_id: application.id,
+				application_name: application.display_name(),
+				certificate,
+			});
+		}
+	}
+	declared.sort_by(|a, b| a.name.cmp(&b.name));
+
+	let undeclared = database::UndeclaredDnsName::for_machine(&mut conn, machine.id)
+		.await?
+		.into_iter()
+		.map(|row| UndeclaredView {
+			name: row.dns_name,
+			asked_for: row.asked_for,
+			first_asked_at: row.first_asked_at,
+			last_asked_at: row.last_asked_at,
+		})
+		.collect();
+
+	let denied = database::DeniedDnsName::for_machine(&mut conn, machine.id)
+		.await?
+		.into_iter()
+		.map(denied_view)
+		.collect();
+
+	Ok(Json(MachineDnsNamesView {
+		applications: applications
+			.iter()
+			.map(|a| MachineApplicationView {
+				id: a.id,
+				name: a.display_name(),
+				r#type: a.r#type.to_string(),
+			})
+			.collect(),
+		declared,
+		undeclared,
+		denied,
+	}))
+}
+
+/// Which machines have undeclared requests, optionally within one group.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UndeclaredNoticesArgs {
+	/// Narrow to one group's machines. Omitted for the whole fleet.
+	#[serde(default)]
+	pub server_group_id: Option<Uuid>,
+}
+
+/// How many undeclared requests one machine has.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct UndeclaredNoticeView {
+	/// The machine with requests waiting on a declaration.
+	pub machine_id: Uuid,
+	/// The machine's name.
+	pub machine_name: String,
+	/// The machine's group. Null for a machine in none.
+	pub group_id: Option<Uuid>,
+	/// That group's name.
+	pub group_name: Option<String>,
+	/// How many of its requests are waiting.
+	pub count: i64,
+}
+
+/// The machines with requests waiting on a declaration.
+///
+/// For the notices on the group page and the Status page. Empty when there
+/// are none.
+// spec: CRT#presentation
+#[utoipa::path(
+	post,
+	path = "/undeclared_notices",
+	operation_id = "certificates_undeclared_notices",
+	tag = "certificates",
+	security(("tailscale-user" = [])),
+	request_body = UndeclaredNoticesArgs,
+	responses((status = 200, body = Vec<UndeclaredNoticeView>)),
+)]
+pub async fn undeclared_notices(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+	Json(args): Json<UndeclaredNoticesArgs>,
+) -> Result<Json<Vec<UndeclaredNoticeView>>> {
+	let mut conn = state.db_read.get().await?;
+	let rows =
+		database::UndeclaredDnsName::counts_by_machine(&mut conn, args.server_group_id).await?;
+	Ok(Json(
+		rows.into_iter()
+			.map(|row| UndeclaredNoticeView {
+				machine_id: row.machine_id,
+				machine_name: row.machine_name,
+				group_id: row.group_id,
+				group_name: row.group_name,
+				count: row.count,
+			})
+			.collect(),
+	))
+}
+
+/// A DNS name to deny to a machine.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct DenyArgs {
+	/// The machine to deny it to.
+	pub machine_id: Uuid,
+	/// The name, in any case and with or without a trailing dot.
+	pub name: String,
+	/// Why, optionally.
+	#[serde(default)]
+	pub note: Option<String>,
+}
+
+/// Deny a DNS name to a machine.
+///
+/// Every address and certificate request about it from that machine is then
+/// refused as denied, and is not recorded, so it raises no notice. Refused while
+/// one of the machine's applications declares the name.
+// spec: CRT#denied-dns-names
+#[utoipa::path(
+	post,
+	path = "/deny",
+	operation_id = "certificates_deny",
+	tag = "certificates",
+	security(("tailscale-admin" = [])),
+	request_body = DenyArgs,
+	responses(
+		(status = 200, body = DeniedView),
+		(status = 404, body = ProblemDetailsSchema),
+		(status = 409, description = "One of the machine's applications declares this name.", body = ProblemDetailsSchema),
+	),
+)]
+pub async fn deny(
+	State(state): State<AppState>,
+	TailscaleAdmin(admin): TailscaleAdmin,
+	Json(args): Json<DenyArgs>,
+) -> Result<Json<DeniedView>> {
+	let mut conn = state.db.get().await?;
+	// A machine that does not exist is a 404 rather than a foreign-key failure.
+	database::Machine::get_by_id(&mut conn, args.machine_id).await?;
+	let row = database::DeniedDnsName::deny(
+		&mut conn,
+		args.machine_id,
+		&args.name,
+		&admin.login,
+		args.note.as_deref(),
+	)
+	.await?;
+	Ok(Json(denied_view(row)))
+}
+
+/// A machine and one DNS name.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct MachineDnsNameArgs {
+	/// The machine.
+	pub machine_id: Uuid,
+	/// The name, in any case and with or without a trailing dot.
+	pub name: String,
+}
+
+/// Lift a denial.
+///
+/// The machine's requests about the name then resolve as any other's do.
+// spec: CRT#denied-dns-names
+#[utoipa::path(
+	post,
+	path = "/lift_denial",
+	operation_id = "certificates_lift_denial",
+	tag = "certificates",
+	security(("tailscale-admin" = [])),
+	request_body = MachineDnsNameArgs,
+	responses((status = 200), (status = 404, body = ProblemDetailsSchema)),
+)]
+pub async fn lift_denial(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<MachineDnsNameArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	database::DeniedDnsName::lift(&mut conn, args.machine_id, &args.name).await?;
 	Ok(Json(()))
 }

@@ -44,6 +44,7 @@ import {
 	groupServersByRank,
 	isIncidentLingering,
 } from "../types";
+import UndeclaredDnsNamesNotice from "../components/UndeclaredDnsNamesNotice";
 
 /// How an open incident should read at a glance:
 /// - "loud": failing, and the Slack notice has fired (or been given up on);
@@ -125,6 +126,7 @@ export default function Status() {
 	}
 	return (
 		<Stack spacing={3}>
+			<UndeclaredDnsNamesNotice refreshKey={tick} />
 			<ReleaseSummary tick={tick} />
 			<GroupCards tick={tick} openIncidentGroups={openIncidentGroups} />
 			<Box>

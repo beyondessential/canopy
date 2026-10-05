@@ -296,7 +296,7 @@ pub struct StatusResponse {
 	/// newly granted permission without asking separately. Identical to what
 	/// `GET /names/entitlements` returns. Clients that predate this field can
 	/// safely ignore it.
-	// spec: CRT#what-a-server-may-act-on
+	// spec: CRT#what-an-application-may-act-on
 	pub names: crate::names::Entitlements,
 	/// The server's effective tags: its own tags overlaid on its group's,
 	/// plus the synthetic read-only `canopy:` tags and effective `billing.*`
@@ -829,7 +829,7 @@ async fn create(
 
 	// A server-wide fact, like the tags: every source gets it, so an agent
 	// reporting status learns of a new domain or grant without a second call.
-	// spec: CRT#what-a-server-may-act-on
+	// spec: CRT#what-an-application-may-act-on
 	let names = crate::names::entitlements_for(&mut db, &machine, &dns_zones).await?;
 
 	Ok(Json(StatusResponse {

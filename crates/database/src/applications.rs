@@ -161,12 +161,12 @@ pub struct Application {
 	/// group's domains. Withheld by default: a server without it is
 	/// authenticated and refused. Unlike the restore window this is a standing
 	/// grant, records needing maintenance for as long as the server lives.
-	// spec: DOM#permission-for-a-server-to-manage-its-own-names
+	// spec: DOM#permission-for-an-application-to-manage-its-own-dns-names
 	pub may_manage_dns: bool,
 	/// Whether this server may obtain TLS certificates for names under its
 	/// group's domains. Separate from `may_manage_dns`: an application whose
 	/// records are managed elsewhere may still want its certificates here.
-	// spec: DOM#permission-for-a-server-to-manage-its-own-names
+	// spec: DOM#permission-for-an-application-to-manage-its-own-dns-names
 	pub may_manage_tls: bool,
 	/// The certificate profile — the authority's name for a lifetime — this
 	/// server's certificates are requested under. `None` means the longest the
@@ -183,7 +183,7 @@ pub struct Application {
 	/// Set automatically when one of the server's certificates is revoked, so
 	/// revocation and re-issuance don't chase each other. Only an operator lifts
 	/// it.
-	// spec: CRT#pausing-a-server
+	// spec: CRT#pausing-an-application
 	#[serde(skip_serializing_if = "Option::is_none")]
 	#[diesel(
 		deserialize_as = jiff_diesel::NullableTimestamp,
@@ -661,7 +661,7 @@ impl Application {
 		ShortStatus::grade(last_reported_at, self.alert_when_down_for.0)
 	}
 
-	// spec: CRT#pausing-a-server
+	// spec: CRT#pausing-an-application
 	/// Whether Canopy is currently making no new changes on this server's behalf.
 	pub fn name_management_paused(&self) -> bool {
 		self.name_management_paused_at.is_some()
@@ -694,7 +694,7 @@ impl Application {
 	/// never un-pauses itself, however long the pause has stood and however much
 	/// is expiring under it. Deciding it is safe to start again is a judgement
 	/// Canopy is not in a position to make.
-	// spec: CRT#pausing-a-server
+	// spec: CRT#pausing-an-application
 	pub async fn resume_name_management(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<()> {
 		use crate::schema::applications::dsl;
 		diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
