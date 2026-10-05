@@ -1432,11 +1432,31 @@ impl ScopedCheckPolicy {
 		}
 	}
 
-	/// Group scope applies before the target's own scope: the most specific
-	/// transform has the last word. An application-scoped and a
-	/// machine-scoped row never appear in one chain, so they sort alike.
+	/// Put a chain in the order its transforms apply: the most specific
+	/// transform has the last word.
+	///
+	/// Group scope applies before the target's own scope. An
+	/// application-scoped and a machine-scoped row never appear in one chain,
+	/// so they sort alike. Within a scope, the transform covering every
+	/// instance applies before one naming an instance, so an instance's
+	/// silence is not undone by a whole-check rule whose matching branch
+	/// replaces the result it was handed. What remains is broken by instance
+	/// key and then id, so the order never depends on the order the database
+	/// returned the rows in.
+	// spec: CHK#silencing-one-instance
 	fn order_chain(rows: &mut [Self]) {
-		rows.sort_by_key(|r| r.application_id.is_some() || r.machine_id.is_some());
+		rows.sort_by(|a, b| {
+			let rank = |r: &Self| {
+				(
+					r.application_id.is_some() || r.machine_id.is_some(),
+					r.instance_key.is_some(),
+				)
+			};
+			rank(a)
+				.cmp(&rank(b))
+				.then_with(|| a.instance_key.cmp(&b.instance_key))
+				.then_with(|| a.id.cmp(&b.id))
+		});
 	}
 
 	/// Apply this transform to the effective result arriving from the

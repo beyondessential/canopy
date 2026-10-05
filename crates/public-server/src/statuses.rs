@@ -248,6 +248,20 @@ const LEGACY_CHECK: &str = "tasks";
 /// included (a broken check retains the previous definite result's
 /// contribution while additionally warning that the check is broken).
 const HEALTH_REF: &str = "health";
+/// The most instances one check may carry.
+///
+/// Instance count is the one dimension of a push a reporter can multiply
+/// freely, and its cost outlives the push: every instance is graded through
+/// the whole policy chain, kept in the check's state, and graded again on
+/// each later push of that check and on each silence of one of its
+/// instances — which a group-scoped silence fans out across the group. The
+/// bound is well clear of what a real check reports (a central's facilities,
+/// a machine's backup types) so that it only ever catches a reporter that
+/// has gone wrong.
+const MAX_INSTANCES_PER_CHECK: usize = 1000;
+/// The longest an instance's key or label may be. Both name one instance to
+/// an operator or to a silence, so they are identifiers rather than prose.
+const MAX_INSTANCE_NAMING_CHARS: usize = 256;
 
 /// The status-push response: only the return-path instructions the device
 /// can act on. The stored status record is deliberately not echoed back —
@@ -1674,9 +1688,20 @@ fn parse_health_entry(entry: &serde_json::Value, path: &str) -> Result<()> {
 			let Some(instances) = instances.as_object() else {
 				return bad(format!("`{path}.instances` must be an object"));
 			};
+			if instances.len() > MAX_INSTANCES_PER_CHECK {
+				return bad(format!(
+					"`{path}.instances` has {} instances, more than the {MAX_INSTANCES_PER_CHECK} a check may carry",
+					instances.len(),
+				));
+			}
 			for (key, instance) in instances {
 				if key.is_empty() {
 					return bad(format!("`{path}.instances` keys must be non-empty strings"));
+				}
+				if key.chars().count() > MAX_INSTANCE_NAMING_CHARS {
+					return bad(format!(
+						"`{path}.instances` keys must be at most {MAX_INSTANCE_NAMING_CHARS} characters",
+					));
 				}
 				parse_health_instance(instance, &format!("{path}.instances.{key}"))?;
 			}
@@ -1727,7 +1752,14 @@ fn parse_health_instance(instance: &serde_json::Value, path: &str) -> Result<()>
 		None => return bad(format!("`{path}` must have a `result`")),
 	}
 	match instance.get("label") {
-		None | Some(serde_json::Value::String(_)) => {}
+		None => {}
+		Some(serde_json::Value::String(label)) => {
+			if label.chars().count() > MAX_INSTANCE_NAMING_CHARS {
+				return bad(format!(
+					"`{path}.label` must be at most {MAX_INSTANCE_NAMING_CHARS} characters",
+				));
+			}
+		}
 		Some(_) => return bad(format!("`{path}.label` must be a string")),
 	}
 	if let Some(detail) = instance.get("detail")

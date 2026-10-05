@@ -1388,9 +1388,9 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 }
 
 pub use crate::check_instances::{
-	CheckGrading, CheckInstance, CheckOutcome, GradedCheck, GradedInstance, GradingContext,
-	GradingInputs, InstancedState, PresentedInstances, ReportedCheck, StoredInstance,
-	StoredInstances, grade_instances,
+	CheckGrading, CheckGradingRef, CheckInstance, CheckOutcome, GradedCheck, GradedInstance,
+	GradingContext, GradingInputs, InstancedState, PresentedInstances, ReportedCheck,
+	StoredInstance, StoredInstances, grade_instances,
 };
 
 /// A check filed from its instances. Everything except the instances is

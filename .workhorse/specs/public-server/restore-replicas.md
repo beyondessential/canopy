@@ -380,6 +380,7 @@ It is a machine check because what failed to restore is the machine's backup, so
 A machine has one restore-verification check however many replicas it has.
 Each replica is an instance of that check, graded on its own and carrying its type, its intent, its declared name, and the snapshot in the check's detail (see [CHK](../monitoring/checks.md)), so a rule or silence written for one replica applies to only that replica.
 An instance is keyed by its replica's type, intent and declared name together, which is what a silence for a single replica names.
+The detail also carries the type and intent joined as `<type>:<intent>`, alongside each separately, so a rule can match a replica's type and intent in one condition, since a rule condition reads a single variable.
 Two replicas of one type and intent on one machine are two instances, told apart by their names, so one of them failing leaves its siblings' results untouched.
 The check reflects the most urgent of them, names the ones in trouble, and recovers when none is left degraded.
 

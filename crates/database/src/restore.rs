@@ -1571,11 +1571,19 @@ async fn untried_candidate(
 /// rule written against some of the replicas. A rule never reads an instance's
 /// key, so these are the replica's identity as far as a rule goes; a silence
 /// for one replica names its key instead (see [`replica_instance_key`]).
+///
+/// `replica_key` is the type and intent joined as `type:intent`, because a rule
+/// condition takes one variable and a rule pinning one replica has to match
+/// both (see [`crate::check_policies::Condition`]). The rules the
+/// `collapse_restore_check_names` migration rewrote operators' per-replica
+/// silences into match on it, so its format is fixed.
+// spec: RST#alerting
 fn instance_identity(key: &ReplicaKey) -> serde_json::Value {
 	let (_, r#type, intent, declared_as) = key;
 	serde_json::json!({
 		"type": r#type.to_string(),
 		"intent": intent.to_string(),
+		"replica_key": format!("{type}:{intent}"),
 		"replica": declared_as,
 	})
 }

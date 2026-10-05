@@ -935,7 +935,7 @@ async fn consolidated_checks_at(
 	use commons_types::status::{ConsolidatedCheck, ConsolidatedChecks, HealthState};
 	use commons_types::subject::CheckSubject;
 	use database::check_policies::{CheckPolicy, ScopedCheckPolicy};
-	use database::issues::{CheckGrading, GradingContext, ReportedCheck, grade_instances};
+	use database::issues::{CheckGradingRef, GradingContext, ReportedCheck, grade_instances};
 
 	let statuses = Status::latest_per_source_at(conn, server.id, at).await?;
 	// The box's own reports. A split push files the machine's checks at machine
@@ -1099,10 +1099,9 @@ async fn consolidated_checks_at(
 			} else {
 				&chains
 			};
-			let chain = scoped.get(&key).cloned().unwrap_or_default();
-			let check_grading = CheckGrading {
-				fleet: grading.get(&key).cloned(),
-				chain,
+			let check_grading = CheckGradingRef {
+				fleet: grading.get(&key),
+				chain: scoped.get(&key).map(Vec::as_slice).unwrap_or_default(),
 			};
 			let ctx = GradingContext {
 				source: &status.source,
@@ -1115,7 +1114,7 @@ async fn consolidated_checks_at(
 				},
 			};
 			let graded = grade_instances(
-				&check_grading,
+				check_grading,
 				&ctx,
 				Some(&reported.detail),
 				&reported.outcome,

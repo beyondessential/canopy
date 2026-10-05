@@ -806,6 +806,77 @@ async fn whole_check_and_instance_silences_are_unique_apart_and_coexist() {
 	.await
 }
 
+/// A whole-check transform carrying rules and an instance silence at the same
+/// scope: the silence is the more specific and has the last word, whichever
+/// order the two rows were written (and so come back) in. The rules here
+/// match the silenced instance and would replace its skipped result if they
+/// applied after the silence.
+// spec: CHK#silencing-one-instance
+#[tokio::test(flavor = "multi_thread")]
+async fn an_instance_silence_outlasts_a_whole_check_rule_at_its_scope_in_either_row_order() {
+	TestDb::run(async |mut conn, _| {
+		for silence_first in [false, true] {
+			let s = seed(&mut conn).await;
+			let scope = Scope::Application(s.application);
+			let silence_instance = async |conn: &mut AsyncPgConnection| {
+				ScopedCheckPolicy::silence(
+					conn,
+					scope,
+					CANOPY_SOURCE,
+					&Namespace::Flat,
+					CHECK,
+					Some("dev-north"),
+					Some("op"),
+				)
+				.await
+				.expect("instance silence");
+			};
+			let whole_check_rules = async |conn: &mut AsyncPgConnection| {
+				let row = ScopedCheckPolicy::silence(
+					conn,
+					scope,
+					CANOPY_SOURCE,
+					&Namespace::Flat,
+					CHECK,
+					None,
+					Some("op"),
+				)
+				.await
+				.expect("whole-check row");
+				conn.batch_execute(&format!(
+					"UPDATE scoped_check_policies SET ceiling = NULL, rules = '{}' \
+					 WHERE id = '{}'",
+					json!({"if": [{"==": [{"var": "check.result"}, "failed"]}, "failed"]}),
+					row.id,
+				))
+				.await
+				.expect("rules on the whole-check row");
+			};
+			if silence_first {
+				silence_instance(&mut conn).await;
+				whole_check_rules(&mut conn).await;
+			} else {
+				whole_check_rules(&mut conn).await;
+				silence_instance(&mut conn).await;
+			}
+
+			let issue = file(&mut conn, scope, CheckOutcome::Instances(devices())).await;
+			let detail = stored(&issue);
+			assert_eq!(
+				detail.0["dev-north"].effective,
+				CheckResult::Skipped,
+				"the instance stays silenced (silence written first: {silence_first})",
+			);
+			assert_eq!(
+				issue.effective_result,
+				Some(CheckResult::Passed),
+				"and the check settles on the instances left (silence written first: {silence_first})",
+			);
+		}
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_regrade_replays_the_report_and_tags_the_filing_graded_with() {
 	TestDb::run(async |mut conn, _| {

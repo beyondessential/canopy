@@ -51,6 +51,8 @@ Policy rules and the fleet spread reach a check's fields as `check.<field>`, mat
 A check reporting several instances of its condition carries them as an object keyed by each instance's key, in place of a result (see [CHK](../monitoring/checks.md), "Checks with instances").
 The key is the reporter's to choose: it must be unique within the check, must not be empty, and must identify the same instance across that reporter's pushes, as an application's key does.
 An object keyed this way cannot express two instances sharing a key.
+A check carrying more instances than Canopy accepts is refused, as is an instance whose key or label is longer than it accepts: an instance is graded, kept and graded again whenever the check or one of its silences is touched, so the count a reporter sends bounds work well beyond the push itself.
+The bounds are generous enough that only a reporter gone wrong meets them.
 
 Each instance carries exactly one result (`passed`, `warning`, `failed`, or `skipped`), an optional `label` naming it to an operator, and its own `detail` object.
 A check carrying both a result and instances is refused, as is an instance without a result.

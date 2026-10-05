@@ -244,6 +244,33 @@ impl CheckGrading {
 			chain: ScopedCheckPolicy::chain_for(conn, source, namespace, check, scope).await?,
 		})
 	}
+
+	/// This grading, borrowed.
+	pub fn borrowed(&self) -> CheckGradingRef<'_> {
+		CheckGradingRef {
+			fleet: self.fleet.as_ref(),
+			chain: &self.chain,
+		}
+	}
+}
+
+/// A [`CheckGrading`] borrowed from wherever its parts were loaded, so a
+/// caller holding a whole report's catalog and chains (see
+/// [`CheckPolicy::grading_table`] and [`ScopedCheckPolicy::chains_for_scope`])
+/// grades each check through them without copying its policy out.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CheckGradingRef<'a> {
+	/// The catalog entry. `None` for a check with no catalog row yet.
+	pub fleet: Option<&'a FleetGrading>,
+	/// The scoped chain, in application order (see
+	/// [`ScopedCheckPolicy::chain_for`]).
+	pub chain: &'a [ScopedCheckPolicy],
+}
+
+impl<'a> From<&'a CheckGrading> for CheckGradingRef<'a> {
+	fn from(grading: &'a CheckGrading) -> Self {
+		grading.borrowed()
+	}
 }
 
 /// What a rule evaluated for one of the check's instances reads, beyond the
@@ -620,13 +647,14 @@ impl GradingInputs {
 /// when the check came out broken.
 // spec: CHK#checks-with-instances
 // spec: CHK#stability
-pub fn grade_instances(
-	grading: &CheckGrading,
+pub fn grade_instances<'g>(
+	grading: impl Into<CheckGradingRef<'g>>,
 	ctx: &GradingContext<'_>,
 	shared: Option<&Map<String, Value>>,
 	outcome: &CheckOutcome,
 	prior: Option<&Issue>,
 ) -> GradedCheck {
+	let grading = grading.into();
 	let (instances, broken) = match outcome {
 		CheckOutcome::Instances(instances) => {
 			debug_assert!(
@@ -682,14 +710,14 @@ pub fn grade_instances(
 			tags: ctx.tags,
 		};
 		let fleet = CheckPolicy::grade(
-			grading.fleet.as_ref(),
+			grading.fleet,
 			ctx.source,
 			ctx.check,
 			instance.observed,
 			&eval,
 		);
 		let mut graded =
-			CheckPolicy::chain_scoped_for_instance(fleet, &grading.chain, &instance.key, &eval);
+			CheckPolicy::chain_scoped_for_instance(fleet, grading.chain, &instance.key, &eval);
 		if instanced && !broken && graded.effective == CheckResult::Broken {
 			graded.effective = CheckResult::Warning;
 		}

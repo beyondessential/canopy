@@ -176,6 +176,14 @@ async fn malformed_checks_are_refused() {
 		async |mut conn, cert, device_id, public, _| {
 			let id = central(&mut conn, device_id).await;
 			let instance = json!({ "result": "passed" });
+			// The bounds on how many instances a check may carry and how long
+			// an instance's key or label may be: a reporter multiplying
+			// instances buys work on every later push and silence of that
+			// check, so the boundary is where that stops.
+			let too_many: serde_json::Map<String, Value> = (0..=1000)
+				.map(|i| (format!("k{i}"), instance.clone()))
+				.collect();
+			let long_name = "x".repeat(257);
 			let refused = [
 				(
 					json!({ "check": "c", "result": "passed", "instances": { "a": instance } }),
@@ -245,6 +253,18 @@ async fn malformed_checks_are_refused() {
 				(
 					json!({ "check": "c", "instances": [instance] }),
 					"`health[0].instances` must be an object",
+				),
+				(
+					json!({ "check": "c", "instances": too_many }),
+					"more than the 1000 a check may carry",
+				),
+				(
+					json!({ "check": "c", "instances": { long_name.clone(): instance } }),
+					"keys must be at most 256 characters",
+				),
+				(
+					json!({ "check": "c", "instances": { "a": { "result": "passed", "label": long_name } } }),
+					"`health[0].instances.a.label` must be at most 256 characters",
 				),
 			];
 			for (entry, expected) in refused {

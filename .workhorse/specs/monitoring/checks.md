@@ -176,6 +176,7 @@ A group spans several types, so a group silence states which type's check it qui
 A silence can name one instance of a check by its key (see "Checks with instances"), quieting that instance while the check's other instances are graded as before.
 It is set, recorded, and scoped as any silence is, at the check's own target or that target's group.
 A group silence on an instance quiets the instance with that key on every target in the group that reports the check.
+Within one scope, a transform naming an instance applies after the transform covering the whole check, since it is the more specific of the two, so a whole-check rule at the same scope never undoes an instance's silence.
 What the consolidated view presents and what an incident counts agree on it as on any silence.
 The reporting source is told the check's policy and not each instance's, since it runs the check rather than its instances one by one (see [STA](../public-server/statuses.md), "Response").
 

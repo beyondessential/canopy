@@ -1775,6 +1775,92 @@ async fn same_scope_replicas_grade_separately_by_name() {
 	.await;
 }
 
+/// The `collapse_restore_check_names` migration rewrote a silence on one
+/// replica's parameterised check into a keyless scoped rule on the collapsed
+/// check, matching `check.replica_key` against the replica's type and intent.
+/// Those rules go on skipping exactly that replica's instance.
+// spec: RST#alerting
+#[tokio::test(flavor = "multi_thread")]
+async fn a_migrated_per_replica_silence_still_skips_only_its_replica() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let (server, _application) = insert_server(&mut conn, group).await;
+		RestoreConsumerCapability::register(
+			&mut conn,
+			consumer,
+			&[
+				descriptor("verify", &["check"]),
+				descriptor("dr", &["check"]),
+			],
+		)
+		.await
+		.expect("register caps");
+
+		for intent in ["verify", "dr"] {
+			let replica = RestoreReplica::create(
+				&mut conn,
+				new_replica(
+					consumer,
+					group,
+					Some(server),
+					RestoreIntent::from(intent),
+					&format!("{intent}-copy"),
+				),
+			)
+			.await
+			.expect("declare replica")
+			.id;
+			BackupRestoreCheck::record_report(
+				&mut conn,
+				new_check_for(
+					Some(replica),
+					consumer,
+					group,
+					server,
+					RestoreIntent::from(intent),
+					RunOutcome::Failure,
+					false,
+				),
+			)
+			.await
+			.expect("record report");
+		}
+
+		// The row exactly as the migration leaves a ceiling-only silence on
+		// restore-verification:tamanu-postgres:verify.
+		sql_query(
+			"INSERT INTO scoped_check_policies (source, check_name, machine_id, ceiling, rules) \
+			 VALUES ('canopy', 'restore-verification', $1, NULL, $2)",
+		)
+		.bind::<sql_types::Uuid, _>(server)
+		.bind::<sql_types::Jsonb, _>(serde_json::json!({"if": [
+			{"==": [{"var": "check.replica_key"}, "tamanu-postgres:verify"]},
+			"skipped",
+		]}))
+		.execute(&mut conn)
+		.await
+		.expect("migrated per-replica silence");
+
+		database::restore::sweep_restore_checks(&mut conn)
+			.await
+			.expect("sweep");
+
+		let verification = filed(&mut conn, server, "restore-verification").await;
+		let detail = verification.instances.expect("instances");
+		let by_key = detail.as_object().unwrap();
+		assert_eq!(
+			by_key["tamanu-postgres:verify:verify-copy"]["effective"], "skipped",
+			"the replica the silence was written for stays silenced: {detail}",
+		);
+		assert_eq!(
+			by_key["tamanu-postgres:dr:dr-copy"]["effective"], "warning",
+			"and its sibling of another intent is untouched: {detail}",
+		);
+	})
+	.await;
+}
+
 /// A server with several replicas holds one check of each kind, with the
 /// replicas as instances: the message names the ones in trouble, the detail
 /// carries them with their own results, and the catalog gains one entry per
@@ -1935,9 +2021,9 @@ async fn one_check_of_each_kind_per_machine_with_the_replicas_as_instances() {
 		assert_eq!(instances[0]["detail"]["intent"], "verify");
 		assert_eq!(instances[0]["detail"]["replica"], "nightly-verify");
 		assert_eq!(instances[0]["detail"]["type"], "tamanu-postgres");
-		assert!(
-			instances[0]["detail"].get("replica_key").is_none(),
-			"the instance is keyed, so no joined identity field is spelled into its detail"
+		assert_eq!(
+			instances[0]["detail"]["replica_key"], "tamanu-postgres:verify",
+			"the type and intent joined, which the migrated per-replica rules match on"
 		);
 		assert!(
 			verification.message.contains("nightly-verify"),
