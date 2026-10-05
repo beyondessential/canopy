@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0](https://github.com/beyondessential/canopy/compare/bes-canopy-api-v1.0.3...bes-canopy-api-v1.1.0) - 2026-10-05
+
+### Added
+
+- *(statuses)* accept instanced checks and per-check detail (B4)
+
+### Fixed
+
+- *(statuses)* read a non-object instances or detail as a flat field
+
 ## [1.0.3](https://github.com/beyondessential/canopy/compare/bes-canopy-api-v1.0.2...bes-canopy-api-v1.0.3) - 2026-09-28
 
 ### Other
