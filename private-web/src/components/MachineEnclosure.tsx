@@ -187,6 +187,7 @@ export default function MachineEnclosure({
 					bgcolor: state.fill,
 					backgroundImage: (theme) =>
 						ownWindow ? ownWindowStripes(theme, settling) : "none",
+					backgroundClip: "padding-box",
 					...(ownWindow && !settling
 						? {
 								animation: `${PILL_PULSE} 2s ease-in-out 0.5s infinite`,

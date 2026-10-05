@@ -182,6 +182,7 @@ export function MaintenanceLegend() {
 					border: 1,
 					borderColor: "divider",
 					backgroundImage: (theme) => ownWindowStripes(theme, false),
+					backgroundClip: "padding-box",
 					...waveWhileHolding(true),
 				}}
 			/>

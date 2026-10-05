@@ -331,6 +331,7 @@ function GroupCardLoader({
 									);
 									return `repeating-linear-gradient(45deg, ${ink} 0 1px, transparent 1px 7px, ${ink} 7px 8px)`;
 								},
+								backgroundClip: "padding-box",
 								...waveWhileHolding(!groupWindowSettling),
 							}
 						: {}),
