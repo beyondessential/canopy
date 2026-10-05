@@ -2919,16 +2919,17 @@ async fn checks_at_scope(
 	//
 	// Both are keyed on borrowed data so that looking a check, or each of its
 	// instances, up allocates nothing.
-	let silence_rows: Vec<(Namespace, String, String, Option<String>, Option<Uuid>)> = silence_rows
+	let silence_rows: Vec<_> = silence_rows
 		.into_iter()
 		.filter_map(|(subject, ty, source, check, instance, group)| {
 			let ns = Namespace::from_columns(subject.as_deref(), ty.as_deref()).ok()?;
 			Some((ns, source, check, instance, group))
 		})
 		.collect();
-	let mut silenced: HashSet<(&Namespace, &str, &str)> = HashSet::new();
+	type CheckKey<'a> = (&'a Namespace, &'a str, &'a str);
+	let mut silenced: HashSet<CheckKey<'_>> = HashSet::new();
 	let mut instance_silences: std::collections::HashMap<
-		(&Namespace, &str, &str),
+		CheckKey<'_>,
 		std::collections::HashMap<&str, (bool, bool)>,
 	> = std::collections::HashMap::new();
 	for (ns, source, check, instance, group) in &silence_rows {
