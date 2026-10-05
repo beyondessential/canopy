@@ -1034,7 +1034,7 @@ async fn snapshot_returns_latest_when_at_omitted() {
 async fn snapshot_leaves_a_unified_pushs_machine_checks_to_the_machine() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('20000000-0000-0000-0000-000000000040') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '20000000-0000-0000-0000-000000000040') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
 			('20000000-0000-0000-0000-000000000040', 'https://unified.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000040');
 
 			INSERT INTO check_policies (source, subject, application_type, check_name) VALUES
@@ -1090,7 +1090,7 @@ async fn snapshot_leaves_a_unified_pushs_machine_checks_to_the_machine() {
 async fn snapshot_takes_a_split_pushs_application_row_as_given() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('20000000-0000-0000-0000-000000000041') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '20000000-0000-0000-0000-000000000041') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
 			('20000000-0000-0000-0000-000000000041', 'https://given.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000041');
 
 			INSERT INTO check_policies (source, subject, application_type, check_name) VALUES
@@ -1143,7 +1143,7 @@ async fn snapshot_takes_a_split_pushs_application_row_as_given() {
 async fn snapshot_reads_a_split_push_as_split_after_the_machine_moves_on() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('20000000-0000-0000-0000-000000000043') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '20000000-0000-0000-0000-000000000043') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
 			('20000000-0000-0000-0000-000000000043', 'https://moved.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000043');
 
 			INSERT INTO check_policies (source, subject, application_type, check_name) VALUES
@@ -1185,7 +1185,7 @@ async fn snapshot_reads_a_split_push_as_split_after_the_machine_moves_on() {
 async fn snapshot_reads_the_applications_own_silences_not_the_boxs() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('20000000-0000-0000-0000-000000000042') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '20000000-0000-0000-0000-000000000042') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
 			('20000000-0000-0000-0000-000000000042', 'https://boxsilence.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000042');
 
 			INSERT INTO check_policies (source, subject, application_type, check_name) VALUES
