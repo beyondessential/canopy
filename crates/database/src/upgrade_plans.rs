@@ -161,19 +161,15 @@ impl UpgradePlan {
 			)));
 		}
 
-		let superseded: Vec<Self> = diesel::update(dsl::upgrade_plans)
+		diesel::update(dsl::upgrade_plans)
 			.filter(dsl::group_id.eq(group_id))
 			.filter(dsl::rank.eq(rank))
 			.filter(dsl::met_at.is_null())
 			.filter(dsl::superseded_at.is_null())
 			.filter(dsl::withdrawn_at.is_null())
 			.set(dsl::superseded_at.eq(diesel::dsl::now))
-			.returning(Self::as_select())
-			.get_results(db)
+			.execute(db)
 			.await?;
-		for plan in &superseded {
-			crate::migration_tests::MigrationTestRequest::clear_for_plan(db, plan).await?;
-		}
 
 		diesel::insert_into(dsl::upgrade_plans)
 			.values((
@@ -348,7 +344,7 @@ impl UpgradePlan {
 	) -> Result<Option<Self>> {
 		use crate::schema::upgrade_plans::dsl;
 
-		let withdrawn = diesel::update(dsl::upgrade_plans)
+		diesel::update(dsl::upgrade_plans)
 			.filter(dsl::id.eq(id))
 			.filter(dsl::met_at.is_null())
 			.filter(dsl::superseded_at.is_null())
@@ -361,11 +357,7 @@ impl UpgradePlan {
 			.get_result(db)
 			.await
 			.optional()
-			.map_err(AppError::from)?;
-		if let Some(plan) = &withdrawn {
-			crate::migration_tests::MigrationTestRequest::clear_for_plan(db, plan).await?;
-		}
-		Ok(withdrawn)
+			.map_err(AppError::from)
 	}
 }
 
@@ -530,7 +522,6 @@ pub async fn close_met_plans(db: &mut AsyncPgConnection) -> Result<usize> {
 			.set(dsl::met_at.eq(diesel::dsl::now))
 			.execute(db)
 			.await?;
-		crate::migration_tests::MigrationTestRequest::clear_for_plan(db, &plan).await?;
 		closed += 1;
 	}
 

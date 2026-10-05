@@ -1551,6 +1551,39 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 /// A failing migration report carries the error the migration runner produced,
 /// so the group page can say what broke as well as where.
 #[tokio::test(flavor = "multi_thread")]
+async fn a_report_naming_another_group_s_machine_is_refused() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			make_server(&mut conn, group).await;
+			let replica = declare_replica(&mut conn, device_id, group, "verify").await;
+			let elsewhere = make_group(&mut conn).await;
+			let theirs = make_server(&mut conn, elsewhere).await;
+
+			public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"replica_id": replica,
+					"group": group,
+					"machine_id": theirs,
+					"type": "tamanu-postgres",
+					"intent": "verify",
+					"snapshot_id": "snap-1",
+					"outcome": "success",
+					"replica_healthy": true,
+					"observed_at": "2026-07-30T00:00:00Z",
+				}))
+				.await
+				.assert_status(http::StatusCode::FORBIDDEN);
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_migration_report_carries_its_error() {
 	commons_tests::server::run_with_device_auth(
 		"backup-restore",

@@ -1550,8 +1550,12 @@ async fn untried_candidate(
 		return Ok(None);
 	};
 	let applications = machine.applications(db).await?;
-	let Some((application, version, request)) =
-		crate::migration_tests::candidate_on_box(db, machine.id, &applications).await?
+	let Some(crate::migration_tests::BoxCandidate {
+		plan,
+		version,
+		request,
+		..
+	}) = crate::migration_tests::candidate_on_box(db, machine.id, &applications).await?
 	else {
 		return Ok(None);
 	};
@@ -1564,7 +1568,7 @@ async fn untried_candidate(
 			match crate::migration_tests::scheduled_due(
 				db,
 				machine.id,
-				application,
+				&plan,
 				&version,
 				snapshot_id,
 				run.reported_at,

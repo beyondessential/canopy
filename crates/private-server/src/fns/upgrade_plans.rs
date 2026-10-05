@@ -146,6 +146,15 @@ pub async fn fleet(
 		.into_iter()
 		.map(|plan| ((plan.group_id, plan.rank), plan))
 		.collect();
+	let plan_ids: Vec<Uuid> = open.values().map(|plan| plan.id).collect();
+	let mut requests: HashMap<Uuid, Vec<database::migration_tests::MigrationTestRequest>> =
+		HashMap::new();
+	for request in
+		database::migration_tests::MigrationTestRequest::pending_for_plans(&mut conn, &plan_ids)
+			.await?
+	{
+		requests.entry(request.plan_id).or_default().push(request);
+	}
 	let mut attempts: HashMap<Uuid, Option<crate::fns::migration_tests::AttemptState>> =
 		HashMap::new();
 	let mut members: HashMap<Uuid, Vec<database::applications::Application>> = HashMap::new();
@@ -256,22 +265,21 @@ pub async fn fleet(
 						.unwrap_or_else(|| "Unknown application".to_string())
 				});
 				tally = tested_tally(&per_server);
-				if let Some(version) = planned {
-					let machines: Vec<Uuid> = applications
-						.iter()
-						.filter_map(|application| application.machine_id)
-						.collect();
-					test_request = database::migration_tests::MigrationTestRequest::pending_among(
-						&mut conn, &machines, version.id,
-					)
-					.await?
+				test_request = plan
+					.as_ref()
+					.and_then(|plan| requests.get(&plan.id))
 					.into_iter()
+					.flatten()
+					.filter(|request| {
+						applications
+							.iter()
+							.any(|application| application.machine_id == Some(request.machine_id))
+					})
 					.max_by_key(|request| request.requested_at)
 					.map(|request| TestRequest {
 						requested_at: request.requested_at,
-						requested_by: request.requested_by,
+						requested_by: request.requested_by.clone(),
 					});
-				}
 				Some(roll_up(&per_server).to_owned())
 			}
 		};

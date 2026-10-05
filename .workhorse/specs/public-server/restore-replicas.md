@@ -48,6 +48,7 @@ The role is read-only by contract, enforced at the API:
 - A `backup-restore` caller requesting backup (write) credentials is rejected.
   The read-only guarantee is enforced by Canopy rather than trusted to the caller, so a compromised consumer cannot pivot to writing or poisoning a repo.
 - A `backup-restore` caller may obtain credentials and the worklist only for a `(group, type)` it has been authorised for.
+- A report names the machine it restored, and that machine must be one of the reported group's: a verdict recorded against it, and the asks it answers, belong to that group.
 
 Authorization is the set of declared replicas (below): a consumer is authorised for exactly the `(group, type)` pairs that appear in its enabled replica declarations.
 There is no separate grant object — declaring a replica *is* the authorization to read what that replica needs.
@@ -294,6 +295,8 @@ The schedule is the default; asking is for trying a version out, and for a group
 An operator asks from the environment's row in the upgrades view, and the ask covers every machine whose application the plan applies to.
 An ask puts each of those machines on the worklist against its latest snapshot, including one whose pair is already settled, since an ask after a fix to the pipeline or to the data is a request for a new answer.
 It is answered for a machine once a verdict for that machine and version lands from a test that began after the ask, and until then the environment's row says it is waiting.
+A test begins when its run is first issued credentials, so a run already under way when the ask is made does not answer it.
+An ask belongs to the plan it was made under: once that plan is met, withdrawn, or replaced, the ask dispatches nothing.
 A restore that fails before migrating leaves the ask standing, as it leaves the pair retryable.
 A declaration is overdue when a pair it is due to test, by the schedule or by an ask, goes untried past the bound; one that tests on request is never overdue for want of a test nobody asked for.
 

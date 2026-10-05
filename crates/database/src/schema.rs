@@ -640,9 +640,9 @@ diesel::table! {
 }
 
 diesel::table! {
-	migration_test_requests (machine_id, version_id) {
+	migration_test_requests (machine_id, plan_id) {
 		machine_id -> Uuid,
-		version_id -> Uuid,
+		plan_id -> Uuid,
 		requested_at -> Timestamptz,
 		requested_by -> Nullable<Text>,
 	}
@@ -1010,7 +1010,7 @@ diesel::joinable!(maintenance_windows -> applications (application_id));
 diesel::joinable!(maintenance_windows -> machines (machine_id));
 diesel::joinable!(maintenance_windows -> server_groups (server_group_id));
 diesel::joinable!(migration_test_requests -> machines (machine_id));
-diesel::joinable!(migration_test_requests -> versions (version_id));
+diesel::joinable!(migration_test_requests -> upgrade_plans (plan_id));
 diesel::joinable!(migration_tests -> applications (application_id));
 diesel::joinable!(migration_tests -> backup_restore_checks (check_id));
 diesel::joinable!(migration_tests -> versions (target_version_id));

@@ -6,13 +6,14 @@
 ALTER TABLE restore_replicas
 	ADD COLUMN migrates_on_request BOOLEAN NOT NULL DEFAULT FALSE;
 
--- An operator asking for a machine's data to be tested against a version. Held
--- until a verdict for the pair lands, and reinstates a pair already settled
--- against the latest snapshot.
+-- An operator asking for a machine's data to be tested against its
+-- environment's plan. Held until a test that began after it answers it, and
+-- only while the plan is the one the environment is going by: a closed plan's
+-- asks match nothing.
 CREATE TABLE migration_test_requests (
 	machine_id UUID NOT NULL REFERENCES machines (id) ON DELETE CASCADE,
-	version_id UUID NOT NULL REFERENCES versions (id) ON DELETE CASCADE,
+	plan_id UUID NOT NULL REFERENCES upgrade_plans (id) ON DELETE CASCADE,
 	requested_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
 	requested_by TEXT,
-	PRIMARY KEY (machine_id, version_id)
+	PRIMARY KEY (machine_id, plan_id)
 );

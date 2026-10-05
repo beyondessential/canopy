@@ -959,6 +959,9 @@ function CreateReplicaDialog({
 	useEffect(() => {
 		if (!canPublishSchemas || redacts || serverId) setPublishesSchemas(false);
 	}, [canPublishSchemas, redacts, serverId]);
+	useEffect(() => {
+		if (!canMigrateOnRequest) setMigratesOnRequest(false);
+	}, [canMigrateOnRequest]);
 
 	// Suggest a name from the group, (if picked) server, and intent, until the
 	// operator types their own. The intent is part of it because names are
@@ -1181,6 +1184,9 @@ function EditReplicaDialog({
 	useEffect(() => {
 		if (!canPublishSchemas || redacts || serverId) setPublishesSchemas(false);
 	}, [canPublishSchemas, redacts, serverId]);
+	useEffect(() => {
+		if (!canMigrateOnRequest) setMigratesOnRequest(false);
+	}, [canMigrateOnRequest]);
 
 	// Re-derive parameter values whenever the consumer or intent changes: keep
 	// values for parameter names the new schema still has, drop the rest.

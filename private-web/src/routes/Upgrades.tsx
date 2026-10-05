@@ -1568,25 +1568,36 @@ function RequestTest({
 	}
 	if (!testable) return null;
 	return (
-		<GradedAction calls="migration_tests/request">
-			<Tooltip title="Test the migrations against this environment's latest backup">
-				<IconButton
-					size="small"
-					aria-label={`Test migrations for ${groupName}`}
-					disabled={ask.pending}
-					onClick={async () => {
-						try {
-							await ask.call({ group_id: groupId, rank });
-							onRequested();
-						} catch {
-							/* surfaced by the reload showing no request */
-						}
-					}}
+		<>
+			<GradedAction calls="migration_tests/request">
+				<Tooltip title="Test the migrations against this environment's latest backup">
+					<IconButton
+						size="small"
+						aria-label={`Test migrations for ${groupName}`}
+						disabled={ask.pending}
+						onClick={async () => {
+							try {
+								await ask.call({ group_id: groupId, rank });
+								onRequested();
+							} catch {
+								/* ask.error is shown beside the button */
+							}
+						}}
+					>
+						<ScienceOutlinedIcon fontSize="small" />
+					</IconButton>
+				</Tooltip>
+			</GradedAction>
+			{ask.error && (
+				<Typography
+					variant="caption"
+					color="error"
+					data-testid="migration-test-request-error"
 				>
-					<ScienceOutlinedIcon fontSize="small" />
-				</IconButton>
-			</Tooltip>
-		</GradedAction>
+					{ask.error.message}
+				</Typography>
+			)}
+		</>
 	);
 }
 

@@ -873,11 +873,26 @@ async fn record_test_at(
 	.expect("record test");
 }
 
+#[derive(QueryableByName)]
+struct Count {
+	#[diesel(sql_type = sql_types::BigInt)]
+	n: i64,
+}
+
+/// Whether an ask against an open plan for `target` is held for `machine`.
 async fn pending(conn: &mut AsyncPgConnection, machine: Uuid, target: &Version) -> bool {
-	database::migration_tests::MigrationTestRequest::pending(conn, machine, target.id)
-		.await
-		.expect("pending")
-		.is_some()
+	let row: Count = sql_query(
+		"SELECT COUNT(*) AS n FROM migration_test_requests r
+		 JOIN upgrade_plans p ON p.id = r.plan_id
+		 WHERE r.machine_id = $1 AND p.target_version_id = $2
+		   AND p.met_at IS NULL AND p.superseded_at IS NULL AND p.withdrawn_at IS NULL",
+	)
+	.bind::<sql_types::Uuid, _>(machine)
+	.bind::<sql_types::Uuid, _>(target.id)
+	.get_result(conn)
+	.await
+	.expect("pending");
+	row.n > 0
 }
 
 async fn ask(conn: &mut AsyncPgConnection, group: Uuid, rank: ServerRank) -> usize {
@@ -1090,6 +1105,58 @@ async fn an_ask_waits_for_a_test_begun_after_it() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_run_already_under_way_does_not_answer_an_ask() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn).await;
+		let (machine, server) = insert_server(&mut conn, group).await;
+		let target = insert_version(&mut conn, 63).await;
+		plan_upgrade(&mut conn, group, &target).await;
+		let run = Uuid::new_v4();
+		sql_query(
+			"INSERT INTO backup_credential_issuances
+				(device_id, group_id, type, purpose, issued_at, expires_at,
+				 sts_assumed_role, bucket, prefix, run_id)
+			 VALUES ($1, $2, 'tamanu-postgres', 'restore', NOW() - INTERVAL '3 hours',
+				NOW() + INTERVAL '1 hour', 'arn:aws:iam::1:role/r', 'b', '', $3)",
+		)
+		.bind::<sql_types::Uuid, _>(consumer)
+		.bind::<sql_types::Uuid, _>(group)
+		.bind::<sql_types::Uuid, _>(run)
+		.execute(&mut conn)
+		.await
+		.expect("issue credentials");
+		assert_eq!(ask(&mut conn, group, ServerRank::Production).await, 1);
+
+		let mut check = report(consumer, group, machine, RunOutcome::Success);
+		check.snapshot_id = Some("snap-1".into());
+		check.run_id = Some(run);
+		MigrationTest::record(
+			&mut conn,
+			check,
+			NewMigrationTest {
+				application_id: server,
+				target_version_id: target.id,
+				total_elapsed: secs(10),
+				failed_migration: None,
+				error: None,
+				data_bytes_before: 1,
+				data_bytes_after: 1,
+				timings: vec![],
+			},
+		)
+		.await
+		.expect("record test");
+
+		assert!(
+			pending(&mut conn, machine, &target).await,
+			"the run began three hours before the ask, though it reported after"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn an_ask_covers_the_environment_s_tamanu_boxes() {
 	TestDb::run(|mut conn, _url| async move {
 		let group = insert_group(&mut conn).await;
@@ -1122,7 +1189,7 @@ async fn an_ask_covers_the_environment_s_tamanu_boxes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn withdrawing_a_plan_drops_its_asks() {
+async fn a_withdrawn_plan_s_asks_match_nothing() {
 	TestDb::run(|mut conn, _url| async move {
 		let group = insert_group(&mut conn).await;
 		let (machine, _) = insert_server(&mut conn, group).await;
@@ -1171,14 +1238,13 @@ async fn a_box_is_tested_for_the_workload_an_ask_names() {
 			database::applications::Application::list_live_in_group(&mut conn, group)
 				.await
 				.expect("applications");
-		let (application, version, request) =
-			database::migration_tests::candidate_on_box(&mut conn, machine, &applications)
-				.await
-				.expect("candidate")
-				.expect("one");
-		assert_eq!(application.id, clone_app);
-		assert_eq!(version.id, clone.id);
-		assert!(request.is_some());
+		let chosen = database::migration_tests::candidate_on_box(&mut conn, machine, &applications)
+			.await
+			.expect("candidate")
+			.expect("one");
+		assert_eq!(chosen.application.id, clone_app);
+		assert_eq!(chosen.version.id, clone.id);
+		assert!(chosen.request.is_some());
 	})
 	.await
 }

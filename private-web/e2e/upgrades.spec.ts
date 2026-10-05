@@ -135,10 +135,37 @@ test.describe("upgrades dashboard", () => {
 		await expect(
 			row.getByRole("button", { name: "Test migrations for kamaka" }),
 		).toHaveCount(0);
-		const requests = await sql.query<{ version_id: string }>(
-			"SELECT version_id FROM migration_test_requests",
+		const requests = await sql.query<{ target_version_id: string }>(
+			`SELECT p.target_version_id FROM migration_test_requests r
+			 JOIN upgrade_plans p ON p.id = r.plan_id`,
 		);
-		expect(requests.map((r) => r.version_id)).toEqual([target.id]);
+		expect(requests.map((r) => r.target_version_id)).toEqual([target.id]);
+	});
+
+	test("a refused test request says why", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await runningAt(sql, group.id, "2.60.0");
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+			plannedFor: "2020-01-01",
+		});
+		await declareUpgradeReplica(sql, group.id);
+
+		await page.goto("/upgrades");
+		const row = page
+			.getByTestId("planned-upgrade-row")
+			.filter({ hasText: "kamaka" });
+		const button = row.getByRole("button", { name: "Test migrations for kamaka" });
+		await expect(button).toBeVisible();
+		// Withdrawn from elsewhere after this page loaded.
+		await sql.query("UPDATE upgrade_plans SET withdrawn_at = NOW()");
+		await button.click();
+
+		await expect(row.getByTestId("migration-test-request-error")).toContainText(
+			"no open plan",
+		);
 	});
 
 	test("says a plan with nothing declared to test it is not set up", async ({

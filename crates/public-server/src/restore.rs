@@ -471,18 +471,20 @@ async fn worklist(
 			} else {
 				None
 			};
-			let target = candidate.as_ref().map(|(application, version, _)| {
-				(application.r#type.clone(), version.id, version.as_semver())
+			let target = candidate.as_ref().map(|c| {
+				(
+					c.application.r#type.clone(),
+					c.version.id,
+					c.version.as_semver(),
+				)
 			});
 
 			// An operator's ask reinstates a pair already settled against the
 			// latest snapshot, and is the only thing that dispatches a
 			// declaration migrating on request.
 			// spec: RST#dispatching-a-migration-test
-			let requested = candidate
-				.as_ref()
-				.is_some_and(|(_, _, request)| request.is_some());
-			if target.is_some() && d.migrates_on_request && !requested {
+			let requested = candidate.as_ref().is_some_and(|c| c.request.is_some());
+			if migrates && d.migrates_on_request && !requested {
 				continue;
 			}
 
@@ -515,19 +517,17 @@ async fn worklist(
 			if once && !requested {
 				let snapshot = latest.and_then(|r| r.snapshot_id.as_ref().map(|id| (id, r)));
 				let settled = match (&candidate, snapshot) {
-					(Some((application, version, _)), Some((snapshot, run))) => {
-						migration_tests::scheduled_due(
-							&mut conn,
-							machine.id,
-							application,
-							version,
-							snapshot,
-							run.reported_at,
-							jiff::Timestamp::now(),
-						)
-						.await?
-						.is_none()
-					}
+					(Some(c), Some((snapshot, run))) => migration_tests::scheduled_due(
+						&mut conn,
+						machine.id,
+						&c.plan,
+						&c.version,
+						snapshot,
+						run.reported_at,
+						jiff::Timestamp::now(),
+					)
+					.await?
+					.is_none(),
 					(Some(_), None) => false,
 					(None, snapshot) => {
 						let snapshot = snapshot.map(|(id, _)| id);
@@ -1016,6 +1016,16 @@ async fn verification(
 	if !RestoreReplica::authorizes(&mut conn, consumer_device_id, args.group, &args.r#type).await? {
 		return Err(AppError::AuthInsufficientPermissions {
 			required: "an enabled restore-replica declaration for this group and type".into(),
+		});
+	}
+	// The machine is the consumer's word, and a report records a verdict and
+	// answers asks against it, so it must be one of the group's.
+	let reported = database::machines::Machine::get_by_id(&mut conn, machine_id)
+		.await
+		.map_err(|_| AppError::NotFound("no such machine".into()))?;
+	if reported.group_id != Some(args.group) {
+		return Err(AppError::AuthInsufficientPermissions {
+			required: "the reported machine to belong to the reported group".into(),
 		});
 	}
 
