@@ -250,7 +250,7 @@ async fn insert_check_state(
 	CheckPolicy::upsert_default(
 		conn,
 		source,
-		&Namespace::for_application(source, check, &ApplicationType::TamanuCentral),
+		&Namespace::of(source, Some(&ApplicationType::TamanuCentral)),
 		check,
 	)
 	.await
@@ -725,7 +725,7 @@ async fn insert_machine_check_state(
 	check: &str,
 	minutes_ago: i32,
 ) {
-	CheckPolicy::upsert_default(conn, source, &Namespace::for_machine(source, check), check)
+	CheckPolicy::upsert_default(conn, source, &Namespace::of(source, None), check)
 		.await
 		.expect("catalog the seeded check");
 	sql_query(

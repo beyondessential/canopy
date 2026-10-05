@@ -13,6 +13,7 @@ test.describe("healthcheck settings page", () => {
 		await seedCheckPolicy(sql, {
 			checkName: "caddy_version",
 			source: "alertd",
+			applicationType: null,
 			ceiling: "warning",
 		});
 
@@ -72,6 +73,7 @@ test.describe("healthcheck settings page", () => {
 		await seedCheckPolicy(sql, {
 			checkName: "caddy_version",
 			source: "alertd",
+			applicationType: null,
 			// Escalation is only offered at a failed ceiling, so seed one to
 			// see the toggle in its enabled state.
 			ceiling: "failed",
@@ -101,6 +103,7 @@ test.describe("healthcheck settings page", () => {
 		await seedCheckPolicy(sql, {
 			checkName: "caddy_version",
 			source: "alertd",
+			applicationType: null,
 			ceiling: "warning",
 		});
 

@@ -51,7 +51,7 @@ async fn set_policy(
 	CheckPolicy::upsert_default(
 		conn,
 		"alertd",
-		&Namespace::for_application("alertd", check, &ApplicationType::TamanuCentral),
+		&Namespace::of("alertd", Some(&ApplicationType::TamanuCentral)),
 		check,
 	)
 	.await

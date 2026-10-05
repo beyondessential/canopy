@@ -55,8 +55,7 @@ async fn seed_catalog(
 	// The servers here are facilities, so that is the namespace their pushes
 	// will read these ceilings back out of.
 	let (subject, application_type) =
-		Namespace::for_application("alertd", check_name, &ApplicationType::TamanuFacility)
-			.to_columns();
+		Namespace::of("alertd", Some(&ApplicationType::TamanuFacility)).to_columns();
 	sql_query(
 		"INSERT INTO check_policies \
 		 (source, subject, application_type, check_name, ceiling, rules, reviewed_at, reviewed_by) \

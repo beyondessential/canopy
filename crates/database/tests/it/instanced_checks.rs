@@ -20,7 +20,7 @@ use database::{
 	},
 	silenced_refs::{
 		MachineSilencedRef, ServerGroupSilencedRef, ServerSilencedRef, is_silenced,
-		silenced_health_checks_for_server,
+		silenced_health_checks_at,
 	},
 	statuses::CANOPY_SOURCE,
 };
@@ -501,16 +501,10 @@ async fn an_instance_silence_on_an_application_quiets_that_instance_and_regrades
 				.expect("is_silenced")
 		);
 		assert!(
-			!silenced_health_checks_for_server(
-				&mut conn,
-				Some(s.application),
-				Some(s.machine),
-				Some(s.group),
-				CANOPY_SOURCE,
-			)
-			.await
-			.expect("silenced checks")
-			.contains(CHECK)
+			!silenced_health_checks_at(&mut conn, scope, Some(s.group), CANOPY_SOURCE)
+				.await
+				.expect("silenced checks")
+				.contains(CHECK)
 		);
 
 		// The next filing applies it too.

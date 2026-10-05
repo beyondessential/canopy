@@ -1,7 +1,7 @@
 //! Queries backing the device-facing effective check map:
 //! `CheckPolicy::ceiling_map_for_source` (static policy ceilings,
 //! ignoring conditional rules) and
-//! `silenced_refs::silenced_health_checks_for_server` (server- plus
+//! `silenced_refs::silenced_health_checks_at` (server- plus
 //! group-scope silences under one reporting source).
 
 /// The type every application in this file has.
@@ -18,8 +18,9 @@ fn ns() -> Namespace {
 }
 use commons_types::{namespace::Namespace, server::app_type::ApplicationType, status::CheckResult};
 use database::check_policies::{CheckPolicy, IfLadder};
+use database::issues::Scope;
 use database::silenced_refs::{
-	ServerGroupSilencedRef, ServerSilencedRef, silenced_health_checks_for_server,
+	MachineSilencedRef, ServerGroupSilencedRef, ServerSilencedRef, silenced_health_checks_at,
 };
 use diesel::{sql_query, sql_types};
 use diesel_async::RunQueryDsl;
@@ -95,7 +96,7 @@ async fn ceiling_map_returns_static_ceilings_for_one_source() {
 		.await
 		.expect("update chatty");
 
-		let map = CheckPolicy::ceiling_map_for_source(&mut conn, "alertd", Some(&ty()))
+		let map = CheckPolicy::ceiling_map_for_source(&mut conn, "alertd", &ns())
 			.await
 			.expect("map");
 		assert_eq!(map.len(), 3, "only the requested source's checks");
@@ -122,7 +123,7 @@ async fn ceiling_map_ignores_conditional_rules() {
 
 		// The expression could grade a failure through at push time, but
 		// the static map must only reflect the ceiling column.
-		let map = CheckPolicy::ceiling_map_for_source(&mut conn, "alertd", Some(&ty()))
+		let map = CheckPolicy::ceiling_map_for_source(&mut conn, "alertd", &ns())
 			.await
 			.expect("map");
 		assert_eq!(map.get("ruled"), Some(&CheckResult::Warning));
@@ -135,7 +136,6 @@ async fn silenced_checks_combine_scopes_and_stay_per_source() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn).await;
 		let server_id = insert_server(&mut conn, Some(group_id)).await;
-		let m_server_id = machine_of(&mut conn, server_id).await;
 		let other_server_id = insert_server(&mut conn, None).await;
 
 		ServerSilencedRef::add(&mut conn, server_id, "alertd", "health/flaky", None, None)
@@ -179,10 +179,9 @@ async fn silenced_checks_combine_scopes_and_stay_per_source() {
 		.await
 		.expect("other-server silence");
 
-		let checks = silenced_health_checks_for_server(
+		let checks = silenced_health_checks_at(
 			&mut conn,
-			Some(server_id),
-			Some(m_server_id),
+			Scope::Application(server_id),
 			Some(group_id),
 			"alertd",
 		)
@@ -194,33 +193,76 @@ async fn silenced_checks_combine_scopes_and_stay_per_source() {
 		);
 
 		// Ungrouped lookup only sees the server-scope silences.
-		let checks = silenced_health_checks_for_server(
-			&mut conn,
-			Some(server_id),
-			Some(m_server_id),
-			None,
-			"alertd",
-		)
-		.await
-		.expect("checks without group");
+		let checks =
+			silenced_health_checks_at(&mut conn, Scope::Application(server_id), None, "alertd")
+				.await
+				.expect("checks without group");
 		assert_eq!(checks.into_iter().collect::<Vec<_>>(), vec!["flaky"]);
 	})
 	.await
 }
 
-/// The machine an application sits on. These tests exercise application- and
-/// group-scoped silences; the machine is passed because the lookup now covers
-/// that grain too, and it carries no silences of its own here.
-async fn machine_of(conn: &mut database::diesel_async::AsyncPgConnection, app: Uuid) -> Uuid {
-	#[derive(diesel::QueryableByName)]
-	struct M {
-		#[diesel(sql_type = sql_types::Uuid)]
-		machine_id: Uuid,
-	}
-	sql_query("SELECT machine_id FROM applications WHERE id = $1")
-		.bind::<sql_types::Uuid, _>(app)
-		.get_result::<M>(conn)
+/// A check reported under an application is that application's, whatever it
+/// is called, so the box's `memory` and an application's own `memory` are two
+/// entries: each target's reporter is told its own ceiling and its own
+/// silences, never the other's.
+// spec: CHK#names
+#[tokio::test(flavor = "multi_thread")]
+async fn a_box_check_and_an_applications_namesake_are_told_apart() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		// The machine takes the application's id (see `insert_server`).
+		let server_id = insert_server(&mut conn, Some(group_id)).await;
+		let machine_id = server_id;
+
+		for (namespace, ceiling) in [
+			(Namespace::Machine, CheckResult::Failed),
+			(ns(), CheckResult::Passed),
+		] {
+			CheckPolicy::upsert_default(&mut conn, "alertd", &namespace, "memory")
+				.await
+				.expect("seed");
+			CheckPolicy::update(
+				&mut conn, "alertd", &namespace, "memory", ceiling, false, None, "alice",
+			)
+			.await
+			.expect("set ceiling");
+		}
+
+		let machine_map =
+			CheckPolicy::ceiling_map_for_source(&mut conn, "alertd", &Namespace::Machine)
+				.await
+				.expect("machine map");
+		let own_map = CheckPolicy::ceiling_map_for_source(&mut conn, "alertd", &ns())
+			.await
+			.expect("application map");
+		assert_eq!(machine_map.get("memory"), Some(&CheckResult::Failed));
+		assert_eq!(own_map.get("memory"), Some(&CheckResult::Passed));
+
+		MachineSilencedRef::add(&mut conn, machine_id, "alertd", "health/memory", None, None)
+			.await
+			.expect("machine silence");
+		let at_machine = silenced_health_checks_at(
+			&mut conn,
+			Scope::Machine(machine_id),
+			Some(group_id),
+			"alertd",
+		)
 		.await
-		.expect("machine of application")
-		.machine_id
+		.expect("machine silences");
+		let at_application = silenced_health_checks_at(
+			&mut conn,
+			Scope::Application(server_id),
+			Some(group_id),
+			"alertd",
+		)
+		.await
+		.expect("application silences");
+		assert!(at_machine.contains("memory"));
+		assert!(
+			!at_application.contains("memory"),
+			"the box's silence is not the application's: {at_application:?}"
+		);
+	})
+	.await
 }

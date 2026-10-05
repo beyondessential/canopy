@@ -2096,6 +2096,84 @@ async fn snapshot_surfaces_per_check_results() {
 	.await
 }
 
+/// A split push's application row is taken as given, so a check it carries
+/// under a machine-subject name is the application's, graded through its
+/// type's entry, beside the box's own check of the same name. A unified push's
+/// machine-subject name is still the box's.
+// spec: CHK#names, STA#transitional-unified-pushes
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_reads_a_split_push_as_its_reporter_filed_it() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO check_policies (source, subject, application_type, check_name, ceiling, reviewed_at, reviewed_by) VALUES \
+				('alertd', 'machine', NULL, 'disk_free', 'warning', NOW(), 'test'), \
+				('alertd', 'application', 'tamanu-central', 'disk_free', 'failed', NOW(), 'test'); \
+			 INSERT INTO machines (id, name) VALUES ('30000000-0000-0000-0000-000000000041', 'split-box'), ('30000000-0000-0000-0000-000000000042', 'unified-box'); \
+			 INSERT INTO applications (id, host, type, machine_id) VALUES \
+				('30000000-0000-0000-0000-000000000041', 'https://split-snap.example.com', 'tamanu-central', '30000000-0000-0000-0000-000000000041'), \
+				('30000000-0000-0000-0000-000000000042', 'https://unified-snap.example.com', 'tamanu-central', '30000000-0000-0000-0000-000000000042'); \
+			 INSERT INTO statuses (server_id, machine_id, source, created_at, healthy, health, extra) VALUES \
+				(NULL, '30000000-0000-0000-0000-000000000041', 'alertd', '2026-10-01T00:00:00Z', false, \
+				 '[{\"check\":\"disk_free\",\"result\":\"failed\"}]'::jsonb, '{}'::jsonb), \
+				('30000000-0000-0000-0000-000000000041', '30000000-0000-0000-0000-000000000041', 'alertd', '2026-10-01T00:00:00Z', false, \
+				 '[{\"check\":\"disk_free\",\"result\":\"failed\"}]'::jsonb, '{}'::jsonb), \
+				('30000000-0000-0000-0000-000000000042', '30000000-0000-0000-0000-000000000042', 'alertd', '2026-10-01T00:00:00Z', false, \
+				 '[{\"check\":\"disk_free\",\"result\":\"failed\"}]'::jsonb, '{}'::jsonb);",
+		)
+		.await
+		.unwrap();
+
+		let read = async |server_id: &str| -> Vec<serde_json::Value> {
+			let r = private
+				.post("/api/statuses/snapshot")
+				.json(&serde_json::json!({ "server_id": server_id, "at": "2026-10-01T00:05:00Z" }))
+				.await;
+			r.assert_status_ok();
+			let body: serde_json::Value = r.json();
+			let mut checks: Vec<_> = body["checks"]["checks"]
+				.as_array()
+				.unwrap()
+				.iter()
+				.filter(|c| c["check"] == "disk_free")
+				.map(|c| {
+					serde_json::json!({
+						"subject": c["subject"],
+						"namespace": c["namespace"],
+						"effective": c["effective"],
+					})
+				})
+				.collect();
+			checks.sort_by_key(|c| c["subject"].to_string());
+			checks
+		};
+
+		assert_eq!(
+			read("30000000-0000-0000-0000-000000000041").await,
+			vec![
+				serde_json::json!({
+					"subject": "application",
+					"namespace": { "subject": "application", "application_type": "tamanu-central" },
+					"effective": "failed",
+				}),
+				serde_json::json!({
+					"subject": "machine",
+					"namespace": { "subject": "machine", "application_type": null },
+					"effective": "warning",
+				}),
+			],
+		);
+		assert_eq!(
+			read("30000000-0000-0000-0000-000000000042").await,
+			vec![serde_json::json!({
+				"subject": "machine",
+				"namespace": { "subject": "machine", "application_type": null },
+				"effective": "warning",
+			})],
+		);
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn snapshot_check_results_cover_result_form() {
 	commons_tests::server::run(async |mut conn, _, private| {

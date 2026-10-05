@@ -49,7 +49,8 @@ function randomLabel(prefix: string): string {
 // These helpers derive it the way `Namespace::of` does, so the rows a spec
 // seeds are the rows a real report would have made.
 
-/** The checks that describe the box rather than the workload on it.
+/** The checks that describe the box rather than the workload on it, which is
+ * how a unified push's checks are split between the two.
  *
  * A snapshot of MACHINE_SUBJECT_CHECKS in crates/commons-types/src/subject.rs.
  * `the_e2e_seed_snapshot_matches_the_subject_list`, beside that list, parses
@@ -133,18 +134,17 @@ export interface SeedNamespace {
 	applicationType: string | null;
 }
 
-/** The namespace a check lands in: flat for a curated source, the machine's
- * for a name that describes the box, and the reporting application's type
- * otherwise. */
+/** The namespace a check lands in: flat for a curated source, and otherwise
+ * that of the target it was filed against, whatever the check is called. Pass
+ * the type of the application it was filed against, or `null` for a machine. */
 export function namespaceOf(
 	source: string,
-	checkName: string,
-	applicationType: string,
+	applicationType: string | null,
 ): SeedNamespace {
 	if (RESERVED_SOURCES.includes(source)) {
 		return { subject: null, applicationType: null };
 	}
-	if (MACHINE_SUBJECT_CHECKS.includes(checkName)) {
+	if (applicationType === null) {
 		return { subject: "machine", applicationType: null };
 	}
 	return { subject: "application", applicationType };
@@ -588,7 +588,8 @@ export async function seedStatus(
 		// counts if a live catalog row backs it, in the namespace the reporter
 		// files into. Never clobbers an explicit seedCheckPolicy for the same
 		// entry.
-		const ns = namespaceOf(source, check, applicationType);
+		const onMachine = machineId !== null && MACHINE_SUBJECT_CHECKS.includes(check);
+		const ns = namespaceOf(source, onMachine ? null : applicationType);
 		await sql.query(
 			`INSERT INTO check_policies (source, subject, application_type, check_name)
 			 VALUES ($1, $2, $3, $4)
@@ -596,7 +597,6 @@ export async function seedStatus(
 			[source, ns.subject, ns.applicationType, check],
 		);
 		const degraded = ["failed", "warning", "broken"].includes(result);
-		const onMachine = ns.subject === "machine" && machineId !== null;
 		await sql.query(
 			`INSERT INTO issues
 			 (application_id, machine_id, source, ref, check_name, observed_result, effective_result, detail, message, active, first_seen, last_seen, degraded_since, last_degraded_at)
@@ -686,16 +686,15 @@ export async function seedCheckPolicy(
 		 * candidate ("gone quiet"). */
 		lastSeen?: string | null;
 		decommissionedAt?: string | null;
-		/** Which application type reports it, for a check that names the
-		 * workload. Defaults to a Tamanu central, as `seedServer` does. */
-		applicationType?: ApplicationType;
+		/** Which application type reports it, or `null` for a check a machine
+		 * reports. Defaults to a Tamanu central, as `seedServer` does. */
+		applicationType?: ApplicationType | null;
 	},
 ): Promise<SeededCheckPolicy> {
 	const source = opts.source ?? "alertd";
 	const namespace = namespaceOf(
 		source,
-		opts.checkName,
-		opts.applicationType ?? "tamanu-central",
+		opts.applicationType === undefined ? "tamanu-central" : opts.applicationType,
 	);
 	await sql.query(
 		`INSERT INTO check_policies (source, subject, application_type, check_name, ceiling, escalates, notes, documentation, last_seen, decommissioned_at)
@@ -743,7 +742,7 @@ export async function seedServerSilencedRef(
 	const check = refToCheck(opts.ref);
 	// A silence names a check, so it names a namespace: quieting one
 	// application type's check leaves another type's same-named check alone.
-	const ns = namespaceOf(source, check, await applicationTypeOf(sql, opts.serverId));
+	const ns = namespaceOf(source, await applicationTypeOf(sql, opts.serverId));
 	await sql.query(
 		`INSERT INTO scoped_check_policies (application_id, source, subject, application_type, check_name, ceiling, created_by, instance_key)
 		 VALUES ($1, $2, $3, $4, $5, 'skipped', $6, $7)
@@ -769,17 +768,21 @@ export async function seedGroupSilencedRef(
 		ref: string;
 		source?: string;
 		createdBy?: string | null;
-		/** Which application type's check is silenced. A group spans several,
-		 * so the same name reported by another type is another silence.
-		 * Defaults to a Tamanu central, as `seedServer` does. */
-		applicationType?: ApplicationType;
+		/** Which application type's check is silenced, or `null` for the check
+		 * a machine reports. A group spans several, so the same name reported by
+		 * another type is another silence. Defaults to a Tamanu central, as
+		 * `seedServer` does. */
+		applicationType?: ApplicationType | null;
 		/** Silence one instance of the check, by key, rather than all of it. */
 		instance?: string | null;
 	},
 ): Promise<void> {
 	const source = opts.source ?? "alertd";
 	const check = refToCheck(opts.ref);
-	const ns = namespaceOf(source, check, opts.applicationType ?? "tamanu-central");
+	const ns = namespaceOf(
+		source,
+		opts.applicationType === undefined ? "tamanu-central" : opts.applicationType,
+	);
 	await sql.query(
 		`INSERT INTO scoped_check_policies (server_group_id, source, subject, application_type, check_name, ceiling, created_by, instance_key)
 		 VALUES ($1, $2, $3, $4, $5, 'skipped', $6, $7)
@@ -829,11 +832,7 @@ export async function seedInstancedCheck(
 ): Promise<SeededIssue> {
 	const id = randomUUID();
 	const source = opts.source ?? "alertd";
-	const ns = namespaceOf(
-		source,
-		opts.check,
-		await applicationTypeOf(sql, opts.serverId),
-	);
+	const ns = namespaceOf(source, await applicationTypeOf(sql, opts.serverId));
 	await sql.query(
 		`INSERT INTO check_policies (source, subject, application_type, check_name, ceiling, reviewed_at, reviewed_by)
 		 VALUES ($1, $2, $3, $4, 'failed', NOW(), 'e2e')
@@ -974,15 +973,11 @@ export async function seedIssue(
 	// explicit seedCheckPolicy for the same (source, check).
 	if (opts.serverId || opts.machineId || opts.clusterId) {
 		const source = opts.source ?? "alertd";
-		// A machine-scoped issue names a check about the box, which derives to
-		// the machine namespace whatever type is passed; the fallback only
-		// matters for a server-scoped one, and there the application says.
+		// The namespace follows the target: a server-scoped issue is its
+		// application type's, anything else the machine's.
 		const ns = namespaceOf(
 			source,
-			check,
-			opts.serverId
-				? await applicationTypeOf(sql, opts.serverId)
-				: "tamanu-central",
+			opts.serverId ? await applicationTypeOf(sql, opts.serverId) : null,
 		);
 		await sql.query(
 			`INSERT INTO check_policies (source, subject, application_type, check_name)
