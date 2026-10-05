@@ -472,7 +472,7 @@ async fn silenced_health_checks_at(
 	use crate::schema::scoped_check_policies::dsl;
 
 	let (subject, application_type) = namespace.to_columns();
-	let (application_id, machine_id, server_group_id, kubernetes_cluster_id) = target.to_columns();
+	let (application_id, machine_id, _, _) = target.to_columns();
 	let rows: Vec<String> = dsl::scoped_check_policies
 		.select(dsl::check_name)
 		.filter(dsl::ceiling.eq("skipped"))
@@ -483,22 +483,14 @@ async fn silenced_health_checks_at(
 		.filter(dsl::source.eq(source))
 		.filter(dsl::subject.is_not_distinct_from(subject.map(str::to_owned)))
 		.filter(dsl::application_type.is_not_distinct_from(application_type))
+		// The target is an application or a machine, so one of these names it
+		// and the other is null. A null never equals anything, so it matches
+		// no row, and nor does an ungrouped target's absent group.
 		.filter(
 			dsl::application_id
-				.is_not_distinct_from(application_id)
-				.and(dsl::machine_id.is_not_distinct_from(machine_id))
-				.and(dsl::server_group_id.is_not_distinct_from(server_group_id))
-				.and(dsl::kubernetes_cluster_id.is_not_distinct_from(kubernetes_cluster_id))
-				.and(
-					dsl::application_id
-						.is_not_null()
-						.or(dsl::machine_id.is_not_null())
-						.or(dsl::server_group_id.is_not_null())
-						.or(dsl::kubernetes_cluster_id.is_not_null()),
-				)
-				.or(dsl::server_group_id
-					.is_not_distinct_from(group_id)
-					.and(dsl::server_group_id.is_not_null())),
+				.eq(application_id)
+				.or(dsl::machine_id.eq(machine_id))
+				.or(dsl::server_group_id.eq(group_id)),
 		)
 		.load(db)
 		.await?;
