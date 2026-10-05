@@ -648,11 +648,16 @@ pub async fn checks(
 	// this table is for restore *consumers*, so their issuances are the ones we
 	// pair here (the complement of the backup panel's member-device filter). An
 	// identity belongs to a box, so the members are the group's machines.
-	let member_devices: HashSet<Uuid> = Machine::list_for_group(&mut conn, group_id)
-		.await?
-		.into_iter()
-		.filter_map(|m| m.device_id)
-		.collect();
+	let members = Machine::list_for_group(&mut conn, group_id).await?;
+	let member_devices: HashSet<Uuid> = members.iter().filter_map(|m| m.device_id).collect();
+	// A check outlives its box's membership, so only a box that has since left
+	// the group costs a lookup.
+	let machine_names = Machine::names_with_known(
+		&mut conn,
+		&members,
+		checks.iter().filter_map(|c| c.machine_id),
+	)
+	.await?;
 
 	let issuance_since =
 		run_pairing::issuance_since(now, checks.iter().map(|c| c.reported_at).min());
@@ -687,8 +692,8 @@ pub async fn checks(
 			RestoreActivity {
 				key: format!("check-{}", c.id),
 				status: RunStatus::Reported,
+				machine_name: c.machine_id.and_then(|id| machine_names.get(&id).cloned()),
 				machine_id: c.machine_id,
-				machine_name: None,
 				r#type: c.r#type,
 				intent: Some(c.intent),
 				outcome: Some(c.outcome),
@@ -750,16 +755,6 @@ pub async fn checks(
 
 	rows.sort_by(|a, b| b.at.cmp(&a.at));
 	rows.truncate(RECENT_CHECKS_LIMIT as usize);
-	let machine_names = Machine::names_by_ids(
-		&mut conn,
-		&rows.iter().filter_map(|r| r.machine_id).collect::<Vec<_>>(),
-	)
-	.await?;
-	for row in &mut rows {
-		row.machine_name = row
-			.machine_id
-			.and_then(|id| machine_names.get(&id).cloned());
-	}
 	Ok(Json(rows))
 }
 

@@ -391,6 +391,26 @@ impl Machine {
 		Ok(rows.into_iter().collect())
 	}
 
+	/// Names for `ids`, taken from `known` where it already holds the machine
+	/// and fetched for the rest, so a surface that has loaded a group's
+	/// machines pays a query only for boxes that have since left it.
+	pub async fn names_with_known(
+		db: &mut AsyncPgConnection,
+		known: &[Self],
+		ids: impl IntoIterator<Item = Uuid>,
+	) -> Result<std::collections::HashMap<Uuid, String>> {
+		let mut names: std::collections::HashMap<Uuid, String> =
+			known.iter().map(|m| (m.id, m.name.clone())).collect();
+		let mut missing: Vec<Uuid> = ids
+			.into_iter()
+			.filter(|id| !names.contains_key(id))
+			.collect();
+		missing.sort_unstable();
+		missing.dedup();
+		names.extend(Self::names_by_ids(db, &missing).await?);
+		Ok(names)
+	}
+
 	/// Bulk-fetch `(group_id, group_name)` for a set of machine ids, so a
 	/// surface listing machine-scoped rows can name the group each belongs
 	/// to without a query per row.

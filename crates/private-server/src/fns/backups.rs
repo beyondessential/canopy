@@ -600,6 +600,7 @@ fn build_recent_runs(
 		runs,
 		issuances,
 		device_to_machine,
+		&Default::default(),
 		source_snapshot_sizes,
 		&Default::default(),
 		&Default::default(),
@@ -639,6 +640,7 @@ fn build_recent_runs_with_progress(
 	runs: Vec<BackupRun>,
 	issuances: Vec<BackupCredentialIssuance>,
 	device_to_machine: &std::collections::HashMap<Uuid, Uuid>,
+	machine_names: &std::collections::HashMap<Uuid, String>,
 	source_snapshot_sizes: &std::collections::HashMap<String, i64>,
 	latest_progress: &std::collections::HashMap<Uuid, database::backups::BackupRunProgress>,
 	progress_windows: &std::collections::HashMap<Uuid, Vec<database::backups::BackupRunProgress>>,
@@ -674,8 +676,10 @@ fn build_recent_runs_with_progress(
 			};
 			RecentRun {
 				key: format!("run-{}", run.id),
+				machine_name: run
+					.machine_id
+					.and_then(|id| machine_names.get(&id).cloned()),
 				machine_id: run.machine_id,
-				machine_name: None,
 				r#type: run.r#type,
 				purpose: run.purpose,
 				status: RunStatus::Reported,
@@ -726,7 +730,9 @@ fn build_recent_runs_with_progress(
 		rows.push(RecentRun {
 			key: format!("issuance-{}", first.id),
 			machine_id: device_to_machine.get(&first.device_id).copied(),
-			machine_name: None,
+			machine_name: device_to_machine
+				.get(&first.device_id)
+				.and_then(|id| machine_names.get(id).cloned()),
 			r#type: first.r#type,
 			purpose: first.purpose,
 			status,
@@ -2175,10 +2181,19 @@ pub async fn stats(
 			&candidate_run_ids,
 		)
 		.await?;
-	let mut recent_runs = build_recent_runs_with_progress(
+	// A run outlives its box's membership, so a run's machine may be one the
+	// group no longer holds; only those cost a lookup.
+	let run_machine_names = Machine::names_with_known(
+		&mut conn,
+		&machines,
+		reported_runs.iter().filter_map(|r| r.machine_id),
+	)
+	.await?;
+	let recent_runs = build_recent_runs_with_progress(
 		reported_runs,
 		issuances,
 		&device_to_machine,
+		&run_machine_names,
 		&source_snapshot_sizes,
 		&latest_progress,
 		&progress_windows,
@@ -2186,19 +2201,6 @@ pub async fn stats(
 		now,
 		RECENT_LIMIT as usize,
 	);
-	let run_machine_names = Machine::names_by_ids(
-		&mut conn,
-		&recent_runs
-			.iter()
-			.filter_map(|r| r.machine_id)
-			.collect::<Vec<_>>(),
-	)
-	.await?;
-	for run in &mut recent_runs {
-		run.machine_name = run
-			.machine_id
-			.and_then(|id| run_machine_names.get(&id).cloned());
-	}
 	let mut intervals: std::collections::HashMap<BackupType, Option<i64>> =
 		std::collections::HashMap::new();
 	let mut pending_requests = Vec::new();
@@ -3186,6 +3188,7 @@ mod tests {
 			// Creds still valid at ts(4500) → the row is in flight.
 			vec![issuance_for(1, d, BackupPurpose::Backup, 1000, 8000, rid)],
 			&device_map(d, 9),
+			&Default::default(),
 			&no_sizes(),
 			&std::collections::HashMap::from([(rid, latest.clone())]),
 			&std::collections::HashMap::from([(rid, vec![sample(rid, 3900, Some(600)), latest])]),
@@ -3215,6 +3218,7 @@ mod tests {
 			vec![],
 			vec![issuance_for(1, d, BackupPurpose::Backup, 1000, 8000, rid)],
 			&device_map(d, 9),
+			&Default::default(),
 			&no_sizes(),
 			&Default::default(),
 			&Default::default(),
@@ -3241,6 +3245,7 @@ mod tests {
 			vec![],
 			vec![issuance(1, d, BackupPurpose::Backup, 1000, 8000)],
 			&device_map(d, 9),
+			&Default::default(),
 			&no_sizes(),
 			&std::collections::HashMap::from([(other, sample(other, 4000, Some(700)))]),
 			&Default::default(),
