@@ -725,15 +725,10 @@ impl ApplicationCertificate {
 			}
 			out.push(PausedLapse {
 				application_id: cert.application_id,
-				// A server with no name of its own reads as its type, as it does
-				// everywhere else.
-				// spec: FLT#naming
-				server_name: server_name.unwrap_or_else(|| {
-					server_type
-						.parse::<commons_types::server::app_type::ApplicationType>()
-						.map(|t| t.label())
-						.unwrap_or(server_type)
-				}),
+				server_name: crate::applications::Application::display_name_of(
+					server_name,
+					&server_type,
+				),
 				name: cert.name.clone(),
 				not_after: cert.not_after,
 				expired,

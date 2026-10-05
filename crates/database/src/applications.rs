@@ -213,6 +213,19 @@ impl Application {
 		self.name.clone().unwrap_or_else(|| self.r#type.label())
 	}
 
+	/// [`Self::display_name`] from the raw columns, for a query that selects
+	/// the name and type rather than the whole row. A type that does not parse
+	/// reads as stored rather than vanishing.
+	// spec: FLT#naming
+	pub fn display_name_of(name: Option<String>, r#type: &str) -> String {
+		name.unwrap_or_else(|| {
+			r#type
+				.parse::<ApplicationType>()
+				.map(|t| t.label())
+				.unwrap_or_else(|_| r#type.to_owned())
+		})
+	}
+
 	pub async fn get_all(
 		db: &mut AsyncPgConnection,
 		offset: u64,
@@ -848,12 +861,7 @@ impl Application {
 			.map_err(AppError::from)?;
 		Ok(rows
 			.into_iter()
-			.map(|(i, n, h, t)| {
-				let name = n.unwrap_or_else(|| {
-					t.parse::<ApplicationType>().map(|t| t.label()).unwrap_or(t)
-				});
-				(i, (name, h))
-			})
+			.map(|(i, n, h, t)| (i, (Self::display_name_of(n, &t), h)))
 			.collect())
 	}
 
