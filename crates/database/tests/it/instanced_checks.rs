@@ -199,7 +199,7 @@ async fn the_most_urgent_instance_settles_the_check_and_every_instance_is_stored
 async fn a_check_without_instances_stores_its_detail_as_reported() {
 	TestDb::run(async |mut conn, _| {
 		let s = seed(&mut conn).await;
-		let detail = json!({"free_percent": 4.2, "instances": 3});
+		let detail = database::check_detail! {"free_percent": 4.2, "instances": 3};
 		let issue = file_check(
 			&mut conn,
 			CheckFiling {
@@ -218,7 +218,7 @@ async fn a_check_without_instances_stores_its_detail_as_reported() {
 		)
 		.await
 		.expect("file");
-		assert_eq!(issue.detail, Some(detail));
+		assert_eq!(issue.detail, Some(Value::Object(detail)));
 		assert_eq!(issue.message, "low");
 		assert!(issue.instances.is_none());
 		assert!(issue.grading_context.is_none());
@@ -1225,11 +1225,11 @@ async fn a_plain_check_whose_detail_looks_instanced_is_still_plain() {
 	TestDb::run(async |mut conn, _| {
 		let s = seed(&mut conn).await;
 		let scope = Scope::Application(s.application);
-		let detail = json!({
+		let detail = database::check_detail! {
 			"instances": {"dev-north": {"observed": "failed", "effective": "failed"}},
 			"degraded": 1,
 			"total": 1,
-		});
+		};
 		let filed = file_check(
 			&mut conn,
 			CheckFiling {
@@ -1250,7 +1250,7 @@ async fn a_plain_check_whose_detail_looks_instanced_is_still_plain() {
 		.expect("file");
 		assert!(filed.instances.is_none());
 		assert!(filed.stored_instances().is_none());
-		assert_eq!(filed.detail, Some(detail.clone()));
+		assert_eq!(filed.detail, Some(Value::Object(detail.clone())));
 
 		// An instance silence naming a key in that detail reaches nothing.
 		ServerSilencedRef::add(
@@ -1265,7 +1265,7 @@ async fn a_plain_check_whose_detail_looks_instanced_is_still_plain() {
 		.expect("silence");
 		let issue = state(&mut conn, scope).await;
 		assert_eq!(issue.effective_result, Some(CheckResult::Failed));
-		assert_eq!(issue.detail, Some(detail));
+		assert_eq!(issue.detail, Some(Value::Object(detail)));
 		assert_eq!(issue.message, "plain");
 	})
 	.await
@@ -1374,7 +1374,7 @@ async fn a_broken_check_that_held_no_instances_is_its_plain_self() {
 				observed: CheckResult::Broken,
 				title: None,
 				message: "could not run",
-				detail: Some(json!({"error": "timeout"})),
+				detail: Some(database::check_detail! {"error": "timeout"}),
 				default_ceiling: CheckResult::Failed,
 				default_escalates: false,
 				documentation: None,

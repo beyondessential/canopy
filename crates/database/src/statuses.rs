@@ -108,7 +108,11 @@ fn grade_reachability(
 	expected: &[(String, SignedDuration, ReachabilityMode)],
 	last_reported: Option<Timestamp>,
 	now: Timestamp,
-) -> (CheckResult, String, serde_json::Value) {
+) -> (
+	CheckResult,
+	String,
+	serde_json::Map<String, serde_json::Value>,
+) {
 	if expected.is_empty() {
 		// No counted source: never reported, or every source excluded. Fall
 		// back to whether anything at all has reached Canopy about it.
@@ -118,7 +122,7 @@ fn grade_reachability(
 			return (
 				CheckResult::Passed,
 				format!("{grain} {label} is reachable"),
-				serde_json::json!({ "threshold_secs": threshold.as_secs() }),
+				crate::check_detail! { "threshold_secs": threshold.as_secs() },
 			);
 		}
 		let message = match elapsed {
@@ -135,10 +139,10 @@ fn grade_reachability(
 		return (
 			CheckResult::Failed,
 			message,
-			serde_json::json!({
+			crate::check_detail! {
 				"elapsed_secs": elapsed.map(|e| e.as_secs()),
 				"threshold_secs": threshold.as_secs(),
-			}),
+			},
 		);
 	}
 
@@ -151,13 +155,13 @@ fn grade_reachability(
 		.map(|(s, _, _)| s.as_str())
 		.collect::<Vec<_>>()
 		.join(", ");
-	let detail = serde_json::json!({
+	let detail = crate::check_detail! {
 		"stale_sources": stale
 			.iter()
 			.map(|(source, e, _)| serde_json::json!({ "source": source, "stale_secs": e.as_secs() }))
 			.collect::<Vec<_>>(),
 		"threshold_secs": threshold.as_secs(),
-	});
+	};
 
 	if stale.len() == expected.len() {
 		(
@@ -182,7 +186,7 @@ fn grade_reachability(
 		(
 			CheckResult::Passed,
 			format!("{grain} {label} is reachable"),
-			serde_json::json!({ "threshold_secs": threshold.as_secs() }),
+			crate::check_detail! { "threshold_secs": threshold.as_secs() },
 		)
 	}
 }

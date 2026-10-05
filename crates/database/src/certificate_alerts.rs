@@ -142,13 +142,13 @@ pub async fn sweep_certificate_expiry(db: &mut AsyncPgConnection) -> Result<usiz
 				observed,
 				title: Some("TLS certificate running out"),
 				message: &message,
-				detail: Some(serde_json::json!({
+				detail: Some(crate::check_detail! {
 					"names": certificates.iter().map(|(c, _)| &c.name).collect::<Vec<_>>(),
 					"expires_at": certificates
 						.iter()
 						.map(|(c, _)| c.not_after.map(|at| at.to_string()))
 						.collect::<Vec<_>>(),
-				})),
+				}),
 				default_ceiling: CheckResult::Failed,
 				default_escalates: false,
 				documentation: Some(EXPIRY_DOC),
@@ -233,10 +233,10 @@ pub async fn sweep_stuck_issuance(db: &mut AsyncPgConnection) -> Result<usize> {
 				observed: CheckResult::Failed,
 				title: Some("TLS certificate never obtained"),
 				message: &message,
-				detail: Some(serde_json::json!({
+				detail: Some(crate::check_detail! {
 					"names": orders.iter().map(|o| &o.name).collect::<Vec<_>>(),
 					"attempts": orders.iter().map(|o| o.attempts).collect::<Vec<_>>(),
-				})),
+				}),
 				default_ceiling: CheckResult::Failed,
 				default_escalates: false,
 				documentation: Some(ISSUANCE_DOC),
@@ -310,9 +310,9 @@ pub async fn sweep_address_records(db: &mut AsyncPgConnection) -> Result<usize> 
 				observed: CheckResult::Failed,
 				title: Some("DNS records not published"),
 				message: &message,
-				detail: Some(serde_json::json!({
+				detail: Some(crate::check_detail! {
 					"names": names.iter().map(|n| &n.name).collect::<Vec<_>>(),
-				})),
+				}),
 				default_ceiling: CheckResult::Failed,
 				default_escalates: false,
 				documentation: Some(ADDRESS_DOC),

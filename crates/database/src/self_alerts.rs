@@ -360,7 +360,7 @@ pub async fn sweep_stale_healthchecks(conn: &mut AsyncPgConnection) -> Result<Op
 	// The same set, structured, so the operator surface can link each one to
 	// its own policy page — which is where the decommission this alert asks
 	// for actually lives.
-	let detail = serde_json::json!({
+	let detail = crate::check_detail! {
 		"checks": quiet
 			.iter()
 			.map(|p| {
@@ -378,7 +378,7 @@ pub async fn sweep_stale_healthchecks(conn: &mut AsyncPgConnection) -> Result<Op
 				})
 			})
 			.collect::<Vec<_>>(),
-	});
+	};
 	raise_with_detail(
 		conn,
 		STALE_CHECKS_REF,
@@ -602,7 +602,7 @@ pub async fn raise_with_detail(
 	documentation: Option<&str>,
 	title: &str,
 	message: &str,
-	detail: Option<serde_json::Value>,
+	detail: Option<serde_json::Map<String, serde_json::Value>>,
 ) -> Result<Issue> {
 	file_check(
 		conn,

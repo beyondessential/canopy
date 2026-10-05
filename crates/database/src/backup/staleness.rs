@@ -524,10 +524,10 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 							.map(|t| Timestamp::from(t).to_string())
 							.unwrap_or_else(|| "never".into()),
 					),
-					detail: Some(serde_json::json!({
+					detail: Some(crate::check_detail! {
 						"threshold_secs": MAINTENANCE_STALE_AFTER.as_secs(),
 						"last_success_at": latest_success.map(|t| Timestamp::from(t).to_string()),
-					})),
+					}),
 					default_ceiling: CheckResult::Warning,
 					default_escalates: false,
 					documentation: Some(refs::MAINTENANCE_STALE_DOC),
@@ -578,10 +578,10 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 							run.kind,
 							run.error.as_deref().unwrap_or("(no detail reported)"),
 						),
-						detail: Some(serde_json::json!({
+						detail: Some(crate::check_detail! {
 							"kind": run.kind,
 							"error": run.error,
-						})),
+						}),
 						default_ceiling: CheckResult::Warning,
 						default_escalates: false,
 						documentation: Some(refs::MAINTENANCE_ERROR_DOC),

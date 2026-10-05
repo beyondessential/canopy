@@ -1415,8 +1415,8 @@ pub struct CheckFiling<'a> {
 	pub title: Option<&'a str>,
 	pub message: &'a str,
 	/// The check's own fields, available to policy rules as `check.*`
-	/// and displayed alongside the state.
-	pub detail: Option<serde_json::Value>,
+	/// and displayed alongside the state. Build one with [`check_detail!`].
+	pub detail: Option<serde_json::Map<String, serde_json::Value>>,
 	/// The policy this check registers with on first sight — the ceiling
 	/// and escalation its condition warrants. Operator edits stick;
 	/// these only seed the catalog row.
@@ -1427,6 +1427,22 @@ pub struct CheckFiling<'a> {
 	/// the CHK spec's Documentation section for the convention.
 	pub documentation: Option<&'a str>,
 }
+
+/// A check's fields for [`CheckFiling::detail`], written as the body of a
+/// `serde_json::json!` object literal. The braces are the macro's, so what it
+/// builds is always an object.
+///
+/// [`CheckFiling::detail`]: crate::issues::CheckFiling::detail
+#[macro_export]
+macro_rules! check_detail {
+	($($body:tt)*) => {
+		match ::serde_json::json!({ $($body)* }) {
+			::serde_json::Value::Object(fields) => fields,
+			_ => unreachable!("a JSON object literal builds an object"),
+		}
+	};
+}
+pub use check_detail;
 
 /// File one canopy-determined or operator-raised check result: register
 /// its catalog entry (first sight only), grade the observation through
@@ -1444,16 +1460,13 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 	// Brokenness is the whole check's, so a broken filing is not an instance
 	// but the check failing to run; its fields are what the check shares.
 	let (shared, outcome) = if filing.observed == CheckResult::Broken {
-		(
-			filing.detail.as_ref().and_then(|d| d.as_object().cloned()),
-			CheckOutcome::Broken,
-		)
+		(filing.detail, CheckOutcome::Broken)
 	} else {
 		(
 			None,
 			CheckOutcome::Instances(vec![CheckInstance::plain(
 				filing.observed,
-				filing.detail.clone(),
+				filing.detail.map(serde_json::Value::Object),
 			)]),
 		)
 	};
