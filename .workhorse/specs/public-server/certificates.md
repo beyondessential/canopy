@@ -27,6 +27,9 @@ A DNS name is declared by at most one application across the whole fleet.
 Declaring a DNS name another application already holds is refused, and the refusal names the application holding it, so an operator can see what to release first.
 Exclusivity is what makes a DNS name resolve to one application without Canopy having to guess which of a machine's workloads a request is about.
 
+An operator may declare a DNS name that lies outside every domain the application's group controls, since the group may be about to claim the domain it sits under.
+Such a declaration routes requests like any other, and every request about it is then refused for want of a domain until the group controls one covering it (see "Identity and authorisation").
+
 An application may declare several DNS names, each held exclusively.
 Releasing a DNS name ends the application's hold on it and leaves the records and certificates already in place, as revoking a grant does.
 What was published stays published and what was issued stays held and collectable until it expires.
@@ -50,9 +53,24 @@ A machine hosting exactly one application resolves to it even for a DNS name not
 There is nothing to disambiguate on such a machine, and an agent's own registration is how most DNS names come to be declared.
 On a machine hosting several, an undeclared DNS name is genuinely ambiguous, so it is refused rather than guessed at and an operator declares it first.
 
+A DNS name no application on the machine declares is refused as undeclared, distinguishably from every other refusal.
+The remedy is an operator's and not the agent's, so an agent can tell a DNS name waiting on a declaration from one it is not entitled to, and wait rather than report a fault.
+
 A machine asking about a DNS name none of its applications declares is refused the same way whether the DNS name is held by an application elsewhere or by nobody, so the endpoint is not a directory of what other machines serve.
 
 A DNS name within another group's domain is refused as if unclaimed: the refusal says the application's group does not control it, and never that another group does, so the endpoint is not a directory of other groups' DNS names.
+
+### Undeclared requests
+
+A request refused as undeclared is recorded against the machine that made it, so an operator learns that a declaration is wanted from Canopy rather than from the agent's alerts.
+The record holds the DNS name, whether it was asked about for addresses or for a certificate, and when the machine last asked.
+A machine asking again about the same DNS name updates the one record rather than adding another.
+
+The record reads the same whether the DNS name is declared by an application on another machine or by nobody.
+It is presented to operators alone, who already see the whole fleet, so it tells the asking machine nothing it was not already told.
+
+A record lasts only as long as it describes something an operator should act on.
+It goes when an application on the machine declares the DNS name, when the machine's next request about it is accepted, and when a day passes without the machine asking about it, so a DNS name the agent has stopped wanting drops off without anyone acting.
 
 ## What an application may act on
 
@@ -200,9 +218,18 @@ Reporting the two apart matters because they call for different people — an ap
 
 An application presents the DNS names it declares, with the addresses published for each and whether the zone has caught up with what it asked for, and the certificates Canopy holds for it, each with the DNS name it covers, the profile it was issued under, and when it expires, given both as an instant and as how long is left.
 An operator declares and releases an application's DNS names from the same place.
+A declared DNS name with no addresses registered presents as declared without addresses, distinct from one whose addresses are being withdrawn.
+A declared DNS name outside every domain the group controls presents flagged as such, since nothing can be published or certified for it until a covering domain is claimed.
 A request that has not yet produced a certificate presents as pending, or as failed with the reason.
 An operator sets the application's profile where its other permissions are set, and pauses or unpauses it from the same place, a pause showing who set it, when, and why.
 
 A group presents, under each domain it controls, the DNS names in use beneath it and which of them hold a current certificate, so whether a group's DNS names are healthy is answerable without visiting each of its applications.
+
+A machine hosting several applications presents their DNS names together, since that is where a request about a DNS name is resolved to one of them.
+Each declared DNS name shows the application declaring it and the state of its certificate.
+Any machine with undeclared requests presents them, each with what was asked for and when, and with a control to declare the DNS name on one of the machine's applications.
+Where the domains of exactly one of those applications' groups cover the DNS name, that application is offered first.
+A machine hosting one application has them only for a DNS name another application holds, and declaring there is refused with the holder named, which is what an operator needs to release it first.
+Declaring from the machine is the same declaration as declaring from the application, refused the same way.
 
 The authority Canopy is configured to use is presented to operators along with the profiles it advertises and whether Canopy's account with it is usable, since that is where a misconfiguration of issuance shows up rather than on any one application.
