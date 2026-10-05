@@ -1612,6 +1612,8 @@ export async function seedRestoreReplica(
 		redacts?: boolean;
 		/** Whether the operator has made this the group's schema publisher. */
 		publishesSchemas?: boolean;
+		/** Whether a migrating declaration tests only when asked. */
+		migratesOnRequest?: boolean;
 	},
 ): Promise<SeededRestoreReplica> {
 	const id = randomUUID();
@@ -1620,8 +1622,8 @@ export async function seedRestoreReplica(
 	if (overdue == null) {
 		await sql.query(
 			`INSERT INTO restore_replicas
-			 (id, consumer_device_id, group_id, machine_id, type, intent, name, params, enabled, redacts, publishes_schemas)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11)`,
+			 (id, consumer_device_id, group_id, machine_id, type, intent, name, params, enabled, redacts, publishes_schemas, migrates_on_request)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12)`,
 			[
 				id,
 				opts.consumerDeviceId,
@@ -1634,13 +1636,14 @@ export async function seedRestoreReplica(
 				opts.enabled ?? true,
 				opts.redacts ?? false,
 				opts.publishesSchemas ?? false,
+				opts.migratesOnRequest ?? false,
 			],
 		);
 	} else {
 		await sql.query(
 			`INSERT INTO restore_replicas
-			 (id, consumer_device_id, group_id, machine_id, type, intent, name, overdue_after, params, enabled, redacts, publishes_schemas)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, make_interval(secs => $8), $9::jsonb, $10, $11, $12)`,
+			 (id, consumer_device_id, group_id, machine_id, type, intent, name, overdue_after, params, enabled, redacts, publishes_schemas, migrates_on_request)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, make_interval(secs => $8), $9::jsonb, $10, $11, $12, $13)`,
 			[
 				id,
 				opts.consumerDeviceId,
@@ -1654,6 +1657,7 @@ export async function seedRestoreReplica(
 				opts.enabled ?? true,
 				opts.redacts ?? false,
 				opts.publishesSchemas ?? false,
+				opts.migratesOnRequest ?? false,
 			],
 		);
 	}

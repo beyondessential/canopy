@@ -449,6 +449,33 @@ pub async fn has_verdict(
 	Ok(existing.is_some())
 }
 
+/// The application on a box whose candidate a migration test of the box is
+/// for, its candidate, and the ask pending against that pair.
+///
+/// A box hosting several workloads with candidates is tested for the first in
+/// its own order, unless an ask is pending against another: an ask is for that
+/// pair, and testing a different one would leave it waiting for good.
+// spec: RST#candidate-versions
+pub async fn candidate_on_box<'a>(
+	db: &mut AsyncPgConnection,
+	machine_id: Uuid,
+	applications: &'a [Application],
+) -> Result<Option<(&'a Application, Version, Option<MigrationTestRequest>)>> {
+	let mut first = None;
+	for application in applications {
+		let Some(version) = candidate_for(db, application).await? else {
+			continue;
+		};
+		if let Some(request) = MigrationTestRequest::pending(db, machine_id, version.id).await? {
+			return Ok(Some((application, version, Some(request))));
+		}
+		if first.is_none() {
+			first = Some((application, version, None));
+		}
+	}
+	Ok(first)
+}
+
 /// How long a declaration on the schedule goes between tests of a pair.
 pub const SCHEDULED_EVERY: SignedDuration = SignedDuration::from_hours(7 * 24);
 
@@ -561,9 +588,11 @@ impl MigrationTestRequest {
 			if machines.contains(&machine_id) {
 				continue;
 			}
-			if candidate_for(db, &application)
-				.await?
-				.is_some_and(|candidate| candidate.id == version.id)
+			if crate::server_groups::ServerGroup::environment_of(db, &application).await?
+				== Some(rank)
+				&& candidate_for(db, &application)
+					.await?
+					.is_some_and(|candidate| candidate.id == version.id)
 			{
 				machines.push(machine_id);
 			}
@@ -590,6 +619,36 @@ impl MigrationTestRequest {
 			);
 		}
 		Ok(out)
+	}
+
+	/// Drop the asks a plan was carrying, once it is no longer where its
+	/// environment is going: an ask is for a test before that upgrade, and a
+	/// later plan to the same version is a fresh decision.
+	pub async fn clear_for_plan(
+		db: &mut AsyncPgConnection,
+		plan: &crate::upgrade_plans::UpgradePlan,
+	) -> Result<()> {
+		use crate::schema::migration_test_requests::dsl;
+
+		let mut machines = Vec::new();
+		for application in Application::list_live_in_group(db, plan.group_id).await? {
+			let Some(machine_id) = application.machine_id else {
+				continue;
+			};
+			if crate::server_groups::ServerGroup::environment_of(db, &application).await?
+				== Some(plan.rank)
+			{
+				machines.push(machine_id);
+			}
+		}
+		diesel::delete(
+			dsl::migration_test_requests
+				.filter(dsl::version_id.eq(plan.target_version_id))
+				.filter(dsl::machine_id.eq_any(machines)),
+		)
+		.execute(db)
+		.await?;
+		Ok(())
 	}
 
 	/// The pending request for a pair, if any.

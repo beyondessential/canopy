@@ -854,3 +854,111 @@ async fn an_environment_that_has_reported_no_version_has_no_distance() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_ask_shows_on_the_row_until_a_verdict_answers_it() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+				('cccccccc-0000-0000-0000-0000000000f1', 2, 61, 0, 'x', 'published');
+			INSERT INTO server_groups (id, name) VALUES
+				('cccccccc-0000-0000-0000-000000000001', 'kamaka');
+			INSERT INTO machines (name, id, group_id) VALUES
+				('box', 'cccccccc-0000-0000-0000-0000000000a1', 'cccccccc-0000-0000-0000-000000000001');
+			INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'tamanu-central', 'production', 'cccccccc-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-0000000000a1');
+			INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'test', '{}'::jsonb, '2.60.0');
+			INSERT INTO devices (id, role) VALUES
+				('cccccccc-0000-0000-0000-0000000000d0', 'backup-restore');",
+		)
+		.await
+		.unwrap();
+
+		let refused = private
+			.post("/api/migration_tests/request")
+			.json(&json!({ "group_id": GROUP, "rank": "production" }))
+			.await;
+		refused.assert_status_bad_request();
+
+		conn.batch_execute(
+			"INSERT INTO upgrade_plans (group_id, rank, target_version_id) VALUES
+				('cccccccc-0000-0000-0000-000000000001', 'production',
+				 'cccccccc-0000-0000-0000-0000000000f1');",
+		)
+		.await
+		.unwrap();
+
+		let asked = private
+			.post("/api/migration_tests/request")
+			.json(&json!({ "group_id": GROUP, "rank": "production" }))
+			.await;
+		asked.assert_status_ok();
+		assert_eq!(asked.json::<Value>(), 1);
+
+		let row = |fleet: Vec<Value>| fleet.into_iter().find(|r| r["group_id"] == GROUP).unwrap();
+		let waiting = row(
+			private
+				.post("/api/upgrade_plans/fleet")
+				.json(&json!({}))
+				.await
+				.json(),
+		);
+		assert_eq!(waiting["test_request"]["requested_by"], "admin@localhost");
+
+		let machine: uuid::Uuid = "cccccccc-0000-0000-0000-0000000000a1".parse().unwrap();
+		database::migration_tests::MigrationTest::record(
+			&mut conn,
+			database::restore::NewBackupRestoreCheck {
+				replica_id: None,
+				replica_name: None,
+				consumer_device_id: "cccccccc-0000-0000-0000-0000000000d0".parse().unwrap(),
+				group_id: GROUP.parse().unwrap(),
+				machine_id: Some(machine),
+				r#type: commons_types::backup::BackupType::TamanuPostgres,
+				intent: commons_types::backup::RestoreIntent::from("upgrade"),
+				snapshot_id: Some("snap-1".into()),
+				outcome: commons_types::backup::RunOutcome::Success,
+				error: None,
+				replica_healthy: true,
+				postgres_version: Some("18".into()),
+				observed_at: jiff::Timestamp::now(),
+				s3_sent_raw_bytes: None,
+				s3_sent_payload_bytes: None,
+				s3_received_raw_bytes: None,
+				s3_received_payload_bytes: None,
+				health_details: None,
+				run_id: None,
+				redaction_outcome: None,
+				redaction_manifest_version: None,
+				redaction_columns_masked: None,
+				redaction_columns_skipped: None,
+				redaction_error: None,
+			},
+			database::migration_tests::NewMigrationTest {
+				application_id: machine,
+				target_version_id: "cccccccc-0000-0000-0000-0000000000f1".parse().unwrap(),
+				total_elapsed: database::pg_duration::PgDuration(jiff::SignedDuration::from_secs(
+					10,
+				)),
+				failed_migration: None,
+				error: None,
+				data_bytes_before: 1,
+				data_bytes_after: 1,
+				timings: vec![],
+			},
+		)
+		.await
+		.expect("record test");
+
+		let answered = row(
+			private
+				.post("/api/upgrade_plans/fleet")
+				.json(&json!({}))
+				.await
+				.json(),
+		);
+		assert!(answered["test_request"].is_null(), "got {answered}");
+	})
+	.await;
+}

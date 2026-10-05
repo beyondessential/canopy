@@ -161,15 +161,19 @@ impl UpgradePlan {
 			)));
 		}
 
-		diesel::update(dsl::upgrade_plans)
+		let superseded: Vec<Self> = diesel::update(dsl::upgrade_plans)
 			.filter(dsl::group_id.eq(group_id))
 			.filter(dsl::rank.eq(rank))
 			.filter(dsl::met_at.is_null())
 			.filter(dsl::superseded_at.is_null())
 			.filter(dsl::withdrawn_at.is_null())
 			.set(dsl::superseded_at.eq(diesel::dsl::now))
-			.execute(db)
+			.returning(Self::as_select())
+			.get_results(db)
 			.await?;
+		for plan in &superseded {
+			crate::migration_tests::MigrationTestRequest::clear_for_plan(db, plan).await?;
+		}
 
 		diesel::insert_into(dsl::upgrade_plans)
 			.values((
@@ -344,7 +348,7 @@ impl UpgradePlan {
 	) -> Result<Option<Self>> {
 		use crate::schema::upgrade_plans::dsl;
 
-		diesel::update(dsl::upgrade_plans)
+		let withdrawn = diesel::update(dsl::upgrade_plans)
 			.filter(dsl::id.eq(id))
 			.filter(dsl::met_at.is_null())
 			.filter(dsl::superseded_at.is_null())
@@ -357,7 +361,11 @@ impl UpgradePlan {
 			.get_result(db)
 			.await
 			.optional()
-			.map_err(AppError::from)
+			.map_err(AppError::from)?;
+		if let Some(plan) = &withdrawn {
+			crate::migration_tests::MigrationTestRequest::clear_for_plan(db, plan).await?;
+		}
+		Ok(withdrawn)
 	}
 }
 
@@ -439,18 +447,16 @@ pub fn planned_window(plan: &UpgradePlan) -> Option<(Timestamp, Timestamp)> {
 }
 
 /// When a plan's work starts: its window's opening where it recorded an hour,
-/// otherwise the start of its planned day, in its zone where it named one.
+/// otherwise the start of its planned day in UTC, a zone being recorded only
+/// with an hour.
 pub fn planned_start(plan: &UpgradePlan) -> Option<Timestamp> {
 	if let Some((start, _)) = planned_window(plan) {
 		return Some(start);
 	}
-	let date = plan.planned_for?;
-	let tz = plan
-		.planned_zone
-		.as_deref()
-		.and_then(|zone| TimeZone::get(zone).ok())
-		.unwrap_or(TimeZone::UTC);
-	date.to_zoned(tz).ok().map(|zoned| zoned.timestamp())
+	plan.planned_for?
+		.to_zoned(TimeZone::UTC)
+		.ok()
+		.map(|zoned| zoned.timestamp())
 }
 
 /// The instant a plan's own window closes.
@@ -524,6 +530,7 @@ pub async fn close_met_plans(db: &mut AsyncPgConnection) -> Result<usize> {
 			.set(dsl::met_at.eq(diesel::dsl::now))
 			.execute(db)
 			.await?;
+		crate::migration_tests::MigrationTestRequest::clear_for_plan(db, &plan).await?;
 		closed += 1;
 	}
 

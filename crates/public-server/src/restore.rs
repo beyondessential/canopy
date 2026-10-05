@@ -463,21 +463,15 @@ async fn worklist(
 			// whose candidate it carries alongside the machine whose snapshot it
 			// restores: the one place the two grains interleave.
 			// spec: RST#dispatching-a-migration-test
-			let mut candidate = None;
-			if migrates {
-				for application in &on_box {
-					if let Some(version) =
-						migration_tests::candidate_for(&mut conn, application).await?
-					{
-						candidate = Some((application, version));
-						break;
-					}
+			let candidate = if migrates {
+				match migration_tests::candidate_on_box(&mut conn, machine.id, &on_box).await? {
+					Some(found) => Some(found),
+					None => continue,
 				}
-				if candidate.is_none() {
-					continue;
-				}
-			}
-			let target = candidate.as_ref().map(|(application, version)| {
+			} else {
+				None
+			};
+			let target = candidate.as_ref().map(|(application, version, _)| {
 				(application.r#type.clone(), version.id, version.as_semver())
 			});
 
@@ -485,16 +479,9 @@ async fn worklist(
 			// latest snapshot, and is the only thing that dispatches a
 			// declaration migrating on request.
 			// spec: RST#dispatching-a-migration-test
-			let requested = match &target {
-				Some((_, version_id, _)) => migration_tests::MigrationTestRequest::pending(
-					&mut conn,
-					machine.id,
-					*version_id,
-				)
-				.await?
-				.is_some(),
-				None => false,
-			};
+			let requested = candidate
+				.as_ref()
+				.is_some_and(|(_, _, request)| request.is_some());
 			if target.is_some() && d.migrates_on_request && !requested {
 				continue;
 			}
@@ -528,7 +515,7 @@ async fn worklist(
 			if once && !requested {
 				let snapshot = latest.and_then(|r| r.snapshot_id.as_ref().map(|id| (id, r)));
 				let settled = match (&candidate, snapshot) {
-					(Some((application, version)), Some((snapshot, run))) => {
+					(Some((application, version, _)), Some((snapshot, run))) => {
 						migration_tests::scheduled_due(
 							&mut conn,
 							machine.id,

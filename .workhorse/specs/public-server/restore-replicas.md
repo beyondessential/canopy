@@ -287,7 +287,7 @@ A restore can fail for transient reasons and is worth retrying, but a migration 
 A migrating declaration says when it tests: on a schedule while its environment has a plan open, or only when an operator asks.
 A test costs a full restore and migrate per machine, and a group's data rarely changes in a way that alters the answer from one day's snapshot to the next, so a declaration does not test every snapshot.
 On the schedule, a pair falls due once a week, and once more in the day before its environment's plan starts, so the last answer before the upgrade is against the latest data.
-A plan's start is the opening of its window where it recorded an hour, and the start of its planned day otherwise.
+A plan's start is the opening of its window where it recorded an hour, and the start of its planned day in UTC otherwise.
 A snapshot that already has a verdict for the version is never due, so backups that stopped arriving do not spend a restore a week on an answer already held.
 The schedule is the default; asking is for trying a version out, and for a group too large to restore weekly.
 

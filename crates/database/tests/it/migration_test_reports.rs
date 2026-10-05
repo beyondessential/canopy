@@ -790,3 +790,395 @@ async fn a_verdict_with_no_declaration_still_surfaces() {
 	})
 	.await
 }
+
+/// A second application at `rank` on its own box in the group, as `(machine,
+/// application)`.
+async fn insert_server_at(
+	conn: &mut AsyncPgConnection,
+	group_id: Uuid,
+	rank: &str,
+	r#type: &str,
+	machine: Option<Uuid>,
+) -> (Uuid, Uuid) {
+	let machine = match machine {
+		Some(machine) => machine,
+		None => {
+			let row: RowId =
+				sql_query("INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id")
+					.bind::<sql_types::Uuid, _>(group_id)
+					.get_result(conn)
+					.await
+					.expect("machine");
+			row.id
+		}
+	};
+	let row: RowId = sql_query(
+		"INSERT INTO applications (type, host, rank, group_id, machine_id) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+	)
+	.bind::<sql_types::Text, _>(r#type)
+	.bind::<sql_types::Text, _>(format!("https://{}.kamaka.example", Uuid::new_v4()))
+	.bind::<sql_types::Text, _>(rank)
+	.bind::<sql_types::Uuid, _>(group_id)
+	.bind::<sql_types::Uuid, _>(machine)
+	.get_result(conn)
+	.await
+	.expect("server");
+	(machine, row.id)
+}
+
+async fn plan_upgrade_at(conn: &mut AsyncPgConnection, group: Uuid, rank: &str, target: &Version) {
+	sql_query(
+		"INSERT INTO upgrade_plans (group_id, rank, target_version_id, created_by)
+		 VALUES ($1, $2, $3, 'test@example.com')",
+	)
+	.bind::<sql_types::Uuid, _>(group)
+	.bind::<sql_types::Text, _>(rank)
+	.bind::<sql_types::Uuid, _>(target.id)
+	.execute(conn)
+	.await
+	.expect("plan upgrade");
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn record_test_at(
+	conn: &mut AsyncPgConnection,
+	consumer: Uuid,
+	group: Uuid,
+	machine: Uuid,
+	application: Uuid,
+	target: &Version,
+	snapshot: &str,
+	outcome: RunOutcome,
+	failed_migration: Option<&str>,
+	hours_ago: i64,
+) {
+	let mut check = report(consumer, group, machine, outcome);
+	check.snapshot_id = Some(snapshot.into());
+	check.observed_at = Timestamp::now() - SignedDuration::from_hours(hours_ago);
+	MigrationTest::record(
+		conn,
+		check,
+		NewMigrationTest {
+			application_id: application,
+			target_version_id: target.id,
+			total_elapsed: secs(10),
+			failed_migration: failed_migration.map(Into::into),
+			error: None,
+			data_bytes_before: 1,
+			data_bytes_after: 1,
+			timings: vec![],
+		},
+	)
+	.await
+	.expect("record test");
+}
+
+async fn pending(conn: &mut AsyncPgConnection, machine: Uuid, target: &Version) -> bool {
+	database::migration_tests::MigrationTestRequest::pending(conn, machine, target.id)
+		.await
+		.expect("pending")
+		.is_some()
+}
+
+async fn ask(conn: &mut AsyncPgConnection, group: Uuid, rank: ServerRank) -> usize {
+	database::migration_tests::MigrationTestRequest::request_environment(conn, group, rank, None)
+		.await
+		.expect("ask")
+		.len()
+}
+
+async fn on_request(conn: &mut AsyncPgConnection) {
+	sql_query("UPDATE restore_replicas SET migrates_on_request = TRUE")
+		.execute(conn)
+		.await
+		.expect("on request");
+}
+
+use commons_types::server::rank::ServerRank;
+
+async fn open_production(
+	conn: &mut AsyncPgConnection,
+	group: Uuid,
+) -> database::upgrade_plans::UpgradePlan {
+	database::upgrade_plans::UpgradePlan::open_for_environment(conn, group, ServerRank::Production)
+		.await
+		.expect("plan")
+		.expect("open")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plan_starts_at_its_window_or_at_midnight_utc() {
+	TestDb::run(|mut conn, _url| async move {
+		let group = insert_group(&mut conn).await;
+		insert_server(&mut conn, group).await;
+		let target = insert_version(&mut conn, 63).await;
+		plan_upgrade(&mut conn, group, &target).await;
+
+		sql_query("UPDATE upgrade_plans SET planned_for = '2026-11-02'")
+			.execute(&mut conn)
+			.await
+			.expect("date");
+		let plan = open_production(&mut conn, group).await;
+		assert_eq!(
+			database::upgrade_plans::planned_start(&plan),
+			Some("2026-11-02T00:00:00Z".parse().unwrap()),
+			"a date alone starts at midnight UTC"
+		);
+
+		sql_query(
+			"UPDATE upgrade_plans SET planned_time = '22:30', planned_zone = 'Pacific/Auckland'",
+		)
+		.execute(&mut conn)
+		.await
+		.expect("time");
+		let plan = open_production(&mut conn, group).await;
+		assert_eq!(
+			database::upgrade_plans::planned_start(&plan),
+			Some("2026-11-02T09:30:00Z".parse().unwrap()),
+			"a recorded hour is the window's opening, in its zone"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn on_the_schedule_overdue_runs_from_when_the_pair_fell_due() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn).await;
+		let (machine, server) = insert_server(&mut conn, group).await;
+		let target = insert_version(&mut conn, 63).await;
+		plan_upgrade(&mut conn, group, &target).await;
+		declare_migrate(&mut conn, consumer, group, 3600).await;
+		record_snapshot(&mut conn, consumer, group, machine, "snap-old", 30 * 86400).await;
+		record_test_at(
+			&mut conn,
+			consumer,
+			group,
+			machine,
+			server,
+			&target,
+			"snap-old",
+			RunOutcome::Success,
+			None,
+			3 * 24,
+		)
+		.await;
+		record_snapshot(&mut conn, consumer, group, machine, "snap-new", 7200).await;
+
+		assert_eq!(
+			database::restore::sweep_restore_checks(&mut conn)
+				.await
+				.expect("sweep"),
+			0,
+			"tested three days ago, so the newer snapshot is not due"
+		);
+
+		sql_query("UPDATE backup_restore_checks SET observed_at = NOW() - INTERVAL '8 days'")
+			.execute(&mut conn)
+			.await
+			.expect("age the test");
+		assert_eq!(
+			database::restore::sweep_restore_checks(&mut conn)
+				.await
+				.expect("sweep"),
+			1,
+			"due a day ago, past the hour's bound"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn on_request_is_overdue_only_for_an_ask() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn).await;
+		let (machine, _) = insert_server(&mut conn, group).await;
+		let target = insert_version(&mut conn, 63).await;
+		plan_upgrade(&mut conn, group, &target).await;
+		declare_migrate(&mut conn, consumer, group, 3600).await;
+		on_request(&mut conn).await;
+		record_snapshot(&mut conn, consumer, group, machine, "snap-old", 7200).await;
+
+		assert_eq!(
+			database::restore::sweep_restore_checks(&mut conn)
+				.await
+				.expect("sweep"),
+			0,
+			"nobody asked"
+		);
+
+		assert_eq!(ask(&mut conn, group, ServerRank::Production).await, 1);
+		sql_query("UPDATE migration_test_requests SET requested_at = NOW() - INTERVAL '2 hours'")
+			.execute(&mut conn)
+			.await
+			.expect("age the ask");
+		assert_eq!(
+			database::restore::sweep_restore_checks(&mut conn)
+				.await
+				.expect("sweep"),
+			1,
+			"an ask unanswered past the bound"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_ask_waits_for_a_test_begun_after_it() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn).await;
+		let (machine, server) = insert_server(&mut conn, group).await;
+		let target = insert_version(&mut conn, 63).await;
+		plan_upgrade(&mut conn, group, &target).await;
+		assert_eq!(ask(&mut conn, group, ServerRank::Production).await, 1);
+
+		record_test_at(
+			&mut conn,
+			consumer,
+			group,
+			machine,
+			server,
+			&target,
+			"snap-1",
+			RunOutcome::Success,
+			None,
+			1,
+		)
+		.await;
+		assert!(
+			pending(&mut conn, machine, &target).await,
+			"a test begun an hour before the ask does not answer it"
+		);
+
+		record_test_at(
+			&mut conn,
+			consumer,
+			group,
+			machine,
+			server,
+			&target,
+			"snap-1",
+			RunOutcome::Failure,
+			None,
+			0,
+		)
+		.await;
+		assert!(
+			pending(&mut conn, machine, &target).await,
+			"a restore that failed before migrating leaves it standing"
+		);
+
+		record_test_at(
+			&mut conn,
+			consumer,
+			group,
+			machine,
+			server,
+			&target,
+			"snap-1",
+			RunOutcome::Success,
+			None,
+			0,
+		)
+		.await;
+		assert!(!pending(&mut conn, machine, &target).await, "answered");
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_ask_covers_the_environment_s_tamanu_boxes() {
+	TestDb::run(|mut conn, _url| async move {
+		let group = insert_group(&mut conn).await;
+		assert_eq!(
+			ask(&mut conn, group, ServerRank::Production).await,
+			0,
+			"no plan, nothing to ask for"
+		);
+
+		let (central, _) = insert_server(&mut conn, group).await;
+		let (facility, _) =
+			insert_server_at(&mut conn, group, "production", "tamanu-facility", None).await;
+		let (other_product, _) =
+			insert_server_at(&mut conn, group, "production", "senaite", None).await;
+		let (clone, _) = insert_server_at(&mut conn, group, "clone", "tamanu-central", None).await;
+		let target = insert_version(&mut conn, 63).await;
+		plan_upgrade(&mut conn, group, &target).await;
+		plan_upgrade_at(&mut conn, group, "clone", &target).await;
+
+		assert_eq!(ask(&mut conn, group, ServerRank::Production).await, 2);
+		assert!(pending(&mut conn, central, &target).await);
+		assert!(pending(&mut conn, facility, &target).await);
+		assert!(!pending(&mut conn, other_product, &target).await);
+		assert!(
+			!pending(&mut conn, clone, &target).await,
+			"the clone is another environment"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn withdrawing_a_plan_drops_its_asks() {
+	TestDb::run(|mut conn, _url| async move {
+		let group = insert_group(&mut conn).await;
+		let (machine, _) = insert_server(&mut conn, group).await;
+		let (clone, _) = insert_server_at(&mut conn, group, "clone", "tamanu-central", None).await;
+		let target = insert_version(&mut conn, 63).await;
+		plan_upgrade(&mut conn, group, &target).await;
+		plan_upgrade_at(&mut conn, group, "clone", &target).await;
+		ask(&mut conn, group, ServerRank::Production).await;
+		ask(&mut conn, group, ServerRank::Clone).await;
+
+		let plan = database::upgrade_plans::UpgradePlan::open_for_environment(
+			&mut conn,
+			group,
+			ServerRank::Production,
+		)
+		.await
+		.expect("plan")
+		.expect("open");
+		database::upgrade_plans::UpgradePlan::withdraw(&mut conn, plan.id, "ops@example.com")
+			.await
+			.expect("withdraw");
+
+		assert!(!pending(&mut conn, machine, &target).await);
+		assert!(
+			pending(&mut conn, clone, &target).await,
+			"the clone's plan still stands"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_box_is_tested_for_the_workload_an_ask_names() {
+	TestDb::run(|mut conn, _url| async move {
+		let group = insert_group(&mut conn).await;
+		let (machine, _) = insert_server(&mut conn, group).await;
+		let (_, clone_app) =
+			insert_server_at(&mut conn, group, "clone", "tamanu-central", Some(machine)).await;
+		let production = insert_version(&mut conn, 63).await;
+		let clone = insert_version(&mut conn, 64).await;
+		plan_upgrade(&mut conn, group, &production).await;
+		plan_upgrade_at(&mut conn, group, "clone", &clone).await;
+		ask(&mut conn, group, ServerRank::Clone).await;
+
+		let applications =
+			database::applications::Application::list_live_in_group(&mut conn, group)
+				.await
+				.expect("applications");
+		let (application, version, request) =
+			database::migration_tests::candidate_on_box(&mut conn, machine, &applications)
+				.await
+				.expect("candidate")
+				.expect("one");
+		assert_eq!(application.id, clone_app);
+		assert_eq!(version.id, clone.id);
+		assert!(request.is_some());
+	})
+	.await
+}

@@ -1549,18 +1549,12 @@ async fn untried_candidate(
 	let Some(snapshot_id) = run.snapshot_id.as_ref() else {
 		return Ok(None);
 	};
-	let mut candidate = None;
-	for application in machine.applications(db).await? {
-		if let Some(version) = crate::migration_tests::candidate_for(db, &application).await? {
-			candidate = Some((application, version));
-			break;
-		}
-	}
-	let Some((application, version)) = candidate else {
+	let applications = machine.applications(db).await?;
+	let Some((application, version, request)) =
+		crate::migration_tests::candidate_on_box(db, machine.id, &applications).await?
+	else {
 		return Ok(None);
 	};
-	let request =
-		crate::migration_tests::MigrationTestRequest::pending(db, machine.id, version.id).await?;
 	// Measured from when the pair fell due on the schedule, or from the ask, for
 	// a declaration that tests only when asked.
 	let since = match (&request, declaration.migrates_on_request) {
@@ -1570,7 +1564,7 @@ async fn untried_candidate(
 			match crate::migration_tests::scheduled_due(
 				db,
 				machine.id,
-				&application,
+				application,
 				&version,
 				snapshot_id,
 				run.reported_at,
