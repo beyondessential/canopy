@@ -247,7 +247,7 @@ pub async fn fleet(
 						.iter()
 						.find(|application| application.id == server_id)
 						.map(database::applications::Application::display_name)
-						.unwrap_or_default()
+						.unwrap_or_else(|| "Unknown application".to_string())
 				});
 				tally = tested_tally(&per_server);
 				Some(roll_up(&per_server).to_owned())
