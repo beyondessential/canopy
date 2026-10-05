@@ -16,46 +16,50 @@ The unranked rule is also implemented four different ways:
 - Upgrade candidates and reporting schemas (`ServerGroup::environment_of`, `migration_tests.rs`, `upgrade_plans.rs`): the group's headline environment. GRP's "A group's headline rank" section still says this.
 - Maintenance windows (`environment_of_machines`): through the machine's derived rank.
 
-## Decision: every group member is in an environment
+## Decision: a box's applications share one rank
 
-Each group has, beside its ranked environments, an **other** environment: a catch-all Canopy derives, not a rank an operator can set.
-It reads as the group's name with "other" after it ("Fiji Prime other"), and as "other" on the group's own surface.
+An earlier draft of this card gave each group a derived **other** environment for unranked members and group-scoped checks.
+It is replaced by making unranked members in an environment impossible in the first place.
 
-An application's environment is, in order:
+- A box's applications share one rank, and a machine is in the environment its applications' rank names.
+  Ranking any application on a box ranks every application on it, so a box never carries two ranks.
+- An application arriving on a box that carries a rank takes it.
+  An application arriving on a box with nothing ranked is **pending**: it is in no environment until an operator ranks it, and ranking it ranks the box.
+- A rank can be changed but not cleared, so the only way a group loses its last ranked application is to lose its last application.
+- A cluster-hosted application has no box, so it ranks on its own; it is pending until ranked.
+- Group-scoped issues (backups) belong to the group's headline environment.
+  Whether a group check should file against a narrower environment is #H4.
 
-1. its own rank;
-2. failing that, its machine's derived rank (the highest rank among the applications on the box);
-3. otherwise the group's other environment.
+So every environment holds ranked members only, every group incident has an environment, and the group-itself incident target is gone.
 
-A machine's environment is steps 2 and 3.
-Group-scoped checks (backups) belong to the other environment too, so every group incident has an environment and the group-itself incident target is gone.
-An all-unranked group's one environment is its other environment, holding its upgrade plans, maintenance windows and incidents.
-The rule is stated once in GRP and referenced from INC, MNT, UPG, RST (candidate versions) and wherever else an application's environment is read.
+Live data on 2026-10-06 (read-only, through the private API): 105 live boxes, none carrying two ranks; 68 unranked applications (67 `postgres`, 1 `tamanu-central`), every one with a ranked sibling, so all of them inherit on migration and none go pending.
+The one all-unranked group (a demo) was ranked by hand the same day.
 
 Consequences:
 
-- A sidecar (Postgres and similar) on a ranked box joins that box's environment's incident, maintenance, and plan.
-- An unranked application on a box hosting nothing ranked is in the other environment for incidents, maintenance, plans and upgrade candidates, rather than inheriting the headline environment's candidate.
-- A rank change on one application re-evaluates the issues of every unranked application on its box, as well as its own and its machine's.
-- A group's maintenance window keeps covering everything in the group; the other environment's window is a separate, narrower target beside it, covering its machines and leaving the group's own checks watched.
-- The production-upgrade lease guard (INV "Planned upgrades") applies to production alone, so an all-unranked group's upgrade runs need no plan. One live group (a demo) is all-unranked.
-- Existing open incidents heal on deploy through the monitor's startup `reconcile_open_incidents`; the group-target incidents become other-environment incidents in the same migration.
-
-Whether group-scoped checks should instead file against the environment they concern is a separate card (H4).
+- A sidecar (Postgres and similar) on a ranked box is ranked with it, so it joins that box's environment's incidents, maintenance windows, plans and upgrade candidates through the ordinary rank rule.
+- A pending application's or box's issues belong to no target, as for a machine in no group, and the group presents them as awaiting a rank beside "awaiting check-in".
+- A group with nothing ranked yet (new, or holding only pending boxes) has no environments and no headline environment, so its group-scoped issues belong to no target until something in it is ranked.
+- A rank change on a box moves the issues of every application on it and of its machine together; ranking a pending box brings its issues into incident membership.
+- The production-upgrade lease guard (INV "Planned upgrades") is unchanged: a group with nothing ranked has no environment to lease.
+- Existing group-target incidents move to the headline environment in the migration; open ones heal on deploy through the monitor's startup `reconcile_open_incidents`.
 
 ## Tech notes
 
-- Storage: `incidents.rank` and `maintenance_windows.rank` use NULL for the group itself, while `upgrade_plans.rank` and `inventory_leases.rank` are NOT NULL with a rank CHECK.
-  The other environment needs one representation across all four. Maintenance still needs NULL for the group-wide window, so a stored `'other'` value (added to each CHECK) is the likely shape, with incidents' NULL migrated to it and `incidents_open_by_group` folded into `incidents_open_by_environment`.
-- Rust: an environment key type (`Ranked(ServerRank)` or `Other`) distinct from `ServerRank`, which stays an application's settable rank. `IncidentTarget` becomes `Environment(group, key)` and `Global`.
+- Migration: set each unranked application's rank to its box's, then hold the rule in the schema.
+  An exclusion constraint over live applications, `machine_id WITH =` and `COALESCE(rank, '') WITH <>` (needs `btree_gist`), refuses both two ranks on one box and an unranked application beside a ranked one.
+  Arrival code sets the sibling's rank on insert; the rank update writes every live application on the box in one statement.
+- No environment key type is needed: `ServerRank` names every environment. `IncidentTarget` becomes `Environment(group, rank)` and `Global`.
+- Storage: `incidents.rank` becomes required wherever `server_group_id` is set, and its NULL rows move to the group's headline rank; `incidents_open_by_group` goes. `maintenance_windows.rank` keeps NULL for a group-wide window. `upgrade_plans`, `inventory_leases` and `inventory_variables` are unaffected.
+- The rank-clearing path goes from the private API and the SPA (`update` on applications, the machine form).
 
 ## Steps
 
-- [x] Specs: GRP "Environments", "A group's headline rank" and "Naming" define the other environment and the derivation; INC "Targets", "Notification" and the rank-change re-evaluation; CHK marks, FLT group tree, MNT, UPG, RST and MCP wording that leaned on the old rules
-- [ ] Migration: `'other'` in the rank CHECKs of incidents, maintenance windows, upgrade plans and inventory leases; incidents' NULL rank moves to `'other'`; one open-incident index per environment
-- [ ] One derivation in the database crate (application or machine → environment key, batched), replacing `environment_of` and the unranked branches of `environments_inner`, `member_target`, `candidates_for` and `upgrade_plans.rs`
-- [ ] `ScopeTargets::load` loads machine ranks for application scopes; the group-scope arm of `incident_target` targets the other environment
-- [ ] Naming: `environment_name` and `format_group_label` read the other environment as "{group} other"; the SPA reads it as "other" on the group's surface (`GroupTree` heading, upgrades, incidents)
-- [ ] Inventory: `GroupInventorySection` places an unranked application at dev; it follows the derivation instead, offering the other environment
-- [ ] Re-evaluation: rank change and machine move enqueue co-hosted unranked applications
-- [ ] Tests: unranked sidecar on a production box joins the production incident (the Fiji Prime shape); bare box in a ranked group and a group check both open on the other environment; all-unranked group's plans, windows and incidents sit on its other environment; rank change on the host app moves the sidecar's issues
+- [ ] Specs: rework this branch's GRP, INC, CHK, FLT, MNT, UPG, RST and MCP edits from the other-environment model to the shared-rank model; FLT "Environments" and "Editing" (rank per box, not clearable), APP "Billing attribution" (a box's stage is its rank), K8S (a cluster application ranks on its own; namespace checks follow group checks), INC re-evaluation (box rank change, ranking a pending box)
+- [ ] Migration: inherit sibling ranks; exclusion constraint; group-target incidents move to the headline rank; `incidents.rank` required with a group
+- [ ] Arrival: an application reported onto a ranked box takes its rank (statuses and cluster relay paths)
+- [ ] Rank change: one write for the whole box, refusing a clear; re-evaluation enqueues every application on the box and its machine
+- [ ] One derivation: replace `environment_of`, the unranked branches of `environments_inner`, `member_target`, `candidates_for`, `upgrade_plans.rs` and `environment_of_machines` with the plain rank rule; pending members map to no target
+- [ ] `incident_target`: the group-scope arm targets the headline environment; `format_group_label` loses the group-itself case
+- [ ] SPA: rank edited once per box on the machine form, with no empty choice once ranked; pending boxes shown as awaiting a rank; `GroupInventorySection` stops placing unranked applications at dev
+- [ ] Tests: sidecar on a production box joins the production incident (the Fiji Prime shape); arrival on a ranked box inherits; arrival on a bare box is pending and raises no incident; ranking one application ranks its box; clearing a rank is refused; the exclusion constraint refuses a mixed box; a group check opens on the headline environment; a group with nothing ranked has no environments
