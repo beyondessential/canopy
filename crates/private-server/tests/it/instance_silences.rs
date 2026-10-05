@@ -433,7 +433,7 @@ async fn an_instance_silenced_on_the_group_is_listed_and_lifted() {
 }
 
 /// A machine check with instances is silenced one instance at a time on the
-/// machine, and presents so on the machine and on the application it carries.
+/// machine, and presents so on the machine.
 #[tokio::test(flavor = "multi_thread")]
 async fn an_instance_silenced_on_the_machine_is_listed_and_lifted() {
 	commons_tests::server::run_with_device_auth(
@@ -470,10 +470,21 @@ async fn an_instance_silenced_on_the_machine_is_listed_and_lifted() {
 			assert_eq!(keys(entry), ["/"]);
 			assert_eq!(instance(entry, "/")["silenced_on_target"], true);
 			assert_eq!(entry["passing_instances"], 1);
-			// The box's check presents on its application the same way.
-			let on_application = application_check(&private, id, "disk_free").await;
-			assert_eq!(on_application["subject"], "machine");
-			assert_eq!(instance(&on_application, "/")["silenced_on_target"], true);
+			// The box's check is the box's, so its application does not list it.
+			// spec: CHK#presentation
+			let application = post(
+				&private,
+				"/api/fleet/applications/get_detail",
+				json!({ "server_id": id }),
+			)
+			.await;
+			assert!(
+				application["checks"]["checks"]
+					.as_array()
+					.expect("checks list")
+					.iter()
+					.all(|c| c["check"] != "disk_free"),
+			);
 
 			let listed = post(
 				&private,

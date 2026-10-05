@@ -3,7 +3,6 @@ use std::fmt::Display;
 use serde::{Deserialize, Serialize};
 
 use crate::namespace::NamespaceRef;
-use crate::subject::CheckSubject;
 
 /// How a server should treat one of its healthchecks, distilled from
 /// canopy's operator-side configuration (the policy catalog and the
@@ -448,9 +447,8 @@ mod tests {
 	/// A person is logged in to a box, so the sessions read are the box's.
 	mod consolidated_operators {
 		use crate::status::{CheckResult, ConsolidatedCheck, ConsolidatedChecks, HealthState};
-		use crate::subject::CheckSubject;
 
-		fn check(subject: CheckSubject, name: &str, logins: &[&str]) -> ConsolidatedCheck {
+		pub(super) fn check(name: &str, logins: &[&str]) -> ConsolidatedCheck {
 			let users: Vec<serde_json::Value> = logins
 				.iter()
 				.map(|l| serde_json::json!({"tailscale": l}))
@@ -463,7 +461,8 @@ mod tests {
 				observed: Some(CheckResult::Passed),
 				effective: CheckResult::Passed,
 				silenced: false,
-				subject,
+				last_reported_at: None,
+				quiet: false,
 				detail: serde_json::json!({ "users": users }),
 				instances: Vec::new(),
 				passing_instances: 0,
@@ -481,7 +480,6 @@ mod tests {
 		#[test]
 		fn reads_the_machines_sessions() {
 			let c = checks(vec![check(
-				CheckSubject::Machine,
 				"external_users",
 				&["alice@example.com", "bob@example.com"],
 			)]);
@@ -490,46 +488,61 @@ mod tests {
 			assert_eq!(ops[0].login, "alice@example.com");
 		}
 
-		/// A workload reporting sessions about itself is not who is on the
-		/// box, so it does not answer the question.
-		#[test]
-		fn ignores_an_applications_own_sessions() {
-			let c = checks(vec![check(
-				CheckSubject::Application,
-				"external_users",
-				&["mallory@example.com"],
-			)]);
-			assert_eq!(c.operators(), Vec::new());
-		}
-
-		/// Where both are present the box's is the one that counts.
-		#[test]
-		fn prefers_the_machines_over_an_applications() {
-			let c = checks(vec![
-				check(
-					CheckSubject::Application,
-					"external_users",
-					&["mallory@example.com"],
-				),
-				check(
-					CheckSubject::Machine,
-					"external_users",
-					&["alice@example.com"],
-				),
-			]);
-			let ops = c.operators();
-			assert_eq!(ops.len(), 1);
-			assert_eq!(ops[0].login, "alice@example.com");
-		}
-
 		#[test]
 		fn nobody_when_the_check_is_absent() {
-			let c = checks(vec![check(
-				CheckSubject::Machine,
-				"load",
-				&["alice@example.com"],
-			)]);
+			let c = checks(vec![check("load", &["alice@example.com"])]);
 			assert_eq!(c.operators(), Vec::new());
+		}
+	}
+
+	/// Most urgent first, then by the name a check presents as: an application
+	/// type's `tamanu-central:caddy_certs` sorts after a bare `caddy_version`.
+	mod consolidated_order {
+		use super::consolidated_operators::check;
+		use crate::status::{CheckResult, ConsolidatedChecks};
+
+		fn named(
+			qualified: &str,
+			source: &str,
+			effective: CheckResult,
+		) -> crate::status::ConsolidatedCheck {
+			let mut c = check(qualified, &[]);
+			c.qualified_name = qualified.into();
+			c.source = source.into();
+			c.effective = effective;
+			c
+		}
+
+		#[test]
+		fn by_result_then_presented_name_then_source() {
+			let mut checks = vec![
+				named("tamanu-central:caddy_certs", "alertd", CheckResult::Passed),
+				named("reachability", "canopy", CheckResult::Skipped),
+				named("caddy_version", "alertd", CheckResult::Passed),
+				named(
+					"tamanu-central:sync_facility_stale",
+					"alertd",
+					CheckResult::Failed,
+				),
+				named("caddy_version", "aaa", CheckResult::Passed),
+				named("backup-staleness", "canopy", CheckResult::Warning),
+			];
+			ConsolidatedChecks::sort(&mut checks);
+			let order: Vec<(&str, &str)> = checks
+				.iter()
+				.map(|c| (c.qualified_name.as_str(), c.source.as_str()))
+				.collect();
+			assert_eq!(
+				order,
+				vec![
+					("tamanu-central:sync_facility_stale", "alertd"),
+					("backup-staleness", "canopy"),
+					("caddy_version", "aaa"),
+					("caddy_version", "alertd"),
+					("tamanu-central:caddy_certs", "alertd"),
+					("reachability", "canopy"),
+				]
+			);
 		}
 	}
 }
@@ -572,7 +585,7 @@ pub struct ConsolidatedCheck {
 	/// reporting one name are two checks, so the name alone does not address
 	/// a policy, a silence or a document — this does.
 	pub namespace: NamespaceRef,
-	/// How the check reads to an operator: `<type>.<check>` where it is one
+	/// How the check reads to an operator: `<type>:<check>` where it is one
 	/// application type's, the bare name otherwise.
 	pub qualified_name: String,
 	/// What the source reported, before policy. `None` if the stored state
@@ -585,14 +598,17 @@ pub struct ConsolidatedCheck {
 	pub effective: CheckResult,
 	/// Whether this check is silenced at server or group scope.
 	pub silenced: bool,
-	/// Which grain this check is filed against.
-	///
-	/// An application presents its machine's checks among its own, and this is
-	/// what marks them: a `machine` entry in an application's list is the
-	/// box's, one filing seen from each workload the box carries rather than a
-	/// copy per workload, and graded against the box rather than the workload.
-	// spec: CHK#a-machines-checks-present-on-its-applications
-	pub subject: CheckSubject,
+	/// When the check's source last reported it about this target. `None`
+	/// for a state Canopy presents without one having been filed, such as a
+	/// reachability that has never degraded.
+	pub last_reported_at: Option<jiff::Timestamp>,
+	/// Whether the check's source has gone quiet about this target: its last
+	/// report is older than the target's down threshold, on the same clock
+	/// reachability reads. The check is presented at its last result, muted.
+	/// Always false for Canopy's own determinations and manual conditions,
+	/// which no report carries.
+	// spec: CHK#presentation
+	pub quiet: bool,
 	/// The detail the source attached to the check (its extra fields), as an
 	/// object. Empty object when the check carried none. For a check with
 	/// instances, the fields its instances share; each instance's own are on
@@ -659,25 +675,36 @@ impl ConsolidatedInstance {
 pub struct ConsolidatedChecks {
 	/// The rolled-up health over these checks, by the one classifier.
 	pub health_state: HealthState,
-	/// Every source's checks, most urgent first.
+	/// Every source's checks, most urgent first, then by presented name.
+	// spec: CHK#presentation
 	pub checks: Vec<ConsolidatedCheck>,
 }
 
 impl ConsolidatedChecks {
-	/// The people logged in to this target right now, from its
-	/// `external_users` check.
-	///
-	/// People are logged in to a box, so this reads the check filed against
-	/// the machine and ignores one an application reported about itself. A
-	/// box carrying two workloads has one set of sessions rather than one per
-	/// workload, which is what the machine grain is for.
+	/// The people logged in to a machine right now, from its `external_users`
+	/// check. Read from a machine's own checks: people are logged in to a box,
+	/// and a box carrying two workloads has one set of sessions rather than one
+	/// per workload, which is what the machine grain is for.
 	// spec: FLT
 	pub fn operators(&self) -> Vec<OperatorPresence> {
 		self.checks
 			.iter()
-			.find(|c| c.check == "external_users" && c.subject == CheckSubject::Machine)
+			.find(|c| c.check == "external_users")
 			.map(|c| operators_from_sessions(c.detail.get("users")))
 			.unwrap_or_default()
+	}
+
+	/// Order checks for presentation: most urgent effective result first, then
+	/// by the name they present as, then by source.
+	// spec: CHK#presentation
+	pub fn sort(checks: &mut [ConsolidatedCheck]) {
+		checks.sort_by(|a, b| {
+			a.effective
+				.urgency_rank()
+				.cmp(&b.effective.urgency_rank())
+				.then_with(|| a.qualified_name.cmp(&b.qualified_name))
+				.then_with(|| a.source.cmp(&b.source))
+		});
 	}
 }
 

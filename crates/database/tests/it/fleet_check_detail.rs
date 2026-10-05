@@ -246,3 +246,52 @@ async fn same_check_name_from_two_sources_merges_newest_first() {
 	})
 	.await
 }
+
+/// The fleet reads only what the server's own check list presents: a resolved
+/// state and a check its source no longer reports have nothing to say.
+// spec: FIG#fleet-spread
+// spec: CHK#presentation
+#[tokio::test(flavor = "multi_thread")]
+async fn resolved_and_unreported_checks_are_absent() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server = insert_server(&mut conn, "http://fleet-current.invalid/").await;
+		for check in ["diskspace", "kopia_backup", "report_errors"] {
+			file_check(
+				&mut conn,
+				filing(
+					server,
+					"alertd",
+					check,
+					CheckResult::Warning,
+					database::check_detail! {"check": check, "result": "warning", "seen": true},
+				),
+			)
+			.await
+			.expect("file");
+		}
+		sql_query(
+			"UPDATE issues SET last_seen = last_seen - INTERVAL '1 hour' \
+			 WHERE application_id = $1 AND check_name = 'kopia_backup'",
+		)
+		.bind::<sql_types::Uuid, _>(server)
+		.execute(&mut conn)
+		.await
+		.expect("age");
+		sql_query(
+			"UPDATE issues SET resolved_at = NOW(), resolved_by = 'test' \
+			 WHERE application_id = $1 AND check_name = 'report_errors'",
+		)
+		.bind::<sql_types::Uuid, _>(server)
+		.execute(&mut conn)
+		.await
+		.expect("resolve");
+
+		let detail = check_detail_by_server(&mut conn, &[(server, None)])
+			.await
+			.expect("check detail");
+		let checks: std::collections::BTreeSet<&str> =
+			detail[&server].keys().map(String::as_str).collect();
+		assert_eq!(checks, ["diskspace"].into_iter().collect());
+	})
+	.await
+}

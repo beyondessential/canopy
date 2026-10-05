@@ -5771,7 +5771,7 @@ export interface components {
             /** @description `true` if no operator has reviewed this policy yet. */
             pending_review: boolean;
             /**
-             * @description How the entry reads to an operator: `<type>.<check>` where it is one
+             * @description How the entry reads to an operator: `<type>:<check>` where it is one
              *     application type's, the bare name otherwise.
              */
             qualified_name: string;
@@ -5840,11 +5840,6 @@ export interface components {
          * @enum {string}
          */
         CheckResult: "passed" | "warning" | "failed" | "broken" | "skipped";
-        /**
-         * @description The grain a check's result belongs to.
-         * @enum {string}
-         */
-        CheckSubject: "machine" | "application";
         /** @description Identifies a server group's schedule override for a backup type. */
         ClearScheduleArgs: {
             /**
@@ -6098,6 +6093,13 @@ export interface components {
              */
             instances?: components["schemas"]["ConsolidatedInstance"][];
             /**
+             * Format: date-time
+             * @description When the check's source last reported it about this target. `None`
+             *     for a state Canopy presents without one having been filed, such as a
+             *     reachability that has never degraded.
+             */
+            last_reported_at?: string | null;
+            /**
              * @description Which catalog entry this check resolves to. Two application types
              *     reporting one name are two checks, so the name alone does not address
              *     a policy, a silence or a document — this does.
@@ -6114,10 +6116,18 @@ export interface components {
              */
             passing_instances?: number;
             /**
-             * @description How the check reads to an operator: `<type>.<check>` where it is one
+             * @description How the check reads to an operator: `<type>:<check>` where it is one
              *     application type's, the bare name otherwise.
              */
             qualified_name: string;
+            /**
+             * @description Whether the check's source has gone quiet about this target: its last
+             *     report is older than the target's down threshold, on the same clock
+             *     reachability reads. The check is presented at its last result, muted.
+             *     Always false for Canopy's own determinations and manual conditions,
+             *     which no report carries.
+             */
+            quiet: boolean;
             /** @description Whether this check is silenced at server or group scope. */
             silenced: boolean;
             /**
@@ -6129,22 +6139,13 @@ export interface components {
             skipped_instances?: number;
             /** @description The source that reports this check. */
             source: string;
-            /**
-             * @description Which grain this check is filed against.
-             *
-             *     An application presents its machine's checks among its own, and this is
-             *     what marks them: a `machine` entry in an application's list is the
-             *     box's, one filing seen from each workload the box carries rather than a
-             *     copy per workload, and graded against the box rather than the workload.
-             */
-            subject: components["schemas"]["CheckSubject"];
         };
         /**
          * @description A server's checks across every source, graded and classified as one —
          *     current or as of a past time.
          */
         ConsolidatedChecks: {
-            /** @description Every source's checks, most urgent first. */
+            /** @description Every source's checks, most urgent first, then by presented name. */
             checks: components["schemas"]["ConsolidatedCheck"][];
             /** @description The rolled-up health over these checks, by the one classifier. */
             health_state: components["schemas"]["HealthState"];
@@ -7680,7 +7681,7 @@ export interface components {
             /** @description The result the source reported on the latest filing, before policy. */
             observed_result?: string | null;
             /**
-             * @description How the check behind this issue reads to an operator: `<type>.<check>`
+             * @description How the check behind this issue reads to an operator: `<type>:<check>`
              *     where it is one application type's, the bare name otherwise. Absent
              *     alongside `namespace`.
              */

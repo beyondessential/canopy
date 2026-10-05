@@ -18,17 +18,15 @@ A machine and a cluster are the two kinds of host an application has, so a check
 Group checks are conditions Canopy determines about a group's control plane, such as backup maintenance health (see [BKJ](../jobs/backup.md)).
 Canopy-wide checks are Canopy monitoring its own operation (see [SELF](../private-server/self-alerts.md)).
 
-### A machine's checks present on its applications
+### Each check is held at one grain
 
-Every machine check appears on every application on that machine, marked as belonging to the machine.
-An operator triaging an application sees every check bearing on it, its own and its host's, in one list.
+A check is held against the target it is about and no other.
+A reported check is held against the target its report put it under (see [STA](../public-server/statuses.md)).
+Each of Canopy's own checks is filed at one grain, the backup checks at the grains their spec files them at (see [BKJ](../jobs/backup.md)), and a state of one held against a target of any other grain is resolved and contributes to nothing.
 
-There is one filing per machine check however many applications present it, so a degraded machine check contributes one issue at machine scope rather than one per application (see [INC](incidents.md)).
-A silence on a machine check is machine-scoped and quiets it everywhere it appears, being one check seen from several places.
-
+There is one filing per machine check however many applications run on the machine, so a degraded machine check contributes one issue at machine scope rather than one per application (see [INC](incidents.md)).
+A machine's checks are read and silenced on the machine.
 A cluster's checks are read on the cluster itself, which is the grain they hold for: a cluster schedules the applications of many groups, where a machine carries the few colocated on one box (see [K8S](kubernetes.md)).
-
-Reachability is not presented this way, each grain having its own (see "Reachability").
 
 ## Sources
 
@@ -71,8 +69,9 @@ A check reported for an application belongs to the reporting application's type,
 A check reported for a machine belongs to the machine namespace, there being no application type to distinguish it by.
 A check from a source Canopy curates itself is flat: those names are Canopy's own and mean one thing fleet-wide.
 
-An entry whose namespace is an application type presents as `<type>.<check>`, and every other entry as its name alone.
+An entry whose namespace is an application type presents as `<type>:<check>`, and every other entry as its name alone.
 That is how an entry reads and not how it is held: the namespace is never concatenated into the name, and an address for a check carries the namespace as a part of its own.
+Wherever Canopy accepts a check's presented name as input, it also accepts `<type>.<check>`.
 
 A namespace is derived from where a check was filed rather than asserted alongside it, so a reporter needs no knowledge of the scheme and the two cannot fall out of step.
 
@@ -252,7 +251,7 @@ A cluster whose relay goes quiet behaves the same, so a relay that stops answeri
 An application whose machine is reporting normally also becomes unreachable if that machine stops mentioning it, which is the same rule reaching a case no derived one could express.
 
 An unreachable target's checks keep their last observed results.
-Presenting the target as unreachable is what says those results are no longer current.
+Presenting the target as unreachable, and each of its checks as last reported when its source went quiet (see "Presentation"), is what says those results are no longer current.
 
 Every target presents a reachability check as it currently stands, whether or not a reporter has ever gone quiet: one with nothing stale presents it as passed, and one whose reachability is silenced presents it as skipped.
 So the check — and the controls on it — are reachable before anything has gone wrong.
@@ -286,6 +285,7 @@ If a decommissioned check is reported again it is treated as newly registered �
 
 A target's health is derived from the checks currently contributing across all its sources: any effective failure makes it unhealthy; otherwise any effective warning or brokenness makes it degraded; otherwise it is healthy.
 Passed and skipped checks, and states that are resolved, snoozed, or decommissioned, do not count against a target.
+A state whose source has gone quiet counts as its last effective result until the source reports again: last known bad stays bad, and that the source is quiet is reachability's to say.
 
 A check is graded against the target it is filed on and no other.
 A machine's checks make the machine degraded or unhealthy and leave the applications on it graded on their own checks alone, so a box whose disk is filling reads as the box being in trouble rather than as every workload on it being in trouble.
@@ -293,8 +293,19 @@ A machine's checks make the machine degraded or unhealthy and leave the applicat
 ## Presentation
 
 Wherever a target's checks are presented — as they stand now, or as they stood at a past time — all of its sources' checks are shown together, each by its effective result and rolled into the target's health by the same rules used everywhere else.
-An application presents its machine's checks among its own, each marked as the machine's.
-They are shown there so a box's trouble is read where its workload is read, and they count towards the machine's health rather than the application's.
+A target presents its own checks and no other target's, so every check on its list bears on its health and its health is explained by its list.
+An application's machine is linked from the application, and the machine's checks are read there.
+
+A target presents each of its checks once, as it currently stands.
+A check is current when its source included it in that source's latest report about the target, or, for a check under one of the reserved sources, while its state is unresolved.
+A resolved state, a state held at a grain the check is not held at, and a check its source has stopped reporting are not presented.
+
+A check whose source has not reported about the target within the target's down threshold is presented at its last result, muted and marked with how long ago it was last reported, so a stale pass never reads as a live one.
+Canopy's own determinations and manual conditions are not reported, so they are never muted this way.
+Whether a source is quiet is judged on the same clock and threshold as reachability, so every source reachability names as stale has its checks muted.
+
+Checks are ordered by effective result, most urgent first, and alphabetically by presented name within each result.
+
 The detail a source attached to a check is presented with it, attributed to its source.
 A past state is reconstructed from the status history.
 No surface presents one source's checks in isolation, and none exposes a source's report other than as classified check state.

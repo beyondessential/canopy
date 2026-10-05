@@ -913,3 +913,94 @@ async fn two_applications_cannot_share_a_key() {
 	)
 	.await
 }
+
+/// Move every state on a target an hour back, as though the push that stamped
+/// them happened that long ago.
+async fn an_hour_passes(conn: &mut AsyncPgConnection, application: Uuid) {
+	sql_query(
+		"UPDATE issues SET last_seen = last_seen - INTERVAL '1 hour' WHERE application_id = $1",
+	)
+	.bind::<sql_types::Uuid, _>(application)
+	.execute(conn)
+	.await
+	.expect("age the target's states");
+}
+
+async fn listed(conn: &mut AsyncPgConnection, application: Uuid) -> Vec<String> {
+	database::issues::consolidated_checks_latest(conn, application, None)
+		.await
+		.expect("consolidated")
+		.checks
+		.into_iter()
+		.filter(|c| c.source == "alertd")
+		.map(|c| c.check)
+		.collect()
+}
+
+/// A push is the source's complete set, so a check a later push leaves out is
+/// no longer presented. A passing one drops at once; a failing one is closed
+/// by omission, stamped by that push, and drops at the push after.
+// spec: CHK#presentation
+// spec: CHK#reporting-semantics
+#[tokio::test(flavor = "multi_thread")]
+async fn a_check_left_out_of_a_later_push_drops_off_the_list() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let machine_id = machine_for(&mut conn, device_id).await;
+			let push = |health: serde_json::Value| {
+				serde_json::json!({
+					"source": "alertd",
+					"machine": { "health": [], "detail": {} },
+					"applications": {
+						"central": { "type": "tamanu-central", "health": health, "detail": {} },
+					},
+				})
+			};
+
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&push(serde_json::json!([
+					{ "check": "db", "result": "passed" },
+					{ "check": "kopia_backup", "result": "passed" },
+					{ "check": "sync", "result": "failed" },
+				])))
+				.await
+				.assert_status_ok();
+			let central = application_id(&mut conn, machine_id, "central").await;
+			let mut first = listed(&mut conn, central).await;
+			first.sort();
+			assert_eq!(first, vec!["db", "kopia_backup", "sync"]);
+
+			an_hour_passes(&mut conn, central).await;
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&push(
+					serde_json::json!([{ "check": "db", "result": "passed" }]),
+				))
+				.await
+				.assert_status_ok();
+			let mut second = listed(&mut conn, central).await;
+			second.sort();
+			assert_eq!(
+				second,
+				vec!["db", "sync"],
+				"the passing check left out drops at once; the failing one was just closed"
+			);
+
+			an_hour_passes(&mut conn, central).await;
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&push(
+					serde_json::json!([{ "check": "db", "result": "passed" }]),
+				))
+				.await
+				.assert_status_ok();
+			assert_eq!(listed(&mut conn, central).await, vec!["db"]);
+		},
+	)
+	.await
+}

@@ -499,3 +499,60 @@ async fn the_sources_listing_leaves_the_substrate_source_out() {
 	})
 	.await
 }
+
+/// The relay files each substrate check on its own cadence, so a check filed
+/// an hour before another is still current; and once the relay itself has
+/// gone quiet past the cluster's threshold, its checks are marked so.
+// spec: CHK#presentation
+#[tokio::test(flavor = "multi_thread")]
+async fn a_relays_checks_filed_at_different_times_all_present() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let cluster = registered_cluster(&mut conn, "ops-cadence").await;
+		file_substrate(
+			&mut conn,
+			cluster.id,
+			"node-pools",
+			only(CheckResult::Passed),
+		)
+		.await;
+		sql_query(
+			"UPDATE issues SET last_seen = NOW() - INTERVAL '1 hour' \
+			 WHERE kubernetes_cluster_id = $1 AND check_name = 'node-pools'",
+		)
+		.bind::<sql_types::Uuid, _>(cluster.id)
+		.execute(&mut conn)
+		.await
+		.expect("age one check");
+		file_substrate(
+			&mut conn,
+			cluster.id,
+			"pod-unschedulable",
+			only(CheckResult::Passed),
+		)
+		.await;
+
+		let checks = consolidated_checks_latest_for_cluster(&mut conn, cluster.id)
+			.await
+			.unwrap();
+		let names: Vec<&str> = checks.checks.iter().map(|c| c.check.as_str()).collect();
+		assert!(names.contains(&"node-pools"), "{names:?}");
+		assert!(names.contains(&"pod-unschedulable"), "{names:?}");
+		assert!(checks.checks.iter().all(|c| !c.quiet));
+
+		age_filings(&mut conn, cluster.id, 60).await;
+		let checks = consolidated_checks_latest_for_cluster(&mut conn, cluster.id)
+			.await
+			.unwrap();
+		let substrate: Vec<_> = checks
+			.checks
+			.iter()
+			.filter(|c| c.source == SUBSTRATE_SOURCE)
+			.collect();
+		assert_eq!(substrate.len(), 2);
+		assert!(
+			substrate.iter().all(|c| c.quiet),
+			"the relay has gone quiet"
+		);
+	})
+	.await
+}

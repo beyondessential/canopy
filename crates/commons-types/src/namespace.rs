@@ -169,13 +169,32 @@ impl Namespace {
 	/// How a check in this namespace reads to an operator.
 	///
 	/// The qualification is presentation, not storage: an application check
-	/// shows as `<type>.<check>` so two types reporting one name are
+	/// shows as `<type>:<check>` so two types reporting one name are
 	/// distinguishable on sight, while the name is stored on its own.
+	// spec: CHK#names
 	pub fn qualified_name(&self, check_name: &str) -> String {
 		match self {
 			Self::Flat | Self::Machine => check_name.to_owned(),
-			Self::Application(ty) => format!("{ty}.{check_name}"),
+			Self::Application(ty) => format!("{ty}:{check_name}"),
 		}
+	}
+
+	/// Read a presented name back into the application type and check name it
+	/// could stand for: `<type>:<check>`, or `<type>.<check>` as presented names
+	/// once were. `None` where the name has no prefix that could be a type.
+	///
+	/// Only a candidate. Check names are arbitrary reported strings, so one may
+	/// contain a separator without naming a type at all; a caller resolves the
+	/// candidate against the catalog and falls back to reading the name whole.
+	// spec: CHK#names
+	pub fn split_presented(presented: &str) -> Option<(ApplicationType, &str)> {
+		let (prefix, check) = presented
+			.split_once(':')
+			.or_else(|| presented.split_once('.'))?;
+		if check.is_empty() {
+			return None;
+		}
+		Some((prefix.parse().ok()?, check))
 	}
 
 	/// The application type this namespace qualifies by, if any.
@@ -353,7 +372,22 @@ mod tests {
 		);
 		assert_eq!(
 			Namespace::Application(ApplicationType::TamanuCentral).qualified_name("version"),
-			"tamanu-central.version"
+			"tamanu-central:version"
 		);
+	}
+
+	#[test]
+	fn a_presented_name_reads_back_with_either_separator() {
+		assert_eq!(
+			Namespace::split_presented("tamanu-central:version"),
+			Some((ApplicationType::TamanuCentral, "version"))
+		);
+		assert_eq!(
+			Namespace::split_presented("tamanu-central.version"),
+			Some((ApplicationType::TamanuCentral, "version"))
+		);
+		assert_eq!(Namespace::split_presented("disk_free"), None);
+		assert_eq!(Namespace::split_presented("tamanu-central:"), None);
+		assert_eq!(Namespace::split_presented("Not A Type:x"), None);
 	}
 }

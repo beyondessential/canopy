@@ -105,8 +105,9 @@ export function HealthIndicator({
 	);
 }
 
-/** Consolidated per-check table: every source's current checks, graded
- * and sorted most-urgent-first by the backend. Capped at 5 visible rows
+/** Consolidated per-check table: the target's own current checks across
+ * every source, graded and ordered by the backend (most urgent first, then
+ * by presented name). Capped at 5 visible rows
  * with an "expand all" toggle so a server reporting 30 checks doesn't
  * push the rest of the page off-screen. Render nothing when there are no
  * checks to show.
@@ -139,30 +140,23 @@ export function ChecksTable(props: {
 	checks: ConsolidatedChecks;
 	operators: OperatorPresence[];
 	target: CheckTarget;
-	/** The box under an application, whose checks the list also carries. Leave
-	 * unset on a machine's own table, where the target is already the box. */
-	machineId?: string | null;
 	groupId: string | null;
 	refreshTick: number;
 	onSilenced: () => void;
 }) {
-	// An application's list carries its box's checks too, so both grains'
-	// silences are read: a machine check is silenced on the machine wherever it
-	// is presented from.
-	// spec: CHK#a-machines-checks-present-on-its-applications
-	const machineId =
-		props.target.kind === "machine" ? props.target.id : (props.machineId ?? "");
 	const applicationApi = useApi(
 		"silenced_refs",
 		"list_for_server",
 		{ server_id: props.target.kind === "application" ? props.target.id : "" },
 		[props.target.kind, props.target.id, props.refreshTick],
+		{ skip: props.target.kind !== "application" },
 	);
 	const machineApi = useApi(
 		"silenced_refs",
 		"list_for_machine",
-		{ machine_id: machineId },
-		[machineId, props.refreshTick],
+		{ machine_id: props.target.kind === "machine" ? props.target.id : "" },
+		[props.target.kind, props.target.id, props.refreshTick],
+		{ skip: props.target.kind !== "machine" },
 	);
 	// A cluster belongs to no group, so its own silences are all it has.
 	// spec: CHK#silences-follow-the-event
@@ -191,17 +185,11 @@ export function ChecksTable(props: {
 				{...props}
 				groupId={props.groupId}
 				ownSilences={ownSilences}
-				machineSilences={machineSilences}
 			/>
 		);
 	}
 	return (
-		<ChecksTableBody
-			{...props}
-			ownSilences={ownSilences}
-			machineSilences={machineSilences}
-			groupSilences={[]}
-		/>
+		<ChecksTableBody {...props} ownSilences={ownSilences} groupSilences={[]} />
 	);
 }
 
@@ -209,12 +197,10 @@ function ChecksTableGrouped(props: {
 	checks: ConsolidatedChecks;
 	operators: OperatorPresence[];
 	target: CheckTarget;
-	machineId?: string | null;
 	groupId: string;
 	refreshTick: number;
 	onSilenced: () => void;
 	ownSilences: Silence[];
-	machineSilences: Silence[];
 }) {
 	const groupApi = useApi(
 		"silenced_refs",
@@ -230,21 +216,17 @@ function ChecksTableBody({
 	checks,
 	operators,
 	target,
-	machineId,
 	groupId,
 	onSilenced,
 	ownSilences,
-	machineSilences,
 	groupSilences,
 }: {
 	checks: ConsolidatedChecks;
 	operators: OperatorPresence[];
 	target: CheckTarget;
-	machineId?: string | null;
 	groupId: string | null;
 	onSilenced: () => void;
 	ownSilences: Silence[];
-	machineSilences: Silence[];
 	groupSilences: ServerGroupSilencedRef[];
 }) {
 	const entries = checks.checks;
@@ -260,25 +242,12 @@ function ChecksTableBody({
 			</Typography>
 			<Stack spacing={1} sx={{ mt: 0.5 }}>
 				{visible.map((entry) => {
-					// A machine check in an application's list is the box's,
-					// one filing seen from each workload on it. Its silence
-					// control acts on the machine, so the row's target is the
-					// box rather than the table's.
-					// spec: CHK#a-machines-checks-present-on-its-applications
-					const fromMachine =
-						target.kind === "application" &&
-						entry.subject === "machine" &&
-						!!machineId;
-					const rowTarget: CheckTarget = fromMachine
-						? { kind: "machine", id: machineId as string }
-						: target;
-					const rowOwnSilences = fromMachine ? machineSilences : ownSilences;
 					// Match the silence refs to this entry's own source — a
 					// silence on another source's same-named check is a
 					// different check, and canopy's own checks are silenced
 					// at a bare ref rather than under `health/`.
 					const refName = silenceRef(entry.source, entry.check);
-					const rowSilences = rowOwnSilences.filter(
+					const rowSilences = ownSilences.filter(
 						(s) => s.source === entry.source && s.ref === refName,
 					);
 					// A group covers several application types, so its silences
@@ -297,11 +266,10 @@ function ChecksTableBody({
 						rowGroupSilences.find((s) => !s.instance) ?? null;
 					return (
 						<CheckRow
-							key={`${entry.subject}:${entry.source}:${entry.check}`}
+							key={`${entry.source}:${entry.qualified_name}`}
 							entry={entry}
 							operators={operators}
-							target={rowTarget}
-							fromMachine={fromMachine}
+							target={target}
 							groupId={groupId}
 							onSilenced={onSilenced}
 							ownSilence={ownSilence}
@@ -340,7 +308,6 @@ function CheckRow({
 	entry,
 	operators,
 	target,
-	fromMachine,
 	groupId,
 	onSilenced,
 	ownSilence,
@@ -351,8 +318,6 @@ function CheckRow({
 	entry: ConsolidatedCheck;
 	operators: OperatorPresence[];
 	target: CheckTarget;
-	/** True when this row is the box's check shown on an application. */
-	fromMachine: boolean;
 	groupId: string | null;
 	onSilenced: () => void;
 	ownSilence: Silence | null;
@@ -378,27 +343,35 @@ function CheckRow({
 			? allExtras
 			: allExtras.filter(([k]) => k !== "users" && k !== "count");
 	const effective = entry.effective as CheckResult;
-	const quiet =
+	const calm =
 		entry.silenced || effective === "passed" || effective === "skipped";
+	// A source gone quiet leaves its checks at their last result. Muted and
+	// aged, so a stale pass never reads as a live one.
+	// spec: CHK#presentation
+	const muted = entry.quiet ? { opacity: 0.5 } : undefined;
 	return (
 		<Stack
 			direction="row"
 			spacing={1.5}
+			data-testid="check-row"
+			data-quiet={entry.quiet ? "true" : undefined}
 			sx={{
 				p: 1,
 				border: 1,
 				borderColor: "divider",
 				borderRadius: 1,
 				alignItems: "flex-start",
-				bgcolor: quiet ? undefined : "action.hover",
+				bgcolor: calm ? undefined : "action.hover",
 			}}
 		>
-			<CheckResultIcon
-				observed={entry.observed as CheckResult | null}
-				effective={effective}
-				silenced={entry.silenced}
-			/>
-			<Box sx={{ flex: 1, minWidth: 0 }}>
+			<Box sx={{ display: "flex", ...muted }}>
+				<CheckResultIcon
+					observed={entry.observed as CheckResult | null}
+					effective={effective}
+					silenced={entry.silenced}
+				/>
+			</Box>
+			<Box sx={{ flex: 1, minWidth: 0, ...muted }}>
 				<Stack
 					direction="row"
 					spacing={1}
@@ -416,12 +389,16 @@ function CheckRow({
 					<Typography variant="caption" color="text.secondary">
 						{entry.source}
 					</Typography>
+					{entry.quiet && entry.last_reported_at && (
+						<Typography variant="caption" color="text.secondary">
+							last reported <TimeAgo timestamp={entry.last_reported_at} />
+						</Typography>
+					)}
 					<CheckDocButton
 						source={entry.source}
 						namespace={entry.namespace}
 						check={entry.check}
 					/>
-					{fromMachine && <MachineCheckChip />}
 					<SilencedChip
 						targetKind={target.kind}
 						ownSilence={ownSilence}
@@ -666,24 +643,6 @@ function CheckResultIcon({
  * is already in the silence list at one or both scopes. Shown for all
  * viewers (silences are listable without admin); the row's silence
  * button still gates the manage actions on admin. */
-
-/** Marks a row as the box's rather than the workload's. An application's list
- * carries both, and which grain a check speaks for decides where it is
- * silenced and what a failure implicates.
- * spec: CHK#a-machines-checks-present-on-its-applications */
-function MachineCheckChip() {
-	return (
-		<Tooltip title="Filed against the machine this runs on, and shared with every application on it.">
-			<Chip
-				size="small"
-				variant="outlined"
-				label="machine"
-				data-testid="check-machine-subject"
-			/>
-		</Tooltip>
-	);
-}
-
 function SilencedChip({
 	targetKind,
 	ownSilence,

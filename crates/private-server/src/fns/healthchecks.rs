@@ -53,7 +53,7 @@ pub struct CheckPolicyData {
 	/// curated source's unqualified one. Send it back verbatim to name this
 	/// entry in an edit.
 	pub namespace: NamespaceRef,
-	/// How the entry reads to an operator: `<type>.<check>` where it is one
+	/// How the entry reads to an operator: `<type>:<check>` where it is one
 	/// application type's, the bare name otherwise.
 	pub qualified_name: String,
 	/// The maximum effective result for this check when no conditional

@@ -312,9 +312,9 @@ pub struct IssueListFilters {
 	pub results: Option<Vec<CheckResult>>,
 	/// Restrict to issues whose target belongs to this group.
 	pub server_group_id: Option<Uuid>,
-	/// Restrict to issues raised against this application, together with those
-	/// of the machine it runs on: a box's disk filling is the application's
-	/// problem too, and is presented against it (see CHK, "Health rollup").
+	/// Restrict to issues raised against this application, its own only: what
+	/// the application presents (see CHK, "Presentation"). The machine it runs
+	/// on is asked about through `machine_id`.
 	pub application_id: Option<Uuid>,
 	/// Restrict to issues raised against this machine, its own only.
 	pub machine_id: Option<Uuid>,
@@ -930,10 +930,9 @@ pub async fn raise_machine_event_with_state(
 /// `(kubernetes_cluster_id, source, ref)` under the cluster partial unique
 /// index.
 ///
-/// A cluster's substrate checks are read on the cluster itself, not presented on
-/// the applications scheduled across it the way a machine's checks are (spec
-/// CHK, "A machine's checks present on its applications"). A cluster belongs to
-/// no group, so `Scope::Cluster` resolves to no incident target: the state is
+/// A cluster's substrate checks are read on the cluster itself, as a machine's
+/// are read on the machine (spec CHK, "Each check is held at one grain"). A
+/// cluster belongs to no group, so `Scope::Cluster` resolves to no incident target: the state is
 /// recorded and rolls into the cluster's own health, but opens no incident.
 ///
 /// Like [`raise_machine_event_with_state`], this takes the `source` rather than
@@ -2118,15 +2117,6 @@ pub async fn regrade_instanced_states(
 	Ok(states)
 }
 
-/// Whether a `(source, check)` pair is Canopy's own reachability determination.
-///
-/// Reachability is the one check every grain determines for itself, so it is
-/// the one check an application does not take from its machine.
-// spec: CHK#reachability
-fn is_reachability(source: &str, check: &str) -> bool {
-	source == crate::statuses::CANOPY_SOURCE && check == crate::statuses::REACHABILITY_REF
-}
-
 /// One rollup input row: `(application_id, source, check_name, effective_result)`.
 type HealthCheckRow = (Option<Uuid>, String, Option<String>, Option<String>);
 
@@ -2265,9 +2255,8 @@ pub async fn health_from_check_state(
 
 	// A check is graded against the target it is filed on and no other, so a
 	// box's own checks make the box degraded and leave the workloads on it
-	// graded on theirs. The machine's checks are presented alongside an
-	// application's (see `consolidated_checks_for`), marked as the machine's,
-	// and counted towards the machine's health rather than this one's.
+	// graded on theirs. The machine's checks are read on the machine and
+	// counted towards the machine's health rather than this one's.
 	// spec: CHK#health-rollup
 
 	Ok(health)
@@ -2456,8 +2445,8 @@ pub async fn cluster_health_from_check_state(
 		.collect())
 }
 
-/// One fleet check-detail row: `(application_id, source, check_name,
-/// observed_result, effective_result, detail)`.
+/// One fleet check-detail row: `(target_id, source, check_name,
+/// observed_result, effective_result, detail, last_seen, resolved_at)`.
 type FleetCheckRow = (
 	Option<Uuid>,
 	String,
@@ -2465,6 +2454,8 @@ type FleetCheckRow = (
 	Option<String>,
 	Option<String>,
 	Option<serde_json::Value>,
+	jiff_diesel::Timestamp,
+	Option<jiff_diesel::Timestamp>,
 );
 
 /// Every named check's current state across the given applications, as one JSON
@@ -2531,6 +2522,8 @@ async fn check_detail_at_grain(
 					issues::observed_result,
 					issues::effective_result,
 					issues::detail,
+					issues::last_seen,
+					issues::resolved_at,
 				))
 				.filter(issues::application_id.eq_any(&target_ids))
 				.filter(issues::check_name.is_not_null())
@@ -2548,6 +2541,8 @@ async fn check_detail_at_grain(
 					issues::observed_result,
 					issues::effective_result,
 					issues::detail,
+					issues::last_seen,
+					issues::resolved_at,
 				))
 				.filter(issues::machine_id.eq_any(&target_ids))
 				.filter(issues::check_name.is_not_null())
@@ -2633,19 +2628,59 @@ async fn check_detail_at_grain(
 		}
 	}
 
+	// What presents here is what the target's own check list presents, so the
+	// same currency rule applies: a resolved state, or one older than its
+	// source's latest report about the target, has nothing to say. See
+	// `checks_at_scope`.
+	// spec: CHK#presentation
+	let rows: Vec<FleetCheckRow> = rows
+		.into_iter()
+		.filter(|(target_id, source, check, ..)| match (target_id, check) {
+			(Some(target_id), Some(check)) => crate::check_policies::CheckPolicy::live_for(
+				&cataloged,
+				source,
+				check,
+				types.get(target_id),
+			),
+			_ => false,
+		})
+		.collect();
+	let mut latest: HashMap<(Uuid, &str), Timestamp> = HashMap::new();
+	for (target_id, source, _, _, _, _, last_seen, _) in &rows {
+		if commons_types::namespace::is_reserved(source) {
+			continue;
+		}
+		let Some(target_id) = target_id else { continue };
+		let seen: Timestamp = (*last_seen).into();
+		latest
+			.entry((*target_id, source.as_str()))
+			.and_modify(|t| *t = (*t).max(seen))
+			.or_insert(seen);
+	}
+	let current: Vec<bool> = rows
+		.iter()
+		.map(|(target_id, source, _, _, _, _, last_seen, resolved_at)| {
+			resolved_at.is_none()
+				&& target_id.is_some_and(|target_id| {
+					latest
+						.get(&(target_id, source.as_str()))
+						.is_none_or(|newest| {
+							Timestamp::from(*last_seen) >= *newest - REPORT_STAMP_SLACK
+						})
+				})
+		})
+		.collect();
+
 	let mut by_target: HashMap<Uuid, serde_json::Map<String, serde_json::Value>> = HashMap::new();
-	for (target_id, source, check_name, observed, effective, detail) in rows {
+	for ((target_id, source, check_name, observed, effective, detail, _, _), current) in
+		rows.into_iter().zip(current)
+	{
+		if !current {
+			continue;
+		}
 		let (Some(target_id), Some(check)) = (target_id, check_name) else {
 			continue;
 		};
-		if !crate::check_policies::CheckPolicy::live_for(
-			&cataloged,
-			&source,
-			&check,
-			types.get(&target_id),
-		) {
-			continue;
-		}
 		let Some(stored) = effective
 			.as_deref()
 			.and_then(|e| e.parse::<CheckResult>().ok())
@@ -2689,8 +2724,20 @@ async fn check_detail_at_grain(
 	Ok(by_target)
 }
 
+/// How far behind its source's newest stamp a state may be and still count as
+/// part of that source's latest report about a target.
+///
+/// A push stamps every check it carries with the push's own time, so on that
+/// path the newest stamp is the report exactly. A filing path that stamps
+/// states one at a time stamps one report a moment apart, and this keeps those
+/// together. A state its source has stopped reporting falls behind by a whole
+/// reporting interval at least, and one left at an abandoned grain by far more.
+// spec: CHK#presentation
+const REPORT_STAMP_SLACK: SignedDuration = SignedDuration::from_secs(10);
+
 /// One consolidated check row:
-/// `(source, check_name, observed_result, effective_result, detail)`.
+/// `(source, check_name, observed_result, effective_result, detail, instances,
+/// last_seen, resolved_at)`.
 type ConsolidatedRow = (
 	String,
 	Option<String>,
@@ -2698,16 +2745,13 @@ type ConsolidatedRow = (
 	Option<String>,
 	Option<serde_json::Value>,
 	Option<serde_json::Value>,
+	jiff_diesel::Timestamp,
+	Option<jiff_diesel::Timestamp>,
 );
 
-/// A server's current checks across every source, graded, for presentation.
-/// The health rollup uses [`health_from_check_state`] (so it matches the
-/// headline exactly); the check list is every non-decommissioned reported
-/// `(source, check)` with its observed/effective results, detail, and
-/// whether it's silenced — most urgent first. This is the live side of the
-/// consolidated checks view; the point-in-time side reconstructs the same
-/// shape from status history.
-/// One application's live consolidated checks.
+/// One application's live consolidated checks: its own, current, graded, and
+/// ordered for presentation. The health rollup is [`health_from_check_state`],
+/// so the headline and the list are answered by the same rules.
 pub async fn consolidated_checks_latest(
 	conn: &mut AsyncPgConnection,
 	application_id: Uuid,
@@ -2746,10 +2790,14 @@ pub async fn consolidated_checks_latest_for_cluster(
 /// The live consolidated checks filed against one target, at whichever grain
 /// it is.
 ///
-/// The two grains differ only in which column identifies the target and which
+/// The grains differ only in which column identifies the target and which
 /// rollup answers for it; everything after that — the catalog gate, the
-/// silence pass, the reachability fill-in, the ordering — is the same work.
-/// Keeping it one function is what stops the pair drifting apart.
+/// currency and silence passes, the reachability fill-in, the ordering — is
+/// the same work. Keeping it one function is what stops them drifting apart.
+///
+/// A target presents its own checks and no other's, so every check on its list
+/// bears on its health and its health is explained by its list.
+// spec: CHK#presentation
 async fn consolidated_checks_for(
 	conn: &mut AsyncPgConnection,
 	target: Scope,
@@ -2757,18 +2805,12 @@ async fn consolidated_checks_for(
 ) -> Result<commons_types::status::ConsolidatedChecks> {
 	use commons_types::status::ConsolidatedChecks;
 
-	let target_id = match target {
-		Scope::Application(id) | Scope::Machine(id) | Scope::Cluster(id) => id,
-		// A group or canopy-wide rollup is a different question, answered by
-		// its own reader; nothing calls this with one.
-		Scope::Group(_) | Scope::Global => {
-			return Err(AppError::BadRequest(
-				"consolidated checks are read for an application, a machine or a cluster".into(),
-			));
-		}
-	};
-
 	let health_state = match target {
+		Scope::Application(id) => health_from_check_state(conn, &[(id, group_id)])
+			.await?
+			.get(&id)
+			.copied()
+			.unwrap_or_default(),
 		Scope::Machine(id) => machine_health_from_check_state(conn, &[(id, group_id)])
 			.await?
 			.get(&id)
@@ -2779,56 +2821,17 @@ async fn consolidated_checks_for(
 			.get(&id)
 			.copied()
 			.unwrap_or_default(),
-		_ => health_from_check_state(conn, &[(target_id, group_id)])
-			.await?
-			.get(&target_id)
-			.copied()
-			.unwrap_or_default(),
+		// A group or canopy-wide rollup is a different question, answered by
+		// its own reader; nothing calls this with one.
+		Scope::Group(_) | Scope::Global => {
+			return Err(AppError::BadRequest(
+				"consolidated checks are read for an application, a machine or a cluster".into(),
+			));
+		}
 	};
 
-	// A check-state only presents if a live catalog policy backs it: this
-	// excludes decommissioned checks and orphaned check-states (no catalog
-	// row at all — invisible in settings and unmanageable, so never a
-	// phantom failure here). See `live_cataloged_pairs`. Read once and shared
-	// across both grains, the catalog being fleet-wide.
-	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
-
-	let mut checks = checks_at_scope(conn, target, group_id, &cataloged, true).await?;
-
-	// An operator triaging an application sees every check bearing on it, its
-	// own and its host's, in one list. The box's checks are read from where
-	// they were filed rather than copied per workload, so two applications on
-	// one box present one filing twice rather than two filings.
-	//
-	// Reachability is left behind: each grain determines its own, and the box
-	// going quiet has already made every application on it unreachable in its
-	// own right.
-	// spec: CHK#a-machines-checks-present-on-its-applications
-	// An application on a cluster has no machine, so there is no host check to
-	// present alongside its own; its cluster's checks are read on the cluster.
-	if let Scope::Application(id) = target
-		&& let Some(machine_id) = Application::get_by_id(conn, id).await?.machine_id
-	{
-		let machine = crate::machines::Machine::get_by_id(conn, machine_id).await?;
-		checks.extend(
-			checks_at_scope(
-				conn,
-				Scope::Machine(machine_id),
-				machine.group_id,
-				&cataloged,
-				false,
-			)
-			.await?,
-		);
-	}
-
-	checks.sort_by(|a, b| {
-		a.effective
-			.urgency_rank()
-			.cmp(&b.effective.urgency_rank())
-			.then_with(|| a.source.cmp(&b.source))
-			.then_with(|| a.check.cmp(&b.check))
-	});
+	let mut checks = checks_at_scope(conn, target, group_id).await?;
+	ConsolidatedChecks::sort(&mut checks);
 
 	Ok(ConsolidatedChecks {
 		health_state,
@@ -2836,32 +2839,58 @@ async fn consolidated_checks_for(
 	})
 }
 
-/// The checks filed against one target, graded and ready to present, without
-/// the rollup: what a target contributes to a consolidated view, whether it is
-/// the target being read or the machine under one.
+/// The current checks filed against one target, graded and ready to present.
 ///
-/// `include_reachability` fills in a passing reachability where the target has
-/// no state row for it. That belongs to the grain being read and not to a
-/// machine seen from an application on it.
+/// A state presents when it is current: for a source that pushes its complete
+/// set of checks, the check was in that source's latest report about the
+/// target, which is when the push stamped it; for a reserved source, which
+/// files each check on its own, the state is unresolved. Resolved states,
+/// states a source has stopped reporting, and states left behind at a grain
+/// their check is no longer filed at do not present.
+///
+/// A source whose latest report is older than the target's down threshold is
+/// quiet, judged on the clock reachability reads, and its checks are marked
+/// so they present at their last result, muted.
+// spec: CHK#presentation
 async fn checks_at_scope(
 	conn: &mut AsyncPgConnection,
 	target: Scope,
 	group_id: Option<Uuid>,
-	cataloged: &std::collections::HashSet<(String, Namespace, String)>,
-	include_reachability: bool,
 ) -> Result<Vec<commons_types::status::ConsolidatedCheck>> {
 	use crate::schema::{issues, scoped_check_policies};
+	use commons_types::namespace::{MANUAL_SOURCE, is_reserved};
 	use commons_types::status::ConsolidatedCheck;
-	use commons_types::subject::CheckSubject;
-	use std::collections::HashSet;
+	use std::collections::{HashMap, HashSet};
 
 	let (target_application, target_machine, target_group, target_cluster) = target.to_columns();
-	// A cluster's checks are about neither a box nor one application; the
-	// subject only tells a machine's checks apart where they present beside an
-	// application's, which a cluster's never do.
-	let subject = match target {
-		Scope::Machine(_) => CheckSubject::Machine,
-		_ => CheckSubject::Application,
+
+	// Only an application has a type; a machine's checks are in the machine
+	// namespace or a curated source's flat one. Each grain is judged quiet on
+	// its own threshold, the one its reachability is graded on.
+	let (application_type, down_after) = match target {
+		Scope::Application(id) => {
+			let application = Application::get_by_id(conn, id).await?;
+			(Some(application.r#type), application.alert_when_down_for.0)
+		}
+		Scope::Machine(id) => (
+			None,
+			crate::machines::Machine::get_by_id(conn, id)
+				.await?
+				.alert_when_down_for
+				.0,
+		),
+		Scope::Cluster(id) => (
+			None,
+			crate::kubernetes_clusters::KubernetesCluster::get_by_id(conn, id)
+				.await?
+				.alert_when_down_for
+				.0,
+		),
+		Scope::Group(_) | Scope::Global => {
+			return Err(AppError::BadRequest(
+				"consolidated checks are read for an application, a machine or a cluster".into(),
+			));
+		}
 	};
 
 	let rows: Vec<ConsolidatedRow> = issues::table
@@ -2872,6 +2901,8 @@ async fn checks_at_scope(
 			issues::effective_result,
 			issues::detail,
 			issues::instances,
+			issues::last_seen,
+			issues::resolved_at,
 		))
 		.filter(issues::application_id.is_not_distinct_from(target_application))
 		.filter(issues::machine_id.is_not_distinct_from(target_machine))
@@ -2882,12 +2913,79 @@ async fn checks_at_scope(
 		.load(conn)
 		.await?;
 
-	// Only an application has a type; a machine's checks are in the machine
-	// namespace or a curated source's flat one.
-	let application_type = match target_application {
-		Some(id) => Some(Application::get_by_id(conn, id).await?.r#type),
-		None => None,
-	};
+	// A check-state only presents if a live catalog policy backs it: this
+	// excludes decommissioned checks and orphaned check-states (no catalog
+	// row at all — invisible in settings and unmanageable, so never a
+	// phantom failure here). See `live_cataloged_pairs`.
+	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
+	struct Live {
+		source: String,
+		check: String,
+		namespace: Namespace,
+		observed: Option<String>,
+		effective: Option<String>,
+		detail: Option<serde_json::Value>,
+		instances: Option<serde_json::Value>,
+		last_seen: Timestamp,
+		resolved: bool,
+	}
+	let live: Vec<Live> = rows
+		.into_iter()
+		.filter_map(
+			|(
+				source,
+				check_name,
+				observed,
+				effective,
+				detail,
+				instances,
+				last_seen,
+				resolved_at,
+			)| {
+				let check = check_name?;
+				let namespace = Namespace::of(&source, &check, application_type.as_ref())?;
+				crate::check_policies::CheckPolicy::live_in(&cataloged, &source, &namespace, &check)
+					.then(|| Live {
+						source,
+						check,
+						namespace,
+						observed,
+						effective,
+						detail,
+						instances,
+						last_seen: last_seen.into(),
+						resolved: resolved_at.is_some(),
+					})
+			},
+		)
+		.collect();
+
+	// When each source last reported about this target: every report a source
+	// pushes stamps the states of the checks it carries, so the newest stamp is
+	// that report. Read over every live state, resolved or not, as reachability
+	// reads it (see `Issue::source_freshness`), so the two agree on the clock.
+	// Canopy's own determinations and manual conditions are not reports.
+	// spec: CHK#reachability
+	let mut latest: HashMap<&str, Timestamp> = HashMap::new();
+	for state in &live {
+		if state.source == crate::statuses::CANOPY_SOURCE || state.source == MANUAL_SOURCE {
+			continue;
+		}
+		latest
+			.entry(state.source.as_str())
+			.and_modify(|t| *t = (*t).max(state.last_seen))
+			.or_insert(state.last_seen);
+	}
+	let now = Timestamp::now();
+	let quiet: HashSet<String> = latest
+		.iter()
+		.filter(|(_, at)| now.duration_since(**at) >= down_after)
+		.map(|(source, _)| (*source).to_string())
+		.collect();
+	let latest: HashMap<String, Timestamp> = latest
+		.into_iter()
+		.map(|(source, at)| (source.to_string(), at))
+		.collect();
 
 	let group_ids: Vec<Uuid> = group_id.into_iter().collect();
 	#[allow(clippy::type_complexity)]
@@ -2965,69 +3063,78 @@ async fn checks_at_scope(
 		}
 	}
 
-	let mut checks: Vec<ConsolidatedCheck> = rows
+	let mut checks: Vec<ConsolidatedCheck> = live
 		.into_iter()
-		.filter_map(
-			|(source, check_name, observed, effective, detail, instances)| {
-				let check = check_name?;
-				if !include_reachability && is_reachability(&source, &check) {
-					return None;
-				}
-				let namespace = Namespace::of(&source, &check, application_type.as_ref())?;
-				if !crate::check_policies::CheckPolicy::live_in(
-					cataloged, &source, &namespace, &check,
-				) {
-					return None;
-				}
-				let stored: CheckResult = effective.as_deref().and_then(|e| e.parse().ok())?;
-				let is_silenced = silenced.contains(&(&namespace, source.as_str(), check.as_str()));
-				// A silence is a scoped ceiling of `skipped`: cap the effective
-				// result here so the live view matches both the health rollup
-				// (which excludes silenced checks) and the snapshot path (which
-				// re-grades through `apply_scoped`). The stored effective may
-				// still read failed/warning if the silence post-dates the last
-				// push — the observed result keeps what was reported.
-				let effective = if is_silenced {
-					CheckResult::Skipped
-				} else {
-					stored
-				};
-				// The state's instances as their last grading left them: an
-				// instance silence re-grades the state when it is set or lifted,
-				// so the stored results already account for it.
-				let presented = instances
-					.and_then(|stored| {
-						serde_json::from_value::<StoredInstances>(stored)
-							.inspect_err(|err| tracing::warn!(?err, "unreadable stored instances"))
-							.ok()
-					})
-					.map(|stored| {
-						let check_silences =
-							instance_silences.get(&(&namespace, source.as_str(), check.as_str()));
-						stored.presented(is_silenced, |key| {
-							check_silences
-								.and_then(|silences| silences.get(key))
-								.copied()
-								.unwrap_or_default()
-						})
-					})
-					.unwrap_or_default();
-				Some(ConsolidatedCheck {
-					silenced: is_silenced,
-					observed: observed.as_deref().and_then(|o| o.parse().ok()),
-					qualified_name: namespace.qualified_name(&check),
-					namespace: (&namespace).into(),
-					source,
-					check,
-					effective,
-					detail: detail.unwrap_or_else(|| serde_json::json!({})),
-					subject,
-					instances: presented.listed,
-					passing_instances: presented.passing,
-					skipped_instances: presented.skipped,
+		.filter_map(|state| {
+			if state.resolved {
+				return None;
+			}
+			// A source that pushes its complete set of checks stamps every one
+			// it carries, so a state older than the source's latest report is
+			// one it no longer carries (see `REPORT_STAMP_SLACK`). A reserved
+			// source files each check on its own cadence, so for it being
+			// unresolved is being current.
+			if !is_reserved(&state.source)
+				&& latest
+					.get(&state.source)
+					.is_some_and(|newest| state.last_seen < *newest - REPORT_STAMP_SLACK)
+			{
+				return None;
+			}
+			let stored: CheckResult = state.effective.as_deref().and_then(|e| e.parse().ok())?;
+			let key = (
+				&state.namespace,
+				state.source.as_str(),
+				state.check.as_str(),
+			);
+			let is_silenced = silenced.contains(&key);
+			// A silence is a scoped ceiling of `skipped`: cap the effective
+			// result here so the live view matches both the health rollup
+			// (which excludes silenced checks) and the snapshot path (which
+			// re-grades through `apply_scoped`). The stored effective may
+			// still read failed/warning if the silence post-dates the last
+			// push — the observed result keeps what was reported.
+			let effective = if is_silenced {
+				CheckResult::Skipped
+			} else {
+				stored
+			};
+			// The state's instances as their last grading left them: an
+			// instance silence re-grades the state when it is set or lifted,
+			// so the stored results already account for it.
+			let presented = state
+				.instances
+				.and_then(|stored| {
+					serde_json::from_value::<StoredInstances>(stored)
+						.inspect_err(|err| tracing::warn!(?err, "unreadable stored instances"))
+						.ok()
 				})
-			},
-		)
+				.map(|stored| {
+					let check_silences = instance_silences.get(&key);
+					stored.presented(is_silenced, |key| {
+						check_silences
+							.and_then(|silences| silences.get(key))
+							.copied()
+							.unwrap_or_default()
+					})
+				})
+				.unwrap_or_default();
+			Some(ConsolidatedCheck {
+				silenced: is_silenced,
+				observed: state.observed.as_deref().and_then(|o| o.parse().ok()),
+				qualified_name: state.namespace.qualified_name(&state.check),
+				namespace: (&state.namespace).into(),
+				quiet: quiet.contains(&state.source),
+				last_reported_at: Some(state.last_seen),
+				effective,
+				detail: state.detail.unwrap_or_else(|| serde_json::json!({})),
+				instances: presented.listed,
+				passing_instances: presented.passing,
+				skipped_instances: presented.skipped,
+				source: state.source,
+				check: state.check,
+			})
+		})
 		.collect();
 	// Reachability presents for every target, whether or not a reporter has
 	// ever gone quiet. The sweep only files this check while it's degraded
@@ -3041,13 +3148,12 @@ async fn checks_at_scope(
 		crate::statuses::CANOPY_SOURCE.to_string(),
 		crate::statuses::REACHABILITY_REF.to_string(),
 	);
-	if include_reachability
-		&& crate::check_policies::CheckPolicy::live_for(
-			cataloged,
-			&reachability.0,
-			&reachability.1,
-			application_type.as_ref(),
-		) && !checks
+	if crate::check_policies::CheckPolicy::live_for(
+		&cataloged,
+		&reachability.0,
+		&reachability.1,
+		application_type.as_ref(),
+	) && !checks
 		.iter()
 		.any(|c| c.source == reachability.0 && c.check == reachability.1)
 	{
@@ -3070,7 +3176,8 @@ async fn checks_at_scope(
 				CheckResult::Passed
 			},
 			detail: serde_json::json!({}),
-			subject,
+			last_reported_at: None,
+			quiet: false,
 			instances: Vec::new(),
 			passing_instances: 0,
 			skipped_instances: 0,
@@ -4785,21 +4892,8 @@ impl Issue {
 			);
 		}
 		if let Some(sid) = filters.application_id {
-			// The machine's issues come with the application's, which is what
-			// the application's own detail page presents.
 			// spec: MCP#incidents-and-issues
-			let machine_id: Option<Uuid> = applications::table
-				.select(applications::machine_id)
-				.filter(applications::id.eq(sid))
-				.first::<Option<Uuid>>(db)
-				.await
-				.optional()?
-				.flatten();
-			q = q.filter(
-				dsl::application_id.eq(sid).or(dsl::machine_id
-					.is_not_distinct_from(machine_id)
-					.and(dsl::machine_id.is_not_null())),
-			);
+			q = q.filter(dsl::application_id.eq(sid));
 		}
 		if let Some(mid) = filters.machine_id {
 			q = q.filter(dsl::machine_id.eq(mid));

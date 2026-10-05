@@ -738,9 +738,10 @@ impl Status {
 	///
 	/// Only rows the box filed for itself count, so a workload's own report
 	/// carried on the same machine is not read back as the box's. A reporter
-	/// still pushing the unified shape files no such row at all; its machine
-	/// checks are recognised by subject in the application's rows instead.
-	// spec: CHK#a-machines-checks-present-on-its-applications
+	/// still pushing the unified shape files no such row at all, which is how a
+	/// split push is told from a unified one when reading history back.
+	// spec: FIG#point-in-time
+	// spec: STA#transitional-unified-pushes
 	pub async fn machine_latest_per_source_at(
 		db: &mut AsyncPgConnection,
 		machine: Uuid,
@@ -765,6 +766,52 @@ impl Status {
 			.load(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// Which of these application status rows came from a split push.
+	///
+	/// A split push records the machine's row and each application's in one
+	/// transaction, so the machine carries a row from the same source at the
+	/// same moment; a unified push records the application's alone. Asked of
+	/// each row's own moment, not of the machine's latest, since a machine
+	/// keeps reporting after it stops naming an application.
+	// spec: STA#transitional-unified-pushes
+	pub async fn split_push_moments(
+		db: &mut AsyncPgConnection,
+		machine: Uuid,
+		rows: &[&Status],
+	) -> Result<std::collections::HashSet<(String, Timestamp)>> {
+		use crate::schema::statuses::dsl::*;
+
+		let moments: Vec<jiff_diesel::Timestamp> = rows
+			.iter()
+			.map(|row| jiff_diesel::Timestamp::from(row.created_at))
+			.collect();
+		// The range bound is what lets the planner prune the weekly partitions;
+		// a parameterised array alone leaves it planning every one of them.
+		let (Some(earliest), Some(latest)) = (
+			rows.iter().map(|row| row.created_at).min(),
+			rows.iter().map(|row| row.created_at).max(),
+		) else {
+			return Ok(Default::default());
+		};
+		let found: Vec<(String, jiff_diesel::Timestamp)> = statuses
+			.select((source, created_at))
+			.filter(
+				machine_id
+					.eq(machine)
+					.and(server_id.is_null())
+					.and(created_at.ge(jiff_diesel::Timestamp::from(earliest)))
+					.and(created_at.le(jiff_diesel::Timestamp::from(latest)))
+					.and(created_at.eq_any(moments)),
+			)
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(found
+			.into_iter()
+			.map(|(src, at)| (src, at.into()))
+			.collect())
 	}
 
 	/// The machine-grain equivalent of [`Self::latest_for_servers`]: when each

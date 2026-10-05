@@ -49,7 +49,7 @@ pub struct CheckPolicy {
 	/// `check_name`, uniquely identifies this policy.
 	pub source: String,
 	/// The check's name, as reported in status pushes. Stored on its own —
-	/// the qualified `<type>.<check>` form an operator sees is built for
+	/// the qualified `<type>:<check>` form an operator sees is built for
 	/// presentation from [`Self::namespace`], never concatenated here.
 	pub check_name: String,
 	/// The namespace's subject column. Read through [`Self::namespace`]
@@ -121,7 +121,7 @@ impl CheckPolicy {
 			.map_err(|e| AppError::Custom(e.to_string()))
 	}
 
-	/// How this entry reads to an operator: `<type>.<check>` for an
+	/// How this entry reads to an operator: `<type>:<check>` for an
 	/// application namespace, the bare name otherwise. An unreadable
 	/// namespace presents as the bare name rather than failing a listing.
 	pub fn qualified_name(&self) -> String {

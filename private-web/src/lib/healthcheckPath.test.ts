@@ -91,7 +91,7 @@ describe("namespace segments", () => {
 
 describe("qualified names", () => {
 	it("qualifies an application type's check and leaves the rest bare", () => {
-		expect(qualifiedCheckName(CENTRAL, "version")).toBe("tamanu-central.version");
+		expect(qualifiedCheckName(CENTRAL, "version")).toBe("tamanu-central:version");
 		expect(qualifiedCheckName(MACHINE, "disk_free")).toBe("disk_free");
 		expect(qualifiedCheckName(FLAT, "reachability")).toBe("reachability");
 		expect(qualifiedCheckName(undefined, "reachability")).toBe("reachability");

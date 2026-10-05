@@ -85,8 +85,8 @@ impl ServerHandler for CanopyMcp {
 			 clock, addresses, and backups, which belong to the box. Ask about an application \
 			 (find_servers, get_server) for its version, database engine, and product role. Each \
 			 result names the other side, so you can move between them without searching. An \
-			 issue carries a `scope` saying which of the two it is about, and a machine's checks \
-			 also count toward the health of every application on it.\n\n\
+			 issue carries a `scope` saying which of the two it is about. A machine's checks count \
+			 toward the machine's health and are read on the machine, not on the applications on it.\n\n\
 			 Upgrade plans: a plan is a group's recorded intention to move to a version. A \
 			 planned date is a plan rather than a deadline, so one that has passed (`late`) is \
 			 normal operational reality rather than an incident. list_upgrade_plans gives what \

@@ -47,7 +47,7 @@ async fn list_returns_catalog_rows_with_pending_review_flag() {
 		// The name is stored bare and the namespace beside it; the qualified
 		// form is presentation the listing derives.
 		assert_eq!(body[0]["namespace"], ns());
-		assert_eq!(body[0]["qualified_name"], format!("{TYPE}.disk_space"));
+		assert_eq!(body[0]["qualified_name"], format!("{TYPE}:disk_space"));
 		assert_eq!(body[0]["ceiling"], "warning");
 		assert_eq!(body[0]["pending_review"], true);
 		assert!(body[0]["reviewed_at"].is_null());
