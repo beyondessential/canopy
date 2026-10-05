@@ -49,6 +49,28 @@
 <body>
 <div class="page">
 
+	<div class="label">Status page: above the release summary</div>
+
+	<div class="alert info">
+		<span class="icon">ⓘ</span>
+		<div><span class="title">3 DNS names waiting on a declaration</span><br>In <a href="#" style="color: inherit">Example Group</a> (2) and <a href="#" style="color: inherit">Other Group</a> (1).</div>
+	</div>
+	<div class="paper" style="padding: 16px; display: flex; align-items: center; justify-content: space-between;">
+		<span style="font-size: 16px">4 release branches in active use: 2.20, 2.21, 2.22, 2.23 (9 versions: 2.20.4 — 2.23.1)</span>
+		<button class="btn outlined">Fleet figures</button>
+	</div>
+
+	<div class="label">Group page: under the header</div>
+
+	<div class="row" style="justify-content: space-between">
+		<h1 style="font-size: 34px; font-weight: 400; margin: 0">Example Group</h1>
+		<div class="row"><button class="btn contained">Add machine</button><button class="btn outlined">Edit</button></div>
+	</div>
+	<div class="alert info">
+		<span class="icon">ⓘ</span>
+		<div><span class="title">2 DNS names waiting on a declaration</span><br>On <a href="#" style="color: inherit">site-central</a>.</div>
+	</div>
+
 	<div class="label">Machine page: after Applications</div>
 
 	<div>
@@ -67,7 +89,7 @@
 				<h3>Not yet declared</h3>
 				<div class="alert warning" style="margin-bottom: 8px">
 					<span class="icon">⚠</span>
-					<div>Canopy refuses these until each is declared on one application.</div>
+					<div>Canopy refuses these until each is declared on one application, or denied.</div>
 				</div>
 				<table>
 					<thead>
@@ -81,6 +103,7 @@
 								<div class="row" style="justify-content: flex-end">
 									<select class="select"><option>Tamanu</option><option>mSupply</option></select>
 									<button class="btn contained">Declare</button>
+									<button class="btn text danger">Deny</button>
 								</div>
 							</td>
 						</tr>
@@ -91,6 +114,7 @@
 								<div class="row" style="justify-content: flex-end">
 									<select class="select"><option>mSupply</option><option>Tamanu</option></select>
 									<button class="btn contained">Declare</button>
+									<button class="btn text danger">Deny</button>
 								</div>
 							</td>
 						</tr>
@@ -109,6 +133,22 @@
 							<td class="mono">facility.site.example.tamanu.app</td>
 							<td>Tamanu</td>
 							<td><span class="chip success">issued</span> <span class="caption">expires in 61 days</span></td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+
+			<div>
+				<h3>Denied</h3>
+				<table>
+					<thead>
+						<tr><th>DNS name</th><th>Denied</th><th></th></tr>
+					</thead>
+					<tbody>
+						<tr>
+							<td class="mono">old.site.example.tamanu.app</td>
+							<td class="caption">by admin@example.org 4 days ago: site retired</td>
+							<td><div class="row" style="justify-content: flex-end"><button class="btn text">Lift</button></div></td>
 						</tr>
 					</tbody>
 				</table>

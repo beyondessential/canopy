@@ -53,6 +53,8 @@ A DNS name within another group's domain is refused as if unclaimed: the refusal
 
 ### Resolving the application
 
+A request about a DNS name denied to the machine is refused as denied before it is resolved (see "Denied DNS names"), so a denial holds however the request would otherwise have resolved.
+
 A request starts from every application on the machine and is narrowed in this order, stopping as soon as one application remains:
 
 1. Where an application on the machine declares the requested DNS name, to that application.
@@ -84,8 +86,22 @@ A machine asking again about the same DNS name updates the one record rather tha
 The record reads the same whether the DNS name is declared by an application on another machine or by nobody.
 It is presented to operators alone, who already see the whole fleet, so it tells the asking machine nothing it was not already told.
 
+An operator disposes of an undeclared request by declaring the DNS name on one of the machine's applications, or by denying it to the machine.
+
 A record lasts only as long as it describes something an operator should act on.
-It goes when an application on the machine declares the DNS name, when the machine's next request about it is accepted, and when a day passes without the machine asking about it, so a DNS name the agent has stopped wanting drops off without anyone acting.
+It goes when an application on the machine declares the DNS name, when the DNS name is denied to the machine, when the machine's next request about it is accepted, and when a day passes without the machine asking about it, so a DNS name the agent has stopped wanting drops off without anyone acting.
+
+### Denied DNS names
+
+An operator can deny a DNS name to a machine, for a DNS name the machine asks about that none of its applications should serve.
+A denial covers both address and certificate requests about that DNS name from that machine, and records who made it, when, and an optional note saying why.
+
+A request about a denied DNS name is refused as denied, distinguishably from every other refusal, so an agent can tell a decision against it from a declaration it is waiting on.
+Such a request is not recorded as undeclared, so a machine that keeps asking raises nothing however often it asks.
+
+A denial stands until an operator lifts it, or until an operator declares the DNS name on one of the machine's applications, which is the opposite decision and ends it.
+Nothing the machine does lifts a denial, and it outlasts the machine ceasing to ask, since it records a decision rather than an observation.
+Lifting a denial and declaring are administrative actions, as denying is.
 
 ## What an application may act on
 
@@ -242,9 +258,15 @@ A group presents, under each domain it controls, the DNS names in use beneath it
 
 A machine hosting several applications presents their DNS names together, since that is where a request about a DNS name is resolved to one of them.
 Each declared DNS name shows the application declaring it and the state of its certificate.
-Any machine with undeclared requests presents them, each with what was asked for and when, and with a control to declare the DNS name on one of the machine's applications.
+Any machine with undeclared requests presents them, each with what was asked for and when, with a control to declare the DNS name on one of the machine's applications and a control to deny it.
 Where the domains of exactly one of those applications' groups cover the DNS name, that application is offered first.
 A machine hosting one application has them only for a DNS name another application holds, and declaring there is refused with the holder named, which is what an operator needs to release it first.
 Declaring from the machine is the same declaration as declaring from the application, refused the same way.
+A machine presents the DNS names denied to it, each with who denied it, when, and the note, and a control to lift the denial.
+
+Undeclared requests are surfaced as a notice rather than as a check: it is shown to whoever reads the pages it appears on and reaches no notification channel, since what it asks for is an operator's decision rather than a response to something down.
+A group presents a notice while any of its machines has an undeclared request, saying how many there are and on which machines, and leading to each machine.
+The Status page presents one notice across the fleet while any machine has an undeclared request, saying how many there are and in which groups, and leading to each group.
+A notice goes once the requests it counts are declared, denied, or drop off.
 
 The authority Canopy is configured to use is presented to operators along with the profiles it advertises and whether Canopy's account with it is usable, since that is where a misconfiguration of issuance shows up rather than on any one application.
