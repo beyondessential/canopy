@@ -1164,8 +1164,8 @@ fn test_server_serialization() {
 pub struct PartialServer {
 	/// The server to update.
 	pub id: Uuid,
-	/// New display name for the server.
-	pub name: Option<String>,
+	/// New display name for the server, or `null` to clear it.
+	pub name: Option<Option<String>>,
 	/// New environment tier for the server, for example production, test,
 	/// or dev.
 	#[diesel(deserialize_as = String, serialize_as = String)]

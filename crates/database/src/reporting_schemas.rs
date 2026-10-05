@@ -479,8 +479,8 @@ async fn versions_and_applications(
 		// A pair is unique per group and version, so two applications on one
 		// version are one pair carrying both names.
 		match pairs.iter_mut().find(|(v, _)| v.id == version.id) {
-			Some((_, names)) => names.push(application.label()),
-			None => pairs.push((version.clone(), vec![application.label()])),
+			Some((_, names)) => names.push(application.display_name()),
+			None => pairs.push((version.clone(), vec![application.display_name()])),
 		}
 	}
 
