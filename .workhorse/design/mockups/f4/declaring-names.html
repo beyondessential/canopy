@@ -1,0 +1,188 @@
+<!-- spec: public-server/certificates.md -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Declaring names</title>
+<style>
+	body { margin: 0; background: #fafafa; font-family: Roboto, Helvetica, Arial, sans-serif; color: rgba(0,0,0,0.87); font-size: 14px; }
+	.page { max-width: 1040px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; }
+	.label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: #c2410c; font-weight: 500; margin-bottom: -12px; }
+	.paper { background: #fff; border: 1px solid rgba(0,0,0,0.12); border-radius: 4px; padding: 16px; }
+	h2.h5 { font-size: 24px; font-weight: 400; margin: 0 0 8px; }
+	h2.h6 { font-size: 20px; font-weight: 500; margin: 0 0 8px; }
+	h2.h6 .aside { font-size: 14px; font-weight: 400; color: rgba(0,0,0,0.6); margin-left: 8px; }
+	h3 { font-size: 14px; font-weight: 500; margin: 0 0 8px; }
+	.stack { display: flex; flex-direction: column; gap: 16px; }
+	.stack-1 { display: flex; flex-direction: column; gap: 8px; }
+	.row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+	.grow { flex: 1; }
+	.mono { font-family: "Roboto Mono", ui-monospace, monospace; font-size: 14px; }
+	.caption { font-size: 12px; color: rgba(0,0,0,0.6); }
+	.chip { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 16px; font-size: 13px; border: 1px solid rgba(0,0,0,0.23); color: rgba(0,0,0,0.87); background: #fff; }
+	.chip.success { border-color: rgba(46,125,50,0.7); color: #2e7d32; }
+	.chip.warning { border-color: rgba(237,108,2,0.7); color: #ed6c02; }
+	.chip.filled { border: none; background: rgba(0,0,0,0.08); }
+	.alert { border-radius: 4px; padding: 6px 16px; display: flex; gap: 12px; align-items: flex-start; font-size: 14px; line-height: 1.43; }
+	.alert .icon { width: 22px; flex: none; padding-top: 1px; }
+	.alert.info { background: #e5f6fd; color: #014361; }
+	.alert.warning { background: #fff4e5; color: #663c00; }
+	.alert.error { background: #fdeded; color: #5f2120; }
+	.alert .title { font-weight: 500; margin-bottom: 2px; }
+	.btn { font: inherit; font-size: 13px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.03em; border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+	.btn.outlined { background: #fff; border: 1px solid rgba(56,142,60,0.5); color: #388e3c; }
+	.btn.contained { background: #388e3c; border: 1px solid #388e3c; color: #fff; }
+	.btn.text { background: none; border: none; color: #388e3c; }
+	.btn.text.danger { color: #d32f2f; }
+	.select, .input { font: inherit; font-size: 14px; height: 32px; box-sizing: border-box; border: 1px solid rgba(0,0,0,0.23); border-radius: 4px; padding: 0 10px; background: #fff; color: rgba(0,0,0,0.87); }
+	.input { min-width: 280px; font-family: "Roboto Mono", ui-monospace, monospace; }
+	.select { min-width: 180px; }
+	.shorty { border: 1px solid rgba(0,0,0,0.12); border-radius: 4px; padding: 8px 12px; display: flex; align-items: center; gap: 12px; background: #fff; }
+	.dot { width: 10px; height: 10px; border-radius: 50%; background: #2e7d32; }
+	.divider { border-top: 1px solid rgba(0,0,0,0.12); }
+	table { width: 100%; border-collapse: collapse; }
+	th { text-align: left; font-size: 12px; font-weight: 500; color: rgba(0,0,0,0.6); padding: 6px 8px; border-bottom: 1px solid rgba(0,0,0,0.12); }
+	td { padding: 8px; border-bottom: 1px solid rgba(0,0,0,0.06); vertical-align: middle; }
+	.note { font-size: 13px; color: #57534e; border-left: 3px solid #c2410c; padding: 4px 12px; background: #fff; }
+</style>
+</head>
+<body>
+<div class="page">
+
+	<div class="label">Machine page: after Applications</div>
+
+	<div>
+		<h2 class="h5">Applications (2)</h2>
+		<div class="stack-1">
+			<div class="shorty"><span class="dot"></span><strong>Tamanu</strong><span class="caption">tamanu · central</span></div>
+			<div class="shorty"><span class="dot"></span><strong>mSupply</strong><span class="caption">msupply</span></div>
+		</div>
+	</div>
+
+	<div class="paper">
+		<h2 class="h6">Names</h2>
+		<div class="stack">
+
+			<div>
+				<h3>Not yet declared</h3>
+				<div class="alert warning" style="margin-bottom: 8px">
+					<span class="icon">⚠</span>
+					<div>Canopy refuses these until each is declared on one application.</div>
+				</div>
+				<table>
+					<thead>
+						<tr><th>Name</th><th>Last asked</th><th></th></tr>
+					</thead>
+					<tbody>
+						<tr>
+							<td class="mono">site.example.tamanu.app</td>
+							<td class="caption">certificate, 2 minutes ago</td>
+							<td>
+								<div class="row" style="justify-content: flex-end">
+									<select class="select"><option>Tamanu</option><option>mSupply</option></select>
+									<button class="btn contained">Declare</button>
+								</div>
+							</td>
+						</tr>
+						<tr>
+							<td class="mono">msupply.site.example.tamanu.app</td>
+							<td class="caption">certificate, 2 minutes ago</td>
+							<td>
+								<div class="row" style="justify-content: flex-end">
+									<select class="select"><option>mSupply</option><option>Tamanu</option></select>
+									<button class="btn contained">Declare</button>
+								</div>
+							</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+
+			<div>
+				<h3>Declared</h3>
+				<table>
+					<thead>
+						<tr><th>Name</th><th>Application</th><th>Certificate</th></tr>
+					</thead>
+					<tbody>
+						<tr>
+							<td class="mono">facility.site.example.tamanu.app</td>
+							<td>Tamanu</td>
+							<td><span class="chip success">issued</span> <span class="caption">expires in 61 days</span></td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+
+		</div>
+	</div>
+
+	<div class="note">Shown only while the machine hosts several applications; on a single-application machine there is nothing to declare. The application chooser preselects the application whose group controls a covering domain when exactly one does.</div>
+
+	<div class="label">Application page: Names and certificates</div>
+
+	<div class="paper">
+		<h2 class="h6">Names and certificates<span class="aside">— the public names this server has registered, and the TLS certificates Canopy holds for them.</span></h2>
+		<div class="stack">
+			<div class="row">
+				<span class="chip">may not manage DNS records</span>
+				<span class="chip success">may manage TLS certificates</span>
+				<span class="caption">within example-dev.tamanu.app, example.tamanu.app</span>
+				<span class="grow"></span>
+				<button class="btn outlined">Pause</button>
+			</div>
+
+			<div>
+				<div class="row" style="margin-bottom: 8px">
+					<h3 style="margin: 0">Names</h3>
+					<span class="grow"></span>
+					<input class="input" placeholder="name.example.tamanu.app" value="">
+					<button class="btn outlined">Declare</button>
+				</div>
+				<div class="stack-1">
+					<div>
+						<div class="row">
+							<span class="mono">site.example.tamanu.app</span>
+							<span class="chip filled">declared</span>
+							<span class="grow"></span>
+							<span class="caption">no addresses registered</span>
+							<button class="btn text danger">Release</button>
+						</div>
+					</div>
+					<div class="divider"></div>
+					<div>
+						<div class="row">
+							<span class="mono">facility.site.example.tamanu.app</span>
+							<span class="chip success">published</span>
+							<span class="grow"></span>
+							<span class="caption">published 3 days ago</span>
+							<button class="btn text danger">Release</button>
+						</div>
+						<div class="caption mono">203.0.113.14, 2001:db8::14</div>
+					</div>
+				</div>
+			</div>
+
+			<div>
+				<div class="row">
+					<span class="mono">site.other.tamanu.app</span>
+					<span class="chip filled">declared</span>
+					<span class="chip warning">outside the group's domains</span>
+					<span class="grow"></span>
+					<span class="caption">no addresses registered</span>
+					<button class="btn text danger">Release</button>
+				</div>
+			</div>
+
+			<div class="alert error">
+				<span class="icon">⊘</span>
+				<div>msupply.site.example.tamanu.app is already declared by mSupply; release it there before declaring it here.</div>
+			</div>
+		</div>
+	</div>
+
+	<div class="note">The last row shows a name declared outside the group's domains: allowed, but flagged until the group controls a covering domain. The alert is the endpoint's existing 409 for a name another application holds.</div>
+
+</div>
+</body>
+</html>
