@@ -201,6 +201,20 @@ pub struct Application {
 	pub name_management_pause_reason: Option<String>,
 }
 
+/// How an application is named to an operator, as
+/// [`Application::names_by_ids`] fetches it.
+#[derive(Clone, Debug)]
+pub struct ApplicationNaming {
+	/// The name [`Application::display_name`] gives, so an unnamed application
+	/// reads as its type here as everywhere else.
+	// spec: FLT#naming
+	pub name: String,
+	/// The host it answers on, if recorded.
+	pub host: Option<String>,
+	/// Its type, where the stored value parses as one.
+	pub r#type: Option<ApplicationType>,
+}
+
 impl Application {
 	/// What this application is called.
 	///
@@ -838,16 +852,13 @@ impl Application {
 			.map_err(AppError::from)
 	}
 
-	/// Bulk-fetch `(name, host)` for a set of server ids — used by the
+	/// Bulk-fetch how each of a set of servers is named — used by the
 	/// issues/incidents APIs to embed display info into each row so the UI
-	/// doesn't have to fetch every server independently. The name is the one
-	/// [`Self::display_name`] gives, so an unnamed application reads as its
-	/// type here as everywhere else.
-	// spec: FLT#naming
+	/// doesn't have to fetch every server independently.
 	pub async fn names_by_ids(
 		db: &mut AsyncPgConnection,
 		ids: &[Uuid],
-	) -> Result<std::collections::HashMap<Uuid, (String, Option<String>)>> {
+	) -> Result<std::collections::HashMap<Uuid, ApplicationNaming>> {
 		use crate::schema::applications::dsl;
 
 		if ids.is_empty() {
@@ -861,7 +872,16 @@ impl Application {
 			.map_err(AppError::from)?;
 		Ok(rows
 			.into_iter()
-			.map(|(i, n, h, t)| (i, (Self::display_name_of(n, &t), h)))
+			.map(|(id, name, host, r#type)| {
+				(
+					id,
+					ApplicationNaming {
+						name: Self::display_name_of(name, &r#type),
+						host,
+						r#type: r#type.parse().ok(),
+					},
+				)
+			})
 			.collect())
 	}
 
