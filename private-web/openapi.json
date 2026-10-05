@@ -16739,6 +16739,13 @@
                   ],
                   "description": "Whether a maintenance window suspends this server, its own or one over\nthe box it runs on. Set alongside `up` and `health` by the endpoints\nthat decorate listings; `None` where they aren't."
                 },
+                "maintenance_settling": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ],
+                  "description": "Whether every window over the server has ended and it is serving out\nthe settle period."
+                },
                 "may_manage_dns": {
                   "type": "boolean",
                   "description": "Whether the server may manage its own DNS records for names under its\ngroup's domains."
@@ -19770,6 +19777,13 @@
               "null"
             ],
             "description": "Whether a maintenance window suspends this server, its own or one over\nthe box it runs on. Set alongside `up` and `health` by the endpoints\nthat decorate listings; `None` where they aren't."
+          },
+          "maintenance_settling": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether every window over the server has ended and it is serving out\nthe settle period."
           },
           "may_manage_dns": {
             "type": "boolean",

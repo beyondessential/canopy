@@ -175,6 +175,10 @@ pub struct ServerInfo {
 	/// One reaching it through its box is marked on the box.
 	// spec: MNT#presentation
 	pub own_window: Option<bool>,
+	/// Whether every window over the server has ended and it is serving out
+	/// the settle period.
+	// spec: MNT#settling
+	pub maintenance_settling: Option<bool>,
 }
 
 /// The server's most recently reported status push: version/host info plus
@@ -333,6 +337,7 @@ pub(super) fn server_to_info(s: Application) -> ServerInfo {
 		health: None,
 		maintained: None,
 		own_window: None,
+		maintenance_settling: None,
 		may_manage_dns: s.may_manage_dns,
 		may_manage_tls: s.may_manage_tls,
 	}
@@ -356,6 +361,7 @@ pub(super) struct StatusMarks {
 	pub health: HealthState,
 	pub maintained: bool,
 	pub own_window: bool,
+	pub maintenance_settling: bool,
 }
 
 /// Grade a set of applications for presentation, whatever hosts them.
@@ -414,6 +420,11 @@ pub(super) async fn status_marks(
 						subject.group_id,
 					),
 					own_window: suspended.application_window(subject.id),
+					maintenance_settling: suspended.settling_application(
+						subject.id,
+						subject.machine_id,
+						subject.group_id,
+					),
 				},
 			)
 		})
@@ -449,6 +460,7 @@ pub(super) async fn decorate_with_status(
 		info.health = Some(mark.health);
 		info.maintained = Some(mark.maintained);
 		info.own_window = Some(mark.own_window);
+		info.maintenance_settling = Some(mark.maintenance_settling);
 	}
 	Ok(())
 }
