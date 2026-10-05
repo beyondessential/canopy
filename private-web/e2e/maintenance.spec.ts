@@ -257,18 +257,16 @@ test.describe("maintenance windows", () => {
 			.getByTestId("group-tree")
 			.locator('[data-testid="tree-environment"][data-rank="clone"]');
 		await expect(section).toHaveAttribute("data-maintenance", "holding");
-		const boxes = section.getByTestId("tree-boxes");
-		const wash = await boxes.evaluate(
-			(el) => getComputedStyle(el).backgroundImage,
-		);
-		expect(wash).toContain("repeating-linear-gradient");
-		// The wash is the boxes' own footprint, not a band around them.
-		const [washBox, cardBox] = await Promise.all([
-			boxes.boundingBox(),
-			section.getByTestId("tree-machine").first().locator("..").boundingBox(),
-		]);
-		expect(washBox!.x).toBeCloseTo(cardBox!.x, 0);
-		expect(washBox!.width).toBeCloseTo(cardBox!.width, 0);
+		// The wash is the boxes' own footprint, inside their borders.
+		const wash = await section
+			.getByTestId("tree-block")
+			.first()
+			.evaluate((el) => {
+				const style = getComputedStyle(el);
+				return { image: style.backgroundImage, clip: style.backgroundClip };
+			});
+		expect(wash.image).toContain("repeating-linear-gradient");
+		expect(wash.clip).toBe("padding-box");
 		// Nothing is drawn on the box itself, so its tooltip is what says what
 		// caught it.
 		await section.getByTestId("tree-machine").locator("span").first().hover();

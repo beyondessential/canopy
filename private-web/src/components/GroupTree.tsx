@@ -69,25 +69,13 @@ export default function GroupTree({
 						sx={{ mt: index === 0 ? 0 : 1.5 }}
 					>
 						<EnvironmentHeading rank={rank} />
-						<Stack
-							spacing={1}
-							data-testid="tree-boxes"
-							sx={
-								held
-									? {
-											borderRadius: 1,
-											backgroundImage: (theme) =>
-												environmentHatch(theme, settling),
-											...waveWhileHolding(!settling, "&::before"),
-										}
-									: {}
-							}
-						>
+						<Stack spacing={1} data-testid="tree-boxes">
 							{boxes.map((box) => (
 								<MachineBlock
 									key={box.machine.id}
 									machine={box.machine}
 									applications={box.applications}
+									environmentWindow={held ? { settling } : null}
 									heldBy={
 										rank && held
 											? heldByLabel({ kind: "environment", rank })
@@ -129,12 +117,14 @@ function EnvironmentHeading({ rank }: { rank: string | null }) {
 function MachineBlock({
 	machine,
 	applications,
+	environmentWindow,
 	heldBy,
 	currentMachineId,
 	currentApplicationId,
 }: {
 	machine: GroupMachine;
 	applications: ServerInfo[];
+	environmentWindow?: { settling: boolean } | null;
 	/// What holds a window this box did not have declared over it.
 	// spec: MNT#presentation
 	heldBy?: string | null;
@@ -149,7 +139,23 @@ function MachineBlock({
 		: null;
 	const applicationHeldBy = own ? heldByLabel({ kind: "machine", name }) : boxHeldBy;
 	return (
-		<Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
+		<Box
+			data-testid="tree-block"
+			sx={{
+				border: 1,
+				borderColor: "divider",
+				borderRadius: 1,
+				overflow: "hidden",
+				...(environmentWindow
+					? {
+							backgroundImage: (theme: Theme) =>
+								environmentHatch(theme, environmentWindow.settling),
+							backgroundClip: "padding-box",
+							...waveWhileHolding(!environmentWindow.settling, "&::before"),
+						}
+					: {}),
+			}}
+		>
 			<Row
 				current={current}
 				sx={{ p: 1.5, gap: 1.5 }}
@@ -249,7 +255,7 @@ function MachineBlock({
 
 const DIVIDER_LIGHT = "rgba(0, 0, 0, 0.06)";
 
-/// The wash over an environment's whole section while a window over it holds:
+/// The wash over each box in an environment while a window over it holds:
 /// light enough that the cards inside stay readable through it.
 // spec: MNT#presentation
 function environmentHatch(theme: Theme, settling: boolean): string {
