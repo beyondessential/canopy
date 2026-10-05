@@ -256,7 +256,12 @@ export default function MachineDetail() {
 				heldBy={
 					data.own_window
 						? heldByLabel({ kind: "machine", name: data.machine.name })
-						: null
+						: rank &&
+								data.group_environments.some(
+									(e) => e.rank === rank && e.maintained,
+								)
+							? heldByLabel({ kind: "environment", rank })
+							: heldByLabel({ kind: "group", name: data.group?.name })
 				}
 			/>
 
@@ -445,7 +450,7 @@ function ApplicationsOnThisBox({
 }: {
 	applications: ServerInfo[];
 	/// What holds a window the box's applications did not have declared over
-	/// them, where the box's own window is what caught them.
+	/// them: the box, its environment or its group.
 	// spec: MNT#presentation
 	heldBy?: string | null;
 }) {

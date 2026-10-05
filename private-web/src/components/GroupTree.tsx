@@ -144,6 +144,10 @@ function MachineBlock({
 	const current = machine.id === currentMachineId;
 	const name = machine.name;
 	const own = machine.own_window === true;
+	const boxHeldBy = machine.maintained
+		? (heldBy ?? heldByLabel({ kind: "group", name: null }))
+		: null;
+	const applicationHeldBy = own ? heldByLabel({ kind: "machine", name }) : boxHeldBy;
 	return (
 		<Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
 			<Row
@@ -160,7 +164,7 @@ function MachineBlock({
 					maintained={machine.maintained}
 					settling={machine.maintenance_settling}
 					ownWindow={machine.own_window}
-					heldBy={heldBy}
+					heldBy={boxHeldBy}
 				>
 					{applications.map((application) => (
 						<Box key={application.id} component="span" sx={dotCellSx}>
@@ -168,9 +172,10 @@ function MachineBlock({
 								up={application.up ?? "gone"}
 								health={application.health ?? undefined}
 								monitored={application.is_monitored !== false}
-								maintained={own}
-								settling={machine.maintenance_settling === true}
-								suspended={!own && (application.maintained ?? false)}
+								maintained={application.own_window ?? false}
+								suspended={
+									(application.maintained ?? false) && !machine.maintained
+								}
 								quiet
 								size={DOT_SIZE}
 							/>
@@ -214,7 +219,7 @@ function MachineBlock({
 								monitored={application.is_monitored !== false}
 								maintained={application.own_window ?? false}
 								suspended={application.maintained ?? false}
-								heldBy={heldBy ?? heldByLabel({ kind: "machine", name })}
+								heldBy={applicationHeldBy}
 								title={applicationName(application)}
 								size={DOT_SIZE}
 							/>

@@ -308,12 +308,12 @@ test.describe("status page", () => {
 			.getByTestId("dot-strip")
 			.locator("[data-testid='rank-row'] > span")
 			.first();
-		// One box, two workloads, one of them declared over. Inside the box's
-		// ring the dot only fades: a hollow, pulsing dot in there reads as the
-		// machine being worked on, and it is not.
+		// One box, two workloads, one of them declared over. The dot is
+		// hollowed inside the ring as it is everywhere else, and the ring
+		// stays plain since the box is not being worked on.
 		const dots = pill.getByTestId("status-dot");
 		await expect(dots).toHaveCount(2);
-		await expect(dots.nth(0)).not.toHaveAttribute("data-maintenance");
+		await expect(dots.nth(0)).toHaveAttribute("data-maintenance", "holding");
 		await expect(dots.nth(1)).not.toHaveAttribute("data-maintenance");
 		await expect(pill).not.toHaveAttribute("data-maintenance");
 
@@ -324,14 +324,11 @@ test.describe("status page", () => {
 					fill: style.backgroundColor,
 					ring: style.borderTopWidth,
 					opacity: style.opacity,
-					animation: style.animationName,
 				};
 			}),
 		);
-		expect(marks[0]!.fill).not.toBe("rgba(0, 0, 0, 0)");
-		expect(marks[0]!.ring).toBe("0px");
-		expect(Number(marks[0]!.opacity)).toBeLessThan(1);
-		expect(marks[0]!.animation).toBe("none");
+		expect(marks[0]!.fill).toBe("rgba(0, 0, 0, 0)");
+		expect(marks[0]!.ring).not.toBe("0px");
 		expect(marks[1]!.opacity).toBe("1");
 
 		// The enclosure's tooltip is where the status page says which
