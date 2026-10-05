@@ -783,19 +783,26 @@ impl Status {
 	) -> Result<std::collections::HashSet<(String, Timestamp)>> {
 		use crate::schema::statuses::dsl::*;
 
-		if rows.is_empty() {
-			return Ok(Default::default());
-		}
 		let moments: Vec<jiff_diesel::Timestamp> = rows
 			.iter()
 			.map(|row| jiff_diesel::Timestamp::from(row.created_at))
 			.collect();
+		// The range bound is what lets the planner prune the weekly partitions;
+		// a parameterised array alone leaves it planning every one of them.
+		let (Some(earliest), Some(latest)) = (
+			rows.iter().map(|row| row.created_at).min(),
+			rows.iter().map(|row| row.created_at).max(),
+		) else {
+			return Ok(Default::default());
+		};
 		let found: Vec<(String, jiff_diesel::Timestamp)> = statuses
 			.select((source, created_at))
 			.filter(
 				machine_id
 					.eq(machine)
 					.and(server_id.is_null())
+					.and(created_at.ge(jiff_diesel::Timestamp::from(earliest)))
+					.and(created_at.le(jiff_diesel::Timestamp::from(latest)))
 					.and(created_at.eq_any(moments)),
 			)
 			.load(db)
