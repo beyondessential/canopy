@@ -74,6 +74,8 @@ That is how an entry reads and not how it is held: the namespace is never concat
 Wherever Canopy accepts a check's presented name as input, it also accepts `<type>.<check>`.
 
 A namespace is derived from where a check was filed rather than asserted alongside it, so a reporter needs no knowledge of the scheme and the two cannot fall out of step.
+A check's name plays no part in it: a check reported under an application belongs to that application's type even where the box reports a check of the same name, and the two are configured, silenced and documented separately.
+The machine-subject names Canopy holds bear only on where a unified push's checks are filed (see [STA](../public-server/statuses.md), "Transitional unified pushes").
 
 An address naming only a source and a check name resolves to the one entry it can mean.
 Where several entries share that source and name, Canopy asks which was meant rather than picking one.
