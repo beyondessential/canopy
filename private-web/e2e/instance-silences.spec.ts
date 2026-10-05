@@ -229,6 +229,57 @@ test.describe("Silencing one instance", () => {
 		);
 	});
 
+	/// Each opening of the issue's silence starts from the whole check, however
+	/// the panel was last closed, so a past instance choice never carries over.
+	///
+	/// spec: CHK#silencing-one-instance
+	test("the issue's silence forgets its instance choice when closed", async ({
+		page,
+		sql,
+	}) => {
+		const { group, issue } = await centralWithFacilities(sql);
+		const incident = await seedIncident(sql, {
+			serverGroupId: group.id,
+			issues: [{ issueId: issue.id }],
+		});
+		await page.goto(`/incidents/${incident.id}`);
+
+		const open = page.getByRole("button", { name: "Silence ref…" });
+		const picker = page.getByRole("combobox", { name: "Silence" });
+		const choose = async (name: string) => {
+			await picker.click();
+			await page.getByRole("option").filter({ hasText: name }).click();
+			await expect(picker).toHaveText(name);
+		};
+
+		// Cancelled.
+		await open.click();
+		await choose("Northgate Clinic");
+		await page.getByRole("button", { name: "Cancel" }).click();
+		await expect(picker).toHaveCount(0);
+		await open.click();
+		await expect(picker).toHaveText("Whole check");
+
+		// Closed by its own button.
+		await choose("Ridge Health Centre");
+		await open.click();
+		await expect(picker).toHaveCount(0);
+		await open.click();
+		await expect(picker).toHaveText("Whole check");
+
+		// Closed by silencing.
+		await choose("Northgate Clinic");
+		await page.getByRole("button", { name: "For this server" }).click();
+		await expect
+			.poll(async () =>
+				(await instanceSilences(sql)).map((s) => s.instance_key),
+			)
+			.toContain("6f1c2a9e-0d4b-4c1e-9a2f-5d8e3b6c7a10");
+		await expect(picker).toHaveCount(0);
+		await open.click();
+		await expect(picker).toHaveText("Whole check");
+	});
+
 	/// An instance silence lists the instance it quiets, and one whose key the
 	/// check no longer reports is marked so an operator can clear it.
 	///

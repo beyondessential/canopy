@@ -396,6 +396,12 @@ function IssueActions({
 	// spec: CHK#silencing-one-instance
 	const [silenceInstance, setSilenceInstance] = useState("");
 	const instanceArg = silenceInstance ? { instance: silenceInstance } : {};
+	// Each opening of the panel starts from the whole check, so a past choice
+	// never silently carries over to the next silence.
+	const closeSilence = () => {
+		setSilenceOpen(false);
+		setSilenceInstance("");
+	};
 	const [reason, setReason] = useState<ResolvedReason>("fixed");
 	const [snoozeHours, setSnoozeHours] = useState(4);
 
@@ -477,7 +483,9 @@ function IssueActions({
 						size="small"
 						variant="outlined"
 						startIcon={<NotificationsOffOutlinedIcon />}
-						onClick={() => setSilenceOpen((v) => !v)}
+						onClick={() =>
+							silenceOpen ? closeSilence() : setSilenceOpen(true)
+						}
 					>
 						Silence ref…
 					</Button>
@@ -622,7 +630,7 @@ function IssueActions({
 												ref: issue.ref,
 												...instanceArg,
 											}),
-										).then(() => setSilenceOpen(false))
+										).then(closeSilence)
 									}
 								>
 									For this server
@@ -643,7 +651,7 @@ function IssueActions({
 												ref: issue.ref,
 												...instanceArg,
 											}),
-										).then(() => setSilenceOpen(false))
+										).then(closeSilence)
 									}
 								>
 									For this machine
@@ -669,7 +677,7 @@ function IssueActions({
 													issue.namespace?.application_type ?? null,
 												...instanceArg,
 											}),
-										).then(() => setSilenceOpen(false))
+										).then(closeSilence)
 									}
 								>
 									For this group
@@ -679,7 +687,7 @@ function IssueActions({
 						<Button
 							variant="outlined"
 							size="small"
-							onClick={() => setSilenceOpen(false)}
+							onClick={closeSilence}
 						>
 							Cancel
 						</Button>
