@@ -47,6 +47,9 @@ The worst a malfunctioning report can do is make an application read as unreacha
 ## Naming
 
 A machine is named by the operator who creates it.
+A machine always has a name: an operator can rename a machine but never leave it blank.
+
+Wherever Canopy names an application or a machine to an operator, in a check's message, a notification, or the interface, it uses the names set out here and never a record's internal identifier.
 
 An application's name is optional and an operator's alone to set.
 An application with no name given presents as the sentence case of its type, so an application of type `tamanu-central` reads as "Tamanu central".

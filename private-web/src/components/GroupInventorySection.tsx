@@ -209,9 +209,7 @@ function EnvironmentInventory({
 
 				{machines.map((machine) => (
 					<Box key={machine.id} data-testid="inventory-machine">
-						<Typography variant="subtitle2">
-							{machine.name ?? machine.id}
-						</Typography>
+						<Typography variant="subtitle2">{machine.name}</Typography>
 						<Vars
 							items={machineVars(machine.id)}
 							inherited={[...groupVars, ...environmentVars]}
@@ -551,7 +549,7 @@ function SetVariable({
 					<MenuItem value={ENVIRONMENT}>This environment</MenuItem>
 					{machines.map((machine) => (
 						<MenuItem key={machine.id} value={machine.id}>
-							{machine.name ?? machine.id}
+							{machine.name}
 						</MenuItem>
 					))}
 				</TextField>

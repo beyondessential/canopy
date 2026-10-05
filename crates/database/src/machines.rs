@@ -31,11 +31,11 @@ const RESTORE_WINDOW: SignedDuration = SignedDuration::from_hours(24);
 pub struct Machine {
 	/// Unique identifier for this machine.
 	pub id: Uuid,
-	/// The name its operator gave it. Distinct from the hostname the
-	/// operating system reports, which is a reported figure rather than a
+	/// The name its operator gave it, never blank. Distinct from the hostname
+	/// the operating system reports, which is a reported figure rather than a
 	/// field an operator sets.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub name: Option<String>,
+	// spec: FLT#naming
+	pub name: String,
 	/// The group this machine belongs to. The one thing an operator supplies
 	/// when creating a machine: which group a box belongs to is the one
 	/// fact the box has no way of knowing. The applications on it take it.
@@ -123,11 +123,11 @@ pub struct Machine {
 
 /// The fields an operator supplies when creating a machine. Everything else
 /// either has a default or arrives by enrolment and reporting.
-#[derive(Debug, Clone, Default, Deserialize, Insertable)]
+#[derive(Debug, Clone, Deserialize, Insertable)]
 #[diesel(table_name = crate::schema::machines)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewMachine {
-	pub name: Option<String>,
+	pub name: String,
 	pub group_id: Option<Uuid>,
 	pub cloud: Option<bool>,
 	pub geolocation: Option<GeoPoint>,
@@ -143,7 +143,7 @@ pub struct NewMachine {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 #[diesel(treat_none_as_null = false)]
 pub struct MachineUpdate {
-	pub name: Option<Option<String>>,
+	pub name: Option<String>,
 	pub group_id: Option<Option<Uuid>>,
 	pub cloud: Option<Option<bool>>,
 	pub geolocation: Option<Option<GeoPoint>>,
@@ -154,10 +154,34 @@ pub struct MachineUpdate {
 	pub tags: Option<TagMap>,
 }
 
+/// A machine's name as an operator gave it, trimmed. A machine always has a
+/// name, so a blank one is refused.
+// spec: FLT#naming
+pub fn normalise_name(name: &str) -> Result<String> {
+	let name = name.trim();
+	if name.is_empty() {
+		return Err(AppError::BadRequest("a machine needs a name".into()));
+	}
+	Ok(name.to_string())
+}
+
+impl NewMachine {
+	/// A machine with only its name given, the one field every machine has.
+	pub fn named(name: impl Into<String>) -> Self {
+		Self {
+			name: name.into(),
+			group_id: None,
+			cloud: None,
+			geolocation: None,
+		}
+	}
+}
+
 impl Machine {
 	/// Create a machine. An operator supplies the group; enrolment and
 	/// reporting fill in the rest.
-	pub async fn create(db: &mut AsyncPgConnection, new: NewMachine) -> Result<Self> {
+	pub async fn create(db: &mut AsyncPgConnection, mut new: NewMachine) -> Result<Self> {
+		new.name = normalise_name(&new.name)?;
 		diesel::insert_into(crate::schema::machines::table)
 			.values(new)
 			.returning(Self::as_select())
@@ -184,9 +208,13 @@ impl Machine {
 	pub async fn update(
 		db: &mut AsyncPgConnection,
 		machine_id: Uuid,
-		updates: MachineUpdate,
+		mut updates: MachineUpdate,
 	) -> Result<Self> {
 		use crate::schema::machines::dsl;
+
+		if let Some(name) = &updates.name {
+			updates.name = Some(normalise_name(name)?);
+		}
 
 		if let Some(tags) = &updates.tags {
 			crate::tags::reject_reserved_keys(tags)?;
@@ -364,19 +392,39 @@ impl Machine {
 	pub async fn names_by_ids(
 		db: &mut AsyncPgConnection,
 		ids: &[Uuid],
-	) -> Result<std::collections::HashMap<Uuid, Option<String>>> {
+	) -> Result<std::collections::HashMap<Uuid, String>> {
 		use crate::schema::machines::dsl;
 
 		if ids.is_empty() {
 			return Ok(std::collections::HashMap::new());
 		}
-		let rows: Vec<(Uuid, Option<String>)> = dsl::machines
+		let rows: Vec<(Uuid, String)> = dsl::machines
 			.select((dsl::id, dsl::name))
 			.filter(dsl::id.eq_any(ids))
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
 		Ok(rows.into_iter().collect())
+	}
+
+	/// Names for `ids`, taken from `known` where it already holds the machine
+	/// and fetched for the rest, so a surface that has loaded a group's
+	/// machines pays a query only for boxes that have since left it.
+	pub async fn names_with_known(
+		db: &mut AsyncPgConnection,
+		known: &[Self],
+		ids: impl IntoIterator<Item = Uuid>,
+	) -> Result<std::collections::HashMap<Uuid, String>> {
+		let mut names: std::collections::HashMap<Uuid, String> =
+			known.iter().map(|m| (m.id, m.name.clone())).collect();
+		let mut missing: Vec<Uuid> = ids
+			.into_iter()
+			.filter(|id| !names.contains_key(id))
+			.collect();
+		missing.sort_unstable();
+		missing.dedup();
+		names.extend(Self::names_by_ids(db, &missing).await?);
+		Ok(names)
 	}
 
 	/// Bulk-fetch `(group_id, group_name)` for a set of machine ids, so a

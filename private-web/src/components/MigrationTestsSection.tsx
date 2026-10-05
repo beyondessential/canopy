@@ -18,7 +18,7 @@ import { Link as RouterLink, useSearchParams } from "react-router-dom";
 import { useApi } from "../api";
 import { errorPreview } from "../lib/errorText";
 import { formatDuration } from "../lib/migrationTests";
-import type { ApiResponse, ServerInfo } from "../types";
+import { type ApiResponse, type ServerInfo, applicationName } from "../types";
 
 type GroupVerdict = ApiResponse<"migration_tests", "for_group">[number];
 import MigrationRunDialog from "./MigrationRunDialog";
@@ -38,7 +38,7 @@ export default function MigrationTestsSection({
 	servers: ServerInfo[];
 }) {
 	const byId = new Map(servers.map((server) => [server.id, server]));
-	const nameOf = (id: string) => byId.get(id)?.name ?? id;
+	const nameOf = (id: string) => serverName(byId.get(id));
 	// Which run is open lives in the URL, so a link to one server's migrations
 	// opens on the migrations rather than on the group.
 	const [params, setParams] = useSearchParams();
@@ -196,6 +196,12 @@ function VerdictChip({
 	);
 }
 
+/// Every verdict is for one of the group's own applications, so the lookup
+/// only misses on a group that changed under the page.
+function serverName(server: ServerInfo | undefined): string {
+	return server ? applicationName(server) : "Unknown application";
+}
+
 function TestRow({
 	row,
 	server,
@@ -221,7 +227,7 @@ function TestRow({
 							underline="hover"
 							color="text.primary"
 						>
-							{server?.name ?? row.server_id}
+							{serverName(server)}
 						</MuiLink>
 						{server?.rank && <ServerRankChip rank={server.rank} />}
 					</Stack>
@@ -272,7 +278,7 @@ function TestRow({
 				<MigrationRunDialog
 					open={open}
 					onClose={onClose}
-					serverName={server?.name ?? row.server_id}
+					serverName={serverName(server)}
 					rank={server?.rank}
 					targetVersion={row.target_version}
 					latest={row.latest}

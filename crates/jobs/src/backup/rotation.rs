@@ -383,11 +383,10 @@ pub async fn reconcile(worker: &Worker, config: &ServerGroupBackupConfig) -> Res
 			put(worker, secret_ref, &[(KEY_CURRENT, &next)]).await
 		}
 		Recovery::Broken => {
-			let msg = format!(
-				"rotation reconcile for group {}: neither passphrase opens the repo \
-				 (possible kopia #3049 corruption — manual intervention required)",
-				config.group_id
-			);
+			// The alert is filed against the group, so its text needn't say
+			// which group; the log line does.
+			let msg = "neither passphrase opens the repo \
+				 (possible kopia #3049 corruption — manual intervention required)";
 			// Backups and restores are both dead for this group and Canopy
 			// can't fix it — so this has to reach an operator, not just the
 			// log. `bail!` alone left the dashboard green while every device
@@ -396,10 +395,10 @@ pub async fn reconcile(worker: &Worker, config: &ServerGroupBackupConfig) -> Res
 				worker,
 				config.group_id,
 				"file the broken-repo alert",
-				async |db| file_broken_alert(db, config.group_id, &msg).await,
+				async |db| file_broken_alert(db, config.group_id, msg).await,
 			)
 			.await;
-			bail!(msg)
+			bail!("rotation reconcile for group {}: {msg}", config.group_id)
 		}
 	}
 }

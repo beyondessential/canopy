@@ -383,7 +383,7 @@ async fn request_now_upserts_and_cancel_deletes() {
 		let group_id = seed_group(&mut conn).await;
 		let machine_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{machine_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+			"WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{machine_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
 				('{machine_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{machine_id}');"
 		))
 		.await
@@ -444,7 +444,7 @@ async fn allow_disallow_restore_window_round_trip() {
 		let group_id = seed_group(&mut conn).await;
 		let machine_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{machine_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+			"WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{machine_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
 				('{machine_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{machine_id}');"
 		))
 		.await
@@ -605,7 +605,7 @@ async fn stats_includes_runs_and_pending_requests() {
 		let run_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'machine');
-			 WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{machine_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+			 WITH m AS (INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', '{machine_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
 				('{machine_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{machine_id}');
 			 INSERT INTO backup_repo_stats (group_id, snapshot_count, source_count, logical_bytes, physical_bytes, bucket_bytes, bucket_bytes_observed_at) \
 				VALUES ('{group_id}', 12, 3, 1000, 800, 2000, now() - interval '1 day');
@@ -697,7 +697,7 @@ async fn stats_restore_run_resolves_snapshot_size_from_the_producing_backup() {
 		// producing backup immediately, not wait for the backfill.
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'machine');
-			 WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{machine_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+			 WITH m AS (INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', '{machine_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
 				('{machine_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{machine_id}');
 			 INSERT INTO backup_runs (id, device_id, group_id, machine_id, type, purpose, outcome, \
 				bytes_uploaded, snapshot_id, reported_at) \
@@ -746,7 +746,7 @@ async fn group_schedules_reports_next_run_from_last_success_plus_interval() {
 		let machine_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'machine');
-			 WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{machine_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+			 WITH m AS (INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', '{machine_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
 				('{machine_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{machine_id}');
 			 INSERT INTO machine_backup_capabilities (machine_id, type, enabled) VALUES \
 				('{machine_id}', 'tamanu-postgres', true);
@@ -783,7 +783,7 @@ async fn group_schedules_reports_manual_only_override_as_no_schedule() {
 		// An override row with a NULL interval is manual-only, even though
 		// `tamanu-postgres` has a canopy-wide 6h default to inherit from.
 		conn.batch_execute(&format!(
-			"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{machine_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+			"WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{machine_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
 				('{machine_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{machine_id}');
 			 INSERT INTO machine_backup_capabilities (machine_id, type, enabled) VALUES \
 				('{machine_id}', 'tamanu-postgres', true);
@@ -822,7 +822,7 @@ async fn group_schedules_includes_disabled_declared_types() {
 		// A *declared but disabled* type (manual-only): retention still applies, so
 		// it must surface in schedule/retention as a manual-only entry.
 		conn.batch_execute(&format!(
-			"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{machine_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+			"WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{machine_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
 				('{machine_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{machine_id}');
 			 INSERT INTO machine_backup_capabilities (machine_id, type, enabled) VALUES \
 				('{machine_id}', 'files', false);"
@@ -1125,7 +1125,8 @@ async fn upsert_rejects_bucket_already_configured_for_another_group() {
 			.await
 			.assert_status_ok();
 
-		// A different group can't claim the same bucket/prefix.
+		// A different group can't claim the same bucket/prefix, and is told
+		// which group has it.
 		let resp = private
 			.post("/api/backups/upsert")
 			.json(&serde_json::json!({
@@ -1136,6 +1137,12 @@ async fn upsert_rejects_bucket_already_configured_for_another_group() {
 			}))
 			.await;
 		resp.assert_status_conflict();
+		assert!(
+			resp.text()
+				.contains(&format!("already configured for grp-{group_a}")),
+			"{}",
+			resp.text()
+		);
 		assert_no_config!(private, group_b);
 	})
 	.await;

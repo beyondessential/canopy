@@ -9,7 +9,7 @@ async fn seed_issue_and_incident(
 	let group_id = Uuid::new_v4();
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
-		 INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}'); \
+		 INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_id}', '{group_id}'); \
 		 INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
 			('{server_id}', 'https://example.com', 'tamanu-central', '{group_id}', '{server_id}');"
 	))

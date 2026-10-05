@@ -16,7 +16,7 @@ struct RowId {
 
 async fn insert_server(conn: &mut AsyncPgConnection) -> Uuid {
 	let host = format!("http://detail.invalid/{}", Uuid::new_v4());
-	let machine: RowId = sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
+	let machine: RowId = sql_query("INSERT INTO machines (name) VALUES ('box') RETURNING id")
 		.get_result(conn)
 		.await
 		.expect("insert machine");
@@ -32,7 +32,7 @@ async fn insert_server(conn: &mut AsyncPgConnection) -> Uuid {
 
 async fn insert_production_server(conn: &mut AsyncPgConnection) -> Uuid {
 	let host = format!("http://prod.invalid/{}", Uuid::new_v4());
-	let machine: RowId = sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
+	let machine: RowId = sql_query("INSERT INTO machines (name) VALUES ('box') RETURNING id")
 		.get_result(conn)
 		.await
 		.expect("insert machine");

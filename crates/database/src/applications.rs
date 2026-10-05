@@ -201,6 +201,20 @@ pub struct Application {
 	pub name_management_pause_reason: Option<String>,
 }
 
+/// How an application is named to an operator, as
+/// [`Application::names_by_ids`] fetches it.
+#[derive(Clone, Debug)]
+pub struct ApplicationNaming {
+	/// The name [`Application::display_name`] gives, so an unnamed application
+	/// reads as its type here as everywhere else.
+	// spec: FLT#naming
+	pub name: String,
+	/// The host it answers on, if recorded.
+	pub host: Option<String>,
+	/// Its type, where the stored value parses as one.
+	pub r#type: Option<ApplicationType>,
+}
+
 impl Application {
 	/// What this application is called.
 	///
@@ -211,6 +225,19 @@ impl Application {
 	// spec: FLT#naming
 	pub fn display_name(&self) -> String {
 		self.name.clone().unwrap_or_else(|| self.r#type.label())
+	}
+
+	/// [`Self::display_name`] from the raw columns, for a query that selects
+	/// the name and type rather than the whole row. A type that does not parse
+	/// reads as stored rather than vanishing.
+	// spec: FLT#naming
+	pub fn display_name_of(name: Option<String>, r#type: &str) -> String {
+		name.unwrap_or_else(|| {
+			r#type
+				.parse::<ApplicationType>()
+				.map(|t| t.label())
+				.unwrap_or_else(|_| r#type.to_owned())
+		})
 	}
 
 	pub async fn get_all(
@@ -791,15 +818,6 @@ impl Application {
 			.map_err(AppError::from)
 	}
 
-	/// What to call this application to an operator: the name it was given,
-	/// else the host it answers on, else its id.
-	pub fn label(&self) -> String {
-		self.name
-			.clone()
-			.or_else(|| self.host.as_ref().map(|h| h.0.to_string()))
-			.unwrap_or_else(|| self.id.to_string())
-	}
-
 	/// All live (non-archived) applications in a group, ordered by name. Used to
 	/// expand a group-wide restore-replica declaration into per-server entries.
 	pub async fn list_live_in_group(
@@ -834,25 +852,37 @@ impl Application {
 			.map_err(AppError::from)
 	}
 
-	/// Bulk-fetch `(name, host)` for a set of server ids — used by the
+	/// Bulk-fetch how each of a set of servers is named — used by the
 	/// issues/incidents APIs to embed display info into each row so the UI
 	/// doesn't have to fetch every server independently.
 	pub async fn names_by_ids(
 		db: &mut AsyncPgConnection,
 		ids: &[Uuid],
-	) -> Result<std::collections::HashMap<Uuid, (Option<String>, Option<String>)>> {
+	) -> Result<std::collections::HashMap<Uuid, ApplicationNaming>> {
 		use crate::schema::applications::dsl;
 
 		if ids.is_empty() {
 			return Ok(std::collections::HashMap::new());
 		}
-		let rows: Vec<(Uuid, Option<String>, Option<String>)> = dsl::applications
-			.select((dsl::id, dsl::name, dsl::host))
+		let rows: Vec<(Uuid, Option<String>, Option<String>, String)> = dsl::applications
+			.select((dsl::id, dsl::name, dsl::host, dsl::type_))
 			.filter(dsl::id.eq_any(ids))
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
-		Ok(rows.into_iter().map(|(i, n, h)| (i, (n, h))).collect())
+		Ok(rows
+			.into_iter()
+			.map(|(id, name, host, r#type)| {
+				(
+					id,
+					ApplicationNaming {
+						name: Self::display_name_of(name, &r#type),
+						host,
+						r#type: r#type.parse().ok(),
+					},
+				)
+			})
+			.collect())
 	}
 
 	/// Bulk-fetch the group name for each given server. Servers that are

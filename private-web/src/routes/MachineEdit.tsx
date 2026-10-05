@@ -70,7 +70,7 @@ export default function MachineEdit() {
 	);
 	usePageTitle(
 		detail.status === "ok"
-			? `Edit ${detail.data.machine.name ?? "machine"}`
+			? `Edit ${detail.data.machine.name}`
 			: "Edit machine",
 	);
 
@@ -160,7 +160,7 @@ function Form({
 }: {
 	machine: {
 		id: string;
-		name?: string | null;
+		name: string;
 		group_id?: string | null;
 		cloud?: boolean | null;
 		geolocation?: { lat: number; lon: number } | null;
@@ -175,7 +175,7 @@ function Form({
 }) {
 	const navigate = useNavigate();
 	const [box, setBox] = useState<MachineForm>({
-		name: machine.name ?? "",
+		name: machine.name,
 		groupId: machine.group_id ?? null,
 		cloud: machine.cloud == null ? "" : machine.cloud ? "true" : "false",
 		lat: machine.geolocation?.lat?.toString() ?? "",
@@ -222,14 +222,14 @@ function Form({
 	const plan: { call: GradedEndpoint; run: () => Promise<unknown> }[] = [
 		{
 			call: "fleet/machines/update",
-			// Flat args, unlike the application's update: every field is
-			// `Option<Option<_>>` on the wire, so an absent one is left alone
-			// and an explicit null clears it. Nesting them under `data` would
-			// send an empty changeset and quietly write nothing.
+			// Flat args, unlike the application's update: an absent field is
+			// left alone and, for the nullable ones, an explicit null clears it.
+			// Nesting them under `data` would send an empty changeset and
+			// quietly write nothing.
 			run: () =>
 				callApi("fleet/machines", "update", {
 					machine_id: machine.id,
-					name: box.name.trim() === "" ? null : box.name.trim(),
+					name: box.name.trim(),
 					group_id: box.groupId,
 					cloud: box.cloud === "" ? null : box.cloud === "true",
 					geolocation:
@@ -325,7 +325,7 @@ function Form({
 	return (
 		<Stack spacing={3} component="form" onSubmit={onSubmit}>
 			<Typography variant="h5" component="h1">
-				Edit {machine.name ?? "machine"}
+				Edit {machine.name}
 			</Typography>
 
 			<Paper variant="outlined" sx={{ p: 3 }} data-testid="machine-section">
@@ -334,14 +334,12 @@ function Form({
 						Machine
 					</Typography>
 
-					{/* Not required, unlike at creation: a box that arrived
-					    without a name — a migrated server that had none — has
-					    to stay editable. */}
 					<TextField
 						label="Name"
 						value={box.name}
 						onChange={(e) => setBox({ ...box, name: e.target.value })}
 						disabled={pending}
+						required
 					/>
 
 					<GroupControl
@@ -495,7 +493,7 @@ function Form({
 					<Button
 						type="submit"
 						variant="contained"
-						disabled={pending || !box.groupId}
+						disabled={pending || !box.groupId || !box.name.trim()}
 					>
 						{pending ? "Saving…" : "Save"}
 					</Button>

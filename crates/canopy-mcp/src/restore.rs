@@ -184,8 +184,7 @@ impl CanopyMcp {
 				machine_name: c
 					.machine_id
 					.and_then(|m| check_machine_names.get(&m))
-					.cloned()
-					.flatten(),
+					.cloned(),
 				snapshot_id: c.snapshot_id,
 				outcome: c.outcome,
 				replica_healthy: c.replica_healthy,
@@ -286,11 +285,7 @@ impl CanopyMcp {
 					group_id: r.group_id,
 					group_name: g_names.get(&r.group_id).cloned(),
 					machine_id: r.machine_id,
-					machine_name: r
-						.machine_id
-						.and_then(|m| machine_names.get(&m))
-						.cloned()
-						.flatten(),
+					machine_name: r.machine_id.and_then(|m| machine_names.get(&m)).cloned(),
 					r#type: r.r#type.to_string(),
 					intent: r.intent.to_string(),
 					name: r.name,

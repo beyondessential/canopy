@@ -342,7 +342,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 		let server_rows = &by_machine[&machine_id];
 		let device_id = server_rows.iter().find_map(|r| r.device_id);
 		let machine = crate::machines::Machine::get_by_id(db, machine_id).await?;
-		let label = machine_label(&machine);
+		let label = machine.name.clone();
 
 		// Both flags are per-box now that the check is: whether this box's
 		// staleness (or never) check is currently degraded at all.
@@ -754,14 +754,6 @@ pub(crate) async fn open_machine_issue_active(
 	Ok(n > 0)
 }
 
-/// A machine's label for alert messages: its name, else its id.
-pub fn machine_label(machine: &crate::machines::Machine) -> String {
-	match &machine.name {
-		Some(n) if !n.is_empty() => n.clone(),
-		_ => machine.id.to_string(),
-	}
-}
-
 /// Whether a group-scoped `(canopy, ref)` issue is currently open + active.
 pub(crate) async fn open_group_issue_active(
 	db: &mut AsyncPgConnection,
@@ -782,17 +774,13 @@ pub(crate) async fn open_group_issue_active(
 }
 
 /// How an alert message names a server: the name an operator knows it by,
-/// qualified with its host when both are known, falling back to the host
-/// alone and finally to the id. Shared across every canopy-determined check
-/// so they all name applications the same way — never interpolate a bare id.
+/// qualified with its host when it has one. Shared across every
+/// canopy-determined check so they all name applications the same way.
 // spec: BKJ#alerting
 pub fn server_label(server: &Application) -> String {
-	let host = server.host.as_ref().map(|h| h.0.to_string());
-	match (&server.name, host) {
-		(Some(n), Some(h)) if !n.is_empty() => format!("{n} ({h})"),
-		(Some(n), None) if !n.is_empty() => n.clone(),
-		(_, Some(h)) => h,
-		(_, None) => server.id.to_string(),
+	match &server.host {
+		Some(h) => format!("{} ({})", server.display_name(), h.0),
+		None => server.display_name(),
 	}
 }
 

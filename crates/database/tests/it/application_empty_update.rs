@@ -43,7 +43,7 @@ fn new_server(host: &str, machine_id: Uuid) -> Application {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_update_setting_no_column_leaves_the_application_as_it_was() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let machine = Machine::create(&mut conn, NewMachine::default())
+		let machine = Machine::create(&mut conn, NewMachine::named("box"))
 			.await
 			.unwrap();
 		let before =

@@ -3397,7 +3397,7 @@
           "applications"
         ],
         "summary": "Get a server's display name.",
-        "description": "Returns the server's name if set, else its stored host, else its id —\nalways a non-empty string suitable for display. Returns 404 if no server\nexists with that id.",
+        "description": "Returns the server's name if set, else its type's, so an unnamed\napplication reads the same here as everywhere else. Returns 404 if no\nserver exists with that id.",
         "operationId": "get_name",
         "requestBody": {
           "content": {
@@ -4241,6 +4241,16 @@
                 "schema": {
                   "type": "string",
                   "format": "uuid"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
                 }
               }
             }
@@ -12778,6 +12788,7 @@
         "description": "One machine's identity and its currently reported detail, as a row of the\nfleet view.",
         "required": [
           "machine_id",
+          "machine_name",
           "detail",
           "checks"
         ],
@@ -12818,11 +12829,8 @@
             "description": "Unique identifier for the machine."
           },
           "machine_name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The name its operator gave it, if any."
+            "type": "string",
+            "description": "The name its operator gave it."
           },
           "platform": {
             "type": [
@@ -13169,6 +13177,7 @@
         "description": "One of a group's machines, as an operator picks it out of a list.\n\nCarries the box's own state as well as its name, because the group tree\ndraws each machine as an enclosure around the applications on it and an\nenclosure with nothing to say is a decoration. A box whose own checks are\nfailing while its workloads are fine is a state only this can show.",
         "required": [
           "id",
+          "name",
           "up",
           "health",
           "maintained",
@@ -13194,11 +13203,8 @@
             "description": "Whether every window over the box has ended and it is serving out the\nsettle period."
           },
           "name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The operator-assigned name, where it has one."
+            "type": "string",
+            "description": "The operator-assigned name."
           },
           "own_window": {
             "type": "boolean",
@@ -13890,7 +13896,7 @@
           },
           "name": {
             "type": "string",
-            "description": "The application's name within its group, falling back to its host and\nthen its identifier."
+            "description": "The application's name, or its type's where nobody has named it."
           },
           "type": {
             "$ref": "#/components/schemas/ApplicationType",
@@ -15068,6 +15074,7 @@
         "description": "A host in the fleet: a box, physical or virtual, that canopy monitors.\n\nDistinct from the application server running on it. A machine carries the\nfacts that belong to the box — where it is, what identity speaks for it,\nhow long it may be silent — so a host running two workloads reports its\nplatform, memory and filesystems once rather than once per workload.\n\nA machine hosts any number of applications, including none: one created but\nnot yet reporting presents as awaiting check-in rather than as an error.",
         "required": [
           "id",
+          "name",
           "alert_when_down_for",
           "is_monitored"
         ],
@@ -15129,11 +15136,8 @@
             "description": "Whether this machine is actively monitored. Switching it off quiets\nthe machine's own checks and does not touch the applications on it —\na box excused from monitoring says nothing about its workloads."
           },
           "name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The name its operator gave it. Distinct from the hostname the\noperating system reports, which is a reported figure rather than a\nfield an operator sets."
+            "type": "string",
+            "description": "The name its operator gave it, never blank. Distinct from the hostname\nthe operating system reports, which is a reported figure rather than a\nfield an operator sets."
           },
           "notes": {
             "type": "string",
@@ -15259,6 +15263,9 @@
       "MachineCreateArgs": {
         "type": "object",
         "description": "What an operator supplies when adding a machine.\n\nThe group is the only field that matters to get right up front: which\ngroup a box belongs to is the one thing the box has no way of knowing.",
+        "required": [
+          "name"
+        ],
         "properties": {
           "alert_when_down_for": {
             "type": [
@@ -15302,11 +15309,8 @@
             "description": "Whether the machine's own checks alert. Defaults to on."
           },
           "name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "What to call the box. Distinct from the hostname its operating system\nreports, which arrives as a reported figure."
+            "type": "string",
+            "description": "What to call the box; required and never blank. Distinct from the\nhostname its operating system reports, which arrives as a reported\nfigure."
           },
           "notes": {
             "type": [
@@ -15633,7 +15637,7 @@
               "string",
               "null"
             ],
-            "description": "New name for the box, or `null` to clear it."
+            "description": "New name for the box. A machine always has a name, so it can be\nchanged but not cleared."
           },
           "notes": {
             "type": [
@@ -17194,6 +17198,13 @@
             "format": "uuid",
             "description": "The server this run was for, if known."
           },
+          "machine_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "That machine's name, so a run from a box that has since left the group\nstill reads by name."
+          },
           "outcome": {
             "oneOf": [
               {
@@ -17485,6 +17496,7 @@
         "description": "One server a redacting declaration covers but cannot redact.",
         "required": [
           "server_id",
+          "server_name",
           "reason"
         ],
         "properties": {
@@ -17498,11 +17510,8 @@
             "description": "The server that would be restored unmasked, and so isn't restored."
           },
           "server_name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Its display name, when known."
+            "type": "string",
+            "description": "Its display name."
           },
           "version": {
             "type": [
@@ -17791,6 +17800,13 @@
             ],
             "format": "uuid",
             "description": "The machine the restore is for, when reported. Absent for inferred rows\n(the issuance is minted per group+type, not per machine)."
+          },
+          "machine_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "That machine's name."
           },
           "observed_at": {
             "type": [

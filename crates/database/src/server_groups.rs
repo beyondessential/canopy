@@ -341,9 +341,8 @@ impl ServerGroup {
 				let recent = Status::latest_for_servers(conn, &member_ids).await?;
 				if !recent.is_empty() {
 					return Err(AppError::Conflict(format!(
-						"group {group_id} has {} server(s) that reported within the last \
-						 week; only a group whose applications have all gone quiet can be \
-						 archived",
+						"this group has {} server(s) that reported within the last week; \
+						 only a group whose applications have all gone quiet can be archived",
 						recent.len(),
 					)));
 				}

@@ -29,7 +29,7 @@ struct SelfResponse {
 async fn the_listing_reads_the_same_under_both_names() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) \
+			"WITH m AS (INSERT INTO machines (name) VALUES ('box') RETURNING id) \
 			 INSERT INTO applications (name, host, type, rank, public_name, machine_id) \
 			 SELECT 'Test Application', 'https://test.com', 'tamanu-central', 'production', 'Test Application', m.id FROM m",
 		)
@@ -60,7 +60,7 @@ async fn self_reads_the_same_under_both_names() {
 		async |mut conn, cert, device_id, public, _| {
 			let machine_id = Uuid::new_v4();
 			sql_query(
-				"WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) \
+				"WITH m AS (INSERT INTO machines (name, id, device_id) VALUES ('box', $1, $2) RETURNING id) \
 				 INSERT INTO applications (id, host, type, machine_id) \
 				 VALUES ($1, 'https://self.example.com', 'tamanu-central', $1)",
 			)

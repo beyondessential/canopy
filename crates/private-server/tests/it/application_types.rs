@@ -23,7 +23,7 @@ async fn insert_application(
 	let id = Uuid::new_v4();
 	let ty = r#type;
 	conn.batch_execute(&format!(
-		"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{id}', '{group_id}') RETURNING id) \
+		"WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{id}', '{group_id}') RETURNING id) \
 		 INSERT INTO applications (id, host, type, rank, group_id, machine_id) \
 		 VALUES ('{id}', 'https://{id}.example.com', '{ty}', '{rank}', '{group_id}', '{id}')"
 	))
@@ -154,7 +154,7 @@ async fn a_machines_labels_carry_no_type_and_take_the_highest_rank_on_it() {
 		// One box, two workloads of different software and different ranks.
 		let machine = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO machines (id, group_id) VALUES ('{machine}', '{group_id}')"
+			"INSERT INTO machines (name, id, group_id) VALUES ('box', '{machine}', '{group_id}')"
 		))
 		.await
 		.expect("insert machine");
@@ -200,6 +200,31 @@ async fn a_machines_labels_carry_no_type_and_take_the_highest_rank_on_it() {
 			labels.get("billing.deployment").map(String::as_str),
 			Some("pacific")
 		);
+	})
+	.await
+}
+
+/// An application nobody has named reads as its type wherever its name is
+/// asked for, rather than as the host it answers on or its id.
+// spec: FLT#naming
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unnamed_application_is_called_by_its_type() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		let group_body: serde_json::Value = private
+			.post("/api/fleet/groups/create")
+			.json(&json!({ "name": "unnamed-site" }))
+			.await
+			.json();
+		let group_id = group_body["id"].as_str().unwrap().to_string();
+		let id = insert_application(&mut conn, &group_id, "tamanu-facility", "production").await;
+
+		let response = private
+			.post("/api/fleet/applications/get_name")
+			.json(&json!({ "server_id": id }))
+			.await;
+		response.assert_status_ok();
+		let name: String = response.json();
+		assert_eq!(name, "Tamanu facility");
 	})
 	.await
 }

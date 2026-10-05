@@ -62,7 +62,7 @@ async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Ap
 		.await
 		.expect("group");
 	let server: AppRow = sql_query(
-		"WITH m AS (INSERT INTO machines (group_id) VALUES ($2) RETURNING id) INSERT INTO applications (host, type, rank, group_id, machine_id) SELECT $1, 'tamanu-central', 'production', $2, m.id FROM m RETURNING id, machine_id",
+		"WITH m AS (INSERT INTO machines (name, group_id) VALUES ('box', $2) RETURNING id) INSERT INTO applications (host, type, rank, group_id, machine_id) SELECT $1, 'tamanu-central', 'production', $2, m.id FROM m RETURNING id, machine_id",
 	)
 	.bind::<sql_types::Text, _>("https://central.kamaka.example")
 	.bind::<sql_types::Uuid, _>(group.id)
@@ -112,7 +112,7 @@ async fn server_at(
 	running: &str,
 ) -> Application {
 	let server: AppRow = sql_query(
-		"WITH m AS (INSERT INTO machines (group_id) VALUES ($3) RETURNING id) INSERT INTO applications (host, type, rank, group_id, machine_id) SELECT $1, 'tamanu-central', $2, $3, m.id FROM m RETURNING id, machine_id",
+		"WITH m AS (INSERT INTO machines (name, group_id) VALUES ('box', $3) RETURNING id) INSERT INTO applications (host, type, rank, group_id, machine_id) SELECT $1, 'tamanu-central', $2, $3, m.id FROM m RETURNING id, machine_id",
 	)
 	.bind::<sql_types::Text, _>(format!("https://{rank}.kamaka.example"))
 	.bind::<sql_types::Text, _>(rank.to_string())
@@ -1223,7 +1223,7 @@ async fn an_application_with_no_rank_follows_the_headline_environment() {
 	TestDb::run(|mut conn, _url| async move {
 		let (group, _production) = group_running(&mut conn, "2.60.0").await;
 		let unranked: AppRow = sql_query(
-			"WITH m AS (INSERT INTO machines (group_id) VALUES ($1) RETURNING id) INSERT INTO applications (host, type, group_id, machine_id) SELECT 'https://x.kamaka.example', 'tamanu-facility', $1, m.id FROM m RETURNING id, machine_id",
+			"WITH m AS (INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id) INSERT INTO applications (host, type, group_id, machine_id) SELECT 'https://x.kamaka.example', 'tamanu-facility', $1, m.id FROM m RETURNING id, machine_id",
 		)
 		.bind::<sql_types::Uuid, _>(group)
 		.get_result(&mut conn)
@@ -1271,7 +1271,7 @@ async fn a_group_with_no_ranked_member_plans_as_its_production() {
 				.await
 				.expect("group");
 		let central: AppRow = sql_query(
-			"WITH m AS (INSERT INTO machines (group_id) VALUES ($1) RETURNING id) INSERT INTO applications (host, type, group_id, machine_id) SELECT 'https://central.drifting.example', 'tamanu-central', $1, m.id FROM m RETURNING id, machine_id",
+			"WITH m AS (INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id) INSERT INTO applications (host, type, group_id, machine_id) SELECT 'https://central.drifting.example', 'tamanu-central', $1, m.id FROM m RETURNING id, machine_id",
 		)
 		.bind::<sql_types::Uuid, _>(group.id)
 		.get_result(&mut conn)
@@ -1354,7 +1354,7 @@ async fn group_with_a_member_behind(conn: &mut AsyncPgConnection) -> Uuid {
 	] {
 		let host = format!("https://{}.example", Uuid::new_v4());
 		let app: AppRow = sql_query(
-			"WITH m AS (INSERT INTO machines (group_id) VALUES ($4) RETURNING id) INSERT INTO applications (host, type, rank, group_id, machine_id) SELECT $1, $2, $3, $4, m.id FROM m RETURNING id, machine_id",
+			"WITH m AS (INSERT INTO machines (name, group_id) VALUES ('box', $4) RETURNING id) INSERT INTO applications (host, type, rank, group_id, machine_id) SELECT $1, $2, $3, $4, m.id FROM m RETURNING id, machine_id",
 		)
 		.bind::<sql_types::Text, _>(host)
 		.bind::<sql_types::Text, _>(r#type)

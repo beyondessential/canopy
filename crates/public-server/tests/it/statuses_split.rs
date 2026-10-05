@@ -50,7 +50,7 @@ async fn machine_for(conn: &mut AsyncPgConnection, device_id: Uuid) -> Uuid {
 		.await
 		.expect("insert group");
 	let machine_id = Uuid::new_v4();
-	sql_query("INSERT INTO machines (id, group_id, device_id) VALUES ($1, $2, $3)")
+	sql_query("INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', $1, $2, $3)")
 		.bind::<sql_types::Uuid, _>(machine_id)
 		.bind::<sql_types::Uuid, _>(group_id)
 		.bind::<sql_types::Uuid, _>(device_id)

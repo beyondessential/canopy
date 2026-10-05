@@ -1725,9 +1725,9 @@ export interface paths {
         put?: never;
         /**
          * Get a server's display name.
-         * @description Returns the server's name if set, else its stored host, else its id —
-         *     always a non-empty string suitable for display. Returns 404 if no server
-         *     exists with that id.
+         * @description Returns the server's name if set, else its type's, so an unnamed
+         *     application reads the same here as everywhere else. Returns 404 if no
+         *     server exists with that id.
          */
         post: operations["get_name"];
         delete?: never;
@@ -6710,8 +6710,8 @@ export interface components {
              * @description Unique identifier for the machine.
              */
             machine_id: string;
-            /** @description The name its operator gave it, if any. */
-            machine_name?: string | null;
+            /** @description The name its operator gave it. */
+            machine_name: string;
             /**
              * @description The operating system the box runs, qualified by its version where one
              *     is reported. A box reporting no operating system falls back to the
@@ -6953,8 +6953,8 @@ export interface components {
              *     settle period.
              */
             maintenance_settling: boolean;
-            /** @description The operator-assigned name, where it has one. */
-            name?: string | null;
+            /** @description The operator-assigned name. */
+            name: string;
             /**
              * @description Whether the window covering this box was declared over the box itself,
              *     as against one reaching it through its environment or its group.
@@ -7434,10 +7434,7 @@ export interface components {
              * @description Identifier of the application.
              */
             id: string;
-            /**
-             * @description The application's name within its group, falling back to its host and
-             *     then its identifier.
-             */
+            /** @description The application's name, or its type's where nobody has named it. */
             name: string;
             /** @description What the application is: the software and the role it plays together. */
             type: components["schemas"]["ApplicationType"];
@@ -8221,11 +8218,11 @@ export interface components {
              */
             is_monitored: boolean;
             /**
-             * @description The name its operator gave it. Distinct from the hostname the
-             *     operating system reports, which is a reported figure rather than a
+             * @description The name its operator gave it, never blank. Distinct from the hostname
+             *     the operating system reports, which is a reported figure rather than a
              *     field an operator sets.
              */
-            name?: string | null;
+            name: string;
             /** @description Free-form operator notes about this machine. */
             notes?: string;
             /**
@@ -8346,10 +8343,11 @@ export interface components {
             /** @description Whether the machine's own checks alert. Defaults to on. */
             is_monitored?: boolean | null;
             /**
-             * @description What to call the box. Distinct from the hostname its operating system
-             *     reports, which arrives as a reported figure.
+             * @description What to call the box; required and never blank. Distinct from the
+             *     hostname its operating system reports, which arrives as a reported
+             *     figure.
              */
-            name?: string | null;
+            name: string;
             /** @description Operator notes shown on the machine's page. */
             notes?: string | null;
             tags?: null | components["schemas"]["TagMap"];
@@ -8549,7 +8547,10 @@ export interface components {
              * @description The machine to edit.
              */
             machine_id: string;
-            /** @description New name for the box, or `null` to clear it. */
+            /**
+             * @description New name for the box. A machine always has a name, so it can be
+             *     changed but not cleared.
+             */
             name?: string | null;
             /** @description New free-form operator notes for the box. */
             notes?: string | null;
@@ -9463,6 +9464,11 @@ export interface components {
              * @description The server this run was for, if known.
              */
             machine_id?: string | null;
+            /**
+             * @description That machine's name, so a run from a box that has since left the group
+             *     still reads by name.
+             */
+            machine_name?: string | null;
             outcome?: null | components["schemas"]["RunOutcome"];
             progress?: null | components["schemas"]["LiveProgress"];
             /** @description Whether the run was a backup or a restore. */
@@ -9641,8 +9647,8 @@ export interface components {
              * @description The server that would be restored unmasked, and so isn't restored.
              */
             server_id: string;
-            /** @description Its display name, when known. */
-            server_name?: string | null;
+            /** @description Its display name. */
+            server_name: string;
             /** @description The version it reports, when the reason concerns one. */
             version?: string | null;
         };
@@ -9836,6 +9842,8 @@ export interface components {
              *     (the issuance is minted per group+type, not per machine).
              */
             machine_id?: string | null;
+            /** @description That machine's name. */
+            machine_name?: string | null;
             /**
              * Format: date-time
              * @description When the consumer observed the restore result (client-reported); reported
@@ -14937,6 +14945,14 @@ export interface operations {
                 };
                 content: {
                     "text/plain": string;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
             500: {

@@ -126,8 +126,8 @@ pub struct RestoreReplicaView {
 pub struct RedactionGap {
 	/// The server that would be restored unmasked, and so isn't restored.
 	pub server_id: Uuid,
-	/// Its display name, when known.
-	pub server_name: Option<String>,
+	/// Its display name.
+	pub server_name: String,
 	/// Why it can't be redacted.
 	pub reason: RedactionGapReason,
 	/// The version it reports, when the reason concerns one.
@@ -379,7 +379,7 @@ async fn redaction_gaps_for(
 		if let Some((reason, version)) = restore::redaction_gap_for(conn, &server).await? {
 			gaps.push(RedactionGap {
 				server_id: server.id,
-				server_name: Some(server.display_name()),
+				server_name: server.display_name(),
 				reason,
 				version,
 			});
@@ -554,6 +554,8 @@ pub struct RestoreActivity {
 	/// The machine the restore is for, when reported. Absent for inferred rows
 	/// (the issuance is minted per group+type, not per machine).
 	pub machine_id: Option<Uuid>,
+	/// That machine's name.
+	pub machine_name: Option<String>,
 	/// The backup type restored.
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
@@ -646,11 +648,16 @@ pub async fn checks(
 	// this table is for restore *consumers*, so their issuances are the ones we
 	// pair here (the complement of the backup panel's member-device filter). An
 	// identity belongs to a box, so the members are the group's machines.
-	let member_devices: HashSet<Uuid> = Machine::list_for_group(&mut conn, group_id)
-		.await?
-		.into_iter()
-		.filter_map(|m| m.device_id)
-		.collect();
+	let members = Machine::list_for_group(&mut conn, group_id).await?;
+	let member_devices: HashSet<Uuid> = members.iter().filter_map(|m| m.device_id).collect();
+	// A check outlives its box's membership, so only a box that has since left
+	// the group costs a lookup.
+	let machine_names = Machine::names_with_known(
+		&mut conn,
+		&members,
+		checks.iter().filter_map(|c| c.machine_id),
+	)
+	.await?;
 
 	let issuance_since =
 		run_pairing::issuance_since(now, checks.iter().map(|c| c.reported_at).min());
@@ -685,6 +692,7 @@ pub async fn checks(
 			RestoreActivity {
 				key: format!("check-{}", c.id),
 				status: RunStatus::Reported,
+				machine_name: c.machine_id.and_then(|id| machine_names.get(&id).cloned()),
 				machine_id: c.machine_id,
 				r#type: c.r#type,
 				intent: Some(c.intent),
@@ -719,6 +727,7 @@ pub async fn checks(
 			key: format!("issuance-{}", first.id),
 			status,
 			machine_id: None,
+			machine_name: None,
 			r#type: first.r#type,
 			intent: None,
 			outcome: None,

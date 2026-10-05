@@ -247,10 +247,11 @@ async fn a_machines_issues_are_not_self_alerts() {
 			#[diesel(sql_type = diesel::sql_types::Uuid)]
 			id: uuid::Uuid,
 		}
-		let machine: RowId = diesel::sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
-			.get_result(&mut conn)
-			.await
-			.expect("insert machine");
+		let machine: RowId =
+			diesel::sql_query("INSERT INTO machines (name) VALUES ('box') RETURNING id")
+				.get_result(&mut conn)
+				.await
+				.expect("insert machine");
 
 		database::issues::file_check(
 			&mut conn,
@@ -289,7 +290,7 @@ async fn insert_server(conn: &mut diesel_async::AsyncPgConnection) -> uuid::Uuid
 		id: uuid::Uuid,
 	}
 	let row: RowId = diesel::sql_query(
-		"WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (type, host, machine_id) SELECT 'tamanu-central', 'http://sc.invalid/', m.id FROM m RETURNING id",
+		"WITH m AS (INSERT INTO machines (name) VALUES ('box') RETURNING id) INSERT INTO applications (type, host, machine_id) SELECT 'tamanu-central', 'http://sc.invalid/', m.id FROM m RETURNING id",
 	)
 	.get_result(conn)
 	.await

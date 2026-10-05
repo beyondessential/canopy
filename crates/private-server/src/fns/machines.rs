@@ -351,9 +351,10 @@ pub async fn get_detail(
 /// group a box belongs to is the one thing the box has no way of knowing.
 #[derive(Deserialize, ToSchema)]
 pub struct MachineCreateArgs {
-	/// What to call the box. Distinct from the hostname its operating system
-	/// reports, which arrives as a reported figure.
-	pub name: Option<String>,
+	/// What to call the box; required and never blank. Distinct from the
+	/// hostname its operating system reports, which arrives as a reported
+	/// figure.
+	pub name: String,
 	/// The group this machine belongs to. The applications on it take it.
 	pub group_id: Option<Uuid>,
 	/// Whether the box is cloud-hosted, if known.
@@ -392,6 +393,7 @@ pub struct MachineCreateArgs {
 	request_body = MachineCreateArgs,
 	responses(
 		(status = 200, body = Uuid),
+		(status = 400, body = ProblemDetailsSchema),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
@@ -400,6 +402,8 @@ pub async fn create(
 	_admin: TailscaleAdmin,
 	Json(args): Json<MachineCreateArgs>,
 ) -> Result<Json<Uuid>> {
+	// Refused before the tailnet bind, so a blank name leaves nothing behind.
+	let name = database::machines::normalise_name(&args.name)?;
 	let mut conn = state.db.get().await?;
 
 	// Bind the tailnet node first: a machine created and then failed to bind
@@ -412,7 +416,7 @@ pub async fn create(
 	let machine = Machine::create(
 		&mut conn,
 		NewMachine {
-			name: args.name,
+			name,
 			group_id: args.group_id,
 			cloud: args.cloud,
 			geolocation: args.geolocation,
@@ -450,8 +454,9 @@ pub async fn create(
 pub struct MachineUpdateArgs {
 	/// The machine to edit.
 	pub machine_id: Uuid,
-	/// New name for the box, or `null` to clear it.
-	pub name: Option<Option<String>>,
+	/// New name for the box. A machine always has a name, so it can be
+	/// changed but not cleared.
+	pub name: Option<String>,
 	/// New group, or `null` to remove it from its current one. The
 	/// applications on this machine move with it.
 	pub group_id: Option<Option<Uuid>>,
@@ -629,7 +634,8 @@ pub async fn attach_tailscale_device(
 		&& other.deleted_at.is_none()
 	{
 		return Err(AppError::Conflict(format!(
-			"identity {device_id} already speaks for another machine",
+			"this identity already speaks for {}",
+			other.name
 		)));
 	}
 

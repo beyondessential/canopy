@@ -83,8 +83,11 @@ test.describe("restore replicas", () => {
 
 		await page.goto(`/fleet/groups/${groupId}/backups`);
 		await expect(page.getByText(/recent restore checks/i)).toBeVisible();
-		// The reported check's row shows its Canopy-measured duration.
+		// The reported check's row shows its Canopy-measured duration, and
+		// names the machine it restored by name.
+		// spec: FLT#naming
 		await expect(page.getByRole("row", { name: /verify/ })).toContainText("5m");
+		await expect(page.getByRole("row", { name: /verify/ })).toContainText("rr-srv");
 		// The unreported restore surfaces as in progress.
 		await expect(page.getByRole("row", { name: /in progress/i })).toBeVisible();
 	});

@@ -286,7 +286,7 @@ async fn key_deactivation_works() {
 			use diesel::{sql_query, sql_types};
 			use diesel_async::RunQueryDsl;
 			let server_id = uuid::Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
-			sql_query("INSERT INTO machines (id, device_id) VALUES ($1, $2)")
+			sql_query("INSERT INTO machines (name, id, device_id) VALUES ('box', $1, $2)")
 				.bind::<sql_types::Uuid, _>(server_id)
 				.bind::<sql_types::Uuid, _>(device_id)
 				.execute(&mut conn)
@@ -402,7 +402,7 @@ async fn key_rotation_scenario() {
 			let server_id = uuid::Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
 			sql_query(
 				r#"
-				WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, machine_id)
+				WITH m AS (INSERT INTO machines (name, id, device_id) VALUES ('box', $1, $2) RETURNING id) INSERT INTO applications (id, host, type, machine_id)
 				VALUES ($1, 'https://rotation-test.com', 'tamanu-facility', $1)
 			"#,
 			)

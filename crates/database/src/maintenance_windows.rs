@@ -690,16 +690,12 @@ pub async fn target_label(
 	match scope {
 		Scope::Machine(mid) => {
 			let machine = Machine::get_by_id(db, mid).await?;
-			let own = machine
-				.name
-				.clone()
-				.unwrap_or_else(|| machine.id.to_string());
 			match machine.group_id {
 				Some(gid) => {
 					let group = ServerGroup::get_by_id(db, gid).await?;
-					Ok(format!("{} {own}", group.name))
+					Ok(format!("{} {}", group.name, machine.name))
 				}
-				None => Ok(own),
+				None => Ok(machine.name),
 			}
 		}
 		Scope::Application(aid) => {

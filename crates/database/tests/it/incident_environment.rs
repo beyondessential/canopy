@@ -45,11 +45,12 @@ async fn insert_group(conn: &mut diesel_async::AsyncPgConnection) -> Uuid {
 }
 
 async fn insert_machine(conn: &mut diesel_async::AsyncPgConnection, group: Option<Uuid>) -> Uuid {
-	let row: RowId = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
-		.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group)
-		.get_result(conn)
-		.await
-		.expect("machine");
+	let row: RowId =
+		sql_query("INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id")
+			.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group)
+			.get_result(conn)
+			.await
+			.expect("machine");
 	row.id
 }
 
@@ -468,9 +469,7 @@ async fn a_notice_names_the_environment_it_is_about() {
 			.map(|r| r.payload["message"].as_str().unwrap_or_default())
 			.collect();
 		assert!(
-			messages
-				.iter()
-				.any(|m| m.contains("on http://test.invalid/")),
+			messages.iter().any(|m| m.contains("on Tamanu central")),
 			"got {messages:?}"
 		);
 	})

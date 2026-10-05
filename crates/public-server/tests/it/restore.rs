@@ -45,7 +45,7 @@ async fn make_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uuid {
 	let server_id = Uuid::new_v4();
 	let host = format!("https://srv-{server_id}.example.com");
 	sql_query(
-		"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, machine_id, name) VALUES ($1, $2, 'tamanu-central', 'production', $3, $1, 'kamaka')",
+		"WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', $1, $3) RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, machine_id, name) VALUES ($1, $2, 'tamanu-central', 'production', $3, $1, 'kamaka')",
 	)
 		.bind::<sql_types::Uuid, _>(server_id)
 		.bind::<sql_types::Text, _>(host)
@@ -401,7 +401,7 @@ async fn make_senaite_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uu
 	let server_id = Uuid::new_v4();
 	let host = format!("https://lims-{server_id}.example.com");
 	sql_query(
-		"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) \
+		"WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', $1, $3) RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) \
 		 VALUES ($1, $2, 'senaite', $3, $1)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)

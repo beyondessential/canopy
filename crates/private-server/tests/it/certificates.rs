@@ -8,9 +8,11 @@ use uuid::Uuid;
 /// Two applications on one machine, which is the case declarations exist for.
 async fn two_workloads_on_a_box(conn: &mut AsyncPgConnection) -> (Uuid, Uuid) {
 	let machine = Uuid::new_v4();
-	conn.batch_execute(&format!("INSERT INTO machines (id) VALUES ('{machine}')"))
-		.await
-		.expect("insert machine");
+	conn.batch_execute(&format!(
+		"INSERT INTO machines (name, id) VALUES ('box', '{machine}')"
+	))
+	.await
+	.expect("insert machine");
 	let mut ids = Vec::new();
 	for name in ["front", "worker"] {
 		let id = Uuid::new_v4();

@@ -31,7 +31,7 @@ async fn insert_grouped_server(
 	.await
 	.expect("group");
 	let row: RowId = sql_query(
-		"WITH m AS (INSERT INTO machines (group_id) VALUES ($1) RETURNING id) \
+		"WITH m AS (INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id) \
 		 INSERT INTO applications (type, name, group_id, machine_id) \
 		 SELECT 'tamanu-central', 'central-1', $1, m.id FROM m RETURNING id",
 	)

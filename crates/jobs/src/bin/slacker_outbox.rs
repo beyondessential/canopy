@@ -315,6 +315,15 @@ async fn file_self_event(
 	attempts: i32,
 	err: &DeliveryError,
 ) -> Result<(), commons_errors::AppError> {
+	let target = match row.incident_id {
+		Some(id) => Some(
+			database::issues::Incident::get_by_id(conn, id)
+				.await?
+				.target_label(conn)
+				.await?,
+		),
+		None => None,
+	};
 	database::self_alerts::raise(
 		conn,
 		database::self_alerts::SLACK_DELIVERY_FAILURE_REF,
@@ -324,10 +333,9 @@ async fn file_self_event(
 		Some(database::self_alerts::SLACK_DELIVERY_FAILURE_DOC),
 		&format!("Slack delivery permanently failed ({})", row.kind),
 		&format!(
-			"outbox row {} (kind={}, incident={:?}): gave up after {attempts} attempts. Last error: {}. Last response: {}",
-			row.id,
+			"{} notification{}: gave up after {attempts} attempts. Last error: {}. Last response: {}",
 			row.kind,
-			row.incident_id,
+			target.map(|t| format!(" for {t}")).unwrap_or_default(),
 			err.msg,
 			err.body.as_deref().unwrap_or("<none>"),
 		),
@@ -849,7 +857,7 @@ mod tests {
 		commons_tests::db::TestDb::run(async |mut conn, _| {
 			let application: RowId = sql_query(
 				"WITH g AS (INSERT INTO server_groups (name) VALUES ('site') RETURNING id), \
-				 m AS (INSERT INTO machines (group_id) SELECT id FROM g RETURNING id, group_id) \
+				 m AS (INSERT INTO machines (name, group_id) SELECT 'box', id FROM g RETURNING id, group_id) \
 				 INSERT INTO applications (type, name, group_id, machine_id) \
 				 SELECT 'tamanu-central', 'central-1', m.group_id, m.id FROM m RETURNING id",
 			)
@@ -903,6 +911,70 @@ mod tests {
 				row.payload["source_ref"], "2 failed",
 				"the row records what was posted, not the snapshot it was queued with"
 			);
+		})
+		.await
+	}
+
+	/// Giving up on a row raises a self-alert naming the notification by its
+	/// kind and its incident's target, never by the row's or incident's id.
+	// spec: FLT#naming
+	#[tokio::test(flavor = "multi_thread")]
+	async fn giving_up_names_the_incident_target() {
+		use diesel::{QueryableByName, sql_query, sql_types};
+		use diesel_async::RunQueryDsl;
+
+		#[derive(QueryableByName)]
+		struct RowId {
+			#[diesel(sql_type = sql_types::Uuid)]
+			id: Uuid,
+		}
+
+		commons_tests::db::TestDb::run(async |mut conn, _| {
+			let application: RowId = sql_query(
+				"WITH g AS (INSERT INTO server_groups (name) VALUES ('site') RETURNING id), \
+				 m AS (INSERT INTO machines (name, group_id) SELECT 'box', id FROM g RETURNING id, group_id) \
+				 INSERT INTO applications (type, name, group_id, machine_id) \
+				 SELECT 'tamanu-central', 'central-1', m.group_id, m.id FROM m RETURNING id",
+			)
+			.get_result(&mut conn)
+			.await
+			.expect("application");
+			fail(&mut conn, application.id, "app-down").await;
+			let incident: RowId = sql_query("SELECT id FROM incidents")
+				.get_result(&mut conn)
+				.await
+				.expect("incident");
+
+			let mut given_up = row(KIND_INCIDENT_OPEN, serde_json::json!({}));
+			given_up.incident_id = Some(incident.id);
+			file_self_event(
+				&mut conn,
+				&given_up,
+				MAX_ATTEMPTS,
+				&DeliveryError {
+					msg: "503".into(),
+					body: None,
+				},
+			)
+			.await
+			.expect("raise");
+
+			let alert = database::self_alerts::current(
+				&mut conn,
+				database::self_alerts::SLACK_DELIVERY_FAILURE_REF,
+			)
+			.await
+			.expect("read")
+			.expect("raised");
+			assert!(
+				alert
+					.message
+					.starts_with("incident_open notification for site: gave up"),
+				"got: {}",
+				alert.message
+			);
+			assert!(!alert.message.contains(&incident.id.to_string()));
+			assert!(!alert.message.contains(&Uuid::nil().to_string()));
 		})
 		.await
 	}

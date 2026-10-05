@@ -218,8 +218,8 @@ pub(super) async fn group_environments(
 pub struct GroupMachine {
 	/// Unique identifier of the machine.
 	pub id: Uuid,
-	/// The operator-assigned name, where it has one.
-	pub name: Option<String>,
+	/// The operator-assigned name.
+	pub name: String,
 	/// Whether the box is reachable, judged against its own threshold.
 	pub up: ShortStatus,
 	/// The box's own health, from the checks filed against it. What the

@@ -635,7 +635,7 @@ async fn seed_servers(
 		let machine = Machine::create(
 			conn,
 			NewMachine {
-				name: server.name.clone(),
+				name: server.display_name(),
 				group_id: server.group_id,
 				cloud: server.cloud,
 				geolocation: server.geolocation,

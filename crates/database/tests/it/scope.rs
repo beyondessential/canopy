@@ -74,11 +74,12 @@ async fn insert_server(
 	group: Option<Uuid>,
 	monitored: bool,
 ) -> Uuid {
-	let machine: RowId = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
-		.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group)
-		.get_result(conn)
-		.await
-		.expect("insert machine");
+	let machine: RowId =
+		sql_query("INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id")
+			.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group)
+			.get_result(conn)
+			.await
+			.expect("insert machine");
 	let row: RowId = sql_query(
 		"INSERT INTO applications (type, host, group_id, is_monitored, machine_id) VALUES ('tamanu-central', $1, $2, $3, $4) RETURNING id",
 	)
@@ -148,13 +149,14 @@ async fn insert_machine(
 	group: Option<Uuid>,
 	monitored: bool,
 ) -> Uuid {
-	let row: RowId =
-		sql_query("INSERT INTO machines (group_id, is_monitored) VALUES ($1, $2) RETURNING id")
-			.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group)
-			.bind::<sql_types::Bool, _>(monitored)
-			.get_result(conn)
-			.await
-			.expect("insert machine");
+	let row: RowId = sql_query(
+		"INSERT INTO machines (name, group_id, is_monitored) VALUES ('box', $1, $2) RETURNING id",
+	)
+	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group)
+	.bind::<sql_types::Bool, _>(monitored)
+	.get_result(conn)
+	.await
+	.expect("insert machine");
 	row.id
 }
 

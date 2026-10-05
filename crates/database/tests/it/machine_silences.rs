@@ -28,7 +28,7 @@ async fn seed(conn: &mut AsyncPgConnection) -> (Uuid, Uuid, Uuid) {
 	let application = Uuid::new_v4();
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{group}', 'silence-group'); \
-		 INSERT INTO machines (id, group_id) VALUES ('{machine}', '{group}'); \
+		 INSERT INTO machines (name, id, group_id) VALUES ('box', '{machine}', '{group}'); \
 		 INSERT INTO applications (id, host, type, group_id, machine_id) \
 		 VALUES ('{application}', 'https://{application}.example', 'tamanu-central', \
 		         '{group}', '{machine}')"

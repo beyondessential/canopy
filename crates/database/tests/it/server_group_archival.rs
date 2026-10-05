@@ -38,7 +38,7 @@ async fn insert_server(
 	}
 	let host = format!("http://test.invalid/{}", Uuid::new_v4());
 	let row: RowId = sql_query(
-		"WITH m AS (INSERT INTO machines (group_id) VALUES ($2) RETURNING id) INSERT INTO applications (host, type, group_id, deleted_at, machine_id) SELECT $1, 'tamanu-central', $2, CASE WHEN $3 THEN now() ELSE NULL END, m.id FROM m RETURNING id",
+		"WITH m AS (INSERT INTO machines (name, group_id) VALUES ('box', $2) RETURNING id) INSERT INTO applications (host, type, group_id, deleted_at, machine_id) SELECT $1, 'tamanu-central', $2, CASE WHEN $3 THEN now() ELSE NULL END, m.id FROM m RETURNING id",
 	)
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Uuid, _>(group_id)

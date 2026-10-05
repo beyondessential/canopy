@@ -578,7 +578,7 @@ diesel::table! {
 		id -> Uuid,
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
-		name -> Nullable<Text>,
+		name -> Text,
 		group_id -> Nullable<Uuid>,
 		device_id -> Nullable<Uuid>,
 		cloud -> Nullable<Bool>,

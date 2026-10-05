@@ -58,7 +58,7 @@ async fn machine(conn: &mut AsyncPgConnection, group_id: Option<Uuid>) -> Uuid {
 		conn,
 		NewMachine {
 			group_id,
-			..Default::default()
+			..NewMachine::named("box")
 		},
 	)
 	.await
@@ -93,7 +93,7 @@ async fn an_application_has_no_type_to_fall_back_on() {
 		let inserted = diesel::sql_query(
 			// Deliberately omits the type: the point is that there is nothing
 			// for it to fall back to.
-			"WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, machine_id) VALUES ($1, 'https://legacy.example', $1)",
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', $1) RETURNING id) INSERT INTO applications (id, host, machine_id) VALUES ($1, 'https://legacy.example', $1)",
 		)
 		.bind::<diesel::sql_types::Uuid, _>(id)
 		.execute(&mut conn)

@@ -23,7 +23,7 @@ import ProvisionCredentialDialog from "../components/ProvisionCredentialDialog";
 import AddPublicKeyDialog from "../components/AddPublicKeyDialog";
 import { type ApiState, callApi, useApi, useApiAction } from "../api";
 import { GradedAction } from "../components/GradedAction";
-import { deviceDisplayName } from "../components/DeviceShorty";
+import { deviceLabel, deviceName } from "../components/DeviceShorty";
 import TimeAgo from "../components/TimeAgo";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { humanDuration } from "../lib/humanDuration";
@@ -55,7 +55,7 @@ export default function DeviceDetail() {
 	const refresh = () => setTick((t) => t + 1);
 	usePageTitle(
 		detail.status === "ok"
-			? `Device ${deviceDisplayName(detail.data)}`
+			? deviceTitle(detail.data)
 			: "Device",
 	);
 
@@ -66,6 +66,11 @@ export default function DeviceDetail() {
 	return <DeviceView device={detail.data} refresh={refresh} />;
 }
 
+function deviceTitle(device: DeviceInfo): string {
+	const name = deviceName(device);
+	return name ? `Device ${name}` : deviceLabel(null);
+}
+
 function DeviceView({
 	device,
 	refresh,
@@ -73,11 +78,11 @@ function DeviceView({
 	device: DeviceInfo;
 	refresh: () => void;
 }) {
-	const name = deviceDisplayName(device);
+	const title = deviceTitle(device);
 	return (
 		<Stack spacing={3}>
 			<Typography variant="h4" component="h1">
-				Device {name}
+				{title}
 			</Typography>
 			<DeviceInfoBox device={device} />
 			<TailnetIdentitySection device={device} refresh={refresh} />

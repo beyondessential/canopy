@@ -85,27 +85,6 @@ impl From<DirectoryEntry> for TailnetLiveInfo {
 	}
 }
 
-impl DeviceInfo {
-	pub fn name(&self) -> String {
-		self.keys
-			.iter()
-			.filter(|key| key.is_active)
-			.filter_map(|key| {
-				key.name
-					.as_ref()
-					.filter(|name| *name != "Initial Key")
-					.cloned()
-			})
-			.next_back()
-			.or_else(|| {
-				self.latest_connection
-					.as_ref()
-					.map(|conn| conn.ip.to_string())
-			})
-			.unwrap_or_else(|| self.device.id.to_string())
-	}
-}
-
 /// Core identity and trust state of a device.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DeviceData {

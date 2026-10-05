@@ -134,8 +134,8 @@ async fn status_json_basic_server() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Test cluster');
-			INSERT INTO machines (id, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+			INSERT INTO machines (name, id, group_id) VALUES
+			('box', '11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 			INSERT INTO applications (id, name, host, rank, type, group_id, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Test Application', 'https://test.example.com', 'production', 'tamanu-central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111')",
 		)
@@ -180,8 +180,8 @@ async fn status_json_server_with_recent_status() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Active cluster');
-			INSERT INTO machines (id, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+			INSERT INTO machines (name, id, group_id) VALUES
+			('box', '11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 			INSERT INTO applications (id, name, host, rank, type, group_id, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Active Application', 'https://active.example.com', 'production', 'tamanu-central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111');
 
@@ -252,9 +252,9 @@ async fn reachability_uses_each_targets_own_threshold() {
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Impatient cluster'),
 			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Tolerant cluster');
-			INSERT INTO machines (id, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
-			('22222222-2222-2222-2222-222222222222', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+			INSERT INTO machines (name, id, group_id) VALUES
+			('box', '11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('box', '22222222-2222-2222-2222-222222222222', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
 			INSERT INTO applications (id, name, host, rank, type, group_id, machine_id, alert_when_down_for) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Impatient Application', 'https://impatient.example.com', 'production', 'tamanu-central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111', INTERVAL '5 minutes'),
 			('22222222-2222-2222-2222-222222222222', 'Tolerant Application', 'https://tolerant.example.com', 'production', 'tamanu-central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '22222222-2222-2222-2222-222222222222', INTERVAL '1 hour');
@@ -321,10 +321,10 @@ async fn status_json_platform_detection() {
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Windows cluster'),
 			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Linux cluster'),
 			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'Windows cluster 2');
-			INSERT INTO machines (id, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
-			('22222222-2222-2222-2222-222222222222', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
-			('33333333-3333-3333-3333-333333333333', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
+			INSERT INTO machines (name, id, group_id) VALUES
+			('box', '11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('box', '22222222-2222-2222-2222-222222222222', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
+			('box', '33333333-3333-3333-3333-333333333333', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
 			INSERT INTO applications (id, name, host, rank, type, group_id, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Windows Application', 'https://win.example.com', 'production', 'tamanu-central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111'),
 			('22222222-2222-2222-2222-222222222222', 'Linux Application', 'https://linux.example.com', 'production', 'tamanu-central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '22222222-2222-2222-2222-222222222222'),
@@ -390,10 +390,10 @@ async fn status_json_mixed_server_ranks() {
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Production'),
 			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Dev'),
 			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'Clone');
-			INSERT INTO machines (id, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
-			('22222222-2222-2222-2222-222222222222', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
-			('33333333-3333-3333-3333-333333333333', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
+			INSERT INTO machines (name, id, group_id) VALUES
+			('box', '11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('box', '22222222-2222-2222-2222-222222222222', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
+			('box', '33333333-3333-3333-3333-333333333333', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
 			INSERT INTO applications (id, name, host, rank, type, group_id, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Production', 'https://prod.example.com', 'production', 'tamanu-central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111'),
 			('22222222-2222-2222-2222-222222222222', 'Dev', 'https://dev.example.com', 'dev', 'tamanu-central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '22222222-2222-2222-2222-222222222222'),
@@ -449,9 +449,9 @@ async fn status_json_unnamed_servers_excluded() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Mixed cluster');
-			INSERT INTO machines (id, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
-			('22222222-2222-2222-2222-222222222222', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+			INSERT INTO machines (name, id, group_id) VALUES
+			('box', '11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('box', '22222222-2222-2222-2222-222222222222', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 			INSERT INTO applications (id, name, host, rank, type, group_id, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Named Application', 'https://named.example.com', 'production', 'tamanu-central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111'),
 			('22222222-2222-2222-2222-222222222222', NULL, 'https://unnamed.example.com', 'production', 'tamanu-central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '22222222-2222-2222-2222-222222222222')",
@@ -490,8 +490,8 @@ async fn a_gap_inside_the_threshold_is_simply_reachable() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Brief gap cluster');
-			INSERT INTO machines (id, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+			INSERT INTO machines (name, id, group_id) VALUES
+			('box', '11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 			INSERT INTO applications (id, name, host, rank, type, group_id, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Brief Gap Application', 'https://gap.example.com', 'production', 'tamanu-central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111');
 			INSERT INTO statuses (server_id, version, created_at) VALUES
@@ -542,8 +542,8 @@ async fn status_json_gone_server() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Gone cluster');
-			INSERT INTO machines (id, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+			INSERT INTO machines (name, id, group_id) VALUES
+			('box', '11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 			INSERT INTO applications (id, name, host, rank, type, group_id, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Gone Application', 'https://gone.example.com', 'production', 'tamanu-central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111')",
 		)
@@ -582,8 +582,8 @@ async fn get_detail_basic() {
 		.unwrap();
 
 		conn.batch_execute(
-			"INSERT INTO machines (id) VALUES
-			('11111111-1111-1111-1111-111111111111');
+			"INSERT INTO machines (name, id) VALUES
+			('box', '11111111-1111-1111-1111-111111111111');
 			INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Test Application', 'https://test.example.com', 'production', 'tamanu-central', '11111111-1111-1111-1111-111111111111')"
 		)
@@ -617,9 +617,9 @@ async fn get_detail_basic() {
 async fn get_detail_munin_flag() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO machines (id) VALUES
-			('11111111-1111-1111-1111-111111111111'),
-			('22222222-2222-2222-2222-222222222222');
+			"INSERT INTO machines (name, id) VALUES
+			('box', '11111111-1111-1111-1111-111111111111'),
+			('box', '22222222-2222-2222-2222-222222222222');
 
 			INSERT INTO machine_reported_detail (machine_id, source, extra) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd', '{\"munin\": true}'::jsonb),
@@ -668,8 +668,8 @@ async fn get_detail_with_status() {
 		.unwrap();
 
 		conn.batch_execute(
-			"INSERT INTO machines (id) VALUES
-			('11111111-1111-1111-1111-111111111111');
+			"INSERT INTO machines (name, id) VALUES
+			('box', '11111111-1111-1111-1111-111111111111');
 
 			INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Status Application', 'https://status.example.com', 'test', 'tamanu-central', '11111111-1111-1111-1111-111111111111');
@@ -711,9 +711,9 @@ async fn get_detail_with_status() {
 async fn get_detail_figures_resolve_across_sources() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO machines (id) VALUES
-			('11111111-1111-1111-1111-111111111111'),
-			('22222222-2222-2222-2222-222222222222');
+			"INSERT INTO machines (name, id) VALUES
+			('box', '11111111-1111-1111-1111-111111111111'),
+			('box', '22222222-2222-2222-2222-222222222222');
 
 			INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Bestool Application', 'https://bestool.example.com', 'test', 'tamanu-central', '11111111-1111-1111-1111-111111111111'),
@@ -780,7 +780,7 @@ async fn get_detail_with_device() {
 			"INSERT INTO devices (id, role) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'server');
 
-			WITH m AS (INSERT INTO machines (id, device_id) VALUES ('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
+			WITH m AS (INSERT INTO machines (name, id, device_id) VALUES ('box', '11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Device Application', 'https://device.example.com', 'production', 'tamanu-central', '11111111-1111-1111-1111-111111111111');
 
 			INSERT INTO device_connections (device_id, ip, user_agent) VALUES
@@ -893,7 +893,7 @@ async fn group_ids_with_data() {
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Production cluster'),
 			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Clone cluster'),
 			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'Demo cluster');
-			WITH m AS (INSERT INTO machines (id, group_id) VALUES ('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('44444444-4444-4444-4444-444444444444', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('55555555-5555-5555-5555-555555555555', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('22222222-2222-2222-2222-222222222222', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'), ('33333333-3333-3333-3333-333333333333', 'cccccccc-cccc-cccc-cccc-cccccccccccc') RETURNING id) INSERT INTO applications (id, name, host, rank, type, group_id, machine_id) VALUES
+			WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('box', '44444444-4444-4444-4444-444444444444', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('box', '55555555-5555-5555-5555-555555555555', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('box', '22222222-2222-2222-2222-222222222222', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'), ('box', '33333333-3333-3333-3333-333333333333', 'cccccccc-cccc-cccc-cccc-cccccccccccc') RETURNING id) INSERT INTO applications (id, name, host, rank, type, group_id, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Prod Central', 'https://prod.example.com', 'production', 'tamanu-central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111'),
 			('44444444-4444-4444-4444-444444444444', 'Prod Facility A', 'https://facility-a.example.com', 'production', 'tamanu-facility', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '44444444-4444-4444-4444-444444444444'),
 			('55555555-5555-5555-5555-555555555555', 'Prod Facility B', 'https://facility-b.example.com', 'production', 'tamanu-facility', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '55555555-5555-5555-5555-555555555555'),
@@ -944,7 +944,7 @@ async fn group_ids_excludes_ungrouped() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Production cluster');
-			WITH m AS (INSERT INTO machines (id, group_id) VALUES ('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('22222222-2222-2222-2222-222222222222', NULL) RETURNING id) INSERT INTO applications (id, name, host, rank, type, group_id, machine_id) VALUES
+			WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('box', '22222222-2222-2222-2222-222222222222', NULL) RETURNING id) INSERT INTO applications (id, name, host, rank, type, group_id, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Grouped Central', 'https://grouped.example.com', 'production', 'tamanu-central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111'),
 			('22222222-2222-2222-2222-222222222222', 'Standalone', 'https://standalone.example.com', 'production', 'tamanu-central', NULL, '22222222-2222-2222-2222-222222222222')",
 		)
@@ -991,7 +991,7 @@ struct SnapshotData {
 async fn snapshot_returns_latest_when_at_omitted() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('20000000-0000-0000-0000-000000000001') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '20000000-0000-0000-0000-000000000001') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
 			('20000000-0000-0000-0000-000000000001', 'https://snap.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000001')",
 		)
 		.await
@@ -1032,7 +1032,7 @@ async fn snapshot_returns_latest_when_at_omitted() {
 async fn snapshot_figures_survive_a_later_push_from_another_source() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('20000000-0000-0000-0000-000000000030') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '20000000-0000-0000-0000-000000000030') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
 			('20000000-0000-0000-0000-000000000030', 'https://figures.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000030');
 
 			INSERT INTO statuses (server_id, source, created_at, healthy, health, extra) VALUES
@@ -1072,7 +1072,7 @@ async fn snapshot_figures_survive_a_later_push_from_another_source() {
 async fn snapshot_figures_include_the_machines_own_rows() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('20000000-0000-0000-0000-000000000032') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '20000000-0000-0000-0000-000000000032') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
 			('20000000-0000-0000-0000-000000000032', 'https://split.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000032');
 
 			INSERT INTO statuses (server_id, machine_id, source, created_at, healthy, health, extra) VALUES
@@ -1112,7 +1112,7 @@ async fn snapshot_figures_include_the_machines_own_rows() {
 async fn snapshot_has_no_bestool_version_when_unreported() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('20000000-0000-0000-0000-000000000031') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '20000000-0000-0000-0000-000000000031') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
 			('20000000-0000-0000-0000-000000000031', 'https://nobestool.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000031');
 
 			INSERT INTO statuses (server_id, source, created_at, healthy, health, extra) VALUES
@@ -1174,11 +1174,11 @@ struct FleetRow {
 async fn fleet_detail_covers_live_servers() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO machines (id) VALUES
-			('30000000-0000-0000-0000-000000000001'),
-			('30000000-0000-0000-0000-000000000002'),
-			('30000000-0000-0000-0000-000000000003'),
-			('30000000-0000-0000-0000-000000000004');
+			"INSERT INTO machines (name, id) VALUES
+			('box', '30000000-0000-0000-0000-000000000001'),
+			('box', '30000000-0000-0000-0000-000000000002'),
+			('box', '30000000-0000-0000-0000-000000000003'),
+			('box', '30000000-0000-0000-0000-000000000004');
 
 			INSERT INTO applications (id, name, host, type, machine_id) VALUES
 			('30000000-0000-0000-0000-000000000001', 'reports', 'https://reports.example.com', 'tamanu-central', '30000000-0000-0000-0000-000000000001'),
@@ -1296,7 +1296,7 @@ async fn fleet_detail_covers_live_servers() {
 async fn fleet_detail_carries_healthcheck_fields() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('50000000-0000-0000-0000-000000000001'), ('50000000-0000-0000-0000-000000000002') RETURNING id) INSERT INTO applications (id, name, host, type, machine_id) VALUES
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '50000000-0000-0000-0000-000000000001'), ('box', '50000000-0000-0000-0000-000000000002') RETURNING id) INSERT INTO applications (id, name, host, type, machine_id) VALUES
 			('50000000-0000-0000-0000-000000000001', 'checked', 'https://checked.example.com', 'tamanu-central', '50000000-0000-0000-0000-000000000001'),
 			('50000000-0000-0000-0000-000000000002', 'unchecked', 'https://unchecked.example.com', 'tamanu-central', '50000000-0000-0000-0000-000000000002');
 
@@ -1377,7 +1377,7 @@ async fn snapshot_prefers_payload_node_version_over_user_agent() {
 			"INSERT INTO devices (id, role) VALUES
 			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'server');
 
-			WITH m AS (INSERT INTO machines (id, device_id) VALUES ('20000000-0000-0000-0000-000000000010', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			WITH m AS (INSERT INTO machines (name, id, device_id) VALUES ('box', '20000000-0000-0000-0000-000000000010', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
 			('20000000-0000-0000-0000-000000000010', 'https://node.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000010');
 
 			INSERT INTO device_connections (device_id, ip, user_agent) VALUES
@@ -1416,7 +1416,7 @@ async fn snapshot_node_version_falls_back_to_user_agent() {
 			"INSERT INTO devices (id, role) VALUES
 			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'server');
 
-			WITH m AS (INSERT INTO machines (id, device_id) VALUES ('20000000-0000-0000-0000-000000000011', 'cccccccc-cccc-cccc-cccc-cccccccccccc') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			WITH m AS (INSERT INTO machines (name, id, device_id) VALUES ('box', '20000000-0000-0000-0000-000000000011', 'cccccccc-cccc-cccc-cccc-cccccccccccc') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
 			('20000000-0000-0000-0000-000000000011', 'https://node2.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000011');
 
 			INSERT INTO device_connections (device_id, ip, user_agent) VALUES
@@ -1450,7 +1450,7 @@ async fn snapshot_node_version_falls_back_to_user_agent() {
 async fn snapshot_at_time_returns_prior_row() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('20000000-0000-0000-0000-000000000002') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '20000000-0000-0000-0000-000000000002') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
 			('20000000-0000-0000-0000-000000000002', 'https://snap2.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000002');
 			INSERT INTO check_policies (source, subject, application_type, check_name) VALUES ('alertd', 'application', 'tamanu-central', 'old'), ('alertd', 'application', 'tamanu-central', 'mid'), ('alertd', 'application', 'tamanu-central', 'new')",
 		)
@@ -1494,7 +1494,7 @@ async fn snapshot_at_time_returns_prior_row() {
 async fn snapshot_before_any_row_returns_null() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('20000000-0000-0000-0000-000000000003') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '20000000-0000-0000-0000-000000000003') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
 			('20000000-0000-0000-0000-000000000003', 'https://snap3.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000003')",
 		)
 		.await
@@ -1525,7 +1525,7 @@ async fn snapshot_before_any_row_returns_null() {
 async fn snapshot_server_without_statuses_returns_null() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('20000000-0000-0000-0000-000000000004') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '20000000-0000-0000-0000-000000000004') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
 			('20000000-0000-0000-0000-000000000004', 'https://snap4.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000004')",
 		)
 		.await
@@ -1588,7 +1588,7 @@ async fn check_detail_lists_servers_reporting_that_check_ordered_failed_first() 
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Attention cluster');
-			WITH m AS (INSERT INTO machines (id, group_id) VALUES ('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('22222222-2222-2222-2222-222222222222', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('33333333-3333-3333-3333-333333333333', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('44444444-4444-4444-4444-444444444444', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') RETURNING id) INSERT INTO applications (id, name, host, rank, type, group_id, machine_id) VALUES
+			WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('box', '22222222-2222-2222-2222-222222222222', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('box', '33333333-3333-3333-3333-333333333333', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('box', '44444444-4444-4444-4444-444444444444', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') RETURNING id) INSERT INTO applications (id, name, host, rank, type, group_id, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Warning Application', 'https://warning.example.com', 'production', 'tamanu-central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111'),
 			('22222222-2222-2222-2222-222222222222', 'Failing Application', 'https://failing.example.com', 'production', 'tamanu-central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '22222222-2222-2222-2222-222222222222'),
 			('33333333-3333-3333-3333-333333333333', 'Healthy Application', 'https://healthy.example.com', 'production', 'tamanu-central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '33333333-3333-3333-3333-333333333333'),
@@ -1663,7 +1663,7 @@ async fn check_detail_lists_servers_reporting_that_check_ordered_failed_first() 
 async fn check_detail_failing_since_comes_from_the_active_issue() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111'), ('22222222-2222-2222-2222-222222222222') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '11111111-1111-1111-1111-111111111111'), ('box', '22222222-2222-2222-2222-222222222222') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Failing Application', 'https://failing.example.com', 'production', 'tamanu-central', '11111111-1111-1111-1111-111111111111'),
 			('22222222-2222-2222-2222-222222222222', 'Recovered Issue Application', 'https://recovered.example.com', 'production', 'tamanu-central', '22222222-2222-2222-2222-222222222222');
 
@@ -1720,7 +1720,7 @@ async fn check_detail_failing_since_comes_from_the_active_issue() {
 async fn check_detail_excludes_ungrouped_and_archived_servers() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('11111111-1111-1111-1111-111111111111', NULL), ('22222222-2222-2222-2222-222222222222', NULL) RETURNING id) INSERT INTO applications (id, name, host, rank, type, group_id, machine_id) VALUES
+			"WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '11111111-1111-1111-1111-111111111111', NULL), ('box', '22222222-2222-2222-2222-222222222222', NULL) RETURNING id) INSERT INTO applications (id, name, host, rank, type, group_id, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Standalone Failing', 'https://standalone.example.com', 'production', 'tamanu-central', NULL, '11111111-1111-1111-1111-111111111111'),
 			('22222222-2222-2222-2222-222222222222', 'Archived Failing', 'https://archived.example.com', 'production', 'tamanu-central', NULL, '22222222-2222-2222-2222-222222222222');
 
@@ -1753,7 +1753,7 @@ async fn check_detail_returns_catalog_policy_and_ignores_non_matching_check() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
 			"INSERT INTO check_policies (source, subject, application_type, check_name, ceiling) VALUES ('alertd', 'application', 'tamanu-central', 'postgres', 'failed');
-			WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
+			WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Failing Application', 'https://failing.example.com', 'production', 'tamanu-central', '11111111-1111-1111-1111-111111111111');
 			INSERT INTO issues (application_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed', 'failed', true, NOW(), NOW(), NOW(), NOW())",
@@ -1800,7 +1800,7 @@ async fn check_detail_returns_catalog_policy_and_ignores_non_matching_check() {
 async fn snapshot_merges_all_sources() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('30000000-0000-0000-0000-00000000000a') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '30000000-0000-0000-0000-00000000000a') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
 				('30000000-0000-0000-0000-00000000000a', 'https://multi.example.com', 'tamanu-central', '30000000-0000-0000-0000-00000000000a'); \
 				 INSERT INTO check_policies (source, subject, application_type, check_name) VALUES ('alertd', 'application', 'tamanu-central', 'db'), ('tamanu', 'application', 'tamanu-central', 'tasks'); \
 			 INSERT INTO statuses (server_id, source, healthy, health, extra) VALUES \
@@ -1862,7 +1862,7 @@ async fn snapshot_surfaces_per_check_results() {
 		.unwrap();
 
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('30000000-0000-0000-0000-000000000001') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '30000000-0000-0000-0000-000000000001') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
 				('30000000-0000-0000-0000-000000000001', 'https://snap-sev.example.com', 'tamanu-central', '30000000-0000-0000-0000-000000000001'); \
 			 INSERT INTO statuses (server_id, healthy, health, extra) VALUES \
 				('30000000-0000-0000-0000-000000000001', false, \
@@ -1920,7 +1920,7 @@ async fn snapshot_check_results_cover_result_form() {
 		.unwrap();
 
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('30000000-0000-0000-0000-000000000002') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '30000000-0000-0000-0000-000000000002') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
 				('30000000-0000-0000-0000-000000000002', 'https://snap-res.example.com', 'tamanu-central', '30000000-0000-0000-0000-000000000002'); \
 			 INSERT INTO statuses (server_id, healthy, health, extra) VALUES \
 				('30000000-0000-0000-0000-000000000002', true, \
@@ -1975,7 +1975,7 @@ async fn get_detail_health_excludes_silenced_checks() {
 			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
 			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW());
 
-			WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
+			WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Silence Application', 'https://silence.example.com', 'production', 'tamanu-central', '11111111-1111-1111-1111-111111111111');
 
 			INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES
@@ -2047,7 +2047,7 @@ async fn group_details_member_health_excludes_group_silenced_checks() {
 			INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Silenced cluster');
 
-			WITH m AS (INSERT INTO machines (id, group_id) VALUES ('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') RETURNING id) INSERT INTO applications (id, name, host, rank, type, group_id, machine_id) VALUES
+			WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') RETURNING id) INSERT INTO applications (id, name, host, rank, type, group_id, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Member Application', 'https://member.example.com', 'production', 'tamanu-central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111');
 
 			INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES
@@ -2082,7 +2082,7 @@ async fn group_details_member_health_excludes_group_silenced_checks() {
 async fn snapshot_reports_and_excludes_silenced_checks() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Snap Application', 'https://snap.example.com', 'production', 'tamanu-central', '11111111-1111-1111-1111-111111111111');
 
 			INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES
@@ -2124,12 +2124,12 @@ async fn snapshot_reports_and_excludes_silenced_checks() {
 async fn summary_covers_actively_reporting_production_servers() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('40000000-0000-0000-0000-000000000001'), ('40000000-0000-0000-0000-000000000002'), ('40000000-0000-0000-0000-000000000003') RETURNING id) INSERT INTO applications (id, name, host, type, rank, machine_id) VALUES
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '40000000-0000-0000-0000-000000000001'), ('box', '40000000-0000-0000-0000-000000000002'), ('box', '40000000-0000-0000-0000-000000000003') RETURNING id) INSERT INTO applications (id, name, host, type, rank, machine_id) VALUES
 			('40000000-0000-0000-0000-000000000001', 'live-a', 'https://a.example.com', 'tamanu-central', 'production', '40000000-0000-0000-0000-000000000001'),
 			('40000000-0000-0000-0000-000000000002', 'live-b', 'https://b.example.com', 'tamanu-central', 'production', '40000000-0000-0000-0000-000000000002'),
 			('40000000-0000-0000-0000-000000000003', 'quiet', 'https://q.example.com', 'tamanu-central', 'production', '40000000-0000-0000-0000-000000000003');
 
-			WITH m AS (INSERT INTO machines (id) VALUES ('40000000-0000-0000-0000-000000000004') RETURNING id) INSERT INTO applications (id, name, host, type, rank, machine_id) VALUES
+			WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '40000000-0000-0000-0000-000000000004') RETURNING id) INSERT INTO applications (id, name, host, type, rank, machine_id) VALUES
 			('40000000-0000-0000-0000-000000000004', 'testing', 'https://t.example.com', 'tamanu-central', 'test', '40000000-0000-0000-0000-000000000004');
 
 			INSERT INTO application_reported_detail (application_id, source, extra, version, reported_at) VALUES

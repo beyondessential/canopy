@@ -264,6 +264,27 @@ test.describe("machine detail", () => {
 		).toBeVisible();
 	});
 
+	/// A machine always has a name, so the edit form will not save one
+	/// cleared to blank.
+	/// spec: FLT#naming
+	test("a machine cannot be saved without a name", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "named-group" });
+		const machine = await seedMachine(sql, {
+			name: "named-box",
+			groupId: group.id,
+		});
+
+		await page.goto(`/fleet/machines/${machine.id}/edit`);
+		const name = page
+			.getByTestId("machine-section")
+			.getByLabel(/^Name(\s*\*)?$/i);
+		await expect(name).toHaveValue("named-box");
+		await name.fill("   ");
+		await expect(page.getByRole("button", { name: "Save" })).toBeDisabled();
+		await name.fill("renamed-box");
+		await expect(page.getByRole("button", { name: "Save" })).toBeEnabled();
+	});
+
 	/// A check filed against a box is silenced against that box. The scopes
 	/// offered are the ones the check applies at — the machine and its group —
 	/// and never one above, silencing everywhere being the check's own ceiling.

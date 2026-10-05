@@ -194,8 +194,8 @@ async fn scope_labels(
 	issues: &[&Issue],
 ) -> Result<
 	(
-		std::collections::HashMap<Uuid, (Option<String>, Option<String>)>,
-		std::collections::HashMap<Uuid, Option<String>>,
+		std::collections::HashMap<Uuid, database::applications::ApplicationNaming>,
+		std::collections::HashMap<Uuid, String>,
 		std::collections::HashMap<Uuid, String>,
 		std::collections::HashMap<Uuid, String>,
 	),
@@ -251,8 +251,8 @@ enum IssueScopeOut {
 impl IssueScopeOut {
 	fn of(
 		issue: &Issue,
-		applications: &std::collections::HashMap<Uuid, (Option<String>, Option<String>)>,
-		machines: &std::collections::HashMap<Uuid, Option<String>>,
+		applications: &std::collections::HashMap<Uuid, database::applications::ApplicationNaming>,
+		machines: &std::collections::HashMap<Uuid, String>,
 		groups: &std::collections::HashMap<Uuid, String>,
 		clusters: &std::collections::HashMap<Uuid, String>,
 	) -> Self {
@@ -264,11 +264,11 @@ impl IssueScopeOut {
 		) {
 			database::issues::Scope::Application(id) => Self::Application {
 				id,
-				name: applications.get(&id).and_then(|(n, _)| n.clone()),
+				name: applications.get(&id).map(|n| n.name.clone()),
 			},
 			database::issues::Scope::Machine(id) => Self::Machine {
 				id,
-				name: machines.get(&id).cloned().flatten(),
+				name: machines.get(&id).cloned(),
 			},
 			database::issues::Scope::Group(id) => Self::Group {
 				id,
@@ -683,7 +683,7 @@ impl CanopyMcp {
 				.await
 				.map_err(mcp_err)?
 				.get(&sid)
-				.and_then(|(n, _)| n.clone()),
+				.map(|n| n.name.clone()),
 			None => None,
 		};
 
@@ -841,7 +841,7 @@ impl CanopyMcp {
 				server_name: st
 					.application_id
 					.and_then(|sid| names.get(&sid))
-					.and_then(|(n, _)| n.clone()),
+					.map(|n| n.name.clone()),
 				group_id: st.server_group_id,
 				source: st.source,
 				check_name: st.check_name,
@@ -891,8 +891,8 @@ fn parse_results(v: &Option<Vec<String>>) -> Result<Option<Vec<CheckResult>>, Mc
 
 fn issue_summary(
 	i: &Issue,
-	names: &std::collections::HashMap<Uuid, (Option<String>, Option<String>)>,
-	machines: &std::collections::HashMap<Uuid, Option<String>>,
+	names: &std::collections::HashMap<Uuid, database::applications::ApplicationNaming>,
+	machines: &std::collections::HashMap<Uuid, String>,
 	groups: &std::collections::HashMap<Uuid, String>,
 	clusters: &std::collections::HashMap<Uuid, String>,
 ) -> IssueSummary {

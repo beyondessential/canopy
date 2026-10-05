@@ -47,7 +47,7 @@ async fn seed(conn: &mut AsyncPgConnection) -> Seeded {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name, slack_close_delay) \
 		 VALUES ('{group}', 'instances-{group}', INTERVAL '5 minutes'); \
-		 INSERT INTO machines (id, group_id) VALUES ('{machine}', '{group}'); \
+		 INSERT INTO machines (name, id, group_id) VALUES ('box', '{machine}', '{group}'); \
 		 INSERT INTO applications (id, host, type, group_id, machine_id) \
 		 VALUES ('{application}', 'https://{application}.example', 'tamanu-central', \
 		         '{group}', '{machine}')"
@@ -66,7 +66,7 @@ async fn another_application(conn: &mut AsyncPgConnection, group: Uuid) -> Uuid 
 	let machine = Uuid::new_v4();
 	let application = Uuid::new_v4();
 	conn.batch_execute(&format!(
-		"INSERT INTO machines (id, group_id) VALUES ('{machine}', '{group}'); \
+		"INSERT INTO machines (name, id, group_id) VALUES ('box', '{machine}', '{group}'); \
 		 INSERT INTO applications (id, host, type, group_id, machine_id) \
 		 VALUES ('{application}', 'https://{application}.example', 'tamanu-central', \
 		         '{group}', '{machine}')"

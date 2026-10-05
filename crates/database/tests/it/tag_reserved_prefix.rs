@@ -61,7 +61,7 @@ fn assert_bad_request<T: std::fmt::Debug>(result: Result<T, AppError>) {
 #[tokio::test(flavor = "multi_thread")]
 async fn server_create_rejects_reserved_tag_keys() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let machine = Machine::create(&mut conn, NewMachine::default())
+		let machine = Machine::create(&mut conn, NewMachine::named("box"))
 			.await
 			.unwrap();
 		let mut s = new_server("https://create.example/", machine.id);
@@ -74,7 +74,7 @@ async fn server_create_rejects_reserved_tag_keys() {
 #[tokio::test(flavor = "multi_thread")]
 async fn server_update_rejects_reserved_tag_keys() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let machine = Machine::create(&mut conn, NewMachine::default())
+		let machine = Machine::create(&mut conn, NewMachine::named("box"))
 			.await
 			.unwrap();
 		let server =

@@ -19,7 +19,7 @@ struct RowId {
 }
 
 async fn insert_server(conn: &mut diesel_async::AsyncPgConnection) -> Uuid {
-	let machine: RowId = sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
+	let machine: RowId = sql_query("INSERT INTO machines (name) VALUES ('box') RETURNING id")
 		.get_result(conn)
 		.await
 		.expect("insert machine");

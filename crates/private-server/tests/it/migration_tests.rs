@@ -12,10 +12,10 @@ const FLEET: &str = "INSERT INTO versions (major, minor, patch, changelog, statu
 		VALUES (2, 62, 0, 'x', 'published'), (2, 63, 0, 'x', 'published');
 	INSERT INTO server_groups (id, name)
 		VALUES ('bbbbbbbb-0000-0000-0000-000000000001', 'Kamaka');
-	INSERT INTO machines (id, group_id) VALUES
-		('bbbbbbbb-0000-0000-0000-0000000000a0',
+	INSERT INTO machines (name, id, group_id) VALUES
+		('box', 'bbbbbbbb-0000-0000-0000-0000000000a0',
 		 'bbbbbbbb-0000-0000-0000-000000000001'),
-		('bbbbbbbb-0000-0000-0000-0000000000b0',
+		('box', 'bbbbbbbb-0000-0000-0000-0000000000b0',
 		 'bbbbbbbb-0000-0000-0000-000000000001');
 	INSERT INTO applications (id, name, host, type, rank, group_id, machine_id) VALUES
 		('bbbbbbbb-0000-0000-0000-0000000000a0', 'central',

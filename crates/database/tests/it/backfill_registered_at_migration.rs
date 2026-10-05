@@ -92,10 +92,10 @@ async fn migration_backfills_enrolled_servers_only() {
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role) VALUES \
 				('{device_a}', 'server'), ('{device_c}', 'server'), ('{device_e}', 'server'); \
-			 INSERT INTO machines (id, device_id) VALUES \
-				('{with_statuses}', '{device_a}'), ('{device_gone}', NULL), \
-				('{device_only}', '{device_c}'), ('{unenrolled}', NULL), \
-				('{already_set}', '{device_e}'); \
+			 INSERT INTO machines (name, id, device_id) VALUES \
+				('box', '{with_statuses}', '{device_a}'), ('box', '{device_gone}', NULL), \
+				('box', '{device_only}', '{device_c}'), ('box', '{unenrolled}', NULL), \
+				('box', '{already_set}', '{device_e}'); \
 			 INSERT INTO applications (id, host, type, registered_at, machine_id) VALUES \
 				('{with_statuses}', 'https://a.example.com', 'tamanu-central', NULL, \
 				 '{with_statuses}'), \

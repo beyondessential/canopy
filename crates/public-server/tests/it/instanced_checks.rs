@@ -26,7 +26,7 @@ async fn central(conn: &mut AsyncPgConnection, device_id: Uuid) -> Uuid {
 		.expect("insert group");
 	let id = Uuid::new_v4();
 	sql_query(
-		"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) \
+		"WITH m AS (INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', $1, $3, $2) RETURNING id) \
 		 INSERT INTO applications (id, host, type, group_id, machine_id) \
 		 VALUES ($1, 'https://central.example.com', 'tamanu-central', $3, $1)",
 	)

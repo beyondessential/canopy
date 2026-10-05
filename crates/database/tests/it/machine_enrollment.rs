@@ -58,7 +58,7 @@ async fn archiving_a_machine_releases_its_identity_and_takes_its_applications() 
 		)
 		.await
 		.unwrap();
-		let machine = Machine::create(&mut conn, NewMachine::default())
+		let machine = Machine::create(&mut conn, NewMachine::named("box"))
 			.await
 			.unwrap();
 		Machine::bind_device(&mut conn, machine.id, device.id)
@@ -116,7 +116,7 @@ async fn archiving_an_application_hides_the_row_and_leaves_the_identity_alone() 
 		)
 		.await
 		.unwrap();
-		let machine = Machine::create(&mut conn, NewMachine::default())
+		let machine = Machine::create(&mut conn, NewMachine::named("box"))
 			.await
 			.unwrap();
 		Machine::bind_device(&mut conn, machine.id, device.id)
@@ -159,7 +159,7 @@ async fn archiving_an_application_hides_the_row_and_leaves_the_identity_alone() 
 		);
 
 		// Recreating a server at the same host is allowed once archived.
-		let replacement = Machine::create(&mut conn, NewMachine::default())
+		let replacement = Machine::create(&mut conn, NewMachine::named("box"))
 			.await
 			.unwrap();
 		Application::create(
@@ -175,7 +175,7 @@ async fn archiving_an_application_hides_the_row_and_leaves_the_identity_alone() 
 #[tokio::test(flavor = "multi_thread")]
 async fn token_reissue_invalidates_prior_and_consume_is_single_use() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let machine = Machine::create(&mut conn, NewMachine::default())
+		let machine = Machine::create(&mut conn, NewMachine::named("box"))
 			.await
 			.unwrap();
 		// No application on it: a ticket admits the box, and what runs on the
@@ -220,7 +220,7 @@ async fn token_reissue_invalidates_prior_and_consume_is_single_use() {
 #[tokio::test(flavor = "multi_thread")]
 async fn revoke_invalidates_the_active_token() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let machine = Machine::create(&mut conn, NewMachine::default())
+		let machine = Machine::create(&mut conn, NewMachine::named("box"))
 			.await
 			.unwrap();
 		let (_t, token) =

@@ -600,9 +600,9 @@ pub struct ServerIdArgs {
 
 /// Get a server's display name.
 ///
-/// Returns the server's name if set, else its stored host, else its id —
-/// always a non-empty string suitable for display. Returns 404 if no server
-/// exists with that id.
+/// Returns the server's name if set, else its type's, so an unnamed
+/// application reads the same here as everywhere else. Returns 404 if no
+/// server exists with that id.
 #[utoipa::path(
 	post,
 	path = "/get_name",
@@ -619,12 +619,7 @@ pub async fn get_name(
 ) -> Result<Json<String>> {
 	let mut conn = state.db.get().await?;
 	let server = Application::get_by_id(&mut conn, args.server_id).await?;
-	Ok(Json(
-		server
-			.name
-			.or_else(|| server.host.as_ref().map(|h| h.0.to_string()))
-			.unwrap_or_else(|| server.id.to_string()),
-	))
+	Ok(Json(server.display_name()))
 }
 
 /// Get a server's basic record.
@@ -828,9 +823,11 @@ pub async fn get_detail(
 	// An application on a cluster has no box, so it presents no machine facts.
 	let (machine_name, machine_rank) = match server.machine_id {
 		Some(machine_id) => (
-			database::machines::Machine::get_by_id(&mut conn, machine_id)
-				.await?
-				.name,
+			Some(
+				database::machines::Machine::get_by_id(&mut conn, machine_id)
+					.await?
+					.name,
+			),
 			database::machines::Machine::rank(&mut conn, machine_id).await?,
 		),
 		None => (None, None),

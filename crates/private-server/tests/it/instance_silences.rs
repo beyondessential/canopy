@@ -25,7 +25,7 @@ async fn central(conn: &mut AsyncPgConnection, device_id: Uuid) -> (Uuid, Uuid) 
 	let group_id = Uuid::new_v4();
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'instanced-group');
-		 WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{id}', '{group_id}', '{device_id}') RETURNING id)
+		 WITH m AS (INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', '{id}', '{group_id}', '{device_id}') RETURNING id)
 		 INSERT INTO applications (id, host, type, group_id, machine_id) VALUES
 			('{id}', 'https://central.example.com', 'tamanu-central', '{group_id}', '{id}');"
 	))

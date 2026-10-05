@@ -142,7 +142,7 @@ function MachineBlock({
 	currentApplicationId?: string;
 }) {
 	const current = machine.id === currentMachineId;
-	const name = machine.name ?? "Unnamed machine";
+	const name = machine.name;
 	const own = machine.own_window === true;
 	return (
 		<Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>

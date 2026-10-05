@@ -280,7 +280,6 @@ pub(crate) async fn enrich_issues(
 	let names = Application::names_by_ids(conn, &server_ids).await?;
 	let group_refs = Application::group_refs_by_server_ids(conn, &server_ids).await?;
 	let machine_names = database::machines::Machine::names_by_ids(conn, &machine_ids).await?;
-	let application_types = Application::types_by_id(conn, &server_ids).await?;
 	let machine_groups = database::machines::Machine::group_refs_by_ids(conn, &machine_ids).await?;
 	let user_logins = collect_user_logins(&issues);
 	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
@@ -289,18 +288,9 @@ pub(crate) async fn enrich_issues(
 	Ok(issues
 		.into_iter()
 		.map(|i| {
-			let (name, host) = i
-				.application_id
-				.and_then(|sid| names.get(&sid).cloned())
-				.unwrap_or((None, None));
-			// An application nobody has named reads as its type, the same as
-			// it does everywhere else it is presented.
-			// spec: FLT#naming
-			let name = name.or_else(|| {
-				i.application_id
-					.and_then(|sid| application_types.get(&sid))
-					.map(|t| t.label())
-			});
+			let naming = i.application_id.and_then(|sid| names.get(&sid));
+			let name = naming.map(|n| n.name.clone());
+			let host = naming.and_then(|n| n.host.clone());
 			// A machine's issue answers to its machine's group, so the
 			// group is named either way.
 			let (group_id, group_name) = match (i.application_id, i.machine_id) {
@@ -310,8 +300,7 @@ pub(crate) async fn enrich_issues(
 			};
 			let machine_name = i
 				.machine_id
-				.and_then(|mid| machine_names.get(&mid).cloned())
-				.flatten();
+				.and_then(|mid| machine_names.get(&mid).cloned());
 			let links = incidents
 				.remove(&i.id)
 				.unwrap_or_default()
@@ -322,11 +311,7 @@ pub(crate) async fn enrich_issues(
 			// same as it does on ingest, so an issue links to the catalog
 			// entry the check actually files into.
 			let namespace = i.check_name.as_deref().and_then(|check| {
-				Namespace::of(
-					&i.source,
-					check,
-					i.application_id.and_then(|sid| application_types.get(&sid)),
-				)
+				Namespace::of(&i.source, check, naming.and_then(|n| n.r#type.as_ref()))
 			});
 			IssueData::from_with(
 				i,

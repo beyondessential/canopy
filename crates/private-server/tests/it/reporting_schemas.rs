@@ -20,7 +20,7 @@ async fn seed(conn: &mut AsyncPgConnection) -> (Uuid, Uuid, Uuid) {
 		   ('{unrun}', 2, 59, 0, '', 'published');
 
 		 INSERT INTO server_groups (id, name) VALUES ('{group}', 'kamaka');
-		 INSERT INTO machines (id, group_id) VALUES ('{machine}', '{group}');
+		 INSERT INTO machines (name, id, group_id) VALUES ('box', '{machine}', '{group}');
 		 INSERT INTO applications (id, type, name, host, machine_id, group_id) VALUES
 		   ('{central}', 'tamanu-central', 'central', 'https://c', '{machine}', '{group}');
 		 INSERT INTO application_reported_detail (application_id, source, reported_at, version)

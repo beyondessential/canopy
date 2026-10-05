@@ -22,7 +22,7 @@ async fn server_reference_survives_as_provenance() {
 				.await
 				.expect("group");
 		let server: RowId =
-			sql_query("WITH m AS (INSERT INTO machines (group_id) VALUES ($2) RETURNING id) INSERT INTO applications (type, host, group_id, machine_id) SELECT 'tamanu-central', $1, $2, m.id FROM m RETURNING id")
+			sql_query("WITH m AS (INSERT INTO machines (name, group_id) VALUES ('box', $2) RETURNING id) INSERT INTO applications (type, host, group_id, machine_id) SELECT 'tamanu-central', $1, $2, m.id FROM m RETURNING id")
 				.bind::<sql_types::Text, _>("kamaka-central")
 				.bind::<sql_types::Uuid, _>(group.id)
 				.get_result(&mut conn)

@@ -32,11 +32,12 @@ async fn insert_group(conn: &mut AsyncPgConnection) -> Uuid {
 /// report is about the machine's snapshot; the test is about the application's
 /// candidate version.
 async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> (Uuid, Uuid) {
-	let machine: RowId = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
-		.bind::<sql_types::Uuid, _>(group_id)
-		.get_result(conn)
-		.await
-		.expect("machine");
+	let machine: RowId =
+		sql_query("INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id")
+			.bind::<sql_types::Uuid, _>(group_id)
+			.get_result(conn)
+			.await
+			.expect("machine");
 	let row: RowId = sql_query(
 		"INSERT INTO applications (type, host, rank, group_id, machine_id) VALUES ('tamanu-central', $1, 'production', $2, $3) RETURNING id",
 	)

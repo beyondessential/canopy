@@ -182,7 +182,7 @@ impl CanopyMcp {
 
 		let group_names = group_names(&mut conn, &unique(runs.iter().map(|r| r.group_id))).await?;
 		// A run names the box it captured, so the name comes from the machine.
-		let machine_names: std::collections::HashMap<Uuid, Option<String>> =
+		let machine_names: std::collections::HashMap<Uuid, String> =
 			Machine::get_many(&mut conn, &unique(runs.iter().filter_map(|r| r.machine_id)))
 				.await
 				.map_err(mcp_err)?
@@ -199,11 +199,7 @@ impl CanopyMcp {
 				group_id: r.group_id,
 				group_name: group_names.get(&r.group_id).cloned(),
 				machine_id: r.machine_id,
-				machine_name: r
-					.machine_id
-					.and_then(|m| machine_names.get(&m))
-					.cloned()
-					.flatten(),
+				machine_name: r.machine_id.and_then(|m| machine_names.get(&m)).cloned(),
 				device_id: r.device_id,
 				r#type: r.r#type.to_string(),
 				purpose: r.purpose.to_string(),

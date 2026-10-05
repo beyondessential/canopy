@@ -30,7 +30,7 @@ async fn status_missing_auth_headers() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		// Create a test server
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES ('11111111-1111-1111-1111-111111111111', 'https://test.com', 'tamanu-facility', '11111111-1111-1111-1111-111111111111')",
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES ('11111111-1111-1111-1111-111111111111', 'https://test.com', 'tamanu-facility', '11111111-1111-1111-1111-111111111111')",
 		)
 		.await
 		.unwrap();
@@ -223,7 +223,7 @@ async fn malformed_json_body() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		// Create a server for status endpoint
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES ('11111111-1111-1111-1111-111111111111', 'https://test.com', 'tamanu-central', '11111111-1111-1111-1111-111111111111')",
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES ('11111111-1111-1111-1111-111111111111', 'https://test.com', 'tamanu-central', '11111111-1111-1111-1111-111111111111')",
 		)
 		.await
 		.unwrap();
