@@ -7,7 +7,7 @@
 - [x] A retired `health-broken/<check>` row beside a live `health/<check>` row presents the check once (verifies spec: CHK)
 - [x] A check its source no longer reports drops off the list (verifies spec: CHK)
 - [x] A passing check a push leaves out drops off the list at once; a failing one is closed by omission and drops at the push after (verifies spec: CHK)
-- [x] A machine-set name a split push reports under an application is listed on the application (verifies spec: CHK, STA)
+- [x] A check a split push reports under an application is listed on the application, even one named like a box check such as `memory` (verifies spec: CHK, STA)
 - [x] An unresolved reserved-source state stays listed regardless of when it was filed (verifies spec: CHK)
 - [x] A target that has never been quiet still shows its reachability check as passed (verifies spec: CHK)
 - [x] A cluster's relay checks filed at different cadences all stay listed (verifies spec: CHK)

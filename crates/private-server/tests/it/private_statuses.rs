@@ -1081,9 +1081,9 @@ async fn snapshot_leaves_a_unified_pushs_machine_checks_to_the_machine() {
 	.await
 }
 
-/// A split push says which target each check is about, so a machine-set name
-/// reported under the application is the application's, and the box's own
-/// row stays the box's.
+/// A split push says which target each check is about, so a check reported
+/// under the application is the application's whatever it is called, and the
+/// box's own row stays the box's.
 // spec: CHK#presentation
 // spec: STA#transitional-unified-pushes
 #[tokio::test(flavor = "multi_thread")]
