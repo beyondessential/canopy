@@ -180,10 +180,12 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 		let server_rows = &by_server[&machine_id];
 		let device_id = server_rows.iter().find_map(|r| r.device_id);
 		// A scanned server always exists (the scan joins applications), so the
-		// skip is unreachable in practice — it just avoids a panic path.
-		let Some(label) = labels.get(&machine_id).cloned() else {
-			continue;
-		};
+		// placeholder is unreachable in practice. A missed lookup still files:
+		// it is only the wording that suffers, never the alert.
+		let label = labels
+			.get(&machine_id)
+			.cloned()
+			.unwrap_or_else(|| "Unknown machine".to_string());
 
 		let missing_open = crate::backup::staleness::open_machine_issue_active(
 			db,
