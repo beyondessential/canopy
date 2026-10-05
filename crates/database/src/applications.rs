@@ -506,6 +506,10 @@ impl Application {
 	/// its machine's group, because which group a box belongs to is the
 	/// one fact the box cannot know, and the rank its siblings share, or none
 	/// where nothing on the box is ranked yet, which leaves it pending.
+	///
+	/// The caller holds the machine row's lock, which is what keeps a rank
+	/// change on the box from landing between reading the rank here and the
+	/// insert, so every caller must.
 	// spec: GRP#environments
 	async fn adopt(
 		db: &mut AsyncPgConnection,
@@ -556,37 +560,38 @@ impl Application {
 		use crate::schema::applications::dsl;
 		use diesel_async::AsyncConnection;
 
-		let group_id = Self::get_by_id(db, server_id).await?.group_id;
-		let headline = crate::server_groups::ServerGroup::headline_rank(db, group_id).await?;
-		db.transaction::<_, AppError, _>(async |conn| {
-			let server: Application = dsl::applications
-				.select(Self::as_select())
-				.filter(dsl::id.eq(server_id))
-				.for_update()
-				.first(conn)
-				.await
-				.map_err(AppError::from)?;
+		let (group_id, headline) = db
+			.transaction::<_, AppError, _>(async |conn| {
+				let server: Application = dsl::applications
+					.select(Self::as_select())
+					.filter(dsl::id.eq(server_id))
+					.for_update()
+					.first(conn)
+					.await
+					.map_err(AppError::from)?;
+				let headline =
+					crate::server_groups::ServerGroup::headline_rank(conn, server.group_id).await?;
 
-			if server.deleted_at.is_some() {
-				return Ok(());
-			}
+				if server.deleted_at.is_some() {
+					return Ok((server.group_id, headline));
+				}
 
-			diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
-				.set((
-					dsl::deleted_at
-						.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))),
-					dsl::registered_at.eq(None::<jiff_diesel::Timestamp>),
-				))
-				.execute(conn)
-				.await
-				.map_err(AppError::from)?;
+				diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
+					.set((
+						dsl::deleted_at
+							.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))),
+						dsl::registered_at.eq(None::<jiff_diesel::Timestamp>),
+					))
+					.execute(conn)
+					.await
+					.map_err(AppError::from)?;
 
-			// The server just dropped out of its group's live set, so the
-			// group's cached headline version may now belong to someone else.
-			recompute_groups(conn, [server.group_id]).await?;
-			Ok(())
-		})
-		.await?;
+				// The server just dropped out of its group's live set, so the
+				// group's cached headline version may now belong to someone else.
+				recompute_groups(conn, [server.group_id]).await?;
+				Ok((server.group_id, headline))
+			})
+			.await?;
 		// Its group's own checks follow the headline environment, which may
 		// have been this application's.
 		crate::issues::reevaluate_after_headline_change(db, group_id, headline).await
@@ -596,23 +601,31 @@ impl Application {
 	/// which archiving the application did not touch.
 	///
 	/// It comes back at the rank the live applications on its box share now,
-	/// which is not necessarily the one it left at, and pending where none of
-	/// them is ranked.
+	/// which is not necessarily the one it left at. With none of them live, as
+	/// when the whole box was archived, it keeps its own rank, so restoring a
+	/// box's applications one by one does not clear the rank they shared. It is
+	/// pending only where it never had one, or where the live applications are
+	/// themselves pending.
 	// spec: GRP#environments
 	pub async fn restore(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Self> {
 		use crate::schema::applications::dsl;
 		use diesel_async::AsyncConnection;
 
-		let group_id = Self::get_by_id(db, server_id).await?.group_id;
-		let headline = crate::server_groups::ServerGroup::headline_rank(db, group_id).await?;
-		let restored = db
+		let (restored, headline) = db
 			.transaction::<_, AppError, _>(async |conn| {
 				let application = Self::get_by_id(conn, server_id).await?;
+				let headline =
+					crate::server_groups::ServerGroup::headline_rank(conn, application.group_id)
+						.await?;
 				// The box's row serialises this against a report adopting beside it.
 				let rank = match application.machine_id {
 					Some(machine_id) => {
 						crate::machines::Machine::get_by_id_for_update(conn, machine_id).await?;
-						crate::machines::Machine::rank(conn, machine_id).await?
+						if crate::machines::Machine::has_live_application(conn, machine_id).await? {
+							crate::machines::Machine::rank(conn, machine_id).await?
+						} else {
+							application.rank
+						}
 					}
 					None => application.rank,
 				};
@@ -624,7 +637,7 @@ impl Application {
 					.execute(conn)
 					.await
 					.map_err(AppError::from)?;
-				Self::get_by_id(conn, server_id).await
+				Ok((Self::get_by_id(conn, server_id).await?, headline))
 			})
 			.await?;
 		// Back in the live set: the group's canonical member may change, and so
@@ -1064,6 +1077,11 @@ impl Application {
 		use crate::schema::applications::dsl;
 
 		let application = Self::get_by_id(db, application_id).await?;
+		if application.deleted_at.is_some() {
+			return Err(AppError::BadRequest(
+				"an archived application has no rank to change; restore it first".into(),
+			));
+		}
 		if let Some(machine_id) = application.machine_id {
 			return crate::machines::Machine::set_rank(db, machine_id, rank, by).await;
 		}

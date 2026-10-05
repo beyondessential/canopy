@@ -547,6 +547,87 @@ async fn archiving_or_moving_the_headline_box_moves_the_groups_own_issues() {
 	.await
 }
 
+/// A group whose last ranked box goes away has no headline environment left
+/// for its own checks, so they leave the incident they were in rather than
+/// holding it open until they resolve.
+// spec: INC#membership
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_losing_its_headline_releases_its_own_checks() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = insert_group(&mut conn).await;
+		let machine = insert_machine(&mut conn, Some(group)).await;
+		insert_application(
+			&mut conn,
+			machine,
+			Some(group),
+			Some("production"),
+			"http://prod.invalid/",
+		)
+		.await;
+		let pending = insert_machine(&mut conn, Some(group)).await;
+		insert_application(
+			&mut conn,
+			pending,
+			Some(group),
+			None,
+			"http://pending.invalid/",
+		)
+		.await;
+
+		fail_group_check(&mut conn, group).await;
+		assert_eq!(
+			open_ranks(&mut conn, group).await,
+			vec![Some("production".to_string())],
+		);
+
+		database::machines::Machine::archive(&mut conn, machine)
+			.await
+			.expect("archive the only ranked box");
+
+		assert_eq!(
+			open_ranks(&mut conn, group).await,
+			Vec::<Option<String>>::new(),
+			"nothing is ranked, so the group's check has no incident to hold open",
+		);
+		assert_eq!(live_members(&mut conn, group).await, 0);
+	})
+	.await
+}
+
+/// A membership held by an issue that has no target is stale, and the
+/// startup reconcile releases it.
+// spec: INC#membership
+#[tokio::test(flavor = "multi_thread")]
+async fn reconcile_releases_an_issue_that_has_no_target() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = insert_group(&mut conn).await;
+		let application =
+			insert_ranked_member(&mut conn, group, Some("production"), "http://prod.invalid/")
+				.await;
+		fail_application(&mut conn, application, "app_down").await;
+		assert_eq!(
+			open_ranks(&mut conn, group).await,
+			vec![Some("production".to_string())],
+		);
+
+		sql_query("UPDATE applications SET rank = NULL WHERE id = $1")
+			.bind::<sql_types::Uuid, _>(application)
+			.execute(&mut conn)
+			.await
+			.expect("leave it pending");
+		database::issues::reconcile_open_incidents(&mut conn)
+			.await
+			.expect("reconcile");
+
+		assert_eq!(
+			open_ranks(&mut conn, group).await,
+			Vec::<Option<String>>::new()
+		);
+		assert_eq!(live_members(&mut conn, group).await, 0);
+	})
+	.await
+}
+
 /// Setting a rank moves the issue to the environment it now belongs to: it
 /// leaves the incident on the target it has left, which closes with nothing
 /// holding it open, and joins one on its new environment.

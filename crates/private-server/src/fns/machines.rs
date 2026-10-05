@@ -504,19 +504,26 @@ pub async fn update(
 	Json(args): Json<MachineUpdateArgs>,
 ) -> Result<Json<Machine>> {
 	let mut conn = state.db.get().await?;
-	// Ranked first, so a refusal leaves the rest of the edit unapplied.
+	// Everything that can refuse the rank is checked before anything is written,
+	// so a refusal leaves the whole edit unapplied.
 	// spec: GRP#environments
-	match args.rank {
+	let rank = match args.rank {
 		Some(None) => {
 			return Err(AppError::BadRequest(
 				"a rank can be changed but not cleared".into(),
 			));
 		}
 		Some(Some(rank)) => {
-			Machine::set_rank(&mut conn, args.machine_id, rank, Some(&admin.0.login)).await?;
+			if !Machine::has_live_application(&mut conn, args.machine_id).await? {
+				return Err(AppError::BadRequest(
+					"a machine takes its rank from the applications on it, and none has reported yet"
+						.into(),
+				));
+			}
+			Some(rank)
 		}
-		None => {}
-	}
+		None => None,
+	};
 	let updated = Machine::update(
 		&mut conn,
 		args.machine_id,
@@ -534,6 +541,9 @@ pub async fn update(
 		},
 	)
 	.await?;
+	if let Some(rank) = rank {
+		Machine::set_rank(&mut conn, args.machine_id, rank, Some(&admin.0.login)).await?;
+	}
 	Ok(Json(updated))
 }
 

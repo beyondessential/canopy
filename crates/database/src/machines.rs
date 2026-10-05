@@ -584,13 +584,7 @@ impl Machine {
 			.transaction::<_, AppError, _>(async |conn| {
 				// The box's row serialises this against a report adopting beside it.
 				let machine = Self::get_by_id_for_update(conn, machine_id).await?;
-				let live: i64 = dsl::applications
-					.filter(dsl::machine_id.eq(machine_id))
-					.filter(dsl::deleted_at.is_null())
-					.count()
-					.get_result(conn)
-					.await?;
-				if live == 0 {
+				if !Self::has_live_application(conn, machine_id).await? {
 					return Err(AppError::BadRequest(
 						"a machine takes its rank from the applications on it, and none has reported yet".into(),
 					));
@@ -621,6 +615,23 @@ impl Machine {
 			by,
 		)
 		.await
+	}
+
+	/// Whether any application on the machine is live (not archived).
+	pub async fn has_live_application(
+		db: &mut AsyncPgConnection,
+		machine_id: Uuid,
+	) -> Result<bool> {
+		use crate::schema::applications::dsl;
+
+		diesel::select(diesel::dsl::exists(
+			dsl::applications
+				.filter(dsl::machine_id.eq(machine_id))
+				.filter(dsl::deleted_at.is_null()),
+		))
+		.get_result(db)
+		.await
+		.map_err(AppError::from)
 	}
 
 	/// The environment this machine serves: the rank its live applications
@@ -708,37 +719,39 @@ impl Machine {
 	pub async fn archive(db: &mut AsyncPgConnection, machine_id: Uuid) -> Result<()> {
 		use diesel_async::AsyncConnection;
 
-		let group_id = Self::get_by_id(db, machine_id).await?.group_id;
-		let headline = crate::server_groups::ServerGroup::headline_rank(db, group_id).await?;
-		db.transaction::<_, AppError, _>(async |conn| {
-			let machine = Self::get_by_id_for_update(conn, machine_id).await?;
-			if machine.deleted_at.is_some() {
-				return Ok(());
-			}
+		let (group_id, headline) = db
+			.transaction::<_, AppError, _>(async |conn| {
+				let machine = Self::get_by_id_for_update(conn, machine_id).await?;
+				let headline =
+					crate::server_groups::ServerGroup::headline_rank(conn, machine.group_id)
+						.await?;
+				if machine.deleted_at.is_some() {
+					return Ok((machine.group_id, headline));
+				}
 
-			if let Some(device_id) = machine.device_id {
-				crate::devices::Device::revoke(conn, device_id).await?;
-			}
+				if let Some(device_id) = machine.device_id {
+					crate::devices::Device::revoke(conn, device_id).await?;
+				}
 
-			let now = jiff_diesel::Timestamp::from(Timestamp::now());
-			diesel::update(crate::schema::machines::table)
-				.filter(crate::schema::machines::id.eq(machine_id))
-				.set((
-					crate::schema::machines::deleted_at.eq(Some(now)),
-					crate::schema::machines::device_id.eq(None::<Uuid>),
-					crate::schema::machines::registered_at.eq(None::<jiff_diesel::Timestamp>),
-				))
-				.execute(conn)
-				.await?;
-			diesel::update(crate::schema::applications::table)
-				.filter(crate::schema::applications::machine_id.eq(machine_id))
-				.filter(crate::schema::applications::deleted_at.is_null())
-				.set(crate::schema::applications::deleted_at.eq(Some(now)))
-				.execute(conn)
-				.await?;
-			Ok(())
-		})
-		.await?;
+				let now = jiff_diesel::Timestamp::from(Timestamp::now());
+				diesel::update(crate::schema::machines::table)
+					.filter(crate::schema::machines::id.eq(machine_id))
+					.set((
+						crate::schema::machines::deleted_at.eq(Some(now)),
+						crate::schema::machines::device_id.eq(None::<Uuid>),
+						crate::schema::machines::registered_at.eq(None::<jiff_diesel::Timestamp>),
+					))
+					.execute(conn)
+					.await?;
+				diesel::update(crate::schema::applications::table)
+					.filter(crate::schema::applications::machine_id.eq(machine_id))
+					.filter(crate::schema::applications::deleted_at.is_null())
+					.set(crate::schema::applications::deleted_at.eq(Some(now)))
+					.execute(conn)
+					.await?;
+				Ok((machine.group_id, headline))
+			})
+			.await?;
 		// The group's own checks follow its headline environment, which may have
 		// been this box's.
 		crate::issues::reevaluate_after_headline_change(db, group_id, headline).await

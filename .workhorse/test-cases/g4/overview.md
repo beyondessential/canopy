@@ -13,12 +13,19 @@ Most are automated at the database layer (`crates/database/tests/it/`), with the
 - [x] Inserting a live application at a rank different from its siblings' fails on the database constraint (verifies spec: GRP)
 - [x] Inserting an unranked live application beside a ranked sibling fails on the database constraint (verifies spec: GRP)
 - [x] An archived application at another rank on the same machine does not trip the constraint (verifies spec: GRP)
-- [x] Restoring an archived test application onto a box now ranked production brings it back at production, and onto a box with nothing ranked brings it back pending (verifies spec: GRP)
+- [x] Restoring an archived test application onto a box now ranked production brings it back at production (verifies spec: GRP)
+- [x] Restoring an application onto a box with no live application keeps the rank it left with, so restoring a whole archived box one application at a time returns each at the box's rank (verifies spec: GRP)
+- [x] Restoring an application that was pending brings it back pending (verifies spec: GRP)
+- [x] Ranking an archived application is refused and leaves the live applications on its box unchanged (verifies spec: GRP)
+- [x] A machine edit that fails validation leaves the box's rank as it was (verifies spec: FLT)
 - [x] A machine with no applications yet is pending, and becomes ranked only once an application on it is ranked (verifies spec: FLT)
 - [x] A group whose machines are all pending has no environments and no headline rank, and is left out of the fleet listing's rank buckets (verifies spec: GRP)
 
 ## Incidents
 
+- [x] A group whose only ranked box is archived releases its own checks from the incident they were in, closing it (verifies spec: INC)
+- [x] The startup reconcile takes an issue with no target out of the incident it still holds (verifies spec: INC)
+- [x] The migration cancels a group-target incident's undelivered Slack open and reminder, and queues a resolve where an open was already delivered (verifies spec: INC)
 - [x] A production box hosting a Tamanu central and a Postgres goes unreachable: its machine reachability, the central's reachability and Postgres's reachability all join one production incident, and no second incident opens (verifies spec: INC)
 - [x] A failing backup check on a group whose highest rank is production joins the production incident rather than opening one of its own (verifies spec: INC, GRP)
 - [x] A failing backup check on a group whose highest rank is demo joins the demo incident (verifies spec: INC)

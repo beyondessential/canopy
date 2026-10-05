@@ -397,3 +397,70 @@ async fn a_group_incident_with_nothing_ranked_closes_and_its_history_lands_on_pr
 	})
 	.await
 }
+
+/// Slack hears of the close: an open that was delivered gets its resolve, and
+/// one still waiting to be delivered is cancelled with no resolve.
+#[tokio::test(flavor = "multi_thread")]
+async fn closing_a_group_incident_tells_slack() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		revert(&mut conn).await;
+		let mut open = Vec::new();
+		for _ in 0..2 {
+			let group = group(&mut conn).await;
+			let machine = machine(&mut conn, group).await;
+			application(&mut conn, group, machine, "postgres", None).await;
+			open.push(incident(&mut conn, group, None, true).await);
+		}
+		let (announced, unannounced) = (open[0], open[1]);
+		for (incident, delivered) in [(announced, true), (unannounced, false)] {
+			sql_query(
+				"INSERT INTO slack_outbox (kind, incident_id, payload, deliver_after, delivered_at) \
+				 VALUES ('incident_open', $1, '{}'::jsonb, NOW(), \
+				         CASE WHEN $2 THEN NOW() ELSE NULL END)",
+			)
+			.bind::<sql_types::Uuid, _>(incident)
+			.bind::<sql_types::Bool, _>(delivered)
+			.execute(&mut conn)
+			.await
+			.expect("outbox row");
+		}
+
+		apply(&mut conn).await;
+
+		let resolves = |incident: Uuid| {
+			sql_query(
+				"SELECT COUNT(*) AS n FROM slack_outbox \
+				 WHERE incident_id = $1 AND kind = 'incident_resolve'",
+			)
+			.bind::<sql_types::Uuid, _>(incident)
+		};
+		assert_eq!(
+			resolves(announced)
+				.get_result::<Count>(&mut conn)
+				.await
+				.unwrap()
+				.n,
+			1,
+			"the delivered open is resolved"
+		);
+		assert_eq!(
+			resolves(unannounced)
+				.get_result::<Count>(&mut conn)
+				.await
+				.unwrap()
+				.n,
+			0,
+			"Slack never heard of the other, so there is nothing to resolve"
+		);
+		let cancelled: Count = sql_query(
+			"SELECT COUNT(*) AS n FROM slack_outbox \
+			 WHERE incident_id = $1 AND kind = 'incident_open' AND gave_up_at IS NOT NULL",
+		)
+		.bind::<sql_types::Uuid, _>(unannounced)
+		.get_result(&mut conn)
+		.await
+		.unwrap();
+		assert_eq!(cancelled.n, 1);
+	})
+	.await
+}

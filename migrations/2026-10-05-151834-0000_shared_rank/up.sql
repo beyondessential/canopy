@@ -3,8 +3,8 @@
 -- box where nothing is ranked yet.
 
 -- Ranks are written canonical, so the constraint below compares spellings that
--- mean the same thing as equal. A spelling no one recognises reads as unranked
--- already, and stays that way.
+-- mean the same thing as equal. A spelling no one recognises is not a rank the
+-- application can be read with, so it becomes unranked here.
 UPDATE applications SET rank = CASE lower(rank)
 	WHEN 'production' THEN 'production'
 	WHEN 'live' THEN 'production'
@@ -71,6 +71,32 @@ WHERE i.server_group_id IS NOT NULL AND i.rank IS NULL AND i.closed_at IS NULL
 
 UPDATE incident_issues SET left_at = NOW()
 WHERE left_at IS NULL AND incident_id IN (SELECT id FROM group_incidents_closing);
+
+-- Slack hears of the close the way it would of any other: an open still waiting
+-- to be delivered is cancelled, as is a reminder, and an incident whose open was
+-- delivered gets its resolve, naming the group as the incident always did.
+UPDATE slack_outbox
+SET gave_up_at = NOW(),
+	last_error = 'cancelled: group-target incident closed by the shared rank migration'
+WHERE gave_up_at IS NULL
+	AND delivered_at IS NULL
+	AND kind IN ('incident_open', 'incident_reminder')
+	AND incident_id IN (SELECT id FROM group_incidents_closing);
+
+INSERT INTO slack_outbox (kind, incident_id, payload, deliver_after)
+SELECT 'incident_resolve', i.id,
+	jsonb_build_object(
+		'server', g.name,
+		'by', 'Canopy, which no longer opens an incident on a group itself'),
+	NOW()
+FROM incidents i
+JOIN server_groups g ON g.id = i.server_group_id
+WHERE i.id IN (SELECT id FROM group_incidents_closing)
+	AND EXISTS (
+		SELECT 1 FROM slack_outbox o
+		WHERE o.incident_id = i.id
+			AND o.kind = 'incident_open'
+			AND o.delivered_at IS NOT NULL);
 
 UPDATE incidents SET closed_at = NOW(), closing_at = NULL, updated_at = NOW()
 WHERE id IN (SELECT id FROM group_incidents_closing);

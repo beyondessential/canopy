@@ -304,8 +304,102 @@ async fn restoring_an_application_brings_it_back_at_the_boxs_rank() {
 			.await
 			.expect("restore");
 		assert_eq!(
-			alone.rank, None,
-			"with nothing ranked beside it the application comes back pending"
+			alone.rank,
+			Some(ServerRank::Production),
+			"with no live application beside it, it keeps the rank it left with"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn restoring_a_whole_archived_box_one_application_at_a_time_keeps_its_rank() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = group(&mut conn).await;
+		let machine = machine(&mut conn, group).await;
+		let central = insert(
+			&mut conn,
+			&machine,
+			"http://central.invalid/",
+			Some("production"),
+		)
+		.await
+		.expect("central");
+		let facility = insert(
+			&mut conn,
+			&machine,
+			"http://facility.invalid/",
+			Some("production"),
+		)
+		.await
+		.expect("facility");
+		Machine::archive(&mut conn, machine.id)
+			.await
+			.expect("archive the box");
+
+		let first = Application::restore(&mut conn, central)
+			.await
+			.expect("restore");
+		let second = Application::restore(&mut conn, facility)
+			.await
+			.expect("restore");
+		assert_eq!(first.rank, Some(ServerRank::Production));
+		assert_eq!(second.rank, Some(ServerRank::Production));
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pending_application_restores_pending() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = group(&mut conn).await;
+		let machine = machine(&mut conn, group).await;
+		let facility = arrive(&mut conn, &machine, "facility").await;
+		Application::soft_delete(&mut conn, facility.id)
+			.await
+			.expect("archive");
+		let restored = Application::restore(&mut conn, facility.id)
+			.await
+			.expect("restore");
+		assert_eq!(restored.rank, None);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_archived_application_cannot_be_ranked() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = group(&mut conn).await;
+		let machine = machine(&mut conn, group).await;
+		insert(
+			&mut conn,
+			&machine,
+			"http://central.invalid/",
+			Some("production"),
+		)
+		.await
+		.expect("central");
+		let facility = insert(
+			&mut conn,
+			&machine,
+			"http://facility.invalid/",
+			Some("production"),
+		)
+		.await
+		.expect("facility");
+		Application::soft_delete(&mut conn, facility)
+			.await
+			.expect("archive");
+
+		let refused = Application::set_rank(&mut conn, facility, ServerRank::Dev, Some("op")).await;
+		assert!(
+			refused.is_err(),
+			"ranking an archived application is refused"
+		);
+		assert_eq!(
+			ranks_on(&mut conn, &machine).await,
+			vec![Some(ServerRank::Production)],
+			"the live application beside it is left alone"
 		);
 	})
 	.await

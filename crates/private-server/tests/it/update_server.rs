@@ -502,6 +502,26 @@ async fn a_rank_cannot_be_cleared() {
 	.await
 }
 
+/// A machine edit that fails leaves the rank as it was, whichever part of the
+/// edit is refused.
+// spec: FLT#editing
+#[tokio::test(flavor = "multi_thread")]
+async fn a_machine_edit_that_fails_does_not_change_its_rank() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		seed_box(&mut conn, "production").await;
+		let before = ranks_on_the_box(&mut conn).await;
+
+		private
+			.post("/api/fleet/machines/update")
+			.json(&json!({ "machine_id": BOX, "rank": "dev", "name": "   " }))
+			.await
+			.assert_status_bad_request();
+
+		assert_eq!(ranks_on_the_box(&mut conn).await, before);
+	})
+	.await
+}
+
 /// A machine holds its rank through the applications on it, so one with none
 /// has nothing to rank.
 // spec: FLT#editing

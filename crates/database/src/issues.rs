@@ -4059,11 +4059,38 @@ pub async fn reevaluate_open_issues_for_scope(
 	let now = Timestamp::now();
 	for issue in open_issues {
 		let Some(&(target, monitored)) = targets.get(&issue.id) else {
+			leave_targetless(db, &issue, now, by).await?;
 			continue;
 		};
 		re_evaluate_incident_membership(db, &issue, target, monitored, now, by).await?;
 	}
 	Ok(())
+}
+
+/// Take an issue that no longer has a target out of the open incident it is
+/// still a member of, closing that incident if nothing else holds it open.
+///
+/// An issue has no target while its application or machine is pending, and
+/// for a group's own check while nothing in the group is ranked. It has no
+/// incident path then, so a membership it holds on the environment it used to
+/// answer to is stale, and would otherwise keep that incident open until the
+/// issue resolved.
+// spec: INC#membership
+async fn leave_targetless(
+	conn: &mut AsyncPgConnection,
+	issue: &Issue,
+	transition_time: Timestamp,
+	by: Option<&str>,
+) -> Result<()> {
+	let Some(held) = open_incident_holding(conn, issue.id).await? else {
+		return Ok(());
+	};
+	lock_target(conn, IncidentTarget::of_incident(&held)).await?;
+	// The lock may have waited out a close that already took the membership.
+	if open_incident_holding(conn, issue.id).await?.is_none() {
+		return Ok(());
+	}
+	leave_open_incident(conn, issue, transition_time, by, false).await
 }
 
 /// Re-evaluate what a rank change moved: the issues at `scope`, and the
@@ -4147,9 +4174,11 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<usiz
 		let now = Timestamp::now();
 		let mut evaluated = 0usize;
 		for issue in open_issues {
-			// An ungrouped application or machine has no target, so there is
-			// nothing to reconcile for it.
+			// An ungrouped or pending member, or a group's own check while
+			// nothing in the group is ranked, has no target: it can hold no
+			// incident membership, so any it still has is stale.
 			let Some(&(target, monitored)) = targets.get(&issue.id) else {
+				leave_targetless(conn, &issue, now, None).await?;
 				continue;
 			};
 			re_evaluate_incident_membership(conn, &issue, target, monitored, now, None).await?;
