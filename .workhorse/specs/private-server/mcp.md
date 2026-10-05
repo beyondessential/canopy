@@ -84,10 +84,10 @@ Backup capability and history are the machine's rather than any application's, s
 
 ### Planned upgrades
 
-**List upgrade plans** takes no input and returns where every environment is going (see [UPG](upgrade-plans.md)): each open plan, named by its group and rank, with the version that environment runs now, the version it plans to move to, the planned date where there is one, and whether that date has passed unmet.
+**List upgrade plans** takes no input and returns where every environment is going (see [UPG](upgrade-plans.md)): each open plan, named by its group and environment, with the version that environment runs now, the version it plans to move to, the planned date where there is one, and whether that date has passed unmet.
 Separately it returns each group's headline environment that runs behind the newest published version with nothing recorded, and how far behind it is, since pre-upgrade testing does not cover it.
 
-**Get upgrade plan history** takes a group identifier and returns every plan that group's environments have had, newest first, each with the rank it was for, its target, planned date, note, and how it stands: open, met, replaced by a later plan, or withdrawn.
+**Get upgrade plan history** takes a group identifier and returns every plan that group's environments have had, newest first, each with the environment it was for, its target, planned date, note, and how it stands: open, met, replaced by a later plan, or withdrawn.
 It returns the group's environments alongside, each with what it runs now and how far behind the newest published version that is.
 A plan carries the operator who recorded it, who last amended it, and who withdrew it, with the times of each.
 

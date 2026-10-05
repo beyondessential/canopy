@@ -37,7 +37,8 @@ Consequences:
 - A sidecar (Postgres and similar) on a ranked box joins that box's environment's incident, maintenance, and plan.
 - An unranked application on a box hosting nothing ranked is in the other environment for incidents, maintenance, plans and upgrade candidates, rather than inheriting the headline environment's candidate.
 - A rank change on one application re-evaluates the issues of every unranked application on its box, as well as its own and its machine's.
-- A group's maintenance window keeps covering everything in the group; the other environment's window is a separate, narrower target beside it.
+- A group's maintenance window keeps covering everything in the group; the other environment's window is a separate, narrower target beside it, covering its machines and leaving the group's own checks watched.
+- The production-upgrade lease guard (INV "Planned upgrades") applies to production alone, so an all-unranked group's upgrade runs need no plan. One live group (a demo) is all-unranked.
 - Existing open incidents heal on deploy through the monitor's startup `reconcile_open_incidents`; the group-target incidents become other-environment incidents in the same migration.
 
 Whether group-scoped checks should instead file against the environment they concern is a separate card (H4).
@@ -50,10 +51,11 @@ Whether group-scoped checks should instead file against the environment they con
 
 ## Steps
 
-- [ ] Specs: GRP "Environments", "A group's headline rank" and "Naming" define the other environment and the derivation; INC "Targets", "Notification" and the rank-change re-evaluation; MNT, UPG, RST wording that leans on the old rules
+- [x] Specs: GRP "Environments", "A group's headline rank" and "Naming" define the other environment and the derivation; INC "Targets", "Notification" and the rank-change re-evaluation; CHK marks, FLT group tree, MNT, UPG, RST and MCP wording that leaned on the old rules
 - [ ] Migration: `'other'` in the rank CHECKs of incidents, maintenance windows, upgrade plans and inventory leases; incidents' NULL rank moves to `'other'`; one open-incident index per environment
 - [ ] One derivation in the database crate (application or machine → environment key, batched), replacing `environment_of` and the unranked branches of `environments_inner`, `member_target`, `candidates_for` and `upgrade_plans.rs`
 - [ ] `ScopeTargets::load` loads machine ranks for application scopes; the group-scope arm of `incident_target` targets the other environment
-- [ ] Naming: `environment_name` and `format_group_label` read the other environment as "{group} other"; the SPA reads it as "other" on the group's surface
+- [ ] Naming: `environment_name` and `format_group_label` read the other environment as "{group} other"; the SPA reads it as "other" on the group's surface (`GroupTree` heading, upgrades, incidents)
+- [ ] Inventory: `GroupInventorySection` places an unranked application at dev; it follows the derivation instead, offering the other environment
 - [ ] Re-evaluation: rank change and machine move enqueue co-hosted unranked applications
 - [ ] Tests: unranked sidecar on a production box joins the production incident (the Fiji Prime shape); bare box in a ranked group and a group check both open on the other environment; all-unranked group's plans, windows and incidents sit on its other environment; rank change on the host app moves the sidecar's issues

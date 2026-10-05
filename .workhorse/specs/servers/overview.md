@@ -107,17 +107,6 @@ Editing an application leads to that form, its own fields being a section of it 
 
 The group is offered on the machine alone, since the applications on it take it and an application's group is never set independently.
 An identity is not offered at all: it is bound by enrolment rather than by editing a form.
-A machine's name is required when it is created and not when it is edited, so a box that arrived without one stays editable.
-
-## Editing
-
-Editing is machine-first: one form per machine, holding the machine's own section and one section per application on it.
-
-So a machine fact has one place it is edited, and a shared box is edited where everything sharing it is visible — a change to the box is visibly a change to every workload on it.
-Editing an application leads to that form, its own fields being a section of it rather than a form of their own.
-
-The group is offered on the machine alone, since the applications on it take it and an application's group is never set independently.
-An identity is not offered at all: it is bound by enrolment rather than by editing a form.
 A machine's name is required when a box is created and not when it is edited, so a box that arrived without one stays editable.
 
 ## Navigating the two grains
@@ -136,7 +125,7 @@ A version or a database engine is not there, those being a workload's rather tha
 
 An application's page names the machine it runs on.
 
-A group presents its machines, and under each the applications on it, bucketed by rank.
+A group presents its machines, and under each the applications on it, bucketed by environment, its other environment last (see [GRP](groups.md), "Environments").
 A machine takes the rank of the highest-ranked application on it, which is the same derivation its billing stage uses (see [APP](application-types.md), "Billing attribution").
 A machine carrying nothing yet appears in the group as awaiting check-in rather than being absent, since an operator who has just added a box needs to see it.
 
