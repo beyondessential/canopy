@@ -94,8 +94,8 @@ impl Error {
 ///
 /// Endpoints give meaning to specific codes, so this carries the status and the
 /// body rather than flattening them into a message. The message does include
-/// the reason canopy gave where the body is a problem document, so a consumer
-/// that reports the error as text says why the request was refused.
+/// the reason canopy gave for a refusal whose body is a problem document, so a
+/// consumer that reports the error as text says why the request was refused.
 // spec: APIC#the-consumer-supplies-the-transport
 #[derive(Debug, thiserror::Error)]
 #[error("canopy returned {status} for {path}{}", self.reason().map(|r| format!(": {r}")).unwrap_or_default())]
@@ -114,17 +114,21 @@ impl CanopyHttpError {
 		String::from_utf8_lossy(&self.body)
 	}
 
-	/// The reason canopy gave, where the body is a problem document.
+	/// The reason canopy gave for refusing the request, where the body is a
+	/// problem document.
 	///
 	/// Canopy puts the occurrence's own message in the document's title, so that
 	/// is what this reads, falling back to the detail for a document without one.
+	/// Only a refusal (a 4xx) has a reason: a server fault's message describes
+	/// canopy's internals, which stay with canopy.
 	pub fn reason(&self) -> Option<String> {
+		if !self.status.is_client_error() {
+			return None;
+		}
 		let document: serde_json::Value = serde_json::from_slice(&self.body).ok()?;
-		["title", "detail"]
-			.iter()
-			.find_map(|key| document.get(key)?.as_str())
-			.map(str::trim)
-			.filter(|reason| !reason.is_empty())
-			.map(ToOwned::to_owned)
+		["title", "detail"].iter().find_map(|key| {
+			let reason = document.get(key)?.as_str()?.trim();
+			(!reason.is_empty()).then(|| reason.to_owned())
+		})
 	}
 }

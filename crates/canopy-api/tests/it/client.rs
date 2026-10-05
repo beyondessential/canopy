@@ -78,6 +78,45 @@ async fn a_refusal_reports_the_reason_canopy_gave() {
 }
 
 #[tokio::test]
+async fn a_blank_title_falls_back_to_the_detail() {
+	let recorder = Recorder::json(
+		403,
+		r#"{"type":"/errors/forbidden","status":403,"title":"  ","detail":"not yours"}"#,
+	);
+	let client = CanopyClient::new(recorder);
+
+	let err = client
+		.status_check_severities("a-server")
+		.await
+		.expect_err("a 403 is not a success");
+
+	assert_eq!(
+		err.to_string(),
+		"canopy returned 403 Forbidden for /status/a-server/check-severities: not yours"
+	);
+}
+
+#[tokio::test]
+async fn a_server_fault_reports_its_status_alone() {
+	let recorder = Recorder::json(
+		500,
+		r#"{"type":"/errors/database-query","status":500,"title":"database: duplicate key value violates unique constraint \"secret_idx\"","detail":"DatabaseQuery(..)"}"#,
+	);
+	let client = CanopyClient::new(recorder);
+
+	let err = client
+		.status_check_severities("a-server")
+		.await
+		.expect_err("a 500 is not a success");
+
+	assert_eq!(
+		err.to_string(),
+		"canopy returned 500 Internal Server Error for /status/a-server/check-severities"
+	);
+	assert!(err.http().expect("http").body_text().contains("secret_idx"));
+}
+
+#[tokio::test]
 async fn a_refusal_without_a_problem_document_reports_the_status_alone() {
 	let recorder = Recorder::json(412, "device is dormant");
 	let client = CanopyClient::new(recorder);

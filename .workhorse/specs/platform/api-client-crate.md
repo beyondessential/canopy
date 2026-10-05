@@ -80,7 +80,8 @@ It returns Canopy's response as given, unsuccessful statuses included, because e
 A failure to obtain any response is reported as distinct from a response that reports failure.
 
 The client turns an unsuccessful status into an error carrying that status and the body, so a consumer can branch on the status an endpoint documents.
-Where the body is a problem document, the error's message includes the reason Canopy gave, so a consumer that reports the error as text says why the request was refused and not only that it was.
+Where a refusal's body is a problem document, the error's message includes the reason Canopy gave, so a consumer that reports the error as text says why the request was refused and not only that it was.
+A server fault's message carries its status alone, since what Canopy says about its own fault describes its internals; the body stays on the error for a consumer that asks for it.
 
 ## What the generated types carry
 
