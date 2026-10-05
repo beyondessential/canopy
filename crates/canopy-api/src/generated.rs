@@ -3,11 +3,11 @@
 
 /// Version of the OpenAPI document this source was generated from, which is also
 /// this crate's own version.
-pub const OPENAPI_VERSION: &str = "1.0.3";
+pub const OPENAPI_VERSION: &str = "1.1.0";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "8f274deada1f4357dcdf20d631ccdeedf582d30a45a9cc5b4bc5c2f3ae9f1360";
+pub const OPENAPI_BLAKE3: &str = "45d14ec49a816ca6100f9224b01983ef3494348a9d844b99c360d06236879a9a";
 
 /// Error types.
 pub mod error {
