@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0](https://github.com/beyondessential/canopy/compare/bes-canopy-api-v1.0.3...bes-canopy-api-v1.1.0) - 2026-10-05
+
+### Added
+
+- *(statuses)* accept instanced checks and per-check detail (B4)
+
+### Fixed
+
+- *(canopy-api)* report a reason for refusals only, falling back to the detail past a blank title (F4)
+- *(certificates)* close the declared-elsewhere probe, refuse contradicting types distinctly, keep denial notes operator-side (F4)
+- *(statuses)* read a non-object instances or detail as a flat field
+
+### Other
+
+- update 2 specs, update 30 files
+
 ## [1.0.3](https://github.com/beyondessential/canopy/compare/bes-canopy-api-v1.0.2...bes-canopy-api-v1.0.3) - 2026-09-28
 
 ### Other
