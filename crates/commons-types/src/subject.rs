@@ -35,9 +35,10 @@ pub enum CheckSubject {
 /// addresses and the other a Tamanu error stream. A prefix rule files both
 /// wrongly, and silently.
 ///
-/// Canopy holds this list only while unified pushes exist. A reporter that
-/// states the subject itself makes it redundant; until then, a check named
-/// here from any source is the machine's.
+/// Canopy holds this list only to separate unified pushes, which carry both
+/// grains' checks in one set. A push in the current format states the grain
+/// itself, and a check it reports under an application is the application's
+/// whatever it is called, a name on this list included.
 const MACHINE_SUBJECT_CHECKS: &[&str] = &[
 	"billing_tags",
 	"btrfs",

@@ -52,31 +52,6 @@ fn check_to_ref(source: &str, check: &str) -> String {
 	}
 }
 
-/// The namespace a silence names, from the check's name and whatever the
-/// target can say about the application type.
-///
-/// A curated source's names are flat, so nothing needs to be known. A
-/// structured source's machine-subject check is in the machine namespace,
-/// which no type bears on. Only a structured source's application-subject
-/// check needs one, and where it comes from follows the scope: an
-/// application-scoped silence reads it off the application, a group-scoped one
-/// takes it from the operator (who silenced the check while looking at one),
-/// and a machine-scoped one has none. A machine-scoped silence never reaches
-/// here: a box Canopy holds no application for files everything as its own, so
-/// every check at that scope is in the machine namespace whatever its name,
-/// and [`Namespace::for_machine`] answers without needing a type.
-fn namespace_for(
-	source: &str,
-	check: &str,
-	application_type: Option<&ApplicationType>,
-) -> Result<Namespace> {
-	Namespace::of(source, check, application_type).ok_or_else(|| {
-		AppError::Custom(format!(
-			"{check} from {source} is an application check, so silencing it needs an application type"
-		))
-	})
-}
-
 /// The application type of the application a silence is scoped to, for
 /// resolving the check's namespace.
 async fn type_of(db: &mut AsyncPgConnection, application_id: Uuid) -> Result<ApplicationType> {
@@ -417,9 +392,8 @@ pub async fn is_silenced(
 		|p: Option<ScopedCheckPolicy>| p.is_some_and(|p| p.ceiling.as_deref() == Some("skipped"));
 	// The event's own scope, when it has one below the group.
 	let namespace = match scope {
-		Scope::Application(id) => namespace_for(source, check, Some(&type_of(db, id).await?))?,
-		Scope::Machine(_) => Namespace::for_machine(source, check),
-		_ => namespace_for(source, check, None)?,
+		Scope::Application(id) => Namespace::of(source, Some(&type_of(db, id).await?)),
+		_ => Namespace::of(source, None),
 	};
 	if matches!(
 		scope,
@@ -436,43 +410,35 @@ pub async fn is_silenced(
 	))
 }
 
-/// Check names silenced for a server under one reporting source, at
-/// either server or group scope. `group_id` is the server's current
+/// Check names silenced for one target under one reporting source, at the
+/// target's own scope or its group's. `group_id` is the target's current
 /// group; pass `None` if ungrouped. A check's identity is the (source,
-/// check) pair, so a silence on another source's same-named check never
-/// applies.
+/// namespace, check) triple, so a silence on another source's same-named check
+/// never applies, and nor does one on the same name in another namespace: the
+/// box's `memory` and an application's own `memory` are silenced separately.
 ///
-/// This feeds the consolidated check readers and the device-facing
+/// This feeds the point-in-time consolidated view and the device-facing
 /// effective check map: a silenced check keeps recording results but is
-/// presented as skipped and doesn't count toward the server's health
-/// rollup.
-pub async fn silenced_health_checks_for_server(
+/// presented as skipped and doesn't count toward the target's health rollup.
+///
+/// A group-scoped silence is shared by every namespace filing under that
+/// group, so it is narrowed to the one this target's checks file into.
+/// Without that, silencing one application type's check would silence its
+/// namesake on every other type in the group, and on the box.
+pub async fn silenced_health_checks_at(
 	db: &mut AsyncPgConnection,
-	application_id: Option<Uuid>,
-	machine_id: Option<Uuid>,
+	target: Scope,
 	group_id: Option<Uuid>,
 	source: &str,
 ) -> Result<BTreeSet<String>> {
 	use crate::schema::scoped_check_policies::dsl;
 
-	// A reporter pushes both grains' checks and gets one answer back, so this
-	// covers the machine as well. Without it a machine check silenced by an
-	// operator would keep being run and reported: the silence would hold on
-	// canopy's side and be invisible to the agent.
-	// spec: STA
-	// A group-scoped silence is shared by every namespace filing under that
-	// group, so it is narrowed to the ones this reporter can file into: the
-	// machine's, its own application type's, and the flat one a curated source
-	// uses. Without that, silencing one application type's check would silence
-	// its namesake on every other type in the group.
-	//
-	// A box Canopy holds no application for files everything as the machine's,
-	// so there is no type to narrow by and no application scope to read: it
-	// gets the machine's silences and its group's unqualified ones.
-	let application_type = match application_id {
-		Some(id) => Some(type_of(db, id).await?.to_string()),
-		None => None,
+	let application_type = match target {
+		Scope::Application(id) => Some(type_of(db, id).await?),
+		_ => None,
 	};
+	let (subject, application_type) = Namespace::of(source, application_type.as_ref()).to_columns();
+	let (application_id, machine_id, server_group_id, kubernetes_cluster_id) = target.to_columns();
 	let rows: Vec<String> = dsl::scoped_check_policies
 		.select(dsl::check_name)
 		.filter(dsl::ceiling.eq("skipped"))
@@ -481,22 +447,21 @@ pub async fn silenced_health_checks_for_server(
 		// spec: CHK#silencing-one-instance
 		.filter(dsl::instance_key.is_null())
 		.filter(dsl::source.eq(source))
-		.filter(
-			dsl::subject
-				.is_null()
-				.or(dsl::subject.is_not_distinct_from(commons_types::namespace::SUBJECT_MACHINE))
-				.or(dsl::subject
-					.is_not_distinct_from(commons_types::namespace::SUBJECT_APPLICATION)
-					.and(dsl::application_type.is_not_distinct_from(application_type))
-					.and(dsl::application_type.is_not_null())),
-		)
+		.filter(dsl::subject.is_not_distinct_from(subject.map(str::to_owned)))
+		.filter(dsl::application_type.is_not_distinct_from(application_type))
 		.filter(
 			dsl::application_id
 				.is_not_distinct_from(application_id)
-				.and(dsl::application_id.is_not_null())
-				.or(dsl::machine_id
-					.is_not_distinct_from(machine_id)
-					.and(dsl::machine_id.is_not_null()))
+				.and(dsl::machine_id.is_not_distinct_from(machine_id))
+				.and(dsl::server_group_id.is_not_distinct_from(server_group_id))
+				.and(dsl::kubernetes_cluster_id.is_not_distinct_from(kubernetes_cluster_id))
+				.and(
+					dsl::application_id
+						.is_not_null()
+						.or(dsl::machine_id.is_not_null())
+						.or(dsl::server_group_id.is_not_null())
+						.or(dsl::kubernetes_cluster_id.is_not_null()),
+				)
 				.or(dsl::server_group_id
 					.is_not_distinct_from(group_id)
 					.and(dsl::server_group_id.is_not_null())),
@@ -533,7 +498,7 @@ impl ServerSilencedRef {
 		created_by: Option<&str>,
 	) -> Result<Self> {
 		let check = ref_to_check(r#ref);
-		let namespace = namespace_for(source, check, Some(&type_of(db, application_id).await?))?;
+		let namespace = Namespace::of(source, Some(&type_of(db, application_id).await?));
 		let scope = Scope::Application(application_id);
 		let policy =
 			ScopedCheckPolicy::silence(db, scope, source, &namespace, check, instance, created_by)
@@ -563,7 +528,7 @@ impl ServerSilencedRef {
 		instance: Option<&str>,
 	) -> Result<()> {
 		let check = ref_to_check(r#ref);
-		let namespace = namespace_for(source, check, Some(&type_of(db, application_id).await?))?;
+		let namespace = Namespace::of(source, Some(&type_of(db, application_id).await?));
 		let scope = Scope::Application(application_id);
 		ScopedCheckPolicy::unsilence(db, scope, source, &namespace, check, instance).await?;
 		match instance {
@@ -630,9 +595,9 @@ impl ServerGroupSilencedRef {
 	}
 
 	/// Add a group-scoped silence. `application_type` names which type's check is
-	/// meant, and is required for an application-subject check from a structured
-	/// source: the operator silences group-wide from one server's check row, so
-	/// the caller knows the type even though the group covers several.
+	/// meant: the operator silences group-wide from one target's check row, so
+	/// the caller knows the type even though the group covers several. `None`
+	/// is the check a machine files, or a curated source's.
 	///
 	/// `instance` silences one instance of the check by key, on every target in
 	/// the group reporting the check; `None` silences the whole check. What it
@@ -648,7 +613,7 @@ impl ServerGroupSilencedRef {
 		created_by: Option<&str>,
 	) -> Result<Self> {
 		let check = ref_to_check(r#ref);
-		let namespace = namespace_for(source, check, application_type)?;
+		let namespace = Namespace::of(source, application_type);
 		let scope = Scope::Group(server_group_id);
 		let policy =
 			ScopedCheckPolicy::silence(db, scope, source, &namespace, check, instance, created_by)
@@ -676,7 +641,7 @@ impl ServerGroupSilencedRef {
 		instance: Option<&str>,
 	) -> Result<()> {
 		let check = ref_to_check(r#ref);
-		let namespace = namespace_for(source, check, application_type)?;
+		let namespace = Namespace::of(source, application_type);
 		let scope = Scope::Group(server_group_id);
 		ScopedCheckPolicy::unsilence(db, scope, source, &namespace, check, instance).await?;
 		match instance {
@@ -725,7 +690,7 @@ impl MachineSilencedRef {
 		created_by: Option<&str>,
 	) -> Result<Self> {
 		let check = ref_to_check(r#ref);
-		let namespace = Namespace::for_machine(source, check);
+		let namespace = Namespace::of(source, None);
 		let scope = Scope::Machine(machine_id);
 		let policy =
 			ScopedCheckPolicy::silence(db, scope, source, &namespace, check, instance, created_by)
@@ -752,7 +717,7 @@ impl MachineSilencedRef {
 		instance: Option<&str>,
 	) -> Result<()> {
 		let check = ref_to_check(r#ref);
-		let namespace = Namespace::for_machine(source, check);
+		let namespace = Namespace::of(source, None);
 		let scope = Scope::Machine(machine_id);
 		ScopedCheckPolicy::unsilence(db, scope, source, &namespace, check, instance).await?;
 		match instance {
@@ -804,7 +769,7 @@ impl ClusterSilencedRef {
 		created_by: Option<&str>,
 	) -> Result<Self> {
 		let check = ref_to_check(r#ref);
-		let namespace = namespace_for(source, check, None)?;
+		let namespace = Namespace::of(source, None);
 		let scope = Scope::Cluster(kubernetes_cluster_id);
 		let policy =
 			ScopedCheckPolicy::silence(db, scope, source, &namespace, check, instance, created_by)
@@ -827,7 +792,7 @@ impl ClusterSilencedRef {
 		instance: Option<&str>,
 	) -> Result<()> {
 		let check = ref_to_check(r#ref);
-		let namespace = namespace_for(source, check, None)?;
+		let namespace = Namespace::of(source, None);
 		let scope = Scope::Cluster(kubernetes_cluster_id);
 		ScopedCheckPolicy::unsilence(db, scope, source, &namespace, check, instance).await?;
 		if instance.is_some() {

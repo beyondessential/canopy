@@ -456,7 +456,7 @@ mod tests {
 			ConsolidatedCheck {
 				source: "alertd".into(),
 				check: name.into(),
-				namespace: (&crate::namespace::Namespace::for_machine("alertd", name)).into(),
+				namespace: (&crate::namespace::Namespace::of("alertd", None)).into(),
 				qualified_name: name.into(),
 				observed: Some(CheckResult::Passed),
 				effective: CheckResult::Passed,

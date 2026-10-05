@@ -1543,7 +1543,7 @@ pub async fn file_check_instances(
 		"group- and canopy-wide filings are canopy's own; an application's, a machine's and a cluster's come from a reporter",
 	);
 	let target = GradingTarget::load(conn, filing.scope).await?;
-	let namespace = target.namespace(source, filing.check, filing.scope)?;
+	let namespace = Namespace::of(source, target.application_type.as_ref());
 
 	CheckPolicy::register(
 		conn,
@@ -1707,8 +1707,8 @@ impl GradingTarget {
 		};
 		Ok(match scope {
 			// The application type comes out of the same load the tags do,
-			// because the check's namespace needs it: an application-subject
-			// check from a structured source is one catalog entry per type.
+			// because the check's namespace needs it: a structured source's
+			// check filed against an application is one catalog entry per type.
 			Scope::Application(application_id) => {
 				let server = Application::get_by_id(conn, application_id).await?;
 				Self {
@@ -1759,14 +1759,6 @@ impl GradingTarget {
 				filing_scope: FilingScope::default(),
 				application_type: None,
 			},
-		})
-	}
-
-	fn namespace(&self, source: &str, check: &str, scope: Scope) -> Result<Namespace> {
-		Namespace::of(source, check, self.application_type.as_ref()).ok_or_else(|| {
-			AppError::Custom(format!(
-				"{check} from {source} is an application check, so it cannot be filed against {scope:?}"
-			))
 		})
 	}
 }
@@ -2228,9 +2220,7 @@ pub async fn health_from_check_state(
 		) {
 			continue;
 		}
-		let Some(ns) = Namespace::of(&key.1, &key.2, types.get(&application_id)) else {
-			continue;
-		};
+		let ns = Namespace::of(&key.1, types.get(&application_id));
 		if server_silences.contains(&(key.0, ns.clone(), key.1.clone(), key.2.clone())) {
 			continue;
 		}
@@ -2687,14 +2677,11 @@ async fn check_detail_at_grain(
 		else {
 			continue;
 		};
-		let silenced = match Namespace::of(&source, &check, types.get(&target_id)) {
-			Some(ns) => {
-				target_silences.contains(&(target_id, ns.clone(), source.clone(), check.clone()))
-					|| matches!(group_of.get(&target_id), Some(Some(gid))
-					if group_silences.contains(&(*gid, ns.clone(), source.clone(), check.clone())))
-			}
-			None => false,
-		};
+		let ns = Namespace::of(&source, types.get(&target_id));
+		let silenced =
+			target_silences.contains(&(target_id, ns.clone(), source.clone(), check.clone()))
+				|| matches!(group_of.get(&target_id), Some(Some(gid))
+				if group_silences.contains(&(*gid, ns.clone(), source.clone(), check.clone())));
 		let effective = if silenced {
 			CheckResult::Skipped
 		} else {
@@ -2943,7 +2930,7 @@ async fn checks_at_scope(
 				resolved_at,
 			)| {
 				let check = check_name?;
-				let namespace = Namespace::of(&source, &check, application_type.as_ref())?;
+				let namespace = Namespace::of(&source, application_type.as_ref());
 				crate::check_policies::CheckPolicy::live_in(&cataloged, &source, &namespace, &check)
 					.then(|| Live {
 						source,
@@ -5239,7 +5226,7 @@ impl Issue {
 
 		let mut latest: HashMap<(Uuid, String), Timestamp> = HashMap::new();
 		for (machine, source, check, seen) in rows {
-			let namespace = Namespace::for_machine(&source, &check);
+			let namespace = Namespace::of(&source, None);
 			if !CheckPolicy::live_in(&cataloged, &source, &namespace, &check) {
 				continue;
 			}

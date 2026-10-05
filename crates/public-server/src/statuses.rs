@@ -30,7 +30,7 @@ use database::{
 		ReportedCheck, Scope, grade_instances, is_health_structure,
 	},
 	machines::Machine,
-	silenced_refs::silenced_health_checks_for_server,
+	silenced_refs::silenced_health_checks_at,
 	statuses::{NewStatus, Status},
 };
 use jiff::Timestamp;
@@ -687,8 +687,7 @@ async fn create(
 			// push (upserted into the catalog above) are already in the map.
 			let machine_severities = effective_check_severities(
 				&mut db,
-				None,
-				machine.id,
+				Scope::Machine(machine.id),
 				machine.group_id,
 				None,
 				&source,
@@ -698,8 +697,7 @@ async fn create(
 			for (key, application, _, tags) in apps {
 				let check_severities = effective_check_severities(
 					&mut db,
-					Some(application.id),
-					machine.id,
+					Scope::Application(application.id),
 					application.group_id,
 					Some(&application.r#type),
 					&source,
@@ -801,12 +799,11 @@ async fn create(
 				.await?;
 			}
 
-			let check_severities = effective_check_severities(
+			let check_severities = unified_check_severities(
 				&mut db,
-				server_id,
+				application.as_ref(),
 				machine.id,
 				group_id,
-				application.as_ref().map(|s| &s.r#type),
 				&source,
 			)
 			.await?;
@@ -937,41 +934,41 @@ async fn check_severities(
 	let server =
 		resolve_unified_application(&mut db, &machine, &serde_json::Value::Null, false).await?;
 
-	let map = effective_check_severities(
+	let map = unified_check_severities(
 		&mut db,
-		server.as_ref().map(|s| s.id),
+		server.as_ref(),
 		machine.id,
 		server.as_ref().map_or(machine.group_id, |s| s.group_id),
-		server.as_ref().map(|s| &s.r#type),
 		DEFAULT_SOURCE,
 	)
 	.await?;
 	Ok(Json(map))
 }
 
-/// Build the effective per-check map for a server and source: every check
-/// in the source's catalog mapped from its static policy ceiling (`failed`
-/// → `fail`, `warning`/`broken` → `warn`, `passed`/`skipped` → `skip`),
-/// then any check silenced for this server (at application, machine, or group
-/// scope)
-/// forced to `skip`. Conditional rules are deliberately not consulted —
-/// they depend on each push's contents, so only the static ceiling can be
-/// mapped ahead of time.
+/// Build the effective per-check map for one target and source: every check
+/// in the source's catalog in the target's namespace, mapped from its static
+/// policy ceiling (`failed` → `fail`, `warning`/`broken` → `warn`,
+/// `passed`/`skipped` → `skip`), then any check silenced for this target (at
+/// its own scope or its group's) forced to `skip`. Conditional rules are
+/// deliberately not consulted — they depend on each push's contents, so only
+/// the static ceiling can be mapped ahead of time.
+///
+/// `application_type` is the target's type when it is an application, and
+/// `None` when it is a machine.
 async fn effective_check_severities(
 	db: &mut AsyncPgConnection,
-	server_id: Option<Uuid>,
-	machine_id: Uuid,
+	target: Scope,
 	group_id: Option<Uuid>,
 	application_type: Option<&ApplicationType>,
 	source: &str,
 ) -> Result<BTreeMap<String, CheckSeverity>> {
 	// Keyed by bare check name, because that is what the reporter sends and
-	// reads back. The catalog is narrowed to the namespaces this reporter can
-	// file into, so another application type's same-named check is not in here
-	// to collide with. A box with no application can file into the machine's
-	// namespace only.
+	// reads back. The catalog is narrowed to the one namespace this target's
+	// checks file into, so the box's `memory` and an application's own
+	// `memory` do not collide here.
+	let namespace = Namespace::of(source, application_type);
 	let mut map: BTreeMap<String, CheckSeverity> =
-		CheckPolicy::ceiling_map_for_source(db, source, application_type)
+		CheckPolicy::ceiling_map_for_source(db, source, &namespace)
 			.await?
 			.into_iter()
 			.map(|(name, ceiling)| (name, ceiling.into()))
@@ -979,13 +976,46 @@ async fn effective_check_severities(
 
 	// Silences are keyed per (source, check): only this source's own
 	// silences force its checks to skip.
-	for check in
-		silenced_health_checks_for_server(db, server_id, Some(machine_id), group_id, source).await?
-	{
+	for check in silenced_health_checks_at(db, target, group_id, source).await? {
 		map.insert(check, CheckSeverity::Skip);
 	}
 
 	Ok(map)
+}
+
+/// The effective check map for a unified push, which gets one answer for both
+/// grains: each name is answered from the grain ingest files it at, the
+/// machine's for a machine-subject name and the application's for the rest.
+/// A push naming no application is the box's in full.
+// spec: STA#transitional-unified-pushes
+async fn unified_check_severities(
+	db: &mut AsyncPgConnection,
+	application: Option<&Application>,
+	machine_id: Uuid,
+	group_id: Option<Uuid>,
+	source: &str,
+) -> Result<BTreeMap<String, CheckSeverity>> {
+	let machine =
+		effective_check_severities(db, Scope::Machine(machine_id), group_id, None, source).await?;
+	let Some(application) = application else {
+		return Ok(machine);
+	};
+	let own = effective_check_severities(
+		db,
+		Scope::Application(application.id),
+		group_id,
+		Some(&application.r#type),
+		source,
+	)
+	.await?;
+	Ok(machine
+		.into_iter()
+		.filter(|(name, _)| CheckSubject::of(name).is_machine())
+		.chain(
+			own.into_iter()
+				.filter(|(name, _)| !CheckSubject::of(name).is_machine()),
+		)
+		.collect())
 }
 
 /// Resolve the server version to record on this status. Prefers the payload's
@@ -1070,9 +1100,14 @@ async fn file_health_events(
 		SubjectSplit::BySubject => server_id.is_none() || CheckSubject::of(check).is_machine(),
 		SubjectSplit::AsGiven => server_id.is_none(),
 	};
-	let namespace_of = |check: &str| match application_type {
-		Some(ty) if !on_machine(check) => Namespace::for_application(&status.source, check, ty),
-		_ => Namespace::for_machine(&status.source, check),
+	// The namespace follows the grain the check files at, never its name: a
+	// check filed against an application is that application type's entry.
+	// spec: CHK#names
+	let namespace_of = |check: &str| {
+		Namespace::of(
+			&status.source,
+			application_type.filter(|_| !on_machine(check)),
+		)
 	};
 	// The scope a check files at. A check off the machine always has an
 	// application to file against: with no application, every check is the
@@ -1085,9 +1120,9 @@ async fn file_health_events(
 	// Upsert a catalog row for every check name seen on this push,
 	// whatever its result. New checks land at the default warning
 	// ceiling; operators can review and adjust from the /healthchecks
-	// page. A name resolves to the namespace its subject and this
-	// source put it in, so a machine check on a Tamanu push is the
-	// box's entry and not one Tamanu owns.
+	// page. A name resolves to the namespace of the grain it files at,
+	// so a machine check on a Tamanu push is the box's entry and not one
+	// Tamanu owns.
 	for check_name in reported.keys() {
 		let namespace = namespace_of(check_name);
 		CheckPolicy::upsert_default(conn, &status.source, &namespace, check_name).await?;
