@@ -42,7 +42,7 @@ import {
 	aggregateOperators,
 	compareServersByRankThenType,
 	groupServersByRank,
-	heldByLabel,
+	resolveHeldBy,
 	isIncidentLingering,
 } from "../types";
 import UndeclaredDnsNamesNotice from "../components/UndeclaredDnsNamesNotice";
@@ -757,11 +757,11 @@ export function RankedDotStrip({
 								maintained={box.lead.machine_maintained}
 								settling={box.lead.machine_maintenance_settling}
 								ownWindow={box.lead.machine_own_window}
-								heldBy={
-									maintained && rank
-										? heldByLabel({ kind: "environment", rank })
-										: heldByLabel({ kind: "group", name: groupName })
-								}
+								heldBy={resolveHeldBy({
+									rank,
+									environmentHeld: maintained,
+									groupName,
+								})}
 								describes={box.applications.map((m) =>
 									[
 										`Application ${m.name}${m.rank ? ` · ${m.rank}` : ""} · ${m.type}`,

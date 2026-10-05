@@ -15,7 +15,7 @@ import {
 	type GroupEnvironment,
 	type GroupMachine,
 	groupServersByRank,
-	heldByLabel,
+	resolveHeldBy,
 	rankMachines,
 	type ServerInfo,
 } from "../types";
@@ -35,11 +35,13 @@ export default function GroupTree({
 	machines,
 	applications,
 	environments,
+	groupName,
 	currentMachineId,
 	currentApplicationId,
 }: {
 	machines: GroupMachine[];
 	applications: ServerInfo[];
+	groupName?: string | null;
 	/// The group's environments and whether a window holds over each, so the
 	/// row a window was declared over carries the mark rather than only the
 	/// boxes it caught.
@@ -76,11 +78,11 @@ export default function GroupTree({
 									machine={box.machine}
 									applications={box.applications}
 									environmentWindow={held ? { settling } : null}
-									heldBy={
-										rank && held
-											? heldByLabel({ kind: "environment", rank })
-											: null
-									}
+									heldBy={resolveHeldBy({
+										rank,
+										environmentHeld: held,
+										groupName,
+									})}
 									currentMachineId={currentMachineId}
 									currentApplicationId={currentApplicationId}
 								/>
@@ -127,17 +129,17 @@ function MachineBlock({
 	environmentWindow?: { settling: boolean } | null;
 	/// What holds a window this box did not have declared over it.
 	// spec: MNT#presentation
-	heldBy?: string | null;
+	heldBy: string;
 	currentMachineId?: string;
 	currentApplicationId?: string;
 }) {
 	const current = machine.id === currentMachineId;
 	const name = machine.name;
 	const own = machine.own_window === true;
-	const boxHeldBy = machine.maintained
-		? (heldBy ?? heldByLabel({ kind: "group", name: null }))
-		: null;
-	const applicationHeldBy = own ? heldByLabel({ kind: "machine", name }) : boxHeldBy;
+	const boxHeldBy = machine.maintained ? heldBy : null;
+	const applicationHeldBy = own
+		? resolveHeldBy({ ownWindow: true, machineName: name })
+		: boxHeldBy;
 	return (
 		<Box
 			data-testid="tree-block"
@@ -179,6 +181,7 @@ function MachineBlock({
 								health={application.health ?? undefined}
 								monitored={application.is_monitored !== false}
 								maintained={application.own_window ?? false}
+								settling={application.maintenance_settling === true}
 								suspended={
 									(application.maintained ?? false) && !machine.maintained
 								}
@@ -224,6 +227,7 @@ function MachineBlock({
 								health={application.health ?? undefined}
 								monitored={application.is_monitored !== false}
 								maintained={application.own_window ?? false}
+								settling={application.maintenance_settling === true}
 								suspended={application.maintained ?? false}
 								heldBy={applicationHeldBy}
 								title={applicationName(application)}

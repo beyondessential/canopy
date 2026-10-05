@@ -41,7 +41,7 @@ import {
 	SERVER_RANK_ORDER,
 	type ServerInfo,
 	type ServerRank,
-	heldByLabel,
+	resolveHeldBy,
 } from "../types";
 import { GradedAction } from "../components/GradedAction";
 
@@ -253,16 +253,15 @@ export default function MachineDetail() {
 
 			<ApplicationsOnThisBox
 				applications={data.applications}
-				heldBy={
-					data.own_window
-						? heldByLabel({ kind: "machine", name: data.machine.name })
-						: rank &&
-								data.group_environments.some(
-									(e) => e.rank === rank && e.maintained,
-								)
-							? heldByLabel({ kind: "environment", rank })
-							: heldByLabel({ kind: "group", name: data.group?.name })
-				}
+				heldBy={resolveHeldBy({
+					ownWindow: data.own_window,
+					machineName: data.machine.name,
+					rank,
+					environmentHeld: data.group_environments.some(
+						(e) => e.rank === rank && e.maintained,
+					),
+					groupName: data.group?.name,
+				})}
 			/>
 
 			<MachineDnsNamesSection
@@ -352,6 +351,7 @@ export default function MachineDetail() {
 						machines={data.group_machines}
 						environments={data.group_environments}
 						applications={data.group_applications}
+						groupName={data.group?.name}
 						currentMachineId={data.machine.id}
 					/>
 				</Box>
