@@ -40,7 +40,7 @@ export default function RestoreConsumers() {
 					{consumers.data.map((c) => (
 						<Paper key={c.device_id} variant="outlined" sx={{ p: 1.5 }}>
 							<Typography variant="subtitle2">
-								{c.name ?? c.device_id}
+								{c.name ?? "Unnamed device"}
 							</Typography>
 							<Stack
 							direction="row"

@@ -10,13 +10,22 @@ const ROLE_COLORS: Record<DeviceRole, "primary" | "warning" | "info"> = {
 	relay: "info",
 };
 
-export function deviceDisplayName(info: DeviceInfo): string {
+/// What the device is known by, or null when nothing names it yet.
+export function deviceName(info: DeviceInfo): string | null {
 	const namedKey = info.keys.findLast(
 		(k) => k.name && k.name !== "Initial Key",
 	);
-	if (namedKey?.name) return namedKey.name;
-	if (info.latest_connection) return info.latest_connection.ip;
-	return info.device.id;
+	return (
+		namedKey?.name ||
+		info.device.tailscale_node_name ||
+		info.tailnet_live?.display_name ||
+		info.latest_connection?.ip ||
+		null
+	);
+}
+
+export function deviceDisplayName(info: DeviceInfo): string {
+	return deviceName(info) ?? "Unnamed device";
 }
 
 export default function DeviceShorty({ device }: { device: DeviceInfo }) {

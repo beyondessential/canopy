@@ -56,7 +56,6 @@ import {
 	BACKUP_STATUS_HELP,
 	BACKUP_STATUS_INTENT,
 	BACKUP_STATUS_LABEL,
-	applicationName,
 	type BackupConfigStatus,
 	type BackupConfigView,
 	type BackupMaintenanceRun,
@@ -243,7 +242,7 @@ export default function BackupPanel() {
 						isAdmin={isAdmin}
 						onChanged={configForTick.reload}
 					/>
-					<RecentRunsPanel groupId={id} members={members} />
+					<RecentRunsPanel groupId={id} />
 					<RestoreReplicasSection groupId={id} isAdmin={isAdmin} />
 				</>
 			)}
@@ -679,22 +678,9 @@ function ProvisioningCard({
 	);
 }
 
-/// Human label for the machine a run came from. Falls back to the name of a
-/// workload on it, then to a short id, and to "—" for runs with no machine.
-function machineLabel(
-	members: RankedMachine[],
-	machineId: string | null | undefined,
-): string {
-	if (!machineId) return "—";
-	const box = members.find((m) => m.machine.id === machineId);
-	if (!box) return machineId.slice(0, 8);
-	const [first] = box.applications;
-	return (
-		box.machine.name ||
-		first?.name ||
-		first?.display_host ||
-		machineId.slice(0, 8)
-	);
+/// The machine a run came from, or "—" for a run with no machine.
+function machineLabel(run: RecentRun): string {
+	return run.machine_name ?? "—";
 }
 
 /// True when the run carries any of bestool's four S3 traffic tallies.
@@ -849,7 +835,7 @@ function SnapshotTakenCaption({ run }: { run: RecentRun }) {
 /// One row of the recent-runs table. Runs with an error, reported S3 traffic, or
 /// live progress get an expand toggle that reveals the detail in a collapsible
 /// sub-row.
-function RunRow({ run, members }: { run: RecentRun; members: RankedMachine[] }) {
+function RunRow({ run }: { run: RecentRun }) {
 	const [open, setOpen] = useState(false);
 	const hasError = Boolean(run.error);
 	const hasS3 = hasS3Traffic(run);
@@ -893,7 +879,7 @@ function RunRow({ run, members }: { run: RecentRun; members: RankedMachine[] }) 
 					<TimeAgo timestamp={run.at} />
 					<SnapshotTakenCaption run={run} />
 				</TableCell>
-				<TableCell>{machineLabel(members, run.machine_id)}</TableCell>
+				<TableCell>{machineLabel(run)}</TableCell>
 				<TableCell>{run.type}</TableCell>
 				<TableCell>{run.purpose}</TableCell>
 				<TableCell>
@@ -1262,13 +1248,7 @@ function S3MonthlyTrafficStat({
 }
 
 /// The group's recent backup runs (bottom). Failed runs expand to their error.
-function RecentRunsPanel({
-	groupId,
-	members,
-}: {
-	groupId: string;
-	members: RankedMachine[];
-}) {
+function RecentRunsPanel({ groupId }: { groupId: string }) {
 	// Poll faster while a run is in flight, so its progress figures actually
 	// advance while someone is watching — a live view that only moved on page
 	// reload would defeat the point. Back off to a gentle cadence when the table
@@ -1320,7 +1300,7 @@ function RecentRunsPanel({
 						</TableHead>
 						<TableBody>
 							{stats.data.recent_runs.map((r) => (
-								<RunRow key={r.key} run={r} members={members} />
+								<RunRow key={r.key} run={r} />
 							))}
 						</TableBody>
 					</Table>
@@ -1783,8 +1763,7 @@ function ServersPanel({
 		}
 	};
 
-	// The box's own page, at its backup section. A box with no name of its own
-	// is recognisable by what runs on it, so fall back to that before the id.
+	// The box's own page, at its backup section.
 	const machineLink = (box: RankedMachine) => (
 		<MuiLink
 			component={RouterLink}
@@ -1792,9 +1771,7 @@ function ServersPanel({
 			variant="body2"
 			underline="hover"
 		>
-			{box.machine.name ??
-				(box.applications[0] && applicationName(box.applications[0])) ??
-				box.machine.id.slice(0, 8)}
+			{box.machine.name}
 		</MuiLink>
 	);
 

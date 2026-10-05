@@ -37,7 +37,6 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import { humanSeconds } from "../lib/humanDuration";
 import {
 	incidentTargetName,
-	type MachineDetailData,
 	SERVER_RANK_ORDER,
 	type ServerInfo,
 	type ServerRank,
@@ -86,7 +85,7 @@ export default function MachineDetail() {
 	}, [detailLoaded, location.hash]);
 	usePageTitle(
 		detail.status === "ok"
-			? (machineLabel(detail.data) ?? "Unnamed machine")
+			? detail.data.machine.name
 			: "Machine",
 	);
 
@@ -153,7 +152,7 @@ export default function MachineDetail() {
 									label: data.group?.name ?? "",
 									to: data.group ? `/fleet/groups/${data.group.id}` : null,
 								},
-								{ label: machineLabel(data) ?? "Unnamed machine" },
+								{ label: data.machine.name },
 							]}
 						/>
 					</Typography>
@@ -324,7 +323,7 @@ export default function MachineDetail() {
 				scope="machine"
 				anchor="maintenance"
 				id={data.machine.id}
-				targetLabel={machineLabel(data) ?? undefined}
+				targetLabel={data.machine.name}
 				groupId={data.group?.id ?? null}
 				groupName={data.group?.name ?? null}
 				rank={rank}
@@ -356,14 +355,6 @@ export default function MachineDetail() {
 			</Box>
 		</Stack>
 	);
-}
-
-/// What to call the box: the name an operator gave it, else the hostname it
-/// reports, else nothing — the id is already in the address bar.
-function machineLabel(data: MachineDetailData): string | null {
-	if (data.machine.name) return data.machine.name;
-	const hostname = readString(data.figures, "hostname");
-	return hostname ?? null;
 }
 
 function readString(figures: unknown, key: string): string | undefined {

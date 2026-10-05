@@ -110,6 +110,31 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 		await expect(page.getByTestId("migration-run")).toBeHidden();
 	});
 
+	/// spec: FLT#naming
+	test("an application nobody has named reads as its type", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "unnamed-tests" });
+		await seedVersion(sql, { major: 2, minor: 62, patch: 0 });
+		const target = await seedVersion(sql, { major: 2, minor: 63, patch: 0 });
+		const server = await seedServer(sql, {
+			name: null,
+			type: "tamanu-facility",
+			groupId: group.id,
+		});
+		await seedStatus(sql, { serverId: server.id, version: "2.62.0" });
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		const row = page.getByTestId("migration-test-row");
+		await expect(row).toContainText("Tamanu facility");
+		await expect(row).not.toContainText(server.id);
+	});
+
 	test("says so when the group has no open plan", async ({
 		page,
 		sql,

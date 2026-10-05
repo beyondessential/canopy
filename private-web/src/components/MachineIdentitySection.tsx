@@ -20,6 +20,7 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { useEffect, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { callApi, useApiAction } from "../api";
+import { deviceDisplayName } from "./DeviceShorty";
 import { GradedAction } from "./GradedAction";
 import MachineSetupInstructions from "./MachineSetupInstructions";
 import TailnetIdentitySection from "./TailnetIdentitySection";
@@ -113,7 +114,7 @@ function DeviceCard({
 							to={`/devices/${deviceInfo.device.id}`}
 							underline="hover"
 						>
-							{deviceShortName(deviceInfo)}
+							{deviceDisplayName(deviceInfo)}
 						</MuiLink>
 						{deviceInfo.device.tailscale_node_id != null && (
 							<Chip
@@ -301,13 +302,4 @@ function AttachMachineDeviceDialog({
 			</DialogActions>
 		</Dialog>
 	);
-}
-
-function deviceShortName(info: DeviceInfo): string {
-	const namedKey = info.keys.findLast(
-		(k) => k.name && k.name !== "Initial Key",
-	);
-	if (namedKey?.name) return namedKey.name;
-	if (info.latest_connection) return info.latest_connection.ip;
-	return info.device.id;
 }

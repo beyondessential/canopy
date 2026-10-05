@@ -6,6 +6,7 @@ import {
 	seedBackupRepoStats,
 	seedBackupRun,
 	seedDevice,
+	seedMachine,
 	seedServer,
 	seedServerBackupCapability,
 	seedServerGroup,
@@ -360,6 +361,38 @@ test.describe("backups ready: stats + backup-now", () => {
 		// The run carries a server_id, so the table names which server it's from.
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByText("stats-srv")).toBeVisible();
+	});
+
+	/// A run stays in the group's history after its box moves elsewhere, and
+	/// still reads by the box's name rather than its id.
+	/// spec: FLT#naming
+	test("a run from a box that has left the group names the box", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "runs-left" });
+		const elsewhere = await seedServerGroup(sql, { name: "runs-elsewhere" });
+		const device = await seedDevice(sql);
+		const moved = await seedMachine(sql, {
+			name: "moved-box",
+			groupId: elsewhere.id,
+		});
+		await seedServerGroupBackupConfig(sql, {
+			groupId: group.id,
+			status: "ready",
+			intervalSeconds: 3600,
+		});
+		await seedBackupRun(sql, {
+			deviceId: device.id,
+			groupId: group.id,
+			machineId: moved.id,
+			outcome: "success",
+		});
+
+		await page.goto(`/fleet/groups/${group.id}/backups`);
+		const runs = page.getByRole("table").last();
+		await expect(runs.getByText("moved-box")).toBeVisible();
+		await expect(runs.getByText(moved.id.slice(0, 8))).toHaveCount(0);
 	});
 
 	test("recent runs show a Canopy-measured duration and surface unreported restores", async ({

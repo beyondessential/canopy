@@ -450,7 +450,7 @@ export function rankMachines(
 			// either, so it sorts last on rank alone and this never decides an
 			// ordering — naming a type here would be inventing one.
 			type: best?.type ?? "",
-			name: machine.name ?? "",
+			name: machine.name,
 		};
 	});
 }
@@ -693,8 +693,8 @@ export function aggregateOperators(
 	const byLogin = new Map<string, AggregatedOperator>();
 	const seenOn = new Map<string, Set<string>>();
 	for (const m of members) {
-		// An unnamed box reads as the application leading it, the same
-		// fallback the dot strip's enclosures use.
+		// A box whose record the card didn't carry reads as the application
+		// leading it, the same fallback the dot strip's enclosures use.
 		const machineName = m.machine_name ?? m.name;
 		for (const op of m.operators) {
 			const existing = byLogin.get(op.login);

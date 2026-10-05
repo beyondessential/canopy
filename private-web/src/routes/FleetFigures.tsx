@@ -128,7 +128,7 @@ function machineRow(machine: FleetMachineDetailData): Row {
 	return {
 		grain: "machine",
 		id: machine.machine_id,
-		name: machine.machine_name || machine.machine_id,
+		name: machine.machine_name,
 		machineId: machine.machine_id,
 		href: `/fleet/machines/${machine.machine_id}`,
 		type: null,
@@ -142,7 +142,7 @@ function applicationRow(application: FleetServerDetailData): Row {
 	return {
 		grain: "application",
 		id: application.server_id,
-		name: application.server_name || application.server_id,
+		name: application.server_name,
 		machineId: application.machine_id,
 		href: `/fleet/applications/${application.server_id}`,
 		type: application.type,

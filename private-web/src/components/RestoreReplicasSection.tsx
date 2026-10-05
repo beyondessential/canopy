@@ -203,7 +203,7 @@ export default function RestoreReplicasSection({
 								<TableRow key={r.id}>
 									<TableCell>{r.name}</TableCell>
 									<TableCell>
-										{r.consumer_name ?? r.consumer_device_id.slice(0, 8)}
+										{r.consumer_name ?? "Unnamed device"}
 									</TableCell>
 									<TableCell>
 										{r.machine_id ? "one machine" : "whole group"}
@@ -495,7 +495,7 @@ function RedactionCell({
 							Canopy has no masking for:
 							{gaps.map((g) => (
 								<div key={g.server_id}>
-									{g.server_name ?? g.server_id.slice(0, 8)} —{" "}
+									{g.server_name} —{" "}
 									{REDACTION_GAP_LABELS[g.reason] ?? g.reason}
 									{g.version ? ` (${g.version})` : ""}
 								</div>
@@ -760,7 +760,7 @@ function ScopeFields({
 				>
 					{consumers.map((c) => (
 						<MenuItem key={c.device_id} value={c.device_id}>
-							{c.name ?? c.device_id}
+							{c.name ?? "Unnamed device"}
 						</MenuItem>
 					))}
 				</Select>
@@ -777,7 +777,7 @@ function ScopeFields({
 					<MenuItem value="">All machines in the group</MenuItem>
 					{servers.map((s) => (
 						<MenuItem key={s.id} value={s.id}>
-							{s.name ?? s.id}
+							{s.name}
 						</MenuItem>
 					))}
 				</Select>
@@ -898,9 +898,7 @@ function CreateReplicaDialog({
 	// unique per consumer: without it, declaring a second intent for the same
 	// server would suggest a name already taken.
 	const selectedServer = servers.find((s) => s.id === serverId);
-	const serverName = selectedServer
-		? (selectedServer.name ?? selectedServer.id)
-		: "";
+	const serverName = selectedServer?.name ?? "";
 	const baseName = kebabCase(
 		[groupName, serverName, intent].filter(Boolean).join("-"),
 	);
@@ -1370,7 +1368,7 @@ function CheckRow({ check }: { check: RestoreActivity }) {
 					<TimeAgo timestamp={check.at} />
 				</TableCell>
 				<TableCell>
-					{check.machine_id ? check.machine_id.slice(0, 8) : "—"}
+					{check.machine_name ?? "—"}
 				</TableCell>
 				<TableCell>{check.type}</TableCell>
 				<TableCell>{check.intent ?? "—"}</TableCell>
