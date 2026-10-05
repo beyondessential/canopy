@@ -24,8 +24,13 @@ export function deviceName(info: DeviceInfo): string | null {
 	);
 }
 
+/// How a device reads where all that is known of it is a name, possibly none.
+export function deviceLabel(name: string | null | undefined): string {
+	return name || "Unnamed device";
+}
+
 export function deviceDisplayName(info: DeviceInfo): string {
-	return deviceName(info) ?? "Unnamed device";
+	return deviceLabel(deviceName(info));
 }
 
 export default function DeviceShorty({ device }: { device: DeviceInfo }) {

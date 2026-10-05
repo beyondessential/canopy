@@ -36,6 +36,7 @@ import {
 } from "@mui/material";
 import { useEffect, useState } from "react";
 import { ApiError, callApi, useApi } from "../api";
+import { deviceLabel } from "./DeviceShorty";
 import { GradedAction } from "./GradedAction";
 import TimeAgo from "./TimeAgo";
 import { humanSeconds } from "../lib/humanDuration";
@@ -203,7 +204,7 @@ export default function RestoreReplicasSection({
 								<TableRow key={r.id}>
 									<TableCell>{r.name}</TableCell>
 									<TableCell>
-										{r.consumer_name ?? "Unnamed device"}
+										{deviceLabel(r.consumer_name)}
 									</TableCell>
 									<TableCell>
 										{r.machine_id ? "one machine" : "whole group"}
@@ -760,7 +761,7 @@ function ScopeFields({
 				>
 					{consumers.map((c) => (
 						<MenuItem key={c.device_id} value={c.device_id}>
-							{c.name ?? "Unnamed device"}
+							{deviceLabel(c.name)}
 						</MenuItem>
 					))}
 				</Select>

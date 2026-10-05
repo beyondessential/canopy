@@ -8,6 +8,7 @@ import {
 	Typography,
 } from "@mui/material";
 import { useApi } from "../api";
+import { deviceLabel } from "../components/DeviceShorty";
 import { usePageTitle } from "../hooks/usePageTitle";
 
 /// Fleet-wide restore consumers (`backup-restore` devices) and the intents each
@@ -40,7 +41,7 @@ export default function RestoreConsumers() {
 					{consumers.data.map((c) => (
 						<Paper key={c.device_id} variant="outlined" sx={{ p: 1.5 }}>
 							<Typography variant="subtitle2">
-								{c.name ?? "Unnamed device"}
+								{deviceLabel(c.name)}
 							</Typography>
 							<Stack
 							direction="row"

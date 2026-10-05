@@ -23,7 +23,7 @@ import ProvisionCredentialDialog from "../components/ProvisionCredentialDialog";
 import AddPublicKeyDialog from "../components/AddPublicKeyDialog";
 import { type ApiState, callApi, useApi, useApiAction } from "../api";
 import { GradedAction } from "../components/GradedAction";
-import { deviceName } from "../components/DeviceShorty";
+import { deviceLabel, deviceName } from "../components/DeviceShorty";
 import TimeAgo from "../components/TimeAgo";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { humanDuration } from "../lib/humanDuration";
@@ -68,7 +68,7 @@ export default function DeviceDetail() {
 
 function deviceTitle(device: DeviceInfo): string {
 	const name = deviceName(device);
-	return name ? `Device ${name}` : "Unnamed device";
+	return name ? `Device ${name}` : deviceLabel(null);
 }
 
 function DeviceView({
