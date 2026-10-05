@@ -129,14 +129,16 @@ test.describe("An application's check list", () => {
 		const listed = names.filter((n) =>
 			[
 				"tamanu-central:sync_facility_stale",
-				"caddy_version",
+				"reachability",
 				"tamanu-central:caddy_certs",
+				"tamanu-central:caddy_version",
 			].includes(n),
 		);
 		expect(listed).toEqual([
 			"tamanu-central:sync_facility_stale",
-			"caddy_version",
+			"reachability",
 			"tamanu-central:caddy_certs",
+			"tamanu-central:caddy_version",
 		]);
 	});
 });

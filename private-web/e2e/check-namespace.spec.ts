@@ -147,7 +147,7 @@ test.describe("The check namespace in the catalog", () => {
 			page.getByRole("link", { name: "disk_free", exact: true }),
 		).toHaveAttribute("href", "/settings/healthchecks/alertd/machine/disk_free");
 		await expect(
-			page.getByRole("link", { name: "tamanu-central.disk_free", exact: true }),
+			page.getByRole("link", { name: "tamanu-central:disk_free", exact: true }),
 		).toHaveAttribute(
 			"href",
 			"/settings/healthchecks/alertd/application.tamanu-central/disk_free",

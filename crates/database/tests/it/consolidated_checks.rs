@@ -715,9 +715,9 @@ async fn checks_order_by_result_then_presented_name() {
 			vec![
 				"tamanu-central:sync_facility_stale",
 				"certificate-expiry",
-				"memory",
 				"reachability",
 				"tamanu-central:caddy_certs",
+				"tamanu-central:memory",
 			]
 		);
 	})

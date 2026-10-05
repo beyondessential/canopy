@@ -7,7 +7,7 @@
 
 ## Ingest
 
-- [x] A split push carrying `disk_free` under the machine and under an application catalogues two entries, the box's and `tamanu-central.disk_free` (verifies spec: CHK, STA)
+- [x] A split push carrying `disk_free` under the machine and under an application catalogues two entries, the box's and `tamanu-central:disk_free` (verifies spec: CHK, STA)
 - [x] Raising the box's ceiling or silencing the box's check changes the machine's answer on a split push and not the application's (verifies spec: CHK)
 - [x] A unified push's machine-subject name still files at the machine and catalogues once, however many types report it (verifies spec: STA)
 
