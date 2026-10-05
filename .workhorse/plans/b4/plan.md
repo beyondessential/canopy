@@ -228,3 +228,7 @@ Each section leaves the tree building and tested, so they can land as separate c
 - [x] Draft the card's test cases ([Draft test cases] skill)
 - [x] Split layer 2 into its own card via the card breakdown; drop the layer 2 prose from this plan once it lives there
 - [ ] Note on #bestool/P3 when a `bes-canopy-api` release carries the new `HealthCheck` shape
+
+## Review follow-ups (round 1)
+
+- [ ] Make a filing's detail unable to hold a non-object: `CheckFiling.detail` is `Option<Value>`, and `file_check`'s broken branch narrows it with `as_object()` while the non-broken branch keeps it whole, so the two branches disagree about a non-object detail. No caller passes one, so this is latent; fix it by typing the field as a map, which makes the drop unrepresentable. Touches every `CheckFiling` literal (jobs backup and relay, restore, certificate alerts, self alerts, statuses, backup reconcile and staleness, private-server issues, tests), so it lands as its own commit after the round-1 fixes.

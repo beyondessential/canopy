@@ -422,13 +422,6 @@ async fn stamp_check_state(
 		stamp.effective,
 		at,
 	);
-	if let Some(title) = &stamp.title {
-		diesel::update(issues::table.filter(issues::id.eq(issue_id)))
-			.set(issues::title.eq(title))
-			.execute(conn)
-			.await
-			.map_err(AppError::from)?;
-	}
 	let (instances, grading_context) = match &stamp.instanced {
 		Some(state) => (
 			Some(serde_json::to_value(&state.instances).expect("instances serialise")),
@@ -447,6 +440,8 @@ async fn stamp_check_state(
 			issues::detail.eq(&stamp.detail),
 			issues::degraded_since.eq(streak.degraded_since),
 			issues::last_degraded_at.eq(streak.last_degraded_at),
+			// `None` leaves the stored title as it is.
+			stamp.title.as_ref().map(|title| issues::title.eq(title)),
 		))
 		.returning(Issue::as_select())
 		.get_result(conn)
