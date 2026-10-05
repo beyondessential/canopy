@@ -36,20 +36,22 @@ WHERE source = 'canopy'
 		'reporting-schema'
 	);
 
--- 2. Broken-thread rows still unresolved.
+-- 2. Broken-thread rows: resolve those still unresolved, and un-name them all,
+--    in one pass. Only the rows resolved here carry this migration's
+--    `resolved_by`, which the steps below key on.
 UPDATE issues
-SET active = false,
-	resolved_at = NOW(),
-	resolved_by = 'migration:2026-10-05-resolve_abandoned_grain_check_states',
-	resolved_reason = 'expected',
+SET active = CASE WHEN resolved_at IS NULL THEN false ELSE active END,
+	resolved_by = CASE
+		WHEN resolved_at IS NULL
+			THEN 'migration:2026-10-05-resolve_abandoned_grain_check_states'
+		ELSE resolved_by
+	END,
+	resolved_reason = CASE WHEN resolved_at IS NULL THEN 'expected' ELSE resolved_reason END,
+	resolved_at = COALESCE(resolved_at, NOW()),
+	check_name = NULL,
 	updated_at = NOW()
 WHERE ref LIKE 'health-broken/%'
-	AND resolved_at IS NULL;
-
-UPDATE issues
-SET check_name = NULL
-WHERE ref LIKE 'health-broken/%'
-	AND check_name IS NOT NULL;
+	AND (resolved_at IS NULL OR check_name IS NOT NULL);
 
 -- 3. Mark incident links as left for the states just resolved, so the
 --    orphan-close below sees an accurate count of remaining contributors.
