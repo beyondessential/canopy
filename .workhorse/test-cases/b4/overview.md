@@ -50,6 +50,7 @@ Scenarios verifying that reported checks can carry instances, that a check carri
 - [x] A re-grade after an instance silence reads the report fields and tags the last filing graded with, so no rule's inputs change (verifies spec: CHK)
 - [x] A check silenced out of trouble and brought back by unsilencing presents the title its last filing gave it
 - [x] An instance silence and a whole-check silence on the same check and target coexist
+- [x] An instance silence outlasts a whole-check rule at the same scope whose branch matches the instance, whichever order the two were written in (verifies spec: CHK)
 - [x] The reporting source is told the check's policy, unaffected by instance silences (verifies spec: CHK, STA)
 - [x] A target's silences list shows the instance's label and key, and marks a silence whose key the check no longer reports (verifies spec: CHK)
 
@@ -57,16 +58,19 @@ Scenarios verifying that reported checks can carry instances, that a check carri
 
 - [x] Backup staleness and reconciliation instances are keyed by backup type
 - [x] Restore-verification, migration-test and redaction instances are keyed by replica type, intent and declared name; two replicas of one type and intent are told apart (verifies spec: RST)
+- [x] A per-replica silence the restore-check collapse migration rewrote into a `check.replica_key` rule still skips exactly that replica's instance (verifies spec: RST)
 - [x] An instance silence on a backup-type instance quiets that type only
 - [x] Reporting-schema instances are keyed by version
 - [x] Relay substrate instances carry keys; a relay check that cannot be read is filed broken at check level (verifies spec: K8S)
 - [x] An instanced substrate check's message is Canopy's, not the relay's
+- [x] A broken substrate check that held instances is described by the relay's message (verifies spec: CHK)
 
 ## Operator interface
 
 - [x] A target's checks list an instanced check's degraded and silenced instances, each with result, label and its own silence control, and count its passing ones (verifies spec: CHK)
 - [x] Silencing an instance from the target's checks, for the target and for the group (verifies spec: CHK)
 - [x] An issue for an instanced check offers silencing the whole check or one of its degraded instances, from within an incident (verifies spec: CHK)
+- [x] Reopening an issue's silence after Cancel, closing it, or silencing defaults to the whole check (verifies spec: CHK)
 - [x] The silenced refs section shows an instance silence and marks it "not reported" when its key is gone (verifies spec: CHK)
 - [x] The rule-authoring sample for an instanced check shows one instance's fields merged over the shared ones (verifies spec: CHK)
 - [x] The fleet-wide check page offers no instance silence
