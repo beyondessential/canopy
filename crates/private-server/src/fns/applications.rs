@@ -969,7 +969,11 @@ pub async fn update(
 
 	let update_data = PartialServer {
 		id: args.server_id,
-		name: args.data.name,
+		// The form sends every application's name, an unnamed one as blank.
+		name: args.data.name.map(|s| {
+			let s = s.trim();
+			(!s.is_empty()).then(|| s.to_owned())
+		}),
 		rank: args.data.rank,
 		// `Some(Some(url))` sets, `Some(None)` clears, `None` leaves unchanged.
 		// The form always sends `host`; an empty string clears it.

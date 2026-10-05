@@ -372,3 +372,34 @@ async fn update_server_name_management_grants() {
 	})
 	.await
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn update_server_blank_name_clears_it() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"WITH m AS (INSERT INTO machines (id) VALUES ('77777777-7777-7777-7777-777777777777') RETURNING id) INSERT INTO applications (id, name, type, machine_id) VALUES
+			('77777777-7777-7777-7777-777777777777', 'Named', 'postgres', '77777777-7777-7777-7777-777777777777')"
+		)
+		.await
+		.unwrap();
+
+		let response = private
+			.post("/api/fleet/applications/update")
+			.json(&json!({
+				"server_id": "77777777-7777-7777-7777-777777777777",
+				"data": { "name": "  " }
+			}))
+			.await;
+		response.assert_status_ok();
+
+		let application = Application::get_by_id(
+			&mut conn,
+			"77777777-7777-7777-7777-777777777777".parse().unwrap(),
+		)
+		.await
+		.unwrap();
+		assert_eq!(application.name, None);
+		assert_eq!(application.display_name(), "Postgres");
+	})
+	.await
+}
