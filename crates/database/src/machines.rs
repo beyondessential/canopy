@@ -154,6 +154,17 @@ pub struct MachineUpdate {
 	pub tags: Option<TagMap>,
 }
 
+/// A machine's name as an operator gave it, trimmed. A machine always has a
+/// name, so a blank one is refused.
+// spec: FLT#naming
+pub fn normalise_name(name: &str) -> Result<String> {
+	let name = name.trim();
+	if name.is_empty() {
+		return Err(AppError::BadRequest("a machine needs a name".into()));
+	}
+	Ok(name.to_string())
+}
+
 impl NewMachine {
 	/// A machine with only its name given, the one field every machine has.
 	pub fn named(name: impl Into<String>) -> Self {
@@ -169,7 +180,8 @@ impl NewMachine {
 impl Machine {
 	/// Create a machine. An operator supplies the group; enrolment and
 	/// reporting fill in the rest.
-	pub async fn create(db: &mut AsyncPgConnection, new: NewMachine) -> Result<Self> {
+	pub async fn create(db: &mut AsyncPgConnection, mut new: NewMachine) -> Result<Self> {
+		new.name = normalise_name(&new.name)?;
 		diesel::insert_into(crate::schema::machines::table)
 			.values(new)
 			.returning(Self::as_select())
@@ -196,9 +208,13 @@ impl Machine {
 	pub async fn update(
 		db: &mut AsyncPgConnection,
 		machine_id: Uuid,
-		updates: MachineUpdate,
+		mut updates: MachineUpdate,
 	) -> Result<Self> {
 		use crate::schema::machines::dsl;
+
+		if let Some(name) = &updates.name {
+			updates.name = Some(normalise_name(name)?);
+		}
 
 		if let Some(tags) = &updates.tags {
 			crate::tags::reject_reserved_keys(tags)?;

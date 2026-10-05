@@ -7,7 +7,7 @@
 
 use commons_tests::db::TestDb;
 use database::diesel_async::AsyncPgConnection;
-use database::machines::{Machine, NewMachine};
+use database::machines::{Machine, MachineUpdate, NewMachine};
 use diesel::{sql_query, sql_types};
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
@@ -509,4 +509,42 @@ async fn only_an_operator_archives_an_application_and_its_history_survives() {
 		);
 	})
 	.await;
+}
+
+/// A machine always has a name, whoever writes it: a blank one is refused as
+/// a bad request, not left to the column's constraint, and a name is stored
+/// trimmed.
+// spec: FLT#naming
+#[tokio::test(flavor = "multi_thread")]
+async fn a_machine_is_never_written_without_a_name() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let err = Machine::create(&mut conn, NewMachine::named("  "))
+			.await
+			.expect_err("blank name");
+		assert!(
+			matches!(err, commons_errors::AppError::BadRequest(_)),
+			"{err:?}"
+		);
+
+		let machine = Machine::create(&mut conn, NewMachine::named(" box-1 "))
+			.await
+			.expect("create");
+		assert_eq!(machine.name, "box-1");
+
+		let err = Machine::update(
+			&mut conn,
+			machine.id,
+			MachineUpdate {
+				name: Some("".into()),
+				..Default::default()
+			},
+		)
+		.await
+		.expect_err("blank rename");
+		assert!(
+			matches!(err, commons_errors::AppError::BadRequest(_)),
+			"{err:?}"
+		);
+	})
+	.await
 }

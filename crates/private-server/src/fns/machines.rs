@@ -402,7 +402,8 @@ pub async fn create(
 	_admin: TailscaleAdmin,
 	Json(args): Json<MachineCreateArgs>,
 ) -> Result<Json<Uuid>> {
-	let name = machine_name(args.name)?;
+	// Refused before the tailnet bind, so a blank name leaves nothing behind.
+	let name = database::machines::normalise_name(&args.name)?;
 	let mut conn = state.db.get().await?;
 
 	// Bind the tailnet node first: a machine created and then failed to bind
@@ -445,17 +446,6 @@ pub async fn create(
 	}
 
 	Ok(Json(machine.id))
-}
-
-/// A machine's name as an operator gave it, trimmed. A machine always has a
-/// name, so a blank one is refused.
-// spec: FLT#naming
-fn machine_name(name: String) -> Result<String> {
-	let name = name.trim();
-	if name.is_empty() {
-		return Err(AppError::BadRequest("a machine needs a name".into()));
-	}
-	Ok(name.to_string())
 }
 
 /// Fields to change on a machine. Omitted fields are left alone; for the
@@ -508,13 +498,12 @@ pub async fn update(
 	_admin: TailscaleAdmin,
 	Json(args): Json<MachineUpdateArgs>,
 ) -> Result<Json<Machine>> {
-	let name = args.name.map(machine_name).transpose()?;
 	let mut conn = state.db.get().await?;
 	let updated = Machine::update(
 		&mut conn,
 		args.machine_id,
 		MachineUpdate {
-			name,
+			name: args.name,
 			group_id: args.group_id,
 			cloud: args.cloud,
 			geolocation: args.geolocation,
