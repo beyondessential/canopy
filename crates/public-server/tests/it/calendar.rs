@@ -33,7 +33,7 @@ const SERVER: &str = "22222222-2222-2222-2222-222222222222";
 async fn seed(conn: &mut AsyncPgConnection) -> (Uuid, Version) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{GROUP}', 'kamaka'); \
-		 INSERT INTO machines (id, group_id) VALUES ('{SERVER}', '{GROUP}'); \
+		 INSERT INTO machines (name, id, group_id) VALUES ('box', '{SERVER}', '{GROUP}'); \
 		 INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES \
 			('{SERVER}', 'https://central.kamaka.example', 'tamanu-central', 'production', '{GROUP}', '{SERVER}');"
 	))
@@ -257,7 +257,7 @@ async fn a_clones_entry_names_the_environment_and_its_own_version() {
 	commons_tests::server::run(async |mut conn, public, _private| {
 		let (group, target) = seed(&mut conn).await;
 		conn.batch_execute(&format!(
-			"INSERT INTO machines (id, group_id) VALUES ('{CLONE_BOX}', '{GROUP}'); \
+			"INSERT INTO machines (name, id, group_id) VALUES ('box', '{CLONE_BOX}', '{GROUP}'); \
 			 INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES \
 				('{CLONE_BOX}', 'https://clone.kamaka.example', 'tamanu-central', 'clone', '{GROUP}', '{CLONE_BOX}');"
 		))

@@ -34,10 +34,11 @@ struct Count {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_revert_keeps_an_application_window_on_its_machine() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let machine: RowId = diesel::sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
-			.get_result(&mut conn)
-			.await
-			.expect("machine");
+		let machine: RowId =
+			diesel::sql_query("INSERT INTO machines (name) VALUES ('box') RETURNING id")
+				.get_result(&mut conn)
+				.await
+				.expect("machine");
 		let application: RowId = diesel::sql_query(
 			"INSERT INTO applications (host, type, machine_id) \
 			 VALUES ('http://mig.invalid/', 'tamanu-central', $1) RETURNING id",

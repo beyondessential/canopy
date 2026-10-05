@@ -370,7 +370,7 @@ async fn sample_materialises_latest_push_for_this_check() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name, tags) VALUES \
 				('11111111-1111-1111-1111-111111111111', 'prod', '{\"env\": \"prod\"}'::jsonb); \
-			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('22222222-2222-2222-2222-222222222222', \
+			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '22222222-2222-2222-2222-222222222222', \
 				 '11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, host, name, type, group_id, tags, machine_id) VALUES \
 				('22222222-2222-2222-2222-222222222222', 'https://prod-host', 'Prod Central', 'tamanu-central', \
 				 '11111111-1111-1111-1111-111111111111', '{\"region\": \"au\"}'::jsonb, '22222222-2222-2222-2222-222222222222'); \
@@ -430,7 +430,7 @@ async fn sample_materialises_latest_push_for_this_check() {
 async fn sample_normalises_result_form_entries() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('55555555-5555-5555-5555-555555555555') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '55555555-5555-5555-5555-555555555555') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
 				('55555555-5555-5555-5555-555555555555', 'https://result-host', 'tamanu-central', '55555555-5555-5555-5555-555555555555'); \
 			 INSERT INTO statuses (server_id, healthy, health, extra) VALUES \
 				('55555555-5555-5555-5555-555555555555', true, \
@@ -461,9 +461,9 @@ async fn sample_normalises_result_form_entries() {
 async fn sample_picks_the_most_recent_push_across_servers() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES \
-				('33333333-3333-3333-3333-333333333333'), \
-				('44444444-4444-4444-4444-444444444444') RETURNING id) \
+			"WITH m AS (INSERT INTO machines (name, id) VALUES \
+				('box', '33333333-3333-3333-3333-333333333333'), \
+				('box', '44444444-4444-4444-4444-444444444444') RETURNING id) \
 			 INSERT INTO applications (id, host, type, machine_id) VALUES \
 				('33333333-3333-3333-3333-333333333333', 'https://older-host', 'tamanu-central', '33333333-3333-3333-3333-333333333333'), \
 				('44444444-4444-4444-4444-444444444444', 'https://newer-host', 'tamanu-central', '44444444-4444-4444-4444-444444444444'); \

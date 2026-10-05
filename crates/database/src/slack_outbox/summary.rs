@@ -19,9 +19,8 @@ use uuid::Uuid;
 use super::vars::{self, truncate};
 use crate::{
 	applications::Application,
-	issues::{Incident, IncidentIssue, Issue, format_group_label},
+	issues::{Incident, IncidentIssue, Issue},
 	machines::Machine,
-	server_groups::ServerGroup,
 };
 
 /// Cap on one issue's headline in the list, so a single long headline can't
@@ -60,13 +59,9 @@ pub async fn render(
 	incident_id: Uuid,
 	reminder_at: Option<Timestamp>,
 ) -> Result<JsonValue> {
-	use crate::schema::{incident_issues, incidents, issues};
+	use crate::schema::{incident_issues, issues};
 
-	let incident: Incident = incidents::table
-		.select(Incident::as_select())
-		.filter(incidents::id.eq(incident_id))
-		.first(conn)
-		.await?;
+	let incident = Incident::get_by_id(conn, incident_id).await?;
 	let rows: Vec<(IncidentIssue, Issue)> = incident_issues::table
 		.inner_join(issues::table.on(issues::id.eq(incident_issues::issue_id)))
 		.select((IncidentIssue::as_select(), Issue::as_select()))
@@ -83,21 +78,22 @@ pub async fn render(
 		Application::get_by_ids(conn, &application_ids)
 			.await?
 			.into_iter()
-			.map(|a| (a.id, a.label()))
+			.map(|a| (a.id, a.display_name()))
 			.collect()
 	};
 	let machines: HashMap<Uuid, String> = Machine::get_by_ids(conn, &machine_ids)
 		.await?
 		.into_iter()
-		.map(|m| (m.id, m.name.unwrap_or_else(|| m.id.to_string())))
+		.map(|m| (m.id, m.name))
 		.collect();
 
 	let members: Vec<Member> = rows
 		.into_iter()
 		.map(|(link, issue)| {
+			// spec: FLT#naming
 			let location = match (issue.application_id, issue.machine_id) {
-				(Some(id), _) => Some(applications.get(&id).cloned().unwrap_or(id.to_string())),
-				(None, Some(id)) => Some(machines.get(&id).cloned().unwrap_or(id.to_string())),
+				(Some(id), _) => applications.get(&id).cloned(),
+				(None, Some(id)) => machines.get(&id).cloned(),
 				(None, None) => None,
 			};
 			Member {
@@ -110,10 +106,7 @@ pub async fn render(
 		})
 		.collect();
 
-	let server = match incident.server_group_id {
-		Some(gid) => format_group_label(&ServerGroup::get_by_id(conn, gid).await?, incident.rank),
-		None => "Canopy".to_string(),
-	};
+	let server = incident.target_label(conn).await?;
 	let lead = reminder_at.map(|at| open_for(incident.opened_at, at));
 	let summary = compose(members, lead.as_deref());
 	Ok(vars::incident_open(

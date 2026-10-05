@@ -104,10 +104,10 @@ impl ServerGroupDomain {
 						clash.domain
 					)
 				} else {
-					format!(
-						"{domain} overlaps {}, claimed by group {}",
-						clash.domain, clash.group_id
-					)
+					let owner = crate::server_groups::ServerGroup::get_by_id(conn, clash.group_id)
+						.await?
+						.name;
+					format!("{domain} overlaps {}, claimed by {owner}", clash.domain)
 				}));
 			}
 

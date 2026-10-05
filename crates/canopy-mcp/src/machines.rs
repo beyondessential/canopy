@@ -108,7 +108,7 @@ impl MachineFiguresOut {
 #[derive(Serialize)]
 struct MachineSummary {
 	id: Uuid,
-	name: Option<String>,
+	name: String,
 	group_id: Option<Uuid>,
 	group_name: Option<String>,
 	cloud: Option<bool>,
@@ -135,7 +135,8 @@ struct FindMachinesResult {
 #[derive(Serialize)]
 struct MachineApplicationOut {
 	id: Uuid,
-	name: Option<String>,
+	/// Its name, or its type's where nobody has named it.
+	name: String,
 	r#type: String,
 	health: HealthState,
 }
@@ -143,7 +144,7 @@ struct MachineApplicationOut {
 #[derive(Serialize)]
 struct MachineDetail {
 	id: Uuid,
-	name: Option<String>,
+	name: String,
 	group_id: Option<Uuid>,
 	group_name: Option<String>,
 	cloud: Option<bool>,
@@ -221,9 +222,7 @@ impl CanopyMcp {
 						.platform()
 						.is_some_and(|got| got.to_lowercase().contains(p))
 				}) && q.as_deref().is_none_or(|q| {
-				m.name
-					.as_deref()
-					.is_some_and(|n| n.to_lowercase().contains(q))
+				m.name.to_lowercase().contains(q)
 					|| hostname.as_deref().is_some_and(|h| h.contains(q))
 					|| m.id.to_string().contains(q)
 			})
@@ -326,7 +325,7 @@ impl CanopyMcp {
 			.map(|a| MachineApplicationOut {
 				health: app_health.get(&a.id).copied().unwrap_or_default(),
 				id: a.id,
-				name: a.name,
+				name: a.display_name(),
 				r#type: a.r#type.to_string(),
 			})
 			.collect();

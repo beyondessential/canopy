@@ -522,6 +522,9 @@ pub struct RecentRun {
 	pub key: String,
 	/// The server this run was for, if known.
 	pub machine_id: Option<Uuid>,
+	/// That machine's name, so a run from a box that has since left the group
+	/// still reads by name.
+	pub machine_name: Option<String>,
 	/// The backup type that ran.
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
@@ -672,6 +675,7 @@ fn build_recent_runs_with_progress(
 			RecentRun {
 				key: format!("run-{}", run.id),
 				machine_id: run.machine_id,
+				machine_name: None,
 				r#type: run.r#type,
 				purpose: run.purpose,
 				status: RunStatus::Reported,
@@ -722,6 +726,7 @@ fn build_recent_runs_with_progress(
 		rows.push(RecentRun {
 			key: format!("issuance-{}", first.id),
 			machine_id: device_to_machine.get(&first.device_id).copied(),
+			machine_name: None,
 			r#type: first.r#type,
 			purpose: first.purpose,
 			status,
@@ -1303,9 +1308,11 @@ pub async fn upsert(
 				.into_iter()
 				.find(|c| c.bucket == args.bucket && c.prefix == args.prefix)
 			{
+				let owner = ServerGroup::get_by_id(&mut conn, other.group_id)
+					.await?
+					.name;
 				return Err(AppError::Conflict(format!(
-					"bucket/prefix already configured for group {}",
-					other.group_id
+					"bucket/prefix already configured for {owner}"
 				)));
 			}
 
@@ -2168,7 +2175,7 @@ pub async fn stats(
 			&candidate_run_ids,
 		)
 		.await?;
-	let recent_runs = build_recent_runs_with_progress(
+	let mut recent_runs = build_recent_runs_with_progress(
 		reported_runs,
 		issuances,
 		&device_to_machine,
@@ -2179,6 +2186,19 @@ pub async fn stats(
 		now,
 		RECENT_LIMIT as usize,
 	);
+	let run_machine_names = Machine::names_by_ids(
+		&mut conn,
+		&recent_runs
+			.iter()
+			.filter_map(|r| r.machine_id)
+			.collect::<Vec<_>>(),
+	)
+	.await?;
+	for run in &mut recent_runs {
+		run.machine_name = run
+			.machine_id
+			.and_then(|id| run_machine_names.get(&id).cloned());
+	}
 	let mut intervals: std::collections::HashMap<BackupType, Option<i64>> =
 		std::collections::HashMap::new();
 	let mut pending_requests = Vec::new();

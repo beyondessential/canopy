@@ -19,7 +19,7 @@ struct RowId {
 
 async fn insert_server(conn: &mut AsyncPgConnection) -> Uuid {
 	let host = format!("http://test.invalid/{}", Uuid::new_v4());
-	sql_query("WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (host, type, machine_id) SELECT $1, 'tamanu-central', m.id FROM m RETURNING id")
+	sql_query("WITH m AS (INSERT INTO machines (name) VALUES ('box') RETURNING id) INSERT INTO applications (host, type, machine_id) SELECT $1, 'tamanu-central', m.id FROM m RETURNING id")
 		.bind::<sql_types::Text, _>(host)
 		.get_result::<RowId>(conn)
 		.await

@@ -57,11 +57,12 @@ async fn insert_server(
 	host: &str,
 	r#type: ApplicationType,
 ) -> Uuid {
-	let machine: RowId = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
-		.bind::<sql_types::Uuid, _>(group)
-		.get_result(conn)
-		.await
-		.expect("machine");
+	let machine: RowId =
+		sql_query("INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id")
+			.bind::<sql_types::Uuid, _>(group)
+			.get_result(conn)
+			.await
+			.expect("machine");
 	let server: RowId = sql_query(
 		"INSERT INTO applications (host, rank, group_id, type, machine_id) VALUES ($1, 'production', $2, $3, $4) RETURNING id",
 	)
@@ -82,11 +83,12 @@ async fn insert_unranked_server(
 	host: &str,
 	r#type: ApplicationType,
 ) -> Uuid {
-	let machine: RowId = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
-		.bind::<sql_types::Uuid, _>(group)
-		.get_result(conn)
-		.await
-		.expect("machine");
+	let machine: RowId =
+		sql_query("INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id")
+			.bind::<sql_types::Uuid, _>(group)
+			.get_result(conn)
+			.await
+			.expect("machine");
 	let server: RowId = sql_query(
 		"INSERT INTO applications (host, group_id, type, machine_id) VALUES ($1, $2, $3, $4) RETURNING id",
 	)

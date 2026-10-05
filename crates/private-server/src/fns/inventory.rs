@@ -111,8 +111,8 @@ pub struct InventoryArgs {
 pub struct InventoryApplication {
 	/// Identifier of the application.
 	pub id: Uuid,
-	/// The application's name within its group, falling back to its host and
-	/// then its identifier.
+	/// The application's name, or its type's where nobody has named it.
+	// spec: FLT#naming
 	pub name: String,
 	/// What the application is: the software and the role it plays together.
 	pub r#type: ApplicationType,
@@ -632,20 +632,13 @@ pub async fn for_group(
 
 		hosts.push(InventoryHost {
 			id: machine.id,
-			name: machine
-				.name
-				.clone()
-				.unwrap_or_else(|| machine.id.to_string()),
+			name: machine.name.clone(),
 			address,
 			applications: on_machine
 				.into_iter()
 				.map(|application| InventoryApplication {
 					id: application.id,
-					name: application
-						.name
-						.clone()
-						.or_else(|| host_of(application))
-						.unwrap_or_else(|| application.id.to_string()),
+					name: application.display_name(),
 					r#type: application.r#type.clone(),
 				})
 				.collect(),
@@ -835,14 +828,7 @@ fn under_maintenance(
 
 fn machine_target(group: &ServerGroup, machines: &[Machine], machine_id: Option<Uuid>) -> String {
 	match machine_id.and_then(|id| machines.iter().find(|machine| machine.id == id)) {
-		Some(machine) => format!(
-			"machine {:?} in group {:?}",
-			machine
-				.name
-				.clone()
-				.unwrap_or_else(|| machine.id.to_string()),
-			group.name
-		),
+		Some(machine) => format!("machine {:?} in group {:?}", machine.name, group.name),
 		None => format!("server group {:?}", group.name),
 	}
 }

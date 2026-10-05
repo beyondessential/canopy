@@ -234,7 +234,7 @@ async fn submit_status() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, machine_id)
+				WITH m AS (INSERT INTO machines (name, id, device_id) VALUES ('box', $1, $2) RETURNING id) INSERT INTO applications (id, host, type, machine_id)
 				VALUES ($1, 'https://test.example.com', 'tamanu-facility', $1)
 			"#,
 			)
@@ -338,7 +338,7 @@ async fn submit_status_returns_effective_tags_matching_tags_endpoint() {
 			.await
 			.expect("insert group");
 			sql_query(
-				"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, group_id, rank, tags, machine_id) \
+				"WITH m AS (INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', $1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, group_id, rank, tags, machine_id) \
 				 VALUES ($1, 'https://tagged.example.com', 'tamanu-central', $3, 'production', \
 				 '{\"env\": \"server\"}'::jsonb, $1)",
 			)
@@ -392,7 +392,7 @@ async fn submit_status_with_geolocation() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, geolocation, machine_id)
+				WITH m AS (INSERT INTO machines (name, id, device_id) VALUES ('box', $1, $2) RETURNING id) INSERT INTO applications (id, host, type, geolocation, machine_id)
 				VALUES ($1, 'https://test.example.com', 'tamanu-facility', ARRAY[-41.2865, 174.7762], $1)
 			"#,
 			)
@@ -472,7 +472,7 @@ async fn submit_status_with_cloud() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, cloud, machine_id)
+				WITH m AS (INSERT INTO machines (name, id, device_id) VALUES ('box', $1, $2) RETURNING id) INSERT INTO applications (id, host, type, cloud, machine_id)
 				VALUES ($1, 'https://cloud.example.com', 'tamanu-central', true, $1)
 			"#,
 			)
@@ -553,7 +553,7 @@ async fn submit_status_with_geolocation_and_cloud() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, geolocation, cloud, machine_id)
+				WITH m AS (INSERT INTO machines (name, id, device_id) VALUES ('box', $1, $2) RETURNING id) INSERT INTO applications (id, host, type, geolocation, cloud, machine_id)
 				VALUES ($1, 'https://full.example.com', 'tamanu-central', ARRAY[40.7128, -74.0060], false, $1)
 			"#,
 			)
@@ -666,7 +666,7 @@ async fn insert_health_test_server(
 	let server_id = Uuid::new_v4();
 	sql_query(
 		r#"
-		WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id)
+		WITH m AS (INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', $1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id)
 		VALUES ($1, 'https://health.example.com', 'tamanu-central', $3, $1)
 	"#,
 	)
@@ -2579,7 +2579,7 @@ async fn seed_server_in_group(
 		.expect("insert group");
 	let server_id = Uuid::new_v4();
 	sql_query(
-		"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) \
+		"WITH m AS (INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', $1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) \
 		 VALUES ($1, 'https://srv.example.com', 'tamanu-central', $3, $1)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
@@ -2651,13 +2651,15 @@ async fn status_backup_now_reads_the_machine_not_the_application() {
 			let machine_id = Uuid::new_v4();
 			let application_id = Uuid::new_v4();
 			assert_ne!(machine_id, application_id);
-			sql_query("INSERT INTO machines (id, group_id, device_id) VALUES ($1, $2, $3)")
-				.bind::<sql_types::Uuid, _>(machine_id)
-				.bind::<sql_types::Uuid, _>(group_id)
-				.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(device_id))
-				.execute(&mut conn)
-				.await
-				.expect("insert machine");
+			sql_query(
+				"INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', $1, $2, $3)",
+			)
+			.bind::<sql_types::Uuid, _>(machine_id)
+			.bind::<sql_types::Uuid, _>(group_id)
+			.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(device_id))
+			.execute(&mut conn)
+			.await
+			.expect("insert machine");
 			sql_query(
 				"INSERT INTO applications (id, host, type, group_id, machine_id) \
 				 VALUES ($1, 'https://unequal.example.com', 'tamanu-central', $2, $3)",
@@ -3193,7 +3195,7 @@ async fn push_records_the_source_s_current_detail() {
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = Uuid::new_v4();
 			sql_query(
-				"WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, machine_id) \
+				"WITH m AS (INSERT INTO machines (name, id, device_id) VALUES ('box', $1, $2) RETURNING id) INSERT INTO applications (id, host, type, machine_id) \
 				 VALUES ($1, 'https://detail.example.com', 'tamanu-central', $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -3700,7 +3702,7 @@ async fn insert_bare_machine(conn: &mut diesel_async::AsyncPgConnection, device_
 		.await
 		.expect("insert group");
 	let machine_id = Uuid::new_v4();
-	sql_query("INSERT INTO machines (id, group_id, device_id) VALUES ($1, $2, $3)")
+	sql_query("INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', $1, $2, $3)")
 		.bind::<sql_types::Uuid, _>(machine_id)
 		.bind::<sql_types::Uuid, _>(group_id)
 		.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(device_id))

@@ -147,7 +147,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 		crate::machines::Machine::get_many(db, &ids)
 			.await?
 			.iter()
-			.map(|m| (m.id, crate::backup::staleness::machine_label(m)))
+			.map(|m| (m.id, m.name.clone()))
 			.collect()
 	};
 
@@ -180,11 +180,10 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 		let server_rows = &by_server[&machine_id];
 		let device_id = server_rows.iter().find_map(|r| r.device_id);
 		// A scanned server always exists (the scan joins applications), so the
-		// fallback is unreachable in practice — it just avoids a panic path.
-		let label = labels
-			.get(&machine_id)
-			.cloned()
-			.unwrap_or_else(|| machine_id.to_string());
+		// skip is unreachable in practice — it just avoids a panic path.
+		let Some(label) = labels.get(&machine_id).cloned() else {
+			continue;
+		};
 
 		let missing_open = crate::backup::staleness::open_machine_issue_active(
 			db,

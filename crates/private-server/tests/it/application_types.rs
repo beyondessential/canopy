@@ -23,7 +23,7 @@ async fn insert_application(
 	let id = Uuid::new_v4();
 	let ty = r#type;
 	conn.batch_execute(&format!(
-		"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{id}', '{group_id}') RETURNING id) \
+		"WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{id}', '{group_id}') RETURNING id) \
 		 INSERT INTO applications (id, host, type, rank, group_id, machine_id) \
 		 VALUES ('{id}', 'https://{id}.example.com', '{ty}', '{rank}', '{group_id}', '{id}')"
 	))
@@ -154,7 +154,7 @@ async fn a_machines_labels_carry_no_type_and_take_the_highest_rank_on_it() {
 		// One box, two workloads of different software and different ranks.
 		let machine = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO machines (id, group_id) VALUES ('{machine}', '{group_id}')"
+			"INSERT INTO machines (name, id, group_id) VALUES ('box', '{machine}', '{group_id}')"
 		))
 		.await
 		.expect("insert machine");

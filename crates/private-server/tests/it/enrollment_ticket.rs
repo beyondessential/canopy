@@ -17,9 +17,11 @@ use uuid::Uuid;
 /// the enrolled agent reports it.
 async fn seed_machine(conn: &mut AsyncPgConnection) -> String {
 	let id = Uuid::new_v4();
-	conn.batch_execute(&format!("INSERT INTO machines (id) VALUES ('{id}')"))
-		.await
-		.expect("seed machine");
+	conn.batch_execute(&format!(
+		"INSERT INTO machines (name, id) VALUES ('box', '{id}')"
+	))
+	.await
+	.expect("seed machine");
 	id.to_string()
 }
 

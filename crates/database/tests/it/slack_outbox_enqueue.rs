@@ -65,7 +65,7 @@ async fn insert_server_with_delay(
 	};
 	let row: RowId = sql_query(
 		r#"
-			WITH m AS (INSERT INTO machines (group_id) VALUES ($2) RETURNING id) INSERT INTO applications (type, host, group_id, machine_id) SELECT 'tamanu-central', $1, $2, m.id FROM m
+			WITH m AS (INSERT INTO machines (name, group_id) VALUES ('box', $2) RETURNING id) INSERT INTO applications (type, host, group_id, machine_id) SELECT 'tamanu-central', $1, $2, m.id FROM m
 			RETURNING id
 		"#,
 	)
@@ -180,15 +180,18 @@ async fn opening_incident_enqueues_slack_open_row() {
 		assert!(payload.contains_key("server"));
 		// The payload is the incident's summary: its counts in `source_ref`,
 		// and one line per live issue, named by its check where it carries no
-		// headline, with the application it is on.
+		// headline, with the application it is on. An application nobody has
+		// named reads as its type, never its host or its id.
+		// spec: FLT#naming
 		assert_eq!(payload["server"].as_str(), Some("test-group"));
 		assert_eq!(payload["severity"].as_str(), Some("Error"));
 		assert_eq!(payload["source_ref"].as_str(), Some("1 failed"));
 		let message = payload["message"].as_str().expect("message");
 		assert!(
-			message.starts_with("• Failed: ref-1 on http://open.invalid"),
+			message.starts_with("• Failed: ref-1 on Tamanu central"),
 			"got: {message}"
 		);
+		assert!(!message.contains(&server_id.to_string()), "got: {message}");
 		assert!(
 			!payload.contains_key("link"),
 			"link is injected by the drainer, not at enqueue"

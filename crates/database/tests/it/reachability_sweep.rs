@@ -34,7 +34,7 @@ async fn insert_server_full(
 	alert_when_down_for_secs: i64,
 	is_monitored: bool,
 ) -> Uuid {
-	let machine: RowId = sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
+	let machine: RowId = sql_query("INSERT INTO machines (name) VALUES ('box') RETURNING id")
 		.get_result(conn)
 		.await
 		.expect("insert machine");
@@ -73,11 +73,12 @@ async fn insert_grouped_server(
 		.get_result(conn)
 		.await
 		.expect("insert group");
-	let machine: RowId = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
-		.bind::<sql_types::Uuid, _>(group.id)
-		.get_result(conn)
-		.await
-		.expect("insert machine");
+	let machine: RowId =
+		sql_query("INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id")
+			.bind::<sql_types::Uuid, _>(group.id)
+			.get_result(conn)
+			.await
+			.expect("insert machine");
 	insert_machine_detail_at(conn, machine.id, 0).await;
 	let row: RowId = sql_query(
 		r#"
@@ -435,7 +436,7 @@ struct RowSecs {
 #[tokio::test(flavor = "multi_thread")]
 async fn new_servers_default_to_ten_minutes() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let machine: RowId = sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
+		let machine: RowId = sql_query("INSERT INTO machines (name) VALUES ('box') RETURNING id")
 			.get_result(&mut conn)
 			.await
 			.expect("insert machine");
@@ -466,10 +467,11 @@ async fn new_servers_default_to_ten_minutes() {
 async fn check_constraint_forbids_non_positive_duration() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		for bad in ["INTERVAL '-1 second'", "INTERVAL '0'"] {
-			let machine: RowId = sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
-				.get_result(&mut conn)
-				.await
-				.expect("insert machine");
+			let machine: RowId =
+				sql_query("INSERT INTO machines (name) VALUES ('box') RETURNING id")
+					.get_result(&mut conn)
+					.await
+					.expect("insert machine");
 			let res = sql_query(&format!(
 				"INSERT INTO applications (type, host, alert_when_down_for, machine_id) \
 				 VALUES ('tamanu-central', 'http://bad.invalid/', {bad}, '{machine_id}')",

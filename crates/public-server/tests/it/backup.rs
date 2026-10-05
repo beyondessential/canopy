@@ -37,7 +37,7 @@ async fn make_server(
 	group_id: Option<Uuid>,
 ) -> Uuid {
 	let machine_id = Uuid::new_v4();
-	sql_query("INSERT INTO machines (id, group_id, device_id) VALUES ($1, $2, $3)")
+	sql_query("INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', $1, $2, $3)")
 		.bind::<sql_types::Uuid, _>(machine_id)
 		.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)
 		.bind::<sql_types::Uuid, _>(device_id)

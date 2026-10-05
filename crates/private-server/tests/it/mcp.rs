@@ -66,9 +66,9 @@ const SRV_UNGROUPED: &str = "33333333-3333-3333-3333-333333333333";
 async fn seed(conn: &mut impl SimpleAsyncConnection) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{GROUP}', 'Prod Group'); \
-		 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{SRV_GROUPED}', '{GROUP}') RETURNING id) INSERT INTO applications (id, host, name, type, rank, group_id, is_monitored, machine_id) VALUES \
+		 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{SRV_GROUPED}', '{GROUP}') RETURNING id) INSERT INTO applications (id, host, name, type, rank, group_id, is_monitored, machine_id) VALUES \
 			('{SRV_GROUPED}', 'https://prod-central', 'Prod Central', 'tamanu-central', 'production', '{GROUP}', true, '{SRV_GROUPED}'); \
-		 WITH m AS (INSERT INTO machines (id) VALUES ('{SRV_UNGROUPED}') RETURNING id) INSERT INTO applications (id, host, name, type, machine_id) VALUES \
+		 WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '{SRV_UNGROUPED}') RETURNING id) INSERT INTO applications (id, host, name, type, machine_id) VALUES \
 			('{SRV_UNGROUPED}', 'https://lonely', 'Lonely Facility', 'tamanu-facility', '{SRV_UNGROUPED}'); \
 		 INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES \
 			('{SRV_GROUPED}', '2.34.1', true, '[]'::jsonb, \
@@ -374,7 +374,7 @@ const INC_CLOSED: &str = "aaaaaaaa-0000-0000-0000-0000000000a2";
 async fn seed_incidents(conn: &mut impl SimpleAsyncConnection) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{IGROUP}', 'Inc Group'); \
-		 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{ISRV}', '{IGROUP}') RETURNING id) INSERT INTO applications (id, host, name, type, group_id, is_monitored, machine_id) VALUES \
+		 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{ISRV}', '{IGROUP}') RETURNING id) INSERT INTO applications (id, host, name, type, group_id, is_monitored, machine_id) VALUES \
 			('{ISRV}', 'https://inc', 'Inc Application', 'tamanu-central', '{IGROUP}', true, '{ISRV}'); \
 		 INSERT INTO issues (id, created_at, updated_at, application_id, source, ref, check_name, observed_result, effective_result, description, message, active, first_seen, last_seen, last_degraded_at) VALUES \
 			('{ISSUE1}', NOW(), NOW(), '{ISRV}', 'test', 'r1', 'r1', 'failed', 'failed', 'Disk full', 'disk usage 98%', true, NOW() - interval '2 days', NOW() - interval '1 hour', NOW() - interval '1 hour'), \
@@ -605,7 +605,7 @@ async fn backup_problems_finds_a_failure_behind_many_later_successes() {
 
 		let mut sql = format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group}', 'Chatty'); \
-			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server}', '{group}') RETURNING id) INSERT INTO applications (id, host, name, type, group_id, machine_id) VALUES \
+			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server}', '{group}') RETURNING id) INSERT INTO applications (id, host, name, type, group_id, machine_id) VALUES \
 				('{server}', 'https://chatty', 'Chatty', 'tamanu-central', '{group}', '{server}'); \
 			 INSERT INTO devices (id, role) VALUES ('{device}', 'machine'); \
 			 INSERT INTO server_group_backup_config \
@@ -1058,7 +1058,7 @@ const SRV_OFFLINE: &str = "44444444-4444-4444-4444-444444444444";
 async fn find_servers_retains_the_version_of_a_long_offline_server() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		conn.batch_execute(&format!(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('{SRV_OFFLINE}') RETURNING id) INSERT INTO applications (id, host, name, type, rank, machine_id) VALUES \
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '{SRV_OFFLINE}') RETURNING id) INSERT INTO applications (id, host, name, type, rank, machine_id) VALUES \
 				('{SRV_OFFLINE}', 'https://long-gone', 'Long Gone', 'tamanu-central', 'production', '{SRV_OFFLINE}'); \
 			 INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES \
 				('{SRV_OFFLINE}', '2.30.0', true, '[]'::jsonb, '{{}}'::jsonb, \
@@ -1106,7 +1106,7 @@ async fn find_servers_retains_the_version_of_a_long_offline_server() {
 async fn find_servers_reports_a_never_reported_server_as_gone() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		conn.batch_execute(&format!(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('{SRV_OFFLINE}') RETURNING id) INSERT INTO applications (id, host, name, type, rank, machine_id) VALUES \
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '{SRV_OFFLINE}') RETURNING id) INSERT INTO applications (id, host, name, type, rank, machine_id) VALUES \
 				('{SRV_OFFLINE}', 'https://never-spoke', 'Never Spoke', 'tamanu-central', 'production', '{SRV_OFFLINE}');"
 		))
 		.await
@@ -1176,7 +1176,7 @@ async fn upgrade_plans_list_the_open_ones_and_keep_the_withdrawn_in_history() {
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES \
 				('44444444-4444-4444-4444-444444444444', 'Drifting'); \
-			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('44444444-4444-4444-4444-4444444444a1', '44444444-4444-4444-4444-444444444444') RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES \
+			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '44444444-4444-4444-4444-4444444444a1', '44444444-4444-4444-4444-444444444444') RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES \
 				('44444444-4444-4444-4444-4444444444a1', 'https://drifting', 'tamanu-central', 'production', '44444444-4444-4444-4444-444444444444', '44444444-4444-4444-4444-4444444444a1'); \
 			 INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES \
 				('44444444-4444-4444-4444-4444444444a1', 'test', '{{}}'::jsonb, '2.34.1'); \
@@ -1538,7 +1538,7 @@ async fn incidents_name_the_environment_they_target() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{ENV_GROUP}', 'kamaka'); \
-			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{ENV_TEST_APP}', '{ENV_GROUP}') RETURNING id) \
+			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{ENV_TEST_APP}', '{ENV_GROUP}') RETURNING id) \
 			 INSERT INTO applications (id, host, name, type, rank, group_id, is_monitored, machine_id) VALUES \
 				('{ENV_TEST_APP}', 'https://test.kamaka', 'kamaka test', 'tamanu-central', 'test', '{ENV_GROUP}', true, '{ENV_TEST_APP}'); \
 			 INSERT INTO incidents (id, created_at, updated_at, server_group_id, rank, opened_at) VALUES \

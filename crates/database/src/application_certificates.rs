@@ -667,12 +667,13 @@ impl ApplicationCertificate {
 	pub async fn lapsing_under_pause(db: &mut AsyncPgConnection) -> Result<Vec<PausedLapse>> {
 		use crate::schema::{application_certificates, applications};
 
-		/// `(certificate, group, server name, paused at, pause reason)` — the
-		/// columns the report needs from either side of the join.
+		/// `(certificate, group, server name, server type, paused at, pause
+		/// reason)` — the columns the report needs from either side of the join.
 		type PausedRow = (
 			ApplicationCertificate,
 			Option<Uuid>,
 			Option<String>,
+			String,
 			jiff_diesel::NullableTimestamp,
 			Option<String>,
 		);
@@ -687,6 +688,7 @@ impl ApplicationCertificate {
 				Self::as_select(),
 				applications::group_id,
 				applications::name,
+				applications::type_,
 				applications::name_management_paused_at,
 				applications::name_management_pause_reason,
 			))
@@ -702,7 +704,7 @@ impl ApplicationCertificate {
 		let now = Timestamp::now();
 
 		let mut out = Vec::new();
-		for (cert, group_id, server_name, paused_at, pause_reason) in held {
+		for (cert, group_id, server_name, server_type, paused_at, pause_reason) in held {
 			let paused_at: Option<Timestamp> = paused_at.into();
 			// Past renewal is the interesting line here, not `risk()`: what wants
 			// reporting is that Canopy would have acted by now and did not, which
@@ -723,9 +725,15 @@ impl ApplicationCertificate {
 			}
 			out.push(PausedLapse {
 				application_id: cert.application_id,
-				// A server with no name of its own is named by its id, which is what
-				// the rest of the UI falls back to.
-				server_name: server_name.unwrap_or_else(|| cert.application_id.to_string()),
+				// A server with no name of its own reads as its type, as it does
+				// everywhere else.
+				// spec: FLT#naming
+				server_name: server_name.unwrap_or_else(|| {
+					server_type
+						.parse::<commons_types::server::app_type::ApplicationType>()
+						.map(|t| t.label())
+						.unwrap_or(server_type)
+				}),
 				name: cert.name.clone(),
 				not_after: cert.not_after,
 				expired,

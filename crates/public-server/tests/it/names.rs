@@ -55,7 +55,7 @@ async fn entitled(
 
 	let server = Uuid::new_v4();
 	conn.batch_execute(&format!(
-		"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{server}', '{group}', '{device_id}') RETURNING id) INSERT INTO applications (id, name, host, type, group_id, may_manage_dns, may_manage_tls, machine_id) \
+		"WITH m AS (INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', '{server}', '{group}', '{device_id}') RETURNING id) INSERT INTO applications (id, name, host, type, group_id, may_manage_dns, may_manage_tls, machine_id) \
 		 VALUES ('{server}', 'crt', 'https://{server}.example.invalid', 'tamanu-central', '{group}', {dns}, {tls}, '{server}')"
 	))
 	.await
@@ -546,7 +546,7 @@ async fn a_name_held_elsewhere_is_refused_exactly_as_an_unheld_one() {
 			// Someone else's box declares a name under the same domain.
 			let elsewhere = Uuid::new_v4();
 			conn.batch_execute(&format!(
-				"INSERT INTO machines (id) VALUES ('{elsewhere}'); \
+				"INSERT INTO machines (name, id) VALUES ('box', '{elsewhere}'); \
 				 INSERT INTO applications (id, name, host, type, machine_id) \
 				 VALUES ('{elsewhere}', 'theirs', 'https://{elsewhere}.example.invalid', 'tamanu-central', '{elsewhere}'); \
 				 INSERT INTO application_names (application_id, name, addresses, \

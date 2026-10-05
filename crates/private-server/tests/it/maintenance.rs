@@ -15,9 +15,9 @@ const CLONE: &str = "dddddddd-0000-0000-0000-0000000000a2";
 async fn seed(conn: &mut impl SimpleAsyncConnection) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{GROUP}', 'kamaka');
-		 INSERT INTO machines (id, group_id) VALUES
-			('{PRODUCTION_BOX}', '{GROUP}'),
-			('{CLONE_BOX}', '{GROUP}');
+		 INSERT INTO machines (name, id, group_id) VALUES
+			('box', '{PRODUCTION_BOX}', '{GROUP}'),
+			('box', '{CLONE_BOX}', '{GROUP}');
 		 INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES
 			('{PRODUCTION}', 'https://kamaka.example', 'tamanu-central', 'production', '{GROUP}', '{PRODUCTION_BOX}'),
 			('{CLONE}', 'https://clone.kamaka.example', 'tamanu-central', 'clone', '{GROUP}', '{CLONE_BOX}');"

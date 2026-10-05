@@ -29,7 +29,7 @@ fn b64() -> base64::engine::general_purpose::GeneralPurpose {
 /// The box to enrol. An operator creates it; enrolment is what binds it to
 /// the identity that then speaks for it.
 async fn machine(conn: &mut AsyncPgConnection) -> Uuid {
-	Machine::create(conn, NewMachine::default())
+	Machine::create(conn, NewMachine::named("box"))
 		.await
 		.unwrap()
 		.id

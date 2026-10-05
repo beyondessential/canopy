@@ -51,14 +51,15 @@ async fn insert_group(conn: &mut AsyncPgConnection, name: &str) -> Uuid {
 /// is rooted at the box, so the monitoring gate under test is the box's.
 // spec: BAK
 async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid, is_monitored: bool) -> Uuid {
-	let machine =
-		sql_query("INSERT INTO machines (group_id, is_monitored) VALUES ($1, $2) RETURNING id")
-			.bind::<sql_types::Uuid, _>(group_id)
-			.bind::<sql_types::Bool, _>(is_monitored)
-			.get_result::<RowId>(conn)
-			.await
-			.expect("insert machine")
-			.id;
+	let machine = sql_query(
+		"INSERT INTO machines (name, group_id, is_monitored) VALUES ('box', $1, $2) RETURNING id",
+	)
+	.bind::<sql_types::Uuid, _>(group_id)
+	.bind::<sql_types::Bool, _>(is_monitored)
+	.get_result::<RowId>(conn)
+	.await
+	.expect("insert machine")
+	.id;
 	let host = format!("http://test.invalid/{}", Uuid::new_v4());
 	sql_query(
 		"INSERT INTO applications (host, type, group_id, is_monitored, machine_id) \

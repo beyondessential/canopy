@@ -37,7 +37,7 @@ async fn deleting_device_nulls_status_device_id() {
 		// 2) Insert a server (minimal fields)
 		let server_row: RowId = sql_query(
 			r#"
-				WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (type, host, machine_id) SELECT 'tamanu-central', $1, m.id FROM m
+				WITH m AS (INSERT INTO machines (name) VALUES ('box') RETURNING id) INSERT INTO applications (type, host, machine_id) SELECT 'tamanu-central', $1, m.id FROM m
 				RETURNING id
 			"#,
 		)

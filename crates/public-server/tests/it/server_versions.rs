@@ -27,7 +27,7 @@ async fn server_versions_correct_secret() {
 	server::run(|mut conn, public, _private| async move {
 		// Set up test data with multiple applications
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111'), ('22222222-2222-2222-2222-222222222222'), ('33333333-3333-3333-3333-333333333333'), ('44444444-4444-4444-4444-444444444444') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '11111111-1111-1111-1111-111111111111'), ('box', '22222222-2222-2222-2222-222222222222'), ('box', '33333333-3333-3333-3333-333333333333'), ('box', '44444444-4444-4444-4444-444444444444') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Production Application 1', 'https://prod1.example.com', 'production', 'tamanu-central', '11111111-1111-1111-1111-111111111111'),
 			('22222222-2222-2222-2222-222222222222', 'Production Application 2', 'https://prod2.example.com', 'production', 'tamanu-central', '22222222-2222-2222-2222-222222222222'),
 			('33333333-3333-3333-3333-333333333333', 'Clone Application', 'https://clone.example.com', 'clone', 'tamanu-central', '33333333-3333-3333-3333-333333333333'),
@@ -123,7 +123,7 @@ async fn server_versions_rc_section() {
 async fn server_versions_renders_a_reported_version_with_no_distance() {
 	server::run(|mut conn, public, _private| async move {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Production Application 1', 'https://prod1.example.com', 'production', 'tamanu-central', '11111111-1111-1111-1111-111111111111');
 			INSERT INTO statuses (id, server_id, version, extra) VALUES
 			('11111111-1111-1111-1111-111111111111', '11111111-1111-1111-1111-111111111111', '2.12.0', '{}')",

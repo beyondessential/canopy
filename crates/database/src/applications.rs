@@ -791,15 +791,6 @@ impl Application {
 			.map_err(AppError::from)
 	}
 
-	/// What to call this application to an operator: the name it was given,
-	/// else the host it answers on, else its id.
-	pub fn label(&self) -> String {
-		self.name
-			.clone()
-			.or_else(|| self.host.as_ref().map(|h| h.0.to_string()))
-			.unwrap_or_else(|| self.id.to_string())
-	}
-
 	/// All live (non-archived) applications in a group, ordered by name. Used to
 	/// expand a group-wide restore-replica declaration into per-server entries.
 	pub async fn list_live_in_group(
@@ -836,23 +827,34 @@ impl Application {
 
 	/// Bulk-fetch `(name, host)` for a set of server ids — used by the
 	/// issues/incidents APIs to embed display info into each row so the UI
-	/// doesn't have to fetch every server independently.
+	/// doesn't have to fetch every server independently. The name is the one
+	/// [`Self::display_name`] gives, so an unnamed application reads as its
+	/// type here as everywhere else.
+	// spec: FLT#naming
 	pub async fn names_by_ids(
 		db: &mut AsyncPgConnection,
 		ids: &[Uuid],
-	) -> Result<std::collections::HashMap<Uuid, (Option<String>, Option<String>)>> {
+	) -> Result<std::collections::HashMap<Uuid, (String, Option<String>)>> {
 		use crate::schema::applications::dsl;
 
 		if ids.is_empty() {
 			return Ok(std::collections::HashMap::new());
 		}
-		let rows: Vec<(Uuid, Option<String>, Option<String>)> = dsl::applications
-			.select((dsl::id, dsl::name, dsl::host))
+		let rows: Vec<(Uuid, Option<String>, Option<String>, String)> = dsl::applications
+			.select((dsl::id, dsl::name, dsl::host, dsl::type_))
 			.filter(dsl::id.eq_any(ids))
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
-		Ok(rows.into_iter().map(|(i, n, h)| (i, (n, h))).collect())
+		Ok(rows
+			.into_iter()
+			.map(|(i, n, h, t)| {
+				let name = n.unwrap_or_else(|| {
+					t.parse::<ApplicationType>().map(|t| t.label()).unwrap_or(t)
+				});
+				(i, (name, h))
+			})
+			.collect())
 	}
 
 	/// Bulk-fetch the group name for each given server. Servers that are

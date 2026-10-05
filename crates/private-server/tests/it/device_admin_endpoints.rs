@@ -253,7 +253,7 @@ async fn merge_into_reparents_keys_and_the_machine_and_deletes_source() {
 			"INSERT INTO devices (id, role, tailscale_node_id) \
 			   VALUES ('{source}', 'server', 'nodekey:fromauto'); \
 			 INSERT INTO devices (id, role) VALUES ('{target}', 'machine'); \
-			 INSERT INTO machines (id, device_id) VALUES ('{machine}', '{source}'); \
+			 INSERT INTO machines (name, id, device_id) VALUES ('box', '{machine}', '{source}'); \
 			 INSERT INTO device_keys (device_id, key_data, name, is_active) \
 			   VALUES ('{target}', '\\x010203', 'mtls', true);"
 		))
@@ -395,7 +395,7 @@ async fn machine_attach_tailscale_is_404_for_an_unresolvable_identifier() {
 
 		let machine_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO machines (id) VALUES ('{machine_id}');"
+			"INSERT INTO machines (name, id) VALUES ('box', '{machine_id}');"
 		))
 		.await
 		.expect("insert machine");

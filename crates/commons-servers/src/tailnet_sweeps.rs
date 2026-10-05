@@ -98,10 +98,10 @@ pub async fn sweep_key_expiry(
 				CheckResult::Failed,
 				Some(format!("Tailscale key will expire for {}", entry.node_name)),
 				format!(
-					"Tailnet node {} ({}) has key expiry enabled. When the \
+					"Tailnet node {} has key expiry enabled. When the \
 					 node's key expires, it will drop off the tailnet and \
 					 canopy will lose contact.",
-					entry.node_name, entry.node_id,
+					entry.node_name,
 				),
 			),
 		};

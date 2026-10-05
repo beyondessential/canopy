@@ -67,9 +67,8 @@ async fn a_new_machine_has_no_applications_and_has_not_checked_in() {
 		let machine = Machine::create(
 			&mut conn,
 			NewMachine {
-				name: Some("box-1".into()),
 				group_id: Some(group),
-				..Default::default()
+				..NewMachine::named("box-1")
 			},
 		)
 		.await
@@ -102,7 +101,7 @@ async fn a_new_machine_has_no_applications_and_has_not_checked_in() {
 #[tokio::test(flavor = "multi_thread")]
 async fn archiving_a_machine_archives_the_applications_on_it() {
 	TestDb::run(async |mut conn, _url| {
-		let machine = Machine::create(&mut conn, NewMachine::default())
+		let machine = Machine::create(&mut conn, NewMachine::named("box"))
 			.await
 			.expect("create machine");
 		let one = insert_application_on(&mut conn, machine.id).await;
@@ -155,7 +154,7 @@ async fn archiving_a_machine_archives_the_applications_on_it() {
 async fn an_identity_resolves_to_at_most_one_machine() {
 	TestDb::run(async |mut conn, _url| {
 		let device = insert_device(&mut conn, "server").await;
-		let machine = Machine::create(&mut conn, NewMachine::default())
+		let machine = Machine::create(&mut conn, NewMachine::named("box"))
 			.await
 			.expect("create machine");
 		sql_query("UPDATE machines SET device_id = $1 WHERE id = $2")
@@ -182,7 +181,7 @@ async fn an_identity_resolves_to_at_most_one_machine() {
 		);
 
 		// The association is exclusive: a second machine cannot take it.
-		let other = Machine::create(&mut conn, NewMachine::default())
+		let other = Machine::create(&mut conn, NewMachine::named("box"))
 			.await
 			.expect("create machine");
 		let taken = sql_query("UPDATE machines SET device_id = $1 WHERE id = $2")
@@ -207,9 +206,8 @@ async fn machines_are_listed_by_group_and_exclude_archived() {
 		let kept = Machine::create(
 			&mut conn,
 			NewMachine {
-				name: Some("kept".into()),
 				group_id: Some(group),
-				..Default::default()
+				..NewMachine::named("kept")
 			},
 		)
 		.await
@@ -217,9 +215,8 @@ async fn machines_are_listed_by_group_and_exclude_archived() {
 		let gone = Machine::create(
 			&mut conn,
 			NewMachine {
-				name: Some("gone".into()),
 				group_id: Some(group),
-				..Default::default()
+				..NewMachine::named("gone")
 			},
 		)
 		.await
@@ -227,9 +224,8 @@ async fn machines_are_listed_by_group_and_exclude_archived() {
 		Machine::create(
 			&mut conn,
 			NewMachine {
-				name: Some("elsewhere".into()),
 				group_id: Some(other),
-				..Default::default()
+				..NewMachine::named("elsewhere")
 			},
 		)
 		.await
@@ -260,7 +256,7 @@ async fn every_application_has_exactly_one_machine() {
 		// The legacy path: an application inserted with no machine stated.
 		let host = format!("https://{}.example.invalid", Uuid::new_v4());
 		let legacy =
-			sql_query("WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (host, type, machine_id) SELECT $1, 'tamanu-central', m.id FROM m RETURNING id")
+			sql_query("WITH m AS (INSERT INTO machines (name) VALUES ('box') RETURNING id) INSERT INTO applications (host, type, machine_id) SELECT $1, 'tamanu-central', m.id FROM m RETURNING id")
 				.bind::<sql_types::Text, _>(host)
 				.get_result::<RowId>(&mut conn)
 				.await
@@ -279,7 +275,7 @@ async fn every_application_has_exactly_one_machine() {
 		// which is the 1:1 the backfill produced.
 		let host2 = format!("https://{}.example.invalid", Uuid::new_v4());
 		let second =
-			sql_query("WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (host, type, machine_id) SELECT $1, 'tamanu-central', m.id FROM m RETURNING id")
+			sql_query("WITH m AS (INSERT INTO machines (name) VALUES ('box') RETURNING id) INSERT INTO applications (host, type, machine_id) SELECT $1, 'tamanu-central', m.id FROM m RETURNING id")
 				.bind::<sql_types::Text, _>(host2)
 				.get_result::<RowId>(&mut conn)
 				.await
@@ -317,7 +313,7 @@ async fn moving_a_machine_moves_the_applications_on_it() {
 			&mut conn,
 			NewMachine {
 				group_id: Some(from),
-				..Default::default()
+				..NewMachine::named("box")
 			},
 		)
 		.await
@@ -365,7 +361,7 @@ async fn an_application_cannot_hold_a_group_of_its_own() {
 			&mut conn,
 			NewMachine {
 				group_id: Some(machines_group),
-				..Default::default()
+				..NewMachine::named("box")
 			},
 		)
 		.await
@@ -408,7 +404,7 @@ async fn moving_an_application_between_machines_takes_the_new_group() {
 			&mut conn,
 			NewMachine {
 				group_id: Some(here),
-				..Default::default()
+				..NewMachine::named("box")
 			},
 		)
 		.await
@@ -417,7 +413,7 @@ async fn moving_an_application_between_machines_takes_the_new_group() {
 			&mut conn,
 			NewMachine {
 				group_id: Some(there),
-				..Default::default()
+				..NewMachine::named("box")
 			},
 		)
 		.await
@@ -451,7 +447,7 @@ async fn moving_an_application_between_machines_takes_the_new_group() {
 #[tokio::test(flavor = "multi_thread")]
 async fn only_an_operator_archives_an_application_and_its_history_survives() {
 	TestDb::run(async |mut conn, _url| {
-		let machine = Machine::create(&mut conn, NewMachine::default())
+		let machine = Machine::create(&mut conn, NewMachine::named("box"))
 			.await
 			.expect("create machine");
 		let retired = insert_application_on(&mut conn, machine.id).await;

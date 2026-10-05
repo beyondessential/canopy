@@ -21,7 +21,7 @@ struct RowId {
 
 async fn insert_server(conn: &mut AsyncPgConnection, name: &str) -> Uuid {
 	let host = format!("https://{}.example.invalid", Uuid::new_v4());
-	let machine = sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
+	let machine = sql_query("INSERT INTO machines (name) VALUES ('box') RETURNING id")
 		.get_result::<RowId>(conn)
 		.await
 		.expect("insert machine")
@@ -463,12 +463,13 @@ async fn entitled_server(conn: &mut AsyncPgConnection, domain: &str) -> Uuid {
 		.await
 		.expect("claim domain");
 
-	let machine = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
-		.bind::<sql_types::Uuid, _>(group)
-		.get_result::<RowId>(conn)
-		.await
-		.expect("insert machine")
-		.id;
+	let machine =
+		sql_query("INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id")
+			.bind::<sql_types::Uuid, _>(group)
+			.get_result::<RowId>(conn)
+			.await
+			.expect("insert machine")
+			.id;
 
 	let host = format!("https://{}.example.invalid", Uuid::new_v4());
 	sql_query(

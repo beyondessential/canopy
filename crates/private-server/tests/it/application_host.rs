@@ -17,7 +17,7 @@ async fn seed(conn: &mut AsyncPgConnection, host: &str) -> Uuid {
 		format!("'{host}'")
 	};
 	conn.batch_execute(&format!(
-		"WITH m AS (INSERT INTO machines (id) VALUES ('{id}') RETURNING id) \
+		"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '{id}') RETURNING id) \
 		 INSERT INTO applications (id, name, host, rank, type, machine_id) \
 		 VALUES ('{id}', 'Host Test', {host_sql}, 'test', 'tamanu-central', '{id}')"
 	))

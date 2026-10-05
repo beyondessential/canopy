@@ -332,7 +332,7 @@ pub async fn group_details(
 				rank: s.rank,
 				r#type: s.r#type,
 				machine_id,
-				machine_name: machines.get(&machine_id).and_then(|m| m.name.clone()),
+				machine_name: machines.get(&machine_id).map(|m| m.name.clone()),
 				machine_up: machines.get(&machine_id).map_or(ShortStatus::Gone, |m| {
 					m.reachability(machine_reports.get(&machine_id).copied())
 				}),
@@ -1241,8 +1241,8 @@ pub struct FleetServerDetailData {
 pub struct FleetMachineDetailData {
 	/// Unique identifier for the machine.
 	pub machine_id: Uuid,
-	/// The name its operator gave it, if any.
-	pub machine_name: Option<String>,
+	/// The name its operator gave it.
+	pub machine_name: String,
 	/// The group the machine belongs to, if any.
 	pub group_id: Option<Uuid>,
 	/// Display name of that group, if any.

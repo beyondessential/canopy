@@ -52,7 +52,7 @@ async fn entitled_server(conn: &mut AsyncPgConnection, domain: &str) -> Uuid {
 
 	let host = format!("https://{}.example.invalid", Uuid::new_v4());
 	sql_query(
-		"WITH m AS (INSERT INTO machines (group_id) VALUES ($3) RETURNING id) INSERT INTO applications (name, host, type, group_id, may_manage_dns, may_manage_tls, machine_id) SELECT $1, $2, 'tamanu-central', $3, true, true, m.id FROM m RETURNING id",
+		"WITH m AS (INSERT INTO machines (name, group_id) VALUES ('box', $3) RETURNING id) INSERT INTO applications (name, host, type, group_id, may_manage_dns, may_manage_tls, machine_id) SELECT $1, $2, 'tamanu-central', $3, true, true, m.id FROM m RETURNING id",
 	)
 	.bind::<sql_types::Text, _>("entitled")
 	.bind::<sql_types::Text, _>(host)

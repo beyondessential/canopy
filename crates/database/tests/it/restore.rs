@@ -121,12 +121,13 @@ async fn insert_group(conn: &mut AsyncPgConnection, name: &str) -> Uuid {
 /// on a version or a product, which are an application's.
 async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> (Uuid, Uuid) {
 	let host = format!("http://test.invalid/{}", Uuid::new_v4());
-	let machine = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
-		.bind::<sql_types::Uuid, _>(group_id)
-		.get_result::<RowId>(conn)
-		.await
-		.expect("insert machine")
-		.id;
+	let machine =
+		sql_query("INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id")
+			.bind::<sql_types::Uuid, _>(group_id)
+			.get_result::<RowId>(conn)
+			.await
+			.expect("insert machine")
+			.id;
 	let application = sql_query(
 		"INSERT INTO applications (host, type, group_id, machine_id) VALUES ($1, 'tamanu-central', $2, $3) RETURNING id",
 	)

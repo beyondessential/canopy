@@ -31,11 +31,11 @@ const RESTORE_WINDOW: SignedDuration = SignedDuration::from_hours(24);
 pub struct Machine {
 	/// Unique identifier for this machine.
 	pub id: Uuid,
-	/// The name its operator gave it. Distinct from the hostname the
-	/// operating system reports, which is a reported figure rather than a
+	/// The name its operator gave it, never blank. Distinct from the hostname
+	/// the operating system reports, which is a reported figure rather than a
 	/// field an operator sets.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub name: Option<String>,
+	// spec: FLT#naming
+	pub name: String,
 	/// The group this machine belongs to. The one thing an operator supplies
 	/// when creating a machine: which group a box belongs to is the one
 	/// fact the box has no way of knowing. The applications on it take it.
@@ -123,11 +123,11 @@ pub struct Machine {
 
 /// The fields an operator supplies when creating a machine. Everything else
 /// either has a default or arrives by enrolment and reporting.
-#[derive(Debug, Clone, Default, Deserialize, Insertable)]
+#[derive(Debug, Clone, Deserialize, Insertable)]
 #[diesel(table_name = crate::schema::machines)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewMachine {
-	pub name: Option<String>,
+	pub name: String,
 	pub group_id: Option<Uuid>,
 	pub cloud: Option<bool>,
 	pub geolocation: Option<GeoPoint>,
@@ -143,7 +143,7 @@ pub struct NewMachine {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 #[diesel(treat_none_as_null = false)]
 pub struct MachineUpdate {
-	pub name: Option<Option<String>>,
+	pub name: Option<String>,
 	pub group_id: Option<Option<Uuid>>,
 	pub cloud: Option<Option<bool>>,
 	pub geolocation: Option<Option<GeoPoint>>,
@@ -152,6 +152,18 @@ pub struct MachineUpdate {
 	pub alert_when_down_for: Option<PgDuration>,
 	pub notes: Option<String>,
 	pub tags: Option<TagMap>,
+}
+
+impl NewMachine {
+	/// A machine with only its name given, the one field every machine has.
+	pub fn named(name: impl Into<String>) -> Self {
+		Self {
+			name: name.into(),
+			group_id: None,
+			cloud: None,
+			geolocation: None,
+		}
+	}
 }
 
 impl Machine {
@@ -364,13 +376,13 @@ impl Machine {
 	pub async fn names_by_ids(
 		db: &mut AsyncPgConnection,
 		ids: &[Uuid],
-	) -> Result<std::collections::HashMap<Uuid, Option<String>>> {
+	) -> Result<std::collections::HashMap<Uuid, String>> {
 		use crate::schema::machines::dsl;
 
 		if ids.is_empty() {
 			return Ok(std::collections::HashMap::new());
 		}
-		let rows: Vec<(Uuid, Option<String>)> = dsl::machines
+		let rows: Vec<(Uuid, String)> = dsl::machines
 			.select((dsl::id, dsl::name))
 			.filter(dsl::id.eq_any(ids))
 			.load(db)

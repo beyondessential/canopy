@@ -25,7 +25,7 @@ struct RowName {
 }
 
 async fn insert_server(conn: &mut AsyncPgConnection, host: &str) -> Uuid {
-	let machine: RowId = sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
+	let machine: RowId = sql_query("INSERT INTO machines (name) VALUES ('box') RETURNING id")
 		.get_result(conn)
 		.await
 		.expect("insert machine");

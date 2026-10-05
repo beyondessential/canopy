@@ -28,7 +28,7 @@ async fn seed(conn: &mut impl SimpleAsyncConnection, group: Uuid, name: &str) ->
 	let machine = Uuid::new_v4();
 	let application = Uuid::new_v4();
 	conn.batch_execute(&format!(
-		"INSERT INTO machines (id, group_id) VALUES ('{machine}', '{group}'); \
+		"INSERT INTO machines (name, id, group_id) VALUES ('box', '{machine}', '{group}'); \
 		 INSERT INTO applications (id, name, host, type, group_id, machine_id) \
 		 VALUES ('{application}', '{name}', 'https://{application}.example.com', \
 		         'tamanu-central', '{group}', '{machine}')"

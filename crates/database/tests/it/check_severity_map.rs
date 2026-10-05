@@ -39,7 +39,7 @@ async fn insert_group(conn: &mut diesel_async::AsyncPgConnection) -> Uuid {
 async fn insert_server(conn: &mut diesel_async::AsyncPgConnection, group_id: Option<Uuid>) -> Uuid {
 	let server_id = Uuid::new_v4();
 	// The machine takes the application's own id, as the split's backfill did.
-	sql_query("INSERT INTO machines (id, group_id) VALUES ($1, $2)")
+	sql_query("INSERT INTO machines (name, id, group_id) VALUES ('box', $1, $2)")
 		.bind::<sql_types::Uuid, _>(server_id)
 		.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)
 		.execute(conn)

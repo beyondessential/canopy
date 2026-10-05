@@ -4614,10 +4614,7 @@ async fn enqueue_slack_resolve_inner(
 	// over. The opening was delivered before any reminder was queued, so this
 	// has no bearing on whether the resolve is owed.
 	crate::slack_outbox::SlackOutbox::cancel_pending_reminders(conn, incident.id).await?;
-	let label = match incident.server_group_id {
-		Some(gid) => format_group_label(&ServerGroup::get_by_id(conn, gid).await?, incident.rank),
-		None => "Canopy".to_string(),
-	};
+	let label = incident.target_label(conn).await?;
 	let payload = crate::slack_outbox::vars::incident_resolve(&label, by);
 	crate::slack_outbox::SlackOutbox::enqueue(
 		conn,
@@ -4635,10 +4632,32 @@ async fn enqueue_slack_resolve_inner(
 /// How an incident's target reads in a notification: the environment, or the
 /// group itself where the incident carries no rank.
 // spec: INC#notification
-pub(crate) fn format_group_label(group: &ServerGroup, rank: Option<ServerRank>) -> String {
+fn format_group_label(group: &ServerGroup, rank: Option<ServerRank>) -> String {
 	match rank {
 		Some(rank) => crate::server_groups::environment_name(&group.name, rank),
 		None => group.name.clone(),
+	}
+}
+
+impl Incident {
+	pub async fn get_by_id(db: &mut AsyncPgConnection, incident_id: Uuid) -> Result<Self> {
+		use crate::schema::incidents;
+		incidents::table
+			.select(Self::as_select())
+			.filter(incidents::id.eq(incident_id))
+			.first(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// How this incident's target reads in a notification: its environment
+	/// or group, or Canopy for a Canopy-wide incident.
+	// spec: INC#notification
+	pub async fn target_label(&self, db: &mut AsyncPgConnection) -> Result<String> {
+		Ok(match self.server_group_id {
+			Some(gid) => format_group_label(&ServerGroup::get_by_id(db, gid).await?, self.rank),
+			None => "Canopy".to_string(),
+		})
 	}
 }
 

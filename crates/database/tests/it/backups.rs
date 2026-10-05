@@ -39,12 +39,13 @@ async fn insert_group(conn: &mut AsyncPgConnection, name: &str) -> Uuid {
 /// box's, so that is what these tests key on.
 // spec: BAK
 async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uuid {
-	let machine = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
-		.bind::<sql_types::Uuid, _>(group_id)
-		.get_result::<RowId>(conn)
-		.await
-		.expect("insert machine")
-		.id;
+	let machine =
+		sql_query("INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id")
+			.bind::<sql_types::Uuid, _>(group_id)
+			.get_result::<RowId>(conn)
+			.await
+			.expect("insert machine")
+			.id;
 	let host = format!("http://test.invalid/{}", Uuid::new_v4());
 	sql_query(
 		"INSERT INTO applications (host, type, group_id, machine_id) \
@@ -2100,12 +2101,13 @@ async fn a_device_request_resolves_identity_to_machine_to_group() {
 		let group_id = insert_group(&mut conn, "rarotonga").await;
 
 		// A box carrying no workload at all: resolution must still land on it.
-		let machine_id = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
-			.bind::<sql_types::Uuid, _>(group_id)
-			.get_result::<RowId>(&mut conn)
-			.await
-			.expect("insert machine")
-			.id;
+		let machine_id =
+			sql_query("INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id")
+				.bind::<sql_types::Uuid, _>(group_id)
+				.get_result::<RowId>(&mut conn)
+				.await
+				.expect("insert machine")
+				.id;
 		let device_id = insert_device(&mut conn).await;
 		database::Machine::bind_device(&mut conn, machine_id, device_id)
 			.await

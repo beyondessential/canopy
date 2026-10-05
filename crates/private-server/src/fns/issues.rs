@@ -289,18 +289,10 @@ pub(crate) async fn enrich_issues(
 	Ok(issues
 		.into_iter()
 		.map(|i| {
-			let (name, host) = i
-				.application_id
-				.and_then(|sid| names.get(&sid).cloned())
-				.unwrap_or((None, None));
-			// An application nobody has named reads as its type, the same as
-			// it does everywhere else it is presented.
-			// spec: FLT#naming
-			let name = name.or_else(|| {
-				i.application_id
-					.and_then(|sid| application_types.get(&sid))
-					.map(|t| t.label())
-			});
+			let (name, host) = match i.application_id.and_then(|sid| names.get(&sid).cloned()) {
+				Some((name, host)) => (Some(name), host),
+				None => (None, None),
+			};
 			// A machine's issue answers to its machine's group, so the
 			// group is named either way.
 			let (group_id, group_name) = match (i.application_id, i.machine_id) {
@@ -310,8 +302,7 @@ pub(crate) async fn enrich_issues(
 			};
 			let machine_name = i
 				.machine_id
-				.and_then(|mid| machine_names.get(&mid).cloned())
-				.flatten();
+				.and_then(|mid| machine_names.get(&mid).cloned());
 			let links = incidents
 				.remove(&i.id)
 				.unwrap_or_default()

@@ -19,7 +19,7 @@ async fn self_endpoint_returns_server_and_device_ids() {
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = Uuid::new_v4();
 			sql_query(
-				"WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, machine_id) \
+				"WITH m AS (INSERT INTO machines (name, id, device_id) VALUES ('box', $1, $2) RETURNING id) INSERT INTO applications (id, host, type, machine_id) \
 				 VALUES ($1, 'https://self.example.com', 'tamanu-central', $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -86,7 +86,7 @@ async fn machine_self_answers_for_a_box_running_two_applications() {
 		"server",
 		async |mut conn, cert, device_id, public, _| {
 			let machine_id = Uuid::new_v4();
-			sql_query("INSERT INTO machines (id, device_id) VALUES ($1, $2)")
+			sql_query("INSERT INTO machines (name, id, device_id) VALUES ('box', $1, $2)")
 				.bind::<sql_types::Uuid, _>(machine_id)
 				.bind::<sql_types::Uuid, _>(device_id)
 				.execute(&mut conn)
@@ -135,7 +135,7 @@ async fn machine_self_answers_before_anything_has_reported() {
 		"server",
 		async |mut conn, cert, device_id, public, _| {
 			let machine_id = Uuid::new_v4();
-			sql_query("INSERT INTO machines (id, device_id) VALUES ($1, $2)")
+			sql_query("INSERT INTO machines (name, id, device_id) VALUES ('box', $1, $2)")
 				.bind::<sql_types::Uuid, _>(machine_id)
 				.bind::<sql_types::Uuid, _>(device_id)
 				.execute(&mut conn)
@@ -196,7 +196,7 @@ async fn a_row_stored_as_server_reads_as_the_machine_role() {
 
 			// And it authenticates: a fielded agent keeps working.
 			let machine_id = Uuid::new_v4();
-			sql_query("INSERT INTO machines (id, device_id) VALUES ($1, $2)")
+			sql_query("INSERT INTO machines (name, id, device_id) VALUES ('box', $1, $2)")
 				.bind::<sql_types::Uuid, _>(machine_id)
 				.bind::<sql_types::Uuid, _>(device_id)
 				.execute(&mut conn)
@@ -223,14 +223,14 @@ async fn a_machine_gated_route_resolves_the_machine_from_the_identity() {
 		async |mut conn, cert, device_id, public, _| {
 			let mine = Uuid::new_v4();
 			let theirs = Uuid::new_v4();
-			sql_query("INSERT INTO machines (id, device_id) VALUES ($1, $2)")
+			sql_query("INSERT INTO machines (name, id, device_id) VALUES ('box', $1, $2)")
 				.bind::<sql_types::Uuid, _>(mine)
 				.bind::<sql_types::Uuid, _>(device_id)
 				.execute(&mut conn)
 				.await
 				.unwrap();
 			// Another box on the fleet, with no identity of its own.
-			sql_query("INSERT INTO machines (id) VALUES ($1)")
+			sql_query("INSERT INTO machines (name, id) VALUES ('box', $1)")
 				.bind::<sql_types::Uuid, _>(theirs)
 				.execute(&mut conn)
 				.await

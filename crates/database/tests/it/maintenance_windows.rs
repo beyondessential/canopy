@@ -45,11 +45,12 @@ async fn insert_server(
 	conn: &mut diesel_async::AsyncPgConnection,
 	group_id: Option<Uuid>,
 ) -> (Uuid, Uuid) {
-	let machine: RowId = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
-		.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)
-		.get_result(conn)
-		.await
-		.expect("insert machine");
+	let machine: RowId =
+		sql_query("INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id")
+			.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)
+			.get_result(conn)
+			.await
+			.expect("insert machine");
 	let application: RowId = sql_query(
 		"INSERT INTO applications (type, host, group_id, machine_id) \
 		 VALUES ('tamanu-central', 'http://maint.invalid/', $1, $2) RETURNING id",
@@ -70,11 +71,12 @@ async fn insert_ranked_server(
 	group_id: Uuid,
 	rank: &str,
 ) -> (Uuid, Uuid) {
-	let machine: RowId = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
-		.bind::<sql_types::Uuid, _>(group_id)
-		.get_result(conn)
-		.await
-		.expect("insert machine");
+	let machine: RowId =
+		sql_query("INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id")
+			.bind::<sql_types::Uuid, _>(group_id)
+			.get_result(conn)
+			.await
+			.expect("insert machine");
 	let application: RowId = sql_query(
 		"INSERT INTO applications (type, host, group_id, rank, machine_id) VALUES ('tamanu-central', $1, $2, $3, $4) RETURNING id",
 	)

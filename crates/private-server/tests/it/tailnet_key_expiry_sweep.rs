@@ -45,7 +45,7 @@ async fn insert_tailnet_device(conn: &mut AsyncPgConnection) -> Uuid {
 async fn insert_server_for(conn: &mut AsyncPgConnection, device_id: Uuid, host: &str) -> Uuid {
 	let id = Uuid::new_v4();
 	conn.batch_execute(&format!(
-		"INSERT INTO machines (id, device_id) VALUES ('{id}', '{device_id}'); \
+		"INSERT INTO machines (name, id, device_id) VALUES ('box', '{id}', '{device_id}'); \
 		 INSERT INTO applications (id, host, type, machine_id) \
 		 VALUES ('{id}', '{host}', 'tamanu-central', '{id}');"
 	))

@@ -1440,7 +1440,7 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 	for mid in machine_order {
 		let found = per_machine.remove(&mid).expect("entered with its machine");
 		let label = match live_machine(db, &mut machines, mid).await? {
-			Some(machine) => crate::backup::staleness::machine_label(machine),
+			Some(machine) => machine.name.clone(),
 			None => continue,
 		};
 		degraded += file_verification(db, mid, &label, found.verification).await?;

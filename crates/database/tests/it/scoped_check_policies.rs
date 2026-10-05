@@ -33,7 +33,7 @@ async fn insert_group(conn: &mut diesel_async::AsyncPgConnection) -> Uuid {
 
 async fn insert_server(conn: &mut diesel_async::AsyncPgConnection, group_id: Option<Uuid>) -> Uuid {
 	let row: RowId = sql_query(
-		"WITH m AS (INSERT INTO machines (group_id) VALUES ($1) RETURNING id) INSERT INTO applications (type, host, group_id, machine_id) SELECT 'tamanu-central', 'http://scoped.invalid/', $1, m.id FROM m RETURNING id",
+		"WITH m AS (INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id) INSERT INTO applications (type, host, group_id, machine_id) SELECT 'tamanu-central', 'http://scoped.invalid/', $1, m.id FROM m RETURNING id",
 	)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)
 	.get_result(conn)

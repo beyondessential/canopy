@@ -745,7 +745,7 @@ pub async fn sample(
 				.unwrap_or_default(),
 			server_name: server
 				.map(|s| s.display_name())
-				.or_else(|| machine.and_then(|m| m.name)),
+				.or_else(|| machine.map(|m| m.name)),
 			seen_at: status.created_at,
 		}),
 	}))

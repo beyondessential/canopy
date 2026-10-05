@@ -24,7 +24,7 @@ async fn insert_grouped_server(conn: &mut diesel_async::AsyncPgConnection, host:
 			.await
 			.expect("group");
 	let row: RowId =
-		sql_query("WITH m AS (INSERT INTO machines (group_id) VALUES ($2) RETURNING id) INSERT INTO applications (type, host, group_id, machine_id) SELECT 'tamanu-central', $1, $2, m.id FROM m RETURNING id")
+		sql_query("WITH m AS (INSERT INTO machines (name, group_id) VALUES ('box', $2) RETURNING id) INSERT INTO applications (type, host, group_id, machine_id) SELECT 'tamanu-central', $1, $2, m.id FROM m RETURNING id")
 			.bind::<sql_types::Text, _>(host)
 			.bind::<sql_types::Uuid, _>(group.id)
 			.get_result(conn)

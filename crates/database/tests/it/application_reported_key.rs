@@ -12,7 +12,9 @@ use database::{
 use diesel_async::AsyncPgConnection;
 
 async fn machine(conn: &mut AsyncPgConnection) -> Machine {
-	Machine::create(conn, NewMachine::default()).await.unwrap()
+	Machine::create(conn, NewMachine::named("box"))
+		.await
+		.unwrap()
 }
 
 /// The first push naming a key gets a record, and every push after it gets the

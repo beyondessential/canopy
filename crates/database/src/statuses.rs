@@ -59,10 +59,6 @@ const GRACE_LOOKBACK_SQL: &str = "NOW() - INTERVAL '30 days'";
 /// caller-supplied point in time rather than to `NOW()`.
 const GRACE_LOOKBACK: SignedDuration = SignedDuration::from_hours(24 * 30);
 
-fn machine_label(m: &crate::machines::Machine) -> String {
-	m.name.clone().unwrap_or_else(|| m.id.to_string())
-}
-
 /// The sources counting toward a set of targets' reachability, with how long
 /// each has been silent: reporting, not switched off, and actually ingested.
 /// An ignored or denied source has no fresh data to judge, so its silence says
@@ -379,7 +375,7 @@ impl Status {
 		for server in &swept {
 			let graded = grade_reachability(
 				"Application",
-				&server.label(),
+				&server.display_name(),
 				server.alert_when_down_for.0,
 				expected.get(&server.id).map(Vec::as_slice).unwrap_or(&[]),
 				status_map.get(&server.id).copied(),
@@ -470,7 +466,7 @@ impl Status {
 		for machine in machines {
 			let graded = grade_reachability(
 				"Machine",
-				&machine_label(machine),
+				&machine.name,
 				machine.alert_when_down_for.0,
 				expected.get(&machine.id).map(Vec::as_slice).unwrap_or(&[]),
 				last_reported.get(&machine.id).copied(),

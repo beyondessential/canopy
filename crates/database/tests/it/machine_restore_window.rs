@@ -12,7 +12,7 @@ use jiff::Timestamp;
 #[tokio::test(flavor = "multi_thread")]
 async fn restore_window_opens_for_a_day_then_closes() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		let created = Machine::create(&mut conn, NewMachine::default())
+		let created = Machine::create(&mut conn, NewMachine::named("box"))
 			.await
 			.unwrap();
 		assert!(!created.restore_allowed(), "restores start disallowed");
@@ -55,7 +55,7 @@ async fn restore_window_opens_for_a_day_then_closes() {
 #[tokio::test(flavor = "multi_thread")]
 async fn expired_window_reads_as_closed() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		let created = Machine::create(&mut conn, NewMachine::default())
+		let created = Machine::create(&mut conn, NewMachine::named("box"))
 			.await
 			.unwrap();
 		// A window that already lapsed: set, but in the past.
@@ -87,10 +87,10 @@ async fn expired_window_reads_as_closed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_window_reaches_only_the_machine_it_was_opened_on() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		let machine = Machine::create(&mut conn, NewMachine::default())
+		let machine = Machine::create(&mut conn, NewMachine::named("box"))
 			.await
 			.unwrap();
-		let other = Machine::create(&mut conn, NewMachine::default())
+		let other = Machine::create(&mut conn, NewMachine::named("box"))
 			.await
 			.unwrap();
 		Machine::allow_restore(&mut conn, machine.id, Some("op@example"))
