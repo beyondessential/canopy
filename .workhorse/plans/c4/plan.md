@@ -110,5 +110,5 @@ A bare name that only matches typed entries is an invalid-params error listing t
 
 - [x] Rust: membership, retired thread, reserved sources, quiet, ordering, migration, MCP name parsing and `get_server`
 - [x] e2e: machine checks absent from an application, silence scopes offered, quiet rows, current-only, ordering; operator sessions read on the machine page
-- [ ] Full e2e suite green
-- [ ] `just check-generated` after committing
+- [x] Full e2e suite green
+- [x] `just check-generated` after committing
