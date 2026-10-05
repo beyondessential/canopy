@@ -95,5 +95,5 @@ So an operator configures staleness once for the fleet and, where a particular t
 The same holds for the restore signals, which have both a backup type and a restore intent.
 
 Each signal has a stable key by which operators silence or snooze it and by which the interface and notifications refer to it; the keys are a contract and are not renamed without migrating stored silences.
-Where an alert's text names the machine it concerns, it names it the way an operator knows it, falling back to an identifier only when the machine has no name.
+Where an alert's text names the machine or application it concerns, it names it the way an operator knows it (see [FLT](../servers/overview.md), "Naming").
 A signal recovers when the condition that raised it clears.
