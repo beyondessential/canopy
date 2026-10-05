@@ -319,6 +319,14 @@ async fn sweep_files_when_no_status_ever() {
 		);
 		assert!(issue.message.contains("(threshold 10m)"));
 		assert!(!issue.message.contains("106751991167300d"));
+		// An application nobody has named reads as its type, never its id.
+		// spec: FLT#naming
+		assert!(
+			issue.message.starts_with("Application Tamanu central "),
+			"got: {}",
+			issue.message
+		);
+		assert!(!issue.message.contains(&id.to_string()));
 	})
 	.await
 }

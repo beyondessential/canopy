@@ -203,3 +203,28 @@ async fn a_machines_labels_carry_no_type_and_take_the_highest_rank_on_it() {
 	})
 	.await
 }
+
+/// An application nobody has named reads as its type wherever its name is
+/// asked for, rather than as the host it answers on or its id.
+// spec: FLT#naming
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unnamed_application_is_called_by_its_type() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		let group_body: serde_json::Value = private
+			.post("/api/fleet/groups/create")
+			.json(&json!({ "name": "unnamed-site" }))
+			.await
+			.json();
+		let group_id = group_body["id"].as_str().unwrap().to_string();
+		let id = insert_application(&mut conn, &group_id, "tamanu-facility", "production").await;
+
+		let response = private
+			.post("/api/fleet/applications/get_name")
+			.json(&json!({ "server_id": id }))
+			.await;
+		response.assert_status_ok();
+		let name: String = response.json();
+		assert_eq!(name, "Tamanu facility");
+	})
+	.await
+}

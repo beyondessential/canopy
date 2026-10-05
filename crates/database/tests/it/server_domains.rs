@@ -113,11 +113,17 @@ async fn overlapping_claims_are_refused_across_groups() {
 			.await
 			.expect("first claim");
 
-		// The same name.
+		// The same name, refused by naming the group holding it.
 		let err = ServerGroupDomain::claim(&mut conn, samoa, "fiji.tamanu.app", None, &zones())
 			.await
 			.expect_err("duplicate should conflict");
-		assert!(matches!(err, AppError::Conflict(_)), "got {err:?}");
+		match err {
+			AppError::Conflict(msg) => {
+				assert!(msg.ends_with("claimed by fiji"), "got {msg}");
+				assert!(!msg.contains(&fiji.to_string()), "got {msg}");
+			}
+			other => panic!("got {other:?}"),
+		}
 
 		// A name beneath it.
 		let err = ServerGroupDomain::claim(&mut conn, samoa, "sub.fiji.tamanu.app", None, &zones())

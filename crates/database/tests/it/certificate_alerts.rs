@@ -500,6 +500,52 @@ async fn a_certificate_lapsing_under_a_pause_is_canopys_to_report() {
 	.await;
 }
 
+/// The forgotten-pause alert names the server the way every other surface
+/// does: by its name, or its type where nobody has named it, never its id.
+// spec: FLT#naming
+#[tokio::test(flavor = "multi_thread")]
+async fn a_forgotten_pause_names_an_unnamed_server_by_its_type() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
+		sql_query("UPDATE applications SET name = NULL WHERE id = $1")
+			.bind::<sql_types::Uuid, _>(server)
+			.execute(&mut conn)
+			.await
+			.expect("unname");
+		let cert =
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+				.await
+				.expect("request");
+		issue_aged(
+			&mut conn,
+			cert.id,
+			SignedDuration::from_hours(90 * 24),
+			SignedDuration::from_hours(85 * 24),
+		)
+		.await;
+		database::applications::Application::pause_name_management(
+			&mut conn,
+			server,
+			Some("operator@example.test"),
+			"looking into it",
+		)
+		.await
+		.expect("pause");
+
+		let raised = self_alerts::sweep_forgotten_pauses(&mut conn)
+			.await
+			.expect("sweep")
+			.expect("raised");
+		assert!(
+			raised.message.contains("on Tamanu central"),
+			"got: {}",
+			raised.message
+		);
+		assert!(!raised.message.contains(&server.to_string()));
+	})
+	.await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_certificate_expired_under_a_pause_is_a_fault_rather_than_a_nudge() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {

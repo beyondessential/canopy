@@ -1125,7 +1125,8 @@ async fn upsert_rejects_bucket_already_configured_for_another_group() {
 			.await
 			.assert_status_ok();
 
-		// A different group can't claim the same bucket/prefix.
+		// A different group can't claim the same bucket/prefix, and is told
+		// which group has it.
 		let resp = private
 			.post("/api/backups/upsert")
 			.json(&serde_json::json!({
@@ -1136,6 +1137,12 @@ async fn upsert_rejects_bucket_already_configured_for_another_group() {
 			}))
 			.await;
 		resp.assert_status_conflict();
+		assert!(
+			resp.text()
+				.contains(&format!("already configured for grp-{group_a}")),
+			"{}",
+			resp.text()
+		);
 		assert_no_config!(private, group_b);
 	})
 	.await;
