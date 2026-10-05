@@ -316,7 +316,7 @@ impl CanopyMcp {
 			health: consolidated.health_state,
 			healthy: s.healthy,
 			reachability: server.reachability(last_reported_at),
-			checks: consolidated.checks.clone(),
+			checks: consolidated.checks,
 		});
 
 		// Resolved across every source, not read off the latest push: sources
