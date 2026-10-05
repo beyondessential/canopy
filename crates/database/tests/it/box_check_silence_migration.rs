@@ -223,3 +223,67 @@ async fn a_box_ends_up_with_one_silence_per_check() {
 	})
 	.await
 }
+
+/// A deleted application's silence goes with it rather than reaching the box,
+/// and it does not outrank a live workload's silence of the same check.
+// spec: CHK#names
+#[tokio::test(flavor = "multi_thread")]
+async fn a_deleted_applications_silence_does_not_reach_the_box() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let alone = machine(&mut conn).await;
+		let gone = application(&mut conn, alone).await;
+		silence(
+			&mut conn,
+			("application_id", gone),
+			BOX,
+			"disk_free",
+			"alice",
+			"2026-05-01T00:00:00Z",
+		)
+		.await;
+
+		let shared = machine(&mut conn).await;
+		let removed = application(&mut conn, shared).await;
+		let live = application(&mut conn, shared).await;
+		silence(
+			&mut conn,
+			("application_id", removed),
+			BOX,
+			"memory",
+			"alice",
+			"2026-05-01T00:00:00Z",
+		)
+		.await;
+		silence(
+			&mut conn,
+			("application_id", live),
+			BOX,
+			"memory",
+			"bob",
+			"2026-06-01T00:00:00Z",
+		)
+		.await;
+
+		diesel::sql_query("UPDATE applications SET deleted_at = now() WHERE id IN ($1, $2)")
+			.bind::<sql_types::Uuid, _>(gone)
+			.bind::<sql_types::Uuid, _>(removed)
+			.execute(&mut conn)
+			.await
+			.expect("delete applications");
+
+		conn.batch_execute(UP).await.expect("apply");
+
+		assert_eq!(silences_at(&mut conn, "machine_id", alone).await, vec![]);
+		assert_eq!(
+			silences_at(&mut conn, "machine_id", shared).await,
+			vec![Silence {
+				check_name: "memory".into(),
+				created_by: Some("bob".into()),
+			}],
+		);
+		for app in [gone, removed] {
+			assert_eq!(silences_at(&mut conn, "application_id", app).await, vec![]);
+		}
+	})
+	.await
+}

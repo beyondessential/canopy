@@ -13,6 +13,8 @@
 -- A box already carrying the same silence keeps its own, and two applications
 -- on one box carrying it become one row, the earliest. An application with no
 -- machine has no box to carry it to, and its row goes: it silences nothing.
+-- Nor does a deleted application's: its operator's instruction went with it,
+-- and carrying it would silence a live box nobody asked about.
 --
 -- The check-states those silences quieted stay where they are, with no catalog
 -- entry created for them. They are the box's checks as filed against the
@@ -33,6 +35,8 @@ WITH stranded AS (
 	JOIN applications app ON app.id = silence.application_id
 	WHERE silence.subject = 'machine'
 	  AND app.machine_id IS NOT NULL
+	  AND app.deleted_at IS NULL
+	  AND app.id <> '00000000-0000-0000-0000-000000000000'
 	  AND NOT EXISTS (
 		SELECT 1 FROM scoped_check_policies held
 		WHERE held.machine_id = app.machine_id
