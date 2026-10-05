@@ -23,6 +23,12 @@ Code identifiers (`ApplicationName`, `application_names`, the `names` API module
 
 ## Decisions
 
+- Declaring is routing only: it ties a DNS name to an application and publishes nothing. Address records exist only where an application registers addresses, so DNS managed outside Canopy is left alone.
+- A request on a machine hosting several applications resolves without an operator where it can: a declaration first, then the application type the request names, then the one application holding the needed grant whose group covers the DNS name. A request that resolves declares the DNS name (as certificate requests already do), so renewals and later requests follow the declaration. Applies to address registrations as well as certificate requests.
+- The application's URL is not used to resolve; it stays presentation only (FLT).
+- The certificate request and address registration bodies gain an optional application type. Optional and additive, so no public API break; run `just gen-openapi && just gen-api` and commit both.
+- A request naming a type other than the declaring application's on the same machine is refused, naming the declaring type.
+- Where both applications hold the grant and the agent names no type (the case that started this card), the request is refused as undeclared and recorded, and an operator declares; the operator-side UI below stays for exactly that.
 - Declaring and releasing is offered on the application page (in Names and certificates) and on the machine page, which shows every application's DNS names together.
 - Canopy records DNS names a machine asked about that no application on it declares, and the machine page presents them as not yet declared, with a control to declare each on one of the machine's applications. Recording must not distinguish a DNS name declared on another machine from one declared nowhere, for the same reason the refusal does not.
 - `CanopyHttpError` includes the problem document's detail in its message when the body is one.

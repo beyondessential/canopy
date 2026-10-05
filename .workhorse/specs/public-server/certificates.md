@@ -20,7 +20,7 @@ Centralising issuance also puts the authority's rate limits, the record of every
 
 ## Declared DNS names
 
-An operator declares the DNS names an application serves, and an application's own first registration of a DNS name declares it where that is unambiguous (see "Identity and authorisation").
+An operator declares the DNS names an application serves, and a request about a DNS name declares it for the application the request resolves to (see "Resolving the application").
 A declared DNS name is what ties a DNS name to the software that answers on it, and it is what an address registration or a certificate request is resolved against.
 
 A DNS name is declared by at most one application across the whole fleet.
@@ -38,27 +38,42 @@ What stops is Canopy acting on that DNS name for that application: its certifica
 ## Identity and authorisation
 
 A certificate or address request authenticates as the machine the requesting application runs on, by either transport Canopy already accepts for devices (see [DID](machine-identity.md)).
-An identity belongs to a machine rather than to the software on it (see [FLT](../servers/overview.md), "Identities"), so which application a request concerns is resolved from the DNS name it asks about rather than from the credential it presents.
-Because a DNS name is held by one application, that resolution is unambiguous however many applications the machine hosts.
+An identity belongs to a machine rather than to the software on it (see [FLT](../servers/overview.md), "Identities"), so which application a request concerns is resolved from the DNS name it asks about, and from what the request says about itself, rather than from the credential it presents.
+Because a DNS name is held by one application, a declared DNS name resolves unambiguously however many applications the machine hosts.
 
 Every request is checked in the same order, and each check is reported distinctly so a misconfiguration is diagnosable from the refusal alone:
 
 1. The caller authenticates as an identity belonging to a live machine.
-2. An application on that machine declares the requested DNS name, or the machine hosts exactly one application.
+2. The request resolves to one application on that machine (see "Resolving the application").
 3. That application has the grant the request needs — DNS management for addresses, certificate issuance for certificates.
 4. The requested DNS name lies at or beneath a domain the application's *own group* controls.
 5. A managed zone covers that domain, so Canopy can act on the DNS name at all.
 
-A machine hosting exactly one application resolves to it even for a DNS name nothing declares yet, and registering the DNS name declares it.
-There is nothing to disambiguate on such a machine, and an agent's own registration is how most DNS names come to be declared.
-On a machine hosting several, an undeclared DNS name is genuinely ambiguous, so it is refused rather than guessed at and an operator declares it first.
-
-A DNS name no application on the machine declares is refused as undeclared, distinguishably from every other refusal.
-The remedy is an operator's and not the agent's, so an agent can tell a DNS name waiting on a declaration from one it is not entitled to, and wait rather than report a fault.
-
-A machine asking about a DNS name none of its applications declares is refused the same way whether the DNS name is held by an application elsewhere or by nobody, so the endpoint is not a directory of what other machines serve.
-
 A DNS name within another group's domain is refused as if unclaimed: the refusal says the application's group does not control it, and never that another group does, so the endpoint is not a directory of other groups' DNS names.
+
+### Resolving the application
+
+A request starts from every application on the machine and is narrowed in this order, stopping as soon as one application remains:
+
+1. Where an application on the machine declares the requested DNS name, to that application.
+2. Where the request names an application type, to the applications of that type.
+3. To the applications holding the grant the request needs whose group controls a domain covering the DNS name.
+
+A request left with no application, or with several, is refused as undeclared.
+
+A machine hosting exactly one application resolves to it before anything narrows, and its requests go on to the checks that follow, so a missing grant or an uncovered domain is refused as that rather than as undeclared.
+Naming a type is optional, because an agent on a single-application machine has nothing to tell apart, and an agent that cannot tell which of its workloads serves a DNS name may still be resolved by the grants alone.
+
+A request naming a type other than that of the application declaring the DNS name on the same machine is refused, and the refusal names the declaring application's type.
+That is the machine's own business, already in its entitlements, and following the declaration silently would leave an agent serving a certificate attributed to the workload it said it was not.
+
+A request that resolves declares its DNS name for the application it resolved to, so later requests and renewals resolve from the declaration.
+A DNS name another application holds cannot be declared that way, and the request is refused as undeclared.
+
+The undeclared refusal is distinguishable from every other refusal.
+Its remedy is an operator declaring the DNS name, or the agent naming the type, so an agent can tell a DNS name waiting on that from one it is not entitled to, and wait rather than report a fault.
+
+The refusal reads the same whether the DNS name is held by an application elsewhere or by nobody, so the endpoint is not a directory of what other machines serve.
 
 ### Undeclared requests
 
