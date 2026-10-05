@@ -957,7 +957,7 @@ async fn a_name_held_elsewhere_is_undeclared_on_a_single_application_machine() {
 			entitled(&mut conn, device_id, Some("fiji.tamanu.app"), true, true).await;
 			let elsewhere = Uuid::new_v4();
 			conn.batch_execute(&format!(
-				"INSERT INTO machines (id) VALUES ('{elsewhere}'); \
+				"INSERT INTO machines (id, name) VALUES ('{elsewhere}', 'elsewhere'); \
 				 INSERT INTO applications (id, name, host, type, machine_id) \
 				 VALUES ('{elsewhere}', 'theirs', 'https://{elsewhere}.example.invalid', 'tamanu-central', '{elsewhere}'); \
 				 INSERT INTO application_names (application_id, name) \

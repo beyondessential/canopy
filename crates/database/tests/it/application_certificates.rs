@@ -1504,9 +1504,11 @@ async fn undeclared_records_are_bounded_per_machine() {
 	use database::dns_name_dispositions::{AskedFor, UNDECLARED_PER_MACHINE, UndeclaredDnsName};
 	TestDb::run(|mut conn, _url| async move {
 		let machine = Uuid::new_v4();
-		conn.batch_execute(&format!("INSERT INTO machines (id) VALUES ('{machine}')"))
-			.await
-			.expect("machine");
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (id, name) VALUES ('{machine}', 'box')"
+		))
+		.await
+		.expect("machine");
 
 		for i in 0..UNDECLARED_PER_MACHINE {
 			UndeclaredDnsName::record(
