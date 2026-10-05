@@ -55,7 +55,7 @@ async fn an_unnamed_machine_is_named_from_what_the_box_is_known_by() {
 			 INSERT INTO machine_reported_detail (machine_id, source, extra, reported_at) VALUES \
 			 ('{by_hostname}', 'old', '{{\"hostname\": \"stale-host\"}}', NOW() - INTERVAL '1 day'), \
 			 ('{by_hostname}', 'new', '{{\"hostname\": \"fresh-host\"}}', NOW()), \
-			 ('{by_tailnet}', 'bestool', '{{\"hostname\": \"  \"}}', NOW()); \
+			 ('{by_tailnet}', 'bestool', '{{\"hostname\": \"<https://evil.example|Prod Central>\"}}', NOW()); \
 			 INSERT INTO applications (type, name, machine_id, created_at) VALUES \
 			 ('tamanu-central', NULL, '{by_application}', NOW() - INTERVAL '2 days'), \
 			 ('tamanu-facility', 'central-ward', '{by_application}', NOW() - INTERVAL '1 day'), \
@@ -77,6 +77,8 @@ async fn an_unnamed_machine_is_named_from_what_the_box_is_known_by() {
 
 		conn.batch_execute(UP).await.expect("re-apply");
 
+		// A reported hostname not shaped like one is the box speaking for
+		// itself, so it falls through to the next source.
 		assert_eq!(name_of(&mut conn, named).await, "kept");
 		assert_eq!(name_of(&mut conn, by_hostname).await, "fresh-host");
 		assert_eq!(
