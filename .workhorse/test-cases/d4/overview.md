@@ -16,6 +16,8 @@
 - [x] The device-facing ceiling map and silence set are per target: the box's `memory` and an application's `memory` are told apart (verifies spec: CHK)
 - [x] The catalogue page lists an application's own `disk_free` as its type's entry beside the box's (verifies spec: CHK)
 - [x] The point-in-time view of a split push presents a machine-named check reported under the application as the application's, graded through the application's entry (verifies spec: STA)
+- [x] The point-in-time view still reads an application's report as a split push after the box's newer pushes stop describing that application (verifies spec: STA)
+- [x] A unified push's answer takes a box check's silences from the box's group when the application on it is in another group (verifies spec: STA)
 
 ## Migration
 

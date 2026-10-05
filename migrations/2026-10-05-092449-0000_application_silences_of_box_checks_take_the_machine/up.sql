@@ -13,6 +13,13 @@
 -- A box already carrying the same silence keeps its own, and two applications
 -- on one box carrying it become one row, the earliest. An application with no
 -- machine has no box to carry it to, and its row goes: it silences nothing.
+--
+-- The check-states those silences quieted stay where they are, with no catalog
+-- entry created for them. They are the box's checks as filed against the
+-- application before the machine grain, and with no entry in the
+-- application's namespace they are no longer live, so they drop out of every
+-- rollup. Seeding entries for them would revive that history. An application
+-- that reports such a name under itself gets its entry on its next push.
 
 WITH stranded AS (
 	SELECT

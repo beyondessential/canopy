@@ -1,4 +1,4 @@
-//! `silenced_refs::silenced_health_checks_at`: resolving the set
+//! `silenced_refs::silenced_health_checks_of_application`: resolving the set
 //! of healthcheck names silenced for a server under one reporting
 //! source, at server and group scope. This set feeds the consolidated
 //! check readers so silenced checks don't count toward the health
@@ -7,12 +7,10 @@
 
 use std::collections::BTreeSet;
 
+use crate::helpers::silenced_of_application;
 use commons_tests::db::TestDb;
 use commons_types::server::app_type::ApplicationType;
-use database::issues::Scope;
-use database::silenced_refs::{
-	ServerGroupSilencedRef, ServerSilencedRef, silenced_health_checks_at,
-};
+use database::silenced_refs::{ServerGroupSilencedRef, ServerSilencedRef};
 use diesel::{sql_query, sql_types};
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
@@ -84,19 +82,14 @@ async fn combines_server_and_group_scopes() {
 
 		// Application scope and group scope combine for the grouped server.
 		assert_eq!(
-			silenced_health_checks_at(
-				&mut conn,
-				Scope::Application(grouped),
-				Some(group),
-				"alertd"
-			)
-			.await
-			.unwrap(),
+			silenced_of_application(&mut conn, grouped, "alertd")
+				.await
+				.unwrap(),
 			checks(&["postgres", "uploads"]),
 		);
 		// The ungrouped server only sees its own silences.
 		assert_eq!(
-			silenced_health_checks_at(&mut conn, Scope::Application(ungrouped), None, "alertd")
+			silenced_of_application(&mut conn, ungrouped, "alertd")
 				.await
 				.unwrap(),
 			checks(&["disk"]),
@@ -104,14 +97,9 @@ async fn combines_server_and_group_scopes() {
 		// A group member with no server-scope silence still inherits the
 		// group's.
 		assert_eq!(
-			silenced_health_checks_at(
-				&mut conn,
-				Scope::Application(unsilenced),
-				Some(group),
-				"alertd"
-			)
-			.await
-			.unwrap(),
+			silenced_of_application(&mut conn, unsilenced, "alertd")
+				.await
+				.unwrap(),
 			checks(&["uploads"]),
 		);
 	})
@@ -137,14 +125,14 @@ async fn scoped_to_the_reporting_source() {
 			.unwrap();
 
 		assert_eq!(
-			silenced_health_checks_at(&mut conn, Scope::Application(server), None, "alertd")
+			silenced_of_application(&mut conn, server, "alertd")
 				.await
 				.unwrap(),
 			checks(&["disk"]),
 			"only alertd's own silence applies to alertd's checks",
 		);
 		assert_eq!(
-			silenced_health_checks_at(&mut conn, Scope::Application(server), None, "seedling")
+			silenced_of_application(&mut conn, server, "seedling")
 				.await
 				.unwrap(),
 			checks(&["postgres"]),
@@ -163,7 +151,7 @@ async fn unsilencing_removes_the_check() {
 			.await
 			.unwrap();
 		assert_eq!(
-			silenced_health_checks_at(&mut conn, Scope::Application(server), None, "alertd")
+			silenced_of_application(&mut conn, server, "alertd")
 				.await
 				.unwrap(),
 			checks(&["postgres"]),
@@ -173,7 +161,7 @@ async fn unsilencing_removes_the_check() {
 			.await
 			.unwrap();
 		assert_eq!(
-			silenced_health_checks_at(&mut conn, Scope::Application(server), None, "alertd")
+			silenced_of_application(&mut conn, server, "alertd")
 				.await
 				.unwrap(),
 			BTreeSet::new(),

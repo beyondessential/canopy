@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr as _;
 
 use axum::{
@@ -30,7 +30,7 @@ use database::{
 		ReportedCheck, Scope, grade_instances, is_health_structure,
 	},
 	machines::Machine,
-	silenced_refs::silenced_health_checks_at,
+	silenced_refs::{silenced_health_checks_of_application, silenced_health_checks_of_machine},
 	statuses::{NewStatus, Status},
 };
 use jiff::Timestamp;
@@ -685,24 +685,11 @@ async fn create(
 
 			// Computed after the transaction so checks first seen on this very
 			// push (upserted into the catalog above) are already in the map.
-			let machine_severities = effective_check_severities(
-				&mut db,
-				Scope::Machine(machine.id),
-				machine.group_id,
-				None,
-				&source,
-			)
-			.await?;
+			let machine_severities = machine_check_severities(&mut db, &machine, &source).await?;
 			let mut responses = BTreeMap::new();
 			for (key, application, _, tags) in apps {
-				let check_severities = effective_check_severities(
-					&mut db,
-					Scope::Application(application.id),
-					application.group_id,
-					Some(&application.r#type),
-					&source,
-				)
-				.await?;
+				let check_severities =
+					application_check_severities(&mut db, &application, &source).await?;
 				responses.insert(
 					key,
 					TargetResponse {
@@ -799,14 +786,8 @@ async fn create(
 				.await?;
 			}
 
-			let check_severities = unified_check_severities(
-				&mut db,
-				application.as_ref(),
-				machine.id,
-				group_id,
-				&source,
-			)
-			.await?;
+			let check_severities =
+				unified_check_severities(&mut db, application.as_ref(), &machine, &source).await?;
 
 			(effective_tags, check_severities, None, None)
 		}
@@ -934,41 +915,29 @@ async fn check_severities(
 	let server =
 		resolve_unified_application(&mut db, &machine, &serde_json::Value::Null, false).await?;
 
-	let map = unified_check_severities(
-		&mut db,
-		server.as_ref(),
-		machine.id,
-		server.as_ref().map_or(machine.group_id, |s| s.group_id),
-		DEFAULT_SOURCE,
-	)
-	.await?;
+	let map = unified_check_severities(&mut db, server.as_ref(), &machine, DEFAULT_SOURCE).await?;
 	Ok(Json(map))
 }
 
 /// Build the effective per-check map for one target and source: every check
 /// in the source's catalog in the target's namespace, mapped from its static
 /// policy ceiling (`failed` → `fail`, `warning`/`broken` → `warn`,
-/// `passed`/`skipped` → `skip`), then any check silenced for this target (at
-/// its own scope or its group's) forced to `skip`. Conditional rules are
-/// deliberately not consulted — they depend on each push's contents, so only
-/// the static ceiling can be mapped ahead of time.
-///
-/// `application_type` is the target's type when it is an application, and
-/// `None` when it is a machine.
+/// `passed`/`skipped` → `skip`), then the target's `silenced` checks forced to
+/// `skip`. Conditional rules are deliberately not consulted — they depend on
+/// each push's contents, so only the static ceiling can be mapped ahead of
+/// time.
 async fn effective_check_severities(
 	db: &mut AsyncPgConnection,
-	target: Scope,
-	group_id: Option<Uuid>,
-	application_type: Option<&ApplicationType>,
 	source: &str,
+	namespace: &Namespace,
+	silenced: BTreeSet<String>,
 ) -> Result<BTreeMap<String, CheckSeverity>> {
 	// Keyed by bare check name, because that is what the reporter sends and
 	// reads back. The catalog is narrowed to the one namespace this target's
 	// checks file into, so the box's `memory` and an application's own
 	// `memory` do not collide here.
-	let namespace = Namespace::of(source, application_type);
 	let mut map: BTreeMap<String, CheckSeverity> =
-		CheckPolicy::ceiling_map_for_source(db, source, &namespace)
+		CheckPolicy::ceiling_map_for_source(db, source, namespace)
 			.await?
 			.into_iter()
 			.map(|(name, ceiling)| (name, ceiling.into()))
@@ -976,11 +945,32 @@ async fn effective_check_severities(
 
 	// Silences are keyed per (source, check): only this source's own
 	// silences force its checks to skip.
-	for check in silenced_health_checks_at(db, target, group_id, source).await? {
+	for check in silenced {
 		map.insert(check, CheckSeverity::Skip);
 	}
 
 	Ok(map)
+}
+
+/// The effective check map for a machine's own checks under one source.
+async fn machine_check_severities(
+	db: &mut AsyncPgConnection,
+	machine: &Machine,
+	source: &str,
+) -> Result<BTreeMap<String, CheckSeverity>> {
+	let silenced = silenced_health_checks_of_machine(db, machine, source).await?;
+	effective_check_severities(db, source, &Namespace::of(source, None), silenced).await
+}
+
+/// The effective check map for an application's own checks under one source.
+async fn application_check_severities(
+	db: &mut AsyncPgConnection,
+	application: &Application,
+	source: &str,
+) -> Result<BTreeMap<String, CheckSeverity>> {
+	let silenced = silenced_health_checks_of_application(db, application, source).await?;
+	let namespace = Namespace::of(source, Some(&application.r#type));
+	effective_check_severities(db, source, &namespace, silenced).await
 }
 
 /// The effective check map for a unified push, which gets one answer for both
@@ -991,24 +981,15 @@ async fn effective_check_severities(
 async fn unified_check_severities(
 	db: &mut AsyncPgConnection,
 	application: Option<&Application>,
-	machine_id: Uuid,
-	group_id: Option<Uuid>,
+	machine: &Machine,
 	source: &str,
 ) -> Result<BTreeMap<String, CheckSeverity>> {
-	let machine =
-		effective_check_severities(db, Scope::Machine(machine_id), group_id, None, source).await?;
+	let on_machine = machine_check_severities(db, machine, source).await?;
 	let Some(application) = application else {
-		return Ok(machine);
+		return Ok(on_machine);
 	};
-	let own = effective_check_severities(
-		db,
-		Scope::Application(application.id),
-		group_id,
-		Some(&application.r#type),
-		source,
-	)
-	.await?;
-	Ok(machine
+	let own = application_check_severities(db, application, source).await?;
+	Ok(on_machine
 		.into_iter()
 		.filter(|(name, _)| CheckSubject::of(name).is_machine())
 		.chain(
@@ -1220,7 +1201,7 @@ async fn file_health_events(
 	// grain read as unmentioned on the grain it left, closing and reopening it
 	// as a new issue on every push.
 	let health_prefix = format!("{HEALTH_REF}/");
-	let strip = |refs: Vec<String>| -> std::collections::BTreeSet<String> {
+	let strip = |refs: Vec<String>| -> BTreeSet<String> {
 		refs.into_iter()
 			.filter_map(|r| {
 				r.strip_prefix(&health_prefix)

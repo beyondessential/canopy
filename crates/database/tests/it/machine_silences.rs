@@ -8,12 +8,13 @@
 //!
 //! spec: CHK#silences-follow-the-event
 
+use crate::helpers::silenced_of_machine;
 use commons_tests::db::TestDb;
 use commons_types::status::CheckResult;
 use database::{
 	diesel_async::AsyncPgConnection,
 	issues::{CheckFiling, Scope, file_check},
-	silenced_refs::{MachineSilencedRef, is_silenced, silenced_health_checks_at},
+	silenced_refs::{MachineSilencedRef, is_silenced},
 };
 use diesel_async::SimpleAsyncConnection;
 use uuid::Uuid;
@@ -111,10 +112,9 @@ async fn one_machine_silence_is_read_the_same_everywhere() {
 		assert_eq!(entry.effective.to_string(), "skipped");
 
 		// 2. The reporting source is told not to run it.
-		let told =
-			silenced_health_checks_at(&mut conn, Scope::Machine(machine), Some(group), SOURCE)
-				.await
-				.expect("agent-facing set");
+		let told = silenced_of_machine(&mut conn, machine, SOURCE)
+			.await
+			.expect("agent-facing set");
 		assert!(
 			told.contains(CHECK),
 			"the agent is told to skip it: {told:?}"

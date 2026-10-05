@@ -30,6 +30,7 @@ use crate::issues::{
 	reevaluate_open_issues_for_machine_ref, reevaluate_open_issues_for_server_ref,
 	regrade_instanced_states,
 };
+use crate::machines::Machine;
 
 /// The ref prefix (with trailing separator) healthcheck issues use,
 /// whichever source reports them. Mirrors the public-server's `HEALTH_REF`.
@@ -410,34 +411,67 @@ pub async fn is_silenced(
 	))
 }
 
-/// Check names silenced for one target under one reporting source, at the
-/// target's own scope or its group's. `group_id` is the target's current
-/// group; pass `None` if ungrouped. A check's identity is the (source,
-/// namespace, check) triple, so a silence on another source's same-named check
-/// never applies, and nor does one on the same name in another namespace: the
-/// box's `memory` and an application's own `memory` are silenced separately.
+/// Check names silenced for an application under one reporting source, at the
+/// application's own scope or its group's.
+///
+/// A check's identity is the (source, namespace, check) triple, so a silence on
+/// another source's same-named check never applies, and nor does one on the
+/// same name in another namespace: the box's `memory` and an application's own
+/// `memory` are silenced separately.
 ///
 /// This feeds the point-in-time consolidated view and the device-facing
 /// effective check map: a silenced check keeps recording results but is
 /// presented as skipped and doesn't count toward the target's health rollup.
+pub async fn silenced_health_checks_of_application(
+	db: &mut AsyncPgConnection,
+	application: &Application,
+	source: &str,
+) -> Result<BTreeSet<String>> {
+	silenced_health_checks_at(
+		db,
+		Scope::Application(application.id),
+		&Namespace::of(source, Some(&application.r#type)),
+		application.group_id,
+		source,
+	)
+	.await
+}
+
+/// Check names silenced for a machine under one reporting source, at the
+/// machine's own scope or its group's. The machine counterpart of
+/// [`silenced_health_checks_of_application`].
+pub async fn silenced_health_checks_of_machine(
+	db: &mut AsyncPgConnection,
+	machine: &Machine,
+	source: &str,
+) -> Result<BTreeSet<String>> {
+	silenced_health_checks_at(
+		db,
+		Scope::Machine(machine.id),
+		&Namespace::of(source, None),
+		machine.group_id,
+		source,
+	)
+	.await
+}
+
+/// The silences at `target`'s own scope or `group_id`'s, in the one namespace
+/// the target's checks file into.
 ///
 /// A group-scoped silence is shared by every namespace filing under that
-/// group, so it is narrowed to the one this target's checks file into.
-/// Without that, silencing one application type's check would silence its
-/// namesake on every other type in the group, and on the box.
-pub async fn silenced_health_checks_at(
+/// group, so it is narrowed to this target's. Without that, silencing one
+/// application type's check would silence its namesake on every other type in
+/// the group, and on the box.
+async fn silenced_health_checks_at(
 	db: &mut AsyncPgConnection,
 	target: Scope,
+	namespace: &Namespace,
 	group_id: Option<Uuid>,
 	source: &str,
 ) -> Result<BTreeSet<String>> {
 	use crate::schema::scoped_check_policies::dsl;
 
-	let application_type = match target {
-		Scope::Application(id) => Some(type_of(db, id).await?),
-		_ => None,
-	};
-	let (subject, application_type) = Namespace::of(source, application_type.as_ref()).to_columns();
+	let (subject, application_type) = namespace.to_columns();
 	let (application_id, machine_id, server_group_id, kubernetes_cluster_id) = target.to_columns();
 	let rows: Vec<String> = dsl::scoped_check_policies
 		.select(dsl::check_name)

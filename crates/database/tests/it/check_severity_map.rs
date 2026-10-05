@@ -1,8 +1,9 @@
 //! Queries backing the device-facing effective check map:
 //! `CheckPolicy::ceiling_map_for_source` (static policy ceilings,
 //! ignoring conditional rules) and
-//! `silenced_refs::silenced_health_checks_at` (server- plus
-//! group-scope silences under one reporting source).
+//! `silenced_refs::silenced_health_checks_of_application` and
+//! `silenced_health_checks_of_machine` (own- plus group-scope silences under
+//! one reporting source).
 
 /// The type every application in this file has.
 ///
@@ -16,12 +17,10 @@ fn ty() -> ApplicationType {
 fn ns() -> Namespace {
 	Namespace::Application(ty())
 }
+use crate::helpers::{silenced_of_application, silenced_of_machine};
 use commons_types::{namespace::Namespace, server::app_type::ApplicationType, status::CheckResult};
 use database::check_policies::{CheckPolicy, IfLadder};
-use database::issues::Scope;
-use database::silenced_refs::{
-	MachineSilencedRef, ServerGroupSilencedRef, ServerSilencedRef, silenced_health_checks_at,
-};
+use database::silenced_refs::{MachineSilencedRef, ServerGroupSilencedRef, ServerSilencedRef};
 use diesel::{sql_query, sql_types};
 use diesel_async::RunQueryDsl;
 use serde_json::json;
@@ -179,25 +178,13 @@ async fn silenced_checks_combine_scopes_and_stay_per_source() {
 		.await
 		.expect("other-server silence");
 
-		let checks = silenced_health_checks_at(
-			&mut conn,
-			Scope::Application(server_id),
-			Some(group_id),
-			"alertd",
-		)
-		.await
-		.expect("checks");
+		let checks = silenced_of_application(&mut conn, server_id, "alertd")
+			.await
+			.expect("checks");
 		assert_eq!(
 			checks.into_iter().collect::<Vec<_>>(),
 			vec!["flaky", "groupwide"]
 		);
-
-		// Ungrouped lookup only sees the server-scope silences.
-		let checks =
-			silenced_health_checks_at(&mut conn, Scope::Application(server_id), None, "alertd")
-				.await
-				.expect("checks without group");
-		assert_eq!(checks.into_iter().collect::<Vec<_>>(), vec!["flaky"]);
 	})
 	.await
 }
@@ -242,22 +229,12 @@ async fn a_box_check_and_an_applications_namesake_are_told_apart() {
 		MachineSilencedRef::add(&mut conn, machine_id, "alertd", "health/memory", None, None)
 			.await
 			.expect("machine silence");
-		let at_machine = silenced_health_checks_at(
-			&mut conn,
-			Scope::Machine(machine_id),
-			Some(group_id),
-			"alertd",
-		)
-		.await
-		.expect("machine silences");
-		let at_application = silenced_health_checks_at(
-			&mut conn,
-			Scope::Application(server_id),
-			Some(group_id),
-			"alertd",
-		)
-		.await
-		.expect("application silences");
+		let at_machine = silenced_of_machine(&mut conn, machine_id, "alertd")
+			.await
+			.expect("machine silences");
+		let at_application = silenced_of_application(&mut conn, server_id, "alertd")
+			.await
+			.expect("application silences");
 		assert!(at_machine.contains("memory"));
 		assert!(
 			!at_application.contains("memory"),
