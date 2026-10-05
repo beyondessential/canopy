@@ -29,6 +29,7 @@ It is replaced by making unranked members in an environment impossible in the fi
 - A cluster-hosted application has no box, so it ranks on its own; it is pending until ranked.
 - Group-scoped issues (backups) belong to the group's headline environment.
   Whether a group check should file against a narrower environment is #H4.
+  A window declared from such an incident covers the headline environment's machines and not the group's own checks; letting the declare dialog retarget the grain is #J4.
 
 So every environment holds ranked members only, every group incident has an environment, and the group-itself incident target is gone.
 
@@ -55,7 +56,7 @@ Consequences:
 
 ## Steps
 
-- [ ] Specs: rework this branch's GRP, INC, CHK, FLT, MNT, UPG, RST and MCP edits from the other-environment model to the shared-rank model; FLT "Environments" and "Editing" (rank per box, not clearable), APP "Billing attribution" (a box's stage is its rank), K8S (a cluster application ranks on its own; namespace checks follow group checks), INC re-evaluation (box rank change, ranking a pending box)
+- [x] Specs: rework this branch's GRP, INC, CHK, FLT, MNT, UPG, RST and MCP edits from the other-environment model to the shared-rank model; FLT "Environments" and "Editing" (rank per box, not clearable), APP "Billing attribution" (a box's stage is its rank), K8S (a cluster application ranks on its own; namespace checks follow group checks), INC re-evaluation (box rank change, ranking a pending box)
 - [ ] Migration: inherit sibling ranks; exclusion constraint; group-target incidents move to the headline rank; `incidents.rank` required with a group
 - [ ] Arrival: an application reported onto a ranked box takes its rank (statuses and cluster relay paths)
 - [ ] Rank change: one write for the whole box, refusing a clear; re-evaluation enqueues every application on the box and its machine

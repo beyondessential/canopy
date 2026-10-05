@@ -99,7 +99,7 @@ Cost allocation groups by software rather than by software-in-a-role, so a centr
 That label keeps its spelling because cloud cost allocation reads it, and every device reads its own effective tags.
 
 A machine's labels carry a stage and a group and no type, a box not being a piece of software.
-Its stage is the highest rank among the applications on it, so a box shared by a production and a test workload bills as production.
+Its stage is the rank the applications on it share (see [GRP](groups.md), "Environments"), and a pending machine carries none.
 Its group is its own.
 
 A group's labels carry a stage, its own name, and a product only when its live applications all run one software.

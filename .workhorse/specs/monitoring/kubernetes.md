@@ -9,7 +9,8 @@ An application on a cluster is an ordinary application in the fleet, carrying th
 
 ## The shape Canopy relies on
 
-A namespace holds one environment: a group's applications at one rank, so the Nauru group at the demo rank is one namespace, and separate ranks are separate namespaces (see [GRP](../servers/groups.md), "Environments").
+A namespace holds one environment: a group's applications at one rank, so the Nauru group at the demo rank is one namespace, and separate ranks are separate namespaces.
+So the applications in a namespace share one rank as the applications on a box do, and one arriving in a namespace takes the rank its applications carry, or is pending where they carry none (see [GRP](../servers/groups.md), "Environments").
 Within a namespace each central and each facility has its own Postgres instance and its own workloads per duty, with no database or workload shared between duties or between applications.
 So a namespace's contents map onto applications one for one, each with its own set of workloads and its own database.
 

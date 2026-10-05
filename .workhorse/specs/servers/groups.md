@@ -34,39 +34,37 @@ That is how operators use groups rather than a rule Canopy enforces, and a group
 ## Environments
 
 An application's rank is its environment tier: production, clone, demo, test, or dev.
-An operator sets it, and an application may carry none.
+An operator sets it, and once set it can be changed but not cleared.
 
-Every application and machine in a group is in exactly one of the group's environments.
-Each rank a group's applications carry is one of its environments, so a site's production central and the facilities syncing to it are that site's production environment (see [FLT](overview.md), "Environments").
-A machine is in the environment of the highest-ranked application on it.
-An application carrying no rank is in its machine's environment, so a database running beside a site's production central is part of that site's production.
+The applications on one machine share one rank, since a box serves one environment, and ranking any of them ranks every application on the machine (see [FLT](overview.md), "Environments").
+An application on a cluster shares its rank with the applications in its namespace in the same way, a namespace being where a cluster application stands for a box (see [K8S](../monitoring/kubernetes.md), "The shape Canopy relies on").
+An application arriving on a machine, or in a namespace, whose applications carry a rank takes that rank.
+One arriving where nothing is ranked is **pending**, and so is the machine or namespace it arrived on, until an operator ranks one of the applications there.
 
-What is left over is in the group's **other** environment: the applications carrying no rank on boxes hosting nothing ranked, and those boxes.
-The other environment is derived rather than set: no application carries it as a rank, and a member is in it only for as long as nothing on its box is ranked.
-A group whose applications are all unranked has its other environment alone, holding every one of them.
+A group's members at one rank are one of its environments, so a site's production central, the database beside it, and the facilities syncing to it are that site's production environment.
+A machine is in the environment its applications' rank names.
+A pending application or machine is in none of the group's environments, and a group with nothing ranked has no environments until something in it is ranked.
 
 An environment is where a group's applications are going next: it holds at most one open upgrade plan, and the closed plans that preceded it, so a group holds as many open plans as it has environments going somewhere (see [UPG](../private-server/upgrade-plans.md)).
-An environment is also what trouble in it is an incident against, announced on its group's channel and delayed by its group's grace, and trouble with what the group holds as a whole, such as its backups, is an incident against its other environment (see [INC](../monitoring/incidents.md)).
+An environment is also what trouble in it is an incident against, announced on its group's channel and delayed by its group's grace, and trouble with what the group holds as a whole, such as its backups, is an incident against its headline environment (see [INC](../monitoring/incidents.md)).
 A maintenance window covers one environment where an operator declares it over one (see [MNT](../monitoring/maintenance.md)).
 An environment's version is its own central's, derived the way a group's headline version is (see [APP](application-types.md), "Versions").
-Everything else Canopy attaches belongs to the group, and it presents a group's members under their environment.
+Everything else Canopy attaches belongs to the group, and it presents a group's members under their rank, its pending ones apart.
 
 ## A group's headline rank
 
 A group holds no rank of its own.
 Its headline rank is the highest rank held by any of its applications, production outranking clone, then demo, then test, then dev.
-The fleet listing buckets each group under its headline rank, and a group whose applications are all unranked is left out of that bucketing.
+The fleet listing buckets each group under its headline rank, and a group with nothing ranked is left out of that bucketing.
 A group's billing stage is the same value (see [APP](application-types.md), "Billing attribution").
 
 The headline rank is distinct from the headline version, which is the version the group's highest-ranked central reports (see [APP](application-types.md), "Versions").
-A group's headline environment is the one at its headline rank.
-A group with nothing ranked has no headline rank, and its headline environment is its other environment, the only one it has (see "Environments" above).
+A group's headline environment is its members at its headline rank, and a group with nothing ranked has none.
 
 ## Naming
 
 Canopy calls a group a group wherever it appears: in the operator interface, in its API, and throughout this spec set.
-An environment names a group's members at one rank, or its other environment, which is the unit some infrastructure outside Canopy calls a deployment.
-The other environment is named "other" wherever an environment's rank would name it.
+An environment names a group's members at one rank, which is the unit some infrastructure outside Canopy calls a deployment.
 The Canopy instance names an installation of Canopy itself, so a zone list, an ingress, or an account key belongs to the Canopy instance rather than to any group.
 
 The `billing.deployment` cost-allocation label carries the group's name and keeps that spelling, because it is read outside Canopy: by cloud cost allocation, and by every machine reading its effective tags (see [APP](application-types.md), [STA](../public-server/statuses.md)).

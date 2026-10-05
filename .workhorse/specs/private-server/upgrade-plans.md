@@ -49,10 +49,8 @@ An environment moves to one place next, so a second plan for it replaces the fir
 A plan for a group's clone leaves its production's plan where it was.
 
 What an environment runs is what its own central reports, so a site's production reads from its production central and its clone from the clone's (see [APP](../servers/application-types.md), "Versions").
-Wherever an environment is named, it is named by its group with its rank, or "other", after it, except a group's production, which is named by the group alone.
-An application with no rank is in its machine's environment, or its group's other environment where nothing on its box is ranked (see [GRP](../servers/groups.md), "Environments").
-A plan names an environment the group has applications in; one cannot be recorded for an environment the group holds nothing in.
-A group with nothing ranked at all has its other environment alone, and that is the environment its plans are for.
+Wherever an environment is named, it is named by its group with the rank after it, except a group's production, which is named by the group alone.
+A plan names an environment the group has applications at; one cannot be recorded for a rank the group holds nothing at, so a group with nothing ranked records no plans (see [GRP](../servers/groups.md), "Environments").
 
 An open plan's date, time, and note can be amended, and an amendment records who made it and when.
 A corrected date or a reworded note is the same plan better described, so it stays one plan rather than entering the history as a second.

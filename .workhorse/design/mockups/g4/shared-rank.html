@@ -1,0 +1,123 @@
+<!-- spec: servers/overview.md -->
+<!-- spec: servers/groups.md -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Rank set per machine</title>
+<style>
+	body { margin: 0; background: #fafafa; font-family: Roboto, Helvetica, Arial, sans-serif; color: rgba(0,0,0,.87); font-size: 16px; }
+	main { max-width: 880px; margin: 0 auto; padding: 32px 24px 64px; display: flex; flex-direction: column; gap: 48px; }
+	.state { font-size: 12px; color: #c2410c; letter-spacing: .04em; text-transform: uppercase; margin: 0 0 8px; }
+	h1 { font-size: 24px; font-weight: 400; margin: 0 0 24px; }
+	h2 { font-size: 20px; font-weight: 500; margin: 0; }
+	.stack { display: flex; flex-direction: column; gap: 16px; }
+	.paper { background: #fff; border: 1px solid rgba(0,0,0,.12); border-radius: 4px; padding: 24px; }
+	.field { position: relative; border: 1px solid rgba(0,0,0,.23); border-radius: 4px; padding: 16.5px 14px; min-height: 23px; }
+	.field label { position: absolute; top: -9px; left: 9px; padding: 0 5px; background: #fff; font-size: 12px; color: rgba(0,0,0,.6); }
+	.field.select::after { content: ""; position: absolute; right: 14px; top: 50%; margin-top: -3px; border: 5px solid transparent; border-top-color: rgba(0,0,0,.54); }
+	.field.focused { border: 2px solid #388e3c; padding: 15.5px 13px; }
+	.field.focused label { color: #388e3c; }
+	.placeholder { color: rgba(0,0,0,.38); }
+	.caption { font-size: 12px; color: rgba(0,0,0,.6); line-height: 1.66; margin-top: -8px; }
+	.menu { position: absolute; left: -2px; right: -2px; top: calc(100% + 4px); background: #fff; border-radius: 4px; box-shadow: 0 5px 5px -3px rgba(0,0,0,.2), 0 8px 10px 1px rgba(0,0,0,.14), 0 3px 14px 2px rgba(0,0,0,.12); padding: 8px 0; z-index: 2; }
+	.menu div { padding: 6px 16px; font-size: 16px; }
+	.menu .sel { background: rgba(56,142,60,.08); }
+	.chip { display: inline-block; font-size: 13px; border: 1px solid rgba(0,0,0,.23); border-radius: 16px; padding: 1px 8px; color: rgba(0,0,0,.6); }
+	.check { display: flex; align-items: center; gap: 9px; }
+	.box-check { width: 18px; height: 18px; border-radius: 2px; background: #388e3c; }
+	.row-title { display: flex; align-items: center; gap: 8px; }
+	.dim { opacity: .55; }
+	.overline { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: rgba(0,0,0,.6); margin: 12px 0 4px; }
+	.overline:first-child { margin-top: 0; }
+	.block { background: #fff; border: 1px solid rgba(0,0,0,.12); border-radius: 4px; overflow: hidden; margin-bottom: 8px; }
+	.trow { display: flex; align-items: center; gap: 12px; padding: 12px; font-size: 14px; }
+	.apps { border-top: 1px solid rgba(0,0,0,.12); }
+	.apps .trow { padding: 8px 12px 8px 30px; }
+	.apps .trow + .trow { border-top: 1px solid rgba(0,0,0,.06); }
+	.enc { display: inline-flex; gap: 4px; border: 2px solid #388e3c; border-radius: 4px; padding: 2px 3px; }
+	.dot { width: 13px; height: 13px; border-radius: 50%; background: #388e3c; }
+	.name { font-weight: 500; }
+	.meta { margin-left: auto; font-size: 12px; color: rgba(0,0,0,.6); }
+	.new { outline: 2px dashed #c2410c; outline-offset: 4px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<main>
+
+<section>
+	<p class="state">Edit machine, ranked box (rank menu open)</p>
+	<h1>Edit SRH Central</h1>
+	<div class="stack">
+		<div class="paper stack">
+			<h2>Machine</h2>
+			<div class="field"><label>Name</label>SRH Central</div>
+			<div class="field select"><label>Group *</label>Fiji Prime</div>
+			<div class="caption">The applications on this machine take its group, so moving the box moves them with it.</div>
+			<div class="new stack">
+				<div class="field select focused"><label>Rank</label>production
+					<div class="menu">
+						<div class="sel">production</div>
+						<div>clone</div>
+						<div>demo</div>
+						<div>test</div>
+						<div>dev</div>
+					</div>
+				</div>
+				<div class="caption">Every application on this machine shares its rank.</div>
+			</div>
+			<div class="dim" style="height:160px"></div>
+		</div>
+		<div class="paper stack dim">
+			<div class="row-title"><h2>Tamanu central</h2><span class="chip">tamanu-central</span></div>
+			<div class="field"><label>Name</label><span class="placeholder">&nbsp;</span></div>
+			<div class="field"><label>URL</label>https://central.example.org</div>
+			<div class="check"><span class="box-check"></span>Monitor this application</div>
+		</div>
+		<div class="paper stack dim">
+			<div class="row-title"><h2>Postgres</h2><span class="chip">postgres</span></div>
+			<div class="field"><label>Name</label><span class="placeholder">&nbsp;</span></div>
+			<div class="check"><span class="box-check"></span>Monitor this application</div>
+		</div>
+	</div>
+</section>
+
+<section>
+	<p class="state">Edit machine, pending box</p>
+	<h1>Edit lab-box-2</h1>
+	<div class="paper stack">
+		<h2>Machine</h2>
+		<div class="field"><label>Name</label>lab-box-2</div>
+		<div class="field select"><label>Group *</label>Fiji Prime</div>
+		<div class="caption">The applications on this machine take its group, so moving the box moves them with it.</div>
+		<div class="new stack">
+			<div class="field select"><label>Rank</label><span class="placeholder">Not ranked yet</span></div>
+			<div class="caption">Raises no incidents until ranked.</div>
+		</div>
+	</div>
+</section>
+
+<section>
+	<p class="state">Group tree, with a pending box</p>
+	<div class="overline">production</div>
+	<div class="block">
+		<div class="trow"><span class="enc"><span class="dot"></span><span class="dot"></span></span><span class="name">SRH Central</span><span class="meta">Ubuntu 24.04</span></div>
+		<div class="apps">
+			<div class="trow"><span class="dot"></span><span class="name">Tamanu central</span><span class="chip">tamanu-central</span><span class="meta">central.example.org</span></div>
+			<div class="trow"><span class="dot"></span><span class="name">Postgres</span><span class="chip">postgres</span><span class="meta">srh-central</span></div>
+		</div>
+	</div>
+	<div class="new">
+		<div class="overline">awaiting a rank</div>
+		<div class="block" style="margin-bottom:0">
+			<div class="trow"><span class="enc"><span class="dot"></span></span><span class="name">lab-box-2</span><span class="meta">Ubuntu 24.04</span></div>
+			<div class="apps">
+				<div class="trow"><span class="dot"></span><span class="name">Postgres</span><span class="chip">postgres</span><span class="meta">lab-box-2</span></div>
+			</div>
+		</div>
+	</div>
+</section>
+
+</main>
+</body>
+</html>

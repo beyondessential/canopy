@@ -242,7 +242,7 @@ A migration test therefore restores the snapshot of the machine an application r
 Canopy decides which versions are tested against which applications, rather than an operator naming each pair.
 
 An application's candidate is the version its own environment's open plan moves it to (see [UPG](../private-server/upgrade-plans.md)).
-An environment with no open plan has no candidate, so none of its applications are tested, and an application with no rank follows the environment it is in: its machine's, or its group's other environment (see [GRP](../servers/groups.md), "Environments").
+An environment with no open plan has no candidate, so none of its applications are tested, and neither is a pending application, being in no environment (see [GRP](../servers/groups.md), "Environments").
 A site's clone is often planned ahead of its production, so the two are tested against different versions at once.
 
 Recording a plan is what asks for the testing.

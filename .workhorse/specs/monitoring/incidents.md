@@ -13,15 +13,16 @@ An issue is scoped to what its check asserts something about — an application,
 
 ## Targets
 
-Each of a group's environments is a target of its own, its other environment included (see [GRP](../servers/groups.md), "Environments").
+Each of a group's environments is a target of its own (see [GRP](../servers/groups.md), "Environments").
 So a site's test box going down is an incident on that site's test environment while its production central going down is an incident on the site's production, and neither joins the other.
 
-An application-scoped issue belongs to its application's environment, and a machine-scoped issue to its machine's.
-So an environment's trouble is one incident whether it began on a box or in the software on it, and a machine's failure is not split across the applications it hosts: a box going down takes its machine's checks, its ranked workloads' and the unranked database beside them into one incident.
+An application-scoped issue belongs to the environment its application's rank names, and a machine-scoped issue to its machine's, the one its applications' rank names.
+So an environment's trouble is one incident whether it began on a box or in the software on it, and a machine's failure is not split across the applications it hosts: a box going down takes its machine's checks and every workload on it, the database beside them included, into one incident.
 
-A group-scoped issue belongs to the group's other environment, because what a group check asserts is held once for the group however many environments it has: its backups are one repository (see [GRP](../servers/groups.md)).
+A group-scoped issue belongs to the group's headline environment, because what a group check asserts is held once for the group however many environments it has: its backups are one repository (see [GRP](../servers/groups.md), "A group's headline rank").
 Canopy-wide issues belong to the Canopy target.
 An issue on an application or a machine belonging to no group belongs to no target and cannot contribute to incidents.
+An issue on a pending application or machine belongs to no target either, and so does a group-scoped issue in a group with nothing ranked, none of them being in an environment yet.
 A cluster belongs to no group, so a cluster's issues belong to no target either: they are read on the cluster and count towards its health (see [K8S](kubernetes.md), "A cluster's page").
 
 Canopy attaches no configuration to an environment, so an environment's notification channel, grace period, and linger window are its group's.
@@ -47,15 +48,16 @@ An issue with no recorded result is ordered below every graded one.
 Notes are ordered most recent first and sit below every issue.
 
 Operator actions that change what counts (monitoring toggles, group membership changes, rank changes, policy and silence changes) re-evaluate the affected issues' incident membership.
-A rank change moves an application's issues, its machine's, and those of every unranked application on its machine to the environment they now belong to, closing an incident the move leaves with no effective failure.
+A rank change moves the issues of every application sharing the rank, and of the machine they share it on, to the environment they now belong to, and a change to the group's headline rank moves its group-scoped issues with it, closing an incident the move leaves with no effective failure.
+Ranking a pending machine or namespace brings its issues and its applications' into incident membership from then on.
 
 Membership evaluation is asynchronous. A report records its issue state immediately; the resulting open, join, leave, or close follows within a short bounded delay rather than synchronously with the report. Membership is therefore eventually consistent with the current issue state.
 
 ## Notification
 
 Operators are notified over the notification channel: the incidents of every environment in a group to the group's configured channel, Canopy-wide incidents to the operator channel.
-Wherever an incident's target is named, an environment reads as its group's name with its rank, or "other", after it, and a production environment reads as the group's name alone, so a site's production trouble is announced under the site and the rest of its environments under their own names.
-On the group's own surface the group's name is already the heading, so an environment there reads by its rank, or as "other", alone.
+Wherever an incident's target is named, an environment reads as its group's name with its rank after it, and a production environment reads as the group's name alone, so a site's production trouble is announced under the site and its lesser environments under their rank.
+On the group's own surface the group's name is already the heading, so an environment there reads by its rank alone.
 
 An incident notifies when it has stayed open past its target's grace period; the notification additionally waits out any lingering, so it is sent only while an effective failure is live.
 An incident that closes before its notification was sent never notifies.
