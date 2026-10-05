@@ -1407,3 +1407,29 @@ fn a_broken_instance_is_refused() {
 		None,
 	);
 }
+
+/// Only an object is a check's `detail` or its instances; under either name
+/// anything else is one of a plain check's fields.
+// spec: STA#health-and-detail
+#[test]
+fn non_object_structure_names_read_as_fields() {
+	let entry = serde_json::json!({
+		"check": "version_drift",
+		"result": "passed",
+		"instances": [{ "name": "api" }],
+		"detail": "fine",
+		"summary": "ok",
+	});
+	let reported =
+		database::issues::ReportedCheck::from_entry(entry.as_object().expect("an object"))
+			.expect("a readable check");
+	let CheckOutcome::Instances(instances) = &reported.outcome else {
+		panic!("a passed check is not broken");
+	};
+	assert_eq!(instances.len(), 1, "a plain check is its one instance");
+	assert_eq!(instances[0].observed, CheckResult::Passed);
+	assert_eq!(
+		serde_json::Value::Object(reported.detail),
+		serde_json::json!({ "instances": [{ "name": "api" }], "detail": "fine", "summary": "ok" }),
+	);
+}

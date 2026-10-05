@@ -7,7 +7,7 @@ pub const OPENAPI_VERSION: &str = "1.0.3";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "a74cb4dc49fdf06236a36aa7da57ff11e16419e48476dc0035a6e9202fa6f047";
+pub const OPENAPI_BLAKE3: &str = "8f274deada1f4357dcdf20d631ccdeedf582d30a45a9cc5b4bc5c2f3ae9f1360";
 
 /// Error types.
 pub mod error {
@@ -1293,7 +1293,7 @@ Exactly one of `result`, `healthy` and `instances` must be present.*/
 ///      "type": "string"
 ///    },
 ///    "detail": {
-///      "description": "The check's own fields (shown in the status UI as a key/value block,\nand read by operator-defined policy rules as `check.<field>`). For a\ncheck with `instances`, the fields its instances share; a rule reads an\ninstance's own field of the same name over it.\n\nMust be an object. A check with a single result may instead carry its\nfields flat beside `check` and `result` (see `extra`), but not both\nways at once; a check with `instances` carries its fields here only.",
+///      "description": "The check's own fields (shown in the status UI as a key/value block,\nand read by operator-defined policy rules as `check.<field>`). For a\ncheck with `instances`, the fields its instances share; a rule reads an\ninstance's own field of the same name over it.\n\nAn object. A check with a single result may instead carry its fields\nflat beside `check` and `result` (see `extra`), but not both ways at\nonce; a check with `instances` carries its fields here only. A `detail`\nholding anything but an object is one of those flat fields.",
 ///      "type": "object"
 ///    },
 ///    "healthy": {
@@ -1304,7 +1304,7 @@ Exactly one of `result`, `healthy` and `instances` must be present.*/
 ///      ]
 ///    },
 ///    "instances": {
-///      "description": "The check's instances, in place of a `result`: one entry per instance\nof the check's condition (one per device, per resource, per mount),\nkeyed by an instance key the reporter chooses. A key must not be empty,\nmust be unique within the check, and must identify the same instance\nacross this reporter's pushes.\n\nThe set is the check's complete one: an instance left out of a push\nhas recovered, so passing instances are sent too, and an empty object\nrecovers every instance the check held. Each instance is graded\nthrough the check's policy on its own, and the check takes the most\nurgent result among the instances that were not skipped. Canopy writes\nthe check's message from its graded instances, naming the degraded ones\nby label.\n\nA check that could not run reports `result: broken` without instances:\nbrokenness belongs to the whole check, never to one instance.",
+///      "description": "The check's instances, in place of a `result`: one entry per instance\nof the check's condition (one per device, per resource, per mount),\nkeyed by an instance key the reporter chooses. A key must not be empty,\nmust be unique within the check, and must identify the same instance\nacross this reporter's pushes.\n\nThe set is the check's complete one: an instance left out of a push\nhas recovered, so passing instances are sent too, and an empty object\nrecovers every instance the check held. Each instance is graded\nthrough the check's policy on its own, and the check takes the most\nurgent result among the instances that were not skipped. Canopy writes\nthe check's message from its graded instances, naming the degraded ones\nby label.\n\nA check that could not run reports `result: broken` without instances:\nbrokenness belongs to the whole check, never to one instance.\n\nOnly an object is a set of instances. An `instances` holding anything\nelse beside a single result is one of the check's flat fields.",
 ///      "type": [
 ///        "object",
 ///        "null"
@@ -1345,9 +1345,10 @@ and read by operator-defined policy rules as `check.<field>`). For a
 check with `instances`, the fields its instances share; a rule reads an
 instance's own field of the same name over it.
 
-Must be an object. A check with a single result may instead carry its
-fields flat beside `check` and `result` (see `extra`), but not both
-ways at once; a check with `instances` carries its fields here only.*/
+An object. A check with a single result may instead carry its fields
+flat beside `check` and `result` (see `extra`), but not both ways at
+once; a check with `instances` carries its fields here only. A `detail`
+holding anything but an object is one of those flat fields.*/
     #[serde(default, skip_serializing_if = "::serde_json::Map::is_empty")]
     #[builder(default)]
     pub detail: ::serde_json::Map<::std::string::String, ::serde_json::Value>,
@@ -1370,7 +1371,10 @@ the check's message from its graded instances, naming the degraded ones
 by label.
 
 A check that could not run reports `result: broken` without instances:
-brokenness belongs to the whole check, never to one instance.*/
+brokenness belongs to the whole check, never to one instance.
+
+Only an object is a set of instances. An `instances` holding anything
+else beside a single result is one of the check's flat fields.*/
     #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
     pub instances: ::std::option::Option<
         ::std::collections::HashMap<::std::string::String, HealthCheckInstance>,

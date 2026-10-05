@@ -135,8 +135,20 @@ pub struct ReportedCheck {
 	pub detail: Map<String, Value>,
 }
 
-/// The keys of a `health` entry that are its structure rather than its fields.
-const HEALTH_ENTRY_KEYS: [&str; 5] = ["check", "result", "healthy", "detail", "instances"];
+/// Whether `key`, holding `value`, is part of a `health` entry's structure
+/// rather than one of its fields.
+///
+/// `detail` and `instances` are structure only as objects. Reporters that
+/// predate them send fields of either name holding anything else beside a
+/// result (alertd's `version_drift` sends an `instances` array), and those are
+/// the check's fields.
+pub fn is_health_structure(key: &str, value: &Value) -> bool {
+	match key {
+		"check" | "result" | "healthy" => true,
+		"detail" | "instances" => value.is_object(),
+		_ => false,
+	}
+}
 
 impl ReportedCheck {
 	/// Read one entry of a push's `health` array.
@@ -151,7 +163,7 @@ impl ReportedCheck {
 			Some(Value::Object(detail)) => detail.clone(),
 			_ => entry
 				.iter()
-				.filter(|(k, _)| !HEALTH_ENTRY_KEYS.contains(&k.as_str()))
+				.filter(|(k, v)| !is_health_structure(k, v))
 				.map(|(k, v)| (k.clone(), v.clone()))
 				.collect(),
 		};
