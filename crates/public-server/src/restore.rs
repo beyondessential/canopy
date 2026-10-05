@@ -481,6 +481,24 @@ async fn worklist(
 				None
 			};
 
+			// An operator's ask reinstates a pair already settled against the
+			// latest snapshot, and is the only thing that dispatches a
+			// declaration migrating on request.
+			// spec: RST#dispatching-a-migration-test
+			let requested = match &target {
+				Some((_, version_id, _)) => migration_tests::MigrationTestRequest::pending(
+					&mut conn,
+					machine.id,
+					*version_id,
+				)
+				.await?
+				.is_some(),
+				None => false,
+			};
+			if target.is_some() && d.migrates_on_request && !requested {
+				continue;
+			}
+
 			// The masking parameters are Canopy's for a `redact` intent: resolved
 			// from the server's product when the declaration redacts, sent unset
 			// when it doesn't. A redacting declaration contributes nothing for a
@@ -507,7 +525,7 @@ async fn worklist(
 			// the latest snapshot, and reappears only when a newer one exists. For
 			// a `migrate` intent that settling is keyed to the target version too,
 			// and a failure settles it as firmly as a pass.
-			if once {
+			if once && !requested {
 				let settled = match (&target, latest.and_then(|r| r.snapshot_id.as_ref())) {
 					(Some((_, version_id, _)), Some(snapshot)) => {
 						migration_tests::has_verdict(&mut conn, machine.id, snapshot, *version_id)

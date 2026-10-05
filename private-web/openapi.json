@@ -7336,6 +7336,67 @@
         "x-canopy-safety-mode": "read-only"
       }
     },
+    "/api/migration_tests/request": {
+      "post": {
+        "tags": [
+          "migration_tests"
+        ],
+        "summary": "Ask for an environment's data to be tested against its open plan's version.",
+        "description": "Every machine in the environment whose application the plan applies to is\ntested once against its latest snapshot, including one already tested\nagainst that snapshot. This is the only thing that dispatches a declaration\nmigrating on request.",
+        "operationId": "migration_tests_request",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestMigrationTestArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "How many machines were asked for."
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
     "/api/reporting_schemas/build": {
       "post": {
         "tags": [
@@ -17277,6 +17338,17 @@
             ],
             "description": "The plan's target as semver."
           },
+          "test_request": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TestRequest",
+                "description": "The most recent ask for this environment to be tested against its plan\nthat has yet to be answered for every machine it covers. `null` where\nnone is pending."
+              }
+            ]
+          },
           "testable": {
             "type": [
               "boolean",
@@ -18039,6 +18111,25 @@
           }
         }
       },
+      "RequestMigrationTestArgs": {
+        "type": "object",
+        "description": "Request body for asking for an environment's data to be migration-tested.",
+        "required": [
+          "group_id",
+          "rank"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group the environment belongs to."
+          },
+          "rank": {
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "The environment's rank."
+          }
+        }
+      },
       "ResolveIncidentArgs": {
         "type": "object",
         "description": "Request to mark an incident resolved.",
@@ -18358,6 +18449,8 @@
           "can_redact",
           "publishes_schemas",
           "can_publish_schemas",
+          "migrates_on_request",
+          "can_migrate_on_request",
           "redaction_gaps",
           "enabled",
           "gap",
@@ -18365,6 +18458,10 @@
           "updated_at"
         ],
         "properties": {
+          "can_migrate_on_request": {
+            "type": "boolean",
+            "description": "True when the intent migration-tests candidate versions, so the\ndeclaration can choose between every snapshot and on request."
+          },
           "can_publish_schemas": {
             "type": "boolean",
             "description": "True when the intent carries the `reporting-schema` semantic, so the\ndeclaration can be made the group's publisher."
@@ -18425,6 +18522,10 @@
             ],
             "format": "uuid",
             "description": "Specific machine within the group, or null to cover all current machines\nin the group."
+          },
+          "migrates_on_request": {
+            "type": "boolean",
+            "description": "Whether this migrating declaration tests only when an operator asks."
           },
           "name": {
             "type": "string",
@@ -18498,6 +18599,10 @@
             ],
             "format": "uuid",
             "description": "Specific machine within the group; omit or null to cover all current\nmachines in the group."
+          },
+          "migrates_on_request": {
+            "type": "boolean",
+            "description": "Whether a migrating declaration tests only when an operator asks from\nthe upgrades view, rather than every new snapshot while its environment\nhas a plan open. Defaults to false."
           },
           "name": {
             "type": "string",
@@ -18585,6 +18690,10 @@
             ],
             "format": "uuid",
             "description": "Specific machine within the group; omit or null to cover all current\nmachines in the group."
+          },
+          "migrates_on_request": {
+            "type": "boolean",
+            "description": "Whether a migrating declaration tests only when an operator asks from\nthe upgrades view, rather than every new snapshot while its environment\nhas a plan open. Defaults to false."
           },
           "name": {
             "type": "string",
@@ -21073,6 +21182,27 @@
           "rank": {
             "$ref": "#/components/schemas/ServerRank",
             "description": "The rank of the environment within it."
+          }
+        }
+      },
+      "TestRequest": {
+        "type": "object",
+        "description": "An ask for an environment to be migration-tested, still waiting on a verdict.",
+        "required": [
+          "requested_at"
+        ],
+        "properties": {
+          "requested_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was asked for."
+          },
+          "requested_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who asked."
           }
         }
       },

@@ -16,12 +16,15 @@ import {
 	DialogTitle,
 	FormControl,
 	FormControlLabel,
+	FormLabel,
 	IconButton,
 	InputLabel,
 	Link,
 	LinearProgress,
 	MenuItem,
 	Paper,
+	Radio,
+	RadioGroup,
 	Select,
 	Stack,
 	Switch,
@@ -134,6 +137,7 @@ export default function RestoreReplicasSection({
 				params: r.params as Record<string, unknown>,
 				redacts: r.redacts,
 				publishes_schemas: r.publishes_schemas,
+				migrates_on_request: r.migrates_on_request,
 				enabled,
 			});
 			reload();
@@ -220,6 +224,11 @@ export default function RestoreReplicasSection({
 											{r.gap && (
 												<Tooltip title="The consumer does not currently advertise this intent, so Canopy is not dispatching it.">
 													<Chip label="gap" color="warning" size="small" />
+												</Tooltip>
+											)}
+											{r.can_migrate_on_request && r.migrates_on_request && (
+												<Tooltip title="Migration tests run only when requested from the Upgrades page.">
+													<Chip label="on request" size="small" />
 												</Tooltip>
 											)}
 											{r.publishes_schemas && (
@@ -587,6 +596,52 @@ function PublishesSchemasField({
 	);
 }
 
+/** When a migrating declaration tests: every new snapshot while its
+ * environment has a plan open, or only when asked from the upgrades view. */
+// spec: RST#dispatching-a-migration-test
+function MigrationScheduleField({
+	value,
+	onChange,
+}: {
+	value: boolean;
+	onChange: (value: boolean) => void;
+}) {
+	return (
+		<FormControl data-testid="migration-schedule">
+			<FormLabel sx={{ typography: "body2" }}>Run migration tests</FormLabel>
+			<RadioGroup
+				value={value ? "request" : "snapshot"}
+				onChange={(e) => onChange(e.target.value === "request")}
+			>
+				<FormControlLabel
+					value="request"
+					control={<Radio size="small" />}
+					label={
+						<Stack>
+							<Typography variant="body2">When requested</Typography>
+							<Typography variant="caption" color="text.secondary">
+								Only when someone asks from the Upgrades page.
+							</Typography>
+						</Stack>
+					}
+				/>
+				<FormControlLabel
+					value="snapshot"
+					control={<Radio size="small" />}
+					label={
+						<Stack>
+							<Typography variant="body2">On every new backup</Typography>
+							<Typography variant="caption" color="text.secondary">
+								A restore and migrate per snapshot while an upgrade is planned.
+							</Typography>
+						</Stack>
+					}
+				/>
+			</RadioGroup>
+		</FormControl>
+	);
+}
+
 /** Convert the typed form fields into the wire params object, omitting any the
  * operator left unset (the consumer resolves those to their default or null).
  * Returns an error message string if a numeric field doesn't parse. */
@@ -678,6 +733,9 @@ function useIntentSchema(
 	const canRedact = selectedDescriptor?.semantics?.includes("redact") ?? false;
 	const canPublishSchemas =
 		selectedDescriptor?.semantics?.includes("reporting-schema") ?? false;
+	const canMigrateOnRequest =
+		(selectedDescriptor?.semantics?.includes("migrate") ?? false) &&
+		!canPublishSchemas;
 	// Canopy owns the masking parameters for a `redact` intent in both states,
 	// so they get no field: the redaction switch is the whole of the operator's
 	// say in it.
@@ -694,6 +752,7 @@ function useIntentSchema(
 		paramSchema,
 		canRedact,
 		canPublishSchemas,
+		canMigrateOnRequest,
 	};
 }
 
@@ -850,6 +909,7 @@ function CreateReplicaDialog({
 	const [paramValues, setParamValues] = useState<Record<string, string>>({});
 	const [redacts, setRedacts] = useState(false);
 	const [publishesSchemas, setPublishesSchemas] = useState(false);
+	const [migratesOnRequest, setMigratesOnRequest] = useState(true);
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -859,6 +919,7 @@ function CreateReplicaDialog({
 		paramSchema,
 		canRedact,
 		canPublishSchemas,
+		canMigrateOnRequest,
 	} = useIntentSchema(consumers, consumerId, intent);
 
 	// Auto-select the sole consumer, if there's only one to choose from.
@@ -942,6 +1003,7 @@ function CreateReplicaDialog({
 				params,
 				redacts,
 				publishes_schemas: publishesSchemas,
+				migrates_on_request: migratesOnRequest,
 			});
 			onCreated();
 		} catch (err) {
@@ -1012,6 +1074,13 @@ function CreateReplicaDialog({
 						/>
 					)}
 
+					{canMigrateOnRequest && (
+						<MigrationScheduleField
+							value={migratesOnRequest}
+							onChange={setMigratesOnRequest}
+						/>
+					)}
+
 					<ParamFieldsEditor
 						paramSchema={paramSchema}
 						values={paramValues}
@@ -1073,6 +1142,9 @@ function EditReplicaDialog({
 	const [publishesSchemas, setPublishesSchemas] = useState(
 		replica.publishes_schemas,
 	);
+	const [migratesOnRequest, setMigratesOnRequest] = useState(
+		replica.migrates_on_request,
+	);
 	const [paramValues, setParamValues] = useState<Record<string, string>>(() => {
 		const initialDescriptor = consumers
 			.find((c) => c.device_id === replica.consumer_device_id)
@@ -1090,6 +1162,7 @@ function EditReplicaDialog({
 		paramSchema,
 		canRedact,
 		canPublishSchemas,
+		canMigrateOnRequest,
 	} = useIntentSchema(consumers, consumerId, intent);
 
 	// Retargeting to an intent that can't redact drops the flag with it, so the
@@ -1147,6 +1220,7 @@ function EditReplicaDialog({
 				params,
 				redacts,
 				publishes_schemas: publishesSchemas,
+				migrates_on_request: migratesOnRequest,
 				enabled,
 			});
 			onUpdated();
@@ -1222,6 +1296,13 @@ function EditReplicaDialog({
 									? "A redacting replica builds no schema: masking alters the configuration a schema follows from."
 									: "A build is per group: pick every machine in the group to publish its schema."
 							}
+						/>
+					)}
+
+					{canMigrateOnRequest && (
+						<MigrationScheduleField
+							value={migratesOnRequest}
+							onChange={setMigratesOnRequest}
 						/>
 					)}
 

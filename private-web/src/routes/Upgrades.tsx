@@ -7,6 +7,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import ScienceOutlinedIcon from "@mui/icons-material/ScienceOutlined";
 import {
 	Alert,
 	Autocomplete,
@@ -166,6 +167,14 @@ export default function Upgrades() {
 													tally={row.tally}
 												/>
 												<AttemptChip attempt={row.attempt} />
+												<RequestTest
+													groupId={row.group_id}
+													rank={row.rank}
+													groupName={environmentName(row.group_name, row.rank)}
+													testable={row.testable === true}
+													request={row.test_request}
+													onRequested={() => setTick((t) => t + 1)}
+												/>
 											</Stack>
 										</TableCell>
 										<TableCell>
@@ -1515,6 +1524,70 @@ function AttemptChip({
 		);
 	}
 	return null;
+}
+
+/// Ask for the environment's data to be tested against its plan, or say that
+/// an ask is waiting on a verdict.
+// spec: RST#dispatching-a-migration-test
+function RequestTest({
+	groupId,
+	rank,
+	groupName,
+	testable,
+	request,
+	onRequested,
+}: {
+	groupId: string;
+	rank: ServerRank;
+	groupName: string;
+	testable: boolean;
+	request: { requested_at: string; requested_by?: string | null } | null | undefined;
+	onRequested: () => void;
+}) {
+	const ask = useApiAction("migration_tests", "request");
+	if (request) {
+		return (
+			<Tooltip
+				title={
+					<>
+						Asked for <TimeAgo timestamp={request.requested_at} />
+						{request.requested_by ? ` by ${request.requested_by}` : ""}; each
+						machine runs once against its latest backup
+					</>
+				}
+			>
+				<Chip
+					size="small"
+					color="info"
+					variant="outlined"
+					label="requested"
+					data-testid="migration-test-requested"
+				/>
+			</Tooltip>
+		);
+	}
+	if (!testable) return null;
+	return (
+		<GradedAction calls="migration_tests/request">
+			<Tooltip title="Test the migrations against this environment's latest backup">
+				<IconButton
+					size="small"
+					aria-label={`Test migrations for ${groupName}`}
+					disabled={ask.pending}
+					onClick={async () => {
+						try {
+							await ask.call({ group_id: groupId, rank });
+							onRequested();
+						} catch {
+							/* surfaced by the reload showing no request */
+						}
+					}}
+				>
+					<ScienceOutlinedIcon fontSize="small" />
+				</IconButton>
+			</Tooltip>
+		</GradedAction>
+	);
 }
 
 function PlannedFor({ date, late }: { date: string | null; late: boolean }) {

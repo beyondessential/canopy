@@ -108,6 +108,7 @@ Where a restore attempt is under way it shows that too.
 A restore takes hours, and without this a plan that is still being tested and one the pipeline has stopped testing both read as not yet tested.
 An attempt is the group's rather than one environment's, since a restore is issued credentials for the group's backups without naming the machine it will restore, so it shows on each of the group's environments that is set up for testing.
 Where nothing is declared to migrate the environment's data it says so in place of the verdict, since a plan with no such declaration is never dispatched and a reader would otherwise wait on a result that cannot arrive.
+An environment set up for testing offers to test it now, and while that ask waits on a verdict it says so in place of the offer (see [RST](../public-server/restore-replicas.md), "Dispatching a migration test").
 Environments with no plan are shown too, behind a disclosure that counts them, and each is shown with how far behind it is: an unplanned production several minors behind is what this view exists to surface, and the count surfaces it without the list crowding out what is moving.
 Only a group's headline environment is listed there, since a clone or a demo is mostly never planned and listing them would bury the gap that matters.
 An environment already on the newest published version has nothing to plan, and one that has reported no version cannot be placed, so neither is listed either.

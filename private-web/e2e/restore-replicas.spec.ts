@@ -181,6 +181,40 @@ test.describe("restore replicas", () => {
 		expect(rows[0]?.redacts).toBe(true);
 	});
 
+	/// A test costs a full restore and migrate, so a migrating declaration
+	/// waits to be asked unless the operator says otherwise.
+	///
+	/// spec: RST#dispatching-a-migration-test
+	test("a migrating declaration tests on request unless told otherwise", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedRestoreConsumerCapability(sql, {
+			deviceId: consumer.id,
+			intents: [{ intent: "upgrade", semantics: ["check", "once", "migrate"] }],
+		});
+		const groupId = await groupWithBackups(sql, "migrate-declare");
+		await seedServer(sql, { groupId, name: "migrate-srv" });
+
+		await page.goto(`/fleet/groups/${groupId}/backups`);
+		await page.getByRole("button", { name: /declare replica/i }).click();
+
+		const dialog = page.getByRole("dialog");
+		await expect(
+			dialog.getByRole("radio", { name: /when requested/i }),
+		).toBeChecked();
+		await dialog.getByRole("radio", { name: /on every new backup/i }).check();
+		await dialog.getByRole("button", { name: "Declare" }).click();
+
+		await expect(dialog).toHaveCount(0);
+		const rows = await sql.query<{ migrates_on_request: boolean }>(
+			`SELECT migrates_on_request FROM restore_replicas WHERE consumer_device_id = $1`,
+			[consumer.id],
+		);
+		expect(rows[0]?.migrates_on_request).toBe(false);
+	});
+
 	/** A consumer advertising an intent that builds reporting schemas. */
 	async function schemaBuildingConsumer(sql: Sql): Promise<string> {
 		const consumer = await seedDevice(sql, { role: "backup-restore" });

@@ -110,6 +110,37 @@ test.describe("upgrades dashboard", () => {
 		);
 	});
 
+	/// spec: RST#dispatching-a-migration-test
+	test("an environment's migrations are tested when asked", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await runningAt(sql, group.id, "2.60.0");
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+			plannedFor: "2020-01-01",
+		});
+		await declareUpgradeReplica(sql, group.id);
+
+		await page.goto("/upgrades");
+		const row = page
+			.getByTestId("planned-upgrade-row")
+			.filter({ hasText: "kamaka" });
+		await row.getByRole("button", { name: "Test migrations for kamaka" }).click();
+
+		await expect(row.getByTestId("migration-test-requested")).toBeVisible();
+		await expect(
+			row.getByRole("button", { name: "Test migrations for kamaka" }),
+		).toHaveCount(0);
+		const requests = await sql.query<{ version_id: string }>(
+			"SELECT version_id FROM migration_test_requests",
+		);
+		expect(requests.map((r) => r.version_id)).toEqual([target.id]);
+	});
+
 	test("says a plan with nothing declared to test it is not set up", async ({
 		page,
 		sql,

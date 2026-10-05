@@ -270,6 +270,8 @@ impl MigrationTest {
 		let application_id = test.application_id;
 		let target_version_id = test.target_version_id;
 		let failed_migration = test.failed_migration.clone();
+		let machine_id = report.machine_id;
+		let began_at = report.observed_at;
 
 		let restore_failed = report.outcome != RunOutcome::Success;
 
@@ -314,6 +316,10 @@ impl MigrationTest {
 				.values(timings)
 				.execute(db)
 				.await?;
+		}
+
+		if let Some(machine_id) = machine_id {
+			MigrationTestRequest::clear(db, machine_id, target_version_id, began_at).await?;
 		}
 
 		// The finding is held against the application whose candidate this was:
@@ -441,6 +447,133 @@ pub async fn has_verdict(
 		.optional()?;
 
 	Ok(existing.is_some())
+}
+
+/// An operator asking for a machine's data to be tested against a version.
+///
+/// Held until a verdict for the pair lands. While held it puts the pair on the
+/// worklist against the latest snapshot, whether or not that snapshot already
+/// has a verdict, and it is the only thing that dispatches a declaration that
+/// migrates on request.
+// spec: RST#dispatching-a-migration-test
+#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable)]
+#[diesel(table_name = crate::schema::migration_test_requests)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct MigrationTestRequest {
+	pub machine_id: Uuid,
+	pub version_id: Uuid,
+	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
+	pub requested_at: Timestamp,
+	pub requested_by: Option<String>,
+}
+
+impl MigrationTestRequest {
+	/// Ask for every machine of an environment to be tested against its open
+	/// plan's version. Returns the requests made, none where the environment has
+	/// no plan or no application the migrations apply to.
+	pub async fn request_environment(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		rank: commons_types::server::rank::ServerRank,
+		requested_by: Option<&str>,
+	) -> Result<Vec<Self>> {
+		use crate::schema::migration_test_requests::dsl;
+
+		let Some(version) = crate::upgrade_plans::planned_target(db, group_id, rank).await? else {
+			return Ok(Vec::new());
+		};
+		let mut machines = Vec::new();
+		for application in Application::list_live_in_group(db, group_id).await? {
+			let Some(machine_id) = application.machine_id else {
+				continue;
+			};
+			if machines.contains(&machine_id) {
+				continue;
+			}
+			if candidate_for(db, &application)
+				.await?
+				.is_some_and(|candidate| candidate.id == version.id)
+			{
+				machines.push(machine_id);
+			}
+		}
+
+		let mut out = Vec::with_capacity(machines.len());
+		for machine_id in machines {
+			out.push(
+				diesel::insert_into(dsl::migration_test_requests)
+					.values((
+						dsl::machine_id.eq(machine_id),
+						dsl::version_id.eq(version.id),
+						dsl::requested_by.eq(requested_by),
+					))
+					.on_conflict((dsl::machine_id, dsl::version_id))
+					.do_update()
+					.set((
+						dsl::requested_at.eq(diesel::dsl::now),
+						dsl::requested_by.eq(requested_by),
+					))
+					.returning(Self::as_select())
+					.get_result(db)
+					.await?,
+			);
+		}
+		Ok(out)
+	}
+
+	/// The pending request for a pair, if any.
+	pub async fn pending(
+		db: &mut AsyncPgConnection,
+		machine_id: Uuid,
+		version_id: Uuid,
+	) -> Result<Option<Self>> {
+		use crate::schema::migration_test_requests::dsl;
+
+		Ok(dsl::migration_test_requests
+			.filter(dsl::machine_id.eq(machine_id))
+			.filter(dsl::version_id.eq(version_id))
+			.select(Self::as_select())
+			.first(db)
+			.await
+			.optional()?)
+	}
+
+	/// The pending requests against `version_id` among `machine_ids`.
+	pub async fn pending_among(
+		db: &mut AsyncPgConnection,
+		machine_ids: &[Uuid],
+		version_id: Uuid,
+	) -> Result<Vec<Self>> {
+		use crate::schema::migration_test_requests::dsl;
+
+		Ok(dsl::migration_test_requests
+			.filter(dsl::machine_id.eq_any(machine_ids))
+			.filter(dsl::version_id.eq(version_id))
+			.select(Self::as_select())
+			.load(db)
+			.await?)
+	}
+
+	/// Clear a pair's request, where it was made before the test that answers
+	/// it began.
+	async fn clear(
+		db: &mut AsyncPgConnection,
+		machine_id: Uuid,
+		version_id: Uuid,
+		began_at: Timestamp,
+	) -> Result<()> {
+		use crate::schema::migration_test_requests::dsl;
+
+		diesel::delete(
+			dsl::migration_test_requests
+				.filter(dsl::machine_id.eq(machine_id))
+				.filter(dsl::version_id.eq(version_id))
+				.filter(dsl::requested_at.lt(jiff_diesel::Timestamp::from(began_at))),
+		)
+		.execute(db)
+		.await?;
+		Ok(())
+	}
 }
 
 /// The latest recorded verdict for one replica key.

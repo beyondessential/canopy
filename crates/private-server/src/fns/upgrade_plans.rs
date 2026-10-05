@@ -90,6 +90,11 @@ pub struct PlannedUpgrade {
 	/// at "not tested" indefinitely with nothing on its way. `null` without a
 	/// plan.
 	pub testable: Option<bool>,
+	/// The most recent ask for this environment to be tested against its plan
+	/// that has yet to be answered for every machine it covers. `null` where
+	/// none is pending.
+	// spec: RST#dispatching-a-migration-test
+	pub test_request: Option<TestRequest>,
 	/// When the plan's own window opens and closes, where it recorded one. The
 	/// hours the operator said the work runs, so declaring over it can offer
 	/// exactly those rather than a guess from now.
@@ -213,6 +218,7 @@ pub async fn fleet(
 		// worth reading.
 		let mut failed_test = None;
 		let mut tally = None;
+		let mut test_request = None;
 		let verdict = match &plan {
 			None => None,
 			Some(_) => {
@@ -250,6 +256,22 @@ pub async fn fleet(
 						.unwrap_or_else(|| "Unknown application".to_string())
 				});
 				tally = tested_tally(&per_server);
+				if let Some(version) = planned {
+					let machines: Vec<Uuid> = applications
+						.iter()
+						.filter_map(|application| application.machine_id)
+						.collect();
+					test_request = database::migration_tests::MigrationTestRequest::pending_among(
+						&mut conn, &machines, version.id,
+					)
+					.await?
+					.into_iter()
+					.max_by_key(|request| request.requested_at)
+					.map(|request| TestRequest {
+						requested_at: request.requested_at,
+						requested_by: request.requested_by,
+					});
+				}
 				Some(roll_up(&per_server).to_owned())
 			}
 		};
@@ -304,6 +326,7 @@ pub async fn fleet(
 			tally,
 			attempt,
 			testable,
+			test_request,
 			planned_window,
 			maintenance_window: holding
 				.get(&(env.group_id, Some(env.rank)))
@@ -366,6 +389,16 @@ pub struct Tally {
 	pub passed: i32,
 	/// How many the migrations apply to, passed or not.
 	pub total: i32,
+}
+
+/// An ask for an environment to be migration-tested, still waiting on a verdict.
+#[derive(Serialize, ToSchema)]
+pub struct TestRequest {
+	/// When it was asked for.
+	#[schema(value_type = String, format = DateTime)]
+	pub requested_at: jiff::Timestamp,
+	/// Who asked.
+	pub requested_by: Option<String>,
 }
 
 /// The failing test behind a `failed` verdict, so the fleet view can say what

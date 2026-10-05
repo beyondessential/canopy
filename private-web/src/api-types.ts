@@ -3513,6 +3513,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/migration_tests/request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask for an environment's data to be tested against its open plan's version.
+         * @description Every machine in the environment whose application the plan applies to is
+         *     tested once against its latest snapshot, including one already tested
+         *     against that snapshot. This is the only thing that dispatches a declaration
+         *     migrating on request.
+         */
+        post: operations["migration_tests_request"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/reporting_schemas/build": {
         parameters: {
             query?: never;
@@ -9416,6 +9439,7 @@ export interface components {
             tally?: null | components["schemas"]["Tally"];
             /** @description The plan's target as semver. */
             target_version?: string | null;
+            test_request?: null | components["schemas"]["TestRequest"];
             /**
              * @description Whether anything is declared to migrate this group's data. A plan on a
              *     group with nothing declared is never dispatched, so its verdict would sit
@@ -9915,6 +9939,16 @@ export interface components {
             /** @description Backup type to run. */
             type: string;
         };
+        /** @description Request body for asking for an environment's data to be migration-tested. */
+        RequestMigrationTestArgs: {
+            /**
+             * Format: uuid
+             * @description The group the environment belongs to.
+             */
+            group_id: string;
+            /** @description The environment's rank. */
+            rank: components["schemas"]["ServerRank"];
+        };
         /** @description Request to mark an incident resolved. */
         ResolveIncidentArgs: {
             /**
@@ -10107,6 +10141,11 @@ export interface components {
          */
         RestoreReplicaView: {
             /**
+             * @description True when the intent migration-tests candidate versions, so the
+             *     declaration can choose between every snapshot and on request.
+             */
+            can_migrate_on_request: boolean;
+            /**
              * @description True when the intent carries the `reporting-schema` semantic, so the
              *     declaration can be made the group's publisher.
              */
@@ -10158,6 +10197,8 @@ export interface components {
              *     in the group.
              */
             machine_id?: string | null;
+            /** @description Whether this migrating declaration tests only when an operator asks. */
+            migrates_on_request: boolean;
             /** @description Operator-chosen display name for the declaration. */
             name: string;
             /**
@@ -10222,6 +10263,12 @@ export interface components {
              *     machines in the group.
              */
             machine_id?: string | null;
+            /**
+             * @description Whether a migrating declaration tests only when an operator asks from
+             *     the upgrades view, rather than every new snapshot while its environment
+             *     has a plan open. Defaults to false.
+             */
+            migrates_on_request?: boolean;
             /**
              * @description Display name for the declaration, unique among the consumer's
              *     declarations.
@@ -10302,6 +10349,12 @@ export interface components {
              *     machines in the group.
              */
             machine_id?: string | null;
+            /**
+             * @description Whether a migrating declaration tests only when an operator asks from
+             *     the upgrades view, rather than every new snapshot while its environment
+             *     has a plan open. Defaults to false.
+             */
+            migrates_on_request?: boolean;
             /**
              * @description New display name for the declaration, unique among the consumer's
              *     declarations.
@@ -11875,6 +11928,16 @@ export interface components {
             group_id: string;
             /** @description The rank of the environment within it. */
             rank: components["schemas"]["ServerRank"];
+        };
+        /** @description An ask for an environment to be migration-tested, still waiting on a verdict. */
+        TestRequest: {
+            /**
+             * Format: date-time
+             * @description When it was asked for.
+             */
+            requested_at: string;
+            /** @description Who asked. */
+            requested_by?: string | null;
         };
         /**
          * @description One healthy↔degraded transition: the state became (or was first
@@ -17191,6 +17254,52 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GroupVerdict"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    migration_tests_request: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestMigrationTestArgs"];
+            };
+        };
+        responses: {
+            /** @description How many machines were asked for. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
             401: {

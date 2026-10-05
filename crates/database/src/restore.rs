@@ -88,6 +88,10 @@ pub struct RestoreReplica {
 	/// published for it.
 	// spec: RPT#the-build-contract
 	pub publishes_schemas: bool,
+	/// Whether a migrating declaration tests only when an operator asks, rather
+	/// than every new snapshot while its environment has a plan open.
+	// spec: RST#dispatching-a-migration-test
+	pub migrates_on_request: bool,
 	/// Whether this declaration is currently active. When disabled, it
 	/// produces no work and grants no access, but is kept for reference.
 	pub enabled: bool,
@@ -115,6 +119,7 @@ pub struct NewRestoreReplica {
 	pub params: serde_json::Value,
 	pub redacts: bool,
 	pub publishes_schemas: bool,
+	pub migrates_on_request: bool,
 	pub created_by: Option<String>,
 }
 
@@ -133,6 +138,7 @@ pub struct RestoreReplicaUpdate {
 	pub params: serde_json::Value,
 	pub redacts: bool,
 	pub publishes_schemas: bool,
+	pub migrates_on_request: bool,
 	pub enabled: bool,
 }
 
@@ -279,6 +285,7 @@ impl RestoreReplica {
 				dsl::params.eq(update.params),
 				dsl::redacts.eq(update.redacts),
 				dsl::publishes_schemas.eq(update.publishes_schemas),
+				dsl::migrates_on_request.eq(update.migrates_on_request),
 				dsl::enabled.eq(update.enabled),
 			))
 			.returning(Self::as_select())
@@ -1552,12 +1559,22 @@ async fn untried_candidate(
 	let Some(version) = candidate else {
 		return Ok(None);
 	};
-	if crate::migration_tests::has_verdict(db, machine.id, snapshot_id, version.id).await? {
-		return Ok(None);
-	}
+	let request =
+		crate::migration_tests::MigrationTestRequest::pending(db, machine.id, version.id).await?;
 	// Measured from when the snapshot landed, which is when it became available
-	// to migrate, not how old the data inside it is.
-	if now.duration_since(run.reported_at) <= bound.0 {
+	// to migrate, not how old the data inside it is; or from the ask, for a
+	// declaration that tests only when asked.
+	let since = match (&request, declaration.migrates_on_request) {
+		(Some(request), _) => request.requested_at.max(run.reported_at),
+		(None, true) => return Ok(None),
+		(None, false) => {
+			if crate::migration_tests::has_verdict(db, machine.id, snapshot_id, version.id).await? {
+				return Ok(None);
+			}
+			run.reported_at
+		}
+	};
+	if now.duration_since(since) <= bound.0 {
 		return Ok(None);
 	}
 	Ok(Some((

@@ -1,9 +1,10 @@
 use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
-use commons_errors::{ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::TailscaleAdmin;
-use database::migration_tests::GroupVerdict;
+use commons_errors::{AppError, ProblemDetailsSchema, Result};
+use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
+use commons_types::server::rank::ServerRank;
+use database::migration_tests::{GroupVerdict, MigrationTestRequest};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -11,7 +12,61 @@ use uuid::Uuid;
 use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
-	OpenApiRouter::new().routes(routes!(read_only: for_group))
+	OpenApiRouter::new()
+		.routes(routes!(read_only: for_group))
+		.routes(routes!(write: request))
+}
+
+/// Request body for asking for an environment's data to be migration-tested.
+#[derive(Deserialize, ToSchema)]
+pub struct RequestMigrationTestArgs {
+	/// The group the environment belongs to.
+	pub group_id: Uuid,
+	/// The environment's rank.
+	pub rank: ServerRank,
+}
+
+/// Ask for an environment's data to be tested against its open plan's version.
+///
+/// Every machine in the environment whose application the plan applies to is
+/// tested once against its latest snapshot, including one already tested
+/// against that snapshot. This is the only thing that dispatches a declaration
+/// migrating on request.
+// spec: RST#dispatching-a-migration-test
+#[utoipa::path(
+	post,
+	path = "/request",
+	operation_id = "migration_tests_request",
+	tag = "migration_tests",
+	security(("tailscale-admin" = [])),
+	request_body = RequestMigrationTestArgs,
+	responses(
+		(status = 200, description = "How many machines were asked for."),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn request(
+	State(state): State<AppState>,
+	admin: TailscaleAdmin,
+	Json(args): Json<RequestMigrationTestArgs>,
+) -> Result<Json<usize>> {
+	let mut conn = state.db.get().await?;
+	let TailscaleAdmin(TailscaleUser { login, .. }) = admin;
+	let made = MigrationTestRequest::request_environment(
+		&mut conn,
+		args.group_id,
+		args.rank,
+		Some(&login),
+	)
+	.await?;
+	if made.is_empty() {
+		return Err(AppError::BadRequest(
+			"that environment has no open plan, or nothing the plan's migrations apply to".into(),
+		));
+	}
+	Ok(Json(made.len()))
 }
 
 /// Request body for reading a group's migration-test verdicts.

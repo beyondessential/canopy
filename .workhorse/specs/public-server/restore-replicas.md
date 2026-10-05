@@ -245,7 +245,7 @@ An application's candidate is the version its own environment's open plan moves 
 An environment with no open plan has no candidate, so none of its applications are tested, and an application with no rank follows its group's headline environment (see [GRP](../servers/groups.md), "Environments").
 A site's clone is often planned ahead of its production, so the two are tested against different versions at once.
 
-Recording a plan is what asks for the testing.
+Recording a plan is what makes an environment testable.
 A run costs hours of a consumer's capacity per replica, and which minor an environment moves to is not something Canopy can derive, so aiming at whatever is newest would spend that capacity on versions nobody has decided to take.
 An environment that wants its data tested says where it is going, and gets an answer about the version it will actually apply.
 
@@ -283,6 +283,14 @@ There is nothing to migrate to, and an entry naming no version would ask a consu
 `once` is keyed to the pair of snapshot and target version: an entry is omitted once that pair has a verdict, and reinstated when either a newer snapshot or a new candidate version appears.
 A failed verdict settles that pair rather than leaving it retryable.
 A restore can fail for transient reasons and is worth retrying, but a migration failing against a fixed snapshot fails the same way every time, and a retry costs a full restore for an answer already held.
+
+A migrating declaration says when it tests: on every new snapshot while its environment has a plan open, or only when an operator asks.
+A test costs a full restore and migrate per machine, and most of a plan's life is spent waiting on the upgrade window rather than on a new answer, so asking is the default for a new declaration.
+An operator asks from the environment's row in the upgrades view, and the ask covers every machine whose application the plan applies to.
+An ask puts each of those machines on the worklist against its latest snapshot, including one whose pair is already settled, since an ask after a fix to the pipeline or to the data is a request for a new answer.
+It is answered for a machine once a verdict for that machine and version lands from a test that began after the ask, and until then the environment's row says it is waiting.
+A restore that fails before migrating leaves the ask standing, as it leaves the pair retryable.
+A declaration that tests on request is never overdue for want of a test nobody asked for; an ask that goes unanswered past the bound is.
 
 ### What a migration test reports
 
