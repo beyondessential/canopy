@@ -330,10 +330,13 @@ test.describe("machine detail", () => {
 		});
 
 		await page.goto(`/fleet/machines/${first.machineId}/edit`);
-		const rank = page
-			.getByTestId("machine-section")
-			.getByRole("combobox", { name: "Rank" });
+		const section = page.getByTestId("machine-section");
+		const rank = section.getByRole("combobox", { name: "Rank" });
 		await expect(rank).toHaveText("Not ranked yet");
+		// The label floats above the placeholder instead of overlapping it.
+		await expect(
+			section.locator("[data-shrink]", { hasText: /^Rank$/ }),
+		).toHaveAttribute("data-shrink", "true");
 
 		await rank.click();
 		await page.getByRole("option", { name: "demo" }).click();

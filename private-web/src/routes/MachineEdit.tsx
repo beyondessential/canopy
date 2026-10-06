@@ -366,7 +366,10 @@ function Form({
 							setBox({ ...box, rank: e.target.value as ServerRank })
 						}
 						disabled={pending || applications.length === 0}
+						// The empty value still shows a placeholder, so the label has
+						// to float above it rather than sit on top of it.
 						slotProps={{
+							inputLabel: { shrink: true },
 							select: {
 								displayEmpty: true,
 								renderValue: (value) =>
