@@ -7,7 +7,8 @@
 - Resolution order: machine override, then group override, then fleet default. Extend `effective_interval` into an `effective_schedule` returning an enum (Manual / Interval / Cron { expr, zone }), and make staleness, inspection's window and the group view use it.
 - Zone: the schedule's zone, else the machine's reported `osTimezone` figure, else UTC. Use `jiff` (already a dependency) for zone maths. Validate zone names with `TimeZone::get` the way upgrade plans do.
 - Cron parsing: there's no cron crate in the tree yet, and `H` (Jenkins hash syntax) is unlikely to be supported upstream. Check `croner` and similar crates locally before deciding. A small in-house 5-field parser with `H` seeded from a hash of `(machine_id, type)` may be the cleaner choice, reusing the FNV mixing in `jitter_slot_in`.
-- Validation of the "never fires" and "hourly floor" rules has to range over every `H` resolution. Bound it by checking the expression's firing set over a full year for the extreme `H` values per field, or by reasoning per field. Decide during implementation.
+- Validation of the "never fires" and "hourly floor" rules has to range over every `H` resolution. Reason per field rather than enumerating a year of firings. Validation ignores DST entirely (naive wall clock).
+- Hourly floor at runtime: when enumerating firings in the zone, drop any firing less than an hour after the previous kept one. A dropped firing opens no window, doesn't bound the previous window, and isn't a staleness opportunity. This is what handles DST gaps/overlaps producing close firings.
 - Spread offset for non-`H` expressions: a stable hash of `(machine_id, type)`, capped at the smaller of 15 minutes and a quarter of the due window.
 - Due window: from the firing (plus offset) to the midpoint between this firing and the next one.
 - Staleness under cron: stale when the two most recent firings with closed windows have both gone without a success since the earlier one.

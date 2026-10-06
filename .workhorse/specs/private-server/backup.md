@@ -70,11 +70,13 @@ The derived value is stable, so a machine's backup of a type always lands in the
 
 An expression is refused when it would never fire, or when any two consecutive firings would be less than an hour apart.
 Validation considers every value `H` could take, so an expression accepted for one machine is valid for every machine.
+Validation reads the expression on a clock without daylight-saving changes; what those changes do to firings is settled when the expression runs.
 
 An expression is read in the timezone set on its schedule, otherwise in the operating system timezone the machine reports (see [FIG](figures.md)), otherwise in UTC.
 So a fleet default of nightly at 2am backs each machine up at its own 2am.
 A machine whose cron schedule falls back to UTC because it has reported no timezone is flagged as such wherever its schedule or next backup is shown, and in the firing preview, so an operator can tell a deliberate UTC schedule from one waiting on the machine.
 Firings follow the zone's wall clock across daylight-saving changes: a firing at a time the clocks skip happens at the first moment after the gap, and a firing at a time that occurs twice happens once, at the first occurrence.
+A firing less than an hour after the previous one is skipped: it opens no window and does not count as a firing, so the previous firing's window runs on to halfway to the next firing that is kept.
 
 ### When a backup is due
 
