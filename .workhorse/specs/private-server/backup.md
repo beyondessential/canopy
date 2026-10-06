@@ -60,6 +60,7 @@ A machine's schedule for a type is the `(machine, type)` override when one is se
 An override replaces the schedule beneath it whole: its kind, its timing, and its timezone.
 Each layer is set and cleared on its own, and clearing one falls back to the next.
 Wherever a schedule is shown, it says which layer it comes from.
+Every change to a layer, setting or clearing it, is recorded with who made it and when, and each layer's history is shown where it is edited.
 
 ### Cron expressions
 
@@ -90,7 +91,8 @@ The distance stays small against the window, so the backup still starts close to
 An expression with `H` is the operator's own spread, and its windows open at the firing exactly.
 
 A backup is always due according to the machine's schedule as it stands.
-Changing a schedule at any layer, or the timezone it is read in (including the machine reporting a different one), closes any window the previous schedule had open, and what is due follows the new schedule's firings from then on.
+Canopy records when each machine's schedule for a type took effect: the latest moment a change at any layer altered what the schedule resolves to, or the timezone it is read in changed, including the machine reporting a different one.
+A firing from before that moment opens no window, so a change never makes a backup due at a time neither the old schedule nor the new one chose.
 A run already in progress is unaffected.
 
 ### Editing schedules
