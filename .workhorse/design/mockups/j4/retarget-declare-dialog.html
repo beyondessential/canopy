@@ -74,7 +74,7 @@
 					</div>
 					<div class="alert warning">
 						<span class="icon">&#9888;</span>
-						<div class="msg">Quiets 3 of 4 live issues. Backup staleness is on the group.</div>
+						<div class="msg">No longer covers all failing checks</div>
 					</div>
 					<p class="text" style="margin:0">Every check on the group's production machines is suspended: nothing opens or joins an incident, and nothing notifies. The rest of the group stays watched. The window ends itself at the time below, and watching resumes a few minutes later once the reporters have been heard from.</p>
 					<div class="toggles"><span>1h</span><span>2h</span><span>4h</span><span>8h</span></div>
@@ -98,14 +98,14 @@
 				</div>
 				<div class="menu">
 					<div class="opt"><span class="chip kind">Group</span> Fiji</div>
-					<div class="opt l1 sel"><span class="chip kind">Environment</span><span class="chip prod">production</span><span class="sub short">3 of 4 issues</span></div>
-					<div class="opt l2"><span class="chip kind">Machine</span> fj-central-1<span class="sub short">2 of 4 issues</span></div>
-					<div class="opt l3"><span class="chip kind">Application</span> Tamanu central<span class="sub short">1 of 4 issues</span></div>
-					<div class="opt l3"><span class="chip kind">Application</span> Postgres<span class="sub short">1 of 4 issues</span></div>
-					<div class="opt l2"><span class="chip kind">Machine</span> fj-facility-suva<span class="sub short">1 of 4 issues</span></div>
-					<div class="opt l3"><span class="chip kind">Application</span> Tamanu facility<span class="sub short">none</span></div>
+					<div class="opt l1 sel"><span class="chip kind">Environment</span><span class="chip prod">production</span><span class="sub short">not all failing checks</span></div>
+					<div class="opt l2"><span class="chip kind">Machine</span> fj-central-1<span class="sub short">not all failing checks</span></div>
+					<div class="opt l3"><span class="chip kind">Application</span> Tamanu central<span class="sub short">not all failing checks</span></div>
+					<div class="opt l3"><span class="chip kind">Application</span> Postgres<span class="sub short">not all failing checks</span></div>
+					<div class="opt l2"><span class="chip kind">Machine</span> fj-facility-suva<span class="sub short">not all failing checks</span></div>
+					<div class="opt l3"><span class="chip kind">Application</span> Tamanu facility<span class="sub short">not all failing checks</span></div>
 				</div>
-				<div class="note">The group is listed first and quiets every issue, so it carries no count. Fiji's clone environment is not offered: it is a sibling, not on the line of descent. Opened from the group page, every environment, machine and application in the group is listed.</div>
+				<div class="note">The group covers every failing check, so it carries no hint. Fiji's clone environment is not offered: it is a sibling, not on the line of descent. Opened from the group page, every environment, machine and application in the group is listed.</div>
 			</div>
 		</div>
 	</div>
