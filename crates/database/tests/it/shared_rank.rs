@@ -787,3 +787,42 @@ async fn a_box_is_refused_a_rank_no_one_recognises() {
 	})
 	.await
 }
+
+/// A direct write ranks a box only through its sole live application. With
+/// another beside it, the exclusion constraint is checked as the statement
+/// ends, before the box's rank could reach the other, so the write is refused
+/// rather than splitting the box; ranking goes through the box instead.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_direct_rank_write_on_one_of_several_applications_is_refused() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = group(&mut conn).await;
+		let machine = machine(&mut conn, group).await;
+		let one = insert(&mut conn, &machine, "http://one.invalid/", Some("test"))
+			.await
+			.expect("one");
+		insert(&mut conn, &machine, "http://two.invalid/", Some("test"))
+			.await
+			.expect("two");
+
+		assert!(
+			sql_query("UPDATE applications SET rank = 'demo' WHERE id = $1")
+				.bind::<sql_types::Uuid, _>(one)
+				.execute(&mut conn)
+				.await
+				.is_err()
+		);
+		assert_eq!(
+			ranks_on(&mut conn, &machine).await,
+			vec![Some(ServerRank::Test); 2]
+		);
+
+		Application::set_rank(&mut conn, one, ServerRank::Demo, Some("op"))
+			.await
+			.expect("ranking through the model ranks the box");
+		assert_eq!(
+			ranks_on(&mut conn, &machine).await,
+			vec![Some(ServerRank::Demo); 2]
+		);
+	})
+	.await
+}

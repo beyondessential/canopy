@@ -27,8 +27,9 @@ ALTER TABLE machines
 			CHECK (rank_canonical(rank) IS NOT DISTINCT FROM rank);
 
 -- A box is ranked where its live applications are, which the exclusion
--- constraint on applications holds to one rank. A box whose applications are
--- all archived starts unranked, and restoring one of them ranks it again.
+-- constraint on applications holds to one value, so the aggregate reads that
+-- value rather than choosing between ranks. A box whose applications are all
+-- archived starts unranked, and restoring one of them ranks it again.
 UPDATE machines SET rank = box.rank
 FROM (
 	SELECT machine_id, max(rank_canonical(rank)) AS rank
@@ -40,11 +41,11 @@ WHERE machines.id = box.machine_id AND box.rank IS NOT NULL;
 
 -- `applications.rank` stays as a denormalisation, so every query reading an
 -- application's environment reads one column. These triggers keep it and the
--- box's rank together whichever side is ranked: `Machine::set_rank` writes the
--- box and does what a column write cannot, re-evaluating open issues against
--- the environment they now belong to, while the triggers cover every other
--- writer, such as raw SQL, a restore, or a backfill. A rank is never cleared,
--- so neither side propagates a NULL.
+-- box's rank together: `Machine::set_rank` writes the box and does what a
+-- column write cannot, re-evaluating open issues against the environment they
+-- now belong to, while the triggers carry a rank written any other way, such as
+-- raw SQL, a restore, or a seed. A rank is never cleared, so neither side
+-- propagates a NULL.
 --
 -- The box's rank reaches its applications by trigger, and an application's
 -- reaches its box only when written directly, so a write never comes back the
@@ -82,8 +83,10 @@ CREATE TRIGGER applications_take_machine_rank_on_join
 
 -- A live application's rank is its box's, so ranking one ranks the box. By the
 -- time this runs, an application joining a ranked box has taken its rank, so
--- this only ever ranks a box that had none or re-ranks one from an application
--- already on it. It runs only for a write made directly rather than by another
+-- this only ever ranks a box that had none or re-ranks one from its sole live
+-- application. Re-ranking one of several is refused by the exclusion
+-- constraint, which is checked as the statement ends and before this has
+-- carried the rank to the others; that goes through the box instead. It runs only for a write made directly rather than by another
 -- trigger: where `machine_rank_propagates` ranked the application, the box
 -- already carries the rank, and running this once per application on the box
 -- would write nothing each time. `applications.rank` is read leniently, so an older spelling

@@ -33,3 +33,4 @@
 - [x] With the triggers bypassed, the schema still refuses two ranks on one box
 - [x] An archived box with nothing on it offers no rank to change on the edit form (verifies spec: FLT)
 - [ ] A push adopting an application while the box is re-ranked takes the rank the locked row holds
+- [x] A direct rank write on one of several applications on a box is refused rather than splitting the box, and ranking through the model ranks it (verifies spec: GRP)

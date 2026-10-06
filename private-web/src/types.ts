@@ -475,7 +475,8 @@ export function rankMachines(
 			applications: on,
 			rank: machine.environment_rank ?? null,
 			// A box carrying nothing has no type to take, and naming one here
-			// would be inventing it.
+			// would be inventing it. Ranked, it sorts ahead of the boxes at its
+			// rank that carry something, then by name.
 			type: best?.type ?? "",
 			name: machine.name,
 		};
