@@ -15,9 +15,9 @@ import {
 	type GroupEnvironment,
 	type GroupMachine,
 	groupServersByRank,
-	heldByLabel,
 	type RankedMachine,
 	rankMachines,
+	resolveHeldBy,
 	type ServerInfo,
 	type ServerRank,
 } from "../types";
@@ -39,11 +39,13 @@ export default function GroupTree({
 	machines,
 	applications,
 	environments,
+	groupName,
 	currentMachineId,
 	currentApplicationId,
 }: {
 	machines: GroupMachine[];
 	applications: ServerInfo[];
+	groupName?: string | null;
 	/// The group's environments and whether a window holds over each, so the
 	/// row a window was declared over carries the mark rather than only the
 	/// boxes it caught.
@@ -88,30 +90,18 @@ export default function GroupTree({
 						sx={{ mt: index === 0 ? 0 : 1.5 }}
 					>
 						<EnvironmentHeading section={section} />
-						<Stack
-							spacing={1}
-							data-testid="tree-boxes"
-							sx={
-								held
-									? {
-											borderRadius: 1,
-											backgroundImage: (theme) =>
-												environmentHatch(theme, settling),
-											...waveWhileHolding(!settling, "&::before"),
-										}
-									: {}
-							}
-						>
+						<Stack spacing={1} data-testid="tree-boxes">
 							{boxes.map((box) => (
 								<MachineBlock
 									key={box.machine.id}
 									machine={box.machine}
 									applications={box.applications}
-									heldBy={
-										rank && held
-											? heldByLabel({ kind: "environment", rank })
-											: null
-									}
+									environmentWindow={held ? { settling } : null}
+									heldBy={resolveHeldBy({
+										rank,
+										environmentHeld: held,
+										groupName,
+									})}
 									currentMachineId={currentMachineId}
 									currentApplicationId={currentApplicationId}
 								/>
@@ -159,23 +149,45 @@ function EnvironmentHeading({ section }: { section: Section }) {
 function MachineBlock({
 	machine,
 	applications,
+	environmentWindow,
 	heldBy,
 	currentMachineId,
 	currentApplicationId,
 }: {
 	machine: GroupMachine;
 	applications: ServerInfo[];
+	environmentWindow?: { settling: boolean } | null;
 	/// What holds a window this box did not have declared over it.
 	// spec: MNT#presentation
-	heldBy?: string | null;
+	heldBy: string;
 	currentMachineId?: string;
 	currentApplicationId?: string;
 }) {
 	const current = machine.id === currentMachineId;
 	const name = machine.name;
 	const own = machine.own_window === true;
+	const boxHeldBy = machine.maintained ? heldBy : null;
+	const applicationHeldBy = own
+		? resolveHeldBy({ ownWindow: true, machineName: name })
+		: boxHeldBy;
 	return (
-		<Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
+		<Box
+			data-testid="tree-block"
+			sx={{
+				border: 1,
+				borderColor: "divider",
+				borderRadius: 1,
+				overflow: "hidden",
+				...(environmentWindow
+					? {
+							backgroundImage: (theme: Theme) =>
+								environmentHatch(theme, environmentWindow.settling),
+							backgroundClip: "padding-box",
+							...waveWhileHolding(!environmentWindow.settling, "&::before"),
+						}
+					: {}),
+			}}
+		>
 			<Row
 				current={current}
 				sx={{ p: 1.5, gap: 1.5 }}
@@ -190,7 +202,7 @@ function MachineBlock({
 					maintained={machine.maintained}
 					settling={machine.maintenance_settling}
 					ownWindow={machine.own_window}
-					heldBy={heldBy}
+					heldBy={boxHeldBy}
 				>
 					{applications.map((application) => (
 						<Box key={application.id} component="span" sx={dotCellSx}>
@@ -198,9 +210,11 @@ function MachineBlock({
 								up={application.up ?? "gone"}
 								health={application.health ?? undefined}
 								monitored={application.is_monitored !== false}
-								maintained={own}
-								settling={machine.maintenance_settling === true}
-								suspended={!own && (application.maintained ?? false)}
+								maintained={application.own_window ?? false}
+								settling={application.maintenance_settling === true}
+								suspended={
+									(application.maintained ?? false) && !machine.maintained
+								}
 								quiet
 								size={DOT_SIZE}
 							/>
@@ -243,8 +257,9 @@ function MachineBlock({
 								health={application.health ?? undefined}
 								monitored={application.is_monitored !== false}
 								maintained={application.own_window ?? false}
+								settling={application.maintenance_settling === true}
 								suspended={application.maintained ?? false}
-								heldBy={heldBy ?? heldByLabel({ kind: "machine", name })}
+								heldBy={applicationHeldBy}
 								title={applicationName(application)}
 								size={DOT_SIZE}
 							/>
@@ -274,7 +289,7 @@ function MachineBlock({
 
 const DIVIDER_LIGHT = "rgba(0, 0, 0, 0.06)";
 
-/// The wash over an environment's whole section while a window over it holds:
+/// The wash over each box in an environment while a window over it holds:
 /// light enough that the cards inside stay readable through it.
 // spec: MNT#presentation
 function environmentHatch(theme: Theme, settling: boolean): string {

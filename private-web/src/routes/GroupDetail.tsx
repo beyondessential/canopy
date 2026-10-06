@@ -251,6 +251,7 @@ export default function GroupDetail() {
 						machines={machines}
 						applications={applications}
 						environments={detail.data.environments}
+						groupName={detail.data.group.name}
 					/>
 				)}
 			</Box>

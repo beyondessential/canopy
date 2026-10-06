@@ -42,6 +42,7 @@ import {
 	aggregateOperators,
 	compareServersByRankThenType,
 	groupServersByRank,
+	resolveHeldBy,
 	isIncidentLingering,
 } from "../types";
 import UndeclaredDnsNamesNotice from "../components/UndeclaredDnsNamesNotice";
@@ -328,6 +329,7 @@ function GroupCardLoader({
 									);
 									return `repeating-linear-gradient(45deg, ${ink} 0 1px, transparent 1px 7px, ${ink} 7px 8px)`;
 								},
+								backgroundClip: "padding-box",
 								...waveWhileHolding(!groupWindowSettling),
 							}
 						: {}),
@@ -434,6 +436,7 @@ function GroupCard({
 				incidents={incidents}
 				maintainedRanks={group.maintained_ranks}
 				settlingRanks={group.settling_ranks}
+				groupName={group.name}
 			/>
 
 			{hasStatusBand && (
@@ -650,6 +653,7 @@ export function RankedDotStrip({
 	incidents,
 	maintainedRanks,
 	settlingRanks,
+	groupName,
 }: {
 	members: FacilityServerStatus[];
 	incidents?: GroupIncidents | null;
@@ -658,6 +662,7 @@ export function RankedDotStrip({
 	// spec: MNT#presentation
 	maintainedRanks?: ServerRank[];
 	settlingRanks?: ServerRank[];
+	groupName?: string;
 }) {
 	const theme = useTheme();
 	const rows = machineRows(members);
@@ -749,6 +754,11 @@ export function RankedDotStrip({
 								maintained={box.lead.machine_maintained}
 								settling={box.lead.machine_maintenance_settling}
 								ownWindow={box.lead.machine_own_window}
+								heldBy={resolveHeldBy({
+									rank,
+									environmentHeld: maintained,
+									groupName,
+								})}
 								describes={box.applications.map((m) =>
 									[
 										`Application ${m.name}${m.rank ? ` · ${m.rank}` : ""} · ${m.type}`,
@@ -769,9 +779,9 @@ export function RankedDotStrip({
 											up={m.up}
 											health={m.health}
 											monitored={m.is_monitored}
-											maintained={box.lead.machine_own_window}
-											settling={box.lead.machine_maintenance_settling}
-											suspended={!box.lead.machine_own_window && m.maintained}
+											maintained={m.own_window}
+											settling={m.maintenance_settling}
+											suspended={m.maintained && !box.lead.machine_maintained}
 											quiet
 											size={DOT_SIZE}
 										/>

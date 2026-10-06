@@ -151,8 +151,8 @@ export default function Maintenance() {
 			{rows.length === 0 ? (
 				<Paper variant="outlined" sx={{ p: 3 }}>
 					<Typography color="text.secondary">
-						Nothing is under maintenance. Declare a window from a server or
-						a group.
+						Nothing is under maintenance. Declare a window from an
+						application, a machine, a group or an incident.
 					</Typography>
 				</Paper>
 			) : (
