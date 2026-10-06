@@ -1,60 +1,13 @@
 -- A machine carries its own rank, which the applications on it share, so a box
 -- can be ranked before anything on it has reported and what arrives on it is
 -- ranked from the start.
-ALTER TABLE machines
-	ADD COLUMN rank TEXT
-		CONSTRAINT machines_rank_canonical
-		CHECK (rank IN ('production', 'clone', 'demo', 'test', 'dev'));
 
--- A box is ranked where its live applications are, which the exclusion
--- constraint on applications holds to one rank. A box whose applications are
--- all archived starts unranked, and restoring one of them ranks it again.
-UPDATE machines SET rank = box.rank
-FROM (
-	SELECT machine_id, max(rank) AS rank
-	FROM applications
-	WHERE machine_id IS NOT NULL AND deleted_at IS NULL
-		AND rank IN ('production', 'clone', 'demo', 'test', 'dev')
-	GROUP BY machine_id
-) AS box
-WHERE machines.id = box.machine_id;
-
--- `applications.rank` stays as a denormalisation, so every query reading an
--- application's environment reads one column. These triggers keep it and the
--- box's rank together whichever side is written: `Machine::set_rank` writes the
--- box and does what a column write cannot, re-evaluating open issues against
--- the environment they now belong to, while the triggers cover every other
--- writer, such as raw SQL, a restore, or a backfill.
---
--- They are mutually recursive and terminate: each writes only where the rank
--- differs, so the write coming back the other way changes nothing.
-
--- An application stood up on a ranked box without a rank takes the box's. It
--- only ever fills a missing rank: a BEFORE trigger cannot see a machine created
--- earlier in the same statement, and filling nothing from nothing is harmless
--- where overwriting would not be.
-CREATE FUNCTION applications_take_machine_rank() RETURNS TRIGGER
-LANGUAGE plpgsql AS $$
-BEGIN
-	SELECT m.rank INTO NEW.rank FROM machines m WHERE m.id = NEW.machine_id;
-	RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER applications_take_machine_rank
-	BEFORE INSERT ON applications
-	FOR EACH ROW
-	WHEN (NEW.rank IS NULL AND NEW.machine_id IS NOT NULL AND NEW.deleted_at IS NULL)
-	EXECUTE FUNCTION applications_take_machine_rank();
-
--- A live application's rank is its box's, so ranking one ranks the box.
--- `applications.rank` is unconstrained text read leniently, so an older
--- spelling ranks the box as the rank it names, and a spelling no one
--- recognises, which reads as unranked, leaves the box alone.
-CREATE FUNCTION application_rank_ranks_machine() RETURNS TRIGGER
-LANGUAGE plpgsql AS $$
-DECLARE
-	canonical TEXT := CASE lower(NEW.rank)
+-- The one place SQL spells out what a rank is: each spelling `ServerRank` reads,
+-- mapped to the one it writes, and anything else to NULL. A test holds this to
+-- `ServerRank`'s own parsing.
+CREATE FUNCTION rank_canonical(rank TEXT) RETURNS TEXT
+LANGUAGE sql IMMUTABLE AS $$
+	SELECT CASE lower(rank)
 		WHEN 'production' THEN 'production'
 		WHEN 'live' THEN 'production'
 		WHEN 'prod' THEN 'production'
@@ -63,7 +16,77 @@ DECLARE
 		WHEN 'demo' THEN 'demo'
 		WHEN 'test' THEN 'test'
 		WHEN 'dev' THEN 'dev'
-	END;
+	END
+$$;
+
+ALTER TABLE machines
+	ADD COLUMN rank TEXT
+		CONSTRAINT machines_rank_canonical CHECK (rank = rank_canonical(rank));
+
+-- A box is ranked where its live applications are, which the exclusion
+-- constraint on applications holds to one rank. A box whose applications are
+-- all archived starts unranked, and restoring one of them ranks it again.
+UPDATE machines SET rank = box.rank
+FROM (
+	SELECT machine_id, max(rank_canonical(rank)) AS rank
+	FROM applications
+	WHERE machine_id IS NOT NULL AND deleted_at IS NULL
+	GROUP BY machine_id
+) AS box
+WHERE machines.id = box.machine_id AND box.rank IS NOT NULL;
+
+-- `applications.rank` stays as a denormalisation, so every query reading an
+-- application's environment reads one column. These triggers keep it and the
+-- box's rank together whichever side is ranked: `Machine::set_rank` writes the
+-- box and does what a column write cannot, re-evaluating open issues against
+-- the environment they now belong to, while the triggers cover every other
+-- writer, such as raw SQL, a restore, or a backfill. A rank is never cleared,
+-- so neither side propagates a NULL.
+--
+-- They are mutually recursive and terminate: each writes only where the rank
+-- differs, so the write coming back the other way changes nothing.
+
+-- An application joining a ranked box takes the box's rank, as its group is
+-- the box's. An application stood up without a rank is joining, and so is one
+-- moved onto the box or brought back from the archive; one keeping its rank
+-- where it stands is not.
+--
+-- An insert only ever fills a missing rank, so an insert naming a rank the box
+-- does not carry is refused by the exclusion constraint rather than quietly
+-- rewritten. It also cannot rely on finding the box: a BEFORE trigger cannot
+-- see a machine created earlier in the same statement, so where the lookup
+-- finds nothing the application keeps the rank it was given.
+CREATE FUNCTION applications_take_machine_rank() RETURNS TRIGGER
+LANGUAGE plpgsql AS $$
+BEGIN
+	NEW.rank := COALESCE((SELECT m.rank FROM machines m WHERE m.id = NEW.machine_id), NEW.rank);
+	RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER applications_take_machine_rank_on_insert
+	BEFORE INSERT ON applications
+	FOR EACH ROW
+	WHEN (NEW.rank IS NULL AND NEW.machine_id IS NOT NULL AND NEW.deleted_at IS NULL)
+	EXECUTE FUNCTION applications_take_machine_rank();
+
+CREATE TRIGGER applications_take_machine_rank_on_join
+	BEFORE UPDATE OF machine_id, deleted_at ON applications
+	FOR EACH ROW
+	WHEN (NEW.machine_id IS NOT NULL AND NEW.deleted_at IS NULL
+		AND (NEW.machine_id IS DISTINCT FROM OLD.machine_id OR OLD.deleted_at IS NOT NULL))
+	EXECUTE FUNCTION applications_take_machine_rank();
+
+-- A live application's rank is its box's, so ranking one ranks the box. By the
+-- time this runs, an application joining a ranked box has taken its rank, so
+-- this only ever ranks a box that had none or re-ranks one from an application
+-- already on it. `applications.rank` is read leniently, so an older spelling
+-- ranks the box as the rank it names, and a spelling no one recognises, which
+-- reads as unranked, leaves the box alone.
+CREATE FUNCTION application_rank_ranks_machine() RETURNS TRIGGER
+LANGUAGE plpgsql AS $$
+DECLARE
+	canonical TEXT := rank_canonical(NEW.rank);
 BEGIN
 	IF canonical IS NOT NULL THEN
 		UPDATE machines SET rank = canonical

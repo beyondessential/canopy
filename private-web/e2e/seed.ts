@@ -348,7 +348,8 @@ export async function seedServer(
 		type?: ApplicationType;
 		/** Defaults to the rank of the box it goes on, or production for a box
 		 * of its own or one not yet ranked. Pass `null` for a pending
-		 * application: one nothing has ranked yet. */
+		 * application, which only an unranked box can carry: on a ranked box
+		 * it takes the box's rank. */
 		rank?: ServerRank | null;
 		groupId?: string | null;
 		deviceId?: string;

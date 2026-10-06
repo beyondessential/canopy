@@ -17,3 +17,12 @@
 - [x] The update endpoint ranks a box with no application and returns the new rank (verifies spec: FLT)
 - [x] A ranked box with nothing on it sits under its rank in the group tree, still awaiting check-in (verifies spec: FLT)
 - [x] The migration backfills a box's rank from its live applications and leaves pending, empty and fully archived boxes unranked
+
+## Archived boxes and reassignment
+
+- [x] An archived machine is refused a rank, keeps the rank it was archived at, and serves no environment (verifies spec: FLT)
+- [x] The update endpoint refuses a rank for an archived machine and leaves the rest of the edit unapplied (verifies spec: FLT)
+- [x] An application restored onto an archived box comes back at the rank the box carries (verifies spec: FLT)
+- [x] An application moved onto a ranked box takes the box's rank rather than re-ranking it (verifies spec: GRP)
+- [x] An application un-archived onto a ranked box takes the box's rank (verifies spec: GRP)
+- [x] The schema reads every rank spelling the way `ServerRank` parses it

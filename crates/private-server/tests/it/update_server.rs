@@ -551,3 +551,30 @@ async fn a_machine_with_no_application_can_be_ranked() {
 	})
 	.await
 }
+
+/// An archived box serves nothing, so it is refused a rank, and the refusal
+/// leaves the rest of the edit unapplied.
+// spec: FLT#editing
+#[tokio::test(flavor = "multi_thread")]
+async fn an_archived_machine_cannot_be_ranked() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (name, id, deleted_at) VALUES ('gone', '{BOX}', NOW())"
+		))
+		.await
+		.unwrap();
+
+		private
+			.post("/api/fleet/machines/update")
+			.json(&json!({ "machine_id": BOX, "rank": "test", "name": "renamed" }))
+			.await
+			.assert_status_bad_request();
+
+		let machine = Machine::get_by_id(&mut conn, BOX.parse().unwrap())
+			.await
+			.unwrap();
+		assert_eq!(machine.name, "gone");
+		assert_eq!(machine.rank, None);
+	})
+	.await
+}

@@ -79,6 +79,14 @@ async fn ranks_on(conn: &mut AsyncPgConnection, machine: &Machine) -> Vec<Option
 	ranks
 }
 
+/// The environment the box serves.
+async fn serving(conn: &mut AsyncPgConnection, machine: Uuid) -> Option<ServerRank> {
+	Machine::get_by_id(conn, machine)
+		.await
+		.expect("machine")
+		.environment_rank()
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn an_application_arriving_on_a_production_box_takes_production() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
@@ -96,7 +104,7 @@ async fn an_application_arriving_on_a_production_box_takes_production() {
 		let arrived = arrive(&mut conn, &machine, "facility").await;
 		assert_eq!(arrived.rank, Some(ServerRank::Production));
 		assert_eq!(
-			Machine::rank(&mut conn, machine.id).await.unwrap(),
+			serving(&mut conn, machine.id).await,
 			Some(ServerRank::Production)
 		);
 	})
@@ -112,7 +120,7 @@ async fn an_application_arriving_where_nothing_is_ranked_is_pending() {
 		let arrived = arrive(&mut conn, &machine, "facility").await;
 		assert_eq!(arrived.rank, None, "the application is pending");
 		assert_eq!(
-			Machine::rank(&mut conn, machine.id).await.unwrap(),
+			serving(&mut conn, machine.id).await,
 			None,
 			"and so is the machine"
 		);
@@ -138,13 +146,13 @@ async fn a_machine_with_no_applications_can_be_ranked_and_what_arrives_takes_it(
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group = group(&mut conn).await;
 		let machine = machine(&mut conn, group).await;
-		assert_eq!(Machine::rank(&mut conn, machine.id).await.unwrap(), None);
+		assert_eq!(serving(&mut conn, machine.id).await, None);
 
 		Machine::set_rank(&mut conn, machine.id, ServerRank::Test, Some("op"))
 			.await
 			.expect("rank the empty box");
 		assert_eq!(
-			Machine::rank(&mut conn, machine.id).await.unwrap(),
+			serving(&mut conn, machine.id).await,
 			Some(ServerRank::Test),
 			"the box is ranked before anything on it has reported"
 		);
@@ -194,7 +202,7 @@ async fn ranking_an_application_by_any_writer_ranks_its_box() {
 		let id = insert(&mut conn, &machine, "http://raw.invalid/", None)
 			.await
 			.expect("pending");
-		assert_eq!(Machine::rank(&mut conn, machine.id).await.unwrap(), None);
+		assert_eq!(serving(&mut conn, machine.id).await, None);
 
 		sql_query("UPDATE applications SET rank = 'clone' WHERE id = $1")
 			.bind::<sql_types::Uuid, _>(id)
@@ -202,7 +210,7 @@ async fn ranking_an_application_by_any_writer_ranks_its_box() {
 			.await
 			.expect("a raw rank write");
 		assert_eq!(
-			Machine::rank(&mut conn, machine.id).await.unwrap(),
+			serving(&mut conn, machine.id).await,
 			Some(ServerRank::Clone),
 			"the box cannot be left behind its applications"
 		);
@@ -266,7 +274,7 @@ async fn a_box_created_in_the_same_statement_as_its_ranked_application_is_ranked
 		.expect("box and application in one statement")
 		.id;
 		assert_eq!(
-			Machine::rank(&mut conn, machine).await.unwrap(),
+			serving(&mut conn, machine).await,
 			Some(ServerRank::Production)
 		);
 	})
@@ -297,7 +305,7 @@ async fn restoring_onto_an_unranked_empty_box_ranks_the_box() {
 			.expect("restore");
 		assert_eq!(restored.rank, Some(ServerRank::Demo));
 		assert_eq!(
-			Machine::rank(&mut conn, machine.id).await.unwrap(),
+			serving(&mut conn, machine.id).await,
 			Some(ServerRank::Demo),
 			"the box takes the rank its application came back with"
 		);
@@ -568,6 +576,160 @@ async fn a_group_with_only_pending_boxes_is_left_out_of_the_headline_ranks() {
 		assert_eq!(ranks.len(), 1);
 		assert_eq!(ranks[0].rank, ServerRank::Clone);
 		assert!(ranks[0].headline);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_archived_machine_cannot_be_ranked_and_serves_no_environment() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = group(&mut conn).await;
+		let machine = machine(&mut conn, group).await;
+		let central = insert(&mut conn, &machine, "http://central.invalid/", Some("test"))
+			.await
+			.expect("central");
+		Machine::archive(&mut conn, machine.id)
+			.await
+			.expect("archive the box");
+
+		assert!(
+			Machine::set_rank(&mut conn, machine.id, ServerRank::Production, Some("op"))
+				.await
+				.is_err(),
+			"an archived box is refused a rank"
+		);
+		let archived = Machine::get_by_id(&mut conn, machine.id).await.unwrap();
+		assert_eq!(
+			archived.rank,
+			Some(ServerRank::Test),
+			"it keeps the rank it was archived at"
+		);
+		assert_eq!(archived.environment_rank(), None, "and serves nothing");
+
+		let restored = Application::restore(&mut conn, central)
+			.await
+			.expect("restore");
+		assert_eq!(
+			restored.rank,
+			Some(ServerRank::Test),
+			"what comes back takes the rank the box carries"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_application_moved_onto_a_ranked_box_takes_the_boxs_rank() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = group(&mut conn).await;
+		let production = machine(&mut conn, group).await;
+		insert(
+			&mut conn,
+			&production,
+			"http://central.invalid/",
+			Some("production"),
+		)
+		.await
+		.expect("central");
+		let demo = machine(&mut conn, group).await;
+		let moving = insert(&mut conn, &demo, "http://moving.invalid/", Some("demo"))
+			.await
+			.expect("moving");
+
+		sql_query("UPDATE applications SET machine_id = $1 WHERE id = $2")
+			.bind::<sql_types::Uuid, _>(production.id)
+			.bind::<sql_types::Uuid, _>(moving)
+			.execute(&mut conn)
+			.await
+			.expect("a raw move to another box");
+		assert_eq!(
+			ranks_on(&mut conn, &production).await,
+			vec![Some(ServerRank::Production); 2],
+			"the box's rank wins, as its group does"
+		);
+		assert_eq!(
+			serving(&mut conn, production.id).await,
+			Some(ServerRank::Production)
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_application_unarchived_onto_a_ranked_box_takes_the_boxs_rank() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = group(&mut conn).await;
+		let machine = machine(&mut conn, group).await;
+		insert(&mut conn, &machine, "http://central.invalid/", Some("test"))
+			.await
+			.expect("central");
+		let facility = insert(
+			&mut conn,
+			&machine,
+			"http://facility.invalid/",
+			Some("test"),
+		)
+		.await
+		.expect("facility");
+		Application::soft_delete(&mut conn, facility)
+			.await
+			.expect("archive");
+		Machine::set_rank(&mut conn, machine.id, ServerRank::Production, Some("op"))
+			.await
+			.expect("rank");
+
+		sql_query("UPDATE applications SET deleted_at = NULL WHERE id = $1")
+			.bind::<sql_types::Uuid, _>(facility)
+			.execute(&mut conn)
+			.await
+			.expect("a raw un-archive");
+		assert_eq!(
+			ranks_on(&mut conn, &machine).await,
+			vec![Some(ServerRank::Production); 2],
+			"the box is not re-ranked to the rank the application left at"
+		);
+	})
+	.await
+}
+
+#[derive(QueryableByName)]
+struct MaybeRank {
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+	rank: Option<String>,
+}
+
+/// The SQL that keeps a box's rank and its applications' together reads a
+/// spelling the way `ServerRank` does.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_schema_reads_rank_spellings_as_server_rank_does() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		for spelling in [
+			"production",
+			"live",
+			"prod",
+			"clone",
+			"staging",
+			"demo",
+			"test",
+			"dev",
+			"Production",
+			"LIVE",
+			"Staging",
+			"nonsense",
+			"",
+		] {
+			let sql = sql_query("SELECT rank_canonical($1) AS rank")
+				.bind::<sql_types::Text, _>(spelling)
+				.get_result::<MaybeRank>(&mut conn)
+				.await
+				.expect("rank_canonical")
+				.rank;
+			let rust = spelling
+				.parse::<ServerRank>()
+				.ok()
+				.map(|rank| rank.to_string());
+			assert_eq!(sql, rust, "{spelling:?}");
+		}
 	})
 	.await
 }

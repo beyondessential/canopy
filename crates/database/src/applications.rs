@@ -517,7 +517,7 @@ impl Application {
 		r#type: &ApplicationType,
 		key: Option<String>,
 	) -> Result<Self> {
-		let rank = crate::machines::Machine::rank(db, machine.id).await?;
+		let rank = machine.rank;
 		Self::create(
 			db,
 			Self {
@@ -600,13 +600,15 @@ impl Application {
 	/// Un-archive an application. Says nothing about its machine's identity,
 	/// which archiving the application did not touch.
 	///
-	/// It comes back at its box's rank now, which is not necessarily the one it
-	/// left at. Where the box has no rank and nothing else on it is live, as
-	/// when the whole box was archived before boxes carried a rank, it keeps
-	/// its own and the box takes it by trigger, so restoring a box's
-	/// applications one by one does not clear the rank they shared. It is
-	/// pending only where it never had one, or where the live applications are
-	/// themselves pending.
+	/// It comes back at the rank its box carries now, which is not necessarily
+	/// the one it left at. That is the box's stored rank rather than the
+	/// environment it serves, so an application restored onto an archived box
+	/// takes the rank the box was archived at, and restoring a whole archived
+	/// box one application at a time brings each back at the one rank. Where
+	/// the box has no rank and nothing else on it is live, as when the whole
+	/// box was archived before boxes carried a rank, it keeps its own and the
+	/// box takes it by trigger. It is pending only where it never had one, or
+	/// where the live applications are themselves pending.
 	// spec: GRP#environments
 	pub async fn restore(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Self> {
 		use crate::schema::applications::dsl;

@@ -549,7 +549,7 @@ impl MaintenanceWindow {
 		let Some(machine_id) = machine_id else {
 			return Ok(false);
 		};
-		let Some(rank) = Machine::rank(db, machine_id).await? else {
+		let Some(rank) = Machine::get_by_id(db, machine_id).await?.environment_rank() else {
 			return Ok(false);
 		};
 		Ok(ranks.contains(&Some(rank)))
@@ -749,9 +749,9 @@ fn fleet_columns(scope: Scope) -> Option<(Option<Uuid>, Option<Uuid>, Option<Uui
 }
 
 /// The environment each machine serves, for the machines in the groups these
-/// environments belong to: its rank, as [`Machine::ranks`] reads it, so this
-/// and [`MaintenanceWindow::suspends`] read a box the same way. A pending
-/// machine serves none.
+/// environments belong to, by [`Machine::environment_rank`]'s rule, so this and
+/// [`MaintenanceWindow::suspends`] read a box the same way. A pending or
+/// archived machine serves none.
 // spec: MNT#declaring
 async fn environment_of_machines(
 	db: &mut AsyncPgConnection,

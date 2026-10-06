@@ -41,9 +41,15 @@ pub struct Machine {
 	/// fact the box has no way of knowing. The applications on it take it.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub group_id: Option<Uuid>,
-	/// The environment tier this box serves, which every live application on
-	/// it shares. `None` while the machine is pending. Set only through
-	/// [`Machine::set_rank`], which writes it and the applications together.
+	/// The rank this box carries, which every live application on it shares.
+	/// `None` while the machine is pending.
+	///
+	/// Kept when the machine is archived, as an archived application keeps its
+	/// own, so what was on it comes back at it. The environment the box serves
+	/// is [`Machine::environment_rank`], which an archived box has none of.
+	///
+	/// Ranked through [`Machine::set_rank`]; triggers keep it and the
+	/// applications' rank together under any other writer.
 	// spec: FLT#environments
 	#[serde(skip_serializing_if = "Option::is_none")]
 	#[diesel(treat_none_as_default_value = false)]
@@ -569,13 +575,13 @@ impl Machine {
 	}
 
 	/// Rank the machine, and every live application on it with it: a box
-	/// serves one environment and its applications share the rank (see
-	/// [`Self::rank`]). The applications take it from the machine's row by
-	/// trigger, the same one that keeps any other writer from leaving the two
-	/// apart.
+	/// serves one environment and its applications share the rank. The
+	/// applications take it from the machine's row by trigger, the same one
+	/// that keeps any other writer from leaving the two apart.
 	///
 	/// A machine with nothing on it is ranked all the same, so what arrives on
-	/// it later takes the rank rather than being pending. Open issues of the
+	/// it later takes the rank rather than being pending. An archived machine
+	/// is refused (see [`Self::check_rankable`]). Open issues of the
 	/// machine and of everything on it are re-evaluated against the
 	/// environment they now belong to, and so are the group's own checks when
 	/// its headline rank moved, `by` attributing an incident that closes as a
@@ -594,6 +600,7 @@ impl Machine {
 			.transaction::<_, AppError, _>(async |conn| {
 				// The box's row serialises this against a report adopting beside it.
 				let machine = Self::get_by_id_for_update(conn, machine_id).await?;
+				machine.check_rankable()?;
 				let headline =
 					crate::server_groups::ServerGroup::headline_rank(conn, machine.group_id)
 						.await?;
@@ -636,22 +643,34 @@ impl Machine {
 		.map_err(AppError::from)
 	}
 
-	/// The environment this machine serves: its rank, which the live
-	/// applications on it share, and none while it is pending or archived.
-	// spec: FLT#environments
-	pub async fn rank(
-		db: &mut AsyncPgConnection,
-		machine: Uuid,
-	) -> Result<Option<commons_types::server::rank::ServerRank>> {
-		Ok(Self::ranks(db, &[machine]).await?.get(&machine).copied())
+	/// Refuse a rank for an archived machine. Archiving a box archives
+	/// everything on it, so a rank given now would describe nothing live.
+	pub fn check_rankable(&self) -> Result<()> {
+		if self.deleted_at.is_some() {
+			return Err(AppError::BadRequest(
+				"an archived machine has no rank to change".into(),
+			));
+		}
+		Ok(())
 	}
 
-	/// The rank each of `machines` serves, by the same rule as [`Self::rank`].
-	///
-	/// A pending box is absent from the map rather than present with a
-	/// default: it serves no environment.
+	/// The environment this machine serves: its rank, and none while it is
+	/// pending or once it is archived, an archived box serving nothing.
 	// spec: FLT#environments
-	pub async fn ranks(
+	pub fn environment_rank(&self) -> Option<commons_types::server::rank::ServerRank> {
+		if self.deleted_at.is_some() {
+			return None;
+		}
+		self.rank
+	}
+
+	/// The environment each of `machines` serves, by the same rule as
+	/// [`Self::environment_rank`], without loading the machines themselves.
+	///
+	/// A box serving none is absent from the map rather than present with a
+	/// default.
+	// spec: FLT#environments
+	pub async fn environment_ranks(
 		db: &mut AsyncPgConnection,
 		machines: &[Uuid],
 	) -> Result<std::collections::HashMap<Uuid, commons_types::server::rank::ServerRank>> {

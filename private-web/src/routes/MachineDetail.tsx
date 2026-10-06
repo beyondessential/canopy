@@ -113,8 +113,10 @@ export default function MachineDetail() {
 	const muninUrl =
 		data.munin && tailnetName ? `https://${tailnetName}:4950/` : null;
 
+	// An archived box keeps the rank it carried and serves no environment.
 	// spec: FLT#environments
-	const rank = data.machine.rank ?? null;
+	const rank =
+		data.machine.deleted_at != null ? null : (data.machine.rank ?? null);
 
 	return (
 		<Stack spacing={3}>

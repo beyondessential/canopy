@@ -124,19 +124,19 @@ pub async fn get(
 
 /// A machine's effective billing labels.
 ///
-/// A box is not a piece of software, so it carries no product. Its stage is its
-/// rank, and none while it is pending; its deployment label comes from its
-/// group. An ungrouped machine carries no attribution at all, there being no
+/// A box is not a piece of software, so it carries no product. Its stage is the
+/// environment it serves, and none while it is pending or archived; its
+/// deployment label comes from its group. An ungrouped machine carries no attribution at all, there being no
 /// group to attribute it to.
 // spec: APP#billing-attribution
-async fn machine_billing_labels(
+fn machine_billing_labels(
 	machine: &Machine,
 	group: Option<&ServerGroup>,
 ) -> Vec<super::server_groups::BillingTag> {
 	let Some(group) = group else {
 		return Vec::new();
 	};
-	BillingLabels::from_group(&machine.tags, &group.name, None, machine.rank)
+	BillingLabels::from_group(&machine.tags, &group.name, None, machine.environment_rank())
 		.into_tags()
 		.into_iter()
 		.map(|(key, value)| super::server_groups::BillingTag { key, value })
@@ -306,7 +306,7 @@ pub async fn get_detail(
 	super::applications::decorate_with_status(&mut conn, &mut applications).await?;
 	super::applications::fill_display_hosts(&mut conn, &mut applications).await?;
 
-	let billing_labels = machine_billing_labels(&machine, group.as_ref()).await;
+	let billing_labels = machine_billing_labels(&machine, group.as_ref());
 
 	let (group_applications, group_machines) = match group.as_ref() {
 		Some(g) => super::server_groups::tree_members(&mut conn, g).await?,
@@ -508,7 +508,13 @@ pub async fn update(
 				"a rank can be changed but not cleared".into(),
 			));
 		}
-		rank => rank.flatten(),
+		Some(Some(rank)) => {
+			Machine::get_by_id(&mut conn, args.machine_id)
+				.await?
+				.check_rankable()?;
+			Some(rank)
+		}
+		None => None,
 	};
 	let updated = Machine::update(
 		&mut conn,
@@ -531,7 +537,10 @@ pub async fn update(
 		return Ok(Json(updated));
 	};
 	Machine::set_rank(&mut conn, args.machine_id, rank, Some(&admin.0.login)).await?;
-	Ok(Json(Machine::get_by_id(&mut conn, args.machine_id).await?))
+	Ok(Json(Machine {
+		rank: Some(rank),
+		..updated
+	}))
 }
 
 /// Archive a machine, and with it the applications on it.

@@ -367,9 +367,9 @@ pub async fn tree_members(
 			// through an application's Postgres banner belongs to the
 			// application grain, not here.
 			platform: machine_detail.get(&m.id).and_then(|d| d.os_platform()),
+			rank: m.environment_rank(),
 			id: m.id,
 			name: m.name,
-			rank: m.rank,
 		})
 		.collect();
 

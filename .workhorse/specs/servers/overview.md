@@ -63,6 +63,8 @@ A machine and an application are each archived rather than deleted, and each is 
 Archiving a machine archives the applications on it, a box going away taking its workloads with it.
 
 An archived machine or application leaves the live fleet, and its record and history remain.
+An archived machine keeps the rank it was archived at and serves no environment, and it cannot be ranked again.
+An application restored onto a machine comes back at the machine's rank, so restoring an archived box's applications one by one brings each back at the rank they shared.
 
 ## Groups
 
