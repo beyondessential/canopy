@@ -2505,7 +2505,7 @@ function DeclareFromPlan({
 					maintenanceTarget("group", groupId, rank)
 				}
 				existing={ownWindow}
-				fixed
+				fixed="The plan's environment"
 				upgradePlanId={planId}
 				offerLift
 				prefill={

@@ -6,7 +6,7 @@ use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::{Uuid, server::rank::ServerRank};
 use database::issues::{Incident, Scope};
 use database::maintenance_windows::{
-	Amendment, Grain, HeldInPlace, MaintenanceWindow, TargetWindow, line_of_descent,
+	Amendment, Grain, HeldInPlace, MaintenanceWindow, TargetWindow, line_of_descent, target_labels,
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -152,7 +152,10 @@ pub struct MaintenanceTargets {
 	/// Whatever contains the starting grain and whatever it contains, nested
 	/// in the order they contain one another.
 	pub choices: Vec<MaintenanceTargetChoice>,
-	/// Why the window being amended cannot move, where it cannot.
+	/// The window the declaration amends from the start: the one named, or
+	/// else the starting target's own.
+	pub amends: Option<MaintenanceWindow>,
+	/// Why that window cannot move, where it cannot.
 	pub held_in_place: Option<HeldInPlace>,
 }
 
@@ -194,13 +197,21 @@ pub async fn list_open(
 ) -> Result<Json<Vec<OpenWindow>>> {
 	let mut conn = state.db.get().await?;
 	let windows = MaintenanceWindow::list_open(&mut conn).await?;
-	let mut out = Vec::with_capacity(windows.len());
-	for window in windows {
-		let target =
-			database::maintenance_windows::target_label(&mut conn, window.scope(), window.rank)
-				.await?;
-		out.push(OpenWindow { window, target });
-	}
+	let grains: Vec<Grain> = windows
+		.iter()
+		.filter_map(MaintenanceWindow::grain)
+		.collect();
+	let labels = target_labels(&mut conn, &grains).await?;
+	let out = windows
+		.into_iter()
+		.map(|window| {
+			let target = window
+				.grain()
+				.and_then(|grain| labels.get(&grain).cloned())
+				.unwrap_or_default();
+			OpenWindow { window, target }
+		})
+		.collect();
 	Ok(Json(out))
 }
 
@@ -364,7 +375,12 @@ pub async fn targets(
 	let mut conn = state.db.get().await?;
 	let start = args.start.grain()?;
 	let descent = line_of_descent(&mut conn, start).await?;
-	let open = MaintenanceWindow::list_open(&mut conn).await?;
+	let open: std::collections::HashMap<Grain, MaintenanceWindow> =
+		MaintenanceWindow::list_open(&mut conn)
+			.await?
+			.into_iter()
+			.filter_map(|window| Some((window.grain()?, window)))
+			.collect();
 
 	// Coverage is reckoned against the failures alone: an incident whose
 	// failures have all left closes whatever warnings remain in it.
@@ -391,10 +407,7 @@ pub async fn targets(
 			target: entry.grain.into(),
 			label: entry.label.clone(),
 			depth: entry.depth,
-			window: open
-				.iter()
-				.find(|window| window.grain() == Some(entry.grain))
-				.cloned(),
+			window: open.get(&entry.grain).cloned(),
 			covers_failures: failing.as_ref().map(|failing| {
 				failing
 					.iter()
@@ -419,17 +432,15 @@ pub async fn targets(
 			}
 			Some(window).filter(|window| window.ended_at.is_none())
 		}
-		None => open
-			.iter()
-			.find(|window| window.grain() == Some(start))
-			.cloned(),
+		None => open.get(&start).cloned(),
 	};
-	let held_in_place = match own {
+	let held_in_place = match &own {
 		Some(window) => window.held_in_place(&mut conn).await?,
 		None => None,
 	};
 	Ok(Json(MaintenanceTargets {
 		choices,
+		amends: own,
 		held_in_place,
 	}))
 }

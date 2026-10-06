@@ -285,7 +285,10 @@ async fn amending_changes_only_what_it_names_and_can_move_the_window() {
 			.iter()
 			.find(|row| !row["moved_at"].is_null())
 			.expect("the group keeps the span it covered");
-		assert!(left["rank"].is_null(), "that span was the group's own");
+		assert!(
+			left["covered_rank"].is_null(),
+			"that span was the group's own"
+		);
 		assert_eq!(left["moved_to"], "kamaka clone");
 	})
 	.await

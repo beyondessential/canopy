@@ -16357,6 +16357,17 @@
           "choices"
         ],
         "properties": {
+          "amends": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MaintenanceWindow",
+                "description": "The window the declaration amends from the start: the one named, or\nelse the starting target's own."
+              }
+            ]
+          },
           "choices": {
             "type": "array",
             "items": {
@@ -16371,7 +16382,7 @@
               },
               {
                 "$ref": "#/components/schemas/HeldInPlace",
-                "description": "Why the window being amended cannot move, where it cannot."
+                "description": "Why that window cannot move, where it cannot."
               }
             ]
           }
@@ -21431,6 +21442,17 @@
             "format": "date-time",
             "description": "When the window started covering this target: its declaration, or the\nmove that brought it here."
           },
+          "covered_rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "The environment this span covered, where it was over one of a group's\nenvironments rather than the target as a whole. For a span that moved\noff, this is not the window's `rank`, which is where it went."
+              }
+            ]
+          },
           "moved_at": {
             "type": [
               "string",
@@ -21445,17 +21467,6 @@
               "null"
             ],
             "description": "Where it moved to, as it reads to an operator."
-          },
-          "rank": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ServerRank",
-                "description": "The environment this span covered, where it was over one of a group's\nenvironments rather than the target as a whole."
-              }
-            ]
           },
           "window": {
             "$ref": "#/components/schemas/MaintenanceWindow",

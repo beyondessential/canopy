@@ -364,6 +364,9 @@ test.describe("group inventory", () => {
 			"aria-disabled",
 			"true",
 		);
+		await expect(
+			page.getByText("The environment the run is served against"),
+		).toBeVisible();
 		await page.getByRole("button", { name: "Declare", exact: true }).click();
 
 		await expect(production.getByTestId("run-declared")).toBeVisible();
