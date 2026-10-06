@@ -364,6 +364,12 @@ impl MaintenanceWindow {
 		)
 	}
 
+	/// When this window started covering its current target: the move that
+	/// brought it there, or its declaration where it has never moved.
+	pub fn covered_from(&self, latest_move: Option<&MaintenanceWindowMove>) -> Timestamp {
+		latest_move.map_or(self.declared_at, |last| last.moved_at)
+	}
+
 	/// The target this window covers.
 	pub fn scope(&self) -> Scope {
 		// A maintenance window never covers a cluster (see `fleet_columns`), so
@@ -565,14 +571,13 @@ impl MaintenanceWindow {
 		}
 
 		let note = amendment.note.unwrap_or_else(|| window.note.clone());
-		let covered_from = MaintenanceWindowMove::latest_for_window(db, id)
-			.await?
-			.map_or(window.declared_at, |last| last.moved_at);
 
 		let amended = db
 			.transaction::<_, AppError, _>(async |conn| {
 				let (application, machine, group, rank) = to.unwrap_or(from).columns();
 				if to.is_some() {
+					let latest = MaintenanceWindowMove::latest_for_window(conn, id).await?;
+					let covered_from = window.covered_from(latest.as_ref());
 					use crate::schema::maintenance_window_moves::dsl as moves;
 					let (from_application, from_machine, from_group, from_rank) = from.columns();
 					diesel::insert_into(moves::maintenance_window_moves)
@@ -944,7 +949,11 @@ impl MaintenanceWindow {
 		if application_id.is_none() && machine_id.is_none() && group_id.is_none() {
 			return Ok(false);
 		}
+		use crate::schema::maintenance_window_moves::dsl as moves;
 		let cutoff = jiff_diesel::Timestamp::from(Timestamp::now() - SETTLE);
+		// What a move left uncovered settles as though the window had ended
+		// over it, so its move row is read alongside the windows.
+		// spec: MNT#moving-a-window
 		let ranks: Vec<Option<ServerRank>> = dsl::maintenance_windows
 			.select(dsl::rank)
 			.filter(
@@ -953,17 +962,21 @@ impl MaintenanceWindow {
 					.or(dsl::machine_id.eq(machine_id))
 					.or(dsl::server_group_id.eq(group_id)),
 			)
-			.filter(
-				dsl::ended_at
-					.is_null()
-					.and(dsl::expected_end.gt(cutoff))
-					.or(dsl::ended_at.gt(cutoff)),
+			.filter(window_suspending(cutoff))
+			.union_all(
+				moves::maintenance_window_moves
+					.select(moves::rank)
+					.filter(
+						moves::application_id
+							.eq(application_id)
+							.or(moves::machine_id.eq(machine_id))
+							.or(moves::server_group_id.eq(group_id)),
+					)
+					.filter(move_settling(cutoff)),
 			)
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
-		let mut ranks = ranks;
-		ranks.extend(moved_off_ranks(db, application_id, machine_id, group_id, cutoff).await?);
 
 		if ranks.iter().any(Option::is_none) {
 			return Ok(true);
@@ -992,6 +1005,10 @@ impl MaintenanceWindow {
 		use crate::schema::maintenance_windows::dsl;
 		let now = Timestamp::now();
 		let cutoff = jiff_diesel::Timestamp::from(now - SETTLE);
+		use crate::schema::maintenance_window_moves::dsl as moves;
+		// A move row reads as a window that ended when it moved, so what it
+		// left uncovered suspends without holding, at the grain it was over.
+		// spec: MNT#moving-a-window
 		let rows: Vec<SuspensionRow> = dsl::maintenance_windows
 			.select((
 				dsl::application_id,
@@ -1001,11 +1018,18 @@ impl MaintenanceWindow {
 				dsl::ended_at,
 				dsl::expected_end,
 			))
-			.filter(
-				dsl::ended_at
-					.is_null()
-					.and(dsl::expected_end.gt(cutoff))
-					.or(dsl::ended_at.gt(cutoff)),
+			.filter(window_suspending(cutoff))
+			.union_all(
+				moves::maintenance_window_moves
+					.select((
+						moves::application_id,
+						moves::machine_id,
+						moves::server_group_id,
+						moves::rank,
+						moves::moved_at.nullable(),
+						moves::moved_at,
+					))
+					.filter(move_settling(cutoff)),
 			)
 			.load(db)
 			.await
@@ -1040,26 +1064,6 @@ impl MaintenanceWindow {
 					}
 				}
 				(None, None, _) => {}
-			}
-		}
-		// What a move left uncovered settles at the grain the window was over,
-		// so it suspends without holding.
-		// spec: MNT#moving-a-window
-		for (application, machine, group, rank) in settling_moves(db, cutoff).await? {
-			match (application, machine, group, rank) {
-				(Some(id), ..) => {
-					targets.applications.insert(id);
-				}
-				(None, Some(id), ..) => {
-					targets.machines.insert(id);
-				}
-				(None, None, Some(id), None) => {
-					targets.groups.insert(id);
-				}
-				(None, None, Some(id), Some(rank)) => {
-					targets.environments.insert((id, rank));
-				}
-				(None, None, None, _) => {}
 			}
 		}
 		targets.covered_by_environment = environment_of_machines(db, &targets.environments).await?;
@@ -1251,10 +1255,8 @@ async fn spans_over_target(
 
 	let mut out: Vec<TargetWindow> = Vec::with_capacity(current.len() + moved_off.len());
 	for window in current {
-		let covered_from = all_moves
-			.iter()
-			.rfind(|moved| moved.window_id == window.id)
-			.map_or(window.declared_at, |last| last.moved_at);
+		let covered_from =
+			window.covered_from(all_moves.iter().rfind(|moved| moved.window_id == window.id));
 		let rank = window.rank;
 		out.push(TargetWindow {
 			window,
@@ -1306,52 +1308,36 @@ fn ended_is_history() -> AppError {
 	)
 }
 
-/// The targets of moves still inside their settle period.
-async fn settling_moves(
-	db: &mut AsyncPgConnection,
-	cutoff: jiff_diesel::Timestamp,
-) -> Result<Vec<(Option<Uuid>, Option<Uuid>, Option<Uuid>, Option<ServerRank>)>> {
-	use crate::schema::maintenance_window_moves::dsl;
-	dsl::maintenance_window_moves
-		.select((
-			dsl::application_id,
-			dsl::machine_id,
-			dsl::server_group_id,
-			dsl::rank,
-		))
-		// Equivalent to the cutoff alone, since a move is only stamped settled
-		// once its settle period has passed, but it lets the unsettled index
-		// serve the read instead of a scan of all history.
-		.filter(dsl::settled_at.is_null())
-		.filter(dsl::moved_at.gt(cutoff))
-		.load(db)
-		.await
-		.map_err(AppError::from)
+type WindowSuspending = diesel::dsl::Or<
+	diesel::dsl::And<
+		diesel::dsl::IsNull<crate::schema::maintenance_windows::ended_at>,
+		diesel::dsl::Gt<crate::schema::maintenance_windows::expected_end, jiff_diesel::Timestamp>,
+	>,
+	diesel::dsl::Gt<crate::schema::maintenance_windows::ended_at, jiff_diesel::Timestamp>,
+>;
+
+/// Windows whose suspension runs past `cutoff` (now less the settle period):
+/// still open with an end after it, or ended after it.
+fn window_suspending(cutoff: jiff_diesel::Timestamp) -> WindowSuspending {
+	use crate::schema::maintenance_windows::dsl;
+	dsl::ended_at
+		.is_null()
+		.and(dsl::expected_end.gt(cutoff))
+		.or(dsl::ended_at.gt(cutoff))
 }
 
-/// The ranks of moves still settling over any of these targets, read as
-/// [`MaintenanceWindow::suspends`] reads windows.
-async fn moved_off_ranks(
-	db: &mut AsyncPgConnection,
-	application_id: Option<Uuid>,
-	machine_id: Option<Uuid>,
-	group_id: Option<Uuid>,
-	cutoff: jiff_diesel::Timestamp,
-) -> Result<Vec<Option<ServerRank>>> {
+type MoveSettling = diesel::dsl::And<
+	diesel::dsl::IsNull<crate::schema::maintenance_window_moves::settled_at>,
+	diesel::dsl::Gt<crate::schema::maintenance_window_moves::moved_at, jiff_diesel::Timestamp>,
+>;
+
+/// Moves whose settle period runs past `cutoff`. A move is only stamped
+/// settled once that period has passed, so the `settled_at` test changes
+/// nothing about which rows match; it is there so the unsettled index serves
+/// the read instead of a scan of all history.
+fn move_settling(cutoff: jiff_diesel::Timestamp) -> MoveSettling {
 	use crate::schema::maintenance_window_moves::dsl;
-	dsl::maintenance_window_moves
-		.select(dsl::rank)
-		.filter(
-			dsl::application_id
-				.eq(application_id)
-				.or(dsl::machine_id.eq(machine_id))
-				.or(dsl::server_group_id.eq(group_id)),
-		)
-		.filter(dsl::settled_at.is_null())
-		.filter(dsl::moved_at.gt(cutoff))
-		.load(db)
-		.await
-		.map_err(AppError::from)
+	dsl::settled_at.is_null().and(dsl::moved_at.gt(cutoff))
 }
 
 /// The `(application, machine, group)` storage columns for a window's scope.
