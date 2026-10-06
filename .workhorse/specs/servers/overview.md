@@ -36,6 +36,7 @@ A report is the only thing that creates an application.
 An operator never enters an application, its type, or its version, and there is no flow that asks them to.
 
 Canopy adopts what it is told without ceremony: an application it has not seen before on a machine that reports it is created and monitored from that moment.
+It takes the rank the applications already on the machine share, or is pending where they carry none (see [GRP](groups.md), "Environments").
 
 A report never removes an application.
 An application that stops appearing in its machine's reports becomes unreachable and stays, however long it stays away, and only an operator archives it (see [CHK](../monitoring/checks.md), "Reachability").
@@ -77,11 +78,9 @@ A cluster therefore belongs to no group itself, unlike a machine.
 
 ### Environments
 
-Rank is an application's, so a group's environment — its members at one rank — is a set of applications.
-
-A machine serves one environment in practice, since a box is not given a production workload and a demo one.
-Canopy holds no relationship between the two, because nothing it does turns on one: a machine's stage is derived instead, as the highest rank among the applications on it (see [APP](application-types.md), "Billing attribution").
-Deriving it leaves a mixed box well-defined without anyone having to keep a machine's rank in step with what runs on it.
+A machine serves one environment, since a box is not given a production workload and a demo one.
+So the applications on it share one rank, the machine is in the environment that rank names, and a database running beside a site's production central is part of that site's production (see [GRP](groups.md), "Environments").
+A machine whose applications carry no rank yet is pending, and so is every application on it.
 
 ## What each carries
 
@@ -106,17 +105,7 @@ So a machine fact has one place it is edited, and a shared box is edited where e
 Editing an application leads to that form, its own fields being a section of it rather than a form of their own.
 
 The group is offered on the machine alone, since the applications on it take it and an application's group is never set independently.
-An identity is not offered at all: it is bound by enrolment rather than by editing a form.
-A machine's name is required when it is created and not when it is edited, so a box that arrived without one stays editable.
-
-## Editing
-
-Editing is machine-first: one form per machine, holding the machine's own section and one section per application on it.
-
-So a machine fact has one place it is edited, and a shared box is edited where everything sharing it is visible — a change to the box is visibly a change to every workload on it.
-Editing an application leads to that form, its own fields being a section of it rather than a form of their own.
-
-The group is offered on the machine alone, since the applications on it take it and an application's group is never set independently.
+The rank is offered on the machine's own section too, since the applications on it share one: setting it ranks every application on the machine, and once set it can be changed but not cleared.
 An identity is not offered at all: it is bound by enrolment rather than by editing a form.
 A machine's name is required when a box is created and not when it is edited, so a box that arrived without one stays editable.
 
@@ -137,8 +126,9 @@ A version or a database engine is not there, those being a workload's rather tha
 An application's page names the machine it runs on.
 
 A group presents its machines, and under each the applications on it, bucketed by rank.
-A machine takes the rank of the highest-ranked application on it, which is the same derivation its billing stage uses (see [APP](application-types.md), "Billing attribution").
+A machine takes the rank its applications share, which is also its billing stage (see [APP](application-types.md), "Billing attribution").
 A machine carrying nothing yet appears in the group as awaiting check-in rather than being absent, since an operator who has just added a box needs to see it.
+A pending machine appears in the group as awaiting a rank, apart from its environments, since a box that has reported but serves no environment yet needs an operator to rank it.
 
 ## Identities
 

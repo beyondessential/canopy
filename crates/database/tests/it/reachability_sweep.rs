@@ -82,8 +82,8 @@ async fn insert_grouped_server(
 	insert_machine_detail_at(conn, machine.id, 0).await;
 	let row: RowId = sql_query(
 		r#"
-			INSERT INTO applications (type, host, alert_when_down_for, is_monitored, group_id, machine_id)
-			VALUES ('tamanu-central', $1, ($2 || ' seconds')::INTERVAL, $3, $4, $5)
+			INSERT INTO applications (type, host, alert_when_down_for, is_monitored, group_id, rank, machine_id)
+			VALUES ('tamanu-central', $1, ($2 || ' seconds')::INTERVAL, $3, $4, 'production', $5)
 			RETURNING id
 		"#,
 	)

@@ -23,14 +23,14 @@ async fn stats_for_dedupes_repeat_join_rows() {
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'machine'); \
 			 INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
-			 WITH m AS (INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', '{server_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
-				('{server_id}', 'https://example.com', 'tamanu-central', '{group_id}', '{server_id}'); \
+			 WITH m AS (INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', '{server_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, rank, machine_id) VALUES \
+				('{server_id}', 'https://example.com', 'tamanu-central', '{group_id}', 'production', '{server_id}'); \
 			 INSERT INTO issues \
 				(id, application_id, device_id, source, ref, check_name, observed_result, effective_result, message, active, first_seen, last_seen) \
 			   VALUES \
 				('{issue_id}', '{server_id}', '{device_id}', 'test', 'r', 'r', 'failed', 'failed', 'm', true, NOW(), NOW()); \
-			 INSERT INTO incidents (id, server_group_id, opened_at) \
-			   VALUES ('{incident_id}', '{group_id}', NOW()); \
+			 INSERT INTO incidents (id, server_group_id, rank, opened_at) \
+			   VALUES ('{incident_id}', '{group_id}', 'production', NOW()); \
 			 INSERT INTO issue_notes (id, issue_id, author, body) \
 			   VALUES ('{issue_note}', '{issue_id}', 'op', 'jn'); \
 			 INSERT INTO incident_notes (id, incident_id, author, body) \

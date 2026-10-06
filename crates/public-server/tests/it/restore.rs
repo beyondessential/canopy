@@ -401,8 +401,8 @@ async fn make_senaite_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uu
 	let server_id = Uuid::new_v4();
 	let host = format!("https://lims-{server_id}.example.com");
 	sql_query(
-		"WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', $1, $3) RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) \
-		 VALUES ($1, $2, 'senaite', $3, $1)",
+		"WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', $1, $3) RETURNING id) INSERT INTO applications (id, host, type, group_id, rank, machine_id) \
+		 VALUES ($1, $2, 'senaite', $3, 'production', $1)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Text, _>(host)
@@ -1824,8 +1824,8 @@ async fn a_two_workload_box_gets_one_replica_not_one_per_workload() {
 			// A second workload on the same box.
 			let second = Uuid::new_v4();
 			sql_query(
-				"INSERT INTO applications (id, host, type, group_id, machine_id) \
-				 VALUES ($1, $2, 'tamanu-central', $3, $4)",
+				"INSERT INTO applications (id, host, type, group_id, rank, machine_id) \
+				 VALUES ($1, $2, 'tamanu-central', $3, 'production', $4)",
 			)
 			.bind::<sql_types::Uuid, _>(second)
 			.bind::<sql_types::Text, _>(format!("https://second-{second}.example.com"))
@@ -2053,8 +2053,8 @@ async fn a_migration_report_omitting_the_application_resolves_it_from_machine_an
 			// train through Tamanu's migrations.
 			let second = Uuid::new_v4();
 			sql_query(
-				"INSERT INTO applications (id, host, type, group_id, machine_id) \
-				 VALUES ($1, $2, 'senaite', $3, $4)",
+				"INSERT INTO applications (id, host, type, group_id, rank, machine_id) \
+				 VALUES ($1, $2, 'senaite', $3, 'production', $4)",
 			)
 			.bind::<sql_types::Uuid, _>(second)
 			.bind::<sql_types::Text, _>(format!("https://second-{second}.example.com"))

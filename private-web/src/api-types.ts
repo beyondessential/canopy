@@ -2366,7 +2366,8 @@ export interface paths {
         /**
          * Edit a machine.
          * @description Moving a machine to another group moves the applications on it: an
-         *     application's group is never set independently of its machine's.
+         *     application's group is never set independently of its machine's, and
+         *     neither is its rank.
          */
         post: operations["machines_update"];
         delete?: never;
@@ -2704,7 +2705,7 @@ export interface paths {
         put?: never;
         /**
          * List incidents for a server group.
-         * @description Returns the group's own incidents and those of every environment in it. By
+         * @description Returns the incidents of every environment in the group. By
          *     default only open incidents are returned; set `include_closed` to also
          *     include closed ones.
          */
@@ -2726,8 +2727,8 @@ export interface paths {
         put?: never;
         /**
          * List incidents involving a server.
-         * @description Returns the incidents on the environment the application is in, and the
-         *     group's own where it belongs to no environment. By default only open
+         * @description Returns the incidents on the environment the application is in, and none
+         *     for a pending application, which is in no environment. By default only open
          *     incidents are returned; set `include_closed` to also include closed ones.
          */
         post: operations["incident_list_for_server"];
@@ -7326,7 +7327,7 @@ export interface components {
         };
         /**
          * @description An operational incident: a roll-up of the related issues on one target,
-         *     which is one of a group's environments, the group itself, or canopy.
+         *     which is one of a group's environments, or canopy.
          *
          *     An incident opens when an issue on its target crosses the severity
          *     threshold, gathers further contributing issues while open, and closes
@@ -8736,6 +8737,7 @@ export interface components {
             name?: string | null;
             /** @description New free-form operator notes for the box. */
             notes?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
             tags?: null | components["schemas"]["TagMap"];
         };
         /**

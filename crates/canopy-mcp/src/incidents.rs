@@ -156,9 +156,8 @@ struct IncidentSummary {
 	/// incident (aggregating canopy's self-alerts).
 	group_id: Option<Uuid>,
 	group_name: Option<String>,
-	/// Which of the group's environments the incident targets. `null` with a
-	/// group is the group itself: its own checks, and the members of a group
-	/// with no ranked application.
+	/// Which of the group's environments the incident targets: set for any
+	/// incident with a group, `null` for a canopy-wide one.
 	rank: Option<ServerRank>,
 	/// `open` (not closed), `resolved` (operator-resolved), or `closed`.
 	status: &'static str,
@@ -365,9 +364,8 @@ struct IncidentDetail {
 	/// incident (aggregating canopy's self-alerts).
 	group_id: Option<Uuid>,
 	group_name: Option<String>,
-	/// Which of the group's environments the incident targets. `null` with a
-	/// group is the group itself: its own checks, and the members of a group
-	/// with no ranked application.
+	/// Which of the group's environments the incident targets: set for any
+	/// incident with a group, `null` for a canopy-wide one.
 	rank: Option<ServerRank>,
 	status: &'static str,
 	opened_at: Timestamp,

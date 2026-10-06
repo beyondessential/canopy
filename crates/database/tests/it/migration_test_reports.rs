@@ -1225,14 +1225,10 @@ async fn a_withdrawn_plan_s_asks_match_nothing() {
 async fn a_box_is_tested_for_the_workload_an_ask_names() {
 	TestDb::run(|mut conn, _url| async move {
 		let group = insert_group(&mut conn).await;
-		let (machine, _) = insert_server(&mut conn, group).await;
-		let (_, clone_app) =
-			insert_server_at(&mut conn, group, "clone", "tamanu-central", Some(machine)).await;
+		let (machine, app) = insert_server(&mut conn, group).await;
 		let production = insert_version(&mut conn, 63).await;
-		let clone = insert_version(&mut conn, 64).await;
 		plan_upgrade(&mut conn, group, &production).await;
-		plan_upgrade_at(&mut conn, group, "clone", &clone).await;
-		ask(&mut conn, group, ServerRank::Clone).await;
+		ask(&mut conn, group, ServerRank::Production).await;
 
 		let applications =
 			database::applications::Application::list_live_in_group(&mut conn, group)
@@ -1242,8 +1238,8 @@ async fn a_box_is_tested_for_the_workload_an_ask_names() {
 			.await
 			.expect("candidate")
 			.expect("one");
-		assert_eq!(chosen.application.id, clone_app);
-		assert_eq!(chosen.version.id, clone.id);
+		assert_eq!(chosen.application.id, app);
+		assert_eq!(chosen.version.id, production.id);
 		assert!(chosen.request.is_some());
 	})
 	.await

@@ -74,10 +74,10 @@ export default function GroupInventorySection({
 		[groupId, tick],
 	);
 
-	// Rank is an application's, so a group's environments are the ranks its
-	// applications sit at, and one carrying no rank sits at the default.
+	// A group's environments are the ranks its applications sit at. A pending
+	// application is in none.
 	const ranks = SERVER_RANK_ORDER.filter((rank) =>
-		applications.some((application) => (application.rank ?? "dev") === rank),
+		applications.some((application) => application.rank === rank),
 	);
 	const rank =
 		selected !== null && ranks.includes(selected) ? selected : ranks[0];
@@ -94,7 +94,7 @@ export default function GroupInventorySection({
 			{ranks.length === 0 ? (
 				<Paper variant="outlined" sx={{ p: 2 }}>
 					<Typography variant="body2" color="text.secondary">
-						No live applications, so there is no environment to configure.
+						Nothing is ranked yet, so there is no environment to configure.
 					</Typography>
 				</Paper>
 			) : (
@@ -108,7 +108,7 @@ export default function GroupInventorySection({
 						applications.some(
 							(application) =>
 								application.machine_id === machine.id &&
-								(application.rank ?? "dev") === rank,
+								application.rank === rank,
 						),
 					)}
 					variables={variables.status === "ok" ? variables.data : []}

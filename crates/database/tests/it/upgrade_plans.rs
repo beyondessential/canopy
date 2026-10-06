@@ -1218,18 +1218,30 @@ async fn each_environment_goes_its_own_place() {
 	.await
 }
 
+/// A pending application is in no environment, so a plan for its group's
+/// production says nothing about it, while a facility that took its box's rank
+/// is in production and is tested against the plan like the central.
+// spec: GRP#environments
 #[tokio::test(flavor = "multi_thread")]
-async fn an_application_with_no_rank_follows_the_headline_environment() {
+async fn only_an_application_in_the_environment_is_tested_against_its_plan() {
 	TestDb::run(|mut conn, _url| async move {
 		let (group, _production) = group_running(&mut conn, "2.60.0").await;
-		let unranked: AppRow = sql_query(
-			"WITH m AS (INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id) INSERT INTO applications (host, type, group_id, machine_id) SELECT 'https://x.kamaka.example', 'tamanu-facility', $1, m.id FROM m RETURNING id, machine_id",
-		)
-		.bind::<sql_types::Uuid, _>(group)
-		.get_result(&mut conn)
-		.await
-		.expect("application");
-		let unranked = Application::get_by_id(&mut conn, unranked.id)
+		let insert = |rank: Option<&'static str>| {
+			sql_query(
+				"WITH m AS (INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id) INSERT INTO applications (host, type, rank, group_id, machine_id) SELECT 'https://x.kamaka.example', 'tamanu-facility', $2, $1, m.id FROM m RETURNING id, machine_id",
+			)
+			.bind::<sql_types::Uuid, _>(group)
+			.bind::<sql_types::Nullable<sql_types::Text>, _>(rank)
+		};
+		let pending: AppRow = insert(None).get_result(&mut conn).await.expect("pending");
+		let ranked: AppRow = insert(Some("production"))
+			.get_result(&mut conn)
+			.await
+			.expect("ranked");
+		let pending = Application::get_by_id(&mut conn, pending.id)
+			.await
+			.expect("get application");
+		let ranked = Application::get_by_id(&mut conn, ranked.id)
 			.await
 			.expect("get application");
 		let target = publish(&mut conn, 61, 0).await;
@@ -1247,23 +1259,29 @@ async fn an_application_with_no_rank_follows_the_headline_environment() {
 		.expect("plan");
 
 		assert_eq!(
-			candidate_for(&mut conn, &unranked)
+			candidate_for(&mut conn, &ranked)
 				.await
 				.expect("candidate")
 				.map(|v| v.id),
 			Some(target.id),
-			"an unranked facility is tested with the production it belongs to"
+			"a facility in production is tested with it"
+		);
+		assert!(
+			candidate_for(&mut conn, &pending)
+				.await
+				.expect("candidate")
+				.is_none(),
+			"a pending facility is in no environment"
 		);
 	})
 	.await
 }
 
-/// A group nobody has ranked still has somewhere to go: its applications are
-/// its production environment, so a plan can be recorded for it, is what its
-/// members are tested against, and is met when the group arrives.
+/// A group nobody has ranked has no environment, so there is nothing for a
+/// plan to be about until something in it is ranked.
 // spec: GRP#environments
 #[tokio::test(flavor = "multi_thread")]
-async fn a_group_with_no_ranked_member_plans_as_its_production() {
+async fn a_group_with_nothing_ranked_records_no_plans() {
 	TestDb::run(|mut conn, _url| async move {
 		let group: RowId =
 			sql_query("INSERT INTO server_groups (name) VALUES ('drifting') RETURNING id")
@@ -1280,7 +1298,7 @@ async fn a_group_with_no_ranked_member_plans_as_its_production() {
 		report(&mut conn, central.id, central.machine_id, "2.60.0").await;
 		let target = publish(&mut conn, 61, 0).await;
 
-		UpgradePlan::record(
+		let refused = UpgradePlan::record(
 			&mut conn,
 			group.id,
 			ServerRank::Production,
@@ -1289,29 +1307,10 @@ async fn a_group_with_no_ranked_member_plans_as_its_production() {
 			None,
 			"a@example.com",
 		)
-		.await
-		.expect("a group with nothing ranked is still plannable");
-
-		let unranked = Application::get_by_id(&mut conn, central.id)
-			.await
-			.expect("get central");
-		assert_eq!(
-			candidate_for(&mut conn, &unranked)
-				.await
-				.expect("candidate")
-				.map(|version| version.id),
-			Some(target.id),
-			"its members are tested against the plan"
-		);
-
-		report(&mut conn, central.id, central.machine_id, "2.61.0").await;
-		close_met_plans(&mut conn).await.expect("sweep");
+		.await;
 		assert!(
-			UpgradePlan::open_for_environment(&mut conn, group.id, ServerRank::Production)
-				.await
-				.expect("open")
-				.is_none(),
-			"the plan is met once the group arrives"
+			refused.is_err(),
+			"a group with nothing ranked has no environment to plan"
 		);
 	})
 	.await

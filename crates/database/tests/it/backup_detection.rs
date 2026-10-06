@@ -62,8 +62,8 @@ async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid, is_monitore
 	.id;
 	let host = format!("http://test.invalid/{}", Uuid::new_v4());
 	sql_query(
-		"INSERT INTO applications (host, type, group_id, is_monitored, machine_id) \
-		 VALUES ($1, 'tamanu-central', $2, $3, $4)",
+		"INSERT INTO applications (host, type, group_id, rank, is_monitored, machine_id) \
+		 VALUES ($1, 'tamanu-central', $2, 'production', $3, $4)",
 	)
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Uuid, _>(group_id)
@@ -2320,8 +2320,8 @@ async fn a_second_application_does_not_restart_the_machines_anchor() {
 		// group, which the trigger corrects on update rather than on insert.
 		let host = format!("http://test.invalid/{}", Uuid::new_v4());
 		sql_query(
-			"INSERT INTO applications (host, type, machine_id, group_id) \
-			 VALUES ($1, 'tamanu-central', $2, $3)",
+			"INSERT INTO applications (host, type, machine_id, group_id, rank) \
+			 VALUES ($1, 'tamanu-central', $2, $3, 'production')",
 		)
 		.bind::<sql_types::Text, _>(host)
 		.bind::<sql_types::Uuid, _>(first)

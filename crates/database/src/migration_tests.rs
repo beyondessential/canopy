@@ -32,7 +32,7 @@ pub struct Candidate {
 /// Its own environment's open plan names it (see [`crate::upgrade_plans`]), and
 /// an environment with no plan has no candidate: a restore costs hours, and it
 /// is only worth spending on a version an environment has said it intends to
-/// apply. An application with no rank follows its group's headline environment.
+/// apply. A pending application is in no environment and has no candidate.
 ///
 /// Tamanu applications only: the migrations under test are Tamanu's, so no other
 /// product's server has an upgrade path through them.
@@ -62,7 +62,7 @@ pub async fn candidate_plan_for(
 	let Some(group_id) = server.group_id else {
 		return Ok(None);
 	};
-	let Some(rank) = crate::server_groups::ServerGroup::environment_of(db, server).await? else {
+	let Some(rank) = server.rank else {
 		return Ok(None);
 	};
 
@@ -87,15 +87,7 @@ async fn candidates_for(
 	applications: &[Application],
 ) -> Result<HashMap<Uuid, Version>> {
 	use commons_types::server::rank::ServerRank;
-	use std::collections::{HashMap, HashSet, hash_map::Entry};
-
-	let unranked: HashSet<Uuid> = applications
-		.iter()
-		.filter(|application| application.rank.is_none())
-		.filter_map(|application| application.group_id)
-		.collect();
-	let unranked: Vec<Uuid> = unranked.into_iter().collect();
-	let headline = crate::server_groups::ServerGroup::highest_member_ranks(db, &unranked).await?;
+	use std::collections::{HashMap, hash_map::Entry};
 
 	let mut open: HashMap<(Uuid, ServerRank), crate::upgrade_plans::UpgradePlan> = HashMap::new();
 	for plan in crate::upgrade_plans::UpgradePlan::all_open(db).await? {
@@ -112,10 +104,9 @@ async fn candidates_for(
 		let Some(group_id) = application.group_id else {
 			continue;
 		};
-		let rank = application
-			.rank
-			.or_else(|| headline.get(&group_id).copied())
-			.unwrap_or(crate::server_groups::UNRANKED_ENVIRONMENT);
+		let Some(rank) = application.rank else {
+			continue;
+		};
 		let Some(plan) = open.get(&(group_id, rank)) else {
 			continue;
 		};
@@ -619,10 +610,7 @@ impl MigrationTestRequest {
 			let Some(machine_id) = application.machine_id else {
 				continue;
 			};
-			if application.r#type.software() == "tamanu"
-				&& crate::server_groups::ServerGroup::environment_of(db, &application).await?
-					== Some(rank)
-			{
+			if application.r#type.software() == "tamanu" && application.rank == Some(rank) {
 				machines.insert(machine_id);
 			}
 		}

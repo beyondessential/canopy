@@ -18,7 +18,7 @@ use crate::state::AppState;
 const DEFAULT_LIMIT: i64 = 100;
 
 /// An operational incident: a roll-up of the related issues on one target,
-/// which is one of a group's environments, the group itself, or canopy.
+/// which is one of a group's environments, or canopy.
 ///
 /// An incident opens when an issue on its target crosses the severity
 /// threshold, gathers further contributing issues while open, and closes
@@ -36,9 +36,8 @@ pub struct IncidentData {
 	/// a canopy-wide incident. Empty only if the group no longer exists,
 	/// which should not happen in normal operation.
 	pub server_group_name: String,
-	/// Which of the group's environments the incident targets. Null with a
-	/// group means the group itself: its own checks, and the members of a
-	/// group with no ranked application.
+	/// Which of the group's environments the incident targets: set for any
+	/// incident with a group, null for a canopy-wide one.
 	pub rank: Option<ServerRank>,
 	/// When the incident opened.
 	pub opened_at: Timestamp,
@@ -242,8 +241,8 @@ pub struct IncidentListForServerArgs {
 
 /// List incidents involving a server.
 ///
-/// Returns the incidents on the environment the application is in, and the
-/// group's own where it belongs to no environment. By default only open
+/// Returns the incidents on the environment the application is in, and none
+/// for a pending application, which is in no environment. By default only open
 /// incidents are returned; set `include_closed` to also include closed ones.
 #[utoipa::path(
 	post,
@@ -289,7 +288,7 @@ pub struct ListForGroupArgs {
 
 /// List incidents for a server group.
 ///
-/// Returns the group's own incidents and those of every environment in it. By
+/// Returns the incidents of every environment in the group. By
 /// default only open incidents are returned; set `include_closed` to also
 /// include closed ones.
 #[utoipa::path(
