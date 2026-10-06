@@ -48,11 +48,27 @@ CREATE TRIGGER applications_take_machine_rank
 	EXECUTE FUNCTION applications_take_machine_rank();
 
 -- A live application's rank is its box's, so ranking one ranks the box.
+-- `applications.rank` is unconstrained text read leniently, so an older
+-- spelling ranks the box as the rank it names, and a spelling no one
+-- recognises, which reads as unranked, leaves the box alone.
 CREATE FUNCTION application_rank_ranks_machine() RETURNS TRIGGER
 LANGUAGE plpgsql AS $$
+DECLARE
+	canonical TEXT := CASE lower(NEW.rank)
+		WHEN 'production' THEN 'production'
+		WHEN 'live' THEN 'production'
+		WHEN 'prod' THEN 'production'
+		WHEN 'clone' THEN 'clone'
+		WHEN 'staging' THEN 'clone'
+		WHEN 'demo' THEN 'demo'
+		WHEN 'test' THEN 'test'
+		WHEN 'dev' THEN 'dev'
+	END;
 BEGIN
-	UPDATE machines SET rank = NEW.rank
-	WHERE id = NEW.machine_id AND rank IS DISTINCT FROM NEW.rank;
+	IF canonical IS NOT NULL THEN
+		UPDATE machines SET rank = canonical
+		WHERE id = NEW.machine_id AND rank IS DISTINCT FROM canonical;
+	END IF;
 	RETURN NULL;
 END;
 $$;
