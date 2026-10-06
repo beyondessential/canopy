@@ -12,3 +12,4 @@
 - An amendment carries only the fields the operator changed, so retargeting onto another window leaves its end and note alone unless edited. The dialog tracks which fields were touched and shows the window's current end and note beside them.
 - A window declared from an upgrade plan's offer records that plan, and amendment refuses a new target for it. The dialog amending such a window offers no other grain.
 - A moved window appears in both targets' histories: the old target's over the span it covered there. History reads need the window's target changes (the amendment record) rather than only its current target columns.
+- Amending a window to a new target is refused while a run lease is held against an environment it covers; the dialog shows that window's grain without the picker.

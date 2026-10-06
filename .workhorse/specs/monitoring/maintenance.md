@@ -43,24 +43,24 @@ Canopy never opens a window by itself.
 An environment with an open upgrade plan is offered the declaration over itself from that plan, prefilled with the plan's window and note, so declaring is one action at the moment the work starts (see [UPG](../private-server/upgrade-plans.md)).
 An hour someone typed in advance is not evidence that work began, so a planned window suspends nothing on its own.
 An open incident offers the declaration over its target too, so an operator who recognises an alert as their own work declares from where they are reading it.
-A group's own surface offers the declaration over the group, from which each environment the group has is a choice away (see "Choosing what to cover"), so an environment is declarable whether or not a plan is open on it and whoever is reading the group can declare from there.
-
-A group, a machine, and an application each offer the declaration at the head of their own page, beside the page's other actions, so it is at hand without finding the page's maintenance section.
-That control reads "Maintenance" whatever the target's state, and opens as an amendment of the target's own window where it has one.
+A group, a machine, and an application each offer the declaration over themselves from their maintenance section, and again at the head of their page beside its other actions, so it is at hand without finding that section.
+From a group, each environment it has is a choice away (see "Choosing what to cover"), so an environment is declarable whether or not a plan is open on it.
+The control at the head of the page reads "Maintenance" whatever the target's state, and opens as an amendment of the target's own window where it has one, offering to lift it from there too.
 
 ## Choosing what to cover
 
 The declaration starts at the grain of wherever it was offered from, and shows which grain that is before anything is declared, so an operator learns it from the control rather than from the result.
 The operator can retarget it to any grain on the same line of descent: whatever contains the starting grain, and whatever it contains.
-From a machine that is its group, the environment it serves, and its applications; from an environment, its group, the machines serving it, and their applications; from a group, each of its environments and every machine and application in it.
+From an application the choices are its machine, the machine's environment, and its group; from a machine, its group, the environment it serves, and its applications; from an environment, its group, the machines serving it, and their applications; from a group, each of its environments and every machine and application in it.
 A grain the starting point has none of is passed over: a machine in no group offers its applications alone, and a pending machine, being in no environment, offers its group with no environment between them.
 The choices are listed in the shape they nest, group over environment over machine over application, so the choice reads as a choice of how wide.
+A group's pending machines are listed under it apart from its environments, as the group presents them.
 
 Retargeting onto a grain that has an open window of its own makes the declaration an amendment of that window, and the dialog says so and shows that window's expected end and note.
 The amendment changes only what the operator has explicitly changed in the dialog, so retargeting onto someone else's window never shortens it or replaces its note unless the operator has decided to.
 
 Offered from an open incident, the declaration starts at the incident's environment.
-Each choice that would leave any of the incident's failing checks contributing to it is marked as not covering all of them, and a choice covering every one carries no mark.
+A choice that leaves any of the incident's failing checks contributing is marked as not covering them all.
 So an operator reading a backup failure on a group's headline environment learns from the dialog that only the group quiets it, since a window over that environment leaves the group's own checks watched.
 Coverage is reckoned against failures alone, because an incident whose failures have all left closes whatever warnings remain in it (see [INC](incidents.md), "Membership").
 
@@ -79,6 +79,7 @@ One offered over a target with no window of its own declares at whichever grain 
 
 A window declared from an upgrade plan's offer is that plan's window and stays over the plan's environment: it can be amended and lifted but not moved, so the plan it holds open is not released partway through the work (see [UPG](../private-server/upgrade-plans.md), "When a plan is met").
 Any other window over the environment, such as one declared before the plan was recorded, moves like any other.
+A window a run lease is being served against cannot be moved while that lease is held, since the run is acting on the environment the window covers; once the lease is released or expires, the window moves like any other (see [INV](../private-server/inventory.md), "Work under way").
 
 What the move newly covers is suspended from the moment of the move.
 What it leaves uncovered serves the settle period as though the window had ended over it, so narrowing a group's window to one environment does not page for the rest of the group the moment it moves.
