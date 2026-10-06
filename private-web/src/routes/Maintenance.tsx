@@ -29,9 +29,12 @@ import type { MaintenanceWindow, ServerRank } from "../types";
 // spec: MNT#moving-a-window
 function AmendWindow({
 	window,
+	target,
 	onAmended,
 }: {
 	window: MaintenanceWindow;
+	/** How the window's target reads. */
+	target: string;
 	onAmended: () => void;
 }) {
 	const [open, setOpen] = useState(false);
@@ -51,6 +54,7 @@ function AmendWindow({
 				open={open}
 				onClose={() => setOpen(false)}
 				start={start}
+				startLabel={target}
 				existing={window}
 				onDone={onAmended}
 			/>
@@ -187,6 +191,7 @@ export default function Maintenance() {
 											>
 												<AmendWindow
 													window={window}
+													target={target}
 													onAmended={list.reload}
 												/>
 												<GradedAction calls="maintenance/lift">

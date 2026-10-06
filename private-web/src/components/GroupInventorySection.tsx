@@ -361,6 +361,7 @@ function Run({
 				onClose={() => setDialogOpen(false)}
 				start={maintenanceTarget("group", groupId, rank)}
 				fixed="The environment the run is served against"
+				startLabel={groupName}
 				prefill={{ note: `configuring ${rank}` }}
 				onDone={onDeclared}
 			/>
