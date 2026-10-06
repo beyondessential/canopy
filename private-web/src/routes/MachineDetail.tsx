@@ -38,9 +38,7 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import { humanSeconds } from "../lib/humanDuration";
 import {
 	incidentTargetName,
-	SERVER_RANK_ORDER,
 	type ServerInfo,
-	type ServerRank,
 	resolveHeldBy,
 } from "../types";
 import { GradedAction } from "../components/GradedAction";
@@ -115,10 +113,8 @@ export default function MachineDetail() {
 	const muninUrl =
 		data.munin && tailnetName ? `https://${tailnetName}:4950/` : null;
 
-	// A box has no rank of its own: it takes the highest of the workloads on
-	// it, which is the same derivation its billing stage uses.
 	// spec: FLT#environments
-	const rank = machineRank(data.applications);
+	const rank = data.machine.rank ?? null;
 
 	return (
 		<Stack spacing={3}>
@@ -477,18 +473,6 @@ function ApplicationsOnThisBox({
 			)}
 		</Box>
 	);
-}
-
-/// The highest rank among the workloads on a box, which is what a box's rank
-/// means. A box carrying nothing yet has none.
-// spec: FLT#environments
-function machineRank(applications: ServerInfo[]): ServerRank | null {
-	for (const rank of SERVER_RANK_ORDER) {
-		if (applications.some((application) => application.rank === rank)) {
-			return rank;
-		}
-	}
-	return null;
 }
 
 function InfoItem({

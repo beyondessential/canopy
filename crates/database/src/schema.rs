@@ -602,6 +602,7 @@ diesel::table! {
 		registered_at -> Nullable<Timestamptz>,
 		restore_allowed_until -> Nullable<Timestamptz>,
 		restore_allowed_by -> Nullable<Text>,
+		rank -> Nullable<Text>,
 	}
 }
 

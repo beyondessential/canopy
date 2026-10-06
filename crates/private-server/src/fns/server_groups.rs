@@ -220,6 +220,12 @@ pub struct GroupMachine {
 	pub id: Uuid,
 	/// The operator-assigned name.
 	pub name: String,
+	/// The environment tier the box serves, which the applications on it
+	/// share. Absent while it is pending; a box can carry one before anything
+	/// on it has reported.
+	// spec: FLT#environments
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub rank: Option<ServerRank>,
 	/// Whether the box is reachable, judged against its own threshold.
 	pub up: ShortStatus,
 	/// The box's own health, from the checks filed against it. What the
@@ -363,6 +369,7 @@ pub async fn tree_members(
 			platform: machine_detail.get(&m.id).and_then(|d| d.os_platform()),
 			id: m.id,
 			name: m.name,
+			rank: m.rank,
 		})
 		.collect();
 

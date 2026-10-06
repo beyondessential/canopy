@@ -124,24 +124,19 @@ pub async fn get(
 
 /// A machine's effective billing labels.
 ///
-/// A box is not a piece of software, so it carries no product. Its stage is the
-/// rank its applications share, and none while it is pending; its deployment
-/// label comes from its group. An ungrouped machine carries no attribution at all, there being no
+/// A box is not a piece of software, so it carries no product. Its stage is its
+/// rank, and none while it is pending; its deployment label comes from its
+/// group. An ungrouped machine carries no attribution at all, there being no
 /// group to attribute it to.
 // spec: APP#billing-attribution
 async fn machine_billing_labels(
 	machine: &Machine,
 	group: Option<&ServerGroup>,
-	applications: &[super::applications::ServerInfo],
 ) -> Vec<super::server_groups::BillingTag> {
 	let Some(group) = group else {
 		return Vec::new();
 	};
-	let highest_rank = applications
-		.iter()
-		.filter_map(|a| a.rank)
-		.min_by_key(|r| database::server_groups::rank_priority(Some(*r)));
-	BillingLabels::from_group(&machine.tags, &group.name, None, highest_rank)
+	BillingLabels::from_group(&machine.tags, &group.name, None, machine.rank)
 		.into_tags()
 		.into_iter()
 		.map(|(key, value)| super::server_groups::BillingTag { key, value })
@@ -311,7 +306,7 @@ pub async fn get_detail(
 	super::applications::decorate_with_status(&mut conn, &mut applications).await?;
 	super::applications::fill_display_hosts(&mut conn, &mut applications).await?;
 
-	let billing_labels = machine_billing_labels(&machine, group.as_ref(), &applications).await;
+	let billing_labels = machine_billing_labels(&machine, group.as_ref()).await;
 
 	let (group_applications, group_machines) = match group.as_ref() {
 		Some(g) => super::server_groups::tree_members(&mut conn, g).await?,
@@ -472,9 +467,9 @@ pub struct MachineUpdateArgs {
 	pub notes: Option<String>,
 	/// New set of key/value tags. Replaces the whole set.
 	pub tags: Option<TagMap>,
-	/// New rank for the box, which every application on it takes. Omit to
-	/// leave unchanged. A rank can be changed but not cleared, so `null` is
-	/// refused, and a box with no application on it has nothing to rank.
+	/// New rank for the box, which every application on it takes, and so does
+	/// every application that arrives on it later. Omit to leave unchanged. A
+	/// rank can be changed but not cleared, so `null` is refused.
 	#[serde(default, deserialize_with = "super::applications::deserialize_some")]
 	pub rank: Option<Option<ServerRank>>,
 }
@@ -504,8 +499,8 @@ pub async fn update(
 	Json(args): Json<MachineUpdateArgs>,
 ) -> Result<Json<Machine>> {
 	let mut conn = state.db.get().await?;
-	// Everything that can refuse the rank is checked before anything is written,
-	// so a refusal leaves the whole edit unapplied.
+	// A refused rank is refused before anything is written, so it leaves the
+	// whole edit unapplied.
 	// spec: GRP#environments
 	let rank = match args.rank {
 		Some(None) => {
@@ -513,16 +508,7 @@ pub async fn update(
 				"a rank can be changed but not cleared".into(),
 			));
 		}
-		Some(Some(rank)) => {
-			if !Machine::has_live_application(&mut conn, args.machine_id).await? {
-				return Err(AppError::BadRequest(
-					"a machine takes its rank from the applications on it, and none has reported yet"
-						.into(),
-				));
-			}
-			Some(rank)
-		}
-		None => None,
+		rank => rank.flatten(),
 	};
 	let updated = Machine::update(
 		&mut conn,
@@ -541,10 +527,11 @@ pub async fn update(
 		},
 	)
 	.await?;
-	if let Some(rank) = rank {
-		Machine::set_rank(&mut conn, args.machine_id, rank, Some(&admin.0.login)).await?;
-	}
-	Ok(Json(updated))
+	let Some(rank) = rank else {
+		return Ok(Json(updated));
+	};
+	Machine::set_rank(&mut conn, args.machine_id, rank, Some(&admin.0.login)).await?;
+	Ok(Json(Machine::get_by_id(&mut conn, args.machine_id).await?))
 }
 
 /// Archive a machine, and with it the applications on it.

@@ -7080,6 +7080,7 @@ export interface components {
              *     identical rows.
              */
             platform?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
             /** @description Whether the box is reachable, judged against its own threshold. */
             up: components["schemas"]["ShortStatus"];
         };
@@ -8339,6 +8340,7 @@ export interface components {
             name: string;
             /** @description Free-form operator notes about this machine. */
             notes?: string;
+            rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: date-time
              * @description When an identity completed enrolment for this machine. While `None`,

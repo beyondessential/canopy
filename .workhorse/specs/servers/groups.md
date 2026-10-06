@@ -36,13 +36,14 @@ That is how operators use groups rather than a rule Canopy enforces, and a group
 An application's rank is its environment tier: production, clone, demo, test, or dev.
 An operator sets it, and once set it can be changed but not cleared.
 
-The applications on one machine share one rank, since a box serves one environment, and ranking any of them ranks every application on the machine (see [FLT](overview.md), "Environments").
+A machine carries one rank and the applications on it share it, since a box serves one environment, so ranking the machine or any application on it ranks the machine and every application on it (see [FLT](overview.md), "Environments").
 An application on a cluster shares its rank with the applications in its namespace in the same way, a namespace being where a cluster application stands for a box (see [K8S](../monitoring/kubernetes.md), "The shape Canopy relies on").
-An application arriving on a machine, or in a namespace, whose applications carry a rank takes that rank.
-One arriving where nothing is ranked is **pending**, and so is the machine or namespace it arrived on, until an operator ranks one of the applications there.
+An application arriving on a ranked machine takes the machine's rank, and one arriving in a namespace whose applications carry a rank takes theirs.
+One arriving on an unranked machine, or in a namespace where nothing is ranked, is **pending**, and so is the machine or namespace it arrived on, until an operator ranks it.
+A machine can be ranked before any application on it has reported, so what arrives on it is never pending.
 
 A group's members at one rank are one of its environments, so a site's production central, the database beside it, and the facilities syncing to it are that site's production environment.
-A machine is in the environment its applications' rank names.
+A machine is in the environment its rank names, whether or not anything on it has reported yet.
 A pending application or machine is in none of the group's environments, and a group with nothing ranked has no environments until something in it is ranked.
 
 An environment is where a group's applications are going next: it holds at most one open upgrade plan, and the closed plans that preceded it, so a group holds as many open plans as it has environments going somewhere (see [UPG](../private-server/upgrade-plans.md)).

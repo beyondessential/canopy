@@ -1,6 +1,6 @@
-//! A box's applications share one rank, so a machine is in the environment that
-//! rank names. An application is unranked only while it is pending: new on a
-//! box where nothing is ranked yet, which also leaves the box pending.
+//! A machine carries one rank, which the applications on it share, so a machine
+//! is in the environment that rank names. An application is unranked only while
+//! it is pending: new on a box that is not ranked yet.
 //!
 //! spec: GRP#environments
 
@@ -134,26 +134,172 @@ async fn an_application_arriving_where_nothing_is_ranked_is_pending() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_machine_with_no_applications_is_pending_and_cannot_be_ranked() {
+async fn a_machine_with_no_applications_can_be_ranked_and_what_arrives_takes_it() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group = group(&mut conn).await;
 		let machine = machine(&mut conn, group).await;
 		assert_eq!(Machine::rank(&mut conn, machine.id).await.unwrap(), None);
 
-		let refused = Machine::set_rank(&mut conn, machine.id, ServerRank::Test, None).await;
-		assert!(
-			refused.is_err(),
-			"a rank is held by the applications on a box, and none has reported"
-		);
-
-		let arrived = arrive(&mut conn, &machine, "facility").await;
-		Application::set_rank(&mut conn, arrived.id, ServerRank::Test, Some("op"))
+		Machine::set_rank(&mut conn, machine.id, ServerRank::Test, Some("op"))
 			.await
-			.expect("rank the first application");
+			.expect("rank the empty box");
 		assert_eq!(
 			Machine::rank(&mut conn, machine.id).await.unwrap(),
 			Some(ServerRank::Test),
-			"the box is ranked once an application on it is"
+			"the box is ranked before anything on it has reported"
+		);
+		assert_eq!(
+			Machine::get_by_id(&mut conn, machine.id)
+				.await
+				.unwrap()
+				.rank,
+			Some(ServerRank::Test)
+		);
+
+		let arrived = arrive(&mut conn, &machine, "facility").await;
+		assert_eq!(
+			arrived.rank,
+			Some(ServerRank::Test),
+			"what arrives on a ranked box is never pending"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unranked_application_written_onto_a_ranked_box_takes_its_rank() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = group(&mut conn).await;
+		let machine = machine(&mut conn, group).await;
+		Machine::set_rank(&mut conn, machine.id, ServerRank::Demo, Some("op"))
+			.await
+			.expect("rank the empty box");
+
+		insert(&mut conn, &machine, "http://raw.invalid/", None)
+			.await
+			.expect("a raw insert naming no rank");
+		assert_eq!(
+			ranks_on(&mut conn, &machine).await,
+			vec![Some(ServerRank::Demo)]
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ranking_an_application_by_any_writer_ranks_its_box() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = group(&mut conn).await;
+		let machine = machine(&mut conn, group).await;
+		let id = insert(&mut conn, &machine, "http://raw.invalid/", None)
+			.await
+			.expect("pending");
+		assert_eq!(Machine::rank(&mut conn, machine.id).await.unwrap(), None);
+
+		sql_query("UPDATE applications SET rank = 'clone' WHERE id = $1")
+			.bind::<sql_types::Uuid, _>(id)
+			.execute(&mut conn)
+			.await
+			.expect("a raw rank write");
+		assert_eq!(
+			Machine::rank(&mut conn, machine.id).await.unwrap(),
+			Some(ServerRank::Clone),
+			"the box cannot be left behind its applications"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ranking_a_box_by_any_writer_ranks_its_live_applications() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = group(&mut conn).await;
+		let machine = machine(&mut conn, group).await;
+		insert(&mut conn, &machine, "http://one.invalid/", Some("test"))
+			.await
+			.expect("one");
+		insert(&mut conn, &machine, "http://two.invalid/", Some("test"))
+			.await
+			.expect("two");
+		let archived = insert(&mut conn, &machine, "http://gone.invalid/", Some("test"))
+			.await
+			.expect("gone");
+		Application::soft_delete(&mut conn, archived)
+			.await
+			.expect("archive");
+
+		sql_query("UPDATE machines SET rank = 'dev' WHERE id = $1")
+			.bind::<sql_types::Uuid, _>(machine.id)
+			.execute(&mut conn)
+			.await
+			.expect("a raw rank write");
+		assert_eq!(
+			ranks_on(&mut conn, &machine).await,
+			vec![Some(ServerRank::Dev); 2],
+			"the live applications move with the box"
+		);
+		assert_eq!(
+			Application::get_by_id(&mut conn, archived)
+				.await
+				.unwrap()
+				.rank,
+			Some(ServerRank::Test),
+			"an archived one keeps the rank it left at"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_box_created_in_the_same_statement_as_its_ranked_application_is_ranked() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = group(&mut conn).await;
+		let machine = sql_query(
+			"WITH m AS (INSERT INTO machines (name, group_id) VALUES ('box', $1) RETURNING id) \
+			 INSERT INTO applications (type, host, group_id, rank, machine_id) \
+			 SELECT 'tamanu-central', 'http://central.invalid/', $1, 'production', id FROM m \
+			 RETURNING machine_id AS id",
+		)
+		.bind::<sql_types::Uuid, _>(group)
+		.get_result::<RowId>(&mut conn)
+		.await
+		.expect("box and application in one statement")
+		.id;
+		assert_eq!(
+			Machine::rank(&mut conn, machine).await.unwrap(),
+			Some(ServerRank::Production)
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn restoring_onto_an_unranked_empty_box_ranks_the_box() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = group(&mut conn).await;
+		let machine = machine(&mut conn, group).await;
+		let central = insert(&mut conn, &machine, "http://central.invalid/", Some("demo"))
+			.await
+			.expect("central");
+		Application::soft_delete(&mut conn, central)
+			.await
+			.expect("archive");
+		// As a box whose applications were all archived when ranks moved onto
+		// boxes: the migration leaves it unranked.
+		sql_query("UPDATE machines SET rank = NULL WHERE id = $1")
+			.bind::<sql_types::Uuid, _>(machine.id)
+			.execute(&mut conn)
+			.await
+			.expect("unrank the box");
+
+		let restored = Application::restore(&mut conn, central)
+			.await
+			.expect("restore");
+		assert_eq!(restored.rank, Some(ServerRank::Demo));
+		assert_eq!(
+			Machine::rank(&mut conn, machine.id).await.unwrap(),
+			Some(ServerRank::Demo),
+			"the box takes the rank its application came back with"
 		);
 	})
 	.await
@@ -223,12 +369,6 @@ async fn the_schema_refuses_two_ranks_on_one_box() {
 				.await
 				.is_err(),
 			"a second rank on the box"
-		);
-		assert!(
-			insert(&mut conn, &machine, "http://three.invalid/", None)
-				.await
-				.is_err(),
-			"a pending application beside a ranked one"
 		);
 		assert_eq!(
 			ranks_on(&mut conn, &machine).await,

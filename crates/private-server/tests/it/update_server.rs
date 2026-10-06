@@ -522,11 +522,11 @@ async fn a_machine_edit_that_fails_does_not_change_its_rank() {
 	.await
 }
 
-/// A machine holds its rank through the applications on it, so one with none
-/// has nothing to rank.
+/// A machine carries its own rank, so one with nothing on it yet is ranked all
+/// the same.
 // spec: FLT#editing
 #[tokio::test(flavor = "multi_thread")]
-async fn a_machine_with_no_application_cannot_be_ranked() {
+async fn a_machine_with_no_application_can_be_ranked() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(&format!(
 			"INSERT INTO machines (name, id) VALUES ('empty', '{BOX}')"
@@ -534,11 +534,20 @@ async fn a_machine_with_no_application_cannot_be_ranked() {
 		.await
 		.unwrap();
 
-		private
+		let response = private
 			.post("/api/fleet/machines/update")
 			.json(&json!({ "machine_id": BOX, "rank": "test" }))
+			.await;
+		response.assert_status_ok();
+		assert_eq!(response.json::<serde_json::Value>()["rank"], "test");
+
+		let machine = Machine::get_by_id(&mut conn, BOX.parse().unwrap())
 			.await
-			.assert_status_bad_request();
+			.unwrap();
+		assert_eq!(
+			machine.rank,
+			Some(commons_types::server::rank::ServerRank::Test)
+		);
 	})
 	.await
 }

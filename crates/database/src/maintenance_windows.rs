@@ -749,40 +749,34 @@ fn fleet_columns(scope: Scope) -> Option<(Option<Uuid>, Option<Uuid>, Option<Uui
 }
 
 /// The environment each machine serves, for the machines in the groups these
-/// environments belong to: the rank its applications share (see
-/// [`Machine::ranks`]), so this and [`MaintenanceWindow::suspends`] read a box
-/// the same way. A pending machine serves none.
+/// environments belong to: its rank, as [`Machine::ranks`] reads it, so this
+/// and [`MaintenanceWindow::suspends`] read a box the same way. A pending
+/// machine serves none.
 // spec: MNT#declaring
 async fn environment_of_machines(
 	db: &mut AsyncPgConnection,
 	environments: &HashSet<(Uuid, ServerRank)>,
 ) -> Result<HashMap<Uuid, (Uuid, ServerRank)>> {
-	use crate::schema::applications::dsl;
+	use crate::schema::machines::dsl;
 
 	if environments.is_empty() {
 		return Ok(HashMap::new());
 	}
 	let group_ids: Vec<Uuid> = environments.iter().map(|(group, _)| *group).collect();
-	// `applications.rank` is unconstrained text, so an unknown spelling leaves
-	// its application out and the rest of the read intact.
-	// Only machine-hosted applications place a box in an environment; a
-	// cluster-hosted one has no box to carry a window.
-	let members: Vec<(Uuid, Option<Uuid>, Option<String>)> = dsl::applications
-		.select((dsl::machine_id.assume_not_null(), dsl::group_id, dsl::rank))
+	let serving: Vec<(Uuid, Uuid, ServerRank)> = dsl::machines
+		.select((
+			dsl::id,
+			dsl::group_id.assume_not_null(),
+			dsl::rank.assume_not_null(),
+		))
 		.filter(dsl::group_id.eq_any(&group_ids))
-		.filter(dsl::machine_id.is_not_null())
+		.filter(dsl::rank.is_not_null())
 		.filter(dsl::deleted_at.is_null())
 		.load(db)
 		.await
 		.map_err(AppError::from)?;
-
-	let mut serving: HashMap<Uuid, (Uuid, ServerRank)> = HashMap::new();
-	for (machine, group, rank) in members {
-		let rank: Option<ServerRank> = rank.and_then(|rank| rank.parse().ok());
-		let (Some(group), Some(rank)) = (group, rank) else {
-			continue;
-		};
-		serving.insert(machine, (group, rank));
-	}
-	Ok(serving)
+	Ok(serving
+		.into_iter()
+		.map(|(machine, group, rank)| (machine, (group, rank)))
+		.collect())
 }

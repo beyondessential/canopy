@@ -13469,6 +13469,17 @@
             ],
             "description": "The platform the box reports, where it reports one. The one machine\nfigure the tree shows: it is what distinguishes two otherwise\nidentical rows."
           },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "The environment tier the box serves, which the applications on it\nshare. Absent while it is pending; a box can carry one before anything\non it has reported."
+              }
+            ]
+          },
           "up": {
             "$ref": "#/components/schemas/ShortStatus",
             "description": "Whether the box is reachable, judged against its own threshold."
@@ -15395,6 +15406,17 @@
             "type": "string",
             "description": "Free-form operator notes about this machine."
           },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "The environment tier this box serves, which every live application on\nit shares. `None` while the machine is pending. Set only through\n[`Machine::set_rank`], which writes it and the applications together."
+              }
+            ]
+          },
           "registered_at": {
             "type": [
               "string",
@@ -16023,7 +16045,7 @@
               },
               {
                 "$ref": "#/components/schemas/ServerRank",
-                "description": "New rank for the box, which every application on it takes. Omit to\nleave unchanged. A rank can be changed but not cleared, so `null` is\nrefused, and a box with no application on it has nothing to rank."
+                "description": "New rank for the box, which every application on it takes, and so does\nevery application that arrives on it later. Omit to leave unchanged. A\nrank can be changed but not cleared, so `null` is refused."
               }
             ]
           },

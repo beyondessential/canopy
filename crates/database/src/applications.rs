@@ -504,8 +504,8 @@ impl Application {
 	/// Stand up the application a report describes. Everything about the new
 	/// record beyond what the report said is left for an operator: it takes
 	/// its machine's group, because which group a box belongs to is the
-	/// one fact the box cannot know, and the rank its siblings share, or none
-	/// where nothing on the box is ranked yet, which leaves it pending.
+	/// one fact the box cannot know, and its machine's rank, or none where the
+	/// machine is not ranked yet, which leaves it pending.
 	///
 	/// The caller holds the machine row's lock, which is what keeps a rank
 	/// change on the box from landing between reading the rank here and the
@@ -600,10 +600,11 @@ impl Application {
 	/// Un-archive an application. Says nothing about its machine's identity,
 	/// which archiving the application did not touch.
 	///
-	/// It comes back at the rank the live applications on its box share now,
-	/// which is not necessarily the one it left at. With none of them live, as
-	/// when the whole box was archived, it keeps its own rank, so restoring a
-	/// box's applications one by one does not clear the rank they shared. It is
+	/// It comes back at its box's rank now, which is not necessarily the one it
+	/// left at. Where the box has no rank and nothing else on it is live, as
+	/// when the whole box was archived before boxes carried a rank, it keeps
+	/// its own and the box takes it by trigger, so restoring a box's
+	/// applications one by one does not clear the rank they shared. It is
 	/// pending only where it never had one, or where the live applications are
 	/// themselves pending.
 	// spec: GRP#environments
@@ -620,9 +621,14 @@ impl Application {
 				// The box's row serialises this against a report adopting beside it.
 				let rank = match application.machine_id {
 					Some(machine_id) => {
-						crate::machines::Machine::get_by_id_for_update(conn, machine_id).await?;
-						if crate::machines::Machine::has_live_application(conn, machine_id).await? {
-							crate::machines::Machine::rank(conn, machine_id).await?
+						let machine =
+							crate::machines::Machine::get_by_id_for_update(conn, machine_id)
+								.await?;
+						if machine.rank.is_some()
+							|| crate::machines::Machine::has_live_application(conn, machine_id)
+								.await?
+						{
+							machine.rank
 						} else {
 							application.rank
 						}

@@ -449,12 +449,11 @@ export interface RankedMachine {
 	name: string;
 }
 
-/// Give each machine the rank its workloads share, so a box sorts into the same
-/// bands the fleet uses everywhere else.
+/// Pair each machine with the workloads on it under its rank, so a box sorts
+/// into the same bands the fleet uses everywhere else.
 ///
-/// A box serves one environment, so every workload on it carries the same rank.
-/// A box where nothing is ranked yet, or that carries nothing yet, has no rank
-/// to take and sorts last.
+/// A box serves one environment, so every workload on it carries the box's
+/// rank. A pending box has none and sorts last.
 /// spec: FLT
 export function rankMachines(
 	machines: readonly GroupMachine[],
@@ -474,10 +473,9 @@ export function rankMachines(
 		return {
 			machine,
 			applications: on,
-			rank: best?.rank ?? null,
-			// A box carrying nothing has no type to take. It has no rank
-			// either, so it sorts last on rank alone and this never decides an
-			// ordering — naming a type here would be inventing one.
+			rank: machine.rank ?? null,
+			// A box carrying nothing has no type to take, and naming one here
+			// would be inventing it.
 			type: best?.type ?? "",
 			name: machine.name,
 		};
