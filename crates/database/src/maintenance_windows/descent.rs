@@ -14,7 +14,6 @@ use commons_errors::{AppError, Result};
 use commons_types::server::rank::ServerRank;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::applications::Application;
@@ -22,17 +21,71 @@ use crate::issues::{Issue, Scope};
 use crate::machines::Machine;
 use crate::server_groups::{ServerGroup, rank_priority};
 
-/// One target a window can be declared over.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Grain {
-	Group { group_id: Uuid },
-	Environment { group_id: Uuid, rank: ServerRank },
-	Machine { machine_id: Uuid },
-	Application { application_id: Uuid },
+/// One target a window can be declared over: an application, a machine, or a
+/// group, narrowed to one of the group's environments where it has a rank.
+///
+/// A scope and a rank rather than a scope enum of its own, so the mapping of a
+/// target to its storage columns stays [`Scope`]'s.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Grain {
+	scope: Scope,
+	rank: Option<ServerRank>,
 }
 
 impl Grain {
+	/// A grain over `scope`, narrowed to the environment at `rank`. Refuses a
+	/// scope no window covers, and a rank on anything but a group.
+	pub fn new(scope: Scope, rank: Option<ServerRank>) -> Result<Self> {
+		match scope {
+			Scope::Application(_) | Scope::Machine(_) if rank.is_some() => {
+				Err(AppError::BadRequest(
+					"an environment is a group's applications at one rank, so a window over one names the group".into(),
+				))
+			}
+			Scope::Application(_) | Scope::Machine(_) | Scope::Group(_) => Ok(Self { scope, rank }),
+			Scope::Cluster(_) | Scope::Global => Err(AppError::BadRequest(
+				"a maintenance window covers an application, a machine or a group".into(),
+			)),
+		}
+	}
+
+	pub fn group(id: Uuid) -> Self {
+		Self {
+			scope: Scope::Group(id),
+			rank: None,
+		}
+	}
+
+	pub fn environment(group: Uuid, rank: ServerRank) -> Self {
+		Self {
+			scope: Scope::Group(group),
+			rank: Some(rank),
+		}
+	}
+
+	pub fn machine(id: Uuid) -> Self {
+		Self {
+			scope: Scope::Machine(id),
+			rank: None,
+		}
+	}
+
+	pub fn application(id: Uuid) -> Self {
+		Self {
+			scope: Scope::Application(id),
+			rank: None,
+		}
+	}
+
+	pub fn scope(self) -> Scope {
+		self.scope
+	}
+
+	/// The environment this narrows its group to, where it does.
+	pub fn rank(self) -> Option<ServerRank> {
+		self.rank
+	}
+
 	/// The grain stored as a window's target columns, where they name one.
 	pub fn from_columns(
 		application: Option<Uuid>,
@@ -40,48 +93,34 @@ impl Grain {
 		group: Option<Uuid>,
 		rank: Option<ServerRank>,
 	) -> Option<Self> {
-		match (application, machine, group, rank) {
-			(Some(application_id), ..) => Some(Self::Application { application_id }),
-			(None, Some(machine_id), ..) => Some(Self::Machine { machine_id }),
-			(None, None, Some(group_id), None) => Some(Self::Group { group_id }),
-			(None, None, Some(group_id), Some(rank)) => Some(Self::Environment { group_id, rank }),
-			(None, None, None, _) => None,
-		}
-	}
-
-	/// The scope and environment rank a window over this grain is stored as.
-	pub fn scope(self) -> (Scope, Option<ServerRank>) {
-		match self {
-			Self::Group { group_id } => (Scope::Group(group_id), None),
-			Self::Environment { group_id, rank } => (Scope::Group(group_id), Some(rank)),
-			Self::Machine { machine_id } => (Scope::Machine(machine_id), None),
-			Self::Application { application_id } => (Scope::Application(application_id), None),
-		}
+		let scope = Scope::from_columns(application, machine, group, None);
+		let rank = matches!(scope, Scope::Group(_)).then_some(rank).flatten();
+		Self::new(scope, rank).ok()
 	}
 
 	/// The target columns `(application, machine, group, rank)`.
 	pub fn columns(self) -> (Option<Uuid>, Option<Uuid>, Option<Uuid>, Option<ServerRank>) {
-		match self {
-			Self::Group { group_id } => (None, None, Some(group_id), None),
-			Self::Environment { group_id, rank } => (None, None, Some(group_id), Some(rank)),
-			Self::Machine { machine_id } => (None, Some(machine_id), None, None),
-			Self::Application { application_id } => (Some(application_id), None, None, None),
-		}
+		let (application, machine, group, _) = self.scope.to_columns();
+		(application, machine, group, self.rank)
 	}
 
 	/// The grain an issue is filed against, where a window can reach it.
 	pub fn of_issue(issue: &Issue) -> Option<Self> {
-		Self::from_columns(
-			issue.application_id,
-			issue.machine_id,
-			issue.server_group_id,
+		Self::new(
+			Scope::from_columns(
+				issue.application_id,
+				issue.machine_id,
+				issue.server_group_id,
+				issue.kubernetes_cluster_id,
+			),
 			None,
 		)
+		.ok()
 	}
 }
 
 /// One grain on a line of descent, in the order it is listed.
-#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+#[derive(Clone, Debug)]
 pub struct DescentEntry {
 	pub grain: Grain,
 	/// The grain's own name: a group's, a machine's, an application's, or an
@@ -125,12 +164,13 @@ impl Descent {
 /// over, so a machine in no group lists its applications alone.
 // spec: MNT#choosing-what-to-cover
 pub async fn line_of_descent(db: &mut AsyncPgConnection, start: Grain) -> Result<Descent> {
-	let group_id = match start {
-		Grain::Group { group_id } | Grain::Environment { group_id, .. } => Some(group_id),
-		Grain::Machine { machine_id } => Machine::get_by_id(db, machine_id).await?.group_id,
-		Grain::Application { application_id } => {
+	let group_id = match start.scope() {
+		Scope::Group(group_id) => Some(group_id),
+		Scope::Machine(machine_id) => Machine::get_by_id(db, machine_id).await?.group_id,
+		Scope::Application(application_id) => {
 			Application::get_by_id(db, application_id).await?.group_id
 		}
+		Scope::Cluster(_) | Scope::Global => None,
 	};
 
 	let (group, machines, applications) = match group_id {
@@ -141,9 +181,9 @@ pub async fn line_of_descent(db: &mut AsyncPgConnection, start: Grain) -> Result
 			(Some(group), machines, applications)
 		}
 		None => {
-			let machine_id = match start {
-				Grain::Machine { machine_id } => Some(machine_id),
-				Grain::Application { application_id } => {
+			let machine_id = match start.scope() {
+				Scope::Machine(machine_id) => Some(machine_id),
+				Scope::Application(application_id) => {
 					Application::get_by_id(db, application_id).await?.machine_id
 				}
 				_ => None,
@@ -152,9 +192,9 @@ pub async fn line_of_descent(db: &mut AsyncPgConnection, start: Grain) -> Result
 				Some(id) => vec![Machine::get_by_id(db, id).await?],
 				None => Vec::new(),
 			};
-			let applications = match (machine_id, start) {
+			let applications = match (machine_id, start.scope()) {
 				(Some(id), _) => applications_on(db, id).await?,
-				(None, Grain::Application { application_id }) => {
+				(None, Scope::Application(application_id)) => {
 					vec![Application::get_by_id(db, application_id).await?]
 				}
 				_ => Vec::new(),
@@ -168,19 +208,13 @@ pub async fn line_of_descent(db: &mut AsyncPgConnection, start: Grain) -> Result
 
 	// The whole tree, in listing order, with each grain's container.
 	let mut tree: Vec<(Grain, String, Option<Grain>)> = Vec::new();
-	let group_grain = group
-		.as_ref()
-		.map(|group| Grain::Group { group_id: group.id });
+	let group_grain = group.as_ref().map(|group| Grain::group(group.id));
 	if let Some(group) = &group {
-		tree.push((
-			Grain::Group { group_id: group.id },
-			group.name.clone(),
-			None,
-		));
+		tree.push((Grain::group(group.id), group.name.clone(), None));
 	}
 
 	let mut environments: Vec<ServerRank> = ranks.values().copied().collect();
-	if let Grain::Environment { rank, .. } = start {
+	if let Some(rank) = start.rank() {
 		environments.push(rank);
 	}
 	environments.sort_by_key(|rank| rank_priority(Some(*rank)));
@@ -201,15 +235,11 @@ pub async fn line_of_descent(db: &mut AsyncPgConnection, start: Grain) -> Result
 	let push_machine = |tree: &mut Vec<(Grain, String, Option<Grain>)>,
 	                    machine: &Machine,
 	                    parent: Option<Grain>| {
-		let grain = Grain::Machine {
-			machine_id: machine.id,
-		};
+		let grain = Grain::machine(machine.id);
 		tree.push((grain, machine.name.clone(), parent));
 		for application in by_machine.get(&machine.id).into_iter().flatten() {
 			tree.push((
-				Grain::Application {
-					application_id: application.id,
-				},
+				Grain::application(application.id),
 				application.display_name(),
 				Some(grain),
 			));
@@ -218,10 +248,7 @@ pub async fn line_of_descent(db: &mut AsyncPgConnection, start: Grain) -> Result
 
 	if let Some(group) = &group {
 		for rank in &environments {
-			let environment = Grain::Environment {
-				group_id: group.id,
-				rank: *rank,
-			};
+			let environment = Grain::environment(group.id, *rank);
 			tree.push((environment, rank.to_string(), group_grain));
 			for machine in machines.iter().filter(|m| ranks.get(&m.id) == Some(rank)) {
 				push_machine(&mut tree, machine, Some(environment));
@@ -237,9 +264,7 @@ pub async fn line_of_descent(db: &mut AsyncPgConnection, start: Grain) -> Result
 	boxless.sort_by_key(|application| application.display_name());
 	for application in boxless {
 		tree.push((
-			Grain::Application {
-				application_id: application.id,
-			},
+			Grain::application(application.id),
 			application.display_name(),
 			group_grain,
 		));

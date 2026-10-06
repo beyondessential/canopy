@@ -4,6 +4,7 @@ import { useState } from "react";
 import ActionButton from "./ActionButton";
 import DeclareMaintenanceDialog from "./DeclareMaintenanceDialog";
 import { GradedAction } from "./GradedAction";
+import { maintenanceTarget } from "../types";
 import type { MaintenanceScope } from "../types";
 
 /** Maintenance at the head of a target's page, beside its other actions, so it
@@ -46,8 +47,7 @@ export default function MaintenanceHeaderButton({
 			<DeclareMaintenanceDialog
 				open={open}
 				onClose={() => setOpen(false)}
-				scope={scope}
-				id={id}
+				start={maintenanceTarget(scope, id)}
 				offerLift
 				onDone={onDone}
 			/>

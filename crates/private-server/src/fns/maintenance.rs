@@ -6,7 +6,7 @@ use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::{Uuid, server::rank::ServerRank};
 use database::issues::{Incident, Scope};
 use database::maintenance_windows::{
-	Amendment, Grain, MaintenanceWindow, TargetWindow, line_of_descent,
+	Amendment, Grain, HeldInPlace, MaintenanceWindow, TargetWindow, line_of_descent,
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -52,6 +52,46 @@ impl TargetArgs {
 	}
 }
 
+/// A target a window can cover, named the way a declaration names it: exactly
+/// one of the ids, and with the group, optionally the rank of one of its
+/// environments.
+#[derive(Clone, Copy, Serialize, Deserialize, ToSchema)]
+pub struct MaintenanceTarget {
+	/// The application, for a window over one workload.
+	pub application_id: Option<Uuid>,
+	/// The machine, for a window over one box.
+	pub machine_id: Option<Uuid>,
+	/// The group, for a window over a whole group or one of its environments.
+	pub server_group_id: Option<Uuid>,
+	/// With the group, the environment the window covers. Absent for the whole
+	/// group.
+	pub rank: Option<ServerRank>,
+}
+
+impl MaintenanceTarget {
+	fn grain(self) -> Result<Grain> {
+		let scope = TargetArgs {
+			application_id: self.application_id,
+			machine_id: self.machine_id,
+			server_group_id: self.server_group_id,
+		}
+		.scope()?;
+		Grain::new(scope, self.rank)
+	}
+}
+
+impl From<Grain> for MaintenanceTarget {
+	fn from(grain: Grain) -> Self {
+		let (application_id, machine_id, server_group_id, rank) = grain.columns();
+		Self {
+			application_id,
+			machine_id,
+			server_group_id,
+			rank,
+		}
+	}
+}
+
 /// Declare a window over a target, or amend the one it already has.
 #[derive(Deserialize, ToSchema)]
 pub struct DeclareArgs {
@@ -84,7 +124,7 @@ pub struct AmendWindowArgs {
 	pub id: Uuid,
 	/// A new target, moving the window there: any grain on its target's line
 	/// of descent that has no window of its own.
-	pub target: Option<Grain>,
+	pub target: Option<MaintenanceTarget>,
 	/// A new expected end.
 	#[schema(value_type = Option<String>, format = DateTime)]
 	pub expected_end: Option<Timestamp>,
@@ -106,8 +146,8 @@ where
 /// Where a declaration starts, and what it is read against.
 #[derive(Deserialize, ToSchema)]
 pub struct MaintenanceTargetsArgs {
-	/// The grain the declaration is offered over.
-	pub start: Grain,
+	/// The target the declaration is offered over.
+	pub start: MaintenanceTarget,
 	/// The incident it is offered from, to mark the choices that leave some of
 	/// its failing checks contributing.
 	pub incident_id: Option<Uuid>,
@@ -119,7 +159,7 @@ pub struct MaintenanceTargetsArgs {
 #[derive(Serialize, ToSchema)]
 pub struct MaintenanceTargetChoice {
 	/// The target a window here would cover.
-	pub grain: Grain,
+	pub target: MaintenanceTarget,
 	/// The grain's own name: a group's, a machine's, an application's, or an
 	/// environment's rank.
 	pub label: String,
@@ -140,7 +180,7 @@ pub struct MaintenanceTargets {
 	/// in the order they contain one another.
 	pub choices: Vec<MaintenanceTargetChoice>,
 	/// Why the window being amended cannot move, where it cannot.
-	pub fixed_because: Option<String>,
+	pub held_in_place: Option<HeldInPlace>,
 }
 
 /// The window to lift.
@@ -310,7 +350,7 @@ pub async fn amend(
 		&mut conn,
 		args.id,
 		Amendment {
-			target: args.target,
+			target: args.target.map(MaintenanceTarget::grain).transpose()?,
 			expected_end: args.expected_end,
 			note: args
 				.note
@@ -346,7 +386,8 @@ pub async fn targets(
 	Json(args): Json<MaintenanceTargetsArgs>,
 ) -> Result<Json<MaintenanceTargets>> {
 	let mut conn = state.db.get().await?;
-	let descent = line_of_descent(&mut conn, args.start).await?;
+	let start = args.start.grain()?;
+	let descent = line_of_descent(&mut conn, start).await?;
 	let open = MaintenanceWindow::list_open(&mut conn).await?;
 
 	// Coverage is reckoned against the failures alone: an incident whose
@@ -368,7 +409,7 @@ pub async fn targets(
 		.entries
 		.iter()
 		.map(|entry| MaintenanceTargetChoice {
-			grain: entry.grain,
+			target: entry.grain.into(),
 			label: entry.label.clone(),
 			depth: entry.depth,
 			window: open
@@ -387,20 +428,22 @@ pub async fn targets(
 	// grain's own, since a declaration offered over a target with a window of
 	// its own amends it from the start.
 	// spec: MNT#moving-a-window
+	// A window that has ended is amended by no one, so nothing holds it.
 	let own = match args.window_id {
-		Some(id) => Some(MaintenanceWindow::get(&mut conn, id).await?),
+		Some(id) => Some(MaintenanceWindow::get(&mut conn, id).await?)
+			.filter(|window| window.ended_at.is_none()),
 		None => open
 			.iter()
-			.find(|window| window.grain() == Some(args.start))
+			.find(|window| window.grain() == Some(start))
 			.cloned(),
 	};
-	let fixed_because = match own {
-		Some(window) => window.fixed_because(&mut conn).await?,
+	let held_in_place = match own {
+		Some(window) => window.held_in_place(&mut conn).await?,
 		None => None,
 	};
 	Ok(Json(MaintenanceTargets {
 		choices,
-		fixed_because,
+		held_in_place,
 	}))
 }
 

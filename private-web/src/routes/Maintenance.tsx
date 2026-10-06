@@ -21,11 +21,8 @@ import ServerRankChip from "../components/ServerRankChip";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
-import type {
-	MaintenanceScope,
-	MaintenanceWindow,
-	ServerRank,
-} from "../types";
+import { targetOfWindow } from "../types";
+import type { MaintenanceWindow, ServerRank } from "../types";
 
 /// Change a window's hours, note, or what it covers from the list, so the fleet
 /// view an operator finds work in is also where they adjust it.
@@ -38,17 +35,9 @@ function AmendWindow({
 	onAmended: () => void;
 }) {
 	const [open, setOpen] = useState(false);
-	const scope: MaintenanceScope | null = window.application_id
-		? "application"
-		: window.machine_id
-			? "machine"
-			: window.server_group_id
-				? "group"
-				: null;
-	const id =
-		window.application_id ?? window.machine_id ?? window.server_group_id;
+	const start = targetOfWindow(window);
 	// A window over the whole fleet has no target page to amend it against.
-	if (!scope || !id) {
+	if (!start) {
 		return null;
 	}
 	return (
@@ -61,9 +50,7 @@ function AmendWindow({
 			<DeclareMaintenanceDialog
 				open={open}
 				onClose={() => setOpen(false)}
-				scope={scope}
-				id={id}
-				rank={window.rank ?? undefined}
+				start={start}
 				existing={window}
 				onDone={onAmended}
 			/>

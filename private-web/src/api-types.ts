@@ -4945,7 +4945,7 @@ export interface components {
             id: string;
             /** @description A new note. Null clears it; leaving it out keeps the window's own. */
             note?: string | null;
-            target?: null | components["schemas"]["Grain"];
+            target?: null | components["schemas"]["MaintenanceTarget"];
         };
         /**
          * @description A single application in the fleet: the unit that reports status, files
@@ -7002,29 +7002,6 @@ export interface components {
              */
             incident_id: string;
         };
-        /** @description One target a window can be declared over. */
-        Grain: {
-            /** Format: uuid */
-            group_id: string;
-            /** @enum {string} */
-            kind: "group";
-        } | {
-            /** Format: uuid */
-            group_id: string;
-            /** @enum {string} */
-            kind: "environment";
-            rank: components["schemas"]["ServerRank"];
-        } | {
-            /** @enum {string} */
-            kind: "machine";
-            /** Format: uuid */
-            machine_id: string;
-        } | {
-            /** Format: uuid */
-            application_id: string;
-            /** @enum {string} */
-            kind: "application";
-        };
         /** @description Where a group stands with respect to granting its applications name management. */
         GrantAvailabilityView: {
             /**
@@ -7349,6 +7326,21 @@ export interface components {
             notes?: string | null;
             /** @description The source whose check to update. */
             source: string;
+        };
+        /** @description What keeps a window over the target it covers. */
+        HeldInPlace: {
+            /** @enum {string} */
+            kind: "upgrade_plan";
+            /**
+             * Format: uuid
+             * @description The plan it was declared from.
+             */
+            plan_id: string;
+        } | {
+            /** @description The operator running. */
+            held_by?: string | null;
+            /** @enum {string} */
+            kind: "run_lease";
         };
         /** @description Pagination parameters for browsing the shared query history. */
         HistoryArgs: {
@@ -8825,6 +8817,29 @@ export interface components {
          * @enum {string}
          */
         MaintenanceKind: "quick" | "full";
+        /**
+         * @description A target a window can cover, named the way a declaration names it: exactly
+         *     one of the ids, and with the group, optionally the rank of one of its
+         *     environments.
+         */
+        MaintenanceTarget: {
+            /**
+             * Format: uuid
+             * @description The application, for a window over one workload.
+             */
+            application_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The machine, for a window over one box.
+             */
+            machine_id?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
+            /**
+             * Format: uuid
+             * @description The group, for a window over a whole group or one of its environments.
+             */
+            server_group_id?: string | null;
+        };
         /** @description One grain a declaration can cover. */
         MaintenanceTargetChoice: {
             /**
@@ -8837,13 +8852,13 @@ export interface components {
              * @description How many of the listed grains contain this one.
              */
             depth: number;
-            /** @description The target a window here would cover. */
-            grain: components["schemas"]["Grain"];
             /**
              * @description The grain's own name: a group's, a machine's, an application's, or an
              *     environment's rank.
              */
             label: string;
+            /** @description The target a window here would cover. */
+            target: components["schemas"]["MaintenanceTarget"];
             window?: null | components["schemas"]["MaintenanceWindow"];
         };
         /**
@@ -8856,8 +8871,7 @@ export interface components {
              *     in the order they contain one another.
              */
             choices: components["schemas"]["MaintenanceTargetChoice"][];
-            /** @description Why the window being amended cannot move, where it cannot. */
-            fixed_because?: string | null;
+            held_in_place?: null | components["schemas"]["HeldInPlace"];
         };
         /** @description Where a declaration starts, and what it is read against. */
         MaintenanceTargetsArgs: {
@@ -8867,8 +8881,8 @@ export interface components {
              *     its failing checks contributing.
              */
             incident_id?: string | null;
-            /** @description The grain the declaration is offered over. */
-            start: components["schemas"]["Grain"];
+            /** @description The target the declaration is offered over. */
+            start: components["schemas"]["MaintenanceTarget"];
             /**
              * Format: uuid
              * @description The window being amended, where the declaration is an amendment.

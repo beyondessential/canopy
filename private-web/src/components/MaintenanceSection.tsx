@@ -13,7 +13,7 @@ import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
-import { heldByLabel } from "../types";
+import { heldByLabel, maintenanceTarget, targetOfWindow } from "../types";
 import type {
 	MaintenanceScope,
 	MaintenanceWindow,
@@ -391,16 +391,14 @@ export default function MaintenanceSection({
 			<DeclareMaintenanceDialog
 				open={dialogOpen}
 				onClose={() => setDialogOpen(false)}
-				scope={scope}
-				id={id}
+				start={maintenanceTarget(scope, id)}
 				onDone={reload}
 			/>
 			{amending && (
 				<DeclareMaintenanceDialog
 					open
 					onClose={() => setAmending(null)}
-					scope={scope}
-					id={id}
+					start={targetOfWindow(amending) ?? maintenanceTarget(scope, id)}
 					existing={amending}
 					onDone={reload}
 				/>
