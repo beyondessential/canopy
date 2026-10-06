@@ -290,12 +290,15 @@ A test costs a full restore and migrate per machine, and a group's data rarely c
 On the schedule, a pair falls due once a week, and once more in the day before its environment's plan starts, so the last answer before the upgrade is against the latest data.
 A plan's start is the opening of its window where it recorded an hour, and the start of its planned day in UTC otherwise.
 A snapshot that already has a verdict for the version is never due, so backups that stopped arriving do not spend a restore a week on an answer already held.
+A week is counted from when the last test's report reached Canopy, since a consumer's clock is not one the schedule can rest on.
 The schedule is the default; asking is for trying a version out, and for a group too large to restore weekly.
 
 An operator asks from the environment's row in the upgrades view, and the ask covers every machine whose application the plan applies to.
 An ask puts each of those machines on the worklist against its latest snapshot, including one whose pair is already settled, since an ask after a fix to the pipeline or to the data is a request for a new answer.
 It is answered for a machine once a verdict for that machine and version lands from a test that began after the ask, and until then the environment's row says it is waiting.
-A test begins when its run is first issued credentials, so a run already under way when the ask is made does not answer it.
+A test begins when its consumer is first issued credentials for its run, so a run already under way when the ask is made does not answer it; a report naming no run is taken to have begun its elapsed time before it finished.
+An ask on a declaration on the schedule never puts off a test already owed: the pair is due from whichever came first.
+A declaration building reporting schemas migrates without testing the plan, so on its own it leaves an environment with nothing to ask for.
 An ask belongs to the plan it was made under: once that plan is met, withdrawn, or replaced, the ask dispatches nothing.
 A restore that fails before migrating leaves the ask standing, as it leaves the pair retryable.
 A declaration is overdue when a pair it is due to test, by the schedule or by an ask, goes untried past the bound; one that tests on request is never overdue for want of a test nobody asked for.

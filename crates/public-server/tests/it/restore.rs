@@ -1190,8 +1190,8 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 	.await;
 }
 
-/// A migration test against the planned version, begun `hours_ago`, failing
-/// where a migration is named.
+/// A migration test against the planned version, reported `hours_ago`,
+/// failing where a migration is named.
 #[allow(clippy::too_many_arguments)]
 async fn record_migration_test(
 	conn: &mut AsyncPgConnection,
@@ -1244,6 +1244,16 @@ async fn record_migration_test(
 	)
 	.await
 	.expect("record migration test");
+	sql_query(
+		"UPDATE backup_restore_checks SET reported_at = NOW() - make_interval(hours => $1)
+		 WHERE snapshot_id = $2 AND machine_id = $3",
+	)
+	.bind::<sql_types::Integer, _>(hours_ago as i32)
+	.bind::<sql_types::Text, _>(snapshot)
+	.bind::<sql_types::Uuid, _>(server)
+	.execute(conn)
+	.await
+	.expect("age the report");
 }
 
 async fn worklist(public: &axum_test::TestServer, cert: &str) -> Vec<serde_json::Value> {
@@ -1292,6 +1302,12 @@ async fn a_declaration_migrating_on_request_waits_to_be_asked() {
 			assert_eq!(asked.len(), 1, "got {asked:?}");
 			assert_eq!(asked[0]["target_version_id"], planned.to_string());
 
+			sql_query(
+				"UPDATE migration_test_requests SET requested_at = NOW() - INTERVAL '1 hour'",
+			)
+			.execute(&mut conn)
+			.await
+			.expect("age the ask");
 			record_migration_test(
 				&mut conn, device_id, group, server, planned, "snap-1", 0, None,
 			)
@@ -1409,6 +1425,28 @@ async fn a_pair_untested_for_a_week_falls_due() {
 			let entries = worklist(&public, &cert).await;
 			assert_eq!(entries.len(), 1, "got {entries:?}");
 			assert_eq!(entries[0]["snapshot_id"], "snap-2");
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_report_dated_ahead_does_not_hold_the_schedule_off() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			scheduled_after_a_test(&mut conn, &public, &cert, device_id, 8 * 24).await;
+			sql_query("UPDATE backup_restore_checks SET observed_at = NOW() + INTERVAL '1 year'")
+				.execute(&mut conn)
+				.await
+				.expect("date the report ahead");
+
+			let entries = worklist(&public, &cert).await;
+			assert_eq!(
+				entries.len(),
+				1,
+				"it reached Canopy eight days ago, whatever it says: got {entries:?}"
+			);
 		},
 	)
 	.await;

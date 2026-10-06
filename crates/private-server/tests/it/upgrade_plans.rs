@@ -160,6 +160,7 @@ async fn a_plan_nothing_will_test_says_so() {
 			row["testable"], false,
 			"an intent that does not migrate tests nothing"
 		);
+
 		assert!(
 			row["attempt"].is_null(),
 			"and its restores are not a migration test under way"
@@ -882,7 +883,15 @@ async fn an_ask_shows_on_the_row_until_a_verdict_answers_it() {
 			INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES
 				('cccccccc-0000-0000-0000-0000000000a1', 'test', '{}'::jsonb, '2.60.0');
 			INSERT INTO devices (id, role) VALUES
-				('cccccccc-0000-0000-0000-0000000000d0', 'backup-restore');",
+				('cccccccc-0000-0000-0000-0000000000d0', 'backup-restore');
+			INSERT INTO restore_consumer_capabilities
+				(consumer_device_id, intent, semantics)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0', 'upgrade', '[\"migrate\"]');
+			INSERT INTO restore_replicas
+				(consumer_device_id, group_id, type, intent, name)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0',
+				'cccccccc-0000-0000-0000-000000000001', 'tamanu-postgres', 'upgrade',
+				'kamaka-upgrade');",
 		)
 		.await
 		.unwrap();
@@ -918,6 +927,11 @@ async fn an_ask_shows_on_the_row_until_a_verdict_answers_it() {
 		);
 		assert_eq!(waiting["test_request"]["requested_by"], "admin@localhost");
 
+		conn.batch_execute(
+			"UPDATE migration_test_requests SET requested_at = NOW() - INTERVAL '1 hour'",
+		)
+		.await
+		.unwrap();
 		let machine: uuid::Uuid = "cccccccc-0000-0000-0000-0000000000a1".parse().unwrap();
 		database::migration_tests::MigrationTest::record(
 			&mut conn,
@@ -1014,6 +1028,58 @@ async fn only_a_group_with_something_ranked_is_in_the_fleet_view() {
 			!fleet.iter().any(|row| row["group_id"] == UNPLANNED),
 			"a group with nothing ranked has no environment to list: {fleet:?}"
 		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_schema_build_alone_does_not_test_the_plan() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+				('cccccccc-0000-0000-0000-0000000000f1', 2, 61, 0, 'x', 'published');
+			INSERT INTO server_groups (id, name) VALUES
+				('cccccccc-0000-0000-0000-000000000001', 'kamaka');
+			INSERT INTO machines (name, id, group_id) VALUES
+				('box', 'cccccccc-0000-0000-0000-0000000000a1', 'cccccccc-0000-0000-0000-000000000001');
+			INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'tamanu-central', 'production', 'cccccccc-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-0000000000a1');
+			INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'test', '{}'::jsonb, '2.60.0');
+			INSERT INTO devices (id, role) VALUES
+				('cccccccc-0000-0000-0000-0000000000d0', 'backup-restore');
+			INSERT INTO upgrade_plans (group_id, rank, target_version_id) VALUES
+				('cccccccc-0000-0000-0000-000000000001', 'production',
+				 'cccccccc-0000-0000-0000-0000000000f1');",
+		)
+		.await
+		.unwrap();
+
+		conn.batch_execute(
+			"INSERT INTO restore_consumer_capabilities
+				(consumer_device_id, intent, semantics)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0', 'schema-build',
+				'[\"check\", \"once\", \"migrate\", \"reporting-schema\"]');
+			INSERT INTO restore_replicas
+				(consumer_device_id, group_id, type, intent, name, publishes_schemas)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0',
+				'cccccccc-0000-0000-0000-000000000001', 'tamanu-postgres', 'schema-build',
+				'kamaka-schemas', true);",
+		)
+		.await
+		.unwrap();
+		let fleet: Vec<Value> = private
+			.post("/api/upgrade_plans/fleet")
+			.json(&json!({}))
+			.await
+			.json();
+		let row = fleet.iter().find(|r| r["group_id"] == GROUP).unwrap();
+		assert!(row["testing"].is_null(), "got {row}");
+		private
+			.post("/api/migration_tests/request")
+			.json(&json!({ "group_id": GROUP, "rank": "production" }))
+			.await
+			.assert_status_bad_request();
 	})
 	.await;
 }

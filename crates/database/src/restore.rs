@@ -595,24 +595,59 @@ pub async fn group_migrates(db: &mut AsyncPgConnection, group_id: Uuid) -> Resul
 // spec: RST#verdicts
 #[derive(Debug, Clone, Default)]
 pub struct MigratingEnvironments {
-	whole_group: bool,
-	ranks: HashSet<commons_types::server::rank::ServerRank>,
-	scheduled_whole_group: bool,
-	scheduled_ranks: HashSet<commons_types::server::rank::ServerRank>,
+	whole_group: Option<Coverage>,
+	ranks: HashMap<commons_types::server::rank::ServerRank, Coverage>,
+}
+
+/// How an environment's data is migration-tested while its plan is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Testing {
+	/// Only when an operator asks.
+	OnRequest,
+	/// Weekly, and once more in the day before the upgrade.
+	Scheduled,
+}
+
+/// What the declarations covering one environment do with its restores: a
+/// declaration building reporting schemas migrates them without testing the
+/// plan, so it covers the environment and leaves it untested.
+#[derive(Debug, Clone, Copy, Default)]
+struct Coverage {
+	testing: Option<Testing>,
+}
+
+impl Coverage {
+	fn merge(&mut self, testing: Option<Testing>) {
+		self.testing = self.testing.max(testing);
+	}
 }
 
 impl MigratingEnvironments {
+	fn coverage(&self, rank: commons_types::server::rank::ServerRank) -> Option<Coverage> {
+		match (self.whole_group, self.ranks.get(&rank)) {
+			(None, None) => None,
+			(whole, own) => {
+				let mut merged = Coverage::default();
+				for coverage in whole.iter().chain(own) {
+					merged.merge(coverage.testing);
+				}
+				Some(merged)
+			}
+		}
+	}
+
 	/// A group-wide declaration covers every environment, one over a single
 	/// machine covers the environment that machine serves.
 	pub fn covers(&self, rank: commons_types::server::rank::ServerRank) -> bool {
-		self.whole_group || self.ranks.contains(&rank)
+		self.coverage(rank).is_some()
 	}
 
-	/// Whether a declaration covering the environment tests it on the schedule,
-	/// rather than only when asked.
+	/// How the declarations covering the environment test it, the schedule
+	/// winning over asking. `None` where none of them tests the plan.
 	// spec: RST#dispatching-a-migration-test
-	pub fn scheduled(&self, rank: commons_types::server::rank::ServerRank) -> bool {
-		self.scheduled_whole_group || self.scheduled_ranks.contains(&rank)
+	pub fn testing(&self, rank: commons_types::server::rank::ServerRank) -> Option<Testing> {
+		self.coverage(rank).and_then(|coverage| coverage.testing)
 	}
 }
 
@@ -647,21 +682,22 @@ pub async fn migrating_environments(
 		else {
 			continue;
 		};
-		let scheduled =
-			!replica.migrates_on_request && !descriptor.has_semantic(semantics::REPORTING_SCHEMA);
-		match replica.machine_id {
-			None => {
-				out.whole_group = true;
-				out.scheduled_whole_group |= scheduled;
-			}
-			Some(machine_id) => {
-				if let Some(rank) = ranks.get(&machine_id) {
-					out.ranks.insert(*rank);
-					if scheduled {
-						out.scheduled_ranks.insert(*rank);
-					}
-				}
-			}
+		let testing = match (
+			descriptor.has_semantic(semantics::REPORTING_SCHEMA),
+			replica.migrates_on_request,
+		) {
+			(true, _) => None,
+			(false, true) => Some(Testing::OnRequest),
+			(false, false) => Some(Testing::Scheduled),
+		};
+		let coverage = match replica.machine_id {
+			None => Some(out.whole_group.get_or_insert_default()),
+			Some(machine_id) => ranks
+				.get(&machine_id)
+				.map(|rank| out.ranks.entry(*rank).or_default()),
+		};
+		if let Some(coverage) = coverage {
+			coverage.merge(testing);
 		}
 	}
 	Ok(out)
@@ -1567,42 +1603,29 @@ async fn untried_candidate(
 		return Ok(None);
 	};
 	let applications = machine.applications(db).await?;
-	let Some(crate::migration_tests::BoxCandidate {
-		plan,
-		version,
-		request,
-		..
-	}) = crate::migration_tests::candidate_on_box(db, machine.id, &applications).await?
+	let Some(candidate) =
+		crate::migration_tests::candidate_on_box(db, machine.id, &applications).await?
 	else {
 		return Ok(None);
 	};
-	// Measured from when the pair fell due on the schedule, or from the ask, for
-	// a declaration that tests only when asked.
-	let since = match (&request, declaration.migrates_on_request) {
-		(Some(request), _) => request.requested_at.max(run.reported_at),
-		(None, true) => return Ok(None),
-		(None, false) => {
-			match crate::migration_tests::scheduled_due(
-				db,
-				machine.id,
-				&plan,
-				&version,
-				snapshot_id,
-				run.reported_at,
-				now,
-			)
-			.await?
-			{
-				Some(due) => due,
-				None => return Ok(None),
-			}
-		}
+	let Some(since) = crate::migration_tests::due_at(
+		db,
+		machine.id,
+		declaration.migrates_on_request,
+		&candidate,
+		snapshot_id,
+		run.reported_at,
+		now,
+	)
+	.await?
+	else {
+		return Ok(None);
 	};
 	if now.duration_since(since) <= bound.0 {
 		return Ok(None);
 	}
 	Ok(Some((
-		version.as_semver().to_string(),
+		candidate.version.as_semver().to_string(),
 		snapshot_id.to_owned(),
 	)))
 }

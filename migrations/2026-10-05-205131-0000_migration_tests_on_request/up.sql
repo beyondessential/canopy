@@ -17,3 +17,6 @@ CREATE TABLE migration_test_requests (
 	requested_by TEXT,
 	PRIMARY KEY (machine_id, plan_id)
 );
+
+-- The fleet view reads every open plan's asks at once.
+CREATE INDEX migration_test_requests_plan ON migration_test_requests (plan_id);

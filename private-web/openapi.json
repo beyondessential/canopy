@@ -21232,8 +21232,8 @@
         "type": "string",
         "description": "How an environment's data is migration-tested while its plan is open.",
         "enum": [
-          "scheduled",
-          "on_request"
+          "on_request",
+          "scheduled"
         ]
       },
       "Transition": {

@@ -54,6 +54,18 @@ pub async fn request(
 ) -> Result<Json<usize>> {
 	let mut conn = state.db.get().await?;
 	let TailscaleAdmin(TailscaleUser { login, .. }) = admin;
+	// A declaration that builds reporting schemas migrates without testing the
+	// plan, so an ask with nothing else covering the environment would wait for
+	// good.
+	if database::restore::migrating_environments(&mut conn, args.group_id)
+		.await?
+		.testing(args.rank)
+		.is_none()
+	{
+		return Err(AppError::BadRequest(
+			"nothing declared tests this environment's plan".into(),
+		));
+	}
 	let made = MigrationTestRequest::request_environment(
 		&mut conn,
 		args.group_id,

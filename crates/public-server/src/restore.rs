@@ -479,9 +479,8 @@ async fn worklist(
 				)
 			});
 
-			// An operator's ask reinstates a pair already settled against the
-			// latest snapshot, and is the only thing that dispatches a
-			// declaration migrating on request.
+			// A declaration on request waits for an ask; without one it has
+			// nothing to restore whatever the snapshot.
 			// spec: RST#dispatching-a-migration-test
 			let requested = candidate.as_ref().is_some_and(|c| c.request.is_some());
 			if migrates && d.migrates_on_request && !requested {
@@ -512,16 +511,16 @@ async fn worklist(
 
 			// A `once` intent drops off the worklist once its work is settled for
 			// the latest snapshot, and reappears only when a newer one exists. A
-			// `migrate` intent on the schedule is settled until its pair falls due
-			// again, and a failure settles it as firmly as a pass.
-			if once && !requested {
+			// `migrate` intent is settled until its pair falls due, by its
+			// schedule or by an ask, and a failure settles it as firmly as a pass.
+			if once || d.migrates_on_request {
 				let snapshot = latest.and_then(|r| r.snapshot_id.as_ref().map(|id| (id, r)));
 				let settled = match (&candidate, snapshot) {
-					(Some(c), Some((snapshot, run))) => migration_tests::scheduled_due(
+					(Some(c), Some((snapshot, run))) => migration_tests::due_at(
 						&mut conn,
 						machine.id,
-						&c.plan,
-						&c.version,
+						d.migrates_on_request,
+						c,
 						snapshot,
 						run.reported_at,
 						jiff::Timestamp::now(),

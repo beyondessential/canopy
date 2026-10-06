@@ -11946,7 +11946,7 @@ export interface components {
          * @description How an environment's data is migration-tested while its plan is open.
          * @enum {string}
          */
-        Testing: "scheduled" | "on_request";
+        Testing: "on_request" | "scheduled";
         /**
          * @description One healthy↔degraded transition: the state became (or was first
          *     observed) `degraded`/healthy at `at`.

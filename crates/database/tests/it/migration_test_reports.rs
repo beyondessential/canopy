@@ -989,7 +989,7 @@ async fn on_the_schedule_overdue_runs_from_when_the_pair_fell_due() {
 			"tested three days ago, so the newer snapshot is not due"
 		);
 
-		sql_query("UPDATE backup_restore_checks SET observed_at = NOW() - INTERVAL '8 days'")
+		sql_query("UPDATE backup_restore_checks SET reported_at = NOW() - INTERVAL '8 days'")
 			.execute(&mut conn)
 			.await
 			.expect("age the test");
@@ -999,6 +999,36 @@ async fn on_the_schedule_overdue_runs_from_when_the_pair_fell_due() {
 				.expect("sweep"),
 			1,
 			"due a day ago, past the hour's bound"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn asking_does_not_quiet_a_test_already_overdue() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn).await;
+		let (machine, _) = insert_server(&mut conn, group).await;
+		let target = insert_version(&mut conn, 63).await;
+		plan_upgrade(&mut conn, group, &target).await;
+		declare_migrate(&mut conn, consumer, group, 3600).await;
+		record_snapshot(&mut conn, consumer, group, machine, "snap-old", 7200).await;
+		assert_eq!(
+			database::restore::sweep_restore_checks(&mut conn)
+				.await
+				.expect("sweep"),
+			1,
+			"untried two hours, past the hour's bound"
+		);
+
+		assert_eq!(ask(&mut conn, group, ServerRank::Production).await, 1);
+		assert_eq!(
+			database::restore::sweep_restore_checks(&mut conn)
+				.await
+				.expect("sweep"),
+			1,
+			"still owed from before the ask"
 		);
 	})
 	.await
@@ -1086,6 +1116,12 @@ async fn an_ask_waits_for_a_test_begun_after_it() {
 			"a restore that failed before migrating leaves it standing"
 		);
 
+		sql_query(
+			"UPDATE migration_test_requests SET requested_at = NOW() - INTERVAL '10 minutes'",
+		)
+		.execute(&mut conn)
+		.await
+		.expect("age the ask");
 		record_test_at(
 			&mut conn,
 			consumer,
@@ -1151,6 +1187,101 @@ async fn a_run_already_under_way_does_not_answer_an_ask() {
 		assert!(
 			pending(&mut conn, machine, &target).await,
 			"the run began three hours before the ask, though it reported after"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn only_the_reporting_consumer_s_run_says_when_it_began() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let other = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn).await;
+		let (machine, server) = insert_server(&mut conn, group).await;
+		let target = insert_version(&mut conn, 63).await;
+		plan_upgrade(&mut conn, group, &target).await;
+		let run = Uuid::new_v4();
+		sql_query(
+			"INSERT INTO backup_credential_issuances
+				(device_id, group_id, type, purpose, issued_at, expires_at,
+				 sts_assumed_role, bucket, prefix, run_id)
+			 VALUES ($1, $2, 'tamanu-postgres', 'restore', NOW() - INTERVAL '3 hours',
+				NOW() + INTERVAL '1 hour', 'arn:aws:iam::1:role/r', 'b', '', $3)",
+		)
+		.bind::<sql_types::Uuid, _>(other)
+		.bind::<sql_types::Uuid, _>(group)
+		.bind::<sql_types::Uuid, _>(run)
+		.execute(&mut conn)
+		.await
+		.expect("issue credentials to another consumer");
+		assert_eq!(ask(&mut conn, group, ServerRank::Production).await, 1);
+		sql_query("UPDATE migration_test_requests SET requested_at = NOW() - INTERVAL '1 hour'")
+			.execute(&mut conn)
+			.await
+			.expect("age the ask");
+
+		let mut check = report(consumer, group, machine, RunOutcome::Success);
+		check.run_id = Some(run);
+		MigrationTest::record(
+			&mut conn,
+			check,
+			NewMigrationTest {
+				application_id: server,
+				target_version_id: target.id,
+				total_elapsed: secs(10),
+				failed_migration: None,
+				error: None,
+				data_bytes_before: 1,
+				data_bytes_after: 1,
+				timings: vec![],
+			},
+		)
+		.await
+		.expect("record test");
+		assert!(
+			!pending(&mut conn, machine, &target).await,
+			"another consumer's issuance is not this run's start"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_report_with_no_run_began_its_elapsed_time_before() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn).await;
+		let (machine, server) = insert_server(&mut conn, group).await;
+		let target = insert_version(&mut conn, 63).await;
+		plan_upgrade(&mut conn, group, &target).await;
+		assert_eq!(ask(&mut conn, group, ServerRank::Production).await, 1);
+		sql_query(
+			"UPDATE migration_test_requests SET requested_at = NOW() - INTERVAL '10 minutes'",
+		)
+		.execute(&mut conn)
+		.await
+		.expect("age the ask");
+
+		MigrationTest::record(
+			&mut conn,
+			report(consumer, group, machine, RunOutcome::Success),
+			NewMigrationTest {
+				application_id: server,
+				target_version_id: target.id,
+				total_elapsed: secs(3600),
+				failed_migration: None,
+				error: None,
+				data_bytes_before: 1,
+				data_bytes_after: 1,
+				timings: vec![],
+			},
+		)
+		.await
+		.expect("record test");
+		assert!(
+			pending(&mut conn, machine, &target).await,
+			"an hour's run reported now began before the ask"
 		);
 	})
 	.await

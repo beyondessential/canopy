@@ -181,7 +181,7 @@ export default function Upgrades() {
 													groupId={row.group_id}
 													rank={row.rank}
 													groupName={environmentName(row.group_name, row.rank)}
-													testable={row.testable === true}
+													testable={row.testing != null}
 													request={row.test_request}
 													onRequested={() => setTick((t) => t + 1)}
 												/>
