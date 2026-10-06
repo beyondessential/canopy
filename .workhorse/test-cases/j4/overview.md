@@ -11,6 +11,8 @@ Scenarios for choosing what a declaration covers, moving a window, and the page-
 - [x] Declaring from an incident starts at the incident's environment (verifies spec: MNT)
 - [x] With a group check failing in the headline environment's incident, only the group carries no "not all failing checks" mark, and choosing it clears the warning (verifies spec: MNT)
 - [x] Retargeting onto a grain with its own window turns the dialog into an amendment, shows that window's end and note, and changes only what the operator changed (verifies spec: MNT)
+- [x] An end or note entered before retargeting onto another operator's window is dropped, so that window keeps its own (verifies spec: MNT)
+- [x] From an incident, a failure no window can be declared over marks every choice as not covering all failures (verifies spec: MNT)
 - [x] The upgrade plan's declaration cannot be retargeted, and the window it opens records the plan (verifies spec: MNT, UPG)
 - [x] The configuration run's "Declare the work" cannot be retargeted, and declares over the environment it is shown for (verifies spec: MNT, INV)
 

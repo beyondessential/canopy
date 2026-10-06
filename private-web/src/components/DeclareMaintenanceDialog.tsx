@@ -149,7 +149,9 @@ export default function DeclareMaintenanceDialog({
 			window_id: existing?.id ?? null,
 		},
 		[open, targetKey(start), incidentId, existing?.id],
-		{ skip: !open },
+		// A caller that cannot retarget has nothing to choose from, and its
+		// declaration must not wait on a read it does not use.
+		{ skip: !open || fixed },
 	);
 
 	useEffect(() => {
@@ -164,8 +166,11 @@ export default function DeclareMaintenanceDialog({
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [open, existing?.id]);
 
-	const choices: MaintenanceTargetChoice[] =
-		targets.status === "ok" ? targets.data.choices : [];
+	const choices: MaintenanceTargetChoice[] = fixed
+		? [{ target: start, label: "", depth: 0, window: null, covers_failures: null }]
+		: targets.status === "ok"
+			? targets.data.choices
+			: [];
 	const choiceOf = (target: MaintenanceTarget) =>
 		choices.find((choice) => targetKey(choice.target) === targetKey(target));
 	const startChoice = choiceOf(start);
@@ -189,6 +194,15 @@ export default function DeclareMaintenanceDialog({
 	const baseNote = amending ? (amending.note ?? "") : (prefill?.note ?? "");
 	const shownEnd = endsAt ?? baseEnd;
 	const shownNote = note ?? baseNote;
+
+	// What the operator entered was entered for the window they were looking
+	// at, so landing on another one starts from that window's own settings.
+	// spec: MNT#choosing-what-to-cover
+	const amendingId = amending?.id ?? null;
+	useEffect(() => {
+		setEndsAt(null);
+		setNote(null);
+	}, [amendingId]);
 
 	const submit = async () => {
 		const at = new Date(shownEnd);
@@ -224,9 +238,9 @@ export default function DeclareMaintenanceDialog({
 			<DialogTitle>{amending ? "Amend maintenance" : "Declare maintenance"}</DialogTitle>
 			<DialogContent>
 				<Stack spacing={2} sx={{ pt: 1 }}>
-					{targets.status === "loading" || targets.status === "idle" ? (
+					{!fixed && (targets.status === "loading" || targets.status === "idle") ? (
 						<LinearProgress />
-					) : targets.status === "error" ? (
+					) : !fixed && targets.status === "error" ? (
 						<Alert severity="error">{targets.error.message}</Alert>
 					) : (
 						<TextField
@@ -371,7 +385,7 @@ export default function DeclareMaintenanceDialog({
 					<Button
 						variant="contained"
 						onClick={submit}
-						disabled={pending || shownEnd === "" || targets.status !== "ok"}
+						disabled={pending || shownEnd === "" || (!fixed && targets.status !== "ok")}
 					>
 						{moving ? "Move" : amending ? "Amend" : "Declare"}
 					</Button>
