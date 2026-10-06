@@ -61,7 +61,10 @@ pub(crate) async fn insert_application_on_its_own_machine(
 	let machine = Uuid::new_v4();
 	let ty = r#type;
 	let host = host.map_or("NULL".to_string(), |h| format!("'{h}'"));
-	let rank = rank.map_or("NULL".to_string(), |r| format!("'{r}'"));
+	// A rank is held by every application on a box, and a pending one is in no
+	// environment, so these fixtures give an application no asked-for rank dev,
+	// the lowest environment.
+	let rank = format!("'{}'", rank.unwrap_or("dev"));
 	conn.batch_execute(&format!(
 		"INSERT INTO machines (id, name, group_id) VALUES ('{machine}', '{name}', '{group}');
 		 INSERT INTO applications (id, name, type, rank, host, group_id, machine_id)
@@ -165,24 +168,24 @@ async fn serves_an_environments_machines_and_applications() {
 	.await
 }
 
-/// Rank is an application's, so two workloads on one box sit in two
-/// environments and are configured apart. The box is one machine in each.
+/// A box serves one environment, so both workloads on a shared box sit in it and
+/// the box is one host carrying both.
 #[tokio::test(flavor = "multi_thread")]
-async fn splits_a_shared_box_by_the_rank_of_each_application() {
+async fn serves_a_shared_box_whole() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka-shared").await;
 		let machine = Uuid::new_v4();
 		let device = Uuid::new_v4();
-		let production = Uuid::new_v4();
-		let demo = Uuid::new_v4();
+		let central = Uuid::new_v4();
+		let database = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role, tailscale_node_name)
 			 VALUES ('{device}', 'server', 'kamaka-shared-box');
 			 INSERT INTO machines (id, name, group_id, device_id)
 			 VALUES ('{machine}', 'kamaka-shared-box', '{group}', '{device}');
 			 INSERT INTO applications (id, name, type, rank, group_id, machine_id)
-			 VALUES ('{production}', 'kamaka-central', 'tamanu-central', 'production', '{group}', '{machine}'),
-			        ('{demo}', 'kamaka-demo-central', 'tamanu-central', 'demo', '{group}', '{machine}')"
+			 VALUES ('{central}', 'kamaka-central', 'tamanu-central', 'production', '{group}', '{machine}'),
+			        ('{database}', 'kamaka-database', 'postgres', 'production', '{group}', '{machine}')"
 		))
 		.await
 		.expect("seed a shared box");
@@ -196,10 +199,37 @@ async fn splits_a_shared_box_by_the_rank_of_each_application() {
 		assert_eq!(hosts.len(), 1);
 		assert_eq!(hosts[0]["id"], machine.to_string());
 		assert_eq!(hosts[0]["address"], "kamaka-shared-box");
-		// Only the production workload, though both run on this box.
 		let applications = hosts[0]["applications"].as_array().expect("applications");
-		assert_eq!(applications.len(), 1);
-		assert_eq!(applications[0]["id"], production.to_string());
+		assert_eq!(applications.len(), 2, "the whole box is in the environment");
+	})
+	.await
+}
+
+/// A group with nothing ranked has no environment, so there is nothing to serve
+/// and no run to take a lease for.
+// spec: GRP#environments
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_with_nothing_ranked_has_no_environment_to_serve() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-pending").await;
+		let machine = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (id, name, group_id) VALUES ('{machine}', 'kamaka-box', '{group}');
+			 INSERT INTO applications (id, name, type, group_id, machine_id)
+			 VALUES (gen_random_uuid(), 'kamaka-central', 'tamanu-central', '{group}', '{machine}')"
+		))
+		.await
+		.expect("seed a pending box");
+
+		let refused = private
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "server_group_id": group }))
+			.await;
+		assert!(
+			refused.status_code().is_client_error(),
+			"{}",
+			refused.text()
+		);
 	})
 	.await
 }

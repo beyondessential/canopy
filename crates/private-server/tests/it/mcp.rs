@@ -68,8 +68,8 @@ async fn seed(conn: &mut impl SimpleAsyncConnection) {
 		"INSERT INTO server_groups (id, name) VALUES ('{GROUP}', 'Prod Group'); \
 		 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{SRV_GROUPED}', '{GROUP}') RETURNING id) INSERT INTO applications (id, host, name, type, rank, group_id, is_monitored, machine_id) VALUES \
 			('{SRV_GROUPED}', 'https://prod-central', 'Prod Central', 'tamanu-central', 'production', '{GROUP}', true, '{SRV_GROUPED}'); \
-		 WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '{SRV_UNGROUPED}') RETURNING id) INSERT INTO applications (id, host, name, type, machine_id) VALUES \
-			('{SRV_UNGROUPED}', 'https://lonely', 'Lonely Facility', 'tamanu-facility', '{SRV_UNGROUPED}'); \
+		 WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '{SRV_UNGROUPED}') RETURNING id) INSERT INTO applications (id, host, name, type, rank, machine_id) VALUES \
+			('{SRV_UNGROUPED}', 'https://lonely', 'Lonely Facility', 'tamanu-facility', 'production', '{SRV_UNGROUPED}'); \
 		 INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES \
 			('{SRV_GROUPED}', '2.34.1', true, '[]'::jsonb, \
 			 '{{\"pgVersion\": \"PostgreSQL 14.2 on x86_64-pc-linux-gnu\"}}'::jsonb, NOW() - interval '1 minute'); \
@@ -374,14 +374,14 @@ const INC_CLOSED: &str = "aaaaaaaa-0000-0000-0000-0000000000a2";
 async fn seed_incidents(conn: &mut impl SimpleAsyncConnection) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{IGROUP}', 'Inc Group'); \
-		 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{ISRV}', '{IGROUP}') RETURNING id) INSERT INTO applications (id, host, name, type, group_id, is_monitored, machine_id) VALUES \
-			('{ISRV}', 'https://inc', 'Inc Application', 'tamanu-central', '{IGROUP}', true, '{ISRV}'); \
+		 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{ISRV}', '{IGROUP}') RETURNING id) INSERT INTO applications (id, host, name, type, group_id, rank, is_monitored, machine_id) VALUES \
+			('{ISRV}', 'https://inc', 'Inc Application', 'tamanu-central', '{IGROUP}', 'production', true, '{ISRV}'); \
 		 INSERT INTO issues (id, created_at, updated_at, application_id, source, ref, check_name, observed_result, effective_result, description, message, active, first_seen, last_seen, last_degraded_at) VALUES \
 			('{ISSUE1}', NOW(), NOW(), '{ISRV}', 'test', 'r1', 'r1', 'failed', 'failed', 'Disk full', 'disk usage 98%', true, NOW() - interval '2 days', NOW() - interval '1 hour', NOW() - interval '1 hour'), \
 			('{ISSUE2}', NOW(), NOW(), '{ISRV}', 'test', 'r2', 'r2', 'warning', 'warning', NULL, 'slow query', false, NOW() - interval '10 days', NOW() - interval '9 days', NOW() - interval '9 days'); \
-		 INSERT INTO incidents (id, created_at, updated_at, server_group_id, opened_at, closed_at) VALUES \
-			('{INC_OPEN}', NOW(), NOW(), '{IGROUP}', NOW() - interval '2 days', NULL), \
-			('{INC_CLOSED}', NOW(), NOW(), '{IGROUP}', NOW() - interval '5 days', NOW() - interval '3 days'); \
+		 INSERT INTO incidents (id, created_at, updated_at, server_group_id, rank, opened_at, closed_at) VALUES \
+			('{INC_OPEN}', NOW(), NOW(), '{IGROUP}', 'production', NOW() - interval '2 days', NULL), \
+			('{INC_CLOSED}', NOW(), NOW(), '{IGROUP}', 'production', NOW() - interval '5 days', NOW() - interval '3 days'); \
 		 INSERT INTO incident_issues (incident_id, issue_id, joined_at, left_at) VALUES \
 			('{INC_OPEN}', '{ISSUE1}', NOW() - interval '2 days', NULL); \
 		 INSERT INTO slack_outbox (kind, incident_id, payload, deliver_after, delivered_at, attempts) VALUES \
@@ -605,8 +605,8 @@ async fn backup_problems_finds_a_failure_behind_many_later_successes() {
 
 		let mut sql = format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group}', 'Chatty'); \
-			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server}', '{group}') RETURNING id) INSERT INTO applications (id, host, name, type, group_id, machine_id) VALUES \
-				('{server}', 'https://chatty', 'Chatty', 'tamanu-central', '{group}', '{server}'); \
+			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server}', '{group}') RETURNING id) INSERT INTO applications (id, host, name, type, group_id, rank, machine_id) VALUES \
+				('{server}', 'https://chatty', 'Chatty', 'tamanu-central', '{group}', 'production', '{server}'); \
 			 INSERT INTO devices (id, role) VALUES ('{device}', 'machine'); \
 			 INSERT INTO server_group_backup_config \
 				(group_id, bucket, prefix, target_role_arn, maintenance_role_arn, \
@@ -670,8 +670,8 @@ const REPLICA_GAP: &str = "bbbbbbbb-0000-0000-0000-0000000000b3";
 async fn seed_backup_runs(conn: &mut impl SimpleAsyncConnection) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{RGROUP}', 'Backup Group'); \
-		 WITH m AS (INSERT INTO machines (id, group_id, name) VALUES ('{RSERVER}', '{RGROUP}', 'Backup Target') RETURNING id) INSERT INTO applications (id, host, name, type, group_id, machine_id) VALUES \
-			('{RSERVER}', 'https://backup-target', 'Backup Target', 'tamanu-central', '{RGROUP}', '{RSERVER}'); \
+		 WITH m AS (INSERT INTO machines (id, group_id, name) VALUES ('{RSERVER}', '{RGROUP}', 'Backup Target') RETURNING id) INSERT INTO applications (id, host, name, type, group_id, rank, machine_id) VALUES \
+			('{RSERVER}', 'https://backup-target', 'Backup Target', 'tamanu-central', '{RGROUP}', 'production', '{RSERVER}'); \
 		 INSERT INTO devices (id, role) VALUES ('{RDEVICE}', 'machine'); \
 		 INSERT INTO backup_runs \
 			(id, device_id, group_id, machine_id, type, purpose, outcome, snapshot_id, bytes_uploaded, s3_sent_raw_bytes, snapshot_logical_bytes, reported_at) \
@@ -1244,9 +1244,9 @@ async fn seed_two_workload_box(conn: &mut impl SimpleAsyncConnection) {
 		"INSERT INTO server_groups (id, name) VALUES ('{MGROUP}', 'Split Group'); \
 		 INSERT INTO machines (id, group_id, name, cloud) VALUES \
 			('{MACHINE}', '{MGROUP}', 'box-one', false); \
-		 INSERT INTO applications (id, host, name, type, group_id, machine_id) VALUES \
-			('{MAPP_A}', 'https://front', 'Front', 'tamanu-central', '{MGROUP}', '{MACHINE}'), \
-			('{MAPP_B}', 'https://worker', 'Worker', 'tamanu-central', '{MGROUP}', '{MACHINE}'); \
+		 INSERT INTO applications (id, host, name, type, group_id, rank, machine_id) VALUES \
+			('{MAPP_A}', 'https://front', 'Front', 'tamanu-central', '{MGROUP}', 'production', '{MACHINE}'), \
+			('{MAPP_B}', 'https://worker', 'Worker', 'tamanu-central', '{MGROUP}', 'production', '{MACHINE}'); \
 		 INSERT INTO machine_reported_detail (machine_id, source, extra, reported_at) VALUES \
 			('{MACHINE}', 'alertd', \
 			 '{{\"osName\":\"Debian\",\"osVersion\":\"12\",\"hostname\":\"box-one.internal\",\
@@ -1509,12 +1509,13 @@ async fn mcp_health_matches_what_the_ui_presents() {
 const ENV_GROUP: &str = "aaaaaaaa-0000-0000-0000-0000000000e0";
 const ENV_TEST_APP: &str = "aaaaaaaa-0000-0000-0000-0000000000e1";
 const ENV_TEST_INC: &str = "aaaaaaaa-0000-0000-0000-0000000000e2";
-const ENV_GROUP_INC: &str = "aaaaaaaa-0000-0000-0000-0000000000e3";
+const ENV_PROD_APP: &str = "aaaaaaaa-0000-0000-0000-0000000000e4";
+const ENV_PROD_INC: &str = "aaaaaaaa-0000-0000-0000-0000000000e3";
 
 /// An incident targets one of a group's environments, and both tools report
 /// which. An agent summarising the fleet reads these, and a site's test box
 /// counted as the site's production trouble is a wrong answer with no way for
-/// the reader to tell.
+/// the reader to tell. Every incident of a group names an environment.
 ///
 /// spec: INC#targets
 #[tokio::test(flavor = "multi_thread")]
@@ -1525,12 +1526,15 @@ async fn incidents_name_the_environment_they_target() {
 			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{ENV_TEST_APP}', '{ENV_GROUP}') RETURNING id) \
 			 INSERT INTO applications (id, host, name, type, rank, group_id, is_monitored, machine_id) VALUES \
 				('{ENV_TEST_APP}', 'https://test.kamaka', 'kamaka test', 'tamanu-central', 'test', '{ENV_GROUP}', true, '{ENV_TEST_APP}'); \
+			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{ENV_PROD_APP}', '{ENV_GROUP}') RETURNING id) \
+			 INSERT INTO applications (id, host, name, type, rank, group_id, is_monitored, machine_id) VALUES \
+				('{ENV_PROD_APP}', 'https://kamaka', 'kamaka', 'tamanu-central', 'production', '{ENV_GROUP}', true, '{ENV_PROD_APP}'); \
 			 INSERT INTO incidents (id, created_at, updated_at, server_group_id, rank, opened_at) VALUES \
 				('{ENV_TEST_INC}', NOW(), NOW(), '{ENV_GROUP}', 'test', NOW() - interval '1 hour'), \
-				('{ENV_GROUP_INC}', NOW(), NOW(), '{ENV_GROUP}', NULL, NOW() - interval '1 hour');"
+				('{ENV_PROD_INC}', NOW(), NOW(), '{ENV_GROUP}', 'production', NOW() - interval '1 hour');"
 		))
 		.await
-		.expect("seed an environment incident beside a group one");
+		.expect("seed incidents on two environments");
 
 		let found = call_tool!(private, "find_incidents", serde_json::json!({}));
 		let by_id = |id: &str| {
@@ -1546,9 +1550,9 @@ async fn incidents_name_the_environment_they_target() {
 			by_id(ENV_TEST_INC)["rank"], "test",
 			"the environment's incident says which environment"
 		);
-		assert!(
-			by_id(ENV_GROUP_INC)["rank"].is_null(),
-			"and the group's own carries no rank, which is how a reader tells them apart"
+		assert_eq!(
+			by_id(ENV_PROD_INC)["rank"], "production",
+			"and production's says so too, which is how a reader tells them apart"
 		);
 		assert_eq!(by_id(ENV_TEST_INC)["group_name"], "kamaka");
 
@@ -1561,12 +1565,12 @@ async fn incidents_name_the_environment_they_target() {
 			detail["rank"], "test",
 			"the detail carries it too, since an agent may fetch one without listing"
 		);
-		let group_detail = call_tool!(
+		let production_detail = call_tool!(
 			private,
 			"get_incident",
-			serde_json::json!({ "incident_id": ENV_GROUP_INC })
+			serde_json::json!({ "incident_id": ENV_PROD_INC })
 		);
-		assert!(group_detail["rank"].is_null());
+		assert_eq!(production_detail["rank"], "production");
 	})
 	.await
 }

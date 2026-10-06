@@ -77,7 +77,7 @@ test.describe("an incident names the environment it is on", () => {
 	});
 
 	// The group's name is the page's heading, so an environment reads by its
-	// rank alone here and the group's own incident carries none.
+	// rank alone here.
 	// spec: INC#notification
 	test("a group's page presents each environment's incident", async ({
 		page,
@@ -172,7 +172,10 @@ test.describe("an incident names the environment it is on", () => {
 		).toBeVisible();
 	});
 
-	test("a group's own incident marks no environment row", async ({
+	// A group's own checks belong to its headline environment, so the backup
+	// incident is marked on the production row rather than on the card alone.
+	// spec: CHK#presentation
+	test("a group's backup incident marks the production row", async ({
 		page,
 		sql,
 	}) => {
@@ -191,6 +194,7 @@ test.describe("an incident names the environment it is on", () => {
 		});
 		await seedIncident(sql, {
 			serverGroupId: group.id,
+			rank: "production",
 			issues: [{ issueId: backups.id }],
 		});
 
@@ -200,7 +204,7 @@ test.describe("an incident names the environment it is on", () => {
 		).toBeVisible();
 		await expect(
 			page.locator('[data-testid="rank-row"][data-rank="production"]'),
-		).not.toHaveAttribute("data-incident");
+		).toHaveAttribute("data-incident", "loud");
 	});
 
 	/// A card is read from across the grid before any row is, so its own mark
@@ -268,11 +272,17 @@ test.describe("an incident names the environment it is on", () => {
 		).toHaveAttribute("data-incident", "lingering");
 	});
 
-	test("a group's own incident is presented beside its environments'", async ({
+	// spec: INC#notification
+	test("a group's backup incident is presented as its production's", async ({
 		page,
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
 		const backups = await seedIssue(sql, {
 			serverGroupId: group.id,
 			ref: "backup-staleness",
@@ -280,13 +290,13 @@ test.describe("an incident names the environment it is on", () => {
 		});
 		await seedIncident(sql, {
 			serverGroupId: group.id,
+			rank: "production",
 			issues: [{ issueId: backups.id }],
 		});
 
 		await page.goto(`/fleet/groups/${group.id}`);
 		const card = page.getByTestId("active-incident");
 		await expect(card).toHaveCount(1);
-		await expect(card).toHaveText(/Active incident/);
-		await expect(card).not.toHaveText(/Active incident in/);
+		await expect(card).toHaveText(/Active incident in production/);
 	});
 });

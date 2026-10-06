@@ -264,6 +264,89 @@ test.describe("machine detail", () => {
 		).toBeVisible();
 	});
 
+	/// A box serves one environment, so its rank is offered once, on the
+	/// machine's own section, and no application section offers one.
+	///
+	/// spec: FLT#editing
+	test("the rank is the machine's to edit, with no empty choice once ranked", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "ranked-group" });
+		const central = await seedServer(sql, {
+			name: "ranked-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		const database = await seedServer(sql, {
+			name: "ranked-database",
+			groupId: group.id,
+			machineId: central.machineId,
+		});
+
+		await page.goto(`/fleet/machines/${central.machineId}/edit`);
+
+		const rank = page
+			.getByTestId("machine-section")
+			.getByRole("combobox", { name: "Rank" });
+		await expect(rank).toHaveText("production");
+		for (const id of [central.id, database.id]) {
+			await expect(
+				page
+					.locator(`[data-application="${id}"]`)
+					.getByRole("combobox", { name: "Rank" }),
+			).toHaveCount(0);
+		}
+
+		await rank.click();
+		await expect(page.getByRole("option")).toHaveText([
+			"production",
+			"clone",
+			"demo",
+			"test",
+			"dev",
+		]);
+	});
+
+	/// A box nothing has ranked reads as not ranked yet, and ranking it ranks
+	/// every application on it in one save.
+	///
+	/// spec: FLT#editing
+	test("ranking a pending box ranks every application on it", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "pending-group" });
+		const first = await seedServer(sql, {
+			name: "pending-central",
+			groupId: group.id,
+			rank: null,
+		});
+		const second = await seedServer(sql, {
+			name: "pending-database",
+			groupId: group.id,
+			machineId: first.machineId,
+			rank: null,
+		});
+
+		await page.goto(`/fleet/machines/${first.machineId}/edit`);
+		const rank = page
+			.getByTestId("machine-section")
+			.getByRole("combobox", { name: "Rank" });
+		await expect(rank).toHaveText("Not ranked yet");
+
+		await rank.click();
+		await page.getByRole("option", { name: "demo" }).click();
+		await page.getByRole("button", { name: "Save" }).click();
+		await expect(page).toHaveURL(new RegExp(`/fleet/machines/${first.machineId}$`));
+
+		const ranks = await sql.query<{ rank: string | null }>(
+			"SELECT rank FROM applications WHERE id = ANY($1::uuid[])",
+			[[first.id, second.id]],
+		);
+		expect(ranks.map((row) => row.rank)).toEqual(["demo", "demo"]);
+	});
+
 	/// A machine always has a name, so the edit form will not save one
 	/// cleared to blank.
 	/// spec: FLT#naming

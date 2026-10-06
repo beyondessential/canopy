@@ -4762,7 +4762,7 @@
           "machines"
         ],
         "summary": "Edit a machine.",
-        "description": "Moving a machine to another group moves the applications on it: an\napplication's group is never set independently of its machine's.",
+        "description": "Moving a machine to another group moves the applications on it: an\napplication's group is never set independently of its machine's, and\nneither is its rank.",
         "operationId": "machines_update",
         "requestBody": {
           "content": {
@@ -5566,7 +5566,7 @@
           "incidents"
         ],
         "summary": "List incidents for a server group.",
-        "description": "Returns the group's own incidents and those of every environment in it. By\ndefault only open incidents are returned; set `include_closed` to also\ninclude closed ones.",
+        "description": "Returns the incidents of every environment in the group. By\ndefault only open incidents are returned; set `include_closed` to also\ninclude closed ones.",
         "operationId": "incident_list_for_group",
         "requestBody": {
           "content": {
@@ -5607,7 +5607,7 @@
           "incidents"
         ],
         "summary": "List incidents involving a server.",
-        "description": "Returns the incidents on the environment the application is in, and the\ngroup's own where it belongs to no environment. By default only open\nincidents are returned; set `include_closed` to also include closed ones.",
+        "description": "Returns the incidents on the environment the application is in, and none\nfor a pending application, which is in no environment. By default only open\nincidents are returned; set `include_closed` to also include closed ones.",
         "operationId": "incident_list_for_server",
         "requestBody": {
           "content": {
@@ -12846,7 +12846,7 @@
               },
               {
                 "$ref": "#/components/schemas/ServerRank",
-                "description": "Rank of the environment within the group. Required only where the\ngroup's live applications span more than one rank."
+                "description": "Rank of the environment within the group. Required only where the\ngroup's ranked applications span more than one rank."
               }
             ]
           },
@@ -13803,7 +13803,7 @@
       },
       "IncidentData": {
         "type": "object",
-        "description": "An operational incident: a roll-up of the related issues on one target,\nwhich is one of a group's environments, the group itself, or canopy.\n\nAn incident opens when an issue on its target crosses the severity\nthreshold, gathers further contributing issues while open, and closes\nautomatically once the last serious contributor clears. Operators can\nadditionally mark an incident resolved with a reason.",
+        "description": "An operational incident: a roll-up of the related issues on one target,\nwhich is one of a group's environments, or canopy.\n\nAn incident opens when an issue on its target crosses the severity\nthreshold, gathers further contributing issues while open, and closes\nautomatically once the last serious contributor clears. Operators can\nadditionally mark an incident resolved with a reason.",
         "required": [
           "id",
           "server_group_name",
@@ -13870,7 +13870,7 @@
               },
               {
                 "$ref": "#/components/schemas/ServerRank",
-                "description": "Which of the group's environments the incident targets. Null with a\ngroup means the group itself: its own checks, and the members of a\ngroup with no ranked application."
+                "description": "Which of the group's environments the incident targets: set for any\nincident with a group, null for a canopy-wide one."
               }
             ]
           },
@@ -16015,6 +16015,17 @@
               "null"
             ],
             "description": "New free-form operator notes for the box."
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "New rank for the box, which every application on it takes. Omit to\nleave unchanged. A rank can be changed but not cleared, so `null` is\nrefused, and a box with no application on it has nothing to rank."
+              }
+            ]
           },
           "tags": {
             "oneOf": [
@@ -19210,7 +19221,7 @@
               },
               {
                 "$ref": "#/components/schemas/ServerRank",
-                "description": "New promotion rank for the server. Omit to leave unchanged."
+                "description": "New rank for the server. Omit to leave unchanged. A rank can be changed\nbut not cleared, so `null` is refused. Ranking an application ranks\nevery application on its machine with it."
               }
             ]
           },
@@ -19326,7 +19337,7 @@
               },
               {
                 "$ref": "#/components/schemas/ServerRank",
-                "description": "The rank the box this application runs on serves: the highest among the\nworkloads on it.\n\nMaintenance coverage is decided at the box's rank, not the\napplication's, so a page reading a window's reach needs this rather\nthan `server.rank`. They differ on a box carrying workloads at more\nthan one rank."
+                "description": "The rank the box this application runs on serves: the one its workloads\nshare, absent while the box is pending.\n\nMaintenance coverage is decided at the box's rank, so a page reading a\nwindow's reach reads it here. It is the application's own rank for one\non a box."
               }
             ]
           },

@@ -1,6 +1,7 @@
 //! The unified `Scope` type: storage-column mapping and incident-target
 //! resolution — the single place check-state scope is interpreted.
 
+use commons_types::server::rank::ServerRank;
 use database::issues::{IncidentTarget, Scope};
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
@@ -81,7 +82,7 @@ async fn insert_server(
 			.await
 			.expect("insert machine");
 	let row: RowId = sql_query(
-		"INSERT INTO applications (type, host, group_id, is_monitored, machine_id) VALUES ('tamanu-central', $1, $2, $3, $4) RETURNING id",
+		"INSERT INTO applications (type, host, group_id, rank, is_monitored, machine_id) VALUES ('tamanu-central', $1, $2, 'production', $3, $4) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group)
@@ -102,20 +103,27 @@ async fn resolve_incident_target_by_scope() {
 			insert_server(&mut conn, "http://unmon.invalid/", Some(group), false).await;
 		let ungrouped = insert_server(&mut conn, "http://ungrouped.invalid/", None, true).await;
 
-		// A server in a group targets its group, carrying its is_monitored.
+		// A ranked server in a group targets its environment, carrying its
+		// is_monitored.
 		assert_eq!(
 			Scope::Application(monitored)
 				.resolve_incident_target(&mut conn)
 				.await
 				.expect("resolve"),
-			Some((IncidentTarget::Group(group), true)),
+			Some((
+				IncidentTarget::Environment(group, ServerRank::Production),
+				true
+			)),
 		);
 		assert_eq!(
 			Scope::Application(unmonitored)
 				.resolve_incident_target(&mut conn)
 				.await
 				.expect("resolve"),
-			Some((IncidentTarget::Group(group), false)),
+			Some((
+				IncidentTarget::Environment(group, ServerRank::Production),
+				false
+			)),
 		);
 		// An ungrouped server has no target and no incident path.
 		assert_eq!(
@@ -125,13 +133,17 @@ async fn resolve_incident_target_by_scope() {
 				.expect("resolve"),
 			None,
 		);
-		// Group and canopy-wide scopes target themselves, always monitored.
+		// A group's own checks target its headline environment, and a
+		// canopy-wide scope the global target, both always monitored.
 		assert_eq!(
 			Scope::Group(group)
 				.resolve_incident_target(&mut conn)
 				.await
 				.expect("resolve"),
-			Some((IncidentTarget::Group(group), true)),
+			Some((
+				IncidentTarget::Environment(group, ServerRank::Production),
+				true
+			)),
 		);
 		assert_eq!(
 			Scope::Global
@@ -171,20 +183,35 @@ async fn a_machine_resolves_through_its_group_on_its_own_switch() {
 		let monitored = insert_machine(&mut conn, Some(group), true).await;
 		let unmonitored = insert_machine(&mut conn, Some(group), false).await;
 		let ungrouped = insert_machine(&mut conn, None, true).await;
+		for machine in [monitored, unmonitored] {
+			insert_application_on(
+				&mut conn,
+				machine,
+				Some(group),
+				"http://on-the-box.invalid/",
+			)
+			.await;
+		}
 
 		assert_eq!(
 			Scope::Machine(monitored)
 				.resolve_incident_target(&mut conn)
 				.await
 				.expect("resolve"),
-			Some((IncidentTarget::Group(group), true)),
+			Some((
+				IncidentTarget::Environment(group, ServerRank::Production),
+				true
+			)),
 		);
 		assert_eq!(
 			Scope::Machine(unmonitored)
 				.resolve_incident_target(&mut conn)
 				.await
 				.expect("resolve"),
-			Some((IncidentTarget::Group(group), false)),
+			Some((
+				IncidentTarget::Environment(group, ServerRank::Production),
+				false
+			)),
 		);
 		// An ungrouped machine has no target, exactly as an ungrouped
 		// application has none.
@@ -330,7 +357,7 @@ async fn insert_application_on(
 	group: Option<Uuid>,
 	host: &str,
 ) -> Uuid {
-	insert_ranked_application_on(conn, machine, group, None, host).await
+	insert_ranked_application_on(conn, machine, group, Some("production"), host).await
 }
 
 async fn insert_ranked_application_on(
@@ -463,7 +490,10 @@ async fn a_machines_monitoring_switch_does_not_silence_the_applications_on_it() 
 				.resolve_incident_target(&mut conn)
 				.await
 				.expect("resolve"),
-			Some((IncidentTarget::Group(group), true)),
+			Some((
+				IncidentTarget::Environment(group, ServerRank::Production),
+				true
+			)),
 		);
 
 		// The unmonitored machine's own check files, but stays out of incidents.

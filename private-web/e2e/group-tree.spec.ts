@@ -99,6 +99,60 @@ test.describe("the group's tree on the detail pages", () => {
 		);
 	});
 
+	/// A box serving no environment yet is listed apart, after every
+	/// environment, so an operator who has just had one report in sees it needs
+	/// a rank. Its workloads' dots are drawn as on any other box.
+	///
+	/// spec: FLT#what-each-carries
+	test("a pending box is listed under awaiting a rank, after the environments", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "pending-group" });
+		await seedServer(sql, {
+			name: "ranked-app",
+			groupId: group.id,
+			rank: "test",
+		});
+		const pending = await seedServer(sql, {
+			name: "pending-app",
+			groupId: group.id,
+			rank: null,
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+
+		const sections = page.getByTestId("group-tree").getByTestId("tree-environment");
+		await expect(sections).toHaveCount(2);
+		await expect(sections.nth(0)).toHaveAttribute("data-rank", "test");
+		await expect(sections.nth(1)).toHaveAttribute("data-rank", "pending");
+		await expect(sections.nth(1)).toContainText("awaiting a rank");
+		await expect(
+			sections.nth(1).locator(`a[href="/fleet/applications/${pending.id}"]`),
+		).toBeVisible();
+		await expect(sections.nth(1).getByTestId("status-dot").first()).toBeVisible();
+	});
+
+	/// A box with nothing on it has not reported, which is a different wait
+	/// from a reported box waiting for a rank.
+	///
+	/// spec: FLT#what-each-carries
+	test("a box with nothing on it reads as awaiting check-in, not awaiting a rank", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "silent-group" });
+		await seedMachine(sql, { name: "silent-box", groupId: group.id });
+
+		await page.goto(`/fleet/groups/${group.id}`);
+
+		const section = page.getByTestId("group-tree").getByTestId("tree-environment");
+		await expect(section).toHaveCount(1);
+		await expect(section).toHaveAttribute("data-rank", "awaiting-check-in");
+		await expect(section).toContainText("awaiting check-in");
+		await expect(section).not.toContainText("awaiting a rank");
+	});
+
 	/// The title says which thing the page is about. Whether that thing is well
 	/// is the tree's and the checks' business, so no dot rides alongside the
 	/// name.

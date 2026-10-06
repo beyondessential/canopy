@@ -858,8 +858,8 @@ mod tests {
 			let application: RowId = sql_query(
 				"WITH g AS (INSERT INTO server_groups (name) VALUES ('site') RETURNING id), \
 				 m AS (INSERT INTO machines (name, group_id) SELECT 'box', id FROM g RETURNING id, group_id) \
-				 INSERT INTO applications (type, name, group_id, machine_id) \
-				 SELECT 'tamanu-central', 'central-1', m.group_id, m.id FROM m RETURNING id",
+				 INSERT INTO applications (type, name, group_id, rank, machine_id) \
+				 SELECT 'tamanu-central', 'central-1', m.group_id, 'production', m.id FROM m RETURNING id",
 			)
 			.get_result(&mut conn)
 			.await
@@ -933,8 +933,8 @@ mod tests {
 			let application: RowId = sql_query(
 				"WITH g AS (INSERT INTO server_groups (name) VALUES ('site') RETURNING id), \
 				 m AS (INSERT INTO machines (name, group_id) SELECT 'box', id FROM g RETURNING id, group_id) \
-				 INSERT INTO applications (type, name, group_id, machine_id) \
-				 SELECT 'tamanu-central', 'central-1', m.group_id, m.id FROM m RETURNING id",
+				 INSERT INTO applications (type, name, group_id, rank, machine_id) \
+				 SELECT 'tamanu-central', 'central-1', m.group_id, 'production', m.id FROM m RETURNING id",
 			)
 			.get_result(&mut conn)
 			.await

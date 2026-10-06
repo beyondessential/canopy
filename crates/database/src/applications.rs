@@ -16,7 +16,7 @@ use super::url_field::UrlField;
 /// Recompute each distinct, present group id, deduping repeats and skipping
 /// `None`. Used by the server write paths that can change a group's canonical
 /// member (membership/rank/kind/delete).
-async fn recompute_groups(
+pub(crate) async fn recompute_groups(
 	db: &mut AsyncPgConnection,
 	groups: impl IntoIterator<Item = Option<Uuid>>,
 ) -> Result<()> {
@@ -504,13 +504,20 @@ impl Application {
 	/// Stand up the application a report describes. Everything about the new
 	/// record beyond what the report said is left for an operator: it takes
 	/// its machine's group, because which group a box belongs to is the
-	/// one fact the box cannot know, and nothing else.
+	/// one fact the box cannot know, and the rank its siblings share, or none
+	/// where nothing on the box is ranked yet, which leaves it pending.
+	///
+	/// The caller holds the machine row's lock, which is what keeps a rank
+	/// change on the box from landing between reading the rank here and the
+	/// insert, so every caller must.
+	// spec: GRP#environments
 	async fn adopt(
 		db: &mut AsyncPgConnection,
 		machine: &crate::machines::Machine,
 		r#type: &ApplicationType,
 		key: Option<String>,
 	) -> Result<Self> {
+		let rank = crate::machines::Machine::rank(db, machine.id).await?;
 		Self::create(
 			db,
 			Self {
@@ -518,7 +525,7 @@ impl Application {
 				name: None,
 				host: None,
 				r#type: r#type.clone(),
-				rank: None,
+				rank,
 				machine_id: Some(machine.id),
 				kubernetes_cluster_id: None,
 				reported_key: key,
@@ -553,50 +560,90 @@ impl Application {
 		use crate::schema::applications::dsl;
 		use diesel_async::AsyncConnection;
 
-		db.transaction::<_, AppError, _>(async |conn| {
-			let server: Application = dsl::applications
-				.select(Self::as_select())
-				.filter(dsl::id.eq(server_id))
-				.for_update()
-				.first(conn)
-				.await
-				.map_err(AppError::from)?;
+		let (group_id, headline) = db
+			.transaction::<_, AppError, _>(async |conn| {
+				let server: Application = dsl::applications
+					.select(Self::as_select())
+					.filter(dsl::id.eq(server_id))
+					.for_update()
+					.first(conn)
+					.await
+					.map_err(AppError::from)?;
+				let headline =
+					crate::server_groups::ServerGroup::headline_rank(conn, server.group_id).await?;
 
-			if server.deleted_at.is_some() {
-				return Ok(());
-			}
+				if server.deleted_at.is_some() {
+					return Ok((server.group_id, headline));
+				}
 
-			diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
-				.set((
-					dsl::deleted_at
-						.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))),
-					dsl::registered_at.eq(None::<jiff_diesel::Timestamp>),
-				))
-				.execute(conn)
-				.await
-				.map_err(AppError::from)?;
+				diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
+					.set((
+						dsl::deleted_at
+							.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))),
+						dsl::registered_at.eq(None::<jiff_diesel::Timestamp>),
+					))
+					.execute(conn)
+					.await
+					.map_err(AppError::from)?;
 
-			// The server just dropped out of its group's live set, so the
-			// group's cached headline version may now belong to someone else.
-			recompute_groups(conn, [server.group_id]).await?;
-			Ok(())
-		})
-		.await
+				// The server just dropped out of its group's live set, so the
+				// group's cached headline version may now belong to someone else.
+				recompute_groups(conn, [server.group_id]).await?;
+				Ok((server.group_id, headline))
+			})
+			.await?;
+		// Its group's own checks follow the headline environment, which may
+		// have been this application's.
+		crate::issues::reevaluate_after_headline_change(db, group_id, headline).await
 	}
 
 	/// Un-archive an application. Says nothing about its machine's identity,
 	/// which archiving the application did not touch.
+	///
+	/// It comes back at the rank the live applications on its box share now,
+	/// which is not necessarily the one it left at. With none of them live, as
+	/// when the whole box was archived, it keeps its own rank, so restoring a
+	/// box's applications one by one does not clear the rank they shared. It is
+	/// pending only where it never had one, or where the live applications are
+	/// themselves pending.
+	// spec: GRP#environments
 	pub async fn restore(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Self> {
 		use crate::schema::applications::dsl;
+		use diesel_async::AsyncConnection;
 
-		diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
-			.set(dsl::deleted_at.eq(None::<jiff_diesel::Timestamp>))
-			.execute(db)
-			.await
-			.map_err(AppError::from)?;
-		let restored = Self::get_by_id(db, server_id).await?;
-		// Back in the live set: the group's canonical member may change.
+		let (restored, headline) = db
+			.transaction::<_, AppError, _>(async |conn| {
+				let application = Self::get_by_id(conn, server_id).await?;
+				let headline =
+					crate::server_groups::ServerGroup::headline_rank(conn, application.group_id)
+						.await?;
+				// The box's row serialises this against a report adopting beside it.
+				let rank = match application.machine_id {
+					Some(machine_id) => {
+						crate::machines::Machine::get_by_id_for_update(conn, machine_id).await?;
+						if crate::machines::Machine::has_live_application(conn, machine_id).await? {
+							crate::machines::Machine::rank(conn, machine_id).await?
+						} else {
+							application.rank
+						}
+					}
+					None => application.rank,
+				};
+				diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
+					.set((
+						dsl::deleted_at.eq(None::<jiff_diesel::Timestamp>),
+						dsl::rank.eq(rank),
+					))
+					.execute(conn)
+					.await
+					.map_err(AppError::from)?;
+				Ok((Self::get_by_id(conn, server_id).await?, headline))
+			})
+			.await?;
+		// Back in the live set: the group's canonical member may change, and so
+		// may the headline environment its own checks belong to.
 		recompute_groups(db, [restored.group_id]).await?;
+		crate::issues::reevaluate_after_headline_change(db, restored.group_id, headline).await?;
 		Ok(restored)
 	}
 
@@ -1014,6 +1061,49 @@ impl Application {
 		Ok(after)
 	}
 
+	/// Rank an application, and with it every application sharing its box: a
+	/// box serves one environment, so ranking any of them ranks all of them
+	/// in one write. An application on a cluster has no box and ranks alone.
+	///
+	/// Open issues of everything the change moves between environments are
+	/// re-evaluated, `by` attributing an incident that closes as a result.
+	// spec: GRP#environments
+	pub async fn set_rank(
+		db: &mut AsyncPgConnection,
+		application_id: Uuid,
+		rank: ServerRank,
+		by: Option<&str>,
+	) -> Result<()> {
+		use crate::schema::applications::dsl;
+
+		let application = Self::get_by_id(db, application_id).await?;
+		if application.deleted_at.is_some() {
+			return Err(AppError::BadRequest(
+				"an archived application has no rank to change; restore it first".into(),
+			));
+		}
+		if let Some(machine_id) = application.machine_id {
+			return crate::machines::Machine::set_rank(db, machine_id, rank, by).await;
+		}
+
+		let headline =
+			crate::server_groups::ServerGroup::headline_rank(db, application.group_id).await?;
+		diesel::update(dsl::applications.filter(dsl::id.eq(application_id)))
+			.set(dsl::rank.eq(rank))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		recompute_groups(db, [application.group_id]).await?;
+		crate::issues::reevaluate_after_rank_change(
+			db,
+			crate::issues::Scope::Application(application_id),
+			application.group_id,
+			headline,
+			by,
+		)
+		.await
+	}
+
 	/// Set or clear the server's group. On a `None → Some(group)` transition,
 	/// the server's currently-open issues get re-evaluated against the new
 	/// group so any that warrant promotion to an incident do so. The clear
@@ -1196,10 +1286,6 @@ pub struct PartialServer {
 	pub id: Uuid,
 	/// New display name for the server, or `null` to clear it.
 	pub name: Option<Option<String>>,
-	/// New environment tier for the server, for example production, test,
-	/// or dev.
-	#[diesel(deserialize_as = String, serialize_as = String)]
-	pub rank: Option<ServerRank>,
 	/// New URL for the server, or `null` to clear it.
 	pub host: Option<Option<UrlField>>,
 	/// New server group for the server, or `null` to remove it from its
