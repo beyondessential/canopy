@@ -176,7 +176,7 @@ export default function MachineDetail() {
 						groupId={data.group?.id ?? null}
 						refreshKey={refreshTick}
 					/>
-					{isAdmin && (
+					{isAdmin && data.machine.deleted_at == null && (
 						<MaintenanceHeaderButton
 							scope="machine"
 							id={data.machine.id}

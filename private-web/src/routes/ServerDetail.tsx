@@ -310,12 +310,16 @@ function Header({
 							onSubmitted={onEventSubmitted}
 							action
 						/>
+						{/* An archived application is watched by no one, so there is
+						    nothing to declare over. */}
+						{!archived && (
 						<MaintenanceHeaderButton
 							scope="application"
 							id={data.server.id}
 							compact
 							onDone={onMaintenance}
 						/>
+						)}
 						{/* One form per machine, holding this application's own
 						    section — so Edit goes to the box rather than to a
 						    second form that would answer "where do I edit
