@@ -17367,6 +17367,17 @@
             ],
             "description": "Whether anything is declared to migrate this group's data. A plan on a\ngroup with nothing declared is never dispatched, so its verdict would sit\nat \"not tested\" indefinitely with nothing on its way. `null` without a\nplan."
           },
+          "testing": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Testing",
+                "description": "How the environment is tested: `scheduled` where a declaration covering\nit tests weekly and in the day before the upgrade, `on_request` where\nevery one covering it waits to be asked. `null` where nothing tests it."
+              }
+            ]
+          },
           "verdict": {
             "type": [
               "string",
@@ -21216,6 +21227,14 @@
             "description": "Who asked."
           }
         }
+      },
+      "Testing": {
+        "type": "string",
+        "description": "How an environment's data is migration-tested while its plan is open.",
+        "enum": [
+          "scheduled",
+          "on_request"
+        ]
       },
       "Transition": {
         "type": "object",

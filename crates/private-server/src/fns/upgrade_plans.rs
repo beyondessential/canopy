@@ -95,6 +95,11 @@ pub struct PlannedUpgrade {
 	/// none is pending.
 	// spec: RST#dispatching-a-migration-test
 	pub test_request: Option<TestRequest>,
+	/// How the environment is tested: `scheduled` where a declaration covering
+	/// it tests weekly and in the day before the upgrade, `on_request` where
+	/// every one covering it waits to be asked. `null` where nothing tests it.
+	// spec: RST#dispatching-a-migration-test
+	pub testing: Option<Testing>,
 	/// When the plan's own window opens and closes, where it recorded one. The
 	/// hours the operator said the work runs, so declaring over it can offer
 	/// exactly those rather than a guess from now.
@@ -276,6 +281,7 @@ pub async fn fleet(
 			}
 		};
 
+		let mut testing = None;
 		let testable = match &plan {
 			None => None,
 			Some(_) => {
@@ -285,6 +291,13 @@ pub async fn fleet(
 						database::restore::migrating_environments(&mut conn, env.group_id).await?,
 					),
 				};
+				if declared.covers(env.rank) {
+					testing = Some(if declared.scheduled(env.rank) {
+						Testing::Scheduled
+					} else {
+						Testing::OnRequest
+					});
+				}
 				Some(declared.covers(env.rank))
 			}
 		};
@@ -327,6 +340,7 @@ pub async fn fleet(
 			attempt,
 			testable,
 			test_request,
+			testing,
 			planned_window,
 			maintenance_window: holding
 				.get(&(env.group_id, Some(env.rank)))
@@ -389,6 +403,16 @@ pub struct Tally {
 	pub passed: i32,
 	/// How many the migrations apply to, passed or not.
 	pub total: i32,
+}
+
+/// How an environment's data is migration-tested while its plan is open.
+#[derive(Serialize, ToSchema, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum Testing {
+	/// Weekly, and once more in the day before the upgrade.
+	Scheduled,
+	/// Only when an operator asks.
+	OnRequest,
 }
 
 /// An ask for an environment to be migration-tested, still waiting on a verdict.

@@ -597,6 +597,8 @@ pub async fn group_migrates(db: &mut AsyncPgConnection, group_id: Uuid) -> Resul
 pub struct MigratingEnvironments {
 	whole_group: bool,
 	ranks: HashSet<commons_types::server::rank::ServerRank>,
+	scheduled_whole_group: bool,
+	scheduled_ranks: HashSet<commons_types::server::rank::ServerRank>,
 }
 
 impl MigratingEnvironments {
@@ -604,6 +606,13 @@ impl MigratingEnvironments {
 	/// machine covers the environment that machine serves.
 	pub fn covers(&self, rank: commons_types::server::rank::ServerRank) -> bool {
 		self.whole_group || self.ranks.contains(&rank)
+	}
+
+	/// Whether a declaration covering the environment tests it on the schedule,
+	/// rather than only when asked.
+	// spec: RST#dispatching-a-migration-test
+	pub fn scheduled(&self, rank: commons_types::server::rank::ServerRank) -> bool {
+		self.scheduled_whole_group || self.scheduled_ranks.contains(&rank)
 	}
 }
 
@@ -632,17 +641,25 @@ pub async fn migrating_environments(
 					.await?,
 			),
 		};
-		if !descriptors
+		let Some(descriptor) = descriptors
 			.iter()
-			.any(|d| d.intent == replica.intent && d.has_semantic(semantics::MIGRATE))
-		{
+			.find(|d| d.intent == replica.intent && d.has_semantic(semantics::MIGRATE))
+		else {
 			continue;
-		}
+		};
+		let scheduled =
+			!replica.migrates_on_request && !descriptor.has_semantic(semantics::REPORTING_SCHEMA);
 		match replica.machine_id {
-			None => out.whole_group = true,
+			None => {
+				out.whole_group = true;
+				out.scheduled_whole_group |= scheduled;
+			}
 			Some(machine_id) => {
 				if let Some(rank) = ranks.get(&machine_id) {
 					out.ranks.insert(*rank);
+					if scheduled {
+						out.scheduled_ranks.insert(*rank);
+					}
 				}
 			}
 		}

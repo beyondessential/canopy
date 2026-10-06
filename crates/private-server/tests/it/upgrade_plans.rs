@@ -187,6 +187,18 @@ async fn a_plan_nothing_will_test_says_so() {
 		let row = fleet.iter().find(|r| r["group_id"] == GROUP).unwrap();
 		assert_eq!(row["testable"], true);
 		assert_eq!(row["attempt"], "in_flight");
+		assert_eq!(row["testing"], "scheduled");
+
+		conn.batch_execute("UPDATE restore_replicas SET migrates_on_request = TRUE")
+			.await
+			.unwrap();
+		let fleet: Vec<Value> = private
+			.post("/api/upgrade_plans/fleet")
+			.json(&json!({}))
+			.await
+			.json();
+		let row = fleet.iter().find(|r| r["group_id"] == GROUP).unwrap();
+		assert_eq!(row["testing"], "on_request");
 	})
 	.await;
 }

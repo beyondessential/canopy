@@ -131,6 +131,7 @@ test.describe("upgrades dashboard", () => {
 			.filter({ hasText: "kamaka" });
 		await row.getByRole("button", { name: "Test migrations for kamaka" }).click();
 
+		await expect(row.getByTestId("migration-testing")).toHaveText("weekly");
 		await expect(row.getByTestId("migration-test-requested")).toBeVisible();
 		await expect(
 			row.getByRole("button", { name: "Test migrations for kamaka" }),

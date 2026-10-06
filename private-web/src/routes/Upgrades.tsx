@@ -167,6 +167,7 @@ export default function Upgrades() {
 													tally={row.tally}
 												/>
 												<AttemptChip attempt={row.attempt} />
+												<TestingChip testing={row.testing} />
 												<RequestTest
 													groupId={row.group_id}
 													rank={row.rank}
@@ -1524,6 +1525,33 @@ function AttemptChip({
 		);
 	}
 	return null;
+}
+
+/// Whether the environment is tested on the schedule or only when someone asks.
+// spec: RST#dispatching-a-migration-test
+function TestingChip({
+	testing,
+}: {
+	testing: "scheduled" | "on_request" | null | undefined;
+}) {
+	if (!testing) return null;
+	const scheduled = testing === "scheduled";
+	return (
+		<Tooltip
+			title={
+				scheduled
+					? "Tested automatically: weekly, and once more in the 24 hours before the upgrade"
+					: "Tested only when someone presses the test button"
+			}
+		>
+			<Chip
+				size="small"
+				variant="outlined"
+				label={scheduled ? "weekly" : "on request"}
+				data-testid="migration-testing"
+			/>
+		</Tooltip>
+	);
 }
 
 /// Ask for the environment's data to be tested against its plan, or say that

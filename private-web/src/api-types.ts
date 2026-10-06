@@ -9449,6 +9449,7 @@ export interface components {
              *     plan.
              */
             testable?: boolean | null;
+            testing?: null | components["schemas"]["Testing"];
             /**
              * @description Where the environment's data stands against the planned version, rolled
              *     up from its applications: any failure makes the environment a failure,
@@ -11941,6 +11942,11 @@ export interface components {
             /** @description Who asked. */
             requested_by?: string | null;
         };
+        /**
+         * @description How an environment's data is migration-tested while its plan is open.
+         * @enum {string}
+         */
+        Testing: "scheduled" | "on_request";
         /**
          * @description One healthy↔degraded transition: the state became (or was first
          *     observed) `degraded`/healthy at `at`.
