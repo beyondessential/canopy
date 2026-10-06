@@ -727,6 +727,63 @@ test.describe("maintenance windows", () => {
 			.toEqual(["replacing the disk", true, true]);
 	});
 
+	/// What was entered before retargeting was entered for a different target,
+	/// so landing on another operator's window starts from that window's own.
+	/// spec: MNT#choosing-what-to-cover
+	test("an end chosen before retargeting does not reach another window", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		const window = await seedMaintenanceWindow(sql, {
+			serverGroupId: group.id,
+			rank: "production",
+			note: "replacing the disk",
+		});
+		const before = await sql.query<{ expected_end: Date }>(
+			"SELECT expected_end FROM maintenance_windows WHERE id = $1",
+			[window.id],
+		);
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		await page.getByRole("button", { name: "Declare maintenance" }).click();
+		await page.getByRole("button", { name: "8h" }).click();
+		await page.getByLabel("What's being done").fill("something else");
+		await page.getByRole("combobox", { name: "Covers" }).click();
+		await page
+			.getByTestId(`covers-environment:${group.id}:production`)
+			.click();
+		await expect(page.getByLabel("What's being done")).toHaveValue(
+			"replacing the disk",
+		);
+		await page.getByRole("button", { name: "Amend", exact: true }).click();
+
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{
+					note: string | null;
+					expected_end: Date;
+					amended_by: string | null;
+				}>(
+					"SELECT note, expected_end, amended_by FROM maintenance_windows WHERE id = $1",
+					[window.id],
+				);
+				const row = rows[0]!;
+				return [
+					row.note,
+					row.amended_by !== null,
+					new Date(row.expected_end).getTime() ===
+						new Date(before[0]!.expected_end).getTime(),
+				];
+			})
+			.toEqual(["replacing the disk", true, true]);
+	});
+
 	/// spec: MNT#declaring
 	test("a machine's page offers maintenance at its head", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
