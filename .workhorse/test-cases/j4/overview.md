@@ -29,6 +29,7 @@ Scenarios for choosing what a declaration covers, moving a window, and the page-
 - [x] A group's window is held in place by a run lease on any of its environments, including one nothing in the group is still ranked in (verifies spec: MNT, INV)
 - [x] For every grain and target in a group, the dialog's coverage reading agrees with what suspension actually quiets (verifies spec: MNT)
 - [x] An archived application's open window can still be amended from the fleet view (verifies spec: MNT)
+- [x] An archived target's window refuses a move as a conflict and can still be amended (verifies spec: MNT)
 - [x] A moved window is in both targets' histories, each over the span it covered there (verifies spec: MNT)
 - [x] Neither a move nor the end of its settle period notifies (verifies spec: MNT)
 - [x] A window past its expected end that the sweep has not yet ended can be extended, and cannot be moved without extending it (verifies spec: MNT)
