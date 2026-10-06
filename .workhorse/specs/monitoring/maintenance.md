@@ -28,8 +28,6 @@ Taking a box down to patch it stops everything on it, so that is one declaration
 A window over one application covers that application's checks and nothing else on the box, for work that stops one product where the box serves several: an upgrade of the Tamanu server on a host also running mSupply leaves mSupply watched.
 The machine's own checks stay watched with it, since the box is not being taken down.
 
-A control offering the declaration says which grain it declares at, so an operator learns it from the control rather than from the result.
-
 A group's window covers the group's own checks and those of every machine in it, including machines that join while it holds.
 
 A window over one of a group's environments covers the machines serving that environment and nothing else of the group: an upgrade rehearsed on a site's clone leaves its production watched, and the group's own checks such as its backups with it.
@@ -45,7 +43,38 @@ Canopy never opens a window by itself.
 An environment with an open upgrade plan is offered the declaration over itself from that plan, prefilled with the plan's window and note, so declaring is one action at the moment the work starts (see [UPG](../private-server/upgrade-plans.md)).
 An hour someone typed in advance is not evidence that work began, so a planned window suspends nothing on its own.
 An open incident offers the declaration over its target too, so an operator who recognises an alert as their own work declares from where they are reading it.
-A group's own surface offers the declaration over the group and over each environment the group has, so an environment is declarable whether or not a plan is open on it and whoever is reading the group can declare from there.
+A group's own surface offers the declaration over the group, from which each environment the group has is a choice away (see "Choosing what to cover"), so an environment is declarable whether or not a plan is open on it and whoever is reading the group can declare from there.
+
+A group, a machine, and an application each offer the declaration at the head of their own page, beside the page's other actions, so it is at hand without finding the page's maintenance section.
+That control reads "Maintenance" whatever the target's state, and opens as an amendment of the target's own window where it has one.
+
+## Choosing what to cover
+
+The declaration starts at the grain of wherever it was offered from, and shows which grain that is before anything is declared, so an operator learns it from the control rather than from the result.
+The operator can retarget it to any grain on the same line of descent: whatever contains the starting grain, and whatever it contains.
+From a machine that is its group, the environment it serves, and its applications; from an environment, its group, the machines serving it, and their applications; from a group, each of its environments and every machine and application in it.
+A grain the starting point has none of is passed over: a machine in no group offers its applications alone, and a pending machine, being in no environment, offers its group with no environment between them.
+The choices are listed in the shape they nest, group over environment over machine over application, so the choice reads as a choice of how wide.
+
+Retargeting onto a grain that has an open window of its own makes the declaration an amendment of that window, and the dialog says so and when the window ends.
+What the operator has already entered stands, rather than being replaced by that window's end and note.
+
+Offered from an open incident, the declaration starts at the incident's environment.
+Each choice that would leave any of the incident's failing checks contributing to it is marked as not covering all of them, and a choice covering every one carries no mark.
+So an operator reading a backup failure on a group's headline environment learns from the dialog that only the group quiets it, since a window over that environment leaves the group's own checks watched.
+Coverage is reckoned against failures alone, because an incident whose failures have all left closes whatever warnings remain in it (see [INC](incidents.md), "Membership").
+
+The declaration an upgrade plan offers, and the one a configuration run asks for before taking its lease, stay over the target they were offered for and cannot be retargeted: each declares the work on one environment, which the plan stays open for and the lease is served against (see [UPG](../private-server/upgrade-plans.md) and [INV](../private-server/inventory.md), "Work under way").
+
+## Moving a window
+
+Amending a window can retarget it as well, to any grain on its target's line of descent, so a window declared too wide or too narrow is corrected without lifting it and declaring again.
+It stays the same window: its declarer and when it was declared carry over, the move is recorded as an amendment, and the window is the mover's work from then on as well as the declarer's.
+It is the new target's window from then on, and joins the new target's history when it ends.
+A grain with an open window of its own is listed when moving but cannot be chosen, since a target holds at most one window.
+
+What the move newly covers is suspended from the moment of the move.
+What it leaves uncovered serves the settle period as though the window had ended over it, so narrowing a group's window to one environment does not page for the rest of the group the moment it moves.
 
 ## What a window suspends
 
@@ -53,7 +82,7 @@ While a window holds over a target, its checks are observed, graded, and present
 An operator working through a window watches the check they are fixing come good, and a failure arriving mid-work is visible where it happened rather than held back until the window ends.
 
 What a window suspends is what those results feed: no issue on the target contributes to an incident while it holds, so nothing opens, nothing joins, and nothing notifies.
-An issue in an open incident leaves it when the window is declared, and an incident whose last effective failure leaves this way closes immediately, as it does for any operator action (see [INC](incidents.md), "Membership").
+An issue in an open incident leaves it when a window is declared or moved over its target, and an incident whose last effective failure leaves this way closes immediately, as it does for any operator action (see [INC](incidents.md), "Membership").
 Where that close is notified, the notice says maintenance was declared, so a reader does not take it as the problem having gone away.
 
 Canopy-wide checks are Canopy monitoring its own operation, and are never suspended by any window (see [SELF](../private-server/self-alerts.md)).
