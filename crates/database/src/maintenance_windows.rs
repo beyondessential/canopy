@@ -341,8 +341,9 @@ pub struct TargetWindow {
 	/// Where it moved to, as it reads to an operator.
 	pub moved_to: Option<String>,
 	/// The environment this span covered, where it was over one of a group's
-	/// environments rather than the target as a whole.
-	pub rank: Option<ServerRank>,
+	/// environments rather than the target as a whole. For a span that moved
+	/// off, this is not the window's `rank`, which is where it went.
+	pub covered_rank: Option<ServerRank>,
 }
 
 impl TargetWindow {
@@ -542,40 +543,51 @@ impl MaintenanceWindow {
 		by: Option<&str>,
 	) -> Result<Self> {
 		use crate::schema::maintenance_windows::dsl;
-		let window = Self::get(db, id).await?;
 		let now = Timestamp::now();
-		// A window past its expected end is still open until the sweep stamps
-		// it, and amending its end then is the operator saying the work ran long.
-		if window.ended_at.is_some() {
-			return Err(ended_is_history());
-		}
 		if amendment.expected_end.is_some_and(|end| end <= now) {
 			return Err(AppError::BadRequest(
 				"a maintenance window ends in the future".into(),
 			));
 		}
-		let Some(from) = window.grain() else {
-			return Err(AppError::BadRequest(
-				"a maintenance window covers an application, a machine or a group".into(),
-			));
-		};
-		let to = amendment.target.filter(|to| *to != from);
-		let expected_end = amendment.expected_end.unwrap_or(window.expected_end);
-		if let Some(to) = to {
-			if expected_end <= now {
-				return Err(AppError::BadRequest(
-					"this window is past its expected end; extend it to move it".into(),
-				));
-			}
-			window.check_movable(db, from, to, now).await?;
-		}
 
-		let note = amendment.note.unwrap_or_else(|| window.note.clone());
-
-		let amended = db
+		// The window is read locked, and the checks run against that read, so a
+		// concurrent amendment waits for this one rather than writing back what
+		// it read before, and a move is refused or made against what it stands
+		// on when it is written.
+		let (amended, to) = db
 			.transaction::<_, AppError, _>(async |conn| {
-				let (application, machine, group, rank) = to.unwrap_or(from).columns();
-				if to.is_some() {
+				let window: Self = dsl::maintenance_windows
+					.select(Self::as_select())
+					.filter(dsl::id.eq(id))
+					.for_update()
+					.first(conn)
+					.await
+					.map_err(AppError::from)?;
+				// A window past its expected end is still open until the sweep
+				// stamps it, and amending its end then is the operator saying the
+				// work ran long.
+				if window.ended_at.is_some() {
+					return Err(ended_is_history());
+				}
+				let Some(from) = window.grain() else {
+					return Err(AppError::BadRequest(
+						"a maintenance window covers an application, a machine or a group".into(),
+					));
+				};
+				let to = amendment.target.filter(|to| *to != from);
+				let expected_end = amendment.expected_end.unwrap_or(window.expected_end);
+				let note = amendment
+					.note
+					.clone()
+					.unwrap_or_else(|| window.note.clone());
+
+				if let Some(to) = to {
+					if expected_end <= now {
+						return Err(AppError::BadRequest(
+							"this window is past its expected end; extend it to move it".into(),
+						));
+					}
+					window.check_movable(conn, from, to, now).await?;
 					let latest = MaintenanceWindowMove::latest_for_window(conn, id).await?;
 					let covered_from = window.covered_from(latest.as_ref());
 					use crate::schema::maintenance_window_moves::dsl as moves;
@@ -595,34 +607,33 @@ impl MaintenanceWindow {
 						.await
 						.map_err(AppError::from)?;
 				}
-				// The sweep may have ended it since it was read.
-				diesel::update(
-					dsl::maintenance_windows
-						.filter(dsl::id.eq(id))
-						.filter(dsl::ended_at.is_null()),
-				)
-				.set((
-					dsl::application_id.eq(application),
-					dsl::machine_id.eq(machine),
-					dsl::server_group_id.eq(group),
-					dsl::rank.eq(rank),
-					dsl::expected_end.eq(jiff_diesel::Timestamp::from(expected_end)),
-					dsl::note.eq(note.as_deref()),
-					dsl::amended_by.eq(by),
-					dsl::amended_at.eq(jiff_diesel::Timestamp::from(now)),
-					dsl::updated_at.eq(jiff_diesel::Timestamp::from(now)),
-				))
-				.returning(Self::as_select())
-				.get_result(conn)
-				.await
-				.map_err(|err| match err {
-					diesel::result::Error::DatabaseError(
-						diesel::result::DatabaseErrorKind::UniqueViolation,
-						_,
-					) => AppError::Conflict("that target already has a window of its own".into()),
-					diesel::result::Error::NotFound => ended_is_history(),
-					err => AppError::from(err),
-				})
+
+				let (application, machine, group, rank) = to.unwrap_or(from).columns();
+				let amended = diesel::update(dsl::maintenance_windows.filter(dsl::id.eq(id)))
+					.set((
+						dsl::application_id.eq(application),
+						dsl::machine_id.eq(machine),
+						dsl::server_group_id.eq(group),
+						dsl::rank.eq(rank),
+						dsl::expected_end.eq(jiff_diesel::Timestamp::from(expected_end)),
+						dsl::note.eq(note.as_deref()),
+						dsl::amended_by.eq(by),
+						dsl::amended_at.eq(jiff_diesel::Timestamp::from(now)),
+						dsl::updated_at.eq(jiff_diesel::Timestamp::from(now)),
+					))
+					.returning(Self::as_select())
+					.get_result(conn)
+					.await
+					.map_err(|err| match err {
+						diesel::result::Error::DatabaseError(
+							diesel::result::DatabaseErrorKind::UniqueViolation,
+							_,
+						) => {
+							AppError::Conflict("that target already has a window of its own".into())
+						}
+						err => AppError::from(err),
+					})?;
+				Ok((amended, to))
 			})
 			.await?;
 
@@ -701,18 +712,14 @@ impl MaintenanceWindow {
 	) -> Result<Option<InventoryLease>> {
 		let environments: Vec<(Uuid, ServerRank)> = match (grain.scope(), grain.rank()) {
 			(Scope::Group(group_id), Some(rank)) => vec![(group_id, rank)],
-			(Scope::Group(group_id), None) => {
-				let machines: Vec<Uuid> = Machine::list_for_group(db, group_id)
-					.await?
-					.into_iter()
-					.map(|machine| machine.id)
-					.collect();
-				let mut ranks: Vec<ServerRank> =
-					Machine::ranks(db, &machines).await?.into_values().collect();
-				ranks.sort();
-				ranks.dedup();
-				ranks.into_iter().map(|rank| (group_id, rank)).collect()
-			}
+			// A group's window covers every environment it has a lease on,
+			// whether or not anything in it is still ranked at that rank, so
+			// the leases are read directly rather than through its machines.
+			(Scope::Group(group_id), None) => InventoryLease::open_for_group(db, group_id)
+				.await?
+				.into_iter()
+				.map(|lease| (group_id, lease.rank))
+				.collect(),
 			(Scope::Machine(machine_id), _) => {
 				let machine = Machine::get_by_id(db, machine_id).await?;
 				match (machine.group_id, Machine::rank(db, machine_id).await?) {
@@ -1170,47 +1177,105 @@ pub async fn target_label(
 	scope: Scope,
 	rank: Option<ServerRank>,
 ) -> Result<String> {
-	match scope {
-		Scope::Machine(mid) => {
-			let machine = Machine::get_by_id(db, mid).await?;
-			match machine.group_id {
-				Some(gid) => {
-					let group = ServerGroup::get_by_id(db, gid).await?;
-					Ok(format!("{} {}", group.name, machine.name))
-				}
-				None => Ok(machine.name),
-			}
-		}
-		Scope::Application(aid) => {
-			let application = Application::get_by_id(db, aid).await?;
-			let own = application.display_name();
-			match application.group_id {
-				Some(gid) => {
-					let group = ServerGroup::get_by_id(db, gid).await?;
-					let within = match application.rank {
-						Some(rank) => environment_name(&group.name, rank),
-						None => group.name,
-					};
-					Ok(format!("{within} {own}"))
-				}
-				None => Ok(own),
-			}
-		}
-		Scope::Group(gid) => {
-			let group = ServerGroup::get_by_id(db, gid).await?;
-			Ok(match rank {
-				Some(rank) => environment_name(&group.name, rank),
-				None => group.name,
-			})
-		}
-		Scope::Global => Ok("Canopy".to_string()),
-		// A window never covers a cluster (see `fleet_columns`), so this is
-		// unreachable; label it by its grain rather than panicking.
-		Scope::Cluster(cid) => {
-			let cluster = crate::KubernetesCluster::get_by_id(db, cid).await?;
-			Ok(cluster.name)
+	match Grain::new(scope, rank) {
+		Ok(grain) => Ok(target_labels(db, &[grain])
+			.await?
+			.remove(&grain)
+			.unwrap_or_default()),
+		Err(_) => match scope {
+			// A window never covers a cluster (see `fleet_columns`), so this is
+			// unreachable; label it by its grain rather than panicking.
+			Scope::Cluster(cid) => Ok(crate::KubernetesCluster::get_by_id(db, cid).await?.name),
+			_ => Ok("Canopy".to_string()),
+		},
+	}
+}
+
+/// How each of `grains` reads to an operator, in one read per kind however
+/// many there are: a machine and an application under their group's name, an
+/// application under its environment's, an environment as its group's name
+/// with its rank.
+pub async fn target_labels(
+	db: &mut AsyncPgConnection,
+	grains: &[Grain],
+) -> Result<HashMap<Grain, String>> {
+	let mut machine_ids = Vec::new();
+	let mut application_ids = Vec::new();
+	let mut group_ids = Vec::new();
+	for grain in grains {
+		match grain.scope() {
+			Scope::Machine(id) => machine_ids.push(id),
+			Scope::Application(id) => application_ids.push(id),
+			Scope::Group(id) => group_ids.push(id),
+			Scope::Cluster(_) | Scope::Global => {}
 		}
 	}
+	let machines: HashMap<Uuid, Machine> = Machine::get_by_ids(db, &machine_ids)
+		.await?
+		.into_iter()
+		.map(|machine| (machine.id, machine))
+		.collect();
+	let applications: HashMap<Uuid, Application> = if application_ids.is_empty() {
+		HashMap::new()
+	} else {
+		Application::get_by_ids(db, &application_ids)
+			.await?
+			.into_iter()
+			.map(|application| (application.id, application))
+			.collect()
+	};
+	group_ids.extend(machines.values().filter_map(|machine| machine.group_id));
+	group_ids.extend(
+		applications
+			.values()
+			.filter_map(|application| application.group_id),
+	);
+	group_ids.sort();
+	group_ids.dedup();
+	let groups = ServerGroup::names_by_ids(db, &group_ids).await?;
+
+	let mut labels = HashMap::with_capacity(grains.len());
+	for grain in grains {
+		let label = match grain.scope() {
+			Scope::Machine(id) => {
+				let Some(machine) = machines.get(&id) else {
+					continue;
+				};
+				match machine.group_id.and_then(|gid| groups.get(&gid)) {
+					Some(group) => format!("{group} {}", machine.name),
+					None => machine.name.clone(),
+				}
+			}
+			Scope::Application(id) => {
+				let Some(application) = applications.get(&id) else {
+					continue;
+				};
+				let own = application.display_name();
+				match application.group_id.and_then(|gid| groups.get(&gid)) {
+					Some(group) => {
+						let within = match application.rank {
+							Some(rank) => environment_name(group, rank),
+							None => group.clone(),
+						};
+						format!("{within} {own}")
+					}
+					None => own,
+				}
+			}
+			Scope::Group(id) => {
+				let Some(group) = groups.get(&id) else {
+					continue;
+				};
+				match grain.rank() {
+					Some(rank) => environment_name(group, rank),
+					None => group.clone(),
+				}
+			}
+			Scope::Cluster(_) | Scope::Global => continue,
+		};
+		labels.insert(*grain, label);
+	}
+	Ok(labels)
 }
 
 fn format_when(at: Timestamp) -> String {
@@ -1266,40 +1331,32 @@ async fn spans_over_target(
 			covered_from,
 			moved_at: None,
 			moved_to: None,
-			rank,
+			covered_rank: rank,
 		});
 	}
-	// A history read lists a handful of distinct destinations, so each is
-	// named once however many spans moved there.
-	let mut labels: HashMap<Grain, String> = HashMap::new();
+	// Where each moved-off span went next: the target the following move
+	// left, or the window's own where that was its last move.
+	let mut next: Vec<(MaintenanceWindowMove, MaintenanceWindow, Option<Grain>)> = Vec::new();
 	for moved in moved_off {
 		let Some(window) = windows.get(&moved.window_id).cloned() else {
 			continue;
 		};
-		// Where it went next: the target the following move left, or the
-		// window's own where this was its last move.
-		let next = all_moves
+		let to = all_moves
 			.iter()
 			.find(|later| later.window_id == moved.window_id && later.moved_at > moved.moved_at)
 			.and_then(MaintenanceWindowMove::grain)
 			.or_else(|| window.grain());
-		let moved_to = match next {
-			Some(grain) => Some(match labels.get(&grain) {
-				Some(label) => label.clone(),
-				None => {
-					let label = target_label(db, grain.scope(), grain.rank()).await?;
-					labels.insert(grain, label.clone());
-					label
-				}
-			}),
-			None => None,
-		};
+		next.push((moved, window, to));
+	}
+	let destinations: Vec<Grain> = next.iter().filter_map(|(_, _, to)| *to).collect();
+	let labels = target_labels(db, &destinations).await?;
+	for (moved, window, to) in next {
 		out.push(TargetWindow {
 			window,
 			covered_from: moved.covered_from,
 			moved_at: Some(moved.moved_at),
-			moved_to,
-			rank: moved.rank,
+			moved_to: to.and_then(|to| labels.get(&to).cloned()),
+			covered_rank: moved.rank,
 		});
 	}
 	Ok(out)

@@ -538,6 +538,101 @@ async fn a_window_a_run_is_served_against_stays_until_the_lease_is_released() {
 	.await
 }
 
+/// A group's window covers an environment its lease names even where nothing
+/// in the group is still ranked there, so the run still holds it in place.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_lease_on_an_environment_nothing_is_ranked_in_holds_a_group_window() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let site = site(&mut conn).await;
+		let window = declare_group(&mut conn, site.group, None).await;
+		sql_query(
+			"INSERT INTO inventory_leases (server_group_id, rank, intent, held_by, expires_at) \
+			 VALUES ($1, 'demo', 'configure', 'op', NOW() + INTERVAL '1 hour')",
+		)
+		.bind::<sql_types::Uuid, _>(site.group)
+		.execute(&mut conn)
+		.await
+		.expect("lease the demo environment");
+
+		let refused = MaintenanceWindow::amend(
+			&mut conn,
+			window.id,
+			move_to(Grain::machine(site.production_box)),
+			Some("op"),
+		)
+		.await;
+		assert!(
+			matches!(refused, Err(AppError::Conflict(_))),
+			"the run on the demo environment holds the group's window: {refused:?}"
+		);
+	})
+	.await
+}
+
+/// The dialog's coverage marks and suspension are two readings of one rule, so
+/// for every grain and every target in a group they agree.
+#[tokio::test(flavor = "multi_thread")]
+async fn coverage_marks_agree_with_suspension() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let site = site(&mut conn).await;
+		let pending_box = insert_machine(&mut conn, Some(site.group), "fj-new").await;
+		let pending_app =
+			insert_application(&mut conn, Some(site.group), pending_box, None, "new").await;
+		let descent = line_of_descent(&mut conn, Grain::group(site.group))
+			.await
+			.expect("descent");
+
+		// Each target with the arguments filing passes for an issue on it.
+		let group = Some(site.group);
+		let targets = [
+			(Grain::group(site.group), (None, None, group)),
+			(
+				Grain::machine(site.production_box),
+				(None, Some(site.production_box), group),
+			),
+			(
+				Grain::application(site.production_app),
+				(Some(site.production_app), Some(site.production_box), group),
+			),
+			(
+				Grain::machine(site.clone_box),
+				(None, Some(site.clone_box), group),
+			),
+			(
+				Grain::machine(pending_box),
+				(None, Some(pending_box), group),
+			),
+			(
+				Grain::application(pending_app),
+				(Some(pending_app), Some(pending_box), group),
+			),
+		];
+
+		for entry in &descent.entries {
+			let (scope, rank) = (entry.grain.scope(), entry.grain.rank());
+			MaintenanceWindow::declare(&mut conn, scope, rank, in_hours(1), None, Some("op"))
+				.await
+				.expect("declare");
+			for (target, (application, machine, group)) in targets {
+				let suspended = MaintenanceWindow::suspends(&mut conn, application, machine, group)
+					.await
+					.expect("suspends");
+				assert_eq!(
+					descent.covers(entry.grain, target),
+					suspended,
+					"a window over {:?} and a check on {target:?}",
+					entry.grain,
+				);
+			}
+			sql_query("DELETE FROM maintenance_windows")
+				.execute(&mut conn)
+				.await
+				.expect("clear");
+		}
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn another_operators_lease_does_not_hold_a_window_in_place() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
