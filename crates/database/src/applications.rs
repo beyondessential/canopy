@@ -610,6 +610,11 @@ impl Application {
 	/// box was archived before boxes carried a rank, it keeps its own and the
 	/// box takes it by trigger. It is pending only where it never had one, or
 	/// where the live applications are themselves pending.
+	///
+	/// The `applications_take_machine_rank_on_join` trigger holds any other
+	/// writer un-archiving an application to the same rule, as the group
+	/// triggers do for [`crate::machines::Machine::update`]; this decides it
+	/// in full rather than leaving any of it to the trigger.
 	// spec: GRP#environments
 	pub async fn restore(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Self> {
 		use crate::schema::applications::dsl;

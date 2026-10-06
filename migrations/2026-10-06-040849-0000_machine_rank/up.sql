@@ -46,8 +46,9 @@ WHERE machines.id = box.machine_id AND box.rank IS NOT NULL;
 -- writer, such as raw SQL, a restore, or a backfill. A rank is never cleared,
 -- so neither side propagates a NULL.
 --
--- They are mutually recursive and terminate: each writes only where the rank
--- differs, so the write coming back the other way changes nothing.
+-- The box's rank reaches its applications by trigger, and an application's
+-- reaches its box only when written directly, so a write never comes back the
+-- way it went.
 
 -- An application joining a ranked box takes the box's rank, whatever rank it
 -- was written with, as its group is the box's. An application stood up on a
@@ -82,8 +83,10 @@ CREATE TRIGGER applications_take_machine_rank_on_join
 -- A live application's rank is its box's, so ranking one ranks the box. By the
 -- time this runs, an application joining a ranked box has taken its rank, so
 -- this only ever ranks a box that had none or re-ranks one from an application
--- already on it. Where it was the box that ranked the application, the box
--- already carries the rank and this writes nothing. `applications.rank` is read leniently, so an older spelling
+-- already on it. It runs only for a write made directly rather than by another
+-- trigger: where `machine_rank_propagates` ranked the application, the box
+-- already carries the rank, and running this once per application on the box
+-- would write nothing each time. `applications.rank` is read leniently, so an older spelling
 -- ranks the box as the rank it names, and a spelling no one recognises, which
 -- reads as unranked, leaves the box alone.
 CREATE FUNCTION application_rank_ranks_machine() RETURNS TRIGGER
@@ -102,7 +105,8 @@ $$;
 CREATE TRIGGER application_rank_ranks_machine
 	AFTER INSERT OR UPDATE OF rank, machine_id, deleted_at ON applications
 	FOR EACH ROW
-	WHEN (NEW.rank IS NOT NULL AND NEW.machine_id IS NOT NULL AND NEW.deleted_at IS NULL)
+	WHEN (NEW.rank IS NOT NULL AND NEW.machine_id IS NOT NULL AND NEW.deleted_at IS NULL
+		AND pg_trigger_depth() = 0)
 	EXECUTE FUNCTION application_rank_ranks_machine();
 
 -- Ranking a box ranks every live application on it. Archived ones keep the

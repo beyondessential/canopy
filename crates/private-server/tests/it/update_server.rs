@@ -578,3 +578,30 @@ async fn an_archived_machine_cannot_be_ranked() {
 	})
 	.await
 }
+
+/// Naming the rank an archived box already carries changes nothing, so the
+/// rest of the edit saves.
+// spec: FLT#archival
+#[tokio::test(flavor = "multi_thread")]
+async fn an_edit_naming_an_archived_machines_own_rank_saves() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (name, id, rank, deleted_at) \
+			 VALUES ('gone', '{BOX}', 'test', NOW())"
+		))
+		.await
+		.unwrap();
+
+		private
+			.post("/api/fleet/machines/update")
+			.json(&json!({ "machine_id": BOX, "rank": "test", "name": "renamed" }))
+			.await
+			.assert_status_ok();
+
+		let machine = Machine::get_by_id(&mut conn, BOX.parse().unwrap())
+			.await
+			.unwrap();
+		assert_eq!(machine.name, "renamed");
+	})
+	.await
+}

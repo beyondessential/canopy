@@ -621,8 +621,11 @@ async fn an_archived_machine_cannot_be_ranked_and_serves_no_environment() {
 			Machine::set_rank(&mut conn, machine.id, ServerRank::Production, Some("op"))
 				.await
 				.is_err(),
-			"an archived box is refused a rank"
+			"an archived box with nothing live on it is refused a new rank"
 		);
+		Machine::set_rank(&mut conn, machine.id, ServerRank::Test, Some("op"))
+			.await
+			.expect("the rank it carries is never refused");
 		let archived = Machine::get_by_id(&mut conn, machine.id).await.unwrap();
 		assert_eq!(
 			archived.rank,
@@ -638,6 +641,18 @@ async fn an_archived_machine_cannot_be_ranked_and_serves_no_environment() {
 			restored.rank,
 			Some(ServerRank::Test),
 			"what comes back takes the rank the box carries"
+		);
+
+		Application::set_rank(&mut conn, central, ServerRank::Demo, Some("op"))
+			.await
+			.expect("a live application on an archived box can be ranked");
+		assert_eq!(
+			Machine::get_by_id(&mut conn, machine.id)
+				.await
+				.unwrap()
+				.rank,
+			Some(ServerRank::Demo),
+			"and ranks the box it is on"
 		);
 	})
 	.await

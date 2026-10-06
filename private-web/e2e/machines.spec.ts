@@ -350,32 +350,30 @@ test.describe("machine detail", () => {
 		expect(ranks.map((row) => row.rank)).toEqual(["demo", "demo"]);
 	});
 
-	/// Saving a box's other fields leaves its rank alone rather than writing
-	/// it again.
+	/// An archived box with nothing live on it keeps the rank it was archived
+	/// at, so the form offers no change to it.
 	///
-	/// spec: FLT#editing
-	test("editing a ranked box sends its rank only when it changes", async ({
+	/// spec: FLT#archival
+	test("an archived box with nothing on it offers no rank to change", async ({
 		page,
 		sql,
 	}) => {
-		const group = await seedServerGroup(sql, { name: "unchanged-rank-group" });
-		const server = await seedServer(sql, {
-			name: "unchanged-rank-app",
+		const group = await seedServerGroup(sql, { name: "archived-rank-group" });
+		const machine = await seedMachine(sql, {
+			name: "archived-rank-box",
 			groupId: group.id,
 			rank: "test",
 		});
+		await sql.query("UPDATE machines SET deleted_at = NOW() WHERE id = $1", [
+			machine.id,
+		]);
 
-		await page.goto(`/fleet/machines/${server.machineId}/edit`);
-		await page
+		await page.goto(`/fleet/machines/${machine.id}/edit`);
+		const rank = page
 			.getByTestId("machine-section")
-			.getByLabel(/^Name(\s*\*)?$/i)
-			.fill("renamed-ranked-box");
-		const update = page.waitForRequest("**/api/fleet/machines/update");
-		await page.getByRole("button", { name: "Save" }).click();
-		expect((await update).postDataJSON()).not.toHaveProperty("rank");
-		await expect(page).toHaveURL(
-			new RegExp(`/fleet/machines/${server.machineId}$`),
-		);
+			.getByRole("combobox", { name: "Rank" });
+		await expect(rank).toHaveText("test");
+		await expect(rank).toHaveAttribute("aria-disabled", "true");
 	});
 
 	/// A box an operator has just added carries nothing yet, and is ranked all

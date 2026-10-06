@@ -581,11 +581,11 @@ impl Machine {
 	///
 	/// A machine with nothing on it is ranked all the same, so what arrives on
 	/// it later takes the rank rather than being pending. An archived machine
-	/// is refused (see [`Self::check_rankable`]). Open issues of the
-	/// machine and of everything on it are re-evaluated against the
-	/// environment they now belong to, and so are the group's own checks when
-	/// its headline rank moved, `by` attributing an incident that closes as a
-	/// result. Ranking a box at the rank it carries writes nothing.
+	/// with nothing live on it is refused (see [`Self::check_rankable`]).
+	/// Open issues of the machine and of everything on it are re-evaluated
+	/// against the environment they now belong to, and so are the group's own
+	/// checks when its headline rank moved, `by` attributing an incident that
+	/// closes as a result. Ranking a box at the rank it carries writes nothing.
 	///
 	/// Returns the machine as it stands once ranked.
 	// spec: GRP#environments
@@ -602,10 +602,10 @@ impl Machine {
 			.transaction::<_, AppError, _>(async |conn| {
 				// The box's row serialises this against a report adopting beside it.
 				let machine = Self::get_by_id_for_update(conn, machine_id).await?;
-				machine.check_rankable()?;
 				if machine.rank == Some(rank) {
 					return Ok((machine, None, false));
 				}
+				machine.check_rankable(conn, rank).await?;
 				let headline =
 					crate::server_groups::ServerGroup::headline_rank(conn, machine.group_id)
 						.await?;
@@ -650,15 +650,25 @@ impl Machine {
 		.map_err(AppError::from)
 	}
 
-	/// Refuse a rank for an archived machine. Archiving a box archives
-	/// everything on it, so a rank given now would describe nothing live.
-	pub fn check_rankable(&self) -> Result<()> {
-		if self.deleted_at.is_some() {
-			return Err(AppError::BadRequest(
-				"an archived machine has no rank to change".into(),
-			));
+	/// Refuse to move an archived machine to `rank` while nothing on it is
+	/// live. Archiving a box archives everything on it, so a rank given then
+	/// would describe nothing; an application restored onto it is live again,
+	/// and its rank is the box's to change. The rank the box already carries
+	/// is never refused, so an edit naming it changes nothing.
+	pub async fn check_rankable(
+		&self,
+		db: &mut AsyncPgConnection,
+		rank: commons_types::server::rank::ServerRank,
+	) -> Result<()> {
+		if self.deleted_at.is_none()
+			|| self.rank == Some(rank)
+			|| Self::has_live_application(db, self.id).await?
+		{
+			return Ok(());
 		}
-		Ok(())
+		Err(AppError::BadRequest(
+			"an archived machine with nothing live on it has no rank to change".into(),
+		))
 	}
 
 	/// The environment this machine serves: its rank, and none while it is

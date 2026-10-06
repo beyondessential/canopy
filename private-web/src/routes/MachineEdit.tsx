@@ -165,6 +165,7 @@ function Form({
 		name: string;
 		group_id?: string | null;
 		rank?: ServerRank | null;
+		deleted_at?: string | null;
 		cloud?: boolean | null;
 		geolocation?: { lat: number; lon: number } | null;
 		is_monitored: boolean;
@@ -239,12 +240,10 @@ function Form({
 						box.lat && box.lon
 							? { lat: Number(box.lat), lon: Number(box.lon) }
 							: null,
-					// Every application on the box takes it. Sent only when picked
-					// here: an archived box keeps its rank and refuses a new one, so
-					// resending it would refuse every other edit.
+					// Every application on the box takes it. Omitted while the box is
+					// pending and nothing has been picked.
 					// spec: FLT#editing
-					rank:
-						box.rank === "" || box.rank === machine.rank ? undefined : box.rank,
+					rank: box.rank === "" ? undefined : box.rank,
 					is_monitored: box.isMonitored,
 					alert_when_down_for: Math.max(
 						60,
@@ -368,7 +367,13 @@ function Form({
 						onChange={(e) =>
 							setBox({ ...box, rank: e.target.value as ServerRank })
 						}
-						disabled={pending}
+						// An archived box with nothing live on it keeps the rank it
+						// was archived at.
+						// spec: FLT#archival
+						disabled={
+							pending ||
+							(machine.deleted_at != null && applications.length === 0)
+						}
 						// The empty value still shows a placeholder, so the label has
 						// to float above it rather than sit on top of it.
 						slotProps={{

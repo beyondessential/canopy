@@ -20,7 +20,9 @@
 
 ## Archived boxes and reassignment
 
-- [x] An archived machine is refused a rank, keeps the rank it was archived at, and serves no environment (verifies spec: FLT)
+- [x] An archived machine with nothing live on it is refused a new rank, keeps the rank it was archived at, and serves no environment (verifies spec: FLT)
+- [x] An archived machine is never refused the rank it already carries, so an edit naming it saves (verifies spec: FLT)
+- [x] A live application restored onto an archived box can be ranked, and ranks the box (verifies spec: FLT)
 - [x] The update endpoint refuses a rank for an archived machine and leaves the rest of the edit unapplied (verifies spec: FLT)
 - [x] An application restored onto an archived box comes back at the rank the box carries (verifies spec: FLT)
 - [x] An application moved onto a ranked box takes the box's rank rather than re-ranking it (verifies spec: GRP)
@@ -29,5 +31,5 @@
 - [x] An application inserted onto a ranked box at another rank takes the box's rank (verifies spec: GRP)
 - [x] A box's rank column refuses a spelling that is not canonical, including one no one recognises
 - [x] With the triggers bypassed, the schema still refuses two ranks on one box
-- [x] Editing a ranked box's other fields sends no rank (verifies spec: FLT)
+- [x] An archived box with nothing on it offers no rank to change on the edit form (verifies spec: FLT)
 - [ ] A push adopting an application while the box is re-ranked takes the rank the locked row holds

@@ -518,7 +518,8 @@ pub async fn update(
 		Some(Some(rank)) => {
 			Machine::get_by_id(&mut conn, args.machine_id)
 				.await?
-				.check_rankable()?;
+				.check_rankable(&mut conn, rank)
+				.await?;
 			Some(rank)
 		}
 		None => None,
