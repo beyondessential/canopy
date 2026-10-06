@@ -22,6 +22,13 @@ It enforces the group's retention as part of maintenance, and records every run'
 Maintenance also re-asserts that the repo carries no repo-level object-lock retention mode of its own, healing a repo that was imported with one before Canopy disabled it (see [BKO](../private-server/backup.md)).
 Beyond the cadence, an operator may request a one-off full maintenance run for a group (see [BKO](../private-server/backup.md)); Canopy runs it on the next scheduling opportunity, ahead of the jittered cadence slot, subject to the same one-run-per-group interlock — so a forced run never overlaps an in-flight one.
 
+## Keeping clear of backups
+
+Maintenance and passphrase rotation keep clear of a group's backups, since the time an operator schedules backups into is the time the group can spare for heavy work, and maintenance competes with backups for the repo.
+Neither starts while a backup of one of the group's machines is in progress, or while a cron-scheduled backup of one is due (see [BKO](../private-server/backup.md)); each waits for a gap instead.
+Waiting is bounded by the job's own cadence: a job that would otherwise miss the period its cadence gives it runs regardless, so a group that is never clear is still maintained and rotated.
+An operator's one-off maintenance request does not wait, since asking for it is the operator's judgement that now is the time.
+
 ## Passphrase rotation
 
 Canopy rotates each group's repo passphrase on a cadence, so a leaked passphrase is useful only until the next rotation rather than indefinitely.
@@ -31,7 +38,7 @@ Like maintenance, rotation is Canopy's to do; operators never run it.
 
 ## Recovery escrow
 
-Because Canopy holds the only copy of every passphrase, it escrows the state needed to recover access without it (see [ESC](escrow.md)): the per-group passphrases and repo coordinates, and the group, machine, configuration, schedule, and capability records that frame them.
+Because Canopy holds the only copy of every passphrase, it escrows the state needed to recover access without it (see [ESC](escrow.md)): the per-group passphrases and repo coordinates, and the group, machine, configuration, schedule (fleet, group, and machine), and capability records that frame them.
 
 ## Inspection
 
@@ -59,6 +66,7 @@ Pruning is fleet-wide and independent of any group's maintenance, so it never wa
 Canopy reconciles three sources — what a device reported, what credentials were issued, and what actually landed in the repo — and surfaces where they disagree:
 
 - **staleness** — a machine with a prior successful backup but none recent, or one that has never backed up though it has been expected long enough. Expectation for one that has never backed up starts from the later of its group's backup configuration and when the machine was enrolled, so a machine onboarded into an existing configuration is not stale the moment it appears. Recency is the age of the *data*, measured from the moment the backup froze what it captured (see [BAK](../public-server/backup.md)), falling back to the run's report time when it reported no such moment. So a backup that took many hours to upload is aged from when it was taken, and a machine whose data is a day old is not counted fresh because its upload finished minutes ago. Both which run counts as the latest success and how old that success is use the same measure, so a machine's freshness never travels backwards as new runs arrive.
+  What counts as recent follows the machine's schedule for the type (see [BKO](../private-server/backup.md)), and in either kind a machine is stale once it has missed two consecutive opportunities, so one missed run is not stale and two are. Under an interval that is twice the interval. Under a cron expression it is two consecutive firings whose due windows have closed with no successful backup since the earlier of them, and a machine that has never backed up is stale once two such firings have closed since its expectation began. A manual-only type is never stale.
 - **reconcile** — a device reported a successful backup naming the snapshot it created and the repository does not hold that snapshot (the report is false or the upload didn't persist), or a fresh snapshot exists but no recent report (the reporting path is broken).
   These assert that the reporting path itself is working rather than anything about the age of the data.
   A snapshot's absence is only evidence once someone has looked: no verdict is reached from an inventory older than the run it would contradict, and a run whose snapshot could have been expired by retention since it was reported is not judged at all.

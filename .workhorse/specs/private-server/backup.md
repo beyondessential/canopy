@@ -48,10 +48,61 @@ A bucket holding unrelated content is refused rather than written into; Canopy n
 Either way Canopy creates and owns the passphrase secret, and configuration and secret are created together — if the secret cannot be stored, the configuration is rolled back, so a configuration never exists without its passphrase.
 The supplied or generated passphrase is only the starting point: Canopy rotates it on a cadence thereafter (see [BKJ](../jobs/backup.md)), and the recovery ceremony recovers whatever the current passphrase is.
 
-## Scheduling and retention
+## Scheduling
 
-Each `(group, type)` has an expected backup interval and a retention policy, taken from a per-`(group, type)` override when set, otherwise from the fleet-wide default for that type.
-A manual-only type has no interval and is backed up only on an explicit request.
+Each `(machine, type)` has a schedule, which is one of:
+
+- **manual-only**, backed up only on an explicit request;
+- **an interval**, of at least an hour;
+- **a cron expression**, optionally with the timezone it is read in.
+
+A machine's schedule for a type is the `(machine, type)` override when one is set, otherwise the `(group, type)` override, otherwise the fleet-wide default for the type.
+An override replaces the schedule beneath it whole: its kind, its timing, and its timezone.
+Each layer is set and cleared on its own, and clearing one falls back to the next.
+Wherever a schedule is shown, it says which layer it comes from.
+
+### Cron expressions
+
+A cron expression has the five standard fields: minute, hour, day of month, month, and day of week.
+A field may use `H` for a value Canopy derives from the machine and the type: `H` alone ranges over the whole field, `H(a-b)` over a range, and `H/n` steps by `n` from the derived value.
+The derived value is stable, so a machine's backup of a type always lands in the same slot, while a box's types and a group's machines spread out across the field.
+
+An expression is refused when it would never fire, or when any two consecutive firings would be less than an hour apart.
+Validation considers every value `H` could take, so an expression accepted for one machine is valid for every machine.
+
+An expression is read in the timezone set on its schedule, otherwise in the operating system timezone the machine reports (see [FIG](figures.md)), otherwise in UTC.
+So a fleet default of nightly at 2am backs each machine up at its own 2am.
+Firings follow the zone's wall clock across daylight-saving changes: a firing at a time the clocks skip happens at the first moment after the gap, and a firing at a time that occurs twice happens once, at the first occurrence.
+
+### When a backup is due
+
+A machine's backup of a type is due only while the type is an enabled capability of the machine and the group's configuration is ready, and Canopy tells the machine on its next status report (see [STA](../public-server/statuses.md)).
+
+Under an interval, the backup is due once the interval has passed since the snapshot moment of the machine's latest successful backup of the type, or immediately if there is none, and stays due until one succeeds.
+
+Under a cron expression, each firing opens a due window that closes halfway to the next firing.
+The backup is due while a window is open and no backup of the type has succeeded with a snapshot moment since its firing, so a failed run is retried within the window.
+A window that closes unmet is a missed firing: the backup waits for the next firing rather than running whenever the machine is next in contact, so it never runs outside the time the operator chose.
+
+An expression without `H` opens each machine's window a short distance after the firing, derived stably from the machine and the type, so a group sharing one schedule does not reach its storage all at once.
+The distance stays small against the window, so the backup still starts close to the time the operator chose.
+An expression with `H` is the operator's own spread, and its windows open at the firing exactly.
+
+### Editing schedules
+
+The fleet-wide default and the `(group, type)` override are edited where they are today, offering all three kinds.
+A `(machine, type)` override is edited both beside the machine's participation on the group's backup view and on the machine's own page, each showing the schedule the machine inherits when it has no override.
+
+While a cron expression is being edited, the operator sees the next few firings it produces, in the zone each is read in and with `H` resolved, so a mistyped expression is caught before it is saved.
+For a machine override these are the machine's own; for a group override or fleet default they are shown for a sample of the machines it applies to.
+An expression that would be refused is reported as the operator types it, saying why.
+
+Each machine's next scheduled backup of each type is shown against it, in the machine's zone, wherever its backups are listed.
+
+## Retention
+
+Each `(group, type)` has a retention policy, taken from a per-`(group, type)` override when set, otherwise from the fleet-wide default for that type.
+Retention is the group's because its machines share one repository, so a machine's schedule override leaves it untouched.
 Retention is floored to an organisational minimum; a configuration may deliberately opt out of the floor, which is recorded as the dangerous choice it is.
 
 ## Participation and on-demand
