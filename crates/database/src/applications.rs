@@ -507,9 +507,10 @@ impl Application {
 	/// one fact the box cannot know, and its machine's rank, or none where the
 	/// machine is not ranked yet, which leaves it pending.
 	///
-	/// The caller holds the machine row's lock, which is what keeps a rank
-	/// change on the box from landing between reading the rank here and the
-	/// insert, so every caller must.
+	/// The caller holds the machine row's lock and passes the row as it read
+	/// it under that lock, which is what keeps a rank change on the box from
+	/// landing between reading the rank here and the insert, so every caller
+	/// must.
 	// spec: GRP#environments
 	async fn adopt(
 		db: &mut AsyncPgConnection,
@@ -1091,7 +1092,9 @@ impl Application {
 			));
 		}
 		if let Some(machine_id) = application.machine_id {
-			return crate::machines::Machine::set_rank(db, machine_id, rank, by).await;
+			return crate::machines::Machine::set_rank(db, machine_id, rank, by)
+				.await
+				.map(drop);
 		}
 
 		let headline =

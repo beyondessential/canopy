@@ -239,10 +239,12 @@ function Form({
 						box.lat && box.lon
 							? { lat: Number(box.lat), lon: Number(box.lon) }
 							: null,
-					// Every application on the box takes it. Omitted while the box is
-					// pending and nothing has been picked.
+					// Every application on the box takes it. Sent only when picked
+					// here: an archived box keeps its rank and refuses a new one, so
+					// resending it would refuse every other edit.
 					// spec: FLT#editing
-					rank: box.rank === "" ? undefined : box.rank,
+					rank:
+						box.rank === "" || box.rank === machine.rank ? undefined : box.rank,
 					is_monitored: box.isMonitored,
 					alert_when_down_for: Math.max(
 						60,

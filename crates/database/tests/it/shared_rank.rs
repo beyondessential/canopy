@@ -11,7 +11,7 @@ use database::{
 	server_groups::ServerGroup,
 };
 use diesel::{QueryableByName, sql_query, sql_types};
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::{AsyncPgConnection, RunQueryDsl, SimpleAsyncConnection as _};
 use uuid::Uuid;
 
 #[derive(QueryableByName)]
@@ -175,7 +175,7 @@ async fn a_machine_with_no_applications_can_be_ranked_and_what_arrives_takes_it(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_unranked_application_written_onto_a_ranked_box_takes_its_rank() {
+async fn an_application_written_onto_a_ranked_box_takes_its_rank() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group = group(&mut conn).await;
 		let machine = machine(&mut conn, group).await;
@@ -183,13 +183,23 @@ async fn an_unranked_application_written_onto_a_ranked_box_takes_its_rank() {
 			.await
 			.expect("rank the empty box");
 
-		insert(&mut conn, &machine, "http://raw.invalid/", None)
+		insert(&mut conn, &machine, "http://unranked.invalid/", None)
 			.await
 			.expect("a raw insert naming no rank");
+		insert(
+			&mut conn,
+			&machine,
+			"http://other.invalid/",
+			Some("production"),
+		)
+		.await
+		.expect("a raw insert naming another rank");
 		assert_eq!(
 			ranks_on(&mut conn, &machine).await,
-			vec![Some(ServerRank::Demo)]
+			vec![Some(ServerRank::Demo); 2],
+			"the box's rank wins, as its group does"
 		);
+		assert_eq!(serving(&mut conn, machine.id).await, Some(ServerRank::Demo));
 	})
 	.await
 }
@@ -358,6 +368,8 @@ async fn changing_a_ranked_box_moves_every_application_on_it() {
 	.await
 }
 
+/// The triggers keep a box to one rank under any writer; the exclusion
+/// constraint holds it even where they are bypassed.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_schema_refuses_two_ranks_on_one_box() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
@@ -371,6 +383,9 @@ async fn the_schema_refuses_two_ranks_on_one_box() {
 		)
 		.await
 		.expect("one");
+		conn.batch_execute("ALTER TABLE applications DISABLE TRIGGER USER")
+			.await
+			.expect("bypass the triggers");
 
 		assert!(
 			insert(&mut conn, &machine, "http://two.invalid/", Some("test"))
@@ -378,9 +393,11 @@ async fn the_schema_refuses_two_ranks_on_one_box() {
 				.is_err(),
 			"a second rank on the box"
 		);
-		assert_eq!(
-			ranks_on(&mut conn, &machine).await,
-			vec![Some(ServerRank::Production)]
+		assert!(
+			insert(&mut conn, &machine, "http://three.invalid/", None)
+				.await
+				.is_err(),
+			"a pending application beside a ranked one"
 		);
 	})
 	.await
@@ -397,6 +414,9 @@ async fn an_archived_application_at_another_rank_does_not_trip_the_constraint() 
 		Application::soft_delete(&mut conn, old)
 			.await
 			.expect("archive");
+		Machine::set_rank(&mut conn, machine.id, ServerRank::Production, Some("op"))
+			.await
+			.expect("re-rank the box");
 
 		insert(
 			&mut conn,
@@ -406,6 +426,11 @@ async fn an_archived_application_at_another_rank_does_not_trip_the_constraint() 
 		)
 		.await
 		.expect("a live application at another rank beside the archived one");
+		assert_eq!(
+			Application::get_by_id(&mut conn, old).await.unwrap().rank,
+			Some(ServerRank::Test),
+			"the archived one keeps the rank it left at"
+		);
 	})
 	.await
 }
@@ -699,27 +724,21 @@ struct MaybeRank {
 }
 
 /// The SQL that keeps a box's rank and its applications' together reads a
-/// spelling the way `ServerRank` does.
+/// spelling the way `ServerRank` does: every spelling it reads, in any case,
+/// names the same rank, and anything else names none.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_schema_reads_rank_spellings_as_server_rank_does() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		for spelling in [
-			"production",
-			"live",
-			"prod",
-			"clone",
-			"staging",
-			"demo",
-			"test",
-			"dev",
-			"Production",
-			"LIVE",
-			"Staging",
-			"nonsense",
-			"",
-		] {
+		let mut spellings: Vec<String> = Vec::new();
+		for (spelling, _) in ServerRank::SPELLINGS {
+			spellings.push((*spelling).to_owned());
+			spellings.push(spelling.to_ascii_uppercase());
+		}
+		spellings.extend(["nonsense".to_owned(), String::new()]);
+
+		for spelling in spellings {
 			let sql = sql_query("SELECT rank_canonical($1) AS rank")
-				.bind::<sql_types::Text, _>(spelling)
+				.bind::<sql_types::Text, _>(&spelling)
 				.get_result::<MaybeRank>(&mut conn)
 				.await
 				.expect("rank_canonical")
@@ -729,6 +748,26 @@ async fn the_schema_reads_rank_spellings_as_server_rank_does() {
 				.ok()
 				.map(|rank| rank.to_string());
 			assert_eq!(sql, rust, "{spelling:?}");
+		}
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_box_is_refused_a_rank_no_one_recognises() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = group(&mut conn).await;
+		let machine = machine(&mut conn, group).await;
+		for rank in ["nonsense", "Production", "live"] {
+			assert!(
+				sql_query("UPDATE machines SET rank = $1 WHERE id = $2")
+					.bind::<sql_types::Text, _>(rank)
+					.bind::<sql_types::Uuid, _>(machine.id)
+					.execute(&mut conn)
+					.await
+					.is_err(),
+				"{rank:?} is not how a box's rank is written"
+			);
 		}
 	})
 	.await

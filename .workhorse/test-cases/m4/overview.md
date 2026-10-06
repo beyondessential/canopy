@@ -26,3 +26,8 @@
 - [x] An application moved onto a ranked box takes the box's rank rather than re-ranking it (verifies spec: GRP)
 - [x] An application un-archived onto a ranked box takes the box's rank (verifies spec: GRP)
 - [x] The schema reads every rank spelling the way `ServerRank` parses it
+- [x] An application inserted onto a ranked box at another rank takes the box's rank (verifies spec: GRP)
+- [x] A box's rank column refuses a spelling that is not canonical, including one no one recognises
+- [x] With the triggers bypassed, the schema still refuses two ranks on one box
+- [x] Editing a ranked box's other fields sends no rank (verifies spec: FLT)
+- [ ] A push adopting an application while the box is re-ranked takes the rank the locked row holds

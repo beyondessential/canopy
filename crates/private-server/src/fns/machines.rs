@@ -151,8 +151,14 @@ fn machine_billing_labels(
 /// workload's, and each application carries its own (see [APP]).
 #[derive(Serialize, ToSchema)]
 pub struct MachineDetailData {
-	/// The machine's own record.
+	/// The machine's own record. Its `rank` is the rank the box carries,
+	/// which an archived box keeps.
 	pub machine: Machine,
+	/// The environment the box serves: its rank, absent while it is pending
+	/// or once it is archived.
+	// spec: FLT#environments
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub environment_rank: Option<ServerRank>,
 	/// The group this machine belongs to, with its notes and tags, so the page
 	/// renders its group section without a second fetch.
 	pub group: Option<ServerGroup>,
@@ -318,6 +324,7 @@ pub async fn get_detail(
 	};
 
 	Ok(Json(MachineDetailData {
+		environment_rank: machine.environment_rank(),
 		machine,
 		group,
 		device_info,
@@ -536,11 +543,9 @@ pub async fn update(
 	let Some(rank) = rank else {
 		return Ok(Json(updated));
 	};
-	Machine::set_rank(&mut conn, args.machine_id, rank, Some(&admin.0.login)).await?;
-	Ok(Json(Machine {
-		rank: Some(rank),
-		..updated
-	}))
+	Ok(Json(
+		Machine::set_rank(&mut conn, args.machine_id, rank, Some(&admin.0.login)).await?,
+	))
 }
 
 /// Archive a machine, and with it the applications on it.

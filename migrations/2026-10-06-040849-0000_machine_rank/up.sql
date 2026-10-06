@@ -4,7 +4,7 @@
 
 -- The one place SQL spells out what a rank is: each spelling `ServerRank` reads,
 -- mapped to the one it writes, and anything else to NULL. A test holds this to
--- `ServerRank`'s own parsing.
+-- `ServerRank::SPELLINGS`, the table its own parsing reads.
 CREATE FUNCTION rank_canonical(rank TEXT) RETURNS TEXT
 LANGUAGE sql IMMUTABLE AS $$
 	SELECT CASE lower(rank)
@@ -21,7 +21,10 @@ $$;
 
 ALTER TABLE machines
 	ADD COLUMN rank TEXT
-		CONSTRAINT machines_rank_canonical CHECK (rank = rank_canonical(rank));
+		-- IS NOT DISTINCT FROM, so a spelling no one recognises, whose canonical
+		-- form is NULL, is refused rather than passing as an unknown.
+		CONSTRAINT machines_rank_canonical
+			CHECK (rank_canonical(rank) IS NOT DISTINCT FROM rank);
 
 -- A box is ranked where its live applications are, which the exclusion
 -- constraint on applications holds to one rank. A box whose applications are
@@ -46,16 +49,15 @@ WHERE machines.id = box.machine_id AND box.rank IS NOT NULL;
 -- They are mutually recursive and terminate: each writes only where the rank
 -- differs, so the write coming back the other way changes nothing.
 
--- An application joining a ranked box takes the box's rank, as its group is
--- the box's. An application stood up without a rank is joining, and so is one
--- moved onto the box or brought back from the archive; one keeping its rank
--- where it stands is not.
+-- An application joining a ranked box takes the box's rank, whatever rank it
+-- was written with, as its group is the box's. An application stood up on a
+-- box is joining it, and so is one moved onto the box or brought back from the
+-- archive; one keeping its rank where it stands is not, and ranking it ranks
+-- the box (below).
 --
--- An insert only ever fills a missing rank, so an insert naming a rank the box
--- does not carry is refused by the exclusion constraint rather than quietly
--- rewritten. It also cannot rely on finding the box: a BEFORE trigger cannot
--- see a machine created earlier in the same statement, so where the lookup
--- finds nothing the application keeps the rank it was given.
+-- A BEFORE trigger cannot see a machine created earlier in the same statement,
+-- so where the lookup finds nothing the application keeps the rank it was
+-- given, and that ranks the new box in turn.
 CREATE FUNCTION applications_take_machine_rank() RETURNS TRIGGER
 LANGUAGE plpgsql AS $$
 BEGIN
@@ -67,7 +69,7 @@ $$;
 CREATE TRIGGER applications_take_machine_rank_on_insert
 	BEFORE INSERT ON applications
 	FOR EACH ROW
-	WHEN (NEW.rank IS NULL AND NEW.machine_id IS NOT NULL AND NEW.deleted_at IS NULL)
+	WHEN (NEW.machine_id IS NOT NULL AND NEW.deleted_at IS NULL)
 	EXECUTE FUNCTION applications_take_machine_rank();
 
 CREATE TRIGGER applications_take_machine_rank_on_join
@@ -80,7 +82,8 @@ CREATE TRIGGER applications_take_machine_rank_on_join
 -- A live application's rank is its box's, so ranking one ranks the box. By the
 -- time this runs, an application joining a ranked box has taken its rank, so
 -- this only ever ranks a box that had none or re-ranks one from an application
--- already on it. `applications.rank` is read leniently, so an older spelling
+-- already on it. Where it was the box that ranked the application, the box
+-- already carries the rank and this writes nothing. `applications.rank` is read leniently, so an older spelling
 -- ranks the box as the rank it names, and a spelling no one recognises, which
 -- reads as unranked, leaves the box alone.
 CREATE FUNCTION application_rank_ranks_machine() RETURNS TRIGGER

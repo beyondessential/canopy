@@ -350,6 +350,34 @@ test.describe("machine detail", () => {
 		expect(ranks.map((row) => row.rank)).toEqual(["demo", "demo"]);
 	});
 
+	/// Saving a box's other fields leaves its rank alone rather than writing
+	/// it again.
+	///
+	/// spec: FLT#editing
+	test("editing a ranked box sends its rank only when it changes", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "unchanged-rank-group" });
+		const server = await seedServer(sql, {
+			name: "unchanged-rank-app",
+			groupId: group.id,
+			rank: "test",
+		});
+
+		await page.goto(`/fleet/machines/${server.machineId}/edit`);
+		await page
+			.getByTestId("machine-section")
+			.getByLabel(/^Name(\s*\*)?$/i)
+			.fill("renamed-ranked-box");
+		const update = page.waitForRequest("**/api/fleet/machines/update");
+		await page.getByRole("button", { name: "Save" }).click();
+		expect((await update).postDataJSON()).not.toHaveProperty("rank");
+		await expect(page).toHaveURL(
+			new RegExp(`/fleet/machines/${server.machineId}$`),
+		);
+	});
+
 	/// A box an operator has just added carries nothing yet, and is ranked all
 	/// the same, so what arrives on it is never pending.
 	///

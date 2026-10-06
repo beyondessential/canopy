@@ -549,7 +549,10 @@ impl MaintenanceWindow {
 		let Some(machine_id) = machine_id else {
 			return Ok(false);
 		};
-		let Some(rank) = Machine::get_by_id(db, machine_id).await?.environment_rank() else {
+		let Some(rank) = Machine::environment_ranks(db, &[machine_id])
+			.await?
+			.remove(&machine_id)
+		else {
 			return Ok(false);
 		};
 		Ok(ranks.contains(&Some(rank)))

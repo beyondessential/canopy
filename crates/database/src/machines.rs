@@ -585,45 +585,52 @@ impl Machine {
 	/// machine and of everything on it are re-evaluated against the
 	/// environment they now belong to, and so are the group's own checks when
 	/// its headline rank moved, `by` attributing an incident that closes as a
-	/// result.
+	/// result. Ranking a box at the rank it carries writes nothing.
+	///
+	/// Returns the machine as it stands once ranked.
 	// spec: GRP#environments
 	pub async fn set_rank(
 		db: &mut AsyncPgConnection,
 		machine_id: Uuid,
 		rank: commons_types::server::rank::ServerRank,
 		by: Option<&str>,
-	) -> Result<()> {
+	) -> Result<Self> {
 		use crate::schema::machines::dsl;
 		use diesel_async::AsyncConnection;
 
-		let (group_id, headline, changed) = db
+		let (ranked, headline, changed) = db
 			.transaction::<_, AppError, _>(async |conn| {
 				// The box's row serialises this against a report adopting beside it.
 				let machine = Self::get_by_id_for_update(conn, machine_id).await?;
 				machine.check_rankable()?;
+				if machine.rank == Some(rank) {
+					return Ok((machine, None, false));
+				}
 				let headline =
 					crate::server_groups::ServerGroup::headline_rank(conn, machine.group_id)
 						.await?;
-				diesel::update(dsl::machines.filter(dsl::id.eq(machine_id)))
+				let ranked = diesel::update(dsl::machines.filter(dsl::id.eq(machine_id)))
 					.set(dsl::rank.eq(rank))
-					.execute(conn)
+					.returning(Self::as_select())
+					.get_result(conn)
 					.await?;
-				Ok((machine.group_id, headline, machine.rank != Some(rank)))
+				Ok((ranked, headline, true))
 			})
 			.await?;
 		if !changed {
-			return Ok(());
+			return Ok(ranked);
 		}
 
-		crate::applications::recompute_groups(db, [group_id]).await?;
+		crate::applications::recompute_groups(db, [ranked.group_id]).await?;
 		crate::issues::reevaluate_after_rank_change(
 			db,
 			crate::issues::Scope::Machine(machine_id),
-			group_id,
+			ranked.group_id,
 			headline,
 			by,
 		)
-		.await
+		.await?;
+		Ok(ranked)
 	}
 
 	/// Whether any application on the machine is live (not archived).

@@ -473,7 +473,7 @@ export function rankMachines(
 		return {
 			machine,
 			applications: on,
-			rank: machine.rank ?? null,
+			rank: machine.environment_rank ?? null,
 			// A box carrying nothing has no type to take, and naming one here
 			// would be inventing it.
 			type: best?.type ?? "",

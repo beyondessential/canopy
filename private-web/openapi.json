@@ -13437,6 +13437,17 @@
           "own_window"
         ],
         "properties": {
+          "environment_rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "The environment the box serves, which the applications on it share.\nAbsent while it is pending; a box can serve one before anything on it\nhas reported."
+              }
+            ]
+          },
           "health": {
             "$ref": "#/components/schemas/HealthState",
             "description": "The box's own health, from the checks filed against it. What the\napplications on it make of their own checks is each application's."
@@ -13468,17 +13479,6 @@
               "null"
             ],
             "description": "The platform the box reports, where it reports one. The one machine\nfigure the tree shows: it is what distinguishes two otherwise\nidentical rows."
-          },
-          "rank": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ServerRank",
-                "description": "The environment tier the box serves, which the applications on it\nshare. Absent while it is pending; a box can carry one before anything\non it has reported."
-              }
-            ]
           },
           "up": {
             "$ref": "#/components/schemas/ShortStatus",
@@ -15745,6 +15745,17 @@
               }
             ]
           },
+          "environment_rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "The environment the box serves: its rank, absent while it is pending\nor once it is archived."
+              }
+            ]
+          },
           "figures": {
             "type": "object",
             "description": "What the box reports about itself, resolved across every source\nreporting on it: platform, hardware, addresses, uptime."
@@ -15795,7 +15806,7 @@
           },
           "machine": {
             "$ref": "#/components/schemas/Machine",
-            "description": "The machine's own record."
+            "description": "The machine's own record. Its `rank` is the rank the box carries,\nwhich an archived box keeps."
           },
           "maintained": {
             "type": "boolean",
