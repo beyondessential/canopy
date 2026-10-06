@@ -211,6 +211,7 @@ export default function ServerDetail() {
 						machines={data.group_machines}
 						environments={data.group_environments}
 						applications={data.group_applications}
+						groupName={data.group?.name}
 						currentApplicationId={data.server.id}
 					/>
 				</Box>

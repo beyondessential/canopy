@@ -124,7 +124,7 @@ export default function MachineEnclosure({
 	name?: string | null;
 	/** Whether a maintenance window suspends this box, its own, its
 	 * environment's or its group's. A window over one application inside it
-	 * fades that dot alone and leaves the enclosure plain. */
+	 * hollows that dot alone and leaves the enclosure plain. */
 	// spec: MNT#presentation
 	maintained?: boolean;
 	/** Whether every window over the box has ended and it is serving out the
@@ -187,6 +187,7 @@ export default function MachineEnclosure({
 					bgcolor: state.fill,
 					backgroundImage: (theme) =>
 						ownWindow ? ownWindowStripes(theme, settling) : "none",
+					backgroundClip: "padding-box",
 					...(ownWindow && !settling
 						? {
 								animation: `${PILL_PULSE} 2s ease-in-out 0.5s infinite`,

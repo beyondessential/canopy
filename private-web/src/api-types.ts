@@ -9169,6 +9169,11 @@ export interface components {
                  */
                 maintained?: boolean | null;
                 /**
+                 * @description Whether every window over the server has ended and it is serving out
+                 *     the settle period.
+                 */
+                maintenance_settling?: boolean | null;
+                /**
                  * @description Whether the server may manage its own DNS records for names under its
                  *     group's domains.
                  */
@@ -11116,6 +11121,11 @@ export interface components {
              *     that decorate listings; `None` where they aren't.
              */
             maintained?: boolean | null;
+            /**
+             * @description Whether every window over the server has ended and it is serving out
+             *     the settle period.
+             */
+            maintenance_settling?: boolean | null;
             /**
              * @description Whether the server may manage its own DNS records for names under its
              *     group's domains.

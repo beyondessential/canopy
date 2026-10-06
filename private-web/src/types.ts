@@ -320,6 +320,28 @@ export function heldByLabel(
 	}
 }
 
+/// What holds a window over a box or what runs on it: its own declaration,
+/// else its environment's, else its group's. One rule, so the status page, the
+/// group tree and the machine page cannot disagree about the same window.
+// spec: MNT#presentation
+export function resolveHeldBy({
+	ownWindow = false,
+	machineName,
+	rank,
+	environmentHeld = false,
+	groupName,
+}: {
+	ownWindow?: boolean;
+	machineName?: string | null;
+	rank?: ServerRank | null;
+	environmentHeld?: boolean;
+	groupName?: string | null;
+}): string {
+	if (ownWindow) return heldByLabel({ kind: "machine", name: machineName });
+	if (rank && environmentHeld) return heldByLabel({ kind: "environment", rank });
+	return heldByLabel({ kind: "group", name: groupName });
+}
+
 /// The line a suspended target's tooltip carries: whether the work was declared
 /// here, and where it was declared if not. Suspension outlasts the window by a
 /// settle period, so a window that has ended is still "just ended" here.
