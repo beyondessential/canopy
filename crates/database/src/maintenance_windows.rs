@@ -670,7 +670,19 @@ impl MaintenanceWindow {
 				lease.held_by.as_deref().unwrap_or("another operator"),
 			)));
 		}
-		if !line_of_descent(db, from).await?.includes(to) {
+		// A window whose target is gone from what it belonged to, such as an
+		// archived machine, has nowhere to move along; the window itself exists,
+		// so that is a refusal rather than a missing window.
+		let descent = match line_of_descent(db, from).await {
+			Ok(descent) => descent,
+			Err(AppError::NotFound(_)) => {
+				return Err(AppError::Conflict(
+					"this window's target is no longer part of its group, so it can be amended or lifted but not moved".into(),
+				));
+			}
+			Err(err) => return Err(err),
+		};
+		if !descent.includes(to) {
 			return Err(AppError::BadRequest(
 				"a window moves to a grain on its target's line of descent".into(),
 			));
@@ -710,43 +722,37 @@ impl MaintenanceWindow {
 		grain: Grain,
 		now: Timestamp,
 	) -> Result<Option<InventoryLease>> {
-		let environments: Vec<(Uuid, ServerRank)> = match (grain.scope(), grain.rank()) {
-			(Scope::Group(group_id), Some(rank)) => vec![(group_id, rank)],
-			// A group's window covers every environment it has a lease on,
-			// whether or not anything in it is still ranked at that rank, so
-			// the leases are read directly rather than through its machines.
-			(Scope::Group(group_id), None) => InventoryLease::open_for_group(db, group_id)
-				.await?
-				.into_iter()
-				.map(|lease| (group_id, lease.rank))
-				.collect(),
+		// The one environment the grain is in, or for a group's own window
+		// every environment it has a lease on, whether or not anything in it is
+		// still ranked at that rank.
+		let environment: Option<(Uuid, ServerRank)> = match (grain.scope(), grain.rank()) {
+			(Scope::Group(group_id), Some(rank)) => Some((group_id, rank)),
 			(Scope::Machine(machine_id), _) => {
 				let machine = Machine::get_by_id(db, machine_id).await?;
-				match (machine.group_id, Machine::rank(db, machine_id).await?) {
-					(Some(group), Some(rank)) => vec![(group, rank)],
-					_ => Vec::new(),
-				}
+				machine.group_id.zip(Machine::rank(db, machine_id).await?)
 			}
 			(Scope::Application(application_id), _) => {
 				let application = Application::get_by_id(db, application_id).await?;
-				match (application.group_id, application.rank) {
-					(Some(group), Some(rank)) => vec![(group, rank)],
-					_ => Vec::new(),
-				}
+				application.group_id.zip(application.rank)
 			}
-			(Scope::Cluster(_) | Scope::Global, _) => Vec::new(),
+			(Scope::Group(_), None) | (Scope::Cluster(_) | Scope::Global, _) => None,
+		};
+		let leases: Vec<InventoryLease> = match (grain.scope(), grain.rank(), environment) {
+			(Scope::Group(group_id), None, _) => {
+				InventoryLease::open_for_group(db, group_id).await?
+			}
+			(_, _, Some((group, rank))) => InventoryLease::open_for(db, group, rank)
+				.await?
+				.into_iter()
+				.collect(),
+			_ => Vec::new(),
 		};
 		let speaks_for = [self.declared_by.as_deref(), self.amended_by.as_deref()];
-		for (group, rank) in environments {
-			if let Some(lease) = InventoryLease::open_for(db, group, rank).await?
-				&& lease.holds_at(now)
+		Ok(leases.into_iter().find(|lease| {
+			lease.holds_at(now)
 				&& lease.held_by.is_some()
 				&& speaks_for.contains(&lease.held_by.as_deref())
-			{
-				return Ok(Some(lease));
-			}
-		}
-		Ok(None)
+		}))
 	}
 
 	/// Lift a window before its expected end. A window already ended is

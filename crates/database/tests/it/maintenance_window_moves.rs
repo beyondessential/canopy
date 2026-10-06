@@ -486,6 +486,51 @@ async fn a_move_is_refused_where_it_cannot_go() {
 	.await
 }
 
+/// The window of an archived target still exists, so a move is refused as a
+/// conflict rather than reported as a missing window.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_archived_targets_window_cannot_move() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let site = site(&mut conn).await;
+		let window = MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Application(site.production_app),
+			None,
+			in_hours(1),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare");
+		sql_query("UPDATE applications SET deleted_at = NOW() WHERE id = $1")
+			.bind::<sql_types::Uuid, _>(site.production_app)
+			.execute(&mut conn)
+			.await
+			.expect("archive");
+
+		let refused = MaintenanceWindow::amend(
+			&mut conn,
+			window.id,
+			move_to(Grain::machine(site.production_box)),
+			Some("op"),
+		)
+		.await;
+		assert!(matches!(refused, Err(AppError::Conflict(_))), "{refused:?}");
+		MaintenanceWindow::amend(
+			&mut conn,
+			window.id,
+			Amendment {
+				expected_end: Some(in_hours(2)),
+				..Amendment::default()
+			},
+			Some("op"),
+		)
+		.await
+		.expect("it can still be amended");
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_window_a_run_is_served_against_stays_until_the_lease_is_released() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
