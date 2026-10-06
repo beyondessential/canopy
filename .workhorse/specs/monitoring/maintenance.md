@@ -56,8 +56,8 @@ From a machine that is its group, the environment it serves, and its application
 A grain the starting point has none of is passed over: a machine in no group offers its applications alone, and a pending machine, being in no environment, offers its group with no environment between them.
 The choices are listed in the shape they nest, group over environment over machine over application, so the choice reads as a choice of how wide.
 
-Retargeting onto a grain that has an open window of its own makes the declaration an amendment of that window, and the dialog says so and when the window ends.
-What the operator has already entered stands, rather than being replaced by that window's end and note.
+Retargeting onto a grain that has an open window of its own makes the declaration an amendment of that window, and the dialog says so and shows that window's expected end and note.
+The amendment changes only what the operator has explicitly changed in the dialog, so retargeting onto someone else's window never shortens it or replaces its note unless the operator has decided to.
 
 Offered from an open incident, the declaration starts at the incident's environment.
 Each choice that would leave any of the incident's failing checks contributing to it is marked as not covering all of them, and a choice covering every one carries no mark.
@@ -71,10 +71,18 @@ The declaration an upgrade plan offers, and the one a configuration run asks for
 Amending a window can retarget it as well, to any grain on its target's line of descent, so a window declared too wide or too narrow is corrected without lifting it and declaring again.
 It stays the same window: its declarer and when it was declared carry over, the move is recorded as an amendment, and the window is the mover's work from then on as well as the declarer's.
 It is the new target's window from then on, and joins the new target's history when it ends.
+The target it left keeps it in its own history over the span it covered there, so a quiet spell is attributable from either.
 A grain with an open window of its own is listed when moving but cannot be chosen, since a target holds at most one window.
+
+A declaration offered over a target that has an open window of its own is an amendment of that window from the start, wherever it is offered from, so choosing another grain in it moves that window.
+One offered over a target with no window of its own declares at whichever grain is chosen.
+
+A window declared from an upgrade plan's offer is that plan's window and stays over the plan's environment: it can be amended and lifted but not moved, so the plan it holds open is not released partway through the work (see [UPG](../private-server/upgrade-plans.md), "When a plan is met").
+Any other window over the environment, such as one declared before the plan was recorded, moves like any other.
 
 What the move newly covers is suspended from the moment of the move.
 What it leaves uncovered serves the settle period as though the window had ended over it, so narrowing a group's window to one environment does not page for the rest of the group the moment it moves.
+A move is an amendment, so it is recorded on the window and audited rather than notified, and what it leaves uncovered resumes watching at the end of that settle period without a notice of its own.
 
 ## What a window suspends
 
@@ -114,10 +122,11 @@ The ending says whether an operator lifted the window or its expected end passed
 ## Presentation
 
 A target under a window presents its own health and reachability, and is marked as under maintenance wherever they are presented as they currently stand, distinguishably from a machine nobody is watching (see [CHK](checks.md), "Monitoring gate").
-The mark is drawn at the grain the window was declared over, so an environment's window does not read as every machine in it having one of its own: an application's dot, a machine's enclosure, an environment's row, a group's card.
+The mark is drawn at the grain the window is over, so an environment's window does not read as every machine in it having one of its own: an application's dot, a machine's enclosure, an environment's row, a group's card.
 A dot is hollowed rather than patterned or cut: a pattern needs room to resolve, and a cut is what marks a target nobody is watching, which at a dot's size would differ only by its angle.
 Every target the window reaches has its health muted, marked or not, and carries the window and when it ends, so a failing target under maintenance is not read as one nobody has noticed.
 A target serving out the settle period carries the mark still, distinguished from one whose window holds, so lifting a window shows on the target rather than only on the window.
+What a move leaves uncovered settles at the grain the window was over before it moved, so a group's window narrowed to one environment marks the group's card as settling and that environment's row as held.
 The two are told apart by motion as well as by weight: a holding window's mark moves and a settling one is still, so movement on the page means someone is in there now.
 A mark with room to it is crossed, and one drawn small pulses, a sweep being gone before it resolves on a few pixels.
 A reader who has asked for less motion gets the weight alone.

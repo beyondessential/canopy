@@ -8,3 +8,7 @@
 - Coverage marks in the dialog need the incident's failing issues with their scopes, checked against each candidate grain the way suspension resolves cover (application ⊂ machine ⊂ environment ⊂ group, group-scoped checks only under the group).
 - The group page's split button loses its environment menu: one "Declare maintenance" control, the environment chosen in the dialog.
 - The upgrade-plan declare (`Upgrades.tsx`) and the configuration run's "Declare the work" (`GroupInventorySection.tsx`) keep a fixed target.
+- A move is the frontend's name for an amendment that changes the target; the backend has one amend operation, addressed by window, that can carry a new target. `declare` stays the upsert keyed by target for a fresh declaration.
+- An amendment carries only the fields the operator changed, so retargeting onto another window leaves its end and note alone unless edited. The dialog tracks which fields were touched and shows the window's current end and note beside them.
+- A window declared from an upgrade plan's offer records that plan, and amendment refuses a new target for it. The dialog amending such a window offers no other grain.
+- A moved window appears in both targets' histories: the old target's over the span it covered there. History reads need the window's target changes (the amendment record) rather than only its current target columns.

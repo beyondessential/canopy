@@ -24,6 +24,7 @@
 	.field.focus label { color: #388e3c; }
 	.field .caret { margin-left: auto; color: rgba(0,0,0,.54); }
 	.field.multi { min-height: 64px; align-items: flex-start; color: rgba(0,0,0,.87); }
+	.helper { font-size: 12px; color: rgba(0,0,0,.6); margin: 3px 14px 0; }
 	.toggles { display: inline-flex; border: 1px solid rgba(0,0,0,.12); border-radius: 4px; }
 	.toggles span { padding: 5px 11px; font-size: 13px; font-weight: 500; color: rgba(0,0,0,.54); border-left: 1px solid rgba(0,0,0,.12); }
 	.toggles span:first-child { border-left: 0; }
@@ -120,11 +121,17 @@
 					</div>
 					<div class="alert info">
 						<span class="icon">&#128295;</span>
-						<div class="msg">Already under maintenance, ending in 40 minutes</div>
+						<div class="msg">Already under maintenance until 04:20 pm</div>
 					</div>
 					<div class="toggles"><span>1h</span><span>2h</span><span>4h</span><span>8h</span></div>
-					<div class="field"><label>Expected to end</label>06/10/2026, 04:40 pm</div>
-					<div class="field multi"><label>What's being done</label>Upgrading to 2.62</div>
+					<div>
+						<div class="field"><label>Expected to end</label>06/10/2026, 04:40 pm</div>
+						<div class="helper">Currently 04:20 pm</div>
+					</div>
+					<div>
+						<div class="field multi"><label>What's being done</label>Upgrading to 2.62</div>
+						<div class="helper">Currently: Replacing the disk</div>
+					</div>
 				</div>
 			</div>
 			<div class="actions"><button class="btn">Cancel</button><button class="btn contained">Amend</button></div>
