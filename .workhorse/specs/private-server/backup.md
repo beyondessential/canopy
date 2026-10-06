@@ -65,7 +65,10 @@ Every change to a layer, setting or clearing it, is recorded with who made it an
 ### Cron expressions
 
 A cron expression has the five standard fields: minute, hour, day of month, month, and day of week.
-A field may use `H` for a value Canopy derives from the machine and the type: `H` alone ranges over the whole field, `H(a-b)` over a range, and `H/n` steps by `n` from the derived value.
+Each field takes single values, ranges, steps, and lists, months and weekdays may be given by their three-letter English names, and Sunday is either 0 or 7.
+Day of month also takes `L` for the last day of the month and `15W` for the weekday nearest the 15th; day of week also takes `5L` for the month's last Friday and `5#3` for its third Friday.
+When either day field starts with `*` a day must match both of them, and otherwise a day matching either one fires, as in Vixie cron.
+Any field may instead be `H` on its own, standing for a single value Canopy derives from the machine and the type and maps into that field's range.
 The derived value is stable, so a machine's backup of a type always lands in the same slot, while a box's types and a group's machines spread out across the field.
 
 An expression is refused when it would never fire, or when any two consecutive firings would be less than an hour apart.
@@ -75,8 +78,8 @@ Validation reads the expression on a clock without daylight-saving changes; what
 An expression is read in the timezone set on its schedule, otherwise in the operating system timezone the machine reports (see [FIG](figures.md)), otherwise in UTC.
 So a fleet default of nightly at 2am backs each machine up at its own 2am.
 A machine whose cron schedule falls back to UTC because it has reported no timezone is flagged as such wherever its schedule or next backup is shown, and in the firing preview, so an operator can tell a deliberate UTC schedule from one waiting on the machine.
-Firings follow the zone's wall clock across daylight-saving changes: a firing at a time the clocks skip happens at the first moment after the gap, and a firing at a time that occurs twice happens once, at the first occurrence.
-A firing less than an hour after the previous one is skipped: it opens no window and does not count as a firing, so the previous firing's window runs on to halfway to the next firing that is kept.
+Firings follow the zone's wall clock across daylight-saving changes, so a firing at a time the clocks skip does not happen that day.
+A firing is skipped when it falls less than an hour after the previous one, or repeats the previous one's wall-clock time as the clocks go back: it opens no window and does not count as a firing, so the previous firing's window runs on to halfway to the next firing that is kept.
 
 ### When a backup is due
 

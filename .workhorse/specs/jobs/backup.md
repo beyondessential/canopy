@@ -22,13 +22,6 @@ It enforces the group's retention as part of maintenance, and records every run'
 Maintenance also re-asserts that the repo carries no repo-level object-lock retention mode of its own, healing a repo that was imported with one before Canopy disabled it (see [BKO](../private-server/backup.md)).
 Beyond the cadence, an operator may request a one-off full maintenance run for a group (see [BKO](../private-server/backup.md)); Canopy runs it on the next scheduling opportunity, ahead of the jittered cadence slot, subject to the same one-run-per-group interlock — so a forced run never overlaps an in-flight one.
 
-## Keeping clear of backups
-
-Maintenance and passphrase rotation keep clear of a group's backups, since the time an operator schedules backups into is the time the group can spare for heavy work, and maintenance competes with backups for the repo.
-Neither starts while a backup of one of the group's machines is in progress, or while a cron-scheduled backup of one is due (see [BKO](../private-server/backup.md)); each waits for a gap instead.
-Waiting is bounded by the job's own cadence: a job that would otherwise miss the period its cadence gives it runs regardless, so a group that is never clear is still maintained and rotated.
-An operator's one-off maintenance request does not wait, since asking for it is the operator's judgement that now is the time.
-
 ## Passphrase rotation
 
 Canopy rotates each group's repo passphrase on a cadence, so a leaked passphrase is useful only until the next rotation rather than indefinitely.
