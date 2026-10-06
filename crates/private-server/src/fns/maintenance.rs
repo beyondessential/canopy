@@ -102,18 +102,9 @@ pub struct AmendWindowArgs {
 	#[schema(value_type = Option<String>, format = DateTime)]
 	pub expected_end: Option<Timestamp>,
 	/// A new note. Null clears it; leaving it out keeps the window's own.
-	#[serde(default, deserialize_with = "present")]
+	#[serde(default, deserialize_with = "super::applications::deserialize_some")]
 	#[schema(value_type = Option<String>, nullable)]
 	pub note: Option<Option<String>>,
-}
-
-/// Tell a field sent as null apart from one left out.
-fn present<'de, D, T>(deserializer: D) -> std::result::Result<Option<Option<T>>, D::Error>
-where
-	D: serde::Deserializer<'de>,
-	T: Deserialize<'de>,
-{
-	Option::<T>::deserialize(deserializer).map(Some)
 }
 
 /// Where a declaration starts, and what it is read against.

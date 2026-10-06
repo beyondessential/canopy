@@ -367,6 +367,9 @@ test.describe("group inventory", () => {
 		await expect(
 			page.getByText("The environment the run is served against"),
 		).toBeVisible();
+		await expect(page.getByRole("combobox", { name: "Covers" })).toContainText(
+			"drifting",
+		);
 		await page.getByRole("button", { name: "Declare", exact: true }).click();
 
 		await expect(production.getByTestId("run-declared")).toBeVisible();

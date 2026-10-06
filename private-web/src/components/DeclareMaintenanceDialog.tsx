@@ -83,9 +83,9 @@ function TargetLabel({ choice }: { choice: MaintenanceTargetChoice }) {
 	return (
 		<Stack direction="row" spacing={1} sx={{ alignItems: "center", minWidth: 0 }}>
 			<KindChip kind={targetKind(choice.target)} />
-			{choice.target.rank ? (
-				<ServerRankChip rank={choice.target.rank} />
-			) : (
+			{choice.target.rank && <ServerRankChip rank={choice.target.rank} />}
+			{/* An environment's own label is its rank, which the chip says. */}
+			{choice.label && choice.label !== choice.target.rank && (
 				<Typography noWrap>{choice.label}</Typography>
 			)}
 		</Stack>
@@ -101,6 +101,7 @@ export default function DeclareMaintenanceDialog({
 	open,
 	onClose,
 	start,
+	startLabel,
 	existing,
 	prefill,
 	offerLift,
@@ -114,6 +115,9 @@ export default function DeclareMaintenanceDialog({
 	/** Where the declaration starts. Where this target has a window of its
 	 * own, the declaration amends it. */
 	start: MaintenanceTarget;
+	/** How `start` reads, for when the choices are not listed: a caller that
+	 * cannot retarget, or a target gone from its group. */
+	startLabel?: string;
 	/** The window being amended, which `start` is the target of. */
 	existing?: MaintenanceWindow | null;
 	/** Starting values where something else knows them, such as an upgrade
@@ -175,7 +179,15 @@ export default function DeclareMaintenanceDialog({
 	const choices: MaintenanceTargetChoice[] =
 		targets.status === "ok" && !inert
 			? targets.data.choices
-			: [{ target: start, label: "", depth: 0, window: null, covers_failures: null }];
+			: [
+					{
+						target: start,
+						label: startLabel ?? "",
+						depth: 0,
+						window: null,
+						covers_failures: null,
+					},
+				];
 	const choiceOf = (target: MaintenanceTarget) =>
 		choices.find((choice) => targetKey(choice.target) === targetKey(target));
 	const chosenChoice = choiceOf(chosen);

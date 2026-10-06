@@ -2506,6 +2506,7 @@ function DeclareFromPlan({
 				}
 				existing={ownWindow}
 				fixed="The plan's environment"
+				startLabel={groupName}
 				upgradePlanId={planId}
 				offerLift
 				prefill={
