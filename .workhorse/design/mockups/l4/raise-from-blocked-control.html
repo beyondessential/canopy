@@ -104,7 +104,6 @@
 	.dialog .content { padding: 0 24px 20px; }
 	.dialog p { margin: 0 0 16px; font-size: 16px; line-height: 1.5; color: rgba(0, 0, 0, 0.6); }
 	.dialog p:last-child { margin-bottom: 0; }
-	.dialog strong { color: rgba(0, 0, 0, 0.87); font-weight: 500; }
 	.actions { display: flex; justify-content: flex-end; gap: 8px; padding: 8px; }
 	.text-btn {
 		font: inherit;
@@ -157,9 +156,9 @@
 			</div>
 			<div class="backdrop"></div>
 			<div class="dialog" role="dialog">
-				<h2 class="write">Enter write mode?</h2>
+				<h2 class="write">Edit group alpha</h2>
 				<div class="content">
-					<p><strong>Edit group alpha</strong> needs write mode.</p>
+					<p>This action needs write mode.</p>
 				</div>
 				<div class="actions">
 					<button class="text-btn">Cancel</button>
@@ -190,10 +189,10 @@
 			<div class="dialog" role="dialog">
 				<h2 class="danger">
 					<svg viewBox="0 0 24 24"><path d="M12 5.99 19.53 19H4.47zM12 2 1 21h22zm1 14h-2v2h2zm0-6h-2v4h2z"/></svg>
-					Enter danger mode?
+					Revoke certificate for host-3
 				</h2>
 				<div class="content">
-					<p><strong>Revoke certificate for host-3</strong> needs danger mode.</p>
+					<p>This action needs danger mode.</p>
 					<p>Danger mode unlocks actions that cannot be undone, act directly on production servers, or remove a protection.</p>
 				</div>
 				<div class="actions">

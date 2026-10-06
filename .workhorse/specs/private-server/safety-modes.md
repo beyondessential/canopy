@@ -29,8 +29,9 @@ An operator lowers their mode from the mode control at any time, without waiting
 
 ## Raising from a blocked control
 
-Activating a blocked control asks the operator to raise to the mode that control requires, and names the action the control takes.
+Activating a blocked control asks the operator to raise to the mode that control requires.
 This holds for write as well as danger, so a stray click on a blocked control raises nothing by itself.
+The confirmation is titled with the action the control takes, and says the action needs that mode.
 The confirmation for danger also says what danger mode unlocks, as the one reached from the mode control does.
 A control requiring danger raises straight to danger, from read-only as from write.
 
