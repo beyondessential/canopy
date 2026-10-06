@@ -881,6 +881,47 @@ test.describe("maintenance windows", () => {
 		expect(Number(rows[0]!.n)).toBe(1);
 	});
 
+	/// A window outlives its target being archived, and can still be amended
+	/// from the fleet view even though nothing else can be offered for it.
+	/// spec: MNT#presentation
+	test("an archived application's window can still be amended", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const server = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		const window = await seedMaintenanceWindow(sql, {
+			applicationId: server.id,
+			note: "decommissioning",
+		});
+		await sql.query("UPDATE applications SET deleted_at = NOW() WHERE id = $1", [
+			server.id,
+		]);
+
+		await page.goto("/maintenance");
+		await page
+			.getByRole("row", { name: /kamaka/ })
+			.getByRole("button", { name: "Amend" })
+			.click();
+		await expect(page.getByText("Other targets can't be offered")).toBeVisible();
+		await page.getByLabel("What's being done").fill("decommissioned");
+		await page.getByRole("button", { name: "Amend", exact: true }).last().click();
+
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ note: string | null }>(
+					"SELECT note FROM maintenance_windows WHERE id = $1",
+					[window.id],
+				);
+				return rows[0]!.note;
+			})
+			.toBe("decommissioned");
+	});
+
 	/// spec: MNT#moving-a-window
 	test("the maintenance page moves a window", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });

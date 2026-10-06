@@ -352,7 +352,7 @@ export default function MaintenanceSection({
 			)}
 			{history.length > 0 && (
 				<Stack spacing={1}>
-					{history.map(({ window, moved_at, moved_to, rank: spanRank }) => (
+					{history.map(({ window, moved_at, moved_to, covered_rank }) => (
 						<Box
 							key={`${window.id}:${moved_at ?? "here"}`}
 							sx={{ p: 1.5, border: 1, borderColor: "divider", borderRadius: 1 }}
@@ -366,7 +366,7 @@ export default function MaintenanceSection({
 								<Typography variant="body2">
 									{window.note ?? "Maintenance"}
 								</Typography>
-								{spanRank && <ServerRankChip rank={spanRank} />}
+								{covered_rank && <ServerRankChip rank={covered_rank} />}
 								<Box sx={{ flex: 1 }} />
 								<Typography variant="caption" color="text.secondary">
 									{moved_at ? (

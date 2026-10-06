@@ -8845,6 +8845,7 @@ export interface components {
          *     another.
          */
         MaintenanceTargets: {
+            amends?: null | components["schemas"]["MaintenanceWindow"];
             /**
              * @description Whatever contains the starting grain and whatever it contains, nested
              *     in the order they contain one another.
@@ -12008,6 +12009,7 @@ export interface components {
              *     move that brought it here.
              */
             covered_from: string;
+            covered_rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: date-time
              * @description When the window moved off this target, for a span that ended that way.
@@ -12015,7 +12017,6 @@ export interface components {
             moved_at?: string | null;
             /** @description Where it moved to, as it reads to an operator. */
             moved_to?: string | null;
-            rank?: null | components["schemas"]["ServerRank"];
             /** @description The window, as it stands now. */
             window: components["schemas"]["MaintenanceWindow"];
         };

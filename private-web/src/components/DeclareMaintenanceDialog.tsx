@@ -126,8 +126,9 @@ export default function DeclareMaintenanceDialog({
 	/** The incident this is offered from, so each choice says whether it
 	 * covers every failing check in it. */
 	incidentId?: string;
-	/** Declares the work on one target, which the caller depends on. */
-	fixed?: boolean;
+	/** Declares the work on one target, which the caller depends on, and says
+	 * why, so the picker shows it locked with that reason. */
+	fixed?: string;
 	/** The upgrade plan this declares from, where there is one. */
 	upgradePlanId?: string | null;
 	onDone: () => void;
@@ -151,7 +152,7 @@ export default function DeclareMaintenanceDialog({
 		[open, targetKey(start), incidentId, existing?.id],
 		// A caller that cannot retarget has nothing to choose from, and its
 		// declaration must not wait on a read it does not use.
-		{ skip: !open || fixed },
+		{ skip: !open || fixed !== undefined },
 	);
 
 	useEffect(() => {
@@ -166,20 +167,23 @@ export default function DeclareMaintenanceDialog({
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [open, existing?.id]);
 
-	const choices: MaintenanceTargetChoice[] = fixed
-		? [{ target: start, label: "", depth: 0, window: null, covers_failures: null }]
-		: targets.status === "ok"
+	// Without the choices, the declaration can still be made or amended over
+	// where it starts: a caller that cannot retarget never asks for them, and a
+	// target that is gone from its group cannot list any.
+	const inert = fixed !== undefined || targets.status === "error";
+	const loading = !inert && targets.status !== "ok";
+	const choices: MaintenanceTargetChoice[] =
+		targets.status === "ok" && !inert
 			? targets.data.choices
-			: [];
+			: [{ target: start, label: "", depth: 0, window: null, covers_failures: null }];
 	const choiceOf = (target: MaintenanceTarget) =>
 		choices.find((choice) => targetKey(choice.target) === targetKey(target));
-	const startChoice = choiceOf(start);
 	const chosenChoice = choiceOf(chosen);
 
 	// Offered over a target with a window of its own, the declaration amends
 	// that window from the start, so choosing another grain moves it.
 	// spec: MNT#moving-a-window
-	const own = existing ?? startChoice?.window ?? null;
+	const own = existing ?? (targets.status === "ok" ? targets.data.amends : null);
 	const moving = own !== null && targetKey(chosen) !== targetKey(start);
 	// Declaring onto someone else's window amends it, changing only what the
 	// operator has explicitly changed.
@@ -187,8 +191,8 @@ export default function DeclareMaintenanceDialog({
 	const amending = own ?? joined;
 	const held =
 		targets.status === "ok" && own !== null ? targets.data.held_in_place : null;
-	const fixedBecause = held ? heldInPlace(held) : null;
-	const pickable = !fixed && !fixedBecause && choices.length > 1;
+	const fixedBecause = fixed ?? (held ? heldInPlace(held) : null);
+	const pickable = !inert && !fixedBecause && choices.length > 1;
 
 	const baseEnd = amending ? toLocalInput(new Date(amending.expected_end)) : defaultEnd;
 	const baseNote = amending ? (amending.note ?? "") : (prefill?.note ?? "");
@@ -238,10 +242,13 @@ export default function DeclareMaintenanceDialog({
 			<DialogTitle>{amending ? "Amend maintenance" : "Declare maintenance"}</DialogTitle>
 			<DialogContent>
 				<Stack spacing={2} sx={{ pt: 1 }}>
-					{!fixed && (targets.status === "loading" || targets.status === "idle") ? (
+					{targets.status === "error" && fixed === undefined && (
+						<Alert severity="warning">
+							Other targets can't be offered: {targets.error.message}
+						</Alert>
+					)}
+					{loading ? (
 						<LinearProgress />
-					) : !fixed && targets.status === "error" ? (
-						<Alert severity="error">{targets.error.message}</Alert>
 					) : (
 						<TextField
 							select
@@ -314,9 +321,12 @@ export default function DeclareMaintenanceDialog({
 						watching resumes a few minutes later once the reporters have been heard
 						from.
 					</DialogContentText>
+					{/* Until it is known which window this amends, what is entered
+					    here could be entered against the wrong one. */}
 					<ToggleButtonGroup
 						size="small"
 						exclusive
+						disabled={loading}
 						value={null}
 						onChange={(_, hours: number | null) => {
 							if (hours) setEndsAt(hoursFromNow(hours));
@@ -332,6 +342,7 @@ export default function DeclareMaintenanceDialog({
 						size="small"
 						type="datetime-local"
 						label="Expected to end"
+						disabled={loading}
 						value={shownEnd}
 						onChange={(e) => setEndsAt(e.target.value)}
 						helperText={
@@ -344,6 +355,7 @@ export default function DeclareMaintenanceDialog({
 					<TextField
 						size="small"
 						label="What's being done"
+						disabled={loading}
 						placeholder="Upgrading to 2.62"
 						multiline
 						minRows={2}
@@ -385,7 +397,7 @@ export default function DeclareMaintenanceDialog({
 					<Button
 						variant="contained"
 						onClick={submit}
-						disabled={pending || shownEnd === "" || (!fixed && targets.status !== "ok")}
+						disabled={pending || shownEnd === "" || loading}
 					>
 						{moving ? "Move" : amending ? "Amend" : "Declare"}
 					</Button>
