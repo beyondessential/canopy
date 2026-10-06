@@ -143,11 +143,13 @@ export default function GroupDetail() {
 								Add machine
 							</Button>
 						</GradedAction>
+						{!group.deleted_at && (
 						<MaintenanceHeaderButton
 							scope="group"
 							id={group.id}
 							onDone={() => setMaintenanceTick((n) => n + 1)}
 						/>
+						)}
 						<GradedAction opens="fleet/groups/update">
 							<Button
 								component={RouterLink}
