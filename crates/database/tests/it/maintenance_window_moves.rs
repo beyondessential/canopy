@@ -225,6 +225,70 @@ async fn an_amendment_changes_only_what_it_names() {
 	.await
 }
 
+/// A window past its expected end stays open until the sweep stamps it, and
+/// extending it then is the operator saying the work ran long.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_window_past_its_end_but_not_yet_swept_can_be_extended() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let site = site(&mut conn).await;
+		let window = declare_group(&mut conn, site.group, None).await;
+		sql_query(
+			"UPDATE maintenance_windows SET expected_end = NOW() - INTERVAL '1 minute' WHERE id = $1",
+		)
+		.bind::<sql_types::Uuid, _>(window.id)
+		.execute(&mut conn)
+		.await
+		.expect("run past its end");
+
+		let refused = MaintenanceWindow::amend(
+			&mut conn,
+			window.id,
+			move_to(Grain::Environment {
+				group_id: site.group,
+				rank: ServerRank::Clone,
+			}),
+			Some("op"),
+		)
+		.await;
+		assert!(
+			matches!(refused, Err(AppError::BadRequest(_))),
+			"moving a window that is over without extending it is refused: {refused:?}"
+		);
+
+		let extended = MaintenanceWindow::amend(
+			&mut conn,
+			window.id,
+			Amendment {
+				expected_end: Some(in_hours(2)),
+				..Amendment::default()
+			},
+			Some("op"),
+		)
+		.await
+		.expect("extend the window that ran long");
+		assert!(extended.holds_at(Timestamp::now()), "it holds again");
+
+		MaintenanceWindow::lift(&mut conn, window.id, Some("op"))
+			.await
+			.expect("lift");
+		let ended = MaintenanceWindow::amend(
+			&mut conn,
+			window.id,
+			Amendment {
+				expected_end: Some(in_hours(2)),
+				..Amendment::default()
+			},
+			Some("op"),
+		)
+		.await;
+		assert!(
+			matches!(ended, Err(AppError::BadRequest(_))),
+			"a window that has ended is history: {ended:?}"
+		);
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_move_suspends_the_new_target_now_and_settles_the_one_it_left() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
