@@ -22,10 +22,32 @@ That margin is not offered to the operator and does not appear anywhere: it exis
 
 ## Raising and lowering
 
-Raising to write takes effect without confirmation.
-Raising to danger asks the operator to confirm first.
+An operator raises from the mode control, or by reaching for a blocked control (see "Raising from a blocked control").
+From the mode control, raising to write takes effect without confirmation, and raising to danger asks the operator to confirm first.
 
-An operator lowers their mode from the same control at any time, without waiting for the remaining time to run out.
+An operator lowers their mode from the mode control at any time, without waiting for the remaining time to run out.
+
+## Raising from a blocked control
+
+Activating a blocked control asks the operator to raise to the mode that control requires, and names the action the control takes.
+This holds for write as well as danger, so a stray click on a blocked control raises nothing by itself.
+The confirmation for danger also says what danger mode unlocks, as the one reached from the mode control does.
+A control requiring danger raises straight to danger, from read-only as from write.
+
+Every graded control names its action and what it acts on, such as "Revoke certificate for host-3", rather than relying on its visible label, which is often a bare verb.
+
+Confirming raises the session to that mode and then carries out the activation, whether the control makes a change itself or opens a form, dialog, or confirmation for one.
+A control with a confirmation of its own still shows it after the raise: one confirms the mode, the other the action.
+A control that is also unavailable for a reason of its own, such as an incomplete form, is raised for but not activated, and stays in the state that reason puts it in.
+A raise made this way lasts as long as one made from the mode control.
+
+Cancelling leaves the mode and the control as they were.
+If the raise fails, the operator is told their mode is unchanged and the action is not carried out.
+
+A blocked item in a menu closes the menu when chosen, as any other choice does, before asking for the raise.
+
+A blocked control is reachable from the keyboard, and activating it there does what clicking it does.
+Pressing Enter in a field of a form whose save is blocked does what activating the save does.
 
 ## The session
 
@@ -86,8 +108,7 @@ A reloaded page is read-only.
 ## Presenting graded controls
 
 A control the operator could use in a higher mode is present and blocked rather than removed, so the surface has the same shape whatever mode the operator is in.
-A blocked control does not act when clicked, and names the mode it requires.
-Raising is done from the mode control rather than as a by-product of reaching for a blocked control.
+A blocked control names the mode it requires, and is presented as clickable, since activating it offers the raise (see "Raising from a blocked control").
 
 A control that opens a form, dialog, or confirmation for making a change carries the grade of that change, so the operator is never led through filling in something they cannot submit.
 Where what the form saves needs a higher mode for some inputs than for others, its opener carries the lowest of them, and the save carries the grade of the submission it would make.

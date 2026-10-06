@@ -1,0 +1,8 @@
+# Raise from a blocked control
+
+## Tech notes
+
+- The danger confirmation lives inside `SafetyModeControl` today. Raising from a blocked control needs the same dialog (plus the write variant and the action name) reachable from any graded control, so it moves into `SafetyModeProvider` behind something like `requestRaise(mode, actionName) => Promise<boolean>`. The mode control then uses it too, passing no action name.
+- The action name becomes a required field of `Grading` in `GradedAction.tsx`, so the type checker finds every call site (~400 across `GradedAction` and `GradedMenuItem`). The hand-rolled `blockedSx` controls (`GroupInventorySection.tsx`) need the same wiring by hand.
+- A blocked control is currently `disabled` and `pointer-events: none` inside a wrapper `<span>`. To be focusable and activatable it stops being `disabled`; the wrapper (or the control's own click/submit) intercepts activation, asks for the raise, then replays it. For a `type="submit"` save that has no `onClick`, replay means `form.requestSubmit()`, and the form's `onSubmit` path also has to intercept Enter in a field while the save is blocked.
+- `e2e/safety-modes.spec.ts` currently asserts that a blocked control does nothing and is out of keyboard reach; those tests invert.
