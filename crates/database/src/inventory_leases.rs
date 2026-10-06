@@ -153,6 +153,19 @@ impl InventoryLease {
 			.map_err(AppError::from)
 	}
 
+	/// Every unreleased lease on the group's environments, expired or not.
+	pub async fn open_for_group(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<Vec<Self>> {
+		use crate::schema::inventory_leases::dsl;
+
+		dsl::inventory_leases
+			.select(Self::as_select())
+			.filter(dsl::server_group_id.eq(group_id))
+			.filter(dsl::released_at.is_null())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Take the environment's lease, releasing an expired one in the way.
 	/// Refuses one another operator still holds unless `take_over`.
 	///
