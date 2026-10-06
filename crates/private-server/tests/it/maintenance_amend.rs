@@ -158,6 +158,89 @@ async fn an_incidents_choices_say_which_cover_its_failures() {
 	.await
 }
 
+/// A failure no window can be declared over is left contributing whatever is
+/// chosen, so no choice claims to cover everything.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failure_no_window_reaches_marks_every_choice() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		seed(&mut conn).await;
+		file_check(&mut conn, group_check()).await.unwrap();
+		file_check(
+			&mut conn,
+			CheckFiling {
+				scope: Scope::Global,
+				check: "relay-unreachable",
+				..group_check()
+			},
+		)
+		.await
+		.unwrap();
+		conn.batch_execute(&format!(
+			"INSERT INTO incident_issues (incident_id, issue_id, joined_at) \
+			 SELECT i.id, s.id, NOW() FROM incidents i, issues s \
+			 WHERE i.server_group_id = '{GROUP}' AND i.closed_at IS NULL \
+			   AND s.check_name = 'relay-unreachable'"
+		))
+		.await
+		.unwrap();
+		let incidents: Vec<Value> = private
+			.post("/api/incidents/list_active")
+			.json(&json!({}))
+			.await
+			.json();
+		let incident = incidents
+			.iter()
+			.find(|incident| incident["server_group_id"] == GROUP)
+			.expect("the group's incident");
+
+		let targets: Value = private
+			.post("/api/maintenance/targets")
+			.json(&json!({
+				"start": { "server_group_id": GROUP, "rank": "production" },
+				"incident_id": incident["id"],
+			}))
+			.await
+			.json();
+		assert!(
+			targets["choices"]
+				.as_array()
+				.unwrap()
+				.iter()
+				.all(|choice| choice["covers_failures"] == false),
+			"{targets}"
+		);
+	})
+	.await
+}
+
+/// The declaration amends the window it starts over, so a window named from
+/// elsewhere is refused rather than read.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_window_not_over_the_start_is_refused() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		seed(&mut conn).await;
+		let window: Value = private
+			.post("/api/maintenance/declare")
+			.json(&json!({ "machine_id": PRODUCTION_BOX, "expected_end": in_hours(1) }))
+			.await
+			.json();
+		private
+			.post("/api/maintenance/targets")
+			.json(&json!({
+				"start": { "server_group_id": GROUP },
+				"window_id": window["id"],
+			}))
+			.await
+			.assert_status_bad_request();
+		private
+			.post("/api/maintenance/for_target")
+			.json(&json!({ "server_group_id": GROUP, "rank": "clone" }))
+			.await
+			.assert_status_bad_request();
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn amending_changes_only_what_it_names_and_can_move_the_window() {
 	commons_tests::server::run(async |mut conn, _, private| {
