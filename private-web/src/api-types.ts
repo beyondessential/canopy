@@ -3393,8 +3393,10 @@ export interface paths {
         put?: never;
         /**
          * A target's maintenance windows.
-         * @description Open and ended, most recently declared first, so what was being done the
-         *     last time the target went quiet is readable against it.
+         * @description Those still covering it first, then the rest by when they stopped, so what
+         *     was being done the last time the target went quiet is readable against it.
+         *     A group's include the windows over its environments, so the history is read
+         *     per application, machine, or group, and a rank is refused.
          */
         post: operations["for_target"];
         delete?: never;
@@ -6432,31 +6434,14 @@ export interface components {
             name: string;
         };
         /** @description Declare a window over a target, or amend the one it already has. */
-        DeclareArgs: {
-            /**
-             * Format: uuid
-             * @description The application, for a window over one workload. Covers that
-             *     application and nothing else on the box it runs on.
-             */
-            application_id?: string | null;
+        DeclareArgs: components["schemas"]["MaintenanceTarget"] & {
             /**
              * Format: date-time
              * @description When the work is expected to finish. The window ends itself then.
              */
             expected_end: string;
-            /**
-             * Format: uuid
-             * @description The machine, for a window over one box. Covers every application on it.
-             */
-            machine_id?: string | null;
             /** @description What is being done. */
             note?: string | null;
-            rank?: null | components["schemas"]["ServerRank"];
-            /**
-             * Format: uuid
-             * @description The group, for a window over a whole group or one of its environments.
-             */
-            server_group_id?: string | null;
             /**
              * Format: uuid
              * @description The upgrade plan this is declared from, over the plan's environment. A
@@ -12015,25 +12000,6 @@ export interface components {
              */
             total: number;
         };
-        /** @description The target a window covers: exactly one of the ids is set. */
-        TargetArgs: {
-            /**
-             * Format: uuid
-             * @description The application, for a window over one workload. Covers that
-             *     application and nothing else on the box it runs on.
-             */
-            application_id?: string | null;
-            /**
-             * Format: uuid
-             * @description The machine, for a window over one box. Covers every application on it.
-             */
-            machine_id?: string | null;
-            /**
-             * Format: uuid
-             * @description The group, for a window over a whole group or one of its environments.
-             */
-            server_group_id?: string | null;
-        };
         /** @description One span of a window over a target, as the target's history reads it. */
         TargetWindow: {
             /**
@@ -17200,7 +17166,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TargetArgs"];
+                "application/json": components["schemas"]["MaintenanceTarget"];
             };
         };
         responses: {

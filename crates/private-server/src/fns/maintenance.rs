@@ -27,31 +27,6 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(write: lift))
 }
 
-/// The target a window covers: exactly one of the ids is set.
-#[derive(Deserialize, ToSchema)]
-pub struct TargetArgs {
-	/// The application, for a window over one workload. Covers that
-	/// application and nothing else on the box it runs on.
-	pub application_id: Option<Uuid>,
-	/// The machine, for a window over one box. Covers every application on it.
-	pub machine_id: Option<Uuid>,
-	/// The group, for a window over a whole group or one of its environments.
-	pub server_group_id: Option<Uuid>,
-}
-
-impl TargetArgs {
-	fn scope(&self) -> Result<Scope> {
-		match (self.application_id, self.machine_id, self.server_group_id) {
-			(Some(id), None, None) => Ok(Scope::Application(id)),
-			(None, Some(id), None) => Ok(Scope::Machine(id)),
-			(None, None, Some(id)) => Ok(Scope::Group(id)),
-			_ => Err(AppError::BadRequest(
-				"a maintenance window covers one application, one machine or one group".into(),
-			)),
-		}
-	}
-}
-
 /// A target a window can cover, named the way a declaration names it: exactly
 /// one of the ids, and with the group, optionally the rank of one of its
 /// environments.
@@ -69,14 +44,20 @@ pub struct MaintenanceTarget {
 }
 
 impl MaintenanceTarget {
-	fn grain(self) -> Result<Grain> {
-		let scope = TargetArgs {
-			application_id: self.application_id,
-			machine_id: self.machine_id,
-			server_group_id: self.server_group_id,
+	/// The application, machine, or group named, whatever the rank.
+	fn scope(self) -> Result<Scope> {
+		match (self.application_id, self.machine_id, self.server_group_id) {
+			(Some(id), None, None) => Ok(Scope::Application(id)),
+			(None, Some(id), None) => Ok(Scope::Machine(id)),
+			(None, None, Some(id)) => Ok(Scope::Group(id)),
+			_ => Err(AppError::BadRequest(
+				"a maintenance window covers one application, one machine or one group".into(),
+			)),
 		}
-		.scope()?;
-		Grain::new(scope, self.rank)
+	}
+
+	fn grain(self) -> Result<Grain> {
+		Grain::new(self.scope()?, self.rank)
 	}
 }
 
@@ -95,17 +76,9 @@ impl From<Grain> for MaintenanceTarget {
 /// Declare a window over a target, or amend the one it already has.
 #[derive(Deserialize, ToSchema)]
 pub struct DeclareArgs {
-	/// The application, for a window over one workload. Covers that
-	/// application and nothing else on the box it runs on.
-	pub application_id: Option<Uuid>,
-	/// The machine, for a window over one box. Covers every application on it.
-	pub machine_id: Option<Uuid>,
-	/// The group, for a window over a whole group or one of its environments.
-	pub server_group_id: Option<Uuid>,
-	/// With the group, the rank of the environment the window covers: the
-	/// machines serving the group's applications at that rank, and nothing else
-	/// of the group. Absent for a window over the whole group.
-	pub rank: Option<ServerRank>,
+	/// What the window covers.
+	#[serde(flatten)]
+	pub target: MaintenanceTarget,
 	/// When the work is expected to finish. The window ends itself then.
 	#[schema(value_type = String, format = DateTime)]
 	pub expected_end: Timestamp,
@@ -233,14 +206,16 @@ pub async fn list_open(
 
 /// A target's maintenance windows.
 ///
-/// Open and ended, most recently declared first, so what was being done the
-/// last time the target went quiet is readable against it.
+/// Those still covering it first, then the rest by when they stopped, so what
+/// was being done the last time the target went quiet is readable against it.
+/// A group's include the windows over its environments, so the history is read
+/// per application, machine, or group, and a rank is refused.
 #[utoipa::path(
 	post,
 	path = "/for_target",
 	tag = "maintenance",
 	security(("tailscale-user" = [])),
-	request_body = TargetArgs,
+	request_body = MaintenanceTarget,
 	responses(
 		(status = 200, body = Vec<TargetWindow>),
 		(status = 400, body = ProblemDetailsSchema),
@@ -249,8 +224,13 @@ pub async fn list_open(
 pub async fn for_target(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
-	Json(args): Json<TargetArgs>,
+	Json(args): Json<MaintenanceTarget>,
 ) -> Result<Json<Vec<TargetWindow>>> {
+	if args.rank.is_some() {
+		return Err(AppError::BadRequest(
+			"an environment's windows are read through its group's history".into(),
+		));
+	}
 	let mut conn = state.db.get().await?;
 	let rows = MaintenanceWindow::list_for_scope(&mut conn, args.scope()?, HISTORY_LIMIT).await?;
 	Ok(Json(rows))
@@ -284,19 +264,15 @@ pub async fn declare(
 	Json(args): Json<DeclareArgs>,
 ) -> Result<Json<MaintenanceWindow>> {
 	let mut conn = state.db.get().await?;
-	let scope = TargetArgs {
-		application_id: args.application_id,
-		machine_id: args.machine_id,
-		server_group_id: args.server_group_id,
-	}
-	.scope()?;
+	let grain = args.target.grain()?;
+	let (scope, rank) = (grain.scope(), grain.rank());
 	let window = match args.upgrade_plan_id {
 		Some(plan) => {
 			MaintenanceWindow::declare_from_plan(
 				&mut conn,
 				plan,
 				scope,
-				args.rank,
+				rank,
 				args.expected_end,
 				args.note.as_deref(),
 				Some(&admin.0.login),
@@ -307,7 +283,7 @@ pub async fn declare(
 			MaintenanceWindow::declare(
 				&mut conn,
 				scope,
-				args.rank,
+				rank,
 				args.expected_end,
 				args.note.as_deref(),
 				Some(&admin.0.login),
@@ -392,13 +368,16 @@ pub async fn targets(
 
 	// Coverage is reckoned against the failures alone: an incident whose
 	// failures have all left closes whatever warnings remain in it.
-	let failing: Option<Vec<Grain>> = match args.incident_id {
+	// A failure on something no window can be declared over, such as a
+	// cluster, is left contributing by every choice, so it is kept as `None`
+	// rather than dropped.
+	let failing: Option<Vec<Option<Grain>>> = match args.incident_id {
 		Some(incident) => {
 			let (_, rows) = Incident::get_with_issues(&mut conn, incident).await?;
 			Some(
 				rows.into_iter()
 					.filter(|(link, issue)| link.left_at.is_none() && issue.opens_incident())
-					.filter_map(|(_, issue)| Grain::of_issue(&issue))
+					.map(|(_, issue)| Grain::of_issue(&issue))
 					.collect(),
 			)
 		}
@@ -419,7 +398,7 @@ pub async fn targets(
 			covers_failures: failing.as_ref().map(|failing| {
 				failing
 					.iter()
-					.all(|target| descent.covers(entry.grain, *target))
+					.all(|target| target.is_some_and(|target| descent.covers(entry.grain, target)))
 			}),
 		})
 		.collect();
@@ -430,8 +409,16 @@ pub async fn targets(
 	// spec: MNT#moving-a-window
 	// A window that has ended is amended by no one, so nothing holds it.
 	let own = match args.window_id {
-		Some(id) => Some(MaintenanceWindow::get(&mut conn, id).await?)
-			.filter(|window| window.ended_at.is_none()),
+		Some(id) => {
+			let window = MaintenanceWindow::get(&mut conn, id).await?;
+			// The declaration amends the window it starts over, and no other.
+			if window.grain() != Some(start) {
+				return Err(AppError::BadRequest(
+					"the window named is not the starting target's".into(),
+				));
+			}
+			Some(window).filter(|window| window.ended_at.is_none())
+		}
 		None => open
 			.iter()
 			.find(|window| window.grain() == Some(start))

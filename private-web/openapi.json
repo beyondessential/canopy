@@ -7031,13 +7031,13 @@
           "maintenance"
         ],
         "summary": "A target's maintenance windows.",
-        "description": "Open and ended, most recently declared first, so what was being done the\nlast time the target went quiet is readable against it.",
+        "description": "Those still covering it first, then the rest by when they stopped, so what\nwas being done the last time the target went quiet is readable against it.\nA group's include the windows over its environments, so the history is read\nper application, machine, or group, and a rank is refused.",
         "operationId": "for_target",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TargetArgs"
+                "$ref": "#/components/schemas/MaintenanceTarget"
               }
             }
           },
@@ -12444,68 +12444,41 @@
         }
       },
       "DeclareArgs": {
-        "type": "object",
-        "description": "Declare a window over a target, or amend the one it already has.",
-        "required": [
-          "expected_end"
-        ],
-        "properties": {
-          "application_id": {
-            "type": [
-              "string",
-              "null"
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/MaintenanceTarget",
+            "description": "What the window covers."
+          },
+          {
+            "type": "object",
+            "required": [
+              "expected_end"
             ],
-            "format": "uuid",
-            "description": "The application, for a window over one workload. Covers that\napplication and nothing else on the box it runs on."
-          },
-          "expected_end": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When the work is expected to finish. The window ends itself then."
-          },
-          "machine_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The machine, for a window over one box. Covers every application on it."
-          },
-          "note": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "What is being done."
-          },
-          "rank": {
-            "oneOf": [
-              {
-                "type": "null"
+            "properties": {
+              "expected_end": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When the work is expected to finish. The window ends itself then."
               },
-              {
-                "$ref": "#/components/schemas/ServerRank",
-                "description": "With the group, the rank of the environment the window covers: the\nmachines serving the group's applications at that rank, and nothing else\nof the group. Absent for a window over the whole group."
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "What is being done."
+              },
+              "upgrade_plan_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid",
+                "description": "The upgrade plan this is declared from, over the plan's environment. A\nwindow it opens stays over that environment for as long as it holds."
               }
-            ]
-          },
-          "server_group_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The group, for a window over a whole group or one of its environments."
-          },
-          "upgrade_plan_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The upgrade plan this is declared from, over the plan's environment. A\nwindow it opens stays over that environment for as long as it holds."
+            }
           }
-        }
+        ],
+        "description": "Declare a window over a target, or amend the one it already has."
       },
       "DecommissionArgs": {
         "type": "object",
@@ -21395,36 +21368,6 @@
             "type": "integer",
             "format": "int32",
             "description": "How many the migrations apply to, passed or not."
-          }
-        }
-      },
-      "TargetArgs": {
-        "type": "object",
-        "description": "The target a window covers: exactly one of the ids is set.",
-        "properties": {
-          "application_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The application, for a window over one workload. Covers that\napplication and nothing else on the box it runs on."
-          },
-          "machine_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The machine, for a window over one box. Covers every application on it."
-          },
-          "server_group_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The group, for a window over a whole group or one of its environments."
           }
         }
       },
