@@ -235,6 +235,12 @@ async fn the_constraint_holds_after_the_migration() {
 		)
 		.await;
 		apply(&mut conn).await;
+		// The later machine_rank triggers give an application written onto a
+		// ranked box the box's rank, so the constraint this migration installs
+		// is only reached with them out of the way.
+		conn.batch_execute("ALTER TABLE applications DISABLE TRIGGER USER")
+			.await
+			.expect("bypass the triggers");
 
 		let refused = sql_query(
 			"INSERT INTO applications (type, host, group_id, rank, machine_id) \
