@@ -15,16 +15,20 @@ import {
 	type GroupEnvironment,
 	type GroupMachine,
 	groupServersByRank,
-	resolveHeldBy,
+	type RankedMachine,
 	rankMachines,
+	resolveHeldBy,
 	type ServerInfo,
+	type ServerRank,
 } from "../types";
 import ApplicationTypeChip from "./ApplicationTypeChip";
 import MachineEnclosure, { waveWhileHolding } from "./MachineEnclosure";
 import StatusDot from "./StatusDot";
 
 /// The group as an operator navigates it: rank, then the boxes at that rank,
-/// then the workloads on each box.
+/// then the workloads on each box. A box serving no environment yet is listed
+/// apart after them: awaiting a rank once something on it has reported,
+/// awaiting check-in while nothing has.
 ///
 /// The group page and both detail pages end with this, so an operator learns
 /// one arrangement and reads it everywhere, and moving sideways never goes back
@@ -53,24 +57,39 @@ export default function GroupTree({
 	currentApplicationId?: string;
 }) {
 	const ranked = rankMachines(machines, applications);
+	const sections: Array<[Section, RankedMachine[]]> = [];
+	for (const [rank, boxes] of groupServersByRank(ranked)) {
+		if (rank !== null) {
+			sections.push([rank, boxes]);
+			continue;
+		}
+		const reported = boxes.filter((box) => box.applications.length > 0);
+		const silent = boxes.filter((box) => box.applications.length === 0);
+		if (reported.length > 0) sections.push(["pending", reported]);
+		if (silent.length > 0) sections.push(["awaiting-check-in", silent]);
+	}
 
 	return (
 		<Box data-testid="group-tree">
-			{groupServersByRank(ranked).map(([rank, boxes], index) => {
+			{sections.map(([section, boxes], index) => {
+				const rank =
+					section === "pending" || section === "awaiting-check-in"
+						? null
+						: section;
 				const environment = environments?.find((e) => e.rank === rank);
 				const held = environment?.maintained === true;
 				const settling = environment?.maintenance_settling === true;
 				return (
 					<Box
-						key={rank ?? "_unranked"}
+						key={section}
 						data-testid="tree-environment"
-						data-rank={rank ?? "unranked"}
+						data-rank={section}
 						data-maintenance={
 							held ? (settling ? "settling" : "holding") : undefined
 						}
 						sx={{ mt: index === 0 ? 0 : 1.5 }}
 					>
-						<EnvironmentHeading rank={rank} />
+						<EnvironmentHeading section={section} />
 						<Stack spacing={1} data-testid="tree-boxes">
 							{boxes.map((box) => (
 								<MachineBlock
@@ -95,17 +114,28 @@ export default function GroupTree({
 	);
 }
 
-/// An environment's row. A window over the environment is drawn on the boxes
-/// under it rather than here.
+/// A row of the tree: an environment, or one of the two places a box serving
+/// none waits.
+type Section = ServerRank | "pending" | "awaiting-check-in";
+
+const SECTION_HEADINGS: Record<"pending" | "awaiting-check-in", string> = {
+	pending: "awaiting a rank",
+	"awaiting-check-in": "awaiting check-in",
+};
+
+/// A section's row. A window over an environment is drawn on the boxes under
+/// it rather than here.
 // spec: MNT#presentation
-function EnvironmentHeading({ rank }: { rank: string | null }) {
+function EnvironmentHeading({ section }: { section: Section }) {
 	return (
 		<Typography
 			variant="overline"
 			color="text.secondary"
 			sx={{ display: "block", mb: 0.5 }}
 		>
-			{rank ?? "unranked"}
+			{section === "pending" || section === "awaiting-check-in"
+				? SECTION_HEADINGS[section]
+				: section}
 		</Typography>
 	);
 }

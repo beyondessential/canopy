@@ -22,8 +22,8 @@ const SERVER: Uuid = Uuid::from_u128(0xA2);
 async fn seed(conn: &mut AsyncPgConnection) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{GROUP}', 'Race'); \
-		 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{SERVER}', '{GROUP}') RETURNING id) INSERT INTO applications (id, host, name, type, group_id, machine_id) VALUES \
-			('{SERVER}', 'https://race.invalid', 'race', 'tamanu-central', '{GROUP}', '{SERVER}');"
+		 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{SERVER}', '{GROUP}') RETURNING id) INSERT INTO applications (id, host, name, type, group_id, rank, machine_id) VALUES \
+			('{SERVER}', 'https://race.invalid', 'race', 'tamanu-central', '{GROUP}', 'production', '{SERVER}');"
 	))
 	.await
 	.expect("seed");

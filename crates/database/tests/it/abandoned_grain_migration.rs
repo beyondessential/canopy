@@ -137,7 +137,7 @@ async fn canopys_states_at_an_abandoned_grain_are_resolved() {
 
 		// An incident whose only live member is the leftover.
 		let incident: RowId = diesel::sql_query(
-			"INSERT INTO incidents (server_group_id, opened_at) VALUES ($1, NOW()) RETURNING id",
+			"INSERT INTO incidents (server_group_id, rank, opened_at) VALUES ($1, 'production', NOW()) RETURNING id",
 		)
 		.bind::<sql_types::Uuid, _>(group.id)
 		.get_result(&mut conn)

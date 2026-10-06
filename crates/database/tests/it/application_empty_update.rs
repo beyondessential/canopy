@@ -57,7 +57,6 @@ async fn an_update_setting_no_column_leaves_the_application_as_it_was() {
 			PartialServer {
 				id: before.id,
 				name: None,
-				rank: None,
 				host: None,
 				group_id: None,
 				public_name: None,

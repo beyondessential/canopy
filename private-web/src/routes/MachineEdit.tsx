@@ -29,13 +29,14 @@ import {
 	type TagMap,
 } from "../types";
 
-const RANK_OPTIONS: Array<{ value: ServerRank | ""; label: string }> = [
-	{ value: "", label: "(none)" },
-	{ value: "production", label: "production" },
-	{ value: "clone", label: "clone" },
-	{ value: "demo", label: "demo" },
-	{ value: "test", label: "test" },
-	{ value: "dev", label: "dev" },
+/// A rank is changed and never cleared, so there is no empty choice: a
+/// pending box shows its placeholder until one of these is picked.
+const RANK_OPTIONS: ServerRank[] = [
+	"production",
+	"clone",
+	"demo",
+	"test",
+	"dev",
 ];
 
 /// Editing is machine-first: one form per machine, holding the box's own
@@ -126,6 +127,8 @@ interface MachineForm {
 	cloud: "" | "true" | "false";
 	lat: string;
 	lon: string;
+	/// The rank every application on the box shares; empty while it is pending.
+	rank: ServerRank | "";
 	isMonitored: boolean;
 	alertWhenUnreachable: boolean;
 	alertWhenDownMinutes: string;
@@ -137,7 +140,6 @@ interface MachineForm {
 interface ApplicationForm {
 	name: string;
 	host: string;
-	rank: ServerRank | "";
 	publicName: string;
 	isMonitored: boolean;
 	alertWhenUnreachable: boolean;
@@ -180,6 +182,7 @@ function Form({
 		cloud: machine.cloud == null ? "" : machine.cloud ? "true" : "false",
 		lat: machine.geolocation?.lat?.toString() ?? "",
 		lon: machine.geolocation?.lon?.toString() ?? "",
+		rank: applications.find((a) => a.rank)?.rank ?? "",
 		isMonitored: machine.is_monitored,
 		alertWhenUnreachable: !machineReachabilitySilenced,
 		alertWhenDownMinutes: minutesOf(machine.alert_when_down_for),
@@ -193,7 +196,6 @@ function Form({
 				{
 					name: a.name ?? "",
 					host: a.host ?? "",
-					rank: a.rank ?? "",
 					publicName: a.public_name ?? "",
 					isMonitored: a.is_monitored,
 					alertWhenUnreachable: !applicationReachabilitySilenced.has(a.id),
@@ -236,6 +238,10 @@ function Form({
 						box.lat && box.lon
 							? { lat: Number(box.lat), lon: Number(box.lon) }
 							: null,
+					// Every application on the box takes it. Omitted while the box is
+					// pending and nothing has been picked.
+					// spec: FLT#editing
+					rank: box.rank === "" ? undefined : box.rank,
 					is_monitored: box.isMonitored,
 					alert_when_down_for: Math.max(
 						60,
@@ -254,7 +260,6 @@ function Form({
 					data: {
 						name: form.name.trim(),
 						host: form.host.trim(),
-						rank: form.rank === "" ? null : form.rank,
 						// Sent whether or not the field is offered: a public name
 						// already set survives its type losing eligibility, and
 						// takes effect again if it regains it.
@@ -351,6 +356,40 @@ function Form({
 					<Typography variant="caption" color="text.secondary">
 						The applications on this machine take its group, so moving the box
 						moves them with it.
+					</Typography>
+
+					<TextField
+						select
+						label="Rank"
+						value={box.rank}
+						onChange={(e) =>
+							setBox({ ...box, rank: e.target.value as ServerRank })
+						}
+						disabled={pending || applications.length === 0}
+						slotProps={{
+							select: {
+								displayEmpty: true,
+								renderValue: (value) =>
+									value === "" ? (
+										<Typography component="span" color="text.disabled">
+											Not ranked yet
+										</Typography>
+									) : (
+										(value as string)
+									),
+							},
+						}}
+					>
+						{RANK_OPTIONS.map((rank) => (
+							<MenuItem key={rank} value={rank}>
+								{rank}
+							</MenuItem>
+						))}
+					</TextField>
+					<Typography variant="caption" color="text.secondary">
+						{box.rank === ""
+							? "Raises no incidents until ranked."
+							: "Every application on this machine shares its rank."}
 					</Typography>
 
 					<Stack direction={{ xs: "column", md: "row" }} spacing={2}>
@@ -563,20 +602,6 @@ function ApplicationFields({
 					disabled={disabled}
 					helperText="Where an operator reaches it. Empty falls back to the box's tailnet name."
 				/>
-				<TextField
-					select
-					label="Rank"
-					value={form.rank}
-					onChange={(e) => onChange({ rank: e.target.value as ServerRank | "" })}
-					disabled={disabled}
-				>
-					{RANK_OPTIONS.map((o) => (
-						<MenuItem key={o.value} value={o.value}>
-							{o.label}
-						</MenuItem>
-					))}
-				</TextField>
-
 				{canListPublicly && (
 					<TextField
 						label="Name in Tamanu Mobile app"

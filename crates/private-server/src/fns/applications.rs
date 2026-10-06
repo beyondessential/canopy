@@ -78,13 +78,12 @@ pub struct ServerDetailData {
 	/// `group_machines`.
 	// spec: FLT#navigating-the-two-grains
 	pub machine_name: Option<String>,
-	/// The rank the box this application runs on serves: the highest among the
-	/// workloads on it.
+	/// The rank the box this application runs on serves: the one its workloads
+	/// share, absent while the box is pending.
 	///
-	/// Maintenance coverage is decided at the box's rank, not the
-	/// application's, so a page reading a window's reach needs this rather
-	/// than `server.rank`. They differ on a box carrying workloads at more
-	/// than one rank.
+	/// Maintenance coverage is decided at the box's rank, so a page reading a
+	/// window's reach reads it here. It is the application's own rank for one
+	/// on a box.
 	// spec: MNT#presentation
 	pub machine_rank: Option<commons_types::server::rank::ServerRank>,
 	/// The server's own effective `billing.*` labels
@@ -231,9 +230,15 @@ pub struct ServerDataUpdate {
 	/// New name for the server. Omit to leave unchanged.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub name: Option<String>,
-	/// New promotion rank for the server. Omit to leave unchanged.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub rank: Option<ServerRank>,
+	/// New rank for the server. Omit to leave unchanged. A rank can be changed
+	/// but not cleared, so `null` is refused. Ranking an application ranks
+	/// every application on its machine with it.
+	#[serde(
+		default,
+		deserialize_with = "deserialize_some",
+		skip_serializing_if = "Option::is_none"
+	)]
+	pub rank: Option<Option<ServerRank>>,
 	/// New URL for the server. An empty string clears it; omit to leave
 	/// unchanged.
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -295,7 +300,9 @@ pub struct ServerDataUpdate {
 	pub may_manage_tls: Option<bool>,
 }
 
-fn deserialize_some<'de, T, D>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
+pub(super) fn deserialize_some<'de, T, D>(
+	deserializer: D,
+) -> std::result::Result<Option<T>, D::Error>
 where
 	T: Deserialize<'de>,
 	D: serde::Deserializer<'de>,
@@ -929,17 +936,26 @@ pub async fn update(
 	admin: TailscaleAdmin,
 	Json(args): Json<ServerUpdateArgs>,
 ) -> Result<Json<()>> {
+	// A rank is changed, never cleared: an application is pending until it is
+	// first ranked, and ranked from then on. Refused before anything is written.
+	// spec: GRP#environments
+	let new_rank = match args.data.rank {
+		Some(None) => {
+			return Err(AppError::BadRequest(
+				"a rank can be changed but not cleared".into(),
+			));
+		}
+		Some(Some(rank)) => Some(rank),
+		None => None,
+	};
 	let mut conn = state.db.get().await?;
 
 	// Capture the server's pre-update state when this request touches one of
 	// the fields whose transitions warrant an incident catch-up: `group_id`
 	// (ungrouped → grouped opens pending issues into incidents),
 	// `is_monitored` (un/monitored toggles incident eligibility symmetrically:
-	// on enrols open issues, off cascades them out), and `rank` (which
-	// environment the issues belong to).
-	let touches_catchup_field = args.data.group_id.is_some()
-		|| args.data.is_monitored.is_some()
-		|| args.data.rank.is_some();
+	// on enrols open issues, off cascades them out).
+	let touches_catchup_field = args.data.group_id.is_some() || args.data.is_monitored.is_some();
 	let before = if touches_catchup_field {
 		Some(Application::get_by_id(&mut conn, args.server_id).await?)
 	} else {
@@ -983,7 +999,6 @@ pub async fn update(
 			let s = s.trim();
 			(!s.is_empty()).then(|| s.to_owned())
 		}),
-		rank: args.data.rank,
 		// `Some(Some(url))` sets, `Some(None)` clears, `None` leaves unchanged.
 		// The form always sends `host`; an empty string clears it.
 		host: match args.data.host {
@@ -1016,31 +1031,11 @@ pub async fn update(
 		(Some(b), Some(new_value)) => b.is_monitored != new_value,
 		_ => false,
 	};
-	let rank_changed = match (before.as_ref(), args.data.rank) {
-		(Some(b), Some(new_value)) => b.rank != Some(new_value),
-		_ => false,
-	};
 	if group_just_set || monitored_toggled {
 		database::issues::reevaluate_open_issues_for_server(&mut conn, args.server_id).await?;
 	}
-	if rank_changed {
-		// A box's environment is the highest rank among the workloads on it,
-		// so a rank change moves the machine's own issues too. An application on
-		// a cluster has no box, so its own scope is what is re-evaluated.
-		// spec: INC#targets
-		let scope = match Application::get_by_id(&mut conn, args.server_id)
-			.await?
-			.machine_id
-		{
-			Some(machine_id) => database::issues::Scope::Machine(machine_id),
-			None => database::issues::Scope::Application(args.server_id),
-		};
-		database::issues::reevaluate_open_issues_for_scope(
-			&mut conn,
-			scope,
-			Some(&format!("rank changed by {}", admin.0.login)),
-		)
-		.await?;
+	if let Some(rank) = new_rank {
+		Application::set_rank(&mut conn, args.server_id, rank, Some(&admin.0.login)).await?;
 	}
 	Ok(Json(()))
 }

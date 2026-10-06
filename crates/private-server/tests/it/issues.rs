@@ -10,8 +10,8 @@ async fn list_issues_for_device_and_server() {
 			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'machine');
 			 INSERT INTO device_keys (device_id, key_data, name, is_active) VALUES \
 				('{device_id}', '\\x6b6579'::bytea, 'k', true);
-			 WITH m AS (INSERT INTO machines (name, id, device_id) VALUES ('box', '{server_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
-				('{server_id}', 'https://example.com', 'tamanu-central', '{server_id}');
+			 WITH m AS (INSERT INTO machines (name, id, device_id) VALUES ('box', '{server_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, rank, machine_id) VALUES \
+				('{server_id}', 'https://example.com', 'tamanu-central', 'production', '{server_id}');
 			 INSERT INTO issues (application_id, device_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, last_degraded_at) VALUES \
 				('{server_id}', '{device_id}', 'src', 'a', 'a', 'failed',  'failed',  'newest', true,  '2026-05-03T10:00:00Z', '2026-05-03T10:00:00Z', '2026-05-03T10:00:00Z'),
 				('{server_id}', '{device_id}', 'src', 'b', 'b', 'warning', 'warning', 'older',  true,  '2026-05-01T10:00:00Z', '2026-05-01T10:00:00Z', '2026-05-01T10:00:00Z'),
@@ -48,8 +48,8 @@ async fn manual_event_submit_creates_issue_without_device() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '{server_id}') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
-				('{server_id}', 'https://example.com', 'tamanu-central', '{server_id}');"
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '{server_id}') RETURNING id) INSERT INTO applications (id, host, type, rank, machine_id) VALUES \
+				('{server_id}', 'https://example.com', 'tamanu-central', 'production', '{server_id}');"
 		))
 		.await
 		.expect("seed");
@@ -91,10 +91,10 @@ async fn incident_groups_at_server_group() {
 			 INSERT INTO devices (id, role) VALUES ('{device_id}', 'machine');
 			 INSERT INTO device_keys (device_id, key_data, name, is_active) VALUES \
 				('{device_id}', '\\x6b6579'::bytea, 'k', true);
-			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_a_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
-				('{server_a_id}', 'https://a.example.com', 'tamanu-central', '{group_id}', '{server_a_id}');
-			 WITH m AS (INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', '{server_b_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
-				('{server_b_id}', 'https://b.example.com', 'tamanu-facility', '{group_id}', '{server_b_id}');"
+			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_a_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, rank, machine_id) VALUES \
+				('{server_a_id}', 'https://a.example.com', 'tamanu-central', '{group_id}', 'production', '{server_a_id}');
+			 WITH m AS (INSERT INTO machines (name, id, group_id, device_id) VALUES ('box', '{server_b_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, rank, machine_id) VALUES \
+				('{server_b_id}', 'https://b.example.com', 'tamanu-facility', '{group_id}', 'production', '{server_b_id}');"
 		))
 		.await
 		.expect("seed");
@@ -156,8 +156,8 @@ async fn ungrouped_server_event_skips_incident() {
 		// incident is opened — incidents are group-keyed.
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '{server_id}') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
-				('{server_id}', 'https://orphan.example.com', 'tamanu-central', '{server_id}');"
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '{server_id}') RETURNING id) INSERT INTO applications (id, host, type, rank, machine_id) VALUES \
+				('{server_id}', 'https://orphan.example.com', 'tamanu-central', 'production', '{server_id}');"
 		))
 		.await
 		.expect("seed");
@@ -197,8 +197,8 @@ async fn assigning_group_opens_pending_incident() {
 		let server_id = Uuid::new_v4();
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '{server_id}') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
-				('{server_id}', 'https://late.example.com', 'tamanu-central', '{server_id}');
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '{server_id}') RETURNING id) INSERT INTO applications (id, host, type, rank, machine_id) VALUES \
+				('{server_id}', 'https://late.example.com', 'tamanu-central', 'production', '{server_id}');
 			 INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'late group');"
 		))
 		.await
@@ -256,8 +256,8 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
-			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
-				('{server_id}', 'https://example.com', 'tamanu-central', '{group_id}', '{server_id}');"
+			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, rank, machine_id) VALUES \
+				('{server_id}', 'https://example.com', 'tamanu-central', '{group_id}', 'production', '{server_id}');"
 		))
 		.await
 		.expect("seed");
@@ -361,8 +361,8 @@ async fn low_severity_issue_joins_existing_open_incident() {
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
-			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
-				('{server_id}', 'https://example.com', 'tamanu-central', '{group_id}', '{server_id}');"
+			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, rank, machine_id) VALUES \
+				('{server_id}', 'https://example.com', 'tamanu-central', '{group_id}', 'production', '{server_id}');"
 		))
 		.await
 		.expect("seed");
@@ -417,8 +417,8 @@ async fn low_severity_alone_does_not_open_incident() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '{server_id}') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
-				('{server_id}', 'https://example.com', 'tamanu-central', '{server_id}');"
+			"WITH m AS (INSERT INTO machines (name, id) VALUES ('box', '{server_id}') RETURNING id) INSERT INTO applications (id, host, type, rank, machine_id) VALUES \
+				('{server_id}', 'https://example.com', 'tamanu-central', 'production', '{server_id}');"
 		))
 		.await
 		.expect("seed");
@@ -455,8 +455,8 @@ async fn severity_downgrade_keeps_issue_in_incident() {
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
-			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
-				('{server_id}', 'https://example.com', 'tamanu-central', '{group_id}', '{server_id}');"
+			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, rank, machine_id) VALUES \
+				('{server_id}', 'https://example.com', 'tamanu-central', '{group_id}', 'production', '{server_id}');"
 		))
 		.await
 		.expect("seed");
@@ -507,8 +507,8 @@ async fn open_issue(
 	let group_id = Uuid::new_v4();
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g') ON CONFLICT DO NOTHING; \
-		 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
-			('{server_id}', 'https://example.com', 'tamanu-central', '{group_id}', '{server_id}') ON CONFLICT DO NOTHING;"
+		 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, rank, machine_id) VALUES \
+			('{server_id}', 'https://example.com', 'tamanu-central', '{group_id}', 'production', '{server_id}') ON CONFLICT (id) DO NOTHING;"
 	))
 	.await
 	.expect("seed");
@@ -609,8 +609,8 @@ async fn reopen_via_device_clears_resolved_fields() {
 		async |mut conn, cert, device_id, public, private| {
 			let server_id = Uuid::new_v4();
 			conn.batch_execute(&format!(
-				"WITH m AS (INSERT INTO machines (name, id, device_id) VALUES ('box', '{server_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
-					('{server_id}', 'https://example.com', 'tamanu-central', '{server_id}');"
+				"WITH m AS (INSERT INTO machines (name, id, device_id) VALUES ('box', '{server_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, rank, machine_id) VALUES \
+					('{server_id}', 'https://example.com', 'tamanu-central', 'production', '{server_id}');"
 			))
 			.await
 			.expect("seed");
@@ -759,8 +759,8 @@ async fn unmonitored_server_event_does_not_open_incident() {
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, is_monitored, machine_id) VALUES \
-				('{server_id}', 'https://muted.example.com', 'tamanu-central', '{group_id}', FALSE, '{server_id}');"
+			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, rank, is_monitored, machine_id) VALUES \
+				('{server_id}', 'https://muted.example.com', 'tamanu-central', '{group_id}', 'production', FALSE, '{server_id}');"
 		))
 		.await
 		.expect("seed");
@@ -812,8 +812,8 @@ async fn enabling_monitoring_opens_pending_incident() {
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, is_monitored, machine_id) VALUES \
-				('{server_id}', 'https://later.example.com', 'tamanu-central', '{group_id}', FALSE, '{server_id}');"
+			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, rank, is_monitored, machine_id) VALUES \
+				('{server_id}', 'https://later.example.com', 'tamanu-central', '{group_id}', 'production', FALSE, '{server_id}');"
 		))
 		.await
 		.expect("seed");
@@ -1015,9 +1015,9 @@ async fn group_silence_blocks_events_from_all_members() {
 		let server_b = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_a}', '{group_id}'), ('box', '{server_b}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
-				('{server_a}', 'https://a.example.com', 'tamanu-central', '{group_id}', '{server_a}'),
-				('{server_b}', 'https://b.example.com', 'tamanu-central', '{group_id}', '{server_b}');"
+			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_a}', '{group_id}'), ('box', '{server_b}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, rank, machine_id) VALUES \
+				('{server_a}', 'https://a.example.com', 'tamanu-central', '{group_id}', 'production', '{server_a}'),
+				('{server_b}', 'https://b.example.com', 'tamanu-central', '{group_id}', 'production', '{server_b}');"
 		))
 		.await
 		.expect("seed");
@@ -1084,8 +1084,8 @@ async fn list_silenced_refs_for_server_and_group() {
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
-				('{server_id}', 'https://l.example.com', 'tamanu-central', '{group_id}', '{server_id}');
+			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, rank, machine_id) VALUES \
+				('{server_id}', 'https://l.example.com', 'tamanu-central', '{group_id}', 'production', '{server_id}');
 			 INSERT INTO check_policies (source, check_name) VALUES \
 				('manual', 'srv-ref'), ('canopy', 'grp-ref');"
 		))
@@ -1181,8 +1181,8 @@ async fn empty_validation_input_is_a_400_not_a_500() {
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
-				('{server_id}', 'https://validate.example.com', 'tamanu-central', '{group_id}', '{server_id}');
+			 WITH m AS (INSERT INTO machines (name, id, group_id) VALUES ('box', '{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, rank, machine_id) VALUES \
+				('{server_id}', 'https://validate.example.com', 'tamanu-central', '{group_id}', 'production', '{server_id}');
 			 INSERT INTO issues (id, application_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, last_degraded_at) VALUES \
 				('11111111-2222-3333-4444-555555555555', '{server_id}', 'src', 'r', 'r', 'failed', 'failed', 'm', true, NOW(), NOW(), NOW());"
 		))
@@ -1283,9 +1283,9 @@ async fn an_incident_names_the_environment_it_targets() {
 }
 
 /// An application's page shows its own environment's incidents. A group check
-/// asserts something held once for the group, so its incident belongs to the
-/// group and reaches an application's page only where that application is in no
-/// environment: the group's page is where a ranked member's operator reads it.
+/// asserts something held once for the group, so its incident is its headline
+/// environment's and reaches the page of an application in that environment,
+/// while a pending application, in no environment, sees none.
 // spec: INC#targets
 #[tokio::test(flavor = "multi_thread")]
 async fn an_applications_page_sees_its_own_environments_incidents() {
@@ -1304,7 +1304,7 @@ async fn an_applications_page_sees_its_own_environments_incidents() {
 			 INSERT INTO issues (id, created_at, updated_at, server_group_id, source, ref, check_name, observed_result, effective_result, message, active, first_seen, last_seen) VALUES \
 				('{group_issue}', NOW(), NOW(), '{group_id}', 'canopy', 'backup-staleness', 'backup-staleness', 'failed', 'failed', 'the repository is stale', true, NOW(), NOW());
 			 INSERT INTO incidents (id, created_at, updated_at, server_group_id, rank, opened_at) VALUES \
-				('{group_incident}', NOW(), NOW(), '{group_id}', NULL, NOW());
+				('{group_incident}', NOW(), NOW(), '{group_id}', 'production', NOW());
 			 INSERT INTO incident_issues (incident_id, issue_id, joined_at) VALUES \
 				('{group_incident}', '{group_issue}', NOW());"
 		))
@@ -1320,17 +1320,20 @@ async fn an_applications_page_sees_its_own_environments_incidents() {
 			resp.json()
 		};
 
-		assert!(
-			for_server(production_id).await.is_empty(),
-			"the group's own trouble is not the production environment's",
-		);
-		let spare = for_server(spare_id).await;
+		let production = for_server(production_id).await;
 		assert_eq!(
-			spare.len(),
+			production.len(),
 			1,
-			"an application in no environment answers to the group, so its page carries it",
+			"the group's own trouble is its headline environment's, so production's page carries it",
 		);
-		assert!(spare[0].get("rank").is_some_and(|v| v.is_null()));
+		assert_eq!(
+			production[0].get("rank").and_then(|v| v.as_str()),
+			Some("production")
+		);
+		assert!(
+			for_server(spare_id).await.is_empty(),
+			"a pending application is in no environment, so its page carries none",
+		);
 
 		let for_group: Vec<serde_json::Value> = {
 			let resp = private
@@ -1343,7 +1346,7 @@ async fn an_applications_page_sees_its_own_environments_incidents() {
 		assert_eq!(
 			for_group.len(),
 			1,
-			"and the group's page carries it whichever ranks the group holds",
+			"and the group's page carries it with the rest of the group's incidents",
 		);
 	})
 	.await;

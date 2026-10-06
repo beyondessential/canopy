@@ -4,7 +4,7 @@ id: UPG
 
 # Planned upgrades
 
-Canopy records where each environment is going: the version a group's applications at one rank intend to move to, and optionally the day and the window on it.
+Canopy records where each environment is going: the version one of a group's environments intends to move to, and optionally the day and the window on it.
 A plan makes the fleet's intended upgrades visible in one place, and it tells the rest of Canopy which version to hold an environment's data against, so pre-upgrade testing exercises the version that will actually be applied rather than guessing.
 
 ## Scope
@@ -26,7 +26,7 @@ And nobody can see at a glance which environments are mid-plan, which are overdu
 
 ## A plan
 
-An operator records, per environment, a group's applications at one rank (see [GRP](../servers/groups.md), "Environments"):
+An operator records, per environment (see [GRP](../servers/groups.md), "Environments"):
 
 - the **target version**, which must be a published version newer than the environment is running;
 - an optional **planned date**, the day the upgrade is expected to happen;
@@ -50,9 +50,7 @@ A plan for a group's clone leaves its production's plan where it was.
 
 What an environment runs is what its own central reports, so a site's production reads from its production central and its clone from the clone's (see [APP](../servers/application-types.md), "Versions").
 Wherever an environment is named, it is named by its group with the rank after it, except a group's production, which is named by the group alone.
-An application with no rank belongs to its group's headline environment, the one at the group's highest rank (see [GRP](../servers/groups.md), "A group's headline rank").
-A plan names an environment the group has applications at; one cannot be recorded for a rank the group holds nothing at.
-A group with nothing ranked at all has one environment, its production, and that is the rank its plans take (see [GRP](../servers/groups.md), "Environments").
+A plan names an environment the group has applications at; one cannot be recorded for a rank the group holds nothing at, so a group with nothing ranked records no plans (see [GRP](../servers/groups.md), "Environments").
 
 An open plan's date, time, and note can be amended, and an amendment records who made it and when.
 A corrected date or a reworded note is the same plan better described, so it stays one plan rather than entering the history as a second.

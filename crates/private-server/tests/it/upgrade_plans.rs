@@ -854,3 +854,46 @@ async fn an_environment_that_has_reported_no_version_has_no_distance() {
 	})
 	.await;
 }
+
+/// A group with nothing ranked has no environment, so the fleet view lists none
+/// of it, while a group with something ranked is listed by its headline
+/// environment.
+// spec: UPG#the-fleet-view
+#[tokio::test(flavor = "multi_thread")]
+async fn only_a_group_with_something_ranked_is_in_the_fleet_view() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+				('cccccccc-0000-0000-0000-0000000000f1', 2, 61, 0, 'x', 'published');
+			INSERT INTO server_groups (id, name) VALUES
+				('cccccccc-0000-0000-0000-000000000001', 'kamaka'),
+				('cccccccc-0000-0000-0000-000000000002', 'drifting');
+			INSERT INTO machines (name, id, group_id) VALUES
+				('box', 'cccccccc-0000-0000-0000-0000000000a1', 'cccccccc-0000-0000-0000-000000000001'),
+				('box', 'cccccccc-0000-0000-0000-0000000000a2', 'cccccccc-0000-0000-0000-000000000002');
+			INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'tamanu-central', 'production', 'cccccccc-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-0000000000a1'),
+				('cccccccc-0000-0000-0000-0000000000a2', 'https://drifting.example', 'tamanu-central', NULL, 'cccccccc-0000-0000-0000-000000000002', 'cccccccc-0000-0000-0000-0000000000a2');
+			INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'test', '{}'::jsonb, '2.60.0'),
+				('cccccccc-0000-0000-0000-0000000000a2', 'test', '{}'::jsonb, '2.60.0');",
+		)
+		.await
+		.unwrap();
+
+		let fleet: Vec<Value> = private
+			.post("/api/upgrade_plans/fleet")
+			.json(&json!({}))
+			.await
+			.json();
+		assert!(
+			fleet.iter().any(|row| row["group_id"] == GROUP && row["headline"] == true),
+			"{fleet:?}"
+		);
+		assert!(
+			!fleet.iter().any(|row| row["group_id"] == UNPLANNED),
+			"a group with nothing ranked has no environment to list: {fleet:?}"
+		);
+	})
+	.await;
+}

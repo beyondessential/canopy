@@ -100,6 +100,29 @@ test.describe("group inventory", () => {
 		await expect(inventory.getByLabel("Environment")).toHaveCount(0);
 	});
 
+	// A pending application is in no environment, so a group with nothing
+	// ranked has none to configure and the picker never offers a pending bucket.
+	// spec: GRP#environments
+	test("offers no environment while nothing in the group is ranked", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
+		await seedServer(sql, {
+			name: "kamaka-new",
+			type: "tamanu-central",
+			rank: null,
+			groupId: group.id,
+			tags: {},
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+
+		const inventory = page.getByTestId("group-inventory");
+		await expect(inventory).toContainText("no environment to configure");
+		await expect(inventory.getByLabel("Environment")).toHaveCount(0);
+	});
+
 	test("sets a variable on the environment the selector names", async ({
 		page,
 		sql,

@@ -59,9 +59,8 @@ export type IncidentLoudness = "held" | "loud" | "lingering";
 /// Loudest first, for rolling several of a group's incidents into one mark.
 const LOUDNESS_ORDER: IncidentLoudness[] = ["loud", "held", "lingering"];
 
-/// A group's open incidents by target: one entry per environment in trouble,
-/// and `null` for the group's own.
-type GroupIncidents = Map<ServerRank | null, IncidentLoudness>;
+/// A group's open incidents by target: one entry per environment in trouble.
+type GroupIncidents = Map<ServerRank, IncidentLoudness>;
 
 function loudest(incidents: GroupIncidents | null): IncidentLoudness | null {
 	let worst: IncidentLoudness | null = null;
@@ -76,14 +75,12 @@ function loudest(incidents: GroupIncidents | null): IncidentLoudness | null {
 	return worst;
 }
 
-/// A group's incidents in reading order: its environments highest rank first,
-/// the group's own last.
+/// A group's incidents in reading order: its environments, highest rank first.
 function incidentTargets(
 	incidents: GroupIncidents | null,
-): Array<[ServerRank | null, IncidentLoudness]> {
-	const order: Array<ServerRank | null> = [...SERVER_RANK_ORDER, null];
-	const targets: Array<[ServerRank | null, IncidentLoudness]> = [];
-	for (const rank of order) {
+): Array<[ServerRank, IncidentLoudness]> {
+	const targets: Array<[ServerRank, IncidentLoudness]> = [];
+	for (const rank of SERVER_RANK_ORDER) {
 		const loudness = incidents?.get(rank);
 		if (loudness) targets.push([rank, loudness]);
 	}
@@ -115,14 +112,15 @@ export default function Status() {
 						Date.parse(i.notification_held_until) > now
 					? "held"
 					: "loud";
-			// A group holds one open incident per environment plus its own, and
-			// the card marks each of them on the row it belongs to.
+			// A group holds one open incident per environment, and the card
+			// marks each of them on the row it belongs to.
+			if (i.rank == null) continue;
 			let byRank = openIncidentGroups.get(i.server_group_id);
 			if (byRank == null) {
 				byRank = new Map();
 				openIncidentGroups.set(i.server_group_id, byRank);
 			}
-			byRank.set(i.rank ?? null, loudness);
+			byRank.set(i.rank, loudness);
 		}
 	}
 	return (
@@ -478,8 +476,8 @@ function GroupCard({
 /// the linger window.
 ///
 /// Its colour is the loudest of the group's environments, since the rank rows
-/// above it say which is in trouble. The tooltip names every target, and is
-/// where a group's own incident is told apart from an environment's.
+/// above it say which is in trouble. The tooltip names every environment in
+/// trouble.
 /// spec: CHK#presentation
 function IncidentSegment({ incidents }: { incidents: GroupIncidents | null }) {
 	const loudness = loudest(incidents);
@@ -507,8 +505,8 @@ function IncidentSegment({ incidents }: { incidents: GroupIncidents | null }) {
 			title={
 				<Box>
 					{incidentTargets(incidents).map(([rank, state]) => (
-						<Box key={rank ?? "_group"}>
-							{rank ?? "the group itself"}: {EXPLANATION[state]}
+						<Box key={rank}>
+							{rank}: {EXPLANATION[state]}
 						</Box>
 					))}
 				</Box>
@@ -628,7 +626,7 @@ const dotCellSx = {
 } as const;
 
 /// The machines of one group, each with the applications on it, bucketed by
-/// the rank of the highest-ranked application it carries.
+/// the rank they share, with the boxes that have none yet in a trailing bucket.
 function machineRows(members: FacilityServerStatus[]) {
 	const byMachine = new Map<string, FacilityServerStatus[]>();
 	for (const m of members) {
@@ -675,17 +673,16 @@ export function RankedDotStrip({
 		// spec: MNT#presentation
 		<Stack data-testid="dot-strip" spacing={0} sx={{ minWidth: 0 }}>
 			{rows.map(([rank, boxes], index) => {
-				// Only an environment's row takes a mark: a group's own incident
-				// can come from a check with no machine behind it at all.
+				// Only an environment's row takes a mark: a pending box is in none.
 				const incident = rank ? (incidents?.get(rank) ?? null) : null;
 				const tone = incident ? theme.palette[TONE[incident]].main : null;
 				const maintained = !!rank && !!maintainedRanks?.includes(rank);
 				const settling = !!rank && !!settlingRanks?.includes(rank);
 				return (
 					<Box
-						key={rank ?? "_unranked"}
+						key={rank ?? "_pending"}
 						data-testid="rank-row"
-						data-rank={rank ?? "unranked"}
+						data-rank={rank ?? "pending"}
 						data-incident={incident ?? undefined}
 						data-maintenance={
 							maintained ? (settling ? "settling" : "holding") : undefined
