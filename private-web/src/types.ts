@@ -102,6 +102,12 @@ export type MaintenanceWindow = Solidify<Schemas["MaintenanceWindow"]>;
 /** The grain a window is declared at. An environment is a group with a rank.
  * spec: MNT#declaring */
 export type MaintenanceScope = "application" | "machine" | "group";
+/** One target a window can cover, as the declare dialog offers it.
+ * spec: MNT#choosing-what-to-cover */
+export type MaintenanceGrain = Solidify<Schemas["Grain"]>;
+export type MaintenanceTargetChoice = Solidify<Schemas["MaintenanceTargetChoice"]>;
+/** One span of a window over a target, as the target's history reads it. */
+export type TargetWindow = Solidify<Schemas["TargetWindow"]>;
 
 export type GroupEnvironment = Solidify<Schemas["GroupEnvironment"]>;
 export type ResolvedReason = Solidify<Schemas["ResolvedReason"]>;

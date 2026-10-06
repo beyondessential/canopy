@@ -310,10 +310,11 @@ test.describe("maintenance windows", () => {
 		).toBeLessThan(1);
 	});
 
-	/// A group-wide window is not a substitute for one over a single
-	/// environment, so the control for it stays whatever the group is under.
-	/// spec: MNT#declaring
-	test("an environment is declarable while the group has its own window", async ({
+	/// Offered over a target with a window of its own, the declaration amends
+	/// that window, so choosing an environment narrows it rather than opening a
+	/// second one.
+	/// spec: MNT#moving-a-window
+	test("the group's own window moves to one of its environments", async ({
 		page,
 		sql,
 	}) => {
@@ -323,19 +324,34 @@ test.describe("maintenance windows", () => {
 			groupId: group.id,
 			rank: "production",
 		});
-		await seedMaintenanceWindow(sql, { serverGroupId: group.id });
+		const window = await seedMaintenanceWindow(sql, {
+			serverGroupId: group.id,
+			note: "patching",
+		});
 
 		await page.goto(`/fleet/groups/${group.id}`);
-		await expect(page.getByTestId("maintenance-section")).toContainText(
-			"Under maintenance",
-		);
-		await page
-			.getByRole("button", { name: "Declare over an environment" })
-			.click();
-		await page.getByRole("menuitem", { name: "production" }).click();
+		await page.getByRole("button", { name: "Maintenance", exact: true }).click();
 		await expect(
-			page.getByRole("heading", { name: "Declare maintenance" }),
+			page.getByRole("heading", { name: "Amend maintenance" }),
 		).toBeVisible();
+		await expect(page.getByRole("button", { name: "Lift" })).toBeVisible();
+		await page.getByRole("combobox", { name: "Covers" }).click();
+		await page
+			.getByTestId(`covers-environment:${group.id}:production`)
+			.click();
+		await page.getByRole("button", { name: "Move", exact: true }).click();
+
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ id: string; rank: string | null; note: string | null }>(
+					"SELECT id, rank, note FROM maintenance_windows WHERE ended_at IS NULL",
+				);
+				return rows.map((r) => [r.id, r.rank, r.note]);
+			})
+			.toEqual([[window.id, "production", "patching"]]);
+		await expect(page.getByTestId("environment-window")).toContainText(
+			"production",
+		);
 	});
 
 	/// A group's own window and its production environment's are named the same,
@@ -455,6 +471,9 @@ test.describe("maintenance windows", () => {
 
 		await page.goto(`/incidents/${incident.id}`);
 		await page.getByRole("button", { name: "This is maintenance…" }).click();
+		await expect(page.getByRole("combobox", { name: "Covers" })).toContainText(
+			"production",
+		);
 		await page.getByLabel("What's being done").fill("It's us, upgrading");
 		await page.getByRole("button", { name: "Declare", exact: true }).click();
 
@@ -463,14 +482,65 @@ test.describe("maintenance windows", () => {
 		).toBeHidden();
 		await expect
 			.poll(async () => {
-				const rows = await sql.query<{ n: string }>(
-					"SELECT COUNT(*) AS n FROM maintenance_windows \
+				const rows = await sql.query<{ rank: string | null }>(
+					"SELECT rank FROM maintenance_windows \
 					 WHERE server_group_id = $1 AND ended_at IS NULL",
 					[group.id],
 				);
-				return Number(rows[0]!.n);
+				return rows.map((r) => r.rank);
 			})
-			.toBe(1);
+			.toEqual(["production"]);
+	});
+
+	/// A group's backup failure joins its headline environment's incident, and a
+	/// window over that environment leaves it watched, so the dialog says so and
+	/// only the group carries no mark.
+	/// spec: MNT#choosing-what-to-cover
+	test("an incident's declaration marks the choices that leave failures alerting", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "fiji" });
+		await seedServer(sql, {
+			name: "fj-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		const issue = await seedIssue(sql, {
+			serverGroupId: group.id,
+			source: "canopy",
+			ref: "backup-staleness",
+			message: "backups are late",
+		});
+		const incident = await seedIncident(sql, {
+			serverGroupId: group.id,
+			issues: [{ issueId: issue.id }],
+		});
+
+		await page.goto(`/incidents/${incident.id}`);
+		await page.getByRole("button", { name: "This is maintenance…" }).click();
+		await expect(page.getByTestId("not-all-failing-checks")).toBeVisible();
+
+		await page.getByRole("combobox", { name: "Covers" }).click();
+		await expect(
+			page.getByTestId(`covers-environment:${group.id}:production`),
+		).toContainText("not all failing checks");
+		const groupChoice = page.getByTestId(`covers-group:${group.id}`);
+		await expect(groupChoice).not.toContainText("not all failing checks");
+		await groupChoice.click();
+		await expect(page.getByTestId("not-all-failing-checks")).toHaveCount(0);
+		await page.getByRole("button", { name: "Declare", exact: true }).click();
+
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ rank: string | null }>(
+					"SELECT rank FROM maintenance_windows \
+					 WHERE server_group_id = $1 AND ended_at IS NULL",
+					[group.id],
+				);
+				return rows.map((r) => r.rank);
+			})
+			.toEqual([null]);
 	});
 
 	// spec: MNT#declaring, UPG
@@ -500,10 +570,17 @@ test.describe("maintenance windows", () => {
 			.click();
 
 		await expect(
-			page.getByRole("heading", { name: "Declare maintenance — kamaka" }),
+			page.getByRole("heading", { name: "Declare maintenance" }),
 		).toBeVisible();
 		await expect(page.getByLabel("What's being done")).toHaveValue(
 			"site can absorb 2.61 only",
+		);
+		// The plan stays open for the work on its environment, so the
+		// declaration it offers stays there too.
+		// spec: MNT#choosing-what-to-cover
+		await expect(page.getByRole("combobox", { name: "Covers" })).toHaveAttribute(
+			"aria-disabled",
+			"true",
 		);
 
 		// The plan's slot is four hours long, so the declaration ends four
@@ -518,14 +595,19 @@ test.describe("maintenance windows", () => {
 
 		await expect
 			.poll(async () => {
-				const rows = await sql.query<{ note: string | null; rank: string }>(
-					"SELECT note, rank FROM maintenance_windows \
+				const rows = await sql.query<{
+					note: string | null;
+					rank: string;
+					from_plan: boolean;
+				}>(
+					"SELECT note, rank, upgrade_plan_id IS NOT NULL AS from_plan \
+					 FROM maintenance_windows \
 					 WHERE server_group_id = $1 AND ended_at IS NULL",
 					[group.id],
 				);
-				return rows.map((r) => [r.note, r.rank]);
+				return rows.map((r) => [r.note, r.rank, r.from_plan]);
 			})
-			.toEqual([["site can absorb 2.61 only", "production"]]);
+			.toEqual([["site can absorb 2.61 only", "production", true]]);
 	});
 
 	// spec: MNT#declaring
@@ -548,13 +630,12 @@ test.describe("maintenance windows", () => {
 		await seedStatus(sql, { serverId: clone.id, version: "2.60.0" });
 
 		await page.goto(`/fleet/groups/${group.id}`);
-		await page
-			.getByRole("button", { name: "Declare over an environment" })
-			.click();
-		await page.getByRole("menuitem", { name: "clone" }).click();
-		await expect(
-			page.getByRole("heading", { name: "Declare maintenance — kamaka clone" }),
-		).toBeVisible();
+		await page.getByRole("button", { name: "Declare maintenance" }).click();
+		await page.getByRole("combobox", { name: "Covers" }).click();
+		await page.getByTestId(`covers-environment:${group.id}:clone`).click();
+		await expect(page.getByRole("combobox", { name: "Covers" })).toContainText(
+			"clone",
+		);
 		await page.getByLabel("What's being done").fill("rehearsing 2.61");
 		await page.getByRole("button", { name: "Declare", exact: true }).click();
 
@@ -569,16 +650,213 @@ test.describe("maintenance windows", () => {
 			})
 			.toEqual([["clone", "rehearsing 2.61"]]);
 
-		// The environment now reads as declared over, and production is left
-		// to be declared over on its own.
+		// The environment now reads as declared over, and declaring over it
+		// again amends its window rather than opening a second.
 		await expect(page.getByTestId("environment-window")).toContainText("clone");
-		await page
-			.getByRole("button", { name: "Declare over an environment" })
-			.click();
+		await page.getByRole("button", { name: "Declare maintenance" }).click();
+		await page.getByRole("combobox", { name: "Covers" }).click();
 		await expect(
-			page.getByRole("menuitem", { name: "production" }),
+			page.getByTestId(`covers-environment:${group.id}:production`),
 		).toBeVisible();
-		await expect(page.getByRole("menuitem", { name: "clone" })).toHaveCount(0);
+		await page.getByTestId(`covers-environment:${group.id}:clone`).click();
+		await expect(page.getByTestId("joins-window")).toBeVisible();
+		await expect(
+			page.getByRole("heading", { name: "Amend maintenance" }),
+		).toBeVisible();
+	});
+
+	/// Retargeting onto someone else's window shows what it holds, and changes
+	/// only what the operator changes.
+	/// spec: MNT#choosing-what-to-cover
+	test("retargeting onto another window keeps what was not changed", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		const window = await seedMaintenanceWindow(sql, {
+			serverGroupId: group.id,
+			rank: "production",
+			note: "replacing the disk",
+		});
+		const before = await sql.query<{ expected_end: Date }>(
+			"SELECT expected_end FROM maintenance_windows WHERE id = $1",
+			[window.id],
+		);
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		await page.getByRole("button", { name: "Declare maintenance" }).click();
+		await expect(
+			page.getByRole("heading", { name: "Declare maintenance" }),
+		).toBeVisible();
+		await page.getByRole("combobox", { name: "Covers" }).click();
+		await page
+			.getByTestId(`covers-environment:${group.id}:production`)
+			.click();
+		await expect(page.getByTestId("joins-window")).toContainText(
+			"Already under maintenance",
+		);
+		await expect(page.getByLabel("What's being done")).toHaveValue(
+			"replacing the disk",
+		);
+		await page.getByRole("button", { name: "8h" }).click();
+		await expect(page.getByText(/^Currently /)).toBeVisible();
+		await page.getByRole("button", { name: "Amend", exact: true }).click();
+
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{
+					note: string | null;
+					expected_end: Date;
+					amended_by: string | null;
+				}>(
+					"SELECT note, expected_end, amended_by FROM maintenance_windows WHERE id = $1",
+					[window.id],
+				);
+				const row = rows[0]!;
+				return [
+					row.note,
+					row.amended_by !== null,
+					new Date(row.expected_end).getTime() >
+						new Date(before[0]!.expected_end).getTime(),
+				];
+			})
+			.toEqual(["replacing the disk", true, true]);
+	});
+
+	/// spec: MNT#declaring
+	test("a machine's page offers maintenance at its head", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const server = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+
+		await page.goto(`/fleet/machines/${server.machineId}`);
+		await page.getByRole("button", { name: "Maintenance", exact: true }).click();
+		await expect(
+			page.getByRole("heading", { name: "Declare maintenance" }),
+		).toBeVisible();
+		await expect(page.getByRole("combobox", { name: "Covers" })).toContainText(
+			"machine",
+		);
+		await page.getByRole("button", { name: "Declare", exact: true }).click();
+		await expect(page.getByTestId("maintenance-section")).toContainText(
+			"Under maintenance",
+		);
+
+		// The same control amends the window it now has, and lifts it.
+		await page.getByRole("button", { name: "Maintenance", exact: true }).click();
+		await expect(
+			page.getByRole("heading", { name: "Amend maintenance" }),
+		).toBeVisible();
+		await page
+			.getByRole("dialog")
+			.getByRole("button", { name: "Lift" })
+			.click();
+		await expect.poll(() => openWindows(sql)).toBe(0);
+	});
+
+	/// spec: MNT#declaring
+	test("an application's page offers maintenance at its head", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const server = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+
+		await page.goto(`/fleet/applications/${server.id}`);
+		await page.getByRole("button", { name: "Maintenance", exact: true }).click();
+		await expect(page.getByRole("combobox", { name: "Covers" })).toContainText(
+			"application",
+		);
+		await page.getByRole("button", { name: "Declare", exact: true }).click();
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ application_id: string | null }>(
+					"SELECT application_id FROM maintenance_windows WHERE ended_at IS NULL",
+				);
+				return rows.map((r) => r.application_id);
+			})
+			.toEqual([server.id]);
+	});
+
+	/// The target a window moved off keeps it in its history over the span it
+	/// covered there, so its quiet spell is attributable.
+	/// spec: MNT#moving-a-window
+	test("a group's history shows a window that moved to one of its environments", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await seedServer(sql, {
+			name: "kamaka-clone",
+			groupId: group.id,
+			rank: "clone",
+		});
+		const window = await seedMaintenanceWindow(sql, {
+			serverGroupId: group.id,
+			note: "rehearsing 2.61",
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		await page.getByRole("button", { name: "Maintenance", exact: true }).click();
+		await page.getByRole("combobox", { name: "Covers" }).click();
+		await page.getByTestId(`covers-environment:${group.id}:clone`).click();
+		await page.getByRole("button", { name: "Move", exact: true }).click();
+
+		const section = page.getByTestId("maintenance-section");
+		await expect(section.getByTestId("environment-window")).toContainText("clone");
+		await expect(section).toContainText("moved to kamaka clone");
+		const rows = await sql.query<{ n: string }>(
+			"SELECT COUNT(*) AS n FROM maintenance_window_moves WHERE window_id = $1",
+			[window.id],
+		);
+		expect(Number(rows[0]!.n)).toBe(1);
+	});
+
+	/// spec: MNT#moving-a-window
+	test("the maintenance page moves a window", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const server = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		const window = await seedMaintenanceWindow(sql, { serverGroupId: group.id });
+
+		await page.goto("/maintenance");
+		await page
+			.getByRole("row", { name: /kamaka/ })
+			.getByRole("button", { name: "Amend" })
+			.click();
+		await page.getByRole("combobox", { name: "Covers" }).click();
+		await page.getByTestId(`covers-machine:${server.machineId}`).click();
+		await page.getByRole("button", { name: "Move", exact: true }).click();
+
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{
+					id: string;
+					machine_id: string | null;
+					moves: string;
+				}>(
+					"SELECT w.id, w.machine_id, \
+					   (SELECT COUNT(*) FROM maintenance_window_moves m WHERE m.window_id = w.id) AS moves \
+					 FROM maintenance_windows w WHERE w.ended_at IS NULL",
+				);
+				return rows.map((r) => [r.id, r.machine_id, Number(r.moves)]);
+			})
+			.toEqual([[window.id, server.machineId, 1]]);
 	});
 
 	// spec: MNT#presentation
@@ -602,8 +880,11 @@ test.describe("maintenance windows", () => {
 			.getByRole("button", { name: "Amend" })
 			.click();
 		await expect(
-			page.getByRole("heading", { name: "Amend maintenance — kamaka clone" }),
+			page.getByRole("heading", { name: "Amend maintenance" }),
 		).toBeVisible();
+		await expect(page.getByRole("combobox", { name: "Covers" })).toContainText(
+			"clone",
+		);
 		await expect(page.getByLabel("What's being done")).toHaveValue(
 			"rehearsing 2.61",
 		);
@@ -653,8 +934,11 @@ test.describe("maintenance windows", () => {
 			.getByRole("button", { name: "Declare maintenance for kamaka clone" })
 			.click();
 		await expect(
-			page.getByRole("heading", { name: "Declare maintenance — kamaka clone" }),
+			page.getByRole("heading", { name: "Declare maintenance" }),
 		).toBeVisible();
+		await expect(page.getByRole("combobox", { name: "Covers" })).toContainText(
+			"clone",
+		);
 		await page.getByRole("button", { name: "Declare", exact: true }).click();
 
 		await expect

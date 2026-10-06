@@ -210,6 +210,7 @@ export default function Upgrades() {
 													onWithdrawn={() => setTick((t) => t + 1)}
 												/>
 												<DeclareFromPlan
+													planId={row.plan?.id ?? ""}
 													groupId={row.group_id}
 													rank={row.rank}
 													groupName={environmentName(row.group_name, row.rank)}
@@ -2366,6 +2367,7 @@ function plannedLength(
  * nothing: this is an operator saying the work is starting now. */
 // spec: MNT#declaring
 function DeclareFromPlan({
+	planId,
 	groupId,
 	rank,
 	groupName,
@@ -2374,6 +2376,10 @@ function DeclareFromPlan({
 	planned,
 	onDeclared,
 }: {
+	/// The plan being declared from. A window it opens stays over the plan's
+	/// environment.
+	// spec: MNT#moving-a-window
+	planId: string;
 	groupId: string;
 	rank: ServerRank;
 	groupName: string;
@@ -2473,6 +2479,7 @@ function DeclareFromPlan({
 											rank,
 											expected_end: planned.ends_at,
 											note: note ?? undefined,
+											upgrade_plan_id: planId,
 										});
 										setOpen(false);
 										onDeclared();
@@ -2493,8 +2500,9 @@ function DeclareFromPlan({
 				scope="group"
 				id={groupId}
 				rank={ownWindow ? (ownWindow.rank ?? undefined) : rank}
-				targetLabel={groupName}
 				existing={ownWindow}
+				fixed
+				upgradePlanId={planId}
 				offerLift
 				prefill={
 					ownWindow

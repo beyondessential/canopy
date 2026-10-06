@@ -3,23 +3,25 @@ import {
 	Box,
 	Button,
 	LinearProgress,
-	ListSubheader,
-	Menu,
 	Link as MuiLink,
 	Paper,
 	Stack,
 	Typography,
 } from "@mui/material";
-import ArrowDropDownIcon from "@mui/icons-material/ArrowDropDown";
 import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
-import { environmentName, heldByLabel } from "../types";
-import type { MaintenanceScope, MaintenanceWindow, ServerRank } from "../types";
+import { heldByLabel } from "../types";
+import type {
+	MaintenanceScope,
+	MaintenanceWindow,
+	ServerRank,
+	TargetWindow,
+} from "../types";
 import DeclareMaintenanceDialog from "./DeclareMaintenanceDialog";
-import { GradedAction, GradedMenuItem } from "./GradedAction";
+import { GradedAction } from "./GradedAction";
 import ServerRankChip from "./ServerRankChip";
 import TimeAgo from "./TimeAgo";
 
@@ -32,13 +34,11 @@ const HISTORY_SHOWN = 5;
 export default function MaintenanceSection({
 	scope,
 	id,
-	targetLabel,
 	machineId,
 	machineName,
 	groupId,
 	groupName,
 	rank,
-	environments,
 	onChanged,
 	reloadKey = 0,
 	anchor,
@@ -47,7 +47,6 @@ export default function MaintenanceSection({
 	anchor?: string;
 	scope: MaintenanceScope;
 	id: string;
-	targetLabel?: string;
 	/** For an application, the box it runs on: a machine's window covers every
 	 * application on it, so the application is under maintenance without having
 	 * a window of its own. Its own surface has to say so. */
@@ -61,10 +60,6 @@ export default function MaintenanceSection({
 	/** The environment the target serves: a window over its group's
 	 * environment at that rank covers it too. */
 	rank?: ServerRank | null;
-	/** For a group, the environments it has. Each is a target of its own, so
-	 * the group's surface is where one is declared over without a plan. */
-	// spec: MNT#declaring
-	environments?: ServerRank[];
 	/** Called after declaring or lifting, so the page can refresh the
 	 * health and checks that the window changes. */
 	onChanged?: () => void;
@@ -75,11 +70,7 @@ export default function MaintenanceSection({
 	const isAdmin = useIsAdmin() === true;
 	const [tick, setTick] = useState(0);
 	const [dialogOpen, setDialogOpen] = useState(false);
-	const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
-	const [environmentDialog, setEnvironmentDialog] = useState<{
-		rank: ServerRank;
-		existing: MaintenanceWindow | null;
-	} | null>(null);
+	const [amending, setAmending] = useState<MaintenanceWindow | null>(null);
 	const lift = useApiAction("maintenance", "lift");
 
 	const result = useApi(
@@ -129,7 +120,12 @@ export default function MaintenanceSection({
 		);
 	}
 
-	const windows: MaintenanceWindow[] = result.data;
+	const spans: TargetWindow[] = result.data;
+	// The windows over this target now, as against those that moved off it.
+	// spec: MNT#moving-a-window
+	const current = (rows: TargetWindow[]) =>
+		rows.filter((row) => row.moved_at === null).map((row) => row.window);
+	const windows = current(spans);
 	// A window past its expected end suspends nothing, whether or not the sweep
 	// has closed it: saying otherwise claims alerting is off while it is back on.
 	// spec: MNT#settling
@@ -139,27 +135,23 @@ export default function MaintenanceSection({
 	// A group's own window, not one of its environments'.
 	const open = windows.find((w) => w.ended_at === null && !w.rank) ?? null;
 	const environmentWindows = windows.filter((w) => w.ended_at === null && w.rank);
-	const held = new Set(environmentWindows.map((w) => w.rank));
-	// Only an admin is offered these, so for anyone else there is nothing to show.
-	const declarable = isAdmin ? (environments ?? []).filter((r) => !held.has(r)) : [];
 	const fromGroup =
 		covering.status === "ok"
-			? ((covering.data as MaintenanceWindow[]).find(
+			? (current(covering.data).find(
 					(w) => holds(w) && (!w.rank || w.rank === rank),
 				) ?? null)
 			: null;
 	const fromMachine =
 		coveringMachine.status === "ok"
-			? ((coveringMachine.data as MaintenanceWindow[]).find(
-					holds,
-				) ?? null)
+			? (current(coveringMachine.data).find(holds) ?? null)
 			: null;
-	const history = windows.filter((w) => w.ended_at !== null).slice(0, HISTORY_SHOWN);
+	const history = spans
+		.filter((row) => row.window.ended_at !== null || row.moved_at !== null)
+		.slice(0, HISTORY_SHOWN);
 
 	if (
 		!open &&
 		environmentWindows.length === 0 &&
-		declarable.length === 0 &&
 		!fromGroup &&
 		!fromMachine &&
 		history.length === 0 &&
@@ -224,8 +216,8 @@ export default function MaintenanceSection({
 					action={
 						isAdmin ? (
 							<Stack direction="row" spacing={1}>
-								<GradedAction calls="maintenance/declare">
-									<Button size="small" color="info" onClick={() => setDialogOpen(true)}>
+								<GradedAction opens="maintenance/amend">
+									<Button size="small" color="info" onClick={() => setAmending(open)}>
 										Amend
 									</Button>
 								</GradedAction>
@@ -271,66 +263,23 @@ export default function MaintenanceSection({
 					)}
 				</Alert>
 			) : null}
-			{/* One control, and the environment half outlives the group's own
-			    window: a group-wide window is not a substitute for one over a
-			    single environment. */}
+			{/* A group's environments are a choice away in the dialog, so one
+			    control declares over any of them. */}
 			{/* spec: MNT#declaring */}
-			{isAdmin && (!open || declarable.length > 0) && (
+			{isAdmin && !open && (
 				<Stack direction="row" sx={{ mb: history.length ? 2 : 0 }}>
-					{!open && (
-						<GradedAction calls="maintenance/declare">
-							<Button
-								size="small"
-								variant="outlined"
-								startIcon={<BuildOutlinedIcon />}
-								onClick={() => setDialogOpen(true)}
-								sx={
-									declarable.length
-										? {
-												borderTopRightRadius: 0,
-												borderBottomRightRadius: 0,
-												borderRightColor: "transparent",
-											}
-										: undefined
-								}
-							>
-								{fromMachine || fromGroup
-									? `Declare for this ${scope} as well`
-									: "Declare maintenance"}
-							</Button>
-						</GradedAction>
-					)}
-					{declarable.length > 0 &&
-						(open ? (
-							<GradedAction calls="maintenance/declare">
-								<Button
-									size="small"
-									variant="outlined"
-									startIcon={<BuildOutlinedIcon />}
-									endIcon={<ArrowDropDownIcon fontSize="small" />}
-									onClick={(event) => setMenuAnchor(event.currentTarget)}
-								>
-									Declare over an environment
-								</Button>
-							</GradedAction>
-						) : (
-							<GradedAction calls="maintenance/declare">
-								<Button
-									size="small"
-									variant="outlined"
-									aria-label="Declare over an environment"
-									onClick={(event) => setMenuAnchor(event.currentTarget)}
-									sx={{
-										minWidth: 32,
-										px: 0,
-										borderTopLeftRadius: 0,
-										borderBottomLeftRadius: 0,
-									}}
-								>
-									<ArrowDropDownIcon fontSize="small" />
-								</Button>
-							</GradedAction>
-						))}
+					<GradedAction calls="maintenance/declare">
+						<Button
+							size="small"
+							variant="outlined"
+							startIcon={<BuildOutlinedIcon />}
+							onClick={() => setDialogOpen(true)}
+						>
+							{fromMachine || fromGroup
+								? `Declare for this ${scope} as well`
+								: "Declare maintenance"}
+						</Button>
+					</GradedAction>
 				</Stack>
 			)}
 			{environmentWindows.map((window) => (
@@ -343,15 +292,10 @@ export default function MaintenanceSection({
 					action={
 						isAdmin ? (
 							<Stack direction="row" spacing={1}>
-								<GradedAction calls="maintenance/declare">
+								<GradedAction opens="maintenance/amend">
 									<Button
 										size="small"
-										onClick={() =>
-											setEnvironmentDialog({
-												rank: window.rank as ServerRank,
-												existing: window,
-											})
-										}
+										onClick={() => setAmending(window)}
 									>
 										Amend
 									</Button>
@@ -401,27 +345,6 @@ export default function MaintenanceSection({
 					)}
 				</Alert>
 			))}
-			{isAdmin && declarable.length > 0 && (
-				<Menu
-					anchorEl={menuAnchor}
-					open={menuAnchor !== null}
-					onClose={() => setMenuAnchor(null)}
-				>
-					<ListSubheader sx={{ lineHeight: 2 }}>Declare over environment</ListSubheader>
-					{declarable.map((environment) => (
-						<GradedMenuItem
-							key={environment}
-							calls="maintenance/declare"
-							onClick={() => {
-								setMenuAnchor(null);
-								setEnvironmentDialog({ rank: environment, existing: null });
-							}}
-						>
-							<ServerRankChip rank={environment} />
-						</GradedMenuItem>
-					))}
-				</Menu>
-			)}
 			{lift.error && (
 				<Alert severity="error" sx={{ mt: 1 }}>
 					{lift.error.message}
@@ -429,9 +352,9 @@ export default function MaintenanceSection({
 			)}
 			{history.length > 0 && (
 				<Stack spacing={1}>
-					{history.map((window) => (
+					{history.map(({ window, moved_at, moved_to, rank: spanRank }) => (
 						<Box
-							key={window.id}
+							key={`${window.id}:${moved_at ?? "here"}`}
 							sx={{ p: 1.5, border: 1, borderColor: "divider", borderRadius: 1 }}
 						>
 							<Stack
@@ -443,13 +366,22 @@ export default function MaintenanceSection({
 								<Typography variant="body2">
 									{window.note ?? "Maintenance"}
 								</Typography>
-								{window.rank && <ServerRankChip rank={window.rank} />}
+								{spanRank && <ServerRankChip rank={spanRank} />}
 								<Box sx={{ flex: 1 }} />
 								<Typography variant="caption" color="text.secondary">
-									ended <TimeAgo timestamp={window.ended_at as string} />
-									{window.ended_by
-										? ` by ${window.ended_by}`
-										: " at its expected end"}
+									{moved_at ? (
+										<>
+											moved to {moved_to ?? "another target"}{" "}
+											<TimeAgo timestamp={moved_at} />
+										</>
+									) : (
+										<>
+											ended <TimeAgo timestamp={window.ended_at as string} />
+											{window.ended_by
+												? ` by ${window.ended_by}`
+												: " at its expected end"}
+										</>
+									)}
 								</Typography>
 							</Stack>
 						</Box>
@@ -461,23 +393,15 @@ export default function MaintenanceSection({
 				onClose={() => setDialogOpen(false)}
 				scope={scope}
 				id={id}
-				targetLabel={targetLabel}
-				existing={open}
 				onDone={reload}
 			/>
-			{environmentDialog && (
+			{amending && (
 				<DeclareMaintenanceDialog
 					open
-					onClose={() => setEnvironmentDialog(null)}
+					onClose={() => setAmending(null)}
 					scope={scope}
 					id={id}
-					rank={environmentDialog.rank}
-					targetLabel={
-						targetLabel
-							? environmentName(targetLabel, environmentDialog.rank)
-							: undefined
-					}
-					existing={environmentDialog.existing}
+					existing={amending}
 					onDone={reload}
 				/>
 			)}

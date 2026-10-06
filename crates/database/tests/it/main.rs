@@ -49,6 +49,7 @@ mod machine_silences;
 mod machines;
 mod maintenance_window_application_migration;
 mod maintenance_window_machine_migration;
+mod maintenance_window_moves;
 mod maintenance_windows;
 mod mcp_tokens;
 mod migration_test_candidates;

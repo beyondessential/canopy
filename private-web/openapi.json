@@ -6909,6 +6909,74 @@
         "x-canopy-safety-mode": "danger"
       }
     },
+    "/api/maintenance/amend": {
+      "post": {
+        "tags": [
+          "maintenance"
+        ],
+        "summary": "Amend an open window: its end, its note, or what it covers.",
+        "description": "Only what the request names changes. A new target moves the window there:\nit stays the same window, the target it left settles as though the window\nhad ended over it, and what it newly covers is suspended from now. A window\ndeclared from an upgrade plan, or one a configuration run's lease is being\nserved against, cannot move.\nRequires admin access.",
+        "operationId": "amend",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AmendWindowArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceWindow"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The target has a window of its own, or the window is held where it is by an upgrade plan or a configuration run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
     "/api/maintenance/declare": {
       "post": {
         "tags": [
@@ -6983,7 +7051,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/MaintenanceWindow"
+                    "$ref": "#/components/schemas/TargetWindow"
                   }
                 }
               }
@@ -7082,6 +7150,54 @@
                   "items": {
                     "$ref": "#/components/schemas/OpenWindow"
                   }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/maintenance/targets": {
+      "post": {
+        "tags": [
+          "maintenance"
+        ],
+        "summary": "The grains a declaration offered over `start` can cover.",
+        "description": "Whatever contains the starting grain and whatever it contains, nested\ngroup over environment over machine over application, each with its own\nopen window. Offered from an incident, each choice says whether a window\nthere would cover every failing check in it.",
+        "operationId": "targets",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaintenanceTargetsArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceTargets"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
                 }
               }
             }
@@ -10072,6 +10188,46 @@
           }
         }
       },
+      "AmendWindowArgs": {
+        "type": "object",
+        "description": "What to change about an open window. A field left out keeps the window's\nown, so amending someone else's window changes only what was chosen.",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "expected_end": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "A new expected end."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The window to amend."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A new note. Null clears it; leaving it out keeps the window's own."
+          },
+          "target": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Grain",
+                "description": "A new target, moving the window there: any grain on its target's line\nof descent that has no window of its own."
+              }
+            ]
+          }
+        }
+      },
       "Application": {
         "type": "object",
         "description": "A single application in the fleet: the unit that reports status, files\nissues, and is monitored for reachability. An application runs on a\nmachine and may belong to a server group. The identity that reports for\nit belongs to the machine, not to the application.",
@@ -12340,6 +12496,14 @@
             ],
             "format": "uuid",
             "description": "The group, for a window over a whole group or one of its environments."
+          },
+          "upgrade_plan_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The upgrade plan this is declared from, over the plan's environment. A\nwindow it opens stays over that environment for as long as it holds."
           }
         }
       },
@@ -13252,6 +13416,91 @@
             "description": "Identifier of the incident."
           }
         }
+      },
+      "Grain": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "group_id",
+              "kind"
+            ],
+            "properties": {
+              "group_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "group"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "group_id",
+              "rank",
+              "kind"
+            ],
+            "properties": {
+              "group_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "environment"
+                ]
+              },
+              "rank": {
+                "$ref": "#/components/schemas/ServerRank"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "machine_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "machine"
+                ]
+              },
+              "machine_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "application_id",
+              "kind"
+            ],
+            "properties": {
+              "application_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "application"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "One target a window can be declared over."
       },
       "GrantAvailabilityView": {
         "type": "object",
@@ -16048,6 +16297,101 @@
           "full"
         ]
       },
+      "MaintenanceTargetChoice": {
+        "type": "object",
+        "description": "One grain a declaration can cover.",
+        "required": [
+          "grain",
+          "label",
+          "depth"
+        ],
+        "properties": {
+          "covers_failures": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Offered from an incident: whether a window here would cover every one\nof its failing checks."
+          },
+          "depth": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many of the listed grains contain this one.",
+            "minimum": 0
+          },
+          "grain": {
+            "$ref": "#/components/schemas/Grain",
+            "description": "The target a window here would cover."
+          },
+          "label": {
+            "type": "string",
+            "description": "The grain's own name: a group's, a machine's, an application's, or an\nenvironment's rank."
+          },
+          "window": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MaintenanceWindow",
+                "description": "The grain's own open window, where it has one."
+              }
+            ]
+          }
+        }
+      },
+      "MaintenanceTargets": {
+        "type": "object",
+        "description": "The grains a declaration can cover, nested in the order they contain one\nanother.",
+        "required": [
+          "choices"
+        ],
+        "properties": {
+          "choices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MaintenanceTargetChoice"
+            },
+            "description": "Whatever contains the starting grain and whatever it contains, nested\nin the order they contain one another."
+          },
+          "fixed_because": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the window being amended cannot move, where it cannot."
+          }
+        }
+      },
+      "MaintenanceTargetsArgs": {
+        "type": "object",
+        "description": "Where a declaration starts, and what it is read against.",
+        "required": [
+          "start"
+        ],
+        "properties": {
+          "incident_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The incident it is offered from, to mark the choices that leave some of\nits failing checks contributing."
+          },
+          "start": {
+            "$ref": "#/components/schemas/Grain",
+            "description": "The grain the declaration is offered over."
+          },
+          "window_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The window being amended, where the declaration is an amendment."
+          }
+        }
+      },
       "MaintenanceWindow": {
         "type": "object",
         "description": "A declaration that an application, a machine, a group, or one of a group's\nenvironments is being worked on.",
@@ -16170,6 +16514,14 @@
             "type": "string",
             "format": "date-time",
             "description": "When this record was last modified."
+          },
+          "upgrade_plan_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The upgrade plan this window was declared from, which keeps it over the\nplan's environment for as long as it holds."
           }
         }
       },
@@ -21065,6 +21417,51 @@
             ],
             "format": "uuid",
             "description": "The group, for a window over a whole group or one of its environments."
+          }
+        }
+      },
+      "TargetWindow": {
+        "type": "object",
+        "description": "One span of a window over a target, as the target's history reads it.",
+        "required": [
+          "window",
+          "covered_from"
+        ],
+        "properties": {
+          "covered_from": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the window started covering this target: its declaration, or the\nmove that brought it here."
+          },
+          "moved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the window moved off this target, for a span that ended that way."
+          },
+          "moved_to": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where it moved to, as it reads to an operator."
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "The environment this span covered, where it was over one of a group's\nenvironments rather than the target as a whole."
+              }
+            ]
+          },
+          "window": {
+            "$ref": "#/components/schemas/MaintenanceWindow",
+            "description": "The window, as it stands now."
           }
         }
       },

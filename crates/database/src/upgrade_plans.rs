@@ -219,6 +219,23 @@ impl UpgradePlan {
 			.map_err(AppError::from)
 	}
 
+	/// An open plan by id, refusing one that has been met, superseded, or
+	/// withdrawn.
+	pub async fn get_open(db: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
+		use crate::schema::upgrade_plans::dsl;
+
+		dsl::upgrade_plans
+			.select(Self::as_select())
+			.filter(dsl::id.eq(id))
+			.filter(dsl::met_at.is_null())
+			.filter(dsl::superseded_at.is_null())
+			.filter(dsl::withdrawn_at.is_null())
+			.first(db)
+			.await
+			.optional()?
+			.ok_or_else(|| AppError::BadRequest("only an open plan can be declared from".into()))
+	}
+
 	/// Every plan a group's environments have had, newest first.
 	// spec: UPG#when-a-plan-is-met
 	pub async fn history_for_group(
