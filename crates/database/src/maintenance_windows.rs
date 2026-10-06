@@ -907,8 +907,7 @@ impl MaintenanceWindow {
 		for window in current {
 			let covered_from = all_moves
 				.iter()
-				.filter(|moved| moved.window_id == window.id)
-				.next_back()
+				.rfind(|moved| moved.window_id == window.id)
 				.map_or(window.declared_at, |last| last.moved_at);
 			let rank = window.rank;
 			out.push(TargetWindow {
@@ -945,7 +944,7 @@ impl MaintenanceWindow {
 				rank: moved.rank,
 			});
 		}
-		out.sort_by(|a, b| b.covered_from.cmp(&a.covered_from));
+		out.sort_by_key(|span| std::cmp::Reverse(span.covered_from));
 		out.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
 		Ok(out)
 	}

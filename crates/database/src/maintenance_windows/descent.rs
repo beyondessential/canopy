@@ -234,7 +234,6 @@ pub async fn line_of_descent(db: &mut AsyncPgConnection, start: Grain) -> Result
 	for machine in machines.iter().filter(|m| !in_environment(m)) {
 		push_machine(&mut tree, machine, group_grain);
 	}
-	let mut boxless = boxless;
 	boxless.sort_by_key(|application| application.display_name());
 	for application in boxless {
 		tree.push((
