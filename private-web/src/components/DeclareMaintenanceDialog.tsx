@@ -22,12 +22,12 @@ import { GradedAction } from "./GradedAction";
 import KindChip from "./KindChip";
 import ServerRankChip from "./ServerRankChip";
 import TimeAgo from "./TimeAgo";
+import { targetKind } from "../types";
 import type {
-	MaintenanceGrain,
-	MaintenanceScope,
+	HeldInPlace,
+	MaintenanceTarget,
 	MaintenanceTargetChoice,
 	MaintenanceWindow,
-	ServerRank,
 } from "../types";
 
 const PRESETS = [1, 2, 4, 8];
@@ -43,52 +43,32 @@ function hoursFromNow(hours: number): string {
 	return toLocalInput(new Date(Date.now() + hours * 3600_000));
 }
 
-function grainOf(scope: MaintenanceScope, id: string, rank?: ServerRank | null): MaintenanceGrain {
-	if (scope === "application") return { kind: "application", application_id: id };
-	if (scope === "machine") return { kind: "machine", machine_id: id };
-	return rank
-		? { kind: "environment", group_id: id, rank }
-		: { kind: "group", group_id: id };
-}
-
-function grainOfWindow(window: MaintenanceWindow): MaintenanceGrain | null {
-	if (window.application_id) return grainOf("application", window.application_id);
-	if (window.machine_id) return grainOf("machine", window.machine_id);
-	if (window.server_group_id) return grainOf("group", window.server_group_id, window.rank);
-	return null;
-}
-
-function grainKey(grain: MaintenanceGrain): string {
-	switch (grain.kind) {
+function targetKey(target: MaintenanceTarget): string {
+	switch (targetKind(target)) {
 		case "application":
-			return `application:${grain.application_id}`;
+			return `application:${target.application_id}`;
 		case "machine":
-			return `machine:${grain.machine_id}`;
+			return `machine:${target.machine_id}`;
 		case "environment":
-			return `environment:${grain.group_id}:${grain.rank}`;
+			return `environment:${target.server_group_id}:${target.rank}`;
 		case "group":
-			return `group:${grain.group_id}`;
+			return `group:${target.server_group_id}`;
 	}
 }
 
-/** The request body naming a grain as a window's target. */
-function targetColumns(grain: MaintenanceGrain) {
-	switch (grain.kind) {
-		case "application":
-			return { application_id: grain.application_id };
-		case "machine":
-			return { machine_id: grain.machine_id };
-		case "environment":
-			return { server_group_id: grain.group_id, rank: grain.rank };
-		case "group":
-			return { server_group_id: grain.group_id, rank: null };
+function heldInPlace(reason: HeldInPlace): string {
+	switch (reason.kind) {
+		case "upgrade_plan":
+			return "Declared from an upgrade plan";
+		case "run_lease":
+			return `A configuration run by ${reason.held_by ?? "another operator"} is under way`;
 	}
 }
 
-function explanation(grain: MaintenanceGrain): string {
-	switch (grain.kind) {
+function explanation(target: MaintenanceTarget): string {
+	switch (targetKind(target)) {
 		case "environment":
-			return `Every check on the group's ${grain.rank} machines is suspended: nothing opens or joins an incident, and nothing notifies. The rest of the group stays watched.`;
+			return `Every check on the group's ${target.rank} machines is suspended: nothing opens or joins an incident, and nothing notifies. The rest of the group stays watched.`;
 		case "group":
 			return "Every check on this group and its machines is suspended: nothing opens or joins an incident, and nothing notifies.";
 		case "machine":
@@ -98,13 +78,13 @@ function explanation(grain: MaintenanceGrain): string {
 	}
 }
 
-/** A grain as the picker shows it: what kind it is, and which. */
-function GrainLabel({ choice }: { choice: MaintenanceTargetChoice }) {
+/** A target as the picker shows it: what kind it is, and which. */
+function TargetLabel({ choice }: { choice: MaintenanceTargetChoice }) {
 	return (
 		<Stack direction="row" spacing={1} sx={{ alignItems: "center", minWidth: 0 }}>
-			<KindChip kind={choice.grain.kind} />
-			{choice.grain.kind === "environment" ? (
-				<ServerRankChip rank={choice.grain.rank} />
+			<KindChip kind={targetKind(choice.target)} />
+			{choice.target.rank ? (
+				<ServerRankChip rank={choice.target.rank} />
 			) : (
 				<Typography noWrap>{choice.label}</Typography>
 			)}
@@ -120,9 +100,7 @@ function GrainLabel({ choice }: { choice: MaintenanceTargetChoice }) {
 export default function DeclareMaintenanceDialog({
 	open,
 	onClose,
-	scope,
-	id,
-	rank,
+	start,
 	existing,
 	prefill,
 	offerLift,
@@ -133,12 +111,10 @@ export default function DeclareMaintenanceDialog({
 }: {
 	open: boolean;
 	onClose: () => void;
-	scope: MaintenanceScope;
-	id: string;
-	/** With a group, narrows the window to the machines serving the group's
-	 * applications at this rank. */
-	rank?: ServerRank | null;
-	/** The window being amended. */
+	/** Where the declaration starts. Where this target has a window of its
+	 * own, the declaration amends it. */
+	start: MaintenanceTarget;
+	/** The window being amended, which `start` is the target of. */
 	existing?: MaintenanceWindow | null;
 	/** Starting values where something else knows them, such as an upgrade
 	 * plan's window and note. */
@@ -152,16 +128,14 @@ export default function DeclareMaintenanceDialog({
 	incidentId?: string;
 	/** Declares the work on one target, which the caller depends on. */
 	fixed?: boolean;
-	/** The upgrade plan this declares from. */
-	upgradePlanId?: string;
+	/** The upgrade plan this declares from, where there is one. */
+	upgradePlanId?: string | null;
 	onDone: () => void;
 }) {
 	const declare = useApiAction("maintenance", "declare");
 	const amend = useApiAction("maintenance", "amend");
 	const lift = useApiAction("maintenance", "lift");
-	const start: MaintenanceGrain =
-		(existing && grainOfWindow(existing)) ?? grainOf(scope, id, rank);
-	const [chosen, setChosen] = useState<MaintenanceGrain>(start);
+	const [chosen, setChosen] = useState<MaintenanceTarget>(start);
 	const [defaultEnd, setDefaultEnd] = useState(() => hoursFromNow(2));
 	const [endsAt, setEndsAt] = useState<string | null>(null);
 	const [note, setNote] = useState<string | null>(null);
@@ -174,7 +148,7 @@ export default function DeclareMaintenanceDialog({
 			incident_id: incidentId ?? null,
 			window_id: existing?.id ?? null,
 		},
-		[open, grainKey(start), incidentId, existing?.id],
+		[open, targetKey(start), incidentId, existing?.id],
 		{ skip: !open },
 	);
 
@@ -192,8 +166,8 @@ export default function DeclareMaintenanceDialog({
 
 	const choices: MaintenanceTargetChoice[] =
 		targets.status === "ok" ? targets.data.choices : [];
-	const choiceOf = (grain: MaintenanceGrain) =>
-		choices.find((choice) => grainKey(choice.grain) === grainKey(grain));
+	const choiceOf = (target: MaintenanceTarget) =>
+		choices.find((choice) => targetKey(choice.target) === targetKey(target));
 	const startChoice = choiceOf(start);
 	const chosenChoice = choiceOf(chosen);
 
@@ -201,13 +175,14 @@ export default function DeclareMaintenanceDialog({
 	// that window from the start, so choosing another grain moves it.
 	// spec: MNT#moving-a-window
 	const own = existing ?? startChoice?.window ?? null;
-	const moving = own !== null && grainKey(chosen) !== grainKey(start);
+	const moving = own !== null && targetKey(chosen) !== targetKey(start);
 	// Declaring onto someone else's window amends it, changing only what the
 	// operator has explicitly changed.
 	const joined = own === null ? (chosenChoice?.window ?? null) : null;
 	const amending = own ?? joined;
-	const fixedBecause =
-		targets.status === "ok" && own !== null ? targets.data.fixed_because : null;
+	const held =
+		targets.status === "ok" && own !== null ? targets.data.held_in_place : null;
+	const fixedBecause = held ? heldInPlace(held) : null;
 	const pickable = !fixed && !fixedBecause && choices.length > 1;
 
 	const baseEnd = amending ? toLocalInput(new Date(amending.expected_end)) : defaultEnd;
@@ -229,10 +204,10 @@ export default function DeclareMaintenanceDialog({
 				});
 			} else {
 				await declare.call({
-					...targetColumns(chosen),
+					...chosen,
 					expected_end: at.toISOString(),
 					note: trimmed,
-					upgrade_plan_id: upgradePlanId ?? null,
+					...(upgradePlanId ? { upgrade_plan_id: upgradePlanId } : {}),
 				});
 			}
 			onDone();
@@ -258,19 +233,19 @@ export default function DeclareMaintenanceDialog({
 							select
 							size="small"
 							label="Covers"
-							value={grainKey(chosen)}
+							value={targetKey(chosen)}
 							disabled={!pickable}
 							helperText={fixedBecause ?? undefined}
 							onChange={(event) => {
 								const picked = choices.find(
-									(choice) => grainKey(choice.grain) === event.target.value,
+									(choice) => targetKey(choice.target) === event.target.value,
 								);
-								if (picked) setChosen(picked.grain);
+								if (picked) setChosen(picked.target);
 							}}
 							slotProps={{
 								select: {
 									renderValue: () =>
-										chosenChoice ? <GrainLabel choice={chosenChoice} /> : null,
+										chosenChoice ? <TargetLabel choice={chosenChoice} /> : null,
 								},
 							}}
 							data-testid="maintenance-covers"
@@ -284,13 +259,13 @@ export default function DeclareMaintenanceDialog({
 									choice.window.id !== own.id;
 								return (
 									<MenuItem
-										key={grainKey(choice.grain)}
-										value={grainKey(choice.grain)}
+										key={targetKey(choice.target)}
+										value={targetKey(choice.target)}
 										disabled={occupied}
 										sx={{ pl: 2 + choice.depth * 2, gap: 1 }}
-										data-testid={`covers-${grainKey(choice.grain)}`}
+										data-testid={`covers-${targetKey(choice.target)}`}
 									>
-										<GrainLabel choice={choice} />
+										<TargetLabel choice={choice} />
 										<Box sx={{ flex: 1 }} />
 										{occupied ? (
 											<Typography variant="caption" color="text.secondary">

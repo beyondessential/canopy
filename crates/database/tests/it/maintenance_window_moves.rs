@@ -243,10 +243,7 @@ async fn a_window_past_its_end_but_not_yet_swept_can_be_extended() {
 		let refused = MaintenanceWindow::amend(
 			&mut conn,
 			window.id,
-			move_to(Grain::Environment {
-				group_id: site.group,
-				rank: ServerRank::Clone,
-			}),
+			move_to(Grain::environment(site.group, ServerRank::Clone)),
 			Some("op"),
 		)
 		.await;
@@ -298,10 +295,7 @@ async fn a_move_suspends_the_new_target_now_and_settles_the_one_it_left() {
 		let moved = MaintenanceWindow::amend(
 			&mut conn,
 			window.id,
-			move_to(Grain::Environment {
-				group_id: site.group,
-				rank: ServerRank::Clone,
-			}),
+			move_to(Grain::environment(site.group, ServerRank::Clone)),
 			Some("mover"),
 		)
 		.await
@@ -357,10 +351,7 @@ async fn a_failure_on_what_a_move_left_alerts_once_it_has_settled() {
 		MaintenanceWindow::amend(
 			&mut conn,
 			window.id,
-			move_to(Grain::Environment {
-				group_id: site.group,
-				rank: ServerRank::Clone,
-			}),
+			move_to(Grain::environment(site.group, ServerRank::Clone)),
 			Some("op"),
 		)
 		.await
@@ -411,9 +402,7 @@ async fn moving_over_a_target_takes_its_issues_out_of_their_incident() {
 		MaintenanceWindow::amend(
 			&mut conn,
 			window.id,
-			move_to(Grain::Group {
-				group_id: site.group,
-			}),
+			move_to(Grain::group(site.group)),
 			Some("op"),
 		)
 		.await
@@ -446,9 +435,7 @@ async fn a_move_is_refused_where_it_cannot_go() {
 		let sideways = MaintenanceWindow::amend(
 			&mut conn,
 			window.id,
-			move_to(Grain::Machine {
-				machine_id: site.clone_box,
-			}),
+			move_to(Grain::machine(site.clone_box)),
 			Some("op"),
 		)
 		.await;
@@ -459,9 +446,7 @@ async fn a_move_is_refused_where_it_cannot_go() {
 		let away = MaintenanceWindow::amend(
 			&mut conn,
 			window.id,
-			move_to(Grain::Group {
-				group_id: elsewhere,
-			}),
+			move_to(Grain::group(elsewhere)),
 			Some("op"),
 		)
 		.await;
@@ -474,9 +459,7 @@ async fn a_move_is_refused_where_it_cannot_go() {
 		let occupied = MaintenanceWindow::amend(
 			&mut conn,
 			window.id,
-			move_to(Grain::Group {
-				group_id: site.group,
-			}),
+			move_to(Grain::group(site.group)),
 			Some("op"),
 		)
 		.await;
@@ -491,10 +474,7 @@ async fn a_move_is_refused_where_it_cannot_go() {
 		let ended = MaintenanceWindow::amend(
 			&mut conn,
 			window.id,
-			move_to(Grain::Environment {
-				group_id: site.group,
-				rank: ServerRank::Production,
-			}),
+			move_to(Grain::environment(site.group, ServerRank::Production)),
 			Some("op"),
 		)
 		.await;
@@ -525,7 +505,7 @@ async fn a_window_a_run_is_served_against_stays_until_the_lease_is_released() {
 
 		assert!(
 			window
-				.fixed_because(&mut conn)
+				.held_in_place(&mut conn)
 				.await
 				.expect("fixed")
 				.is_some(),
@@ -534,9 +514,7 @@ async fn a_window_a_run_is_served_against_stays_until_the_lease_is_released() {
 		let refused = MaintenanceWindow::amend(
 			&mut conn,
 			window.id,
-			move_to(Grain::Machine {
-				machine_id: site.production_box,
-			}),
+			move_to(Grain::machine(site.production_box)),
 			Some("op"),
 		)
 		.await;
@@ -551,9 +529,7 @@ async fn a_window_a_run_is_served_against_stays_until_the_lease_is_released() {
 		MaintenanceWindow::amend(
 			&mut conn,
 			window.id,
-			move_to(Grain::Machine {
-				machine_id: site.production_box,
-			}),
+			move_to(Grain::machine(site.production_box)),
 			Some("op"),
 		)
 		.await
@@ -582,9 +558,7 @@ async fn another_operators_lease_does_not_hold_a_window_in_place() {
 		MaintenanceWindow::amend(
 			&mut conn,
 			window.id,
-			move_to(Grain::Machine {
-				machine_id: site.production_box,
-			}),
+			move_to(Grain::machine(site.production_box)),
 			Some("op"),
 		)
 		.await
@@ -610,9 +584,7 @@ async fn a_moved_window_is_in_both_targets_histories() {
 		let moved = MaintenanceWindow::amend(
 			&mut conn,
 			window.id,
-			move_to(Grain::Application {
-				application_id: site.production_app,
-			}),
+			move_to(Grain::application(site.production_app)),
 			Some("op"),
 		)
 		.await
@@ -653,6 +625,36 @@ async fn a_moved_window_is_in_both_targets_histories() {
 	.await
 }
 
+/// The target's surface reads its open windows out of its history, so a window
+/// still covering it is never the one a limit cuts.
+#[tokio::test(flavor = "multi_thread")]
+async fn history_lists_what_still_covers_the_target_first() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let site = site(&mut conn).await;
+		let own = declare_group(&mut conn, site.group, None).await;
+		let clone = declare_group(&mut conn, site.group, Some(ServerRank::Clone)).await;
+		MaintenanceWindow::amend(
+			&mut conn,
+			clone.id,
+			move_to(Grain::machine(site.clone_box)),
+			Some("op"),
+		)
+		.await
+		.expect("narrow the clone's window to its box");
+
+		let history = MaintenanceWindow::list_for_scope(&mut conn, Scope::Group(site.group), 1)
+			.await
+			.expect("history");
+		assert_eq!(history.len(), 1);
+		assert_eq!(
+			history[0].window.id, own.id,
+			"the group's open window comes before a span that ended more recently"
+		);
+		assert_eq!(history[0].ended(), None);
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_move_notifies_no_one() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
@@ -663,10 +665,7 @@ async fn a_move_notifies_no_one() {
 		MaintenanceWindow::amend(
 			&mut conn,
 			window.id,
-			move_to(Grain::Environment {
-				group_id: site.group,
-				rank: ServerRank::Clone,
-			}),
+			move_to(Grain::environment(site.group, ServerRank::Clone)),
 			Some("op"),
 		)
 		.await
@@ -698,62 +697,23 @@ async fn a_groups_line_of_descent_nests_everything_in_it() {
 		let pending_app =
 			insert_application(&mut conn, Some(site.group), pending_box, None, "new").await;
 
-		let descent = line_of_descent(
-			&mut conn,
-			Grain::Group {
-				group_id: site.group,
-			},
-		)
-		.await
-		.expect("descent");
+		let descent = line_of_descent(&mut conn, Grain::group(site.group))
+			.await
+			.expect("descent");
 		let listed = grains(&descent);
-		let group = Grain::Group {
-			group_id: site.group,
-		};
-		let production = Grain::Environment {
-			group_id: site.group,
-			rank: ServerRank::Production,
-		};
-		let clone = Grain::Environment {
-			group_id: site.group,
-			rank: ServerRank::Clone,
-		};
+		let group = Grain::group(site.group);
+		let production = Grain::environment(site.group, ServerRank::Production);
+		let clone = Grain::environment(site.group, ServerRank::Clone);
 		assert_eq!(listed[0], (group, 0), "the group heads it");
 		assert_eq!(listed[1], (production, 1), "production before the clone");
-		assert_eq!(
-			listed[2],
-			(
-				Grain::Machine {
-					machine_id: site.production_box
-				},
-				2
-			)
-		);
-		assert_eq!(
-			listed[3],
-			(
-				Grain::Application {
-					application_id: site.production_app
-				},
-				3
-			)
-		);
+		assert_eq!(listed[2], (Grain::machine(site.production_box), 2));
+		assert_eq!(listed[3], (Grain::application(site.production_app), 3));
 		assert_eq!(listed[4], (clone, 1));
 		assert_eq!(
 			&listed[listed.len() - 2..],
 			&[
-				(
-					Grain::Machine {
-						machine_id: pending_box
-					},
-					1
-				),
-				(
-					Grain::Application {
-						application_id: pending_app
-					},
-					2
-				),
+				(Grain::machine(pending_box), 1),
+				(Grain::application(pending_app), 2),
 			],
 			"pending machines sit under the group, apart from its environments"
 		);
@@ -765,42 +725,16 @@ async fn a_groups_line_of_descent_nests_everything_in_it() {
 async fn an_applications_line_of_descent_is_what_contains_it() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let site = site(&mut conn).await;
-		let descent = line_of_descent(
-			&mut conn,
-			Grain::Application {
-				application_id: site.production_app,
-			},
-		)
-		.await
-		.expect("descent");
+		let descent = line_of_descent(&mut conn, Grain::application(site.production_app))
+			.await
+			.expect("descent");
 		assert_eq!(
 			grains(&descent),
 			vec![
-				(
-					Grain::Group {
-						group_id: site.group
-					},
-					0
-				),
-				(
-					Grain::Environment {
-						group_id: site.group,
-						rank: ServerRank::Production
-					},
-					1
-				),
-				(
-					Grain::Machine {
-						machine_id: site.production_box
-					},
-					2
-				),
-				(
-					Grain::Application {
-						application_id: site.production_app
-					},
-					3
-				),
+				(Grain::group(site.group), 0),
+				(Grain::environment(site.group, ServerRank::Production), 1),
+				(Grain::machine(site.production_box), 2),
+				(Grain::application(site.production_app), 3),
 			],
 			"its machine, the machine's environment, and its group; not the clone"
 		);
@@ -814,29 +748,14 @@ async fn grains_the_start_has_none_of_are_passed_over() {
 		let lone_box = insert_machine(&mut conn, None, "lone").await;
 		let lone_app =
 			insert_application(&mut conn, None, lone_box, Some("production"), "lone").await;
-		let descent = line_of_descent(
-			&mut conn,
-			Grain::Machine {
-				machine_id: lone_box,
-			},
-		)
-		.await
-		.expect("descent");
+		let descent = line_of_descent(&mut conn, Grain::machine(lone_box))
+			.await
+			.expect("descent");
 		assert_eq!(
 			grains(&descent),
 			vec![
-				(
-					Grain::Machine {
-						machine_id: lone_box
-					},
-					0
-				),
-				(
-					Grain::Application {
-						application_id: lone_app
-					},
-					1
-				),
+				(Grain::machine(lone_box), 0),
+				(Grain::application(lone_app), 1),
 			],
 			"a machine in no group offers its applications alone"
 		);
@@ -844,17 +763,12 @@ async fn grains_the_start_has_none_of_are_passed_over() {
 		let group = insert_group(&mut conn, "samoa").await;
 		let pending_box = insert_machine(&mut conn, Some(group), "pending").await;
 		insert_application(&mut conn, Some(group), pending_box, None, "pending").await;
-		let descent = line_of_descent(
-			&mut conn,
-			Grain::Machine {
-				machine_id: pending_box,
-			},
-		)
-		.await
-		.expect("descent");
+		let descent = line_of_descent(&mut conn, Grain::machine(pending_box))
+			.await
+			.expect("descent");
 		assert_eq!(
 			descent.entries[0].grain,
-			Grain::Group { group_id: group },
+			Grain::group(group),
 			"a pending machine offers its group"
 		);
 		assert_eq!(
@@ -869,19 +783,12 @@ async fn grains_the_start_has_none_of_are_passed_over() {
 async fn only_the_group_covers_the_groups_own_checks() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let site = site(&mut conn).await;
-		let production = Grain::Environment {
-			group_id: site.group,
-			rank: ServerRank::Production,
-		};
+		let production = Grain::environment(site.group, ServerRank::Production);
 		let descent = line_of_descent(&mut conn, production)
 			.await
 			.expect("descent");
-		let group = Grain::Group {
-			group_id: site.group,
-		};
-		let on_app = Grain::Application {
-			application_id: site.production_app,
-		};
+		let group = Grain::group(site.group);
+		let on_app = Grain::application(site.production_app);
 
 		assert!(descent.covers(group, group));
 		assert!(
@@ -889,18 +796,8 @@ async fn only_the_group_covers_the_groups_own_checks() {
 			"production's window leaves the group's own checks watched"
 		);
 		assert!(descent.covers(production, on_app));
-		assert!(descent.covers(
-			Grain::Machine {
-				machine_id: site.production_box
-			},
-			on_app
-		));
-		assert!(!descent.covers(
-			on_app,
-			Grain::Machine {
-				machine_id: site.production_box
-			}
-		));
+		assert!(descent.covers(Grain::machine(site.production_box), on_app));
+		assert!(!descent.covers(on_app, Grain::machine(site.production_box)));
 	})
 	.await
 }

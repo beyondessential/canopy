@@ -38,6 +38,7 @@ import {
 	RESOLVED_REASON_LABEL,
 	incidentTargetName,
 	isIncidentLingering,
+	maintenanceTarget,
 	type CheckResult,
 	type IncidentIssueData,
 	type IncidentNoteData,
@@ -369,9 +370,11 @@ function Header({
 						<DeclareMaintenanceDialog
 							open={maintenanceOpen}
 							onClose={() => setMaintenanceOpen(false)}
-							scope="group"
-							id={incident.server_group_id}
-							rank={incident.rank}
+							start={maintenanceTarget(
+								"group",
+								incident.server_group_id,
+								incident.rank,
+							)}
 							incidentId={incident.id}
 							onDone={onChanged}
 						/>

@@ -26,6 +26,8 @@ A move row is a closed span of the window over a past target, so:
 
 The window's current span starts at its latest move's `moved_at`, or its `declared_at` where it never moved.
 
+A window's target is a `Grain`: a `Scope` and, for a group, an optional environment rank. It maps to storage through `Scope::from_columns`/`to_columns`, so there is still one scope enum. On the wire it is the flat `MaintenanceTarget` shape (`application_id`/`machine_id`/`server_group_id`/`rank`) that `declare` already takes.
+
 ## Checklist
 
 ### Database

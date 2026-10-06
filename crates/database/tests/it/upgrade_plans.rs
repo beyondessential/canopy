@@ -556,9 +556,7 @@ async fn a_window_declared_from_the_plan_cannot_be_moved() {
 			&mut conn,
 			window.id,
 			Amendment {
-				target: Some(Grain::Machine {
-					machine_id: server.machine_id.unwrap(),
-				}),
+				target: Some(Grain::machine(server.machine_id.unwrap())),
 				..Amendment::default()
 			},
 			Some("a@example.com"),
@@ -649,9 +647,7 @@ async fn a_window_the_plan_did_not_open_moves_like_any_other() {
 			&mut conn,
 			window.id,
 			Amendment {
-				target: Some(Grain::Machine {
-					machine_id: server.machine_id.unwrap(),
-				}),
+				target: Some(Grain::machine(server.machine_id.unwrap())),
 				..Amendment::default()
 			},
 			Some("a@example.com"),

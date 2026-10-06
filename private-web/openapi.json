@@ -10221,7 +10221,7 @@
                 "type": "null"
               },
               {
-                "$ref": "#/components/schemas/Grain",
+                "$ref": "#/components/schemas/MaintenanceTarget",
                 "description": "A new target, moving the window there: any grain on its target's line\nof descent that has no window of its own."
               }
             ]
@@ -13417,91 +13417,6 @@
           }
         }
       },
-      "Grain": {
-        "oneOf": [
-          {
-            "type": "object",
-            "required": [
-              "group_id",
-              "kind"
-            ],
-            "properties": {
-              "group_id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "group"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "group_id",
-              "rank",
-              "kind"
-            ],
-            "properties": {
-              "group_id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "environment"
-                ]
-              },
-              "rank": {
-                "$ref": "#/components/schemas/ServerRank"
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "machine_id",
-              "kind"
-            ],
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "machine"
-                ]
-              },
-              "machine_id": {
-                "type": "string",
-                "format": "uuid"
-              }
-            }
-          },
-          {
-            "type": "object",
-            "required": [
-              "application_id",
-              "kind"
-            ],
-            "properties": {
-              "application_id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "application"
-                ]
-              }
-            }
-          }
-        ],
-        "description": "One target a window can be declared over."
-      },
       "GrantAvailabilityView": {
         "type": "object",
         "description": "Where a group stands with respect to granting its applications name management.",
@@ -13972,6 +13887,54 @@
             "description": "The source whose check to update."
           }
         }
+      },
+      "HeldInPlace": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "It was declared from this upgrade plan, which it holds open.",
+            "required": [
+              "plan_id",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "upgrade_plan"
+                ]
+              },
+              "plan_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "The plan it was declared from."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A configuration run's lease is being served against it.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "held_by": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The operator running."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "run_lease"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "What keeps a window over the target it covers."
       },
       "HistoryArgs": {
         "type": "object",
@@ -16297,11 +16260,52 @@
           "full"
         ]
       },
+      "MaintenanceTarget": {
+        "type": "object",
+        "description": "A target a window can cover, named the way a declaration names it: exactly\none of the ids, and with the group, optionally the rank of one of its\nenvironments.",
+        "properties": {
+          "application_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The application, for a window over one workload."
+          },
+          "machine_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The machine, for a window over one box."
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "With the group, the environment the window covers. Absent for the whole\ngroup."
+              }
+            ]
+          },
+          "server_group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The group, for a window over a whole group or one of its environments."
+          }
+        }
+      },
       "MaintenanceTargetChoice": {
         "type": "object",
         "description": "One grain a declaration can cover.",
         "required": [
-          "grain",
+          "target",
           "label",
           "depth"
         ],
@@ -16319,13 +16323,13 @@
             "description": "How many of the listed grains contain this one.",
             "minimum": 0
           },
-          "grain": {
-            "$ref": "#/components/schemas/Grain",
-            "description": "The target a window here would cover."
-          },
           "label": {
             "type": "string",
             "description": "The grain's own name: a group's, a machine's, an application's, or an\nenvironment's rank."
+          },
+          "target": {
+            "$ref": "#/components/schemas/MaintenanceTarget",
+            "description": "The target a window here would cover."
           },
           "window": {
             "oneOf": [
@@ -16354,12 +16358,16 @@
             },
             "description": "Whatever contains the starting grain and whatever it contains, nested\nin the order they contain one another."
           },
-          "fixed_because": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Why the window being amended cannot move, where it cannot."
+          "held_in_place": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HeldInPlace",
+                "description": "Why the window being amended cannot move, where it cannot."
+              }
+            ]
           }
         }
       },
@@ -16379,8 +16387,8 @@
             "description": "The incident it is offered from, to mark the choices that leave some of\nits failing checks contributing."
           },
           "start": {
-            "$ref": "#/components/schemas/Grain",
-            "description": "The grain the declaration is offered over."
+            "$ref": "#/components/schemas/MaintenanceTarget",
+            "description": "The target the declaration is offered over."
           },
           "window_id": {
             "type": [

@@ -280,15 +280,19 @@ impl MaintenanceWindowMove {
 		)
 	}
 
-	/// The moves of `window`, earliest first.
-	pub async fn for_window(db: &mut AsyncPgConnection, window: Uuid) -> Result<Vec<Self>> {
+	/// The most recent move of `window`, where it has moved.
+	pub async fn latest_for_window(
+		db: &mut AsyncPgConnection,
+		window: Uuid,
+	) -> Result<Option<Self>> {
 		use crate::schema::maintenance_window_moves::dsl;
 		dsl::maintenance_window_moves
 			.select(Self::as_select())
 			.filter(dsl::window_id.eq(window))
-			.order(dsl::moved_at.asc())
-			.load(db)
+			.order(dsl::moved_at.desc())
+			.first(db)
 			.await
+			.optional()
 			.map_err(AppError::from)
 	}
 }
@@ -303,6 +307,23 @@ pub struct Amendment {
 	pub expected_end: Option<Timestamp>,
 	/// `Some(None)` clears the note.
 	pub note: Option<Option<String>>,
+}
+
+/// What keeps a window over the target it covers.
+// spec: MNT#moving-a-window
+#[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum HeldInPlace {
+	/// It was declared from this upgrade plan, which it holds open.
+	UpgradePlan {
+		/// The plan it was declared from.
+		plan_id: Uuid,
+	},
+	/// A configuration run's lease is being served against it.
+	RunLease {
+		/// The operator running.
+		held_by: Option<String>,
+	},
 }
 
 /// One span of a window over a target, as the target's history reads it.
@@ -322,6 +343,14 @@ pub struct TargetWindow {
 	/// The environment this span covered, where it was over one of a group's
 	/// environments rather than the target as a whole.
 	pub rank: Option<ServerRank>,
+}
+
+impl TargetWindow {
+	/// When this span stopped covering its target: the move off it, or the
+	/// window ending. `None` while it still covers it.
+	pub fn ended(&self) -> Option<Timestamp> {
+		self.moved_at.or(self.window.ended_at)
+	}
 }
 
 impl MaintenanceWindow {
@@ -536,10 +565,9 @@ impl MaintenanceWindow {
 		}
 
 		let note = amendment.note.unwrap_or_else(|| window.note.clone());
-		let covered_from = match MaintenanceWindowMove::for_window(db, id).await?.last() {
-			Some(last) => last.moved_at,
-			None => window.declared_at,
-		};
+		let covered_from = MaintenanceWindowMove::latest_for_window(db, id)
+			.await?
+			.map_or(window.declared_at, |last| last.moved_at);
 
 		let amended = db
 			.transaction::<_, AppError, _>(async |conn| {
@@ -594,7 +622,7 @@ impl MaintenanceWindow {
 			.await?;
 
 		if let Some(to) = to {
-			let (scope, _) = to.scope();
+			let scope = to.scope();
 			let closed_because = match by {
 				Some(login) => format!("maintenance declared by {login}"),
 				None => "maintenance being declared".to_string(),
@@ -631,7 +659,7 @@ impl MaintenanceWindow {
 				"a window moves to a grain on its target's line of descent".into(),
 			));
 		}
-		let (scope, rank) = to.scope();
+		let (scope, rank) = (to.scope(), to.rank());
 		if Self::open_for(db, scope, rank).await?.is_some() {
 			return Err(AppError::Conflict(
 				"that target already has a window of its own".into(),
@@ -640,11 +668,11 @@ impl MaintenanceWindow {
 		Ok(())
 	}
 
-	/// Whether this window can move at all, and if not, why: the plan it was
-	/// declared from, or a run lease being served against it.
-	pub async fn fixed_because(&self, db: &mut AsyncPgConnection) -> Result<Option<String>> {
-		if self.upgrade_plan_id.is_some() {
-			return Ok(Some("Declared from an upgrade plan".into()));
+	/// Why this window cannot move, where it cannot: the plan it was declared
+	/// from, or a run lease being served against it.
+	pub async fn held_in_place(&self, db: &mut AsyncPgConnection) -> Result<Option<HeldInPlace>> {
+		if let Some(plan_id) = self.upgrade_plan_id {
+			return Ok(Some(HeldInPlace::UpgradePlan { plan_id }));
 		}
 		let Some(grain) = self.grain() else {
 			return Ok(None);
@@ -652,11 +680,8 @@ impl MaintenanceWindow {
 		Ok(self
 			.serving_lease(db, grain, Timestamp::now())
 			.await?
-			.map(|lease| {
-				format!(
-					"A configuration run by {} is under way",
-					lease.held_by.as_deref().unwrap_or("another operator")
-				)
+			.map(|lease| HeldInPlace::RunLease {
+				held_by: lease.held_by,
 			}))
 	}
 
@@ -669,8 +694,9 @@ impl MaintenanceWindow {
 		grain: Grain,
 		now: Timestamp,
 	) -> Result<Option<InventoryLease>> {
-		let environments: Vec<(Uuid, ServerRank)> = match grain {
-			Grain::Group { group_id } => {
+		let environments: Vec<(Uuid, ServerRank)> = match (grain.scope(), grain.rank()) {
+			(Scope::Group(group_id), Some(rank)) => vec![(group_id, rank)],
+			(Scope::Group(group_id), None) => {
 				let machines: Vec<Uuid> = Machine::list_for_group(db, group_id)
 					.await?
 					.into_iter()
@@ -682,21 +708,21 @@ impl MaintenanceWindow {
 				ranks.dedup();
 				ranks.into_iter().map(|rank| (group_id, rank)).collect()
 			}
-			Grain::Environment { group_id, rank } => vec![(group_id, rank)],
-			Grain::Machine { machine_id } => {
+			(Scope::Machine(machine_id), _) => {
 				let machine = Machine::get_by_id(db, machine_id).await?;
 				match (machine.group_id, Machine::rank(db, machine_id).await?) {
 					(Some(group), Some(rank)) => vec![(group, rank)],
 					_ => Vec::new(),
 				}
 			}
-			Grain::Application { application_id } => {
+			(Scope::Application(application_id), _) => {
 				let application = Application::get_by_id(db, application_id).await?;
 				match (application.group_id, application.rank) {
 					(Some(group), Some(rank)) => vec![(group, rank)],
 					_ => Vec::new(),
 				}
 			}
+			(Scope::Cluster(_) | Scope::Global, _) => Vec::new(),
 		};
 		let speaks_for = [self.declared_by.as_deref(), self.amended_by.as_deref()];
 		for (group, rank) in environments {
@@ -841,10 +867,14 @@ impl MaintenanceWindow {
 	}
 
 	/// The target's windows, open and ended, each over the span it covered
-	/// the target, most recent first. A group's include the windows over its
+	/// the target: those still covering it first, then the rest by when they
+	/// stopped, most recent first. A group's include the windows over its
 	/// environments, and a window that moved off the target is listed over the
 	/// span it covered there, so a quiet spell is attributable from either end
 	/// of a move.
+	///
+	/// Both sources are read in that same order and to `limit` each, so the
+	/// merge keeps exactly the `limit` spans a single ordered read would.
 	// spec: MNT#moving-a-window
 	pub async fn list_for_scope(
 		db: &mut AsyncPgConnection,
@@ -864,7 +894,7 @@ impl MaintenanceWindow {
 					.and(dsl::machine_id.is_not_distinct_from(machine))
 					.and(dsl::server_group_id.is_not_distinct_from(group)),
 			)
-			.order(dsl::declared_at.desc())
+			.order((dsl::ended_at.desc().nulls_first(), dsl::declared_at.desc()))
 			.limit(limit)
 			.load(db)
 			.await
@@ -883,78 +913,13 @@ impl MaintenanceWindow {
 			.await
 			.map_err(AppError::from)?;
 
-		let mut window_ids: Vec<Uuid> = current.iter().map(|window| window.id).collect();
-		window_ids.extend(moved_off.iter().map(|moved| moved.window_id));
-		let all_moves: Vec<MaintenanceWindowMove> = moves::maintenance_window_moves
-			.select(MaintenanceWindowMove::as_select())
-			.filter(moves::window_id.eq_any(&window_ids))
-			.order(moves::moved_at.asc())
-			.load(db)
-			.await
-			.map_err(AppError::from)?;
-		let mut windows: HashMap<Uuid, Self> = current
-			.iter()
-			.map(|window| (window.id, window.clone()))
-			.collect();
-		let missing: Vec<Uuid> = moved_off
-			.iter()
-			.map(|moved| moved.window_id)
-			.filter(|id| !windows.contains_key(id))
-			.collect();
-		if !missing.is_empty() {
-			let loaded: Vec<Self> = dsl::maintenance_windows
-				.select(Self::as_select())
-				.filter(dsl::id.eq_any(&missing))
-				.load(db)
-				.await
-				.map_err(AppError::from)?;
-			windows.extend(loaded.into_iter().map(|window| (window.id, window)));
-		}
-
-		let mut out: Vec<TargetWindow> = Vec::new();
-		for window in current {
-			let covered_from = all_moves
-				.iter()
-				.rfind(|moved| moved.window_id == window.id)
-				.map_or(window.declared_at, |last| last.moved_at);
-			let rank = window.rank;
-			out.push(TargetWindow {
-				window,
-				covered_from,
-				moved_at: None,
-				moved_to: None,
-				rank,
-			});
-		}
-		for moved in moved_off {
-			let Some(window) = windows.get(&moved.window_id).cloned() else {
-				continue;
-			};
-			// Where it went next: the target the following move left, or the
-			// window's own where this was its last move.
-			let next = all_moves
-				.iter()
-				.find(|later| later.window_id == moved.window_id && later.moved_at > moved.moved_at)
-				.and_then(MaintenanceWindowMove::grain)
-				.or_else(|| window.grain());
-			let moved_to = match next {
-				Some(grain) => {
-					let (scope, rank) = grain.scope();
-					Some(target_label(db, scope, rank).await?)
-				}
-				None => None,
-			};
-			out.push(TargetWindow {
-				window,
-				covered_from: moved.covered_from,
-				moved_at: Some(moved.moved_at),
-				moved_to,
-				rank: moved.rank,
-			});
-		}
-		out.sort_by_key(|span| std::cmp::Reverse(span.covered_from));
-		out.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
-		Ok(out)
+		let mut spans = spans_over_target(db, current, moved_off).await?;
+		// A span with no end is still covering the target.
+		spans.sort_by_key(|span| {
+			std::cmp::Reverse((span.ended().is_none(), span.ended(), span.covered_from))
+		});
+		spans.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+		Ok(spans)
 	}
 
 	/// Is a check covered by `(application_id, machine_id, group_id)`
@@ -1146,7 +1111,7 @@ impl MaintenanceWindow {
 		let moved = Self::claim_settled_moves(db).await?;
 		for moved in &moved {
 			if let Some(grain) = moved.grain() {
-				crate::issues::reevaluate_open_issues_for_scope(db, grain.scope().0, None).await?;
+				crate::issues::reevaluate_open_issues_for_scope(db, grain.scope(), None).await?;
 			}
 		}
 		Ok((ended.len(), settled.len() + moved.len()))
@@ -1245,6 +1210,96 @@ fn format_when(at: Timestamp) -> String {
 	at.strftime("%Y-%m-%d %H:%M UTC").to_string()
 }
 
+/// The spans of `current` (windows over a target now) and `moved_off` (moves
+/// off it) over that target: when each started covering it, and for a move,
+/// where the window went next.
+async fn spans_over_target(
+	db: &mut AsyncPgConnection,
+	current: Vec<MaintenanceWindow>,
+	moved_off: Vec<MaintenanceWindowMove>,
+) -> Result<Vec<TargetWindow>> {
+	use crate::schema::maintenance_window_moves::dsl as moves;
+	use crate::schema::maintenance_windows::dsl;
+
+	let mut window_ids: Vec<Uuid> = current.iter().map(|window| window.id).collect();
+	window_ids.extend(moved_off.iter().map(|moved| moved.window_id));
+	let all_moves: Vec<MaintenanceWindowMove> = moves::maintenance_window_moves
+		.select(MaintenanceWindowMove::as_select())
+		.filter(moves::window_id.eq_any(&window_ids))
+		.order(moves::moved_at.asc())
+		.load(db)
+		.await
+		.map_err(AppError::from)?;
+	let mut windows: HashMap<Uuid, MaintenanceWindow> = current
+		.iter()
+		.map(|window| (window.id, window.clone()))
+		.collect();
+	let missing: Vec<Uuid> = moved_off
+		.iter()
+		.map(|moved| moved.window_id)
+		.filter(|id| !windows.contains_key(id))
+		.collect();
+	if !missing.is_empty() {
+		let loaded: Vec<MaintenanceWindow> = dsl::maintenance_windows
+			.select(MaintenanceWindow::as_select())
+			.filter(dsl::id.eq_any(&missing))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		windows.extend(loaded.into_iter().map(|window| (window.id, window)));
+	}
+
+	let mut out: Vec<TargetWindow> = Vec::with_capacity(current.len() + moved_off.len());
+	for window in current {
+		let covered_from = all_moves
+			.iter()
+			.rfind(|moved| moved.window_id == window.id)
+			.map_or(window.declared_at, |last| last.moved_at);
+		let rank = window.rank;
+		out.push(TargetWindow {
+			window,
+			covered_from,
+			moved_at: None,
+			moved_to: None,
+			rank,
+		});
+	}
+	// A history read lists a handful of distinct destinations, so each is
+	// named once however many spans moved there.
+	let mut labels: HashMap<Grain, String> = HashMap::new();
+	for moved in moved_off {
+		let Some(window) = windows.get(&moved.window_id).cloned() else {
+			continue;
+		};
+		// Where it went next: the target the following move left, or the
+		// window's own where this was its last move.
+		let next = all_moves
+			.iter()
+			.find(|later| later.window_id == moved.window_id && later.moved_at > moved.moved_at)
+			.and_then(MaintenanceWindowMove::grain)
+			.or_else(|| window.grain());
+		let moved_to = match next {
+			Some(grain) => Some(match labels.get(&grain) {
+				Some(label) => label.clone(),
+				None => {
+					let label = target_label(db, grain.scope(), grain.rank()).await?;
+					labels.insert(grain, label.clone());
+					label
+				}
+			}),
+			None => None,
+		};
+		out.push(TargetWindow {
+			window,
+			covered_from: moved.covered_from,
+			moved_at: Some(moved.moved_at),
+			moved_to,
+			rank: moved.rank,
+		});
+	}
+	Ok(out)
+}
+
 fn ended_is_history() -> AppError {
 	AppError::BadRequest(
 		"a window that has ended is history; suspending again is a fresh declaration".into(),
@@ -1264,6 +1319,10 @@ async fn settling_moves(
 			dsl::server_group_id,
 			dsl::rank,
 		))
+		// Equivalent to the cutoff alone, since a move is only stamped settled
+		// once its settle period has passed, but it lets the unsettled index
+		// serve the read instead of a scan of all history.
+		.filter(dsl::settled_at.is_null())
 		.filter(dsl::moved_at.gt(cutoff))
 		.load(db)
 		.await
@@ -1288,6 +1347,7 @@ async fn moved_off_ranks(
 				.or(dsl::machine_id.eq(machine_id))
 				.or(dsl::server_group_id.eq(group_id)),
 		)
+		.filter(dsl::settled_at.is_null())
 		.filter(dsl::moved_at.gt(cutoff))
 		.load(db)
 		.await

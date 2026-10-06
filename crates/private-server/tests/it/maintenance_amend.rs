@@ -52,15 +52,24 @@ fn group_check() -> CheckFiling<'static> {
 	}
 }
 
+/// What kind of target a wire target names.
+fn kind(target: &Value) -> String {
+	if !target["application_id"].is_null() {
+		"application"
+	} else if !target["machine_id"].is_null() {
+		"machine"
+	} else if !target["rank"].is_null() {
+		"environment"
+	} else {
+		"group"
+	}
+	.to_string()
+}
+
 fn kinds(choices: &[Value]) -> Vec<(String, u64)> {
 	choices
 		.iter()
-		.map(|choice| {
-			(
-				choice["grain"]["kind"].as_str().unwrap().to_string(),
-				choice["depth"].as_u64().unwrap(),
-			)
-		})
+		.map(|choice| (kind(&choice["target"]), choice["depth"].as_u64().unwrap()))
 		.collect()
 }
 
@@ -70,7 +79,7 @@ async fn a_groups_choices_nest_everything_in_it() {
 		seed(&mut conn).await;
 		let targets: Value = private
 			.post("/api/maintenance/targets")
-			.json(&json!({ "start": { "kind": "group", "group_id": GROUP } }))
+			.json(&json!({ "start": { "server_group_id": GROUP } }))
 			.await
 			.json();
 		let choices = targets["choices"].as_array().unwrap();
@@ -93,7 +102,7 @@ async fn a_groups_choices_nest_everything_in_it() {
 				.iter()
 				.all(|choice| choice["covers_failures"].is_null())
 		);
-		assert!(targets["fixed_because"].is_null());
+		assert!(targets["held_in_place"].is_null());
 	})
 	.await
 }
@@ -119,7 +128,7 @@ async fn an_incidents_choices_say_which_cover_its_failures() {
 		let targets: Value = private
 			.post("/api/maintenance/targets")
 			.json(&json!({
-				"start": { "kind": "environment", "group_id": GROUP, "rank": "production" },
+				"start": { "server_group_id": GROUP, "rank": "production" },
 				"incident_id": incident["id"],
 			}))
 			.await
@@ -130,7 +139,7 @@ async fn an_incidents_choices_say_which_cover_its_failures() {
 			.iter()
 			.map(|choice| {
 				(
-					choice["grain"]["kind"].as_str().unwrap().to_string(),
+					kind(&choice["target"]),
 					choice["covers_failures"].as_bool().unwrap(),
 				)
 			})
@@ -168,7 +177,7 @@ async fn amending_changes_only_what_it_names_and_can_move_the_window() {
 			.post("/api/maintenance/amend")
 			.json(&json!({
 				"id": id,
-				"target": { "kind": "environment", "group_id": GROUP, "rank": "clone" },
+				"target": { "server_group_id": GROUP, "rank": "clone" },
 			}))
 			.await
 			.json();
@@ -212,7 +221,7 @@ async fn a_move_is_refused_where_it_cannot_go() {
 
 		private
 			.post("/api/maintenance/amend")
-			.json(&json!({ "id": id, "target": { "kind": "group", "group_id": OTHER_GROUP } }))
+			.json(&json!({ "id": id, "target": { "server_group_id": OTHER_GROUP } }))
 			.await
 			.assert_status_bad_request();
 
@@ -223,7 +232,7 @@ async fn a_move_is_refused_where_it_cannot_go() {
 			.assert_status_ok();
 		private
 			.post("/api/maintenance/amend")
-			.json(&json!({ "id": id, "target": { "kind": "group", "group_id": GROUP } }))
+			.json(&json!({ "id": id, "target": { "server_group_id": GROUP } }))
 			.await
 			.assert_status(axum::http::StatusCode::CONFLICT);
 
@@ -259,13 +268,14 @@ async fn a_leased_windows_choices_say_it_cannot_move() {
 		let targets: Value = private
 			.post("/api/maintenance/targets")
 			.json(&json!({
-				"start": { "kind": "environment", "group_id": GROUP, "rank": "production" },
+				"start": { "server_group_id": GROUP, "rank": "production" },
 				"window_id": window["id"],
 			}))
 			.await
 			.json();
 		assert!(
-			targets["fixed_because"].is_string(),
+			targets["held_in_place"]["kind"] == "run_lease"
+				&& targets["held_in_place"]["held_by"] == "admin@localhost",
 			"the run is acting on the environment the window covers: {targets}"
 		);
 
@@ -275,30 +285,30 @@ async fn a_leased_windows_choices_say_it_cannot_move() {
 		let unnamed: Value = private
 			.post("/api/maintenance/targets")
 			.json(&json!({
-				"start": { "kind": "environment", "group_id": GROUP, "rank": "production" },
+				"start": { "server_group_id": GROUP, "rank": "production" },
 			}))
 			.await
 			.json();
 		assert!(
-			unnamed["fixed_because"].is_string(),
+			unnamed["held_in_place"]["kind"] == "run_lease",
 			"the starting grain's own window is the one amended: {unnamed}"
 		);
 		let elsewhere: Value = private
 			.post("/api/maintenance/targets")
 			.json(&json!({
-				"start": { "kind": "environment", "group_id": GROUP, "rank": "clone" },
+				"start": { "server_group_id": GROUP, "rank": "clone" },
 			}))
 			.await
 			.json();
 		assert!(
-			elsewhere["fixed_because"].is_null(),
+			elsewhere["held_in_place"].is_null(),
 			"a grain with no window of its own declares freely: {elsewhere}"
 		);
 		private
 			.post("/api/maintenance/amend")
 			.json(&json!({
 				"id": window["id"],
-				"target": { "kind": "machine", "machine_id": PRODUCTION_BOX },
+				"target": { "machine_id": PRODUCTION_BOX },
 			}))
 			.await
 			.assert_status(axum::http::StatusCode::CONFLICT);
