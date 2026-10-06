@@ -1,0 +1,187 @@
+<!-- spec: monitoring/maintenance.md -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Retargeting the declare-maintenance dialog</title>
+<style>
+	* { box-sizing: border-box; }
+	body { margin: 0; padding: 32px; background: #eceff1; font-family: Roboto, "Helvetica Neue", Arial, sans-serif; color: rgba(0,0,0,.87); }
+	h2.frame { font-size: 13px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: #546e7a; margin: 0 0 8px; }
+	.row { display: flex; gap: 32px; flex-wrap: wrap; align-items: flex-start; margin-bottom: 40px; }
+	.col { width: 560px; }
+	.dialog { background: #fff; border-radius: 4px; box-shadow: 0 11px 15px -7px rgba(0,0,0,.2), 0 24px 38px 3px rgba(0,0,0,.14), 0 9px 46px 8px rgba(0,0,0,.12); width: 560px; }
+	.title { padding: 16px 24px; font-size: 20px; font-weight: 500; }
+	.content { padding: 0 24px 20px; }
+	.text { color: rgba(0,0,0,.6); font-size: 16px; line-height: 1.5; margin: 0 0 16px; }
+	.actions { padding: 8px; display: flex; justify-content: flex-end; gap: 8px; }
+	.btn { font: 500 14px Roboto, sans-serif; letter-spacing: .03em; text-transform: uppercase; padding: 6px 8px; border: 0; background: none; color: #388e3c; border-radius: 4px; }
+	.btn.contained { background: #388e3c; color: #fff; padding: 6px 16px; box-shadow: 0 3px 1px -2px rgba(0,0,0,.2), 0 2px 2px 0 rgba(0,0,0,.14); }
+	.btn.outlined { border: 1px solid rgba(56,142,60,.5); padding: 4px 10px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+	.stack > * + * { margin-top: 16px; }
+	.field { position: relative; border: 1px solid rgba(0,0,0,.23); border-radius: 4px; padding: 8.5px 14px; font-size: 16px; min-height: 40px; display: flex; align-items: center; gap: 8px; }
+	.field.focus { border: 2px solid #388e3c; padding: 7.5px 13px; }
+	.field label { position: absolute; top: -9px; left: 10px; background: #fff; padding: 0 4px; font-size: 12px; color: rgba(0,0,0,.6); }
+	.field.focus label { color: #388e3c; }
+	.field .caret { margin-left: auto; color: rgba(0,0,0,.54); }
+	.field.multi { min-height: 64px; align-items: flex-start; color: rgba(0,0,0,.87); }
+	.toggles { display: inline-flex; border: 1px solid rgba(0,0,0,.12); border-radius: 4px; }
+	.toggles span { padding: 5px 11px; font-size: 13px; font-weight: 500; color: rgba(0,0,0,.54); border-left: 1px solid rgba(0,0,0,.12); }
+	.toggles span:first-child { border-left: 0; }
+	.chip { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 12px; font-size: 13px; border: 1px solid; text-transform: capitalize; }
+	.chip.prod { color: #d32f2f; border-color: rgba(211,47,47,.7); }
+	.chip.clone { color: #ed6c02; border-color: rgba(237,108,2,.7); }
+	.chip.kind { color: rgba(0,0,0,.87); border-color: rgba(0,0,0,.23); }
+	.hint { font-size: 12px; color: rgba(0,0,0,.6); margin: 4px 14px 0; }
+	.alert { display: flex; gap: 12px; padding: 6px 16px; border-radius: 4px; font-size: 14px; line-height: 1.43; }
+	.alert .icon { padding-top: 7px; font-size: 18px; }
+	.alert .msg { padding: 8px 0; }
+	.alert.warning { background: #fff4e5; color: #663c00; }
+	.alert.info { background: #e5f6fd; color: #014361; }
+	.menu { background: #fff; border-radius: 4px; box-shadow: 0 5px 5px -3px rgba(0,0,0,.2), 0 8px 10px 1px rgba(0,0,0,.14), 0 3px 14px 2px rgba(0,0,0,.12); padding: 8px 0; margin-top: -8px; position: relative; z-index: 2; }
+	.opt { display: flex; align-items: center; gap: 8px; padding: 6px 16px; font-size: 16px; min-height: 36px; }
+	.opt.sel { background: rgba(56,142,60,.08); }
+	.opt .sub { font-size: 12px; color: rgba(0,0,0,.6); margin-left: auto; text-align: right; }
+	.opt .sub.short { color: #b26a00; }
+	.opt.l1 { padding-left: 32px; }
+	.opt.l2 { padding-left: 48px; }
+	.opt.l3 { padding-left: 64px; }
+	.opt .kind { font-size: 12px; color: rgba(0,0,0,.6); }
+	.opt .dim { color: rgba(0,0,0,.6); }
+	.header { background: #fff; border-radius: 4px; padding: 20px 24px; width: 760px; }
+	.header .chips { display: flex; gap: 8px; align-items: center; }
+	.header h1 { font-size: 34px; font-weight: 400; margin: 0 0 0 8px; }
+	.header h1 a { color: #388e3c; text-decoration: none; }
+	.header .acts { display: flex; gap: 8px; margin-top: 12px; }
+	.note { font-size: 13px; color: #455a64; max-width: 560px; margin-top: 8px; line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<div class="row">
+	<div class="col">
+		<h2 class="frame">1. From an incident on Fiji's production, holding a backup failure</h2>
+		<div class="dialog">
+			<div class="title">Declare maintenance</div>
+			<div class="content">
+				<div class="stack">
+					<div>
+						<div class="field">
+							<label>Covers</label>
+							<span class="chip kind">Environment</span><span class="chip prod">production</span>
+							<span class="caret">&#9662;</span>
+						</div>
+					</div>
+					<div class="alert warning">
+						<span class="icon">&#9888;</span>
+						<div class="msg">Quiets 3 of 4 live issues. Backup staleness is on the group.</div>
+					</div>
+					<p class="text" style="margin:0">Every check on the group's production machines is suspended: nothing opens or joins an incident, and nothing notifies. The rest of the group stays watched. The window ends itself at the time below, and watching resumes a few minutes later once the reporters have been heard from.</p>
+					<div class="toggles"><span>1h</span><span>2h</span><span>4h</span><span>8h</span></div>
+					<div class="field"><label>Expected to end</label>06/10/2026, 04:40 pm</div>
+					<div class="field multi"><label>What's being done</label>Upgrading to 2.62</div>
+				</div>
+			</div>
+			<div class="actions"><button class="btn">Cancel</button><button class="btn contained">Declare</button></div>
+		</div>
+	</div>
+
+	<div class="col">
+		<h2 class="frame">2. The picker open: line of descent from production</h2>
+		<div class="dialog">
+			<div class="title">Declare maintenance</div>
+			<div class="content">
+				<div class="field focus">
+					<label>Covers</label>
+					<span class="chip kind">Environment</span><span class="chip prod">production</span>
+					<span class="caret">&#9652;</span>
+				</div>
+				<div class="menu">
+					<div class="opt"><span class="chip kind">Group</span> Fiji</div>
+					<div class="opt l1 sel"><span class="chip kind">Environment</span><span class="chip prod">production</span><span class="sub short">3 of 4 issues</span></div>
+					<div class="opt l2"><span class="chip kind">Machine</span> fj-central-1<span class="sub short">2 of 4 issues</span></div>
+					<div class="opt l3"><span class="chip kind">Application</span> Tamanu central<span class="sub short">1 of 4 issues</span></div>
+					<div class="opt l3"><span class="chip kind">Application</span> Postgres<span class="sub short">1 of 4 issues</span></div>
+					<div class="opt l2"><span class="chip kind">Machine</span> fj-facility-suva<span class="sub short">1 of 4 issues</span></div>
+					<div class="opt l3"><span class="chip kind">Application</span> Tamanu facility<span class="sub short">none</span></div>
+				</div>
+				<div class="note">The group is listed first and quiets every issue, so it carries no count. Fiji's clone environment is not offered: it is a sibling, not on the line of descent. Opened from the group page, every environment, machine and application in the group is listed.</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+<div class="row">
+	<div class="col">
+		<h2 class="frame">3. Retargeted onto a grain with its own window</h2>
+		<div class="dialog">
+			<div class="title">Amend maintenance</div>
+			<div class="content">
+				<div class="stack">
+					<div class="field">
+						<label>Covers</label>
+						<span class="chip kind">Machine</span> fj-central-1
+						<span class="caret">&#9662;</span>
+					</div>
+					<div class="alert info">
+						<span class="icon">&#128295;</span>
+						<div class="msg">fj-central-1 is already under maintenance, ending in 40 minutes. This amends that window.</div>
+					</div>
+					<p class="text" style="margin:0">Every check on this machine and the applications on it is suspended: nothing opens or joins an incident, and nothing notifies. The window ends itself at the time below, and watching resumes a few minutes later once the reporters have been heard from.</p>
+					<div class="toggles"><span>1h</span><span>2h</span><span>4h</span><span>8h</span></div>
+					<div class="field"><label>Expected to end</label>06/10/2026, 04:40 pm</div>
+					<div class="field multi"><label>What's being done</label>Upgrading to 2.62</div>
+				</div>
+			</div>
+			<div class="actions"><button class="btn">Cancel</button><button class="btn contained">Amend</button></div>
+		</div>
+	</div>
+
+	<div class="col">
+		<h2 class="frame">4. Amending a window, then moving it</h2>
+		<div class="dialog">
+			<div class="title">Amend maintenance</div>
+			<div class="content">
+				<div class="stack">
+					<div class="field">
+						<label>Covers</label>
+						<span class="chip kind">Environment</span><span class="chip prod">production</span>
+						<span class="caret">&#9662;</span>
+					</div>
+					<div class="alert info">
+						<span class="icon">&#128295;</span>
+						<div class="msg">Moves the window from Fiji to its production environment. The rest of the group settles, then is watched.</div>
+					</div>
+					<p class="text" style="margin:0">Every check on the group's production machines is suspended: nothing opens or joins an incident, and nothing notifies. The rest of the group stays watched. The window ends itself at the time below, and watching resumes a few minutes later once the reporters have been heard from.</p>
+					<div class="toggles"><span>1h</span><span>2h</span><span>4h</span><span>8h</span></div>
+					<div class="field"><label>Expected to end</label>06/10/2026, 05:10 pm</div>
+					<div class="field multi"><label>What's being done</label>Patching the central</div>
+				</div>
+			</div>
+			<div class="actions"><button class="btn" style="margin-right:auto">Lift</button><button class="btn">Cancel</button><button class="btn contained">Move</button></div>
+		</div>
+	</div>
+</div>
+
+<div class="row">
+	<div>
+		<h2 class="frame">5. Header shortcut on a machine page</h2>
+		<div class="header">
+			<div class="chips">
+				<span class="chip prod">production</span>
+				<span class="chip kind" style="text-transform:none">2 applications</span>
+				<h1><a href="#">Fiji</a> / fj-central-1</h1>
+			</div>
+			<div class="acts">
+				<button class="btn outlined">&#128200; Munin</button>
+				<button class="btn outlined">&#9888; Incidents</button>
+				<button class="btn outlined">&#128295; Maintenance</button>
+				<button class="btn outlined">&#9998; Edit</button>
+			</div>
+		</div>
+		<div class="note">Opens the dialog at this page's grain, with the picker. Where the machine already has a window it opens as an amendment of it.</div>
+	</div>
+</div>
+
+</body>
+</html>
