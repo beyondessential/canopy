@@ -509,11 +509,10 @@ impl MaintenanceWindow {
 		use crate::schema::maintenance_windows::dsl;
 		let window = Self::get(db, id).await?;
 		let now = Timestamp::now();
-		if !window.holds_at(now) {
-			return Err(AppError::BadRequest(
-				"a window that has ended is history; suspending again is a fresh declaration"
-					.into(),
-			));
+		// A window past its expected end is still open until the sweep stamps
+		// it, and amending its end then is the operator saying the work ran long.
+		if window.ended_at.is_some() {
+			return Err(ended_is_history());
 		}
 		if amendment.expected_end.is_some_and(|end| end <= now) {
 			return Err(AppError::BadRequest(
@@ -526,11 +525,16 @@ impl MaintenanceWindow {
 			));
 		};
 		let to = amendment.target.filter(|to| *to != from);
+		let expected_end = amendment.expected_end.unwrap_or(window.expected_end);
 		if let Some(to) = to {
+			if expected_end <= now {
+				return Err(AppError::BadRequest(
+					"this window is past its expected end; extend it to move it".into(),
+				));
+			}
 			window.check_movable(db, from, to, now).await?;
 		}
 
-		let expected_end = amendment.expected_end.unwrap_or(window.expected_end);
 		let note = amendment.note.unwrap_or_else(|| window.note.clone());
 		let covered_from = match MaintenanceWindowMove::for_window(db, id).await?.last() {
 			Some(last) => last.moved_at,
@@ -558,30 +562,34 @@ impl MaintenanceWindow {
 						.await
 						.map_err(AppError::from)?;
 				}
-				diesel::update(dsl::maintenance_windows.filter(dsl::id.eq(id)))
-					.set((
-						dsl::application_id.eq(application),
-						dsl::machine_id.eq(machine),
-						dsl::server_group_id.eq(group),
-						dsl::rank.eq(rank),
-						dsl::expected_end.eq(jiff_diesel::Timestamp::from(expected_end)),
-						dsl::note.eq(note.as_deref()),
-						dsl::amended_by.eq(by),
-						dsl::amended_at.eq(jiff_diesel::Timestamp::from(now)),
-						dsl::updated_at.eq(jiff_diesel::Timestamp::from(now)),
-					))
-					.returning(Self::as_select())
-					.get_result(conn)
-					.await
-					.map_err(|err| match err {
-						diesel::result::Error::DatabaseError(
-							diesel::result::DatabaseErrorKind::UniqueViolation,
-							_,
-						) => {
-							AppError::Conflict("that target already has a window of its own".into())
-						}
-						err => AppError::from(err),
-					})
+				// The sweep may have ended it since it was read.
+				diesel::update(
+					dsl::maintenance_windows
+						.filter(dsl::id.eq(id))
+						.filter(dsl::ended_at.is_null()),
+				)
+				.set((
+					dsl::application_id.eq(application),
+					dsl::machine_id.eq(machine),
+					dsl::server_group_id.eq(group),
+					dsl::rank.eq(rank),
+					dsl::expected_end.eq(jiff_diesel::Timestamp::from(expected_end)),
+					dsl::note.eq(note.as_deref()),
+					dsl::amended_by.eq(by),
+					dsl::amended_at.eq(jiff_diesel::Timestamp::from(now)),
+					dsl::updated_at.eq(jiff_diesel::Timestamp::from(now)),
+				))
+				.returning(Self::as_select())
+				.get_result(conn)
+				.await
+				.map_err(|err| match err {
+					diesel::result::Error::DatabaseError(
+						diesel::result::DatabaseErrorKind::UniqueViolation,
+						_,
+					) => AppError::Conflict("that target already has a window of its own".into()),
+					diesel::result::Error::NotFound => ended_is_history(),
+					err => AppError::from(err),
+				})
 			})
 			.await?;
 
@@ -1238,6 +1246,12 @@ pub async fn target_label(
 
 fn format_when(at: Timestamp) -> String {
 	at.strftime("%Y-%m-%d %H:%M UTC").to_string()
+}
+
+fn ended_is_history() -> AppError {
+	AppError::BadRequest(
+		"a window that has ended is history; suspending again is a fresh declaration".into(),
+	)
 }
 
 /// The targets of moves still inside their settle period.
