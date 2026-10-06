@@ -72,6 +72,7 @@ Validation considers every value `H` could take, so an expression accepted for o
 
 An expression is read in the timezone set on its schedule, otherwise in the operating system timezone the machine reports (see [FIG](figures.md)), otherwise in UTC.
 So a fleet default of nightly at 2am backs each machine up at its own 2am.
+A machine whose cron schedule falls back to UTC because it has reported no timezone is flagged as such wherever its schedule or next backup is shown, and in the firing preview, so an operator can tell a deliberate UTC schedule from one waiting on the machine.
 Firings follow the zone's wall clock across daylight-saving changes: a firing at a time the clocks skip happens at the first moment after the gap, and a firing at a time that occurs twice happens once, at the first occurrence.
 
 ### When a backup is due
@@ -87,6 +88,10 @@ A window that closes unmet is a missed firing: the backup waits for the next fir
 An expression without `H` opens each machine's window a short distance after the firing, derived stably from the machine and the type, so a group sharing one schedule does not reach its storage all at once.
 The distance stays small against the window, so the backup still starts close to the time the operator chose.
 An expression with `H` is the operator's own spread, and its windows open at the firing exactly.
+
+A backup is always due according to the machine's schedule as it stands.
+Changing a schedule at any layer, or the timezone it is read in (including the machine reporting a different one), closes any window the previous schedule had open, and what is due follows the new schedule's firings from then on.
+A run already in progress is unaffected.
 
 ### Editing schedules
 

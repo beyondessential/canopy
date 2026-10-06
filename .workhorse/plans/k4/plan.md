@@ -15,3 +15,5 @@
 - Escrow: include the machine override table and the new columns.
 - UI: extend `TypeDefaultEditor` (`BackupDefaults.tsx`) and `OverrideEditor` (`BackupPanel.tsx`) with a three-way kind selector. Reuse the timezone `Autocomplete` from `Upgrades.tsx`. Previews need a private endpoint that resolves the next firings for a given expression and machine(s). Add the machine override editor to the group panel's per-machine rows and to the machine page.
 - Run `just gen-openapi` for the private API changes. Add Playwright coverage for the editors.
+- Due state is computed from the schedule and zone as they stand on every push, never persisted, so a schedule or zone change drops an open window without any extra code. Keep it that way: don't cache firings or windows.
+- The UTC-fallback flag needs the effective-schedule resolution to report where its zone came from (schedule, machine, or fallback), so the group view, machine page and preview endpoint can all show it.
