@@ -26,6 +26,8 @@ Scenarios for choosing what a declaration covers, moving a window, and the page-
 - [x] A window a run lease is served against cannot move until the lease is released; another operator's lease does not hold it (verifies spec: MNT, INV)
 - [x] A moved window is in both targets' histories, each over the span it covered there (verifies spec: MNT)
 - [x] Neither a move nor the end of its settle period notifies (verifies spec: MNT)
+- [x] A window past its expected end that the sweep has not yet ended can be extended, and cannot be moved without extending it (verifies spec: MNT)
+- [x] A declaration offered over a target whose own window cannot move shows no picker, whether or not the caller named that window (verifies spec: MNT)
 - [x] The group's history shows a moved-off span as "moved to …" (verifies spec: MNT)
 
 ## Page-head control

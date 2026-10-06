@@ -383,13 +383,19 @@ pub async fn targets(
 		})
 		.collect();
 
-	let fixed_because = match args.window_id {
-		Some(id) => {
-			MaintenanceWindow::get(&mut conn, id)
-				.await?
-				.fixed_because(&mut conn)
-				.await?
-		}
+	// The window the declaration amends: the one named, or else the starting
+	// grain's own, since a declaration offered over a target with a window of
+	// its own amends it from the start.
+	// spec: MNT#moving-a-window
+	let own = match args.window_id {
+		Some(id) => Some(MaintenanceWindow::get(&mut conn, id).await?),
+		None => open
+			.iter()
+			.find(|window| window.grain() == Some(args.start))
+			.cloned(),
+	};
+	let fixed_because = match own {
+		Some(window) => window.fixed_because(&mut conn).await?,
 		None => None,
 	};
 	Ok(Json(MaintenanceTargets {
