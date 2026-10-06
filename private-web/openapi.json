@@ -15413,7 +15413,7 @@
               },
               {
                 "$ref": "#/components/schemas/ServerRank",
-                "description": "The environment tier this box serves, which every live application on\nit shares. `None` while the machine is pending. Set only through\n[`Machine::set_rank`], which writes it and the applications together."
+                "description": "The rank this box carries, which every live application on it shares.\n`None` while the machine is pending.\n\nKept when the machine is archived, as an archived application keeps its\nown, so what was on it comes back at it. The environment the box serves\nis [`Machine::environment_rank`], which an archived box has none of.\n\nRanked through [`Machine::set_rank`]; triggers keep it and the\napplications' rank together under any other writer."
               }
             ]
           },
