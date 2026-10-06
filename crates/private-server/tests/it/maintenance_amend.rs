@@ -268,6 +268,32 @@ async fn a_leased_windows_choices_say_it_cannot_move() {
 			targets["fixed_because"].is_string(),
 			"the run is acting on the environment the window covers: {targets}"
 		);
+
+		// Offered over the environment without naming its window, as the page
+		// head and the section do, the declaration still amends that window and
+		// is told it cannot move.
+		let unnamed: Value = private
+			.post("/api/maintenance/targets")
+			.json(&json!({
+				"start": { "kind": "environment", "group_id": GROUP, "rank": "production" },
+			}))
+			.await
+			.json();
+		assert!(
+			unnamed["fixed_because"].is_string(),
+			"the starting grain's own window is the one amended: {unnamed}"
+		);
+		let elsewhere: Value = private
+			.post("/api/maintenance/targets")
+			.json(&json!({
+				"start": { "kind": "environment", "group_id": GROUP, "rank": "clone" },
+			}))
+			.await
+			.json();
+		assert!(
+			elsewhere["fixed_because"].is_null(),
+			"a grain with no window of its own declares freely: {elsewhere}"
+		);
 		private
 			.post("/api/maintenance/amend")
 			.json(&json!({
