@@ -132,6 +132,7 @@ export default function Upgrades() {
 								<TableCell>Running</TableCell>
 								<TableCell>Going to</TableCell>
 								<TableCell>Data survives it</TableCell>
+								<TableCell>Testing</TableCell>
 								<TableCell>Planned for</TableCell>
 								<TableCell>Window</TableCell>
 								<TableCell>Note</TableCell>
@@ -167,6 +168,14 @@ export default function Upgrades() {
 													tally={row.tally}
 												/>
 												<AttemptChip attempt={row.attempt} />
+											</Stack>
+										</TableCell>
+										<TableCell>
+											<Stack
+												direction="row"
+												spacing={0.5}
+												sx={{ alignItems: "center" }}
+											>
 												<TestingChip testing={row.testing} />
 												<RequestTest
 													groupId={row.group_id}
