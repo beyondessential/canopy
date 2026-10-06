@@ -361,7 +361,8 @@ function Run({
 				onClose={() => setDialogOpen(false)}
 				scope="group"
 				id={groupId}
-				targetLabel={groupName}
+				rank={rank}
+				fixed
 				prefill={{ note: `configuring ${rank}` }}
 				onDone={onDeclared}
 			/>

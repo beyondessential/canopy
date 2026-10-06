@@ -349,7 +349,7 @@ pub async fn take_lease(
 		.iter()
 		.map(|machine| machine.id)
 		.collect();
-	let windows = MaintenanceWindow::open_over(&mut conn, group.id, &machine_ids).await?;
+	let windows = MaintenanceWindow::open_over(&mut conn, group.id, rank, &machine_ids).await?;
 	if let Some(window) = refusing_window(&windows, login, now) {
 		return Err(AppError::Conflict(under_maintenance(
 			group,
@@ -499,8 +499,13 @@ pub async fn run_state(
 		.iter()
 		.map(|machine| machine.id)
 		.collect();
-	let windows =
-		MaintenanceWindow::open_over(&mut conn, environment.group.id, &machine_ids).await?;
+	let windows = MaintenanceWindow::open_over(
+		&mut conn,
+		environment.group.id,
+		environment.rank,
+		&machine_ids,
+	)
+	.await?;
 	let refusing = refusing_window(&windows, login, now);
 
 	Ok(Json(RunState {

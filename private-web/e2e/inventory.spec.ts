@@ -355,11 +355,26 @@ test.describe("group inventory", () => {
 
 		await production.getByTestId("declare-work").click();
 		await expect(
-			page.getByRole("heading", { name: "Declare maintenance — drifting" }),
+			page.getByRole("heading", { name: "Declare maintenance" }),
 		).toBeVisible();
+		// The lease is served against this environment, so the declaration
+		// stays over it.
+		// spec: MNT#choosing-what-to-cover
+		await expect(page.getByRole("combobox", { name: "Covers" })).toHaveAttribute(
+			"aria-disabled",
+			"true",
+		);
 		await page.getByRole("button", { name: "Declare", exact: true }).click();
 
 		await expect(production.getByTestId("run-declared")).toBeVisible();
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ rank: string | null }>(
+					"SELECT rank FROM maintenance_windows WHERE ended_at IS NULL",
+				);
+				return rows.map((r) => r.rank);
+			})
+			.toEqual(["production"]);
 		await expect(production.getByTestId("declare-work")).toHaveCount(0);
 
 		// Lifting it in the section below is the same state, so the panel offers

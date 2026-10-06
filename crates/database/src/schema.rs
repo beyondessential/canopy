@@ -607,6 +607,21 @@ diesel::table! {
 }
 
 diesel::table! {
+	maintenance_window_moves (id) {
+		id -> Uuid,
+		window_id -> Uuid,
+		application_id -> Nullable<Uuid>,
+		machine_id -> Nullable<Uuid>,
+		server_group_id -> Nullable<Uuid>,
+		rank -> Nullable<Text>,
+		covered_from -> Timestamptz,
+		moved_at -> Timestamptz,
+		moved_by -> Nullable<Text>,
+		settled_at -> Nullable<Timestamptz>,
+	}
+}
+
+diesel::table! {
 	maintenance_windows (id) {
 		id -> Uuid,
 		machine_id -> Nullable<Uuid>,
@@ -624,6 +639,7 @@ diesel::table! {
 		updated_at -> Timestamptz,
 		rank -> Nullable<Text>,
 		application_id -> Nullable<Uuid>,
+		upgrade_plan_id -> Nullable<Uuid>,
 	}
 }
 
@@ -997,9 +1013,14 @@ diesel::joinable!(machine_enrollment_tokens -> machines (machine_id));
 diesel::joinable!(machine_reported_detail -> machines (machine_id));
 diesel::joinable!(machines -> devices (device_id));
 diesel::joinable!(machines -> server_groups (group_id));
+diesel::joinable!(maintenance_window_moves -> applications (application_id));
+diesel::joinable!(maintenance_window_moves -> machines (machine_id));
+diesel::joinable!(maintenance_window_moves -> maintenance_windows (window_id));
+diesel::joinable!(maintenance_window_moves -> server_groups (server_group_id));
 diesel::joinable!(maintenance_windows -> applications (application_id));
 diesel::joinable!(maintenance_windows -> machines (machine_id));
 diesel::joinable!(maintenance_windows -> server_groups (server_group_id));
+diesel::joinable!(maintenance_windows -> upgrade_plans (upgrade_plan_id));
 diesel::joinable!(migration_tests -> applications (application_id));
 diesel::joinable!(migration_tests -> backup_restore_checks (check_id));
 diesel::joinable!(migration_tests -> versions (target_version_id));
@@ -1075,6 +1096,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	machine_enrollment_tokens,
 	machine_reported_detail,
 	machines,
+	maintenance_window_moves,
 	maintenance_windows,
 	mcp_tokens,
 	migration_tests,

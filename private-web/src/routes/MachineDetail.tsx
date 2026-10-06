@@ -25,6 +25,7 @@ import MachineBackupSection from "../components/MachineBackupSection";
 import MachineDnsNamesSection from "../components/MachineDnsNamesSection";
 import MachineIdentitySection from "../components/MachineIdentitySection";
 import MachineSetupInstructions from "../components/MachineSetupInstructions";
+import MaintenanceHeaderButton from "../components/MaintenanceHeaderButton";
 import MaintenanceSection from "../components/MaintenanceSection";
 import ServerRankChip from "../components/ServerRankChip";
 import ServerShorty from "../components/ServerShorty";
@@ -171,6 +172,14 @@ export default function MachineDetail() {
 						groupId={data.group?.id ?? null}
 						refreshKey={refreshTick}
 					/>
+					{isAdmin && (
+						<MaintenanceHeaderButton
+							scope="machine"
+							id={data.machine.id}
+							compact
+							onDone={bumpRefresh}
+						/>
+					)}
 					{isAdmin && (
 						<GradedAction opens="fleet/machines/update">
 							<ActionButton
@@ -331,10 +340,10 @@ export default function MachineDetail() {
 				scope="machine"
 				anchor="maintenance"
 				id={data.machine.id}
-				targetLabel={data.machine.name}
 				groupId={data.group?.id ?? null}
 				groupName={data.group?.name ?? null}
 				rank={rank}
+				reloadKey={refreshTick}
 				onChanged={bumpRefresh}
 			/>
 

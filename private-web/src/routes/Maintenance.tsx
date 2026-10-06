@@ -1,7 +1,6 @@
 import {
 	Alert,
 	Button,
-	Chip,
 	LinearProgress,
 	Paper,
 	Stack,
@@ -17,6 +16,7 @@ import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import DeclareMaintenanceDialog from "../components/DeclareMaintenanceDialog";
 import { GradedAction } from "../components/GradedAction";
+import KindChip from "../components/KindChip";
 import ServerRankChip from "../components/ServerRankChip";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
@@ -27,16 +27,14 @@ import type {
 	ServerRank,
 } from "../types";
 
-/// Change a window's hours or note from the list, so the fleet view an operator
-/// finds work in is also where they adjust it.
-// spec: MNT#declaring
+/// Change a window's hours, note, or what it covers from the list, so the fleet
+/// view an operator finds work in is also where they adjust it.
+// spec: MNT#moving-a-window
 function AmendWindow({
 	window,
-	targetLabel,
 	onAmended,
 }: {
 	window: MaintenanceWindow;
-	targetLabel: string;
 	onAmended: () => void;
 }) {
 	const [open, setOpen] = useState(false);
@@ -55,7 +53,7 @@ function AmendWindow({
 	}
 	return (
 		<>
-			<GradedAction calls="maintenance/declare">
+			<GradedAction opens={["maintenance/amend", "maintenance/lift"]}>
 				<Button size="small" onClick={() => setOpen(true)}>
 					Amend
 				</Button>
@@ -66,7 +64,6 @@ function AmendWindow({
 				scope={scope}
 				id={id}
 				rank={window.rank ?? undefined}
-				targetLabel={targetLabel}
 				existing={window}
 				onDone={onAmended}
 			/>
@@ -102,19 +99,6 @@ function TargetKind({
 							? "group"
 							: "fleet"
 			}
-		/>
-	);
-}
-
-/// Styled to match [`ServerRankChip`], so a row carrying both reads as one set
-/// rather than two.
-function KindChip({ kind }: { kind: string }) {
-	return (
-		<Chip
-			size="small"
-			variant="outlined"
-			label={kind}
-			sx={{ textTransform: "capitalize" }}
 		/>
 	);
 }
@@ -216,7 +200,6 @@ export default function Maintenance() {
 											>
 												<AmendWindow
 													window={window}
-													targetLabel={target}
 													onAmended={list.reload}
 												/>
 												<GradedAction calls="maintenance/lift">
