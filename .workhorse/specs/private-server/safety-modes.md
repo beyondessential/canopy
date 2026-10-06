@@ -33,7 +33,7 @@ Activating a blocked control asks the operator to raise to the mode that control
 This holds for write as well as danger, so a stray click on a blocked control raises nothing by itself.
 The confirmation is titled with the action the control takes, and says the action needs that mode.
 Its confirming choice says the action continues in that mode, since confirming both raises and carries the action out.
-The confirmation for danger also says what danger mode unlocks, as the one reached from the mode control does.
+For danger, it also says why, from the reasons the handlers behind the control declare (see "Grading the administrative surface"), as in "This action needs danger mode: it cannot be undone."
 A control requiring danger raises straight to danger, from read-only as from write.
 
 Every graded control names its action and what it acts on, such as "Revoke certificate for host-3", rather than relying on its visible label, which is often a bare verb.
@@ -80,6 +80,10 @@ A handler that changes something is danger when any of the following holds, and 
 - It acts on the fleet rather than amending Canopy's own records. Revoking a machine's certificate qualifies; renaming a group does not.
 - It removes a protection without destroying anything at the time. Closing a machine's restore window and pausing certificate renewal both qualify.
 - It issues or invalidates credentials or trust material. Minting a fleet-query access token and changing the certificate authority both qualify.
+
+A handler graded danger declares which of these hold for it, and one that declares none fails the build.
+Issuing credentials and invalidating them are declared apart, so the reason given to the operator says which.
+The declared reasons are available to the operator interface alongside the grade.
 
 Changing a backup schedule at any layer is graded write, including setting it to manual-only or clearing it: a schedule is routine configuration, set back from the same editor, and every change to it is recorded (see [BKO](backup.md)).
 
