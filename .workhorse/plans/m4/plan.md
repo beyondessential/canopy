@@ -31,5 +31,5 @@ Triggers keep the two columns together whichever is written: an application inse
 - [x] Machine billing stage reads the box's rank
 - [x] Update endpoint drops the empty-box refusal; regenerate the private OpenAPI types
 - [x] Edit form, machine page and group tree read the machine's rank
-- [ ] Tests: database shared-rank, private-server update, e2e empty box
+- [x] Tests: database shared-rank, private-server update, e2e empty box
 - [x] AGENTS.md shared-rank rule
