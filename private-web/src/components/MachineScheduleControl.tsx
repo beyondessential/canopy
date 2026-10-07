@@ -46,6 +46,7 @@ export default function MachineScheduleControl({
 					"backups/set_machine_schedule",
 					"backups/clear_machine_schedule",
 				]}
+				action={`${overridden ? "Edit" : "Override"} ${cap.type} schedule${machineName ? ` for ${machineName}` : ""}`}
 			>
 				<Button
 					size="small"
@@ -158,7 +159,10 @@ function MachineScheduleDialog({
 			</DialogContent>
 			<DialogActions>
 				{overridden && (
-					<GradedAction calls="backups/clear_machine_schedule">
+					<GradedAction
+						calls="backups/clear_machine_schedule"
+						action={`Reset ${cap.type} schedule${machineName ? ` for ${machineName}` : ""} to inherited`}
+					>
 						<Button onClick={reset} disabled={pending}>
 							Reset to inherited
 						</Button>
@@ -167,7 +171,10 @@ function MachineScheduleDialog({
 				<Button onClick={onClose} disabled={pending}>
 					Cancel
 				</Button>
-				<GradedAction calls="backups/set_machine_schedule">
+				<GradedAction
+					calls="backups/set_machine_schedule"
+					action={`Save ${cap.type} schedule override${machineName ? ` for ${machineName}` : ""}`}
+				>
 					<Button
 						variant="contained"
 						onClick={save}
