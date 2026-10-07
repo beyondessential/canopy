@@ -407,15 +407,12 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 		let machine = crate::machines::Machine::get_by_id(db, machine_id).await?;
 		let label = machine.name.clone();
 
-		// Both flags are per-box now that the check is: whether this box's
-		// staleness (or never) check is currently degraded at all.
-		let stale_open = open_machine_issue_active(db, machine_id, refs::STALENESS).await?;
-		let never_open = open_machine_issue_active(db, machine_id, refs::NEVER).await?;
-
-		// What each type was last observed as, so a schedule taking effect
-		// carries an open finding over rather than clearing it.
-		let prior_stale = observed_degraded_types(db, machine_id, refs::STALENESS).await?;
-		let prior_never = observed_degraded_types(db, machine_id, refs::NEVER).await?;
+		// Whether this box's staleness (or never) check is currently degraded at
+		// all, and what each type was last observed as, so a schedule taking
+		// effect carries an open finding over rather than clearing it.
+		let held = held_backup_checks(db, machine_id).await?;
+		let (stale_open, prior_stale) = held.of(refs::STALENESS);
+		let (never_open, prior_never) = held.of(refs::NEVER);
 
 		let mut stale_instances: Vec<CheckInstance> = Vec::with_capacity(server_rows.len());
 		let mut never_instances: Vec<CheckInstance> = Vec::with_capacity(server_rows.len());
@@ -594,30 +591,47 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 	Ok(filed)
 }
 
-/// The types a machine's check state last observed as anything but passing.
-async fn observed_degraded_types(
+/// A machine's staleness and never-backed-up check states, read together.
+struct HeldBackupChecks(Vec<crate::issues::Issue>);
+
+impl HeldBackupChecks {
+	/// Whether the check is open and active, and the types its state last
+	/// observed as anything but passing.
+	fn of(&self, check: &str) -> (bool, std::collections::HashSet<String>) {
+		let Some(state) = self.0.iter().find(|i| i.r#ref == check) else {
+			return (false, Default::default());
+		};
+		let open = state.active && state.resolved_at.is_none();
+		let degraded = state
+			.stored_instances()
+			.map(|instances| {
+				instances
+					.0
+					.into_iter()
+					.filter(|(_, i)| {
+						!matches!(i.observed, CheckResult::Passed | CheckResult::Skipped)
+					})
+					.map(|(key, _)| key)
+					.collect()
+			})
+			.unwrap_or_default();
+		(open, degraded)
+	}
+}
+
+async fn held_backup_checks(
 	db: &mut AsyncPgConnection,
 	machine_id: Uuid,
-	check: &str,
-) -> Result<std::collections::HashSet<String>> {
-	let state = crate::issues::Issue::check_state_at(
-		db,
-		Scope::Machine(machine_id),
-		crate::statuses::CANOPY_SOURCE,
-		check,
-	)
-	.await?;
-	Ok(state
-		.and_then(|state| state.stored_instances())
-		.map(|instances| {
-			instances
-				.0
-				.into_iter()
-				.filter(|(_, i)| !matches!(i.observed, CheckResult::Passed | CheckResult::Skipped))
-				.map(|(key, _)| key)
-				.collect()
-		})
-		.unwrap_or_default())
+) -> Result<HeldBackupChecks> {
+	use crate::schema::issues::dsl;
+	let states = dsl::issues
+		.select(crate::issues::Issue::as_select())
+		.filter(dsl::machine_id.eq(machine_id))
+		.filter(dsl::source.eq(refs::CANOPY_SOURCE))
+		.filter(dsl::ref_.eq_any([refs::STALENESS, refs::NEVER]))
+		.load(db)
+		.await?;
+	Ok(HeldBackupChecks(states))
 }
 
 /// Every machine with an open, active staleness or never-backed-up finding.
