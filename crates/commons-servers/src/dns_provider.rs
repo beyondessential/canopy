@@ -274,6 +274,36 @@ impl DnsProvider {
 		}
 	}
 
+	/// This zone's own authoritative nameservers, read straight from Route 53
+	/// rather than from any DNS lookup — so a check against them cannot itself
+	/// be fooled by a stale answer some recursive resolver cached from an
+	/// earlier, differently-timed attempt at the same name.
+	pub async fn authoritative_nameservers(&self, zone: &ManagedZone) -> Result<Vec<String>> {
+		match self {
+			// Tests never reach the propagation check this feeds.
+			Self::Fake(_) => Ok(Vec::new()),
+			Self::Aws(config) => {
+				let client = self.route53_for(zone, config).await?;
+				let response = client
+					.get_hosted_zone()
+					.id(&zone.provider_zone_id)
+					.send()
+					.await
+					.map_err(|e| {
+						AppError::Upstream(format!(
+							"route53 could not read the nameservers for zone {}: {}",
+							zone.apex,
+							aws_error_message(&e),
+						))
+					})?;
+				Ok(response
+					.delegation_set()
+					.map(|set| set.name_servers().to_vec())
+					.unwrap_or_default())
+			}
+		}
+	}
+
 	/// A Route 53 client for a zone, assuming the zone's role when it names one
 	/// (the zone living in another account than Canopy's own).
 	async fn route53_for(
