@@ -16,12 +16,19 @@ use std::time::Duration;
 
 use commons_errors::{AppError, Result};
 use commons_types::dns::ManagedZone;
+use hickory_resolver::{
+	Resolver, TokioResolver,
+	config::{CLOUDFLARE, GOOGLE, ResolverConfig, ResolverOpts, ServerGroup},
+	net::runtime::TokioRuntimeProvider,
+	proto::rr::{RData, RecordType},
+};
 use instant_acme::{
 	Account, AuthorizationStatus, CertificateIdentifier, ChallengeType, Identifier, LetsEncrypt,
 	NewOrder, OrderStatus, RetryPolicy, RevocationRequest,
 };
 use jiff::Timestamp;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, pem::PemObject};
+use tokio::time::Instant;
 use tracing::{debug, info, warn};
 
 use crate::dns_provider::{DnsProvider, RecordSet};
@@ -36,6 +43,22 @@ const AUTHORISATION_TIMEOUT: Duration = Duration::from_secs(180);
 /// How long to wait for the authority to sign after the request is handed over.
 /// Signing is prompt; this is a backstop, not a budget.
 const FINALISE_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// How long to wait for a freshly-published challenge record to become visible
+/// to resolvers independent of Canopy's own zone before telling the authority
+/// to look. The authority validates promptly once asked and does not keep
+/// retrying the DNS lookup on Canopy's behalf, so signalling ready before the
+/// write has propagated anywhere wastes the whole attempt rather than merely
+/// risking it — [`AUTHORISATION_TIMEOUT`] is patience for the authority's
+/// answer, not for the record to exist in the first place.
+const PROPAGATION_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// How often to recheck while waiting for propagation.
+const PROPAGATION_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Per-query timeout against one public resolver, short so an unreachable
+/// resolver cannot itself eat the [`PROPAGATION_TIMEOUT`] budget.
+const PROPAGATION_QUERY_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Whose problem a failed conversation with the authority is. The type is shared
 /// with the alerting, which decides what to report from it; the classification
@@ -508,11 +531,19 @@ impl Acme {
 				}
 			};
 
-			let set = RecordSet::challenge(&subject, &challenge.key_authorization().dns_value());
+			let dns_value = challenge.key_authorization().dns_value();
+			let set = RecordSet::challenge(&subject, &dns_value);
+			let record_name = set.name.clone();
 			dns.upsert(zone, &set).await?;
 			// Recorded before the authority is told to look, so a failure between
 			// the two still gets cleaned up.
 			published.push(set);
+
+			// The authority validates promptly once asked and will not keep
+			// checking back on Canopy's behalf, so confirm the record is
+			// actually visible — to resolvers that never asked Route 53 and so
+			// cannot simply be agreeing with itself — before asking it to look.
+			Self::wait_for_propagation(&record_name, &dns_value).await?;
 
 			challenge
 				.set_ready()
@@ -531,6 +562,73 @@ impl Acme {
 			other => Err(Failure::order(format!(
 				"the authority left the order {other:?} rather than ready to sign"
 			))),
+		}
+	}
+
+	/// A resolver for one public DNS service, bypassing whatever resolver Canopy's
+	/// own network would otherwise use — the point of the check below is to ask
+	/// someone who never saw the Route 53 write, so Route 53 agreeing with itself
+	/// proves nothing.
+	fn public_resolver(group: &ServerGroup<'_>) -> AcmeResult<TokioResolver> {
+		// `ResolverOpts` is `#[non_exhaustive]`, so built from the default and
+		// adjusted rather than as a struct literal.
+		let mut options = ResolverOpts::default();
+		options.timeout = PROPAGATION_QUERY_TIMEOUT;
+		options.attempts = 1;
+		Resolver::builder_with_config(
+			ResolverConfig::udp_and_tcp(group),
+			TokioRuntimeProvider::default(),
+		)
+		.with_options(options)
+		.build()
+		.map_err(|e| Failure::order(format!("could not build a propagation-check resolver: {e}")))
+	}
+
+	/// Whether `resolver` currently answers `name`'s TXT records with `expected`
+	/// among them. A lookup error — commonly no record yet, which is exactly the
+	/// state being waited out — counts as not yet seen rather than a hard failure.
+	async fn resolver_sees(resolver: &TokioResolver, name: &str, expected: &str) -> bool {
+		let Ok(lookup) = resolver.lookup(name, RecordType::TXT).await else {
+			return false;
+		};
+		lookup.answers().iter().any(|record| match &record.data {
+			RData::TXT(txt) => txt
+				.txt_data
+				.iter()
+				.any(|segment| segment.as_ref() == expected.as_bytes()),
+			_ => false,
+		})
+	}
+
+	/// Wait until `name` resolves to `expected` for at least one resolver
+	/// independent of Canopy's own zone, or give up after [`PROPAGATION_TIMEOUT`]
+	/// and let the caller's ordinary order-level retry handle it.
+	///
+	/// Asking just one public resolver would only move the race rather than
+	/// closing it, so this asks two unrelated services and accepts either: the
+	/// point is evidence the write has left Route 53's own edge, not a survey of
+	/// the whole internet's resolvers (the authority's own validation servers
+	/// query independently and are not necessarily either of these).
+	async fn wait_for_propagation(name: &str, expected: &str) -> AcmeResult<()> {
+		let cloudflare = Self::public_resolver(&CLOUDFLARE)?;
+		let google = Self::public_resolver(&GOOGLE)?;
+		let deadline = Instant::now() + PROPAGATION_TIMEOUT;
+		loop {
+			let (seen_cloudflare, seen_google) = tokio::join!(
+				Self::resolver_sees(&cloudflare, name, expected),
+				Self::resolver_sees(&google, name, expected),
+			);
+			if seen_cloudflare || seen_google {
+				return Ok(());
+			}
+			if Instant::now() >= deadline {
+				return Err(Failure::order(format!(
+					"the challenge record at {name} had not propagated to public resolvers within \
+					 {}s",
+					PROPAGATION_TIMEOUT.as_secs()
+				)));
+			}
+			tokio::time::sleep(PROPAGATION_POLL_INTERVAL).await;
 		}
 	}
 
