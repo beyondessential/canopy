@@ -153,9 +153,10 @@ impl ScanRow {
 
 	/// [`Self::classify`], given what the last sweep observed of this pair.
 	///
-	/// A machine already stale when a cron schedule takes effect stays stale
-	/// until it backs up: the new schedule has had no firings to judge it by,
-	/// and changing a schedule must never clear staleness on its own.
+	/// A machine already stale when a schedule takes effect stays stale until it
+	/// backs up: a new cron schedule has had no firings to judge it by, a looser
+	/// interval would excuse the backups already missed, and changing a schedule
+	/// must never clear staleness on its own.
 	// spec: BKJ#detection
 	pub fn classify_after(
 		&self,
@@ -197,7 +198,6 @@ impl ScanRow {
 		let none_since_effective =
 			since.is_some_and(|s| self.last_success_at.is_none_or(|l| l < s));
 		if matches!(verdict, StalenessVerdict::Ok | StalenessVerdict::Recovered)
-			&& self.grace().is_none()
 			&& none_since_effective
 		{
 			if prior.stale && self.last_success_at.is_some() {

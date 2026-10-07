@@ -856,6 +856,31 @@ fn a_machine_already_stale_when_a_cron_schedule_takes_effect_stays_stale() {
 	);
 }
 
+/// Moving a stale machine onto a looser interval leaves it stale until it
+/// backs up, though the interval alone would count it fresh.
+// spec: BKJ#detection
+#[test]
+fn a_machine_already_stale_when_a_looser_interval_takes_effect_stays_stale() {
+	let mut row = cron_row(Some("2026-10-06T00:00:00Z"), Some("2026-10-03T02:10:00Z"));
+	row.schedule.schedule = Schedule::Interval {
+		seconds: 7 * 24 * 3600,
+	};
+	row.schedule.zone = None;
+	let now = ts("2026-10-06T01:00:00Z");
+	assert_eq!(row.classify(now, true), StalenessVerdict::Recovered);
+	assert_eq!(
+		row.classify_after(
+			now,
+			true,
+			Prior {
+				stale: true,
+				never: false
+			}
+		),
+		StalenessVerdict::Stale
+	);
+}
+
 /// A machine that has never backed up is stale once two firings have closed
 /// since its expectation began.
 // spec: BKJ#detection
