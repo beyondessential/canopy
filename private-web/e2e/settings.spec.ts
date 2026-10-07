@@ -26,6 +26,7 @@ test.describe("Settings", () => {
 		// The seeded tamanu-postgres default is shown.
 		const card = page.getByTestId("type-default-tamanu-postgres");
 		await expect(card).toBeVisible();
+		await card.getByRole("radio", { name: "Interval" }).check();
 		await card.getByLabel("Back up every (hours)").fill("8");
 		await card.getByRole("button", { name: /^save$/i }).click();
 
@@ -48,6 +49,7 @@ test.describe("Settings", () => {
 
 		const add = page.getByTestId("type-default-new");
 		await add.getByLabel("Backup type").fill("tamanu-files");
+		await add.getByRole("radio", { name: "Interval" }).check();
 		await add.getByLabel("Back up every (hours)").fill("12");
 		await add.getByRole("button", { name: /add type/i }).click();
 

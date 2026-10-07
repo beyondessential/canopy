@@ -133,11 +133,11 @@ pub const REPORTING_SCHEMA: &str = "reporting-schema";
 
 pub const STALENESS_DOC: &str = "## Description
 
-The server has backed this type up successfully before, but not recently: the latest success is older than twice the expected interval for the type.
+The server has backed this type up successfully before, but not recently: it has missed two consecutive opportunities. Under an interval that is a latest success older than twice the interval; under a cron schedule it is two consecutive firings whose windows closed with no success since the earlier of them.
 
 ## Results
 
-- **warn** — no successful run within 2\u{d7} the expected interval; recovers on the next successful run.
+- **warn** — two consecutive scheduled backups missed (2\u{d7} the interval, or two cron firings); recovers on the next successful run.
 
 ## Solve
 
@@ -145,7 +145,7 @@ Check the device's bestool logs for failed or stuck runs, confirm the backup sch
 
 pub const NEVER_DOC: &str = "## Description
 
-The server is expected to back this type up but has never reported a single successful run, and it has been enrolled long enough that one should have happened.
+The server is expected to back this type up but has never reported a single successful run, and it has been enrolled long enough that two scheduled backups should have happened.
 
 ## Results
 

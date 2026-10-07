@@ -8,12 +8,12 @@
 - Zone: the schedule's zone, else the machine's reported `osTimezone` figure, else UTC. Use `jiff` (already a dependency) for zone maths. Validate zone names with `TimeZone::get` the way upgrade plans do. A zone is only offered and stored on cron schedules.
 - Windows zone names: map the reported `osTimezone` through the CLDR `windowsZones` table (territory `001`) before `TimeZone::get`. Look in `~/.cargo/registry/src` for a crate carrying the table before vendoring it. Anything still unresolved falls back to UTC with the flag, reason "unrecognised" as distinct from "unreported".
 - Cron parsing: `cronexpr` 1.7 (add with `cargo add`; it's built on `jiff`). Its grammar is what BKO specifies: Vixie day-field semantics, names, `L`/`W`/`5L`/`5#3`, and `H` as a lone value via `ParseOptions::hashed_value`, mapped per field by `hash % field_range_len`. Seed `hashed_value` from a stable hash of `(machine_id, type)`, reusing the FNV mixing in `jitter_slot_in`. Store the five fields without a zone and append the resolved zone at parse time; refuse an operator expression that carries a sixth (zone) field, since the zone is its own setting.
-- Validation of the "never fires" and "hourly floor" rules has to range over every `H` resolution. Reason per field rather than enumerating a year of firings. Validation ignores DST entirely (naive wall clock).
+- Validation of the "never fires" and "hourly floor" rules has to range over every `H` resolution. `H` is substituted per field by Canopy rather than through `cronexpr`'s `hashed_value`, so each field resolves independently. Only the day and month fields decide whether an expression fires, so those are enumerated over; the hourly floor reduces to the minute field resolving to a single value. Validation ignores DST entirely (naive wall clock).
 - Runtime filter over `cronexpr`'s firings: drop any firing less than an hour after the previous kept one, or whose civil (wall-clock) datetime equals the previous kept one's (the fall-back duplicate `cronexpr` emits for a repeated hour). A dropped firing opens no window, doesn't bound the previous window, and isn't a staleness opportunity. Spring-forward needs nothing: `cronexpr` already omits firings in the skipped hour. A 65-minute floor was considered and rejected because it would drop every firing of an hourly expression.
 - Spread offset for non-`H` expressions: a stable hash of `(machine_id, type)`, capped at the smaller of 15 minutes and a quarter of the due window.
 - Due window: from the firing (plus offset) to the midpoint between this firing and the next one.
 - Staleness under cron: stale when the two most recent firings with closed windows have both gone without a success since the earlier one.
-- Escrow: there is no escrow writer in the tree yet, so nothing to version-bump. When it's built it must include the machine override table, the new columns, and the schedule history.
+- Escrow: the recovery vault writer (`crates/jobs/src/backup/recovery_snapshot.rs`) carries the fleet defaults, each group's overrides (with cron and zone, on the group's own rows), the machine overrides and the schedule history, and its schema version moved from 2 to 3.
 - UI: extend `TypeDefaultEditor` (`BackupDefaults.tsx`) and `OverrideEditor` (`BackupPanel.tsx`) with a three-way kind selector. Reuse the timezone `Autocomplete` from `Upgrades.tsx`. Previews need a private endpoint that resolves the next firings for a given expression and machine(s). Add the machine override editor to the group panel's per-machine rows and to the machine page.
 - Run `just gen-openapi` for the private API changes. Add Playwright coverage for the editors.
 - Schedule history: each layer's set/clear is appended to a history (layer key, kind, timing, zone, who, when) rather than overwriting in place; the current row per layer is the latest. Shown beside each editor.
@@ -29,13 +29,13 @@
 
 ## Checklist
 
-- [ ] Add `cronexpr` with `cargo add`; schedule enum, parser wrapper (zone appended, sixth field refused, `H` seeded), validation, runtime firing filter, unit tests incl. Pacific/Auckland DST transitions
-- [ ] Migrations: cron + zone columns on defaults and group overrides with the at-most-one CHECK; machine override table; schedule history; machine zone-changed-at; sub-hour interval migration
-- [ ] Windows zone mapping and zone-source reporting (schedule / machine / unreported / unrecognised)
-- [ ] `effective_schedule` resolution with layer, zone source, and effective-since
-- [ ] Due computation in `backups_due_now_for_machine`: interval as today, cron windows with spread offset, mid-window arrival
-- [ ] Staleness under cron, counting only firings since effective-since, with carry-over of an open staleness issue
-- [ ] Private API: set/clear for each layer (all `write`), history reads, firing preview endpoint, next-backup per machine; split retention clearing from schedule clearing; `just gen-openapi`
-- [ ] UI: kind selector on fleet default and group override editors, machine override editor on the group view and machine page, zone autocomplete, live preview and refusal reasons, history, next backup display, UTC flag
-- [ ] MCP: effective schedule and next backup on Get machine, overrides on Get group
-- [ ] Playwright coverage for the editors and preview
+- [x] Add `cronexpr` with `cargo add`; schedule enum, parser wrapper (zone appended, sixth field refused, `H` seeded), validation, runtime firing filter, unit tests incl. Pacific/Auckland DST transitions
+- [x] Migrations: cron + zone columns on defaults and group overrides with the at-most-one CHECK; machine override table; schedule history; machine zone-changed-at; sub-hour interval migration
+- [x] Windows zone mapping and zone-source reporting (schedule / machine / unreported / unrecognised)
+- [x] `effective_schedule` resolution with layer, zone source, and effective-since
+- [x] Due computation in `backups_due_now_for_machine`: interval as today, cron windows with spread offset, mid-window arrival
+- [x] Staleness under cron, counting only firings since effective-since, with carry-over of an open staleness issue
+- [x] Private API: set/clear for each layer (all `write`), history reads, firing preview endpoint, next-backup per machine; split retention clearing from schedule clearing; `just gen-openapi`
+- [x] UI: kind selector on fleet default and group override editors, machine override editor on the group view and machine page, zone autocomplete, live preview and refusal reasons, history, next backup display, UTC flag
+- [x] MCP: effective schedule and next backup on Get machine, overrides on Get group
+- [x] Playwright coverage for the editors and preview

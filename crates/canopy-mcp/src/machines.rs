@@ -6,8 +6,13 @@
 //! client can move between the two without a search.
 // spec: MCP#discovery
 
-use commons_types::{Uuid, status::HealthState};
+use commons_types::{
+	Uuid,
+	backup::schedule::{EffectiveSchedule, NextBackup, schedule_seed},
+	status::HealthState,
+};
 use database::{
+	MachineBackupCapability, backup::schedules::ScheduleBook, backups::BackupRun,
 	machines::Machine, reported_detail::MachineReportedDetail, server_groups::ServerGroup,
 	statuses::MergedDetail,
 };
@@ -162,6 +167,29 @@ struct MachineDetail {
 	health: HealthState,
 	/// The workloads running on this box.
 	applications: Vec<MachineApplicationOut>,
+	/// What the box can back up, one entry per backup type it has advertised.
+	// spec: MCP#discovery
+	backups: Vec<MachineBackupOut>,
+}
+
+/// One backup type a box can run: the schedule it follows, what to expect
+/// next, and its most recent success.
+#[derive(Serialize)]
+struct MachineBackupOut {
+	r#type: String,
+	/// Whether the operator has enabled backups of this type for the box.
+	enabled: bool,
+	/// The schedule the box follows, the layer it comes from (`machine`,
+	/// `group` or `fleet`), the zone a cron schedule is read in with where
+	/// that came from, and when the schedule took effect.
+	schedule: EffectiveSchedule,
+	/// The next firing, that the backup is due until a window closes, when an
+	/// interval next elapses, that it is due now, or manual. Absent for a type
+	/// that is not enabled.
+	next_backup: Option<NextBackup>,
+	/// The moment the data of the most recent successful backup was frozen.
+	latest_success_at: Option<Timestamp>,
+	latest_snapshot_id: Option<String>,
 }
 
 #[tool_router(router = machines_router, vis = "pub(crate)")]
@@ -280,7 +308,9 @@ impl CanopyMcp {
 		               (platform, processor count, memory, filesystems, uptime, addresses), its \
 		               health from the checks filed against it, and the applications running on \
 		               it. Backup capability and history are the machine's rather than any one \
-		               application's, so a box hosting two workloads reports one set."
+		               application's, so a box hosting two workloads reports one set: for each \
+		               backup type, the schedule it follows and which layer sets it, its next \
+		               scheduled backup, and its latest success."
 	)]
 	async fn get_machine(
 		&self,
@@ -330,6 +360,38 @@ impl CanopyMcp {
 			})
 			.collect();
 
+		let capabilities = MachineBackupCapability::list_for_machine(&mut conn, id)
+			.await
+			.map_err(mcp_err)?;
+		let group_ids: Vec<Uuid> = machine.group_id.into_iter().collect();
+		let book = ScheduleBook::load(&mut conn, Some(&group_ids), Some(&[id]))
+			.await
+			.map_err(mcp_err)?;
+		let now = Timestamp::now();
+		let mut backups = Vec::with_capacity(capabilities.len());
+		for cap in capabilities {
+			let last = BackupRun::latest_success_for_machine(&mut conn, id, &cap.r#type)
+				.await
+				.map_err(mcp_err)?;
+			let latest_success_at = last.as_ref().map(|r| r.anchor());
+			let schedule = book.resolve(id, machine.group_id, &cap.r#type);
+			let next_backup = cap.enabled.then(|| {
+				schedule.next_backup(
+					schedule_seed(id, cap.r#type.as_str()),
+					now,
+					latest_success_at,
+				)
+			});
+			backups.push(MachineBackupOut {
+				r#type: cap.r#type.to_string(),
+				enabled: cap.enabled,
+				schedule,
+				next_backup,
+				latest_success_at,
+				latest_snapshot_id: last.and_then(|r| r.snapshot_id),
+			});
+		}
+
 		ok_json(&MachineDetail {
 			id: machine.id,
 			name: machine.name,
@@ -345,6 +407,7 @@ impl CanopyMcp {
 			figures,
 			health,
 			applications,
+			backups,
 		})
 	}
 }

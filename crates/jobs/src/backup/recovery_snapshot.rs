@@ -26,8 +26,9 @@ use commons_servers::{
 	recovery_vault::Recipients,
 };
 use database::{
-	MachineBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
+	BackupTypeDefault, MachineBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
 	applications::Application,
+	backup::schedules::{MachineBackupSchedule, ScheduleChange},
 	inventory_variables::{InventoryVariable, VariableScope},
 	server_groups::ServerGroup,
 };
@@ -45,7 +46,9 @@ use super::worker::Worker;
 /// ever one recovery-state object per bucket; bucket versioning keeps the history.
 const VAULT_OBJECT_KEY: &str = "canopy-recovery/state.age";
 const DEFAULT_SNAPSHOT_HOURS: u64 = 24;
-const SCHEMA_VERSION: u32 = 2;
+/// Version 3 added the fleet-wide per-type defaults, the machine schedule
+/// overrides, and the schedule history (group overrides carry cron and zone).
+const SCHEMA_VERSION: u32 = 3;
 
 /// Where + how the recovery vault is written. Recipients are mandatory; the rest
 /// comes from `CANOPY_RECOVERY_VAULT_*`.
@@ -101,6 +104,9 @@ struct RecoverySnapshot {
 	groups: Vec<RecoveryGroup>,
 	applications: Vec<Application>,
 	enabled_capabilities: Vec<MachineBackupCapability>,
+	backup_type_defaults: Vec<BackupTypeDefault>,
+	machine_backup_schedules: Vec<MachineBackupSchedule>,
+	backup_schedule_history: Vec<ScheduleChange>,
 	inventory_variables: Vec<RecoveryInventoryVariables>,
 }
 
@@ -256,6 +262,15 @@ pub async fn build_snapshot_json(
 		enabled_capabilities: MachineBackupCapability::list_enabled(db)
 			.await
 			.context("list capabilities")?,
+		backup_type_defaults: BackupTypeDefault::list(db)
+			.await
+			.context("list backup type defaults")?,
+		machine_backup_schedules: MachineBackupSchedule::list_all(db)
+			.await
+			.context("list machine backup schedules")?,
+		backup_schedule_history: ScheduleChange::list_all(db)
+			.await
+			.context("list backup schedule history")?,
 		inventory_variables,
 	};
 	serde_json::to_vec(&snapshot).context("serialise snapshot")
@@ -383,6 +398,59 @@ mod tests {
 			assert_eq!(group["config"]["maintenance_role_arn"], "arn:maint");
 			// The passphrase keyset is the whole point — it must be present.
 			assert_eq!(group["config"]["keys"]["password"], "sekret");
+		})
+		.await;
+	}
+
+	/// The escrow carries every layer of the schedules that frame a recovery:
+	/// the fleet defaults, each group's overrides, each machine's overrides, and
+	/// the history, under a version that says so.
+	// spec: ESC, BKO#scheduling
+	#[tokio::test(flavor = "multi_thread")]
+	async fn snapshot_includes_every_schedule_layer_and_the_history() {
+		TestDb::run(|mut conn, _url| async move {
+			let group_id = uuid::Uuid::new_v4();
+			let machine_id = uuid::Uuid::new_v4();
+			conn.batch_execute(&format!(
+				"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
+				 INSERT INTO machines (id, name, group_id) VALUES ('{machine_id}', 'box', '{group_id}');
+				 INSERT INTO server_group_backup_config
+				   (group_id, bucket, prefix, target_role_arn, maintenance_role_arn,
+				    repo_password_ref, status, mode)
+				 VALUES ('{group_id}', 'bkt', 'p/', 'arn:dev', 'arn:maint',
+				    'backup-repo-{group_id}', 'ready', 'from_birth');
+				 INSERT INTO server_group_backup_schedule
+				   (group_id, type, expected_cron, schedule_zone)
+				 VALUES ('{group_id}', 'tamanu-postgres', '0 2 * * *', 'Pacific/Auckland');
+				 INSERT INTO machine_backup_schedule (machine_id, type, expected_interval)
+				 VALUES ('{machine_id}', 'tamanu-postgres', INTERVAL '12 hours');
+				 INSERT INTO backup_schedule_history (layer, type, machine_id, kind, interval, changed_by)
+				 VALUES ('machine', 'tamanu-postgres', '{machine_id}', 'interval', INTERVAL '12 hours', 'ann@x');"
+			))
+			.await
+			.unwrap();
+
+			let json = build_snapshot_json(&mut conn, &BackupSecrets::memory(), Timestamp::now())
+				.await
+				.unwrap();
+			let value: serde_json::Value = serde_json::from_slice(&json).unwrap();
+
+			assert_eq!(value["schema_version"], 3);
+			let fleet = value["backup_type_defaults"].as_array().unwrap();
+			assert!(
+				fleet.iter().any(|d| d["type"] == "tamanu-postgres"),
+				"the seeded fleet default is carried"
+			);
+			let machines = value["machine_backup_schedules"].as_array().unwrap();
+			assert_eq!(machines.len(), 1);
+			assert_eq!(machines[0]["machine_id"], machine_id.to_string());
+			let history = value["backup_schedule_history"].as_array().unwrap();
+			assert!(history.iter().any(|h| h["changed_by"] == "ann@x"));
+
+			// A group's own overrides ride with the group, cron and zone included.
+			let group = &value["groups"][0]["config"]["schedules"][0];
+			assert_eq!(group["expected_cron"], "0 2 * * *");
+			assert_eq!(group["schedule_zone"], "Pacific/Auckland");
 		})
 		.await;
 	}

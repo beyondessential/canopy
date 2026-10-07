@@ -2,7 +2,7 @@
 
 use commons_types::{
 	Uuid,
-	backup::{BackupType, MaintenanceKind, RunOutcome},
+	backup::{BackupType, MaintenanceKind, RunOutcome, schedule::Schedule},
 };
 use database::{
 	backups::{
@@ -119,8 +119,9 @@ struct MaintenanceRunsList {
 #[derive(Serialize)]
 struct BackupDefaultOut {
 	r#type: String,
-	/// Seconds between scheduled runs; `null` = manual-only.
-	default_interval_seconds: Option<i64>,
+	/// The default schedule: `manual`, an `interval` in seconds, or a `cron`
+	/// expression with its optional timezone.
+	default_schedule: Schedule,
 	default_retention: Option<RetentionPolicyOut>,
 	auto_enable: bool,
 	/// Whether this default opts out of the org retention floor (dangerous).
@@ -294,7 +295,8 @@ impl CanopyMcp {
 		// Every tool reads; none changes anything (see the SAFE spec).
 		annotations(read_only_hint = true),
 		description = "Canopy-wide default schedule/retention per backup type — what a group inherits for a \
-		               type unless it sets its own schedule override (see get_group's `backups.schedules`)."
+		               type unless it sets its own schedule override (see get_group's `backups.schedules`, and \
+		               `backups.machine_schedules` for its machines' own)."
 	)]
 	async fn get_backup_defaults(
 		&self,
@@ -306,7 +308,7 @@ impl CanopyMcp {
 			.into_iter()
 			.map(|d| BackupDefaultOut {
 				r#type: d.r#type.to_string(),
-				default_interval_seconds: d.default_interval.map(|pg| pg.0.as_secs()),
+				default_schedule: d.schedule(),
 				default_retention: RetentionPolicy::from_json(&d.default_retention).map(|r| {
 					RetentionPolicyOut {
 						keep_latest: r.keep_latest,

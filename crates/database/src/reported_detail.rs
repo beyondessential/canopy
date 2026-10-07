@@ -537,6 +537,19 @@ impl MachineReportedDetail {
 			.execute(db)
 			.await
 			.map_err(AppError::from)?;
+
+		// A schedule read in the machine's zone takes effect anew when the
+		// machine reports a different one, so the moment it changes is noted as
+		// the report comes in rather than read back out of status history.
+		// spec: BKO#when-a-backup-is-due
+		if let Some(zone) = extra
+			.get("osTimezone")
+			.and_then(|z| z.as_str())
+			.map(str::trim)
+			.filter(|z| !z.is_empty())
+		{
+			crate::backup::schedules::MachineReportedTimezone::observe(db, machine, zone).await?;
+		}
 		Ok(())
 	}
 

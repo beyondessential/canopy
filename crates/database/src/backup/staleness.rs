@@ -3,21 +3,23 @@
 //! Application-centric, per `(server, type)`: the subject is the server being
 //! protected; the device is the actor recorded in `backup_runs`.
 //!
-//! The scanned set is every enabled `(server, type)` capability whose
-//! effective schedule has a non-NULL `expected_interval` and whose group's
-//! `server_group_backup_config.status = 'ready'`. The effective schedule is
-//! the group's override row if it has one, else the type's canopy-wide
-//! `default_interval` — the same precedence the schedulers resolve with
-//! ([`crate::backups::effective_interval`]), so every pair that is commanded
-//! to back up is also monitored. Disabled / manual-only (an override row with
-//! a NULL interval) / non-ready configs are simply not in the set, so
-//! unauthorized or un-set-up devices never alert.
+//! The scanned set is every enabled `(machine, type)` capability whose
+//! effective schedule is not manual-only and whose group's
+//! `server_group_backup_config.status = 'ready'`. The schedule is the machine's
+//! override, else its group's, else the type's fleet-wide default, resolved by
+//! [`crate::backup::schedules::ScheduleBook`] — the same resolution the
+//! schedulers use, so every pair that is commanded to back up is also
+//! monitored. Disabled / manual-only / non-ready configs are simply not in the
+//! set, so unauthorized or un-set-up devices never alert.
 
 use std::collections::HashMap;
 
 use commons_errors::Result;
 use commons_types::{
-	backup::{BackupType, RunOutcome},
+	backup::{
+		BackupType, RunOutcome,
+		schedule::{EffectiveSchedule, Schedule, schedule_seed},
+	},
 	status::CheckResult,
 };
 use diesel::prelude::*;
@@ -55,7 +57,9 @@ pub struct ScanRow {
 	pub device_id: Option<Uuid>,
 	pub r#type: BackupType,
 	pub is_monitored: bool,
-	pub expected_interval: SignedDuration,
+	/// The schedule the machine has for the type. Never manual-only: those
+	/// pairs are not scanned.
+	pub schedule: EffectiveSchedule,
 	pub config_created_at: Timestamp,
 	/// When this machine was enrolled. `None` for one that never has.
 	pub machine_registered_at: Option<Timestamp>,
@@ -77,10 +81,48 @@ pub enum StalenessVerdict {
 	Ok,
 }
 
+/// What the last sweep left against a `(machine, type)`, read from the state of
+/// the checks it filed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Prior {
+	/// The staleness check last observed this type as stale.
+	pub stale: bool,
+	/// The never-backed-up check last observed this type as never having backed
+	/// up.
+	pub never: bool,
+}
+
 impl ScanRow {
-	/// `grace = expected_interval * 2`.
-	fn grace(&self) -> SignedDuration {
-		self.expected_interval.saturating_mul(2)
+	/// How long a backup stays fresh under an interval: twice the interval, so
+	/// one missed run is not stale and two are.
+	fn grace(&self) -> Option<SignedDuration> {
+		match &self.schedule.schedule {
+			Schedule::Interval { seconds } => {
+				Some(SignedDuration::from_secs(*seconds).saturating_mul(2))
+			}
+			_ => None,
+		}
+	}
+
+	fn seed(&self) -> u64 {
+		schedule_seed(self.machine_id, self.r#type.as_str())
+	}
+
+	/// Whether a backup whose data is from `at` is recent enough, at `now`.
+	///
+	/// Under an interval, that is within twice the interval. Under a cron
+	/// expression it is that the two most recent firings whose windows have
+	/// closed have not both gone without a success since the earlier of them.
+	/// Either way a machine is stale once it has missed two consecutive
+	/// opportunities.
+	// spec: BKJ#detection
+	pub fn fresh(&self, at: Timestamp, now: Timestamp) -> bool {
+		match self.grace() {
+			Some(grace) => now.duration_since(at) <= grace,
+			None => !self
+				.schedule
+				.missed_two_firings(self.seed(), now, Some(at), None),
+		}
 	}
 
 	/// `anchor = max(machine_registered_at, config_created_at)`, so a box
@@ -103,14 +145,27 @@ impl ScanRow {
 	}
 
 	/// Classify against `now`. `was_active` is whether a `backup-staleness`
-	/// (or `backup-never`) issue is currently open for this `(server, type)` —
-	/// used to distinguish a recovery from steady-state OK.
+	/// (or `backup-never`) issue is currently open for this machine — used to
+	/// distinguish a recovery from steady-state OK.
 	pub fn classify(&self, now: Timestamp, was_active: bool) -> StalenessVerdict {
-		let grace = self.grace();
-		match self.last_success_at {
+		self.classify_after(now, was_active, Prior::default())
+	}
+
+	/// [`Self::classify`], given what the last sweep observed of this pair.
+	///
+	/// A machine already stale when a cron schedule takes effect stays stale
+	/// until it backs up: the new schedule has had no firings to judge it by,
+	/// and changing a schedule must never clear staleness on its own.
+	// spec: BKJ#detection
+	pub fn classify_after(
+		&self,
+		now: Timestamp,
+		was_active: bool,
+		prior: Prior,
+	) -> StalenessVerdict {
+		let verdict = match self.last_success_at {
 			Some(last) => {
-				let stale = now.duration_since(last) > grace;
-				if stale {
+				if !self.fresh(last, now) {
 					StalenessVerdict::Stale
 				} else if was_active {
 					StalenessVerdict::Recovered
@@ -119,19 +174,44 @@ impl ScanRow {
 				}
 			}
 			None => {
-				// Never backed up: only alert once past the anchor + grace.
-				if now.duration_since(self.anchor()) > grace {
+				// Never backed up: only alert once two opportunities have
+				// passed since the expectation began.
+				let overdue = match self.grace() {
+					Some(grace) => now.duration_since(self.anchor()) > grace,
+					None => self.schedule.missed_two_firings(
+						self.seed(),
+						now,
+						None,
+						Some(self.anchor()),
+					),
+				};
+				if overdue {
 					StalenessVerdict::Never
 				} else {
 					StalenessVerdict::Ok
 				}
 			}
+		};
+
+		let since = self.schedule.since;
+		let none_since_effective =
+			since.is_some_and(|s| self.last_success_at.is_none_or(|l| l < s));
+		if matches!(verdict, StalenessVerdict::Ok | StalenessVerdict::Recovered)
+			&& self.grace().is_none()
+			&& none_since_effective
+		{
+			if prior.stale && self.last_success_at.is_some() {
+				return StalenessVerdict::Stale;
+			}
+			if prior.never && self.last_success_at.is_none() {
+				return StalenessVerdict::Never;
+			}
 		}
+		verdict
 	}
 }
 
 /// Raw scan-set row: `(machine_id, group_id, is_monitored, device_id, type,
-/// has_schedule_override, override_interval, default_interval,
 /// config_created_at, registered_at)`.
 type ScanBaseRow = (
 	Uuid,
@@ -139,54 +219,39 @@ type ScanBaseRow = (
 	bool,
 	Option<Uuid>,
 	String,
-	bool,
-	Option<crate::pg_duration::PgDuration>,
-	Option<crate::pg_duration::PgDuration>,
 	jiff_diesel::Timestamp,
 	Option<jiff_diesel::Timestamp>,
 );
 
-/// A scan-set row with its effective interval resolved, before the success and
-/// anchor lookups are attached.
+/// A scan-set row with its schedule resolved, before the success and anchor
+/// lookups are attached.
 struct ScanRowBase {
 	machine_id: Uuid,
 	group_id: Uuid,
 	is_monitored: bool,
 	device_id: Option<Uuid>,
 	r#type: BackupType,
-	expected_interval: SignedDuration,
+	schedule: EffectiveSchedule,
 	config_created_at: Timestamp,
 	machine_registered_at: Option<Timestamp>,
 }
 
 /// Build the scan set: every enabled `(machine, type)` capability in a
-/// `status='ready'` group whose effective schedule has a non-NULL
-/// `expected_interval`. Per `(machine, type)`, attach the latest backup success
-/// and the machine's enrolment moment as the anchor.
+/// `status='ready'` group whose schedule is not manual-only. Per `(machine,
+/// type)`, attach the latest backup success and the machine's enrolment moment
+/// as the anchor.
 ///
 /// Rooted at the machine rather than at the applications on it: a capability is
 /// a box's, and a box shared by two workloads owes one backup rather than two.
 // spec: BAK
 pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 	use crate::schema::{
-		backup_type_defaults as defaults, machine_backup_capabilities as cap, machines,
-		server_group_backup_config as cfg, server_group_backup_schedule as sched,
+		machine_backup_capabilities as cap, machines, server_group_backup_config as cfg,
 	};
 
-	// Join: machines -> their group's ready config -> enabled capability, with
-	// both interval sources left-joined. The effective interval is resolved in
-	// Rust below rather than in SQL, because "override row present but NULL"
-	// (manual-only) and "no override row" (inherit the default) have to stay
-	// distinguishable — a COALESCE would flatten them together.
 	let base: Vec<ScanBaseRow> = machines::table
 		.inner_join(cfg::table.on(cfg::group_id.nullable().eq(machines::group_id)))
 		.inner_join(cap::table.on(cap::machine_id.eq(machines::id)))
-		.left_join(
-			sched::table.on(sched::group_id
-				.eq(cfg::group_id)
-				.and(sched::type_.eq(cap::type_))),
-		)
-		.left_join(defaults::table.on(defaults::type_.eq(cap::type_)))
 		.filter(machines::deleted_at.is_null())
 		.filter(cfg::status.eq("ready"))
 		.filter(cap::enabled.eq(true))
@@ -196,18 +261,19 @@ pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 			machines::is_monitored,
 			machines::device_id,
 			cap::type_,
-			sched::group_id.nullable().is_not_null(),
-			sched::expected_interval.nullable(),
-			defaults::default_interval.nullable(),
 			cfg::created_at,
 			machines::registered_at.nullable(),
 		))
 		.load(db)
 		.await?;
 
-	// Resolve each pair's effective interval, dropping the ones with none: an
-	// override row answers on its own (NULL = manual-only), otherwise the type
-	// default applies. Mirrors [`crate::backups::effective_interval`].
+	if base.is_empty() {
+		return Ok(Vec::new());
+	}
+
+	// Resolve each pair's schedule, dropping the manual-only ones: nothing is
+	// expected of them, so nothing is late.
+	let book = crate::backup::schedules::ScheduleBook::load(db, None, None).await?;
 	let base: Vec<ScanRowBase> = base
 		.into_iter()
 		.filter_map(
@@ -217,24 +283,21 @@ pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 				is_monitored,
 				device_id,
 				ty,
-				has_override,
-				override_interval,
-				default_interval,
 				created_at,
 				machine_registered_at,
 			)| {
-				let interval = if has_override {
-					override_interval
-				} else {
-					default_interval
-				}?;
+				let r#type = BackupType::from(ty);
+				let schedule = book.resolve(machine_id, Some(group_id), &r#type);
+				if schedule.schedule == Schedule::Manual {
+					return None;
+				}
 				Some(ScanRowBase {
 					machine_id,
 					group_id,
 					is_monitored,
 					device_id,
-					r#type: BackupType::from(ty),
-					expected_interval: interval.0,
+					r#type,
+					schedule,
 					config_created_at: Timestamp::from(created_at),
 					machine_registered_at: machine_registered_at.map(Timestamp::from),
 				})
@@ -277,7 +340,7 @@ pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 				device_id: row.device_id,
 				r#type: row.r#type,
 				is_monitored: row.is_monitored,
-				expected_interval: row.expected_interval,
+				schedule: row.schedule,
 				config_created_at: row.config_created_at,
 				machine_registered_at: row.machine_registered_at,
 				last_success_at,
@@ -349,13 +412,26 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 		let stale_open = open_machine_issue_active(db, machine_id, refs::STALENESS).await?;
 		let never_open = open_machine_issue_active(db, machine_id, refs::NEVER).await?;
 
+		// What each type was last observed as, so a schedule taking effect
+		// carries an open finding over rather than clearing it.
+		let prior_stale = observed_degraded_types(db, machine_id, refs::STALENESS).await?;
+		let prior_never = observed_degraded_types(db, machine_id, refs::NEVER).await?;
+
 		let mut stale_instances: Vec<CheckInstance> = Vec::with_capacity(server_rows.len());
 		let mut never_instances: Vec<CheckInstance> = Vec::with_capacity(server_rows.len());
 		let mut any_stale = false;
 		let mut any_never = false;
 
 		for row in server_rows {
-			let verdict = row.classify(now, stale_open);
+			let key = row.r#type.to_string();
+			let verdict = row.classify_after(
+				now,
+				stale_open,
+				Prior {
+					stale: prior_stale.contains(&key),
+					never: prior_never.contains(&key),
+				},
+			);
 			let grace = row.grace();
 
 			let stale = verdict == StalenessVerdict::Stale;
@@ -370,7 +446,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				},
 				detail: Some(serde_json::json!({
 					"type": row.r#type.to_string(),
-					"grace_secs": grace.as_secs(),
+					"grace_secs": grace.map(|g| g.as_secs()),
+					"schedule": row.schedule.schedule,
 					"last_success_at": row.last_success_at.map(|t| t.to_string()),
 				})),
 			});
@@ -468,8 +545,95 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 		}
 	}
 
+	// A machine whose every scheduled type has since gone manual-only, or been
+	// disabled, is no longer scanned, and a manual-only type is never stale: so
+	// its open findings are brought to rest here, having nothing to stay open for.
+	for machine_id in machines_with_open_backup_checks(db).await? {
+		if by_machine.contains_key(&machine_id) {
+			continue;
+		}
+		let machine = crate::machines::Machine::get_by_id(db, machine_id).await?;
+		let label = machine.name.clone();
+		for (check, documentation, message) in [
+			(
+				refs::STALENESS,
+				refs::STALENESS_DOC,
+				format!("Application {label} is backing up on schedule again"),
+			),
+			(
+				refs::NEVER,
+				refs::NEVER_DOC,
+				format!("Application {label} has now backed up everything expected of it"),
+			),
+		] {
+			if !open_machine_issue_active(db, machine_id, check).await? {
+				continue;
+			}
+			file_check_instances(
+				db,
+				InstancedCheckFiling {
+					source: crate::statuses::CANOPY_SOURCE,
+					scope: Scope::Machine(machine_id),
+					device_id: machine.device_id,
+					check,
+					title: None,
+					detail: None,
+					outcome: CheckOutcome::Instances(Vec::new()),
+					default_ceiling: CheckResult::Warning,
+					default_escalates: false,
+					documentation: Some(documentation),
+				},
+				&|_| message.clone(),
+			)
+			.await?;
+			filed += 1;
+		}
+	}
+
 	filed += sweep_maintenance(db, now).await?;
 	Ok(filed)
+}
+
+/// The types a machine's check state last observed as anything but passing.
+async fn observed_degraded_types(
+	db: &mut AsyncPgConnection,
+	machine_id: Uuid,
+	check: &str,
+) -> Result<std::collections::HashSet<String>> {
+	let state = crate::issues::Issue::check_state_at(
+		db,
+		Scope::Machine(machine_id),
+		crate::statuses::CANOPY_SOURCE,
+		check,
+	)
+	.await?;
+	Ok(state
+		.and_then(|state| state.stored_instances())
+		.map(|instances| {
+			instances
+				.0
+				.into_iter()
+				.filter(|(_, i)| !matches!(i.observed, CheckResult::Passed | CheckResult::Skipped))
+				.map(|(key, _)| key)
+				.collect()
+		})
+		.unwrap_or_default())
+}
+
+/// Every machine with an open, active staleness or never-backed-up finding.
+async fn machines_with_open_backup_checks(db: &mut AsyncPgConnection) -> Result<Vec<Uuid>> {
+	use crate::schema::issues::dsl;
+	let ids: Vec<Option<Uuid>> = dsl::issues
+		.select(dsl::machine_id)
+		.distinct()
+		.filter(dsl::machine_id.is_not_null())
+		.filter(dsl::source.eq(refs::CANOPY_SOURCE))
+		.filter(dsl::ref_.eq_any([refs::STALENESS, refs::NEVER]))
+		.filter(dsl::active.eq(true))
+		.filter(dsl::resolved_at.is_null())
+		.load(db)
+		.await?;
+	Ok(ids.into_iter().flatten().collect())
 }
 
 /// Group-level maintenance health, per `status='ready'` group:

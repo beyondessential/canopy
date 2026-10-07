@@ -1256,8 +1256,12 @@ export async function seedServerGroupBackupConfig(
 		status?: BackupConfigStatus;
 		mode?: BackupRepoMode;
 		lastInitError?: string | null;
-		/** Seconds; null = manual-only. Omit to skip seeding a schedule row. */
+		/** Seconds; null = manual-only. Omit to leave the schedule to inherit. */
 		intervalSeconds?: number | null;
+		/** A cron schedule override, in place of `intervalSeconds`. */
+		cron?: { expression: string; zone?: string | null };
+		/** Seeds a retention override. With no schedule given, the row overrides
+		 * retention alone. */
 		retention?: Record<string, number>;
 	},
 ): Promise<void> {
@@ -1278,28 +1282,69 @@ export async function seedServerGroupBackupConfig(
 			opts.lastInitError ?? null,
 		],
 	);
-	if (opts.intervalSeconds !== undefined || opts.retention !== undefined) {
-		const retention = opts.retention ?? {
-			keep_latest: 1,
-			keep_daily: 7,
-			keep_weekly: 4,
-			keep_monthly: 6,
-			keep_annual: 0,
-		};
-		if (opts.intervalSeconds == null) {
-			await sql.query(
-				`INSERT INTO server_group_backup_schedule (group_id, type, expected_interval, retention)
-				 VALUES ($1, 'tamanu-postgres', NULL, $2::jsonb)`,
-				[opts.groupId, JSON.stringify(retention)],
-			);
-		} else {
-			await sql.query(
-				`INSERT INTO server_group_backup_schedule (group_id, type, expected_interval, retention)
-				 VALUES ($1, 'tamanu-postgres', make_interval(secs => $2), $3::jsonb)`,
-				[opts.groupId, opts.intervalSeconds, JSON.stringify(retention)],
-			);
-		}
+	if (
+		opts.intervalSeconds !== undefined ||
+		opts.cron !== undefined ||
+		opts.retention !== undefined
+	) {
+		const hasSchedule =
+			opts.intervalSeconds !== undefined || opts.cron !== undefined;
+		await sql.query(
+			`INSERT INTO server_group_backup_schedule
+			 (group_id, type, expected_interval, expected_cron, schedule_zone, has_schedule, retention)
+			 VALUES ($1, 'tamanu-postgres',
+			         CASE WHEN $2::int IS NULL THEN NULL ELSE make_interval(secs => $2::int) END,
+			         $3, $4, $5, $6::jsonb)`,
+			[
+				opts.groupId,
+				opts.intervalSeconds ?? null,
+				opts.cron?.expression ?? null,
+				opts.cron?.zone ?? null,
+				hasSchedule,
+				opts.retention ? JSON.stringify(opts.retention) : null,
+			],
+		);
 	}
+}
+
+/** Seed a machine's own schedule override for a type: an interval, a cron
+ * expression, or (neither) manual-only. */
+export async function seedMachineBackupSchedule(
+	sql: Sql,
+	opts: {
+		machineId: string;
+		type?: string;
+		intervalSeconds?: number;
+		cron?: { expression: string; zone?: string | null };
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO machine_backup_schedule
+		 (machine_id, type, expected_interval, expected_cron, schedule_zone)
+		 VALUES ($1, $2,
+		         CASE WHEN $3::int IS NULL THEN NULL ELSE make_interval(secs => $3::int) END,
+		         $4, $5)`,
+		[
+			opts.machineId,
+			opts.type ?? "tamanu-postgres",
+			opts.intervalSeconds ?? null,
+			opts.cron?.expression ?? null,
+			opts.cron?.zone ?? null,
+		],
+	);
+}
+
+/** The operating system timezone a machine reports. A machine with no row
+ * reports none, which a cron schedule reads as UTC. */
+export async function seedMachineTimezone(
+	sql: Sql,
+	opts: { machineId: string; timezone: string },
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO machine_reported_timezone (machine_id, timezone) VALUES ($1, $2)
+		 ON CONFLICT (machine_id) DO UPDATE SET timezone = EXCLUDED.timezone`,
+		[opts.machineId, opts.timezone],
+	);
 }
 
 /** Seed a reported `backup_runs` row. */

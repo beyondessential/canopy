@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 use commons_errors::{AppError, Result};
 use commons_types::backup::{
 	BackupConfigStatus, BackupPlacement, BackupPurpose, BackupRepoMode, BackupType,
-	MaintenanceKind, RunOutcome,
+	MaintenanceKind, RunOutcome, schedule::Schedule,
 };
 use diesel::{
 	dsl::now,
@@ -562,6 +562,25 @@ pub struct BackupTypeDefault {
 	/// Opt out of the org retention floor for this type's default (dangerous):
 	/// the floor is neither validated on write nor enforced on resolve.
 	pub allow_below_floor: bool,
+	/// Default cron expression, when the default is a cron schedule rather than
+	/// an interval. At most one of this and `default_interval` is set; neither
+	/// means manual-only.
+	pub default_cron: Option<String>,
+	/// The timezone `default_cron` is read in; none reads it in each machine's
+	/// own. Only set beside a cron expression.
+	pub default_zone: Option<String>,
+}
+
+impl BackupTypeDefault {
+	/// The default schedule for the type.
+	// spec: BKO#scheduling
+	pub fn schedule(&self) -> Schedule {
+		Schedule::from_columns(
+			self.default_interval.map(|d| d.0.as_secs()),
+			self.default_cron.clone(),
+			self.default_zone.clone(),
+		)
+	}
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -574,6 +593,8 @@ pub struct NewBackupTypeDefault {
 	pub default_retention: JsonValue,
 	pub auto_enable: bool,
 	pub allow_below_floor: bool,
+	pub default_cron: Option<String>,
+	pub default_zone: Option<String>,
 }
 
 impl BackupTypeDefault {
@@ -607,6 +628,8 @@ impl BackupTypeDefault {
 			.do_update()
 			.set((
 				dsl::default_interval.eq(new.default_interval),
+				dsl::default_cron.eq(&new.default_cron),
+				dsl::default_zone.eq(&new.default_zone),
 				dsl::default_retention.eq(&new.default_retention),
 				dsl::auto_enable.eq(new.auto_enable),
 				dsl::allow_below_floor.eq(new.allow_below_floor),
@@ -728,6 +751,24 @@ impl MachineBackupCapability {
 			.map_err(AppError::from)
 	}
 
+	/// Every enabled `(machine, type)` on a non-archived machine in the group.
+	pub async fn enabled_for_group(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+	) -> Result<Vec<(Uuid, BackupType)>> {
+		use crate::schema::{machine_backup_capabilities as cap, machines};
+
+		cap::table
+			.inner_join(machines::table.on(machines::id.eq(cap::machine_id)))
+			.filter(machines::group_id.eq(group_id))
+			.filter(machines::deleted_at.is_null())
+			.filter(cap::enabled.eq(true))
+			.select((cap::machine_id, cap::type_))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Distinct backup types that are **enabled** on any non-archived machine in
 	/// the group — i.e. the types the group is actively expected to back up on a
 	/// schedule. Used for scheduling cadence and staleness alerting.
@@ -783,6 +824,10 @@ impl MachineBackupCapability {
 
 /// A group's override of the schedule and/or retention for one backup type,
 /// taking precedence over the canopy-wide default for that type.
+///
+/// The row carries the two overrides apart: `has_schedule` says whether the
+/// schedule columns override anything, and `retention` is null when retention
+/// is inherited. A row with neither does not exist.
 #[derive(
 	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, utoipa::ToSchema,
 )]
@@ -797,8 +842,8 @@ pub struct ServerGroupBackupSchedule {
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
 	/// Interval, in seconds, between scheduled backups of this type for this
-	/// group. `None` means manual-only (no schedule) — distinct from a
-	/// present value of 0.
+	/// group. Meaningful only when `has_schedule`; with no cron expression,
+	/// `None` means manual-only (no schedule).
 	#[schema(value_type = Option<i64>, format = "int64")]
 	pub expected_interval: Option<PgDuration>,
 	/// Retention policy override for this group and type, in the same shape
@@ -814,21 +859,30 @@ pub struct ServerGroupBackupSchedule {
 	/// Opt out of the org retention floor for this override (dangerous): the
 	/// floor is neither validated on write nor enforced on resolve.
 	pub allow_below_floor: bool,
-}
-
-#[derive(Debug, Clone, Insertable)]
-#[diesel(table_name = crate::schema::server_group_backup_schedule)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct NewServerGroupBackupSchedule {
-	pub group_id: Uuid,
-	#[diesel(column_name = type_)]
-	pub r#type: BackupType,
-	pub expected_interval: Option<PgDuration>,
-	pub retention: Option<JsonValue>,
-	pub allow_below_floor: bool,
+	/// A cron expression, when the schedule override is cron rather than an
+	/// interval.
+	pub expected_cron: Option<String>,
+	/// The timezone the cron expression is read in; none reads it in each
+	/// machine's own.
+	pub schedule_zone: Option<String>,
+	/// Whether the schedule columns override the schedule beneath, or this row
+	/// is only a retention override.
+	pub has_schedule: bool,
 }
 
 impl ServerGroupBackupSchedule {
+	/// The schedule this overrides with, if it overrides one.
+	// spec: BKO#scheduling
+	pub fn schedule(&self) -> Option<Schedule> {
+		self.has_schedule.then(|| {
+			Schedule::from_columns(
+				self.expected_interval.map(|d| d.0.as_secs()),
+				self.expected_cron.clone(),
+				self.schedule_zone.clone(),
+			)
+		})
+	}
+
 	pub async fn get(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
@@ -856,20 +910,34 @@ impl ServerGroupBackupSchedule {
 			.map_err(AppError::from)
 	}
 
-	pub async fn upsert(
+	/// Set the group's schedule override for a type, leaving any retention
+	/// override as it is.
+	pub async fn set_schedule(
 		db: &mut AsyncPgConnection,
-		new: NewServerGroupBackupSchedule,
+		group_id: Uuid,
+		r#type: &BackupType,
+		schedule: &Schedule,
 	) -> Result<Self> {
 		use crate::schema::server_group_backup_schedule::dsl;
 
+		let (interval, cron, zone) = schedule.to_columns();
+		let interval = interval.map(|s| PgDuration(SignedDuration::from_secs(s)));
 		diesel::insert_into(dsl::server_group_backup_schedule)
-			.values(&new)
+			.values((
+				dsl::group_id.eq(group_id),
+				dsl::type_.eq(r#type.as_str()),
+				dsl::expected_interval.eq(interval),
+				dsl::expected_cron.eq(&cron),
+				dsl::schedule_zone.eq(&zone),
+				dsl::has_schedule.eq(true),
+			))
 			.on_conflict((dsl::group_id, dsl::type_))
 			.do_update()
 			.set((
-				dsl::expected_interval.eq(new.expected_interval),
-				dsl::retention.eq(&new.retention),
-				dsl::allow_below_floor.eq(new.allow_below_floor),
+				dsl::expected_interval.eq(interval),
+				dsl::expected_cron.eq(&cron),
+				dsl::schedule_zone.eq(&zone),
+				dsl::has_schedule.eq(true),
 				dsl::updated_at.eq(now),
 			))
 			.returning(Self::as_select())
@@ -878,47 +946,96 @@ impl ServerGroupBackupSchedule {
 			.map_err(AppError::from)
 	}
 
-	/// Remove a group's per-`(group,type)` schedule override so the type reverts
-	/// to inheriting the canopy-wide default. No-op if there was no override.
-	pub async fn delete(
+	/// Remove the group's schedule override for a type, so it inherits the
+	/// fleet default again. A retention override on the same row stays; a row
+	/// left overriding nothing is removed.
+	pub async fn clear_schedule(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
 		r#type: &BackupType,
 	) -> Result<()> {
 		use crate::schema::server_group_backup_schedule::dsl;
 
-		diesel::delete(
-			dsl::server_group_backup_schedule
-				.filter(dsl::group_id.eq(group_id))
-				.filter(dsl::type_.eq(r#type.as_str())),
-		)
-		.execute(db)
-		.await
-		.map_err(AppError::from)?;
+		let filter = dsl::server_group_backup_schedule
+			.filter(dsl::group_id.eq(group_id))
+			.filter(dsl::type_.eq(r#type.as_str()));
+		diesel::update(filter.clone())
+			.set((
+				dsl::expected_interval.eq(None::<PgDuration>),
+				dsl::expected_cron.eq(None::<String>),
+				dsl::schedule_zone.eq(None::<String>),
+				dsl::has_schedule.eq(false),
+				dsl::updated_at.eq(now),
+			))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		diesel::delete(filter.filter(dsl::retention.is_null()))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
 		Ok(())
 	}
-}
 
-/// Resolve the effective scheduled backup interval for one `(group, type)`.
-///
-/// The single source of truth for this precedence, shared by the schedulers,
-/// the staleness scan, and the admin API — they must agree or a pair can be
-/// commanded to back up on a cadence nothing then monitors (or vice versa).
-///
-/// An override *row* decides on its own: its `expected_interval` is the answer,
-/// including when it is NULL, which the model documents as manual-only. Only
-/// the absence of a row inherits the type's canopy-wide `default_interval`.
-/// `None` ⇒ no scheduled cadence (manual-only).
-pub async fn effective_interval(
-	db: &mut AsyncPgConnection,
-	group_id: Uuid,
-	r#type: &BackupType,
-) -> Result<Option<PgDuration>> {
-	match ServerGroupBackupSchedule::get(db, group_id, r#type).await? {
-		Some(schedule) => Ok(schedule.expected_interval),
-		None => Ok(BackupTypeDefault::get(db, r#type)
-			.await?
-			.and_then(|d| d.default_interval)),
+	/// Set the group's retention override for a type, leaving any schedule
+	/// override as it is.
+	pub async fn set_retention(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		r#type: &BackupType,
+		retention: &JsonValue,
+		allow_below_floor: bool,
+	) -> Result<Self> {
+		use crate::schema::server_group_backup_schedule::dsl;
+
+		diesel::insert_into(dsl::server_group_backup_schedule)
+			.values((
+				dsl::group_id.eq(group_id),
+				dsl::type_.eq(r#type.as_str()),
+				dsl::retention.eq(Some(retention)),
+				dsl::allow_below_floor.eq(allow_below_floor),
+				dsl::has_schedule.eq(false),
+			))
+			.on_conflict((dsl::group_id, dsl::type_))
+			.do_update()
+			.set((
+				dsl::retention.eq(Some(retention)),
+				dsl::allow_below_floor.eq(allow_below_floor),
+				dsl::updated_at.eq(now),
+			))
+			.returning(Self::as_select())
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Remove the group's retention override for a type, so it inherits the
+	/// fleet default again. A schedule override on the same row stays; a row
+	/// left overriding nothing is removed.
+	pub async fn clear_retention(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		r#type: &BackupType,
+	) -> Result<()> {
+		use crate::schema::server_group_backup_schedule::dsl;
+
+		let filter = dsl::server_group_backup_schedule
+			.filter(dsl::group_id.eq(group_id))
+			.filter(dsl::type_.eq(r#type.as_str()));
+		diesel::update(filter.clone())
+			.set((
+				dsl::retention.eq(None::<JsonValue>),
+				dsl::allow_below_floor.eq(false),
+				dsl::updated_at.eq(now),
+			))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		diesel::delete(filter.filter(dsl::has_schedule.eq(false)))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
 	}
 }
 

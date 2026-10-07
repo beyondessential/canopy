@@ -20,6 +20,8 @@ use diesel::{
 };
 use serde::{Deserialize, Serialize};
 
+pub mod schedule;
+
 /// Generate a closed string-valued enum stored as Postgres `TEXT`, with the
 /// `Display`/`FromStr`/`FromSql`/`ToSql` plumbing the `Severity` pattern uses.
 /// The string literal per variant is the single source of truth for the wire
