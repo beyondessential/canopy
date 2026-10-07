@@ -27,6 +27,7 @@ mod issues;
 mod kubernetes_clusters;
 mod machines;
 mod maintenance;
+mod maintenance_amend;
 mod maintenance_targets;
 mod mcp;
 mod migration_tests;

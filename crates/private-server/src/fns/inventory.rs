@@ -344,20 +344,6 @@ pub async fn take_lease(
 		return Err(AppError::Conflict(held.held_by_another()));
 	}
 
-	let machine_ids: Vec<Uuid> = environment
-		.machines
-		.iter()
-		.map(|machine| machine.id)
-		.collect();
-	let windows = MaintenanceWindow::open_over(&mut conn, group.id, &machine_ids).await?;
-	if let Some(window) = refusing_window(&windows, login, now) {
-		return Err(AppError::Conflict(under_maintenance(
-			group,
-			&environment.machines,
-			window,
-		)));
-	}
-
 	if args.intent == RunIntent::Upgrade
 		&& rank == ServerRank::Production
 		&& UpgradePlan::open_for_environment(&mut conn, group.id, rank)
@@ -370,16 +356,29 @@ pub async fn take_lease(
 		)));
 	}
 
+	let machine_ids: Vec<Uuid> = environment
+		.machines
+		.iter()
+		.map(|machine| machine.id)
+		.collect();
+	// The windows over the environment are read under the group's lock, which
+	// a window moving over any part of the group also takes, so a window cannot
+	// move off the environment between this check and the lease it lets through.
+	// spec: INV#work-under-way
 	let taken = InventoryLease::take(
 		&mut conn,
 		group.id,
 		rank,
+		&machine_ids,
 		args.intent,
 		Some(login),
 		args.note.as_deref(),
 		args.take_over,
 	)
-	.await?;
+	.await?
+	.map_err(|window| {
+		AppError::Conflict(under_maintenance(group, &environment.machines, &window))
+	})?;
 
 	tracing::info!(
 		login = %admin.0.login,
@@ -499,9 +498,14 @@ pub async fn run_state(
 		.iter()
 		.map(|machine| machine.id)
 		.collect();
-	let windows =
-		MaintenanceWindow::open_over(&mut conn, environment.group.id, &machine_ids).await?;
-	let refusing = refusing_window(&windows, login, now);
+	let windows = MaintenanceWindow::open_over(
+		&mut conn,
+		environment.group.id,
+		environment.rank,
+		&machine_ids,
+	)
+	.await?;
+	let refusing = MaintenanceWindow::refusing_run(&windows, login, now);
 
 	Ok(Json(RunState {
 		refuses: refusing.is_some(),
@@ -673,24 +677,6 @@ pub async fn for_group(
 		secret_vars: wide.secret.into_iter().collect(),
 		hosts,
 	}))
-}
-
-/// The window a take is refused for: one holding over the environment that
-/// belongs to somebody else. The group page and the refusal read the same
-/// windows the same way, so they cannot disagree.
-fn refusing_window<'a>(
-	windows: &'a [MaintenanceWindow],
-	login: &str,
-	now: Timestamp,
-) -> Option<&'a MaintenanceWindow> {
-	windows.iter().find(|window| {
-		window.holds_at(now)
-			&& window
-				.declared_by
-				.as_deref()
-				.is_some_and(|who| who != login)
-			&& window.amended_by.as_deref() != Some(login)
-	})
 }
 
 /// The operator a window belongs to: an amendment declares the same work, so

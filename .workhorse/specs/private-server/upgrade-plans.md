@@ -94,6 +94,7 @@ An upgrade run on a production environment reads the open plan as its permission
 A plan changes what is tested, so changing one invalidates nothing already recorded: earlier verdicts stand against the versions they named, and the new target simply becomes the one that has not been tested yet.
 
 Declaring maintenance reads the open plan for its prefill: an operator starting the work is offered a window over the plan's environment, carrying the plan's window and note (see [MNT](../monitoring/maintenance.md)).
+A window declared this way stays over the plan's environment until it ends, so the plan it holds open stays held (see [MNT](../monitoring/maintenance.md), "Moving a window").
 The plan is read at the moment someone declares, so a planned hour arriving suspends nothing on its own.
 
 ## The dashboard

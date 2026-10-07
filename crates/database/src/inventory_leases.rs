@@ -14,6 +14,8 @@ use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::maintenance_windows::MaintenanceWindow;
+
 /// How long a lease holds before it has to be extended. A run that dies stops
 /// holding the environment once this passes.
 pub const LEASE_DURATION: SignedDuration = SignedDuration::from_mins(30);
@@ -153,33 +155,57 @@ impl InventoryLease {
 			.map_err(AppError::from)
 	}
 
+	/// Every unreleased lease on the group's environments, expired or not.
+	pub async fn open_for_group(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<Vec<Self>> {
+		use crate::schema::inventory_leases::dsl;
+
+		dsl::inventory_leases
+			.select(Self::as_select())
+			.filter(dsl::server_group_id.eq(group_id))
+			.filter(dsl::released_at.is_null())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Take the environment's lease, releasing an expired one in the way.
-	/// Refuses one another operator still holds unless `take_over`.
+	/// Refuses one another operator still holds unless `take_over`, and gives
+	/// back instead of taking where another operator's maintenance window holds
+	/// over the environment: over its group, the environment itself, or any of
+	/// `machine_ids` (see [`MaintenanceWindow::refusing_run`]).
 	///
 	/// Takes the group's row so concurrent takes on one environment queue
-	/// rather than racing the open-lease index into a database error. The
-	/// no-key form is what makes that cheap: `FOR UPDATE` would also queue
-	/// behind every job writing a row that references the group.
+	/// rather than racing the open-lease index into a database error. A window
+	/// moving over any part of the group takes the same row, so the window this
+	/// is checked against cannot move off the environment before the lease is
+	/// in. The no-key form is what makes that cheap: `FOR UPDATE` would also
+	/// queue behind every job writing a row that references the group.
+	// spec: INV#work-under-way
+	#[allow(clippy::too_many_arguments)]
 	pub async fn take(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
 		rank: ServerRank,
+		machine_ids: &[Uuid],
 		intent: RunIntent,
 		held_by: Option<&str>,
 		note: Option<&str>,
 		take_over: bool,
-	) -> Result<Self> {
+	) -> Result<std::result::Result<Self, MaintenanceWindow>> {
 		use crate::schema::inventory_leases::dsl;
 		use diesel_async::AsyncConnection;
 
 		db.transaction::<_, AppError, _>(async |conn| {
-			let _group: Uuid = crate::schema::server_groups::table
-				.select(crate::schema::server_groups::id)
-				.find(group_id)
-				.for_no_key_update()
-				.first(conn)
-				.await
-				.map_err(AppError::from)?;
+			lock_group(conn, group_id).await?;
+
+			let windows = MaintenanceWindow::open_over(conn, group_id, rank, machine_ids).await?;
+			if let Some(window) = MaintenanceWindow::refusing_run(
+				&windows,
+				held_by.unwrap_or_default(),
+				Timestamp::now(),
+			) {
+				return Ok(Err(window.clone()));
+			}
 
 			if let Some(open) = Self::open_for(conn, group_id, rank).await? {
 				if !take_over && open.holds_for_another(held_by, Timestamp::now()) {
@@ -201,6 +227,7 @@ impl InventoryLease {
 				.returning(Self::as_select())
 				.get_result(conn)
 				.await
+				.map(Ok)
 				.map_err(AppError::from)
 		})
 		.await
@@ -271,4 +298,19 @@ impl InventoryLease {
 			.map_err(AppError::from)?
 			.ok_or_else(|| AppError::NotFound("no such lease".into()))
 	}
+}
+
+/// Hold the group's row for the rest of the transaction, so taking a lease on
+/// any of its environments and moving a window over any part of it are decided
+/// one after the other. The no-key form only queues behind other holders of
+/// this lock, not behind every write referencing the group.
+pub async fn lock_group(conn: &mut AsyncPgConnection, group_id: Uuid) -> Result<()> {
+	crate::schema::server_groups::table
+		.select(crate::schema::server_groups::id)
+		.find(group_id)
+		.for_no_key_update()
+		.first::<Uuid>(conn)
+		.await
+		.map_err(AppError::from)?;
+	Ok(())
 }

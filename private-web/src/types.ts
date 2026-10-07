@@ -102,6 +102,47 @@ export type MaintenanceWindow = Solidify<Schemas["MaintenanceWindow"]>;
 /** The grain a window is declared at. An environment is a group with a rank.
  * spec: MNT#declaring */
 export type MaintenanceScope = "application" | "machine" | "group";
+/** One target a window can cover: exactly one of the ids, and with the group,
+ * the rank of one of its environments where it is narrowed to one.
+ * spec: MNT#choosing-what-to-cover */
+export type MaintenanceTarget = Solidify<Schemas["MaintenanceTarget"]>;
+/** What keeps a window over the target it covers. */
+export type HeldInPlace = Solidify<Schemas["HeldInPlace"]>;
+
+/** The target a window over `scope` names. */
+export function maintenanceTarget(
+	scope: MaintenanceScope,
+	id: string,
+	rank?: ServerRank | null,
+): MaintenanceTarget {
+	return {
+		application_id: scope === "application" ? id : null,
+		machine_id: scope === "machine" ? id : null,
+		server_group_id: scope === "group" ? id : null,
+		rank: scope === "group" ? (rank ?? null) : null,
+	};
+}
+
+/** The target a window covers now, where it covers one a window can name. */
+export function targetOfWindow(window: MaintenanceWindow): MaintenanceTarget | null {
+	if (window.application_id) return maintenanceTarget("application", window.application_id);
+	if (window.machine_id) return maintenanceTarget("machine", window.machine_id);
+	if (window.server_group_id)
+		return maintenanceTarget("group", window.server_group_id, window.rank);
+	return null;
+}
+
+/** What kind of target it is, as the kind chip names it. */
+export function targetKind(
+	target: MaintenanceTarget,
+): "application" | "machine" | "environment" | "group" {
+	if (target.application_id) return "application";
+	if (target.machine_id) return "machine";
+	return target.rank ? "environment" : "group";
+}
+export type MaintenanceTargetChoice = Solidify<Schemas["MaintenanceTargetChoice"]>;
+/** One span of a window over a target, as the target's history reads it. */
+export type TargetWindow = Solidify<Schemas["TargetWindow"]>;
 
 export type GroupEnvironment = Solidify<Schemas["GroupEnvironment"]>;
 export type ResolvedReason = Solidify<Schemas["ResolvedReason"]>;

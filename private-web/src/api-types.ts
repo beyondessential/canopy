@@ -3329,6 +3329,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/maintenance/amend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Amend an open window: its end, its note, or what it covers.
+         * @description Only what the request names changes. A new target moves the window there:
+         *     it stays the same window, the target it left settles as though the window
+         *     had ended over it, and what it newly covers is suspended from now. A window
+         *     declared from an upgrade plan, or one a configuration run's lease is being
+         *     served against, cannot move.
+         *     Requires admin access.
+         */
+        post: operations["amend"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/maintenance/declare": {
         parameters: {
             query?: never;
@@ -3368,8 +3393,10 @@ export interface paths {
         put?: never;
         /**
          * A target's maintenance windows.
-         * @description Open and ended, most recently declared first, so what was being done the
-         *     last time the target went quiet is readable against it.
+         * @description Those still covering it first, then the rest by when they stopped, so what
+         *     was being done the last time the target went quiet is readable against it.
+         *     A group's include the windows over its environments, so the history is read
+         *     per application, machine, or group, and a rank is refused.
          */
         post: operations["for_target"];
         delete?: never;
@@ -3416,6 +3443,29 @@ export interface paths {
          *     period runs.
          */
         post: operations["list_open"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/maintenance/targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The grains a declaration offered over `start` can cover.
+         * @description Whatever contains the starting grain and whatever it contains, nested
+         *     group over environment over machine over application, each with its own
+         *     open window. Offered from an incident, each choice says whether a window
+         *     there would cover every failing check in it.
+         */
+        post: operations["targets"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4879,6 +4929,25 @@ export interface components {
              *     `Pacific/Fiji`. Required alongside a time.
              */
             planned_zone?: string | null;
+        };
+        /**
+         * @description What to change about an open window. A field left out keeps the window's
+         *     own, so amending someone else's window changes only what was chosen.
+         */
+        AmendWindowArgs: {
+            /**
+             * Format: date-time
+             * @description A new expected end.
+             */
+            expected_end?: string | null;
+            /**
+             * Format: uuid
+             * @description The window to amend.
+             */
+            id: string;
+            /** @description A new note. Null clears it; leaving it out keeps the window's own. */
+            note?: string | null;
+            target?: null | components["schemas"]["MaintenanceTarget"];
         };
         /**
          * @description A single application in the fleet: the unit that reports status, files
@@ -6365,31 +6434,20 @@ export interface components {
             name: string;
         };
         /** @description Declare a window over a target, or amend the one it already has. */
-        DeclareArgs: {
-            /**
-             * Format: uuid
-             * @description The application, for a window over one workload. Covers that
-             *     application and nothing else on the box it runs on.
-             */
-            application_id?: string | null;
+        DeclareArgs: components["schemas"]["MaintenanceTarget"] & {
             /**
              * Format: date-time
              * @description When the work is expected to finish. The window ends itself then.
              */
             expected_end: string;
-            /**
-             * Format: uuid
-             * @description The machine, for a window over one box. Covers every application on it.
-             */
-            machine_id?: string | null;
             /** @description What is being done. */
             note?: string | null;
-            rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: uuid
-             * @description The group, for a window over a whole group or one of its environments.
+             * @description The upgrade plan this is declared from, over the plan's environment. A
+             *     window it opens stays over that environment for as long as it holds.
              */
-            server_group_id?: string | null;
+            upgrade_plan_id?: string | null;
         };
         /** @description Request body for decommissioning a check. */
         DecommissionArgs: {
@@ -7253,6 +7311,21 @@ export interface components {
             notes?: string | null;
             /** @description The source whose check to update. */
             source: string;
+        };
+        /** @description What keeps a window over the target it covers. */
+        HeldInPlace: {
+            /** @enum {string} */
+            kind: "upgrade_plan";
+            /**
+             * Format: uuid
+             * @description The plan it was declared from.
+             */
+            plan_id: string;
+        } | {
+            /** @description The operator running. */
+            held_by?: string | null;
+            /** @enum {string} */
+            kind: "run_lease";
         };
         /** @description Pagination parameters for browsing the shared query history. */
         HistoryArgs: {
@@ -8730,6 +8803,79 @@ export interface components {
          */
         MaintenanceKind: "quick" | "full";
         /**
+         * @description A target a window can cover, named the way a declaration names it: exactly
+         *     one of the ids, and with the group, optionally the rank of one of its
+         *     environments.
+         */
+        MaintenanceTarget: {
+            /**
+             * Format: uuid
+             * @description The application, for a window over one workload.
+             */
+            application_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The machine, for a window over one box.
+             */
+            machine_id?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
+            /**
+             * Format: uuid
+             * @description The group, for a window over a whole group or one of its environments.
+             */
+            server_group_id?: string | null;
+        };
+        /** @description One grain a declaration can cover. */
+        MaintenanceTargetChoice: {
+            /**
+             * @description Offered from an incident: whether a window here would cover every one
+             *     of its failing checks.
+             */
+            covers_failures?: boolean | null;
+            /**
+             * Format: int32
+             * @description How many of the listed grains contain this one.
+             */
+            depth: number;
+            /**
+             * @description The grain's own name: a group's, a machine's, an application's, or an
+             *     environment's rank.
+             */
+            label: string;
+            /** @description The target a window here would cover. */
+            target: components["schemas"]["MaintenanceTarget"];
+            window?: null | components["schemas"]["MaintenanceWindow"];
+        };
+        /**
+         * @description The grains a declaration can cover, nested in the order they contain one
+         *     another.
+         */
+        MaintenanceTargets: {
+            amends?: null | components["schemas"]["MaintenanceWindow"];
+            /**
+             * @description Whatever contains the starting grain and whatever it contains, nested
+             *     in the order they contain one another.
+             */
+            choices: components["schemas"]["MaintenanceTargetChoice"][];
+            held_in_place?: null | components["schemas"]["HeldInPlace"];
+        };
+        /** @description Where a declaration starts, and what it is read against. */
+        MaintenanceTargetsArgs: {
+            /**
+             * Format: uuid
+             * @description The incident it is offered from, to mark the choices that leave some of
+             *     its failing checks contributing.
+             */
+            incident_id?: string | null;
+            /** @description The target the declaration is offered over. */
+            start: components["schemas"]["MaintenanceTarget"];
+            /**
+             * Format: uuid
+             * @description The window being amended, where the declaration is an amendment.
+             */
+            window_id?: string | null;
+        };
+        /**
          * @description A declaration that an application, a machine, a group, or one of a group's
          *     environments is being worked on.
          */
@@ -8806,6 +8952,12 @@ export interface components {
              * @description When this record was last modified.
              */
             updated_at: string;
+            /**
+             * Format: uuid
+             * @description The upgrade plan this window was declared from, which keeps it over the
+             *     plan's environment for as long as it holds.
+             */
+            upgrade_plan_id?: string | null;
         };
         /**
          * @description A DNS zone Canopy can write records in.
@@ -11865,24 +12017,24 @@ export interface components {
              */
             total: number;
         };
-        /** @description The target a window covers: exactly one of the ids is set. */
-        TargetArgs: {
+        /** @description One span of a window over a target, as the target's history reads it. */
+        TargetWindow: {
             /**
-             * Format: uuid
-             * @description The application, for a window over one workload. Covers that
-             *     application and nothing else on the box it runs on.
+             * Format: date-time
+             * @description When the window started covering this target: its declaration, or the
+             *     move that brought it here.
              */
-            application_id?: string | null;
+            covered_from: string;
+            covered_rank?: null | components["schemas"]["ServerRank"];
             /**
-             * Format: uuid
-             * @description The machine, for a window over one box. Covers every application on it.
+             * Format: date-time
+             * @description When the window moved off this target, for a span that ended that way.
              */
-            machine_id?: string | null;
-            /**
-             * Format: uuid
-             * @description The group, for a window over a whole group or one of its environments.
-             */
-            server_group_id?: string | null;
+            moved_at?: string | null;
+            /** @description Where it moved to, as it reads to an operator. */
+            moved_to?: string | null;
+            /** @description The window, as it stands now. */
+            window: components["schemas"]["MaintenanceWindow"];
         };
         /** @description Request body for the versions an environment could be planned onto. */
         TargetsArgs: {
@@ -16943,6 +17095,54 @@ export interface operations {
             };
         };
     };
+    amend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AmendWindowArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceWindow"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The target has a window of its own, or the window is held where it is by an upgrade plan or a configuration run */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     declare: {
         parameters: {
             query?: never;
@@ -16983,7 +17183,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TargetArgs"];
+                "application/json": components["schemas"]["MaintenanceTarget"];
             };
         };
         responses: {
@@ -16992,7 +17192,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MaintenanceWindow"][];
+                    "application/json": components["schemas"]["TargetWindow"][];
                 };
             };
             400: {
@@ -17055,6 +17255,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpenWindow"][];
+                };
+            };
+        };
+    };
+    targets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MaintenanceTargetsArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceTargets"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
         };

@@ -24,6 +24,7 @@ import ReportingSchemasSection from "../components/ReportingSchemasSection";
 import { OperatorAvatar, connectedFor } from "../components/OperatorAvatars";
 import ActiveIncidentCard from "../components/ActiveIncidentCard";
 import GroupTree from "../components/GroupTree";
+import MaintenanceHeaderButton from "../components/MaintenanceHeaderButton";
 import MaintenanceSection from "../components/MaintenanceSection";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import { useApi, useApiAction } from "../api";
@@ -142,6 +143,13 @@ export default function GroupDetail() {
 								Add machine
 							</Button>
 						</GradedAction>
+						{!group.deleted_at && (
+						<MaintenanceHeaderButton
+							scope="group"
+							id={group.id}
+							onDone={() => setMaintenanceTick((n) => n + 1)}
+						/>
+						)}
 						<GradedAction opens="fleet/groups/update">
 							<Button
 								component={RouterLink}
@@ -276,8 +284,6 @@ export default function GroupDetail() {
 				scope="group"
 				anchor="maintenance"
 				id={group.id}
-				targetLabel={group.name}
-				environments={detail.data.environments.map((e) => e.rank)}
 				reloadKey={maintenanceTick}
 				onChanged={() => setMaintenanceTick((n) => n + 1)}
 			/>

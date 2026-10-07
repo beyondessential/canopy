@@ -66,6 +66,7 @@ A window over one machine refuses the whole environment, since a run acts on the
 A window over a machine none of the environment's applications run on refuses nothing.
 
 An operator about to run declares their own window first and is served the environment their window covers.
+The window stays over that environment while their lease is held (see [MNT](../monitoring/maintenance.md), "Moving a window").
 A target holds at most one open window, so a second operator's declaration amends the first's rather than opening one of their own.
 An amendment declares the same work, so the window is the amender's as well as the declarer's: both are served the environment it covers, and everyone else is refused and told whose work is under way.
 An amendment a later one replaces stops speaking for the operator who made it.

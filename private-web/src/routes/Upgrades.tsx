@@ -56,7 +56,7 @@ import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { errorPreview } from "../lib/errorText";
-import { environmentName } from "../types";
+import { environmentName, maintenanceTarget, targetOfWindow } from "../types";
 import type { ApiResponse, MaintenanceWindow, ServerRank } from "../types";
 
 type PastPlan = ApiResponse<"upgrade_plans", "history">[number];
@@ -82,7 +82,10 @@ export default function Upgrades() {
 		return <Alert severity="error">{fleet.error.message}</Alert>;
 	}
 
-	const planned = fleet.data.filter((row) => row.plan);
+	const planned = fleet.data.filter(
+		(row): row is typeof row & { plan: NonNullable<typeof row.plan> } =>
+			row.plan !== null,
+	);
 	// The gap this list is for: a group's headline environment, behind the
 	// newest version, with nothing recorded.
 	const unplanned = fleet.data.filter(
@@ -170,50 +173,51 @@ export default function Upgrades() {
 										</TableCell>
 										<TableCell>
 											<PlannedFor
-												date={row.plan?.planned_for ?? null}
+												date={row.plan.planned_for ?? null}
 												late={row.late}
 											/>
 										</TableCell>
 										<TableCell>
 											<Stack spacing={0.25}>
 												<PlannedTime
-													time={row.plan?.planned_time ?? null}
-													end={row.plan?.planned_end_time ?? null}
-													zone={row.plan?.planned_zone ?? null}
+													time={row.plan.planned_time ?? null}
+													end={row.plan.planned_end_time ?? null}
+													zone={row.plan.planned_zone ?? null}
 												/>
 												<UnderMaintenance held={row.maintenance_window} />
 											</Stack>
 										</TableCell>
 										<TableCell>
 											<PlanNote
-												note={row.plan?.note ?? null}
+												note={row.plan.note ?? null}
 												testId="planned-upgrade-note"
 											/>
 										</TableCell>
 										{isAdmin && (
 											<TableCell align="right">
 												<EditPlan
-													planId={row.plan?.id ?? ""}
+													planId={row.plan.id}
 													groupName={environmentName(row.group_name, row.rank)}
 													targetVersion={row.target_version ?? ""}
-													plannedFor={row.plan?.planned_for ?? null}
-													plannedTime={row.plan?.planned_time ?? null}
-													plannedEnd={row.plan?.planned_end_time ?? null}
-													plannedZone={row.plan?.planned_zone ?? null}
-													note={row.plan?.note ?? null}
+													plannedFor={row.plan.planned_for ?? null}
+													plannedTime={row.plan.planned_time ?? null}
+													plannedEnd={row.plan.planned_end_time ?? null}
+													plannedZone={row.plan.planned_zone ?? null}
+													note={row.plan.note ?? null}
 													onAmended={() => setTick((t) => t + 1)}
 												/>
 												<WithdrawPlan
-													planId={row.plan?.id ?? ""}
+													planId={row.plan.id}
 													groupName={environmentName(row.group_name, row.rank)}
 													targetVersion={row.target_version ?? ""}
 													onWithdrawn={() => setTick((t) => t + 1)}
 												/>
 												<DeclareFromPlan
+													planId={row.plan.id}
 													groupId={row.group_id}
 													rank={row.rank}
 													groupName={environmentName(row.group_name, row.rank)}
-													note={row.plan?.note ?? null}
+													note={row.plan.note ?? null}
 													held={row.maintenance_window}
 													planned={row.planned_window}
 													onDeclared={() => setTick((t) => t + 1)}
@@ -2366,6 +2370,7 @@ function plannedLength(
  * nothing: this is an operator saying the work is starting now. */
 // spec: MNT#declaring
 function DeclareFromPlan({
+	planId,
 	groupId,
 	rank,
 	groupName,
@@ -2374,6 +2379,10 @@ function DeclareFromPlan({
 	planned,
 	onDeclared,
 }: {
+	/// The plan being declared from. A window it opens stays over the plan's
+	/// environment.
+	// spec: MNT#moving-a-window
+	planId: string;
 	groupId: string;
 	rank: ServerRank;
 	groupName: string;
@@ -2473,6 +2482,7 @@ function DeclareFromPlan({
 											rank,
 											expected_end: planned.ends_at,
 											note: note ?? undefined,
+											upgrade_plan_id: planId,
 										});
 										setOpen(false);
 										onDeclared();
@@ -2490,11 +2500,14 @@ function DeclareFromPlan({
 			<DeclareMaintenanceDialog
 				open={open && (!confirmable || adjusting)}
 				onClose={() => setOpen(false)}
-				scope="group"
-				id={groupId}
-				rank={ownWindow ? (ownWindow.rank ?? undefined) : rank}
-				targetLabel={groupName}
+				start={
+					(ownWindow && targetOfWindow(ownWindow)) ??
+					maintenanceTarget("group", groupId, rank)
+				}
 				existing={ownWindow}
+				fixed="The plan's environment"
+				startLabel={groupName}
+				upgradePlanId={planId}
 				offerLift
 				prefill={
 					ownWindow

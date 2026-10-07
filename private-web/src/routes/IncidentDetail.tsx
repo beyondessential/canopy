@@ -38,6 +38,7 @@ import {
 	RESOLVED_REASON_LABEL,
 	incidentTargetName,
 	isIncidentLingering,
+	maintenanceTarget,
 	type CheckResult,
 	type IncidentIssueData,
 	type IncidentNoteData,
@@ -363,12 +364,18 @@ function Header({
 								This is maintenance…
 							</Button>
 						</GradedAction>
+						{/* It starts at the incident's environment, and marks the
+						    choices that leave some of its failures contributing. */}
+						{/* spec: MNT#choosing-what-to-cover */}
 						<DeclareMaintenanceDialog
 							open={maintenanceOpen}
 							onClose={() => setMaintenanceOpen(false)}
-							scope="group"
-							id={incident.server_group_id}
-							targetLabel={incident.server_group_name ?? undefined}
+							start={maintenanceTarget(
+								"group",
+								incident.server_group_id,
+								incident.rank,
+							)}
+							incidentId={incident.id}
 							onDone={onChanged}
 						/>
 					</>

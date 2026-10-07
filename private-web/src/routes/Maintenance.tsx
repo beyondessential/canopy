@@ -1,7 +1,6 @@
 import {
 	Alert,
 	Button,
-	Chip,
 	LinearProgress,
 	Paper,
 	Stack,
@@ -17,45 +16,36 @@ import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import DeclareMaintenanceDialog from "../components/DeclareMaintenanceDialog";
 import { GradedAction } from "../components/GradedAction";
+import KindChip from "../components/KindChip";
 import ServerRankChip from "../components/ServerRankChip";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
-import type {
-	MaintenanceScope,
-	MaintenanceWindow,
-	ServerRank,
-} from "../types";
+import { targetOfWindow } from "../types";
+import type { MaintenanceWindow, ServerRank } from "../types";
 
-/// Change a window's hours or note from the list, so the fleet view an operator
-/// finds work in is also where they adjust it.
-// spec: MNT#declaring
+/// Change a window's hours, note, or what it covers from the list, so the fleet
+/// view an operator finds work in is also where they adjust it.
+// spec: MNT#moving-a-window
 function AmendWindow({
 	window,
-	targetLabel,
+	target,
 	onAmended,
 }: {
 	window: MaintenanceWindow;
-	targetLabel: string;
+	/** How the window's target reads. */
+	target: string;
 	onAmended: () => void;
 }) {
 	const [open, setOpen] = useState(false);
-	const scope: MaintenanceScope | null = window.application_id
-		? "application"
-		: window.machine_id
-			? "machine"
-			: window.server_group_id
-				? "group"
-				: null;
-	const id =
-		window.application_id ?? window.machine_id ?? window.server_group_id;
+	const start = targetOfWindow(window);
 	// A window over the whole fleet has no target page to amend it against.
-	if (!scope || !id) {
+	if (!start) {
 		return null;
 	}
 	return (
 		<>
-			<GradedAction calls="maintenance/declare">
+			<GradedAction opens={["maintenance/amend", "maintenance/lift"]}>
 				<Button size="small" onClick={() => setOpen(true)}>
 					Amend
 				</Button>
@@ -63,10 +53,8 @@ function AmendWindow({
 			<DeclareMaintenanceDialog
 				open={open}
 				onClose={() => setOpen(false)}
-				scope={scope}
-				id={id}
-				rank={window.rank ?? undefined}
-				targetLabel={targetLabel}
+				start={start}
+				startLabel={target}
 				existing={window}
 				onDone={onAmended}
 			/>
@@ -102,19 +90,6 @@ function TargetKind({
 							? "group"
 							: "fleet"
 			}
-		/>
-	);
-}
-
-/// Styled to match [`ServerRankChip`], so a row carrying both reads as one set
-/// rather than two.
-function KindChip({ kind }: { kind: string }) {
-	return (
-		<Chip
-			size="small"
-			variant="outlined"
-			label={kind}
-			sx={{ textTransform: "capitalize" }}
 		/>
 	);
 }
@@ -216,7 +191,7 @@ export default function Maintenance() {
 											>
 												<AmendWindow
 													window={window}
-													targetLabel={target}
+													target={target}
 													onAmended={list.reload}
 												/>
 												<GradedAction calls="maintenance/lift">

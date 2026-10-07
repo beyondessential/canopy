@@ -33,7 +33,7 @@ import type {
 	MaintenanceWindow,
 	ServerRank,
 } from "../types";
-import { SERVER_RANK_ORDER } from "../types";
+import { SERVER_RANK_ORDER, maintenanceTarget } from "../types";
 import DeclareMaintenanceDialog from "./DeclareMaintenanceDialog";
 import TimeAgo from "./TimeAgo";
 
@@ -359,9 +359,9 @@ function Run({
 			<DeclareMaintenanceDialog
 				open={dialogOpen}
 				onClose={() => setDialogOpen(false)}
-				scope="group"
-				id={groupId}
-				targetLabel={groupName}
+				start={maintenanceTarget("group", groupId, rank)}
+				fixed="The environment the run is served against"
+				startLabel={groupName}
 				prefill={{ note: `configuring ${rank}` }}
 				onDone={onDeclared}
 			/>
