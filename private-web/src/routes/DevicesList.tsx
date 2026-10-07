@@ -34,7 +34,10 @@ export default function DevicesList() {
 	return (
 		<Stack spacing={2}>
 			<Box sx={{ display: "flex", justifyContent: "flex-end" }}>
-				<GradedAction calls="devices/provision_credential">
+				<GradedAction
+					calls="devices/provision_credential"
+					action="Create device"
+				>
 					<Button
 						variant="contained"
 						startIcon={<AddIcon />}

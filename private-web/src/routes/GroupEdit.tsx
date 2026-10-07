@@ -101,7 +101,10 @@ function CreateForm() {
 				)}
 
 				<Stack direction="row" spacing={1}>
-					<GradedAction calls="fleet/groups/create">
+					<GradedAction
+						calls="fleet/groups/create"
+						action="Create group"
+					>
 						<Button type="submit" variant="contained" disabled={create.pending}>
 							{create.pending ? "Creating…" : "Create group"}
 						</Button>
@@ -293,7 +296,10 @@ function EditForm({
 					sx={{ alignItems: "center", justifyContent: "space-between" }}
 				>
 					<Stack direction="row" spacing={1}>
-						<GradedAction calls="fleet/groups/update">
+						<GradedAction
+							calls="fleet/groups/update"
+							action={`Update group ${group.name}`}
+						>
 							<Button
 								type="submit"
 								variant="contained"
@@ -312,7 +318,10 @@ function EditForm({
 							Cancel
 						</Button>
 					</Stack>
-					<GradedAction calls="fleet/groups/delete">
+					<GradedAction
+						calls="fleet/groups/delete"
+						action={`Archive group ${group.name}`}
+					>
 						<Button
 							type="button"
 							variant="outlined"

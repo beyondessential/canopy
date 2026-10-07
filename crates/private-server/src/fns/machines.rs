@@ -44,10 +44,10 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(read_only: get_detail))
 		.routes(routes!(write: create))
 		.routes(routes!(write: update))
-		.routes(routes!(danger: archive))
-		.routes(routes!(danger: attach_tailscale_device))
-		.routes(routes!(danger: mint_enrollment))
-		.routes(routes!(danger: revoke_enrollment))
+		.routes(routes!(danger(invalidates): archive))
+		.routes(routes!(danger(issues): attach_tailscale_device))
+		.routes(routes!(danger(issues): mint_enrollment))
+		.routes(routes!(danger(invalidates): revoke_enrollment))
 		.routes(routes!(read_only: enrollment_status))
 }
 

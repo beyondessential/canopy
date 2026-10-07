@@ -142,7 +142,10 @@ function ArchivedGroupRow({
 			</MuiLink>
 			<Box sx={{ ml: "auto" }}>
 				{admin && (
-					<GradedAction calls="fleet/groups/restore">
+					<GradedAction
+						calls="fleet/groups/restore"
+						action={`Restore group ${name}`}
+					>
 						<RestoreButton pending={action.pending} onClick={onRestore} />
 					</GradedAction>
 				)}
@@ -180,7 +183,10 @@ function ArchivedServerRow({
 				<ServerShorty server={server} />
 			</Box>
 			{admin && (
-				<GradedAction calls="fleet/applications/restore">
+				<GradedAction
+					calls="fleet/applications/restore"
+					action={`Restore application ${server.name || server.display_host}`}
+				>
 					<RestoreButton pending={action.pending} onClick={onRestore} />
 				</GradedAction>
 			)}

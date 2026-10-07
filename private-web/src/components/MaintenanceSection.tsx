@@ -34,6 +34,7 @@ const HISTORY_SHOWN = 5;
 export default function MaintenanceSection({
 	scope,
 	id,
+	targetLabel,
 	machineId,
 	machineName,
 	groupId,
@@ -47,6 +48,8 @@ export default function MaintenanceSection({
 	anchor?: string;
 	scope: MaintenanceScope;
 	id: string;
+	/** What the target is called, so the section's actions say what they act on. */
+	targetLabel?: string;
 	/** For an application, the box it runs on: a machine's window covers every
 	 * application on it, so the application is under maintenance without having
 	 * a window of its own. Its own surface has to say so. */
@@ -72,6 +75,7 @@ export default function MaintenanceSection({
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const [amending, setAmending] = useState<MaintenanceWindow | null>(null);
 	const lift = useApiAction("maintenance", "lift");
+	const onTarget = targetLabel ? ` on ${targetLabel}` : "";
 
 	const result = useApi(
 		"maintenance",
@@ -216,12 +220,18 @@ export default function MaintenanceSection({
 					action={
 						isAdmin ? (
 							<Stack direction="row" spacing={1}>
-								<GradedAction opens="maintenance/amend">
+								<GradedAction
+									opens="maintenance/amend"
+									action={`Amend maintenance${onTarget}`}
+								>
 									<Button size="small" color="info" onClick={() => setAmending(open)}>
 										Amend
 									</Button>
 								</GradedAction>
-								<GradedAction calls="maintenance/lift">
+								<GradedAction
+									calls="maintenance/lift"
+									action={`Lift maintenance${onTarget}`}
+								>
 									<Button
 										size="small"
 										variant="outlined"
@@ -268,7 +278,10 @@ export default function MaintenanceSection({
 			{/* spec: MNT#declaring */}
 			{isAdmin && !open && (
 				<Stack direction="row" sx={{ mb: history.length ? 2 : 0 }}>
-					<GradedAction calls="maintenance/declare">
+					<GradedAction
+						calls="maintenance/declare"
+						action={`Declare maintenance${onTarget}`}
+					>
 						<Button
 							size="small"
 							variant="outlined"
@@ -292,7 +305,10 @@ export default function MaintenanceSection({
 					action={
 						isAdmin ? (
 							<Stack direction="row" spacing={1}>
-								<GradedAction opens="maintenance/amend">
+								<GradedAction
+									opens="maintenance/amend"
+									action={`Amend maintenance over ${window.rank}${onTarget}`}
+								>
 									<Button
 										size="small"
 										onClick={() => setAmending(window)}
@@ -300,7 +316,10 @@ export default function MaintenanceSection({
 										Amend
 									</Button>
 								</GradedAction>
-								<GradedAction calls="maintenance/lift">
+								<GradedAction
+									calls="maintenance/lift"
+									action={`Lift maintenance over ${window.rank}${onTarget}`}
+								>
 									<Button
 										size="small"
 										variant="outlined"

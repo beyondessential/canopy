@@ -165,7 +165,10 @@ export default function BackupCapabilitiesSection({
 							severity="warning"
 							icon={<RestoreDataIcon fontSize="inherit" />}
 							action={
-								<GradedAction calls="backups/disallow_restore">
+								<GradedAction
+									calls="backups/disallow_restore"
+									action="Disable restores on this machine"
+								>
 									<Button
 										size="small"
 										onClick={onDisallowRestore}
@@ -181,7 +184,10 @@ export default function BackupCapabilitiesSection({
 							restore backups on demand.
 						</Alert>
 					) : (
-						<GradedAction calls="backups/allow_restore">
+						<GradedAction
+							calls="backups/allow_restore"
+							action="Allow restores on this machine"
+						>
 							<Button
 								size="small"
 								variant="outlined"
@@ -324,7 +330,10 @@ function BackupCapabilityRow({
 						{setCapability.error.message}
 					</Typography>
 				)}
-				<GradedAction calls="backups/set_capability">
+				<GradedAction
+					calls="backups/set_capability"
+					action={`${cap.enabled ? "Disable" : "Enable"} ${cap.type} backups for this machine`}
+				>
 					<Switch
 						checked={cap.enabled}
 						disabled={!isAdmin || setCapability.pending}

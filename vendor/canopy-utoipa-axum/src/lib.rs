@@ -98,6 +98,33 @@ pub fn __set_safety_mode(operation: &mut utoipa::openapi::path::Operation, mode:
         .merge(incoming);
 }
 
+/// The OpenAPI operation-extension key carrying why a danger handler is danger.
+/// Its value is an array of reason names, each one of [`DANGER_REASONS`].
+pub const DANGER_REASONS_EXTENSION: &str = "x-canopy-danger-reasons";
+
+/// Every reason a handler can be danger for, in the order the SAFE spec lists
+/// them. The wire form of each is what a `routes!(danger(reason, ...): handler)`
+/// entry names.
+pub const DANGER_REASONS: [&str; 5] = [
+    "irreversible",
+    "fleet",
+    "unprotects",
+    "issues",
+    "invalidates",
+];
+
+/// Record why a handler is danger on its OpenAPI operation. Called by the
+/// [`routes`] macro; not meant to be called directly.
+#[doc(hidden)]
+pub fn __set_danger_reasons(operation: &mut utoipa::openapi::path::Operation, reasons: &[&str]) {
+    use utoipa::openapi::extensions::Extensions;
+    let incoming = Extensions::from_iter([(DANGER_REASONS_EXTENSION, reasons.to_vec())]);
+    operation
+        .extensions
+        .get_or_insert_with(Extensions::default)
+        .merge(incoming);
+}
+
 /// re-export paste so users do not need to add the dependency.
 #[doc(hidden)]
 pub use paste::paste;
@@ -153,9 +180,32 @@ macro_rules! routes {
     // CANOPY FORK: graded entries. The grade prefix names the safety mode the
     // handler requires (see the SAFE spec); it is recorded as an OpenAPI
     // operation extension and read back by the server to enforce it.
-    ( read_only: $handler:path $(,)? ) => { $crate::routes!( @graded "read-only" : $handler ) };
-    ( write: $handler:path $(,)? ) => { $crate::routes!( @graded "write" : $handler ) };
-    ( danger: $handler:path $(,)? ) => { $crate::routes!( @graded "danger" : $handler ) };
+    ( read_only: $handler:path $(,)? ) => { $crate::routes!( @graded "read-only" [] : $handler ) };
+    ( write: $handler:path $(,)? ) => { $crate::routes!( @graded "write" [] : $handler ) };
+    // A danger handler also says why, as one or more reasons from
+    // `DANGER_REASONS`: `routes!(danger(fleet, invalidates): revoke)`. The
+    // operator is told these when a blocked control asks to raise.
+    ( danger( $( $reason:ident ),+ $(,)? ) : $handler:path $(,)? ) => {
+        $crate::routes!( @graded "danger" [ $( $crate::routes!( @reason $reason ) ),+ ] : $handler )
+    };
+    ( danger: $handler:path $(,)? ) => {
+        compile_error!(
+            "a danger handler declares why it is danger: \
+             routes!(danger(reason, ...): handler), with each reason one of \
+             irreversible, fleet, unprotects, issues, invalidates. See the SAFE spec."
+        )
+    };
+    ( @reason irreversible ) => { "irreversible" };
+    ( @reason fleet ) => { "fleet" };
+    ( @reason unprotects ) => { "unprotects" };
+    ( @reason issues ) => { "issues" };
+    ( @reason invalidates ) => { "invalidates" };
+    ( @reason $unknown:ident ) => {
+        compile_error!(concat!(
+            "`", stringify!($unknown), "` is not a danger reason. The reasons are: \
+             irreversible, fleet, unprotects, issues, invalidates."
+        ))
+    };
     // The device-facing public API is a different surface: its callers are
     // machines presenting a certificate, not operators holding a session, so
     // safety modes do not govern it. Saying so is explicit and greppable rather
@@ -188,13 +238,17 @@ macro_rules! routes {
             router
         }
     };
-    ( @graded $mode:literal : $handler:path ) => {
+    ( @graded $mode:literal [ $( $reason:expr ),* ] : $handler:path ) => {
         {
             use $crate::PathItemExt;
             let mut paths = utoipa::openapi::path::Paths::new();
             let mut schemas = Vec::<(String, utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>)>::new();
             let (path, mut item, types) = $crate::routes!(@resolve_types $handler : schemas);
             $crate::__set_safety_mode(&mut item, $mode);
+            let reasons: &[&str] = &[ $( $reason ),* ];
+            if !reasons.is_empty() {
+                $crate::__set_danger_reasons(&mut item, reasons);
+            }
             let method_router = types.iter().by_ref().fold(axum::routing::MethodRouter::new(), |router, path_type| {
                 router.on(path_type.to_method_filter(), $handler)
             });

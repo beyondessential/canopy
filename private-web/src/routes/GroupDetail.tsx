@@ -133,7 +133,10 @@ export default function GroupDetail() {
 				</Stack>
 				{admin && (
 					<Stack direction="row" spacing={1}>
-						<GradedAction opens="fleet/machines/create">
+						<GradedAction
+							opens="fleet/machines/create"
+							action={`Add machine to group ${group.name}`}
+						>
 							<Button
 								component={RouterLink}
 								to={`/fleet/groups/${group.id}/machines/new`}
@@ -147,10 +150,14 @@ export default function GroupDetail() {
 						<MaintenanceHeaderButton
 							scope="group"
 							id={group.id}
+							targetLabel={group.name}
 							onDone={() => setMaintenanceTick((n) => n + 1)}
 						/>
 						)}
-						<GradedAction opens="fleet/groups/update">
+						<GradedAction
+							opens="fleet/groups/update"
+							action={`Edit group ${group.name}`}
+						>
 							<Button
 								component={RouterLink}
 								to={`/fleet/groups/${group.id}/edit`}
@@ -161,7 +168,10 @@ export default function GroupDetail() {
 							</Button>
 						</GradedAction>
 						{allQuiet && !group.deleted_at && (
-							<GradedAction calls="fleet/groups/delete">
+							<GradedAction
+								calls="fleet/groups/delete"
+								action={`Archive group ${group.name}`}
+							>
 								<Button
 									variant="outlined"
 									startIcon={<ArchiveIcon />}
@@ -185,6 +195,7 @@ export default function GroupDetail() {
 			{group.deleted_at && (
 				<ArchivedGroupBanner
 					groupId={group.id}
+					groupName={group.name}
 					isAdmin={admin}
 					onRestored={detail.reload}
 				/>
@@ -264,7 +275,11 @@ export default function GroupDetail() {
 				)}
 			</Box>
 
-			<BackupsCard groupId={group.id} isAdmin={admin} />
+			<BackupsCard
+				groupId={group.id}
+				groupName={group.name}
+				isAdmin={admin}
+			/>
 
 			<MigrationTestsSection groupId={group.id} servers={applications} />
 			<ReportingSchemasSection groupId={group.id} />
@@ -284,6 +299,7 @@ export default function GroupDetail() {
 				scope="group"
 				anchor="maintenance"
 				id={group.id}
+				targetLabel={group.name}
 				reloadKey={maintenanceTick}
 				onChanged={() => setMaintenanceTick((n) => n + 1)}
 			/>
@@ -296,9 +312,11 @@ export default function GroupDetail() {
 /// the full panel, or a "Set up backups" CTA (admin) when no config exists.
 function BackupsCard({
 	groupId,
+	groupName,
 	isAdmin,
 }: {
 	groupId: string;
+	groupName: string;
 	isAdmin: boolean;
 }) {
 	const config = useApi(
@@ -338,7 +356,10 @@ function BackupsCard({
 				</Stack>
 				{config.data == null ? (
 					isAdmin ? (
-						<GradedAction opens={["backups/create_shared", "backups/create"]}>
+						<GradedAction
+							opens={["backups/create_shared", "backups/create"]}
+							action={`Set up backups for group ${groupName}`}
+						>
 							<Button
 								component={RouterLink}
 								to={`/fleet/groups/${groupId}/backups/config`}
@@ -414,10 +435,12 @@ function OperatorsSection({
 
 function ArchivedGroupBanner({
 	groupId,
+	groupName,
 	isAdmin,
 	onRestored,
 }: {
 	groupId: string;
+	groupName: string;
 	isAdmin: boolean;
 	onRestored: () => void;
 }) {
@@ -435,7 +458,10 @@ function ArchivedGroupBanner({
 			severity="warning"
 			action={
 				isAdmin ? (
-					<GradedAction calls="fleet/groups/restore">
+					<GradedAction
+						calls="fleet/groups/restore"
+						action={`Restore group ${groupName}`}
+					>
 						<Button
 							size="small"
 							startIcon={<RestoreIcon />}

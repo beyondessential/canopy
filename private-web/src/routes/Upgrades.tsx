@@ -50,7 +50,13 @@ import {
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import DeclareMaintenanceDialog from "../components/DeclareMaintenanceDialog";
-import { GradedAction, useGrade } from "../components/GradedAction";
+import {
+	GradedAction,
+	blockedSx,
+	blockedTitle,
+	useGradedActivation,
+} from "../components/GradedAction";
+import type { SafetyMode } from "../safety";
 import ServerRankChip from "../components/ServerRankChip";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
@@ -332,6 +338,11 @@ type Block = Segment & { lane: number; lanes: number };
 /// named.
 type Tone = "open" | "late" | "done";
 
+/// How a calendar entry amends its plan, where it can: `blocked` is the mode
+/// the session has yet to reach, when it hasn't.
+type Edit = { open: () => void; blocked: SafetyMode | null };
+type Editor = (entry: Entry) => Edit | null;
+
 type Entry = {
 	planId: string;
 	date: string;
@@ -435,13 +446,22 @@ function PlanCalendar({
 	).length;
 
 	// A met plan is history and no longer amendable, so it keeps the link out
-	// to the group instead. So does every entry below the mode amending needs:
-	// the entry is the calendar's way to its group first, the editor a shortcut
-	// the plan's own row also offers, graded there.
-	const amending = useGrade("upgrade_plans/amend");
-	const editor = (entry: Entry) =>
-		isAdmin && entry.tone !== "done" && !amending.blocked
-			? () => setEditing(entry)
+	// to the group instead. Every other entry opens the amend form, and below the
+	// mode amending needs it wears that mode's stripe and asks for the raise first.
+	const amending = useGradedActivation({
+		calls: "upgrade_plans/amend",
+		action: "Amend upgrade plan",
+	});
+	const editor: Editor = (entry) =>
+		isAdmin && entry.tone !== "done"
+			? {
+					open: () =>
+						amending.activate(
+							() => setEditing(entry),
+							`Amend upgrade plan for ${entry.group}`,
+						),
+					blocked: amending.blocked ? amending.required : null,
+				}
 			: null;
 
 	return (
@@ -564,7 +584,7 @@ function MonthGrid({
 	month: string;
 	today: string;
 	entries: Entry[];
-	editor: (entry: Entry) => (() => void) | null;
+	editor: Editor;
 	onOpenDay: (date: string) => void;
 }) {
 	return (
@@ -616,7 +636,7 @@ function MonthGrid({
 							<CalendarEntry
 								key={entry.planId}
 								entry={entry}
-								onEdit={editor(entry)}
+								edit={editor(entry)}
 							/>
 						))}
 						{overflow.length > 0 && (
@@ -649,7 +669,7 @@ function TimeGrid({
 	days: string[];
 	today: string;
 	entries: Entry[];
-	editor: (entry: Entry) => (() => void) | null;
+	editor: Editor;
 }) {
 	const hours = useRef<HTMLDivElement>(null);
 	const now = useMinute();
@@ -738,7 +758,7 @@ function TimeGrid({
 									<TimeBlock
 										key={`${block.entry.planId}${block.tail ? "-tail" : ""}`}
 										block={block}
-										onEdit={editor(block.entry)}
+										edit={editor(block.entry)}
 									/>
 								))}
 						</Box>
@@ -751,16 +771,16 @@ function TimeGrid({
 
 function CalendarEntry({
 	entry,
-	onEdit,
+	edit,
 }: {
 	entry: Entry;
-	onEdit: (() => void) | null;
+	edit: Edit | null;
 }) {
 	return (
-		<CalendarTooltip title={<EntryTooltip entry={entry} />}>
+		<CalendarTooltip title={<EntryTooltip entry={entry} blocked={edit?.blocked} />}>
 			<Box
-				{...(onEdit
-					? { component: "button" as const, type: "button", onClick: onEdit }
+				{...(edit
+					? { component: "button" as const, type: "button", onClick: edit.open }
 					: { component: RouterLink, to: `/fleet/groups/${entry.groupId}` })}
 				data-testid="calendar-entry"
 				sx={[
@@ -769,7 +789,8 @@ function CalendarEntry({
 						bgcolor: alpha(toneColour(theme, entry.tone), 0.14),
 						"&:hover": { bgcolor: alpha(toneColour(theme, entry.tone), 0.26) },
 					}),
-					!!onEdit && ENTRY_BUTTON,
+					!!edit && ENTRY_BUTTON,
+					!!edit?.blocked && blockedSx(edit.blocked),
 				]}
 			>
 				<Box sx={ENTRY_LABEL}>
@@ -795,18 +816,18 @@ function CalendarEntry({
 /// One window on the hour grid, sized to how long it runs.
 function TimeBlock({
 	block,
-	onEdit,
+	edit,
 }: {
 	block: Block;
-	onEdit: (() => void) | null;
+	edit: Edit | null;
 }) {
 	const { entry } = block;
 
 	return (
-		<CalendarTooltip title={<EntryTooltip entry={entry} />}>
+		<CalendarTooltip title={<EntryTooltip entry={entry} blocked={edit?.blocked} />}>
 			<Box
-				{...(onEdit
-					? { component: "button" as const, type: "button", onClick: onEdit }
+				{...(edit
+					? { component: "button" as const, type: "button", onClick: edit.open }
 					: { component: RouterLink, to: `/fleet/groups/${entry.groupId}` })}
 				data-testid="calendar-entry"
 				{...(block.tail ? { "data-continues": "true" } : null)}
@@ -821,7 +842,8 @@ function TimeBlock({
 						borderColor: alpha(toneColour(theme, entry.tone), 0.45),
 						"&:hover": { bgcolor: alpha(toneColour(theme, entry.tone), 0.28) },
 					}),
-					!!onEdit && BLOCK_BUTTON,
+					!!edit && BLOCK_BUTTON,
+					!!edit?.blocked && blockedSx(edit.blocked),
 				]}
 			>
 				<Box sx={ENTRY_LABEL}>
@@ -875,7 +897,13 @@ const CALENDAR_TOOLTIP_SLOTS = {
 	},
 } as const;
 
-function EntryTooltip({ entry }: { entry: Entry }) {
+function EntryTooltip({
+	entry,
+	blocked,
+}: {
+	entry: Entry;
+	blocked?: SafetyMode | null;
+}) {
 	return (
 		<>
 			{entry.tone === "done"
@@ -888,6 +916,7 @@ function EntryTooltip({ entry }: { entry: Entry }) {
 				</Box>
 			)}
 			{entry.note && <Box sx={ENTRY_NOTE}>{entry.note}</Box>}
+			{blocked && <Box sx={ENTRY_NOTE}>{blockedTitle(blocked)}</Box>}
 		</>
 	);
 }
@@ -1864,7 +1893,7 @@ function RecordPlan({
 
 	return (
 		<>
-			<GradedAction calls="upgrade_plans/record">
+			<GradedAction calls="upgrade_plans/record" action="Record upgrade plan">
 				<Button
 					variant="contained"
 					startIcon={<AddIcon />}
@@ -2102,7 +2131,10 @@ function RecordPlanDialog({
 			</DialogContent>
 			<DialogActions>
 				<Button onClick={onClose}>Cancel</Button>
-				<GradedAction calls="upgrade_plans/record">
+				<GradedAction
+					calls="upgrade_plans/record"
+					action={`Record upgrade plan for ${groups.find((g) => g.id === groupId)?.name ?? "a group"}`}
+				>
 					<Button
 						variant="contained"
 						disabled={!chosen || !versionId || record.pending}
@@ -2135,7 +2167,10 @@ function EditPlan({
 
 	return (
 		<>
-			<GradedAction calls="upgrade_plans/amend">
+			<GradedAction
+				calls="upgrade_plans/amend"
+				action={`Amend upgrade plan for ${groupName}`}
+			>
 				<IconButton
 					size="small"
 					aria-label={`Edit ${groupName}'s plan`}
@@ -2284,7 +2319,10 @@ function EditPlanDialog({
 			</DialogContent>
 			<DialogActions>
 				<Button onClick={onClose}>Cancel</Button>
-				<GradedAction calls="upgrade_plans/amend">
+				<GradedAction
+					calls="upgrade_plans/amend"
+					action={`Amend upgrade plan for ${groupName}`}
+				>
 					<Button variant="contained" onClick={save} disabled={amend.pending}>
 						Save
 					</Button>
@@ -2325,7 +2363,10 @@ function WithdrawPlan({
 	};
 
 	return (
-		<GradedAction calls="upgrade_plans/withdraw">
+		<GradedAction
+			calls="upgrade_plans/withdraw"
+			action={`Withdraw upgrade plan for ${groupName}`}
+		>
 			<IconButton
 				size="small"
 				aria-label={`Withdraw ${groupName}'s plan`}
@@ -2419,6 +2460,7 @@ function DeclareFromPlan({
 						? ["maintenance/declare", "maintenance/lift"]
 						: "maintenance/declare"
 				}
+				action={`${ownWindow ? "Amend" : "Declare"} maintenance for ${groupName}`}
 			>
 				<Tooltip
 					title={
@@ -2471,7 +2513,10 @@ function DeclareFromPlan({
 							Adjust
 						</Button>
 						<Button onClick={() => setOpen(false)}>Cancel</Button>
-						<GradedAction calls="maintenance/declare">
+						<GradedAction
+							calls="maintenance/declare"
+							action={`Declare maintenance for ${groupName}`}
+						>
 							<Button
 								variant="contained"
 								disabled={declare.pending}

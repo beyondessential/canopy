@@ -21,8 +21,8 @@ use crate::state::AppState;
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(read_only: list))
-		.routes(routes!(danger: mint))
-		.routes(routes!(danger: revoke))
+		.routes(routes!(danger(issues): mint))
+		.routes(routes!(danger(irreversible, invalidates): revoke))
 }
 
 /// Metadata about an MCP access token. Never includes the secret value

@@ -238,7 +238,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 				.routes(routes!(write: upload_artifact))
 				.layer(DefaultBodyLimit::max(MAX_UPLOAD_ARTIFACT_BODY_BYTES)),
 		)
-		.routes(routes!(danger: delete_artifact))
+		.routes(routes!(danger(irreversible): delete_artifact))
 		.routes(routes!(read_only: list_known_issues))
 		.routes(routes!(write: add_known_issue))
 		.routes(routes!(write: resolve_known_issue))

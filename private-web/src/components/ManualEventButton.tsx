@@ -37,7 +37,10 @@ export default function ManualEventButton({
 	return (
 		<>
 			{action ? (
-				<GradedAction calls="issues/submit_manual_event">
+				<GradedAction
+					calls="issues/submit_manual_event"
+					action={hasOpenIncident ? "Add manual issue to the open incident" : "Open manual incident on this server"}
+				>
 					<ActionButton
 						icon={<AddAlertIcon />}
 						label={label}
@@ -45,7 +48,10 @@ export default function ManualEventButton({
 					/>
 				</GradedAction>
 			) : (
-				<GradedAction calls="issues/submit_manual_event">
+				<GradedAction
+					calls="issues/submit_manual_event"
+					action={hasOpenIncident ? "Add manual issue to the open incident" : "Open manual incident on this server"}
+				>
 					<Button
 						variant="outlined"
 						size={size}

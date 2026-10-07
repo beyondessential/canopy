@@ -2,7 +2,9 @@
 //! generated OpenAPI document as an operation extension, since that extension is
 //! the single place a handler's safety mode is written (see the SAFE spec).
 
-use canopy_utoipa_axum::{router::OpenApiRouter, routes, SAFETY_MODE_EXTENSION};
+use canopy_utoipa_axum::{
+    router::OpenApiRouter, routes, DANGER_REASONS, DANGER_REASONS_EXTENSION, SAFETY_MODE_EXTENSION,
+};
 
 #[utoipa::path(post, path = "/list")]
 async fn list() {}
@@ -33,7 +35,7 @@ fn each_grade_lands_on_its_operation() {
     let api = OpenApiRouter::<()>::new()
         .routes(routes!(read_only: list))
         .routes(routes!(write: add))
-        .routes(routes!(danger: delete))
+        .routes(routes!(danger(fleet, invalidates): delete))
         .into_openapi();
 
     assert_eq!(mode_of(&api, "/list"), "read-only");
@@ -47,4 +49,39 @@ fn the_extension_key_is_an_openapi_extension() {
     // and the client build both look the key up verbatim, so a silent rename
     // would leave every handler reading as ungraded.
     assert!(SAFETY_MODE_EXTENSION.starts_with("x-"));
+}
+
+#[test]
+fn a_danger_handler_carries_its_reasons_and_others_carry_none() {
+    let api = OpenApiRouter::<()>::new()
+        .routes(routes!(write: add))
+        .routes(routes!(danger(fleet, invalidates): delete))
+        .into_openapi();
+
+    let reasons_of = |path: &str| {
+        let operation = api.paths.paths.get(path).unwrap().post.as_ref().unwrap();
+        operation
+            .extensions
+            .as_ref()
+            .and_then(|ext| ext.get(DANGER_REASONS_EXTENSION))
+            .map(|reasons| {
+                reasons
+                    .as_array()
+                    .expect("the reasons are an array")
+                    .iter()
+                    .map(|reason| reason.as_str().expect("a reason is a string").to_owned())
+                    .collect::<Vec<_>>()
+            })
+    };
+    assert_eq!(reasons_of("/add"), None);
+    assert_eq!(
+        reasons_of("/delete"),
+        Some(vec!["fleet".to_owned(), "invalidates".to_owned()])
+    );
+}
+
+#[test]
+fn the_reason_extension_is_an_openapi_extension() {
+    assert!(DANGER_REASONS_EXTENSION.starts_with("x-"));
+    assert_eq!(DANGER_REASONS.len(), 5);
 }

@@ -115,7 +115,10 @@ export default function ReportingSchemasSection({
 									// An awaiting pair is already on the worklist, so asking adds nothing.
 									isAdmin &&
 									pair.state !== "awaiting" && (
-										<GradedAction calls="reporting_schemas/build">
+										<GradedAction
+											calls="reporting_schemas/build"
+											action={`Build reporting schema for version ${pair.version}`}
+										>
 											<Button
 												size="small"
 												onClick={() => ask(pair.version_id)}

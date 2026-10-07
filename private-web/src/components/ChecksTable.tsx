@@ -776,7 +776,10 @@ function SilenceCheckButton({
 	};
 	return (
 		<>
-			<GradedAction opens={offered}>
+			<GradedAction
+				opens={offered}
+				action={`${silenced ? "Manage silence for" : "Silence"} ${name ? `${name} in ` : ""}${check}`}
+			>
 				<Tooltip
 					title={
 						silenced
@@ -838,6 +841,7 @@ function SilenceCheckButton({
 					)}
 					<Stack spacing={0.75}>
 						<SilenceScopeRow
+							check={check}
 							scopeLabel={
 								target.kind === "machine"
 									? "this machine"
@@ -883,6 +887,7 @@ function SilenceCheckButton({
 						/>
 						{groupId && (
 							<SilenceScopeRow
+								check={check}
 								scopeLabel="this group"
 								silence={groupSilence}
 								silenceCalls="silenced_refs/silence_group"
@@ -930,6 +935,7 @@ function SilenceCheckButton({
  * scope already has a silence for this ref, or a Silence button when it
  * doesn't. */
 function SilenceScopeRow({
+	check,
 	scopeLabel,
 	silence,
 	silenceCalls,
@@ -937,6 +943,7 @@ function SilenceScopeRow({
 	onSilence,
 	onUnsilence,
 }: {
+	check: string;
 	scopeLabel: string;
 	silence: { created_at: string; created_by: string | null } | null;
 	silenceCalls: Calls;
@@ -960,7 +967,10 @@ function SilenceScopeRow({
 						{silence.created_by && ` by ${silence.created_by}`}
 					</Box>
 				</Typography>
-				<GradedAction calls={unsilenceCalls}>
+				<GradedAction
+					calls={unsilenceCalls}
+					action={`Un-silence ${check} for ${scopeLabel}`}
+				>
 					<Button
 						size="small"
 						variant="outlined"
@@ -974,7 +984,10 @@ function SilenceScopeRow({
 		);
 	}
 	return (
-		<GradedAction calls={silenceCalls}>
+		<GradedAction
+			calls={silenceCalls}
+			action={`Silence ${check} for ${scopeLabel}`}
+		>
 			<Button
 				size="small"
 				variant="outlined"

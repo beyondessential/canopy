@@ -13,7 +13,6 @@ import {
 	seedVersionKnownIssue,
 	type ServerRank,
 } from "./seed";
-import { lower, raiseTo } from "./safety";
 
 /** A server of the group at `rank` reporting `version`, which is what that
  * environment reads as running. */
@@ -718,14 +717,14 @@ test.describe("upgrade calendar editing", () => {
 	});
 });
 
-test.describe("upgrade calendar below write", () => {
+test.describe("upgrade calendar in read-only", () => {
 	test.use({ safetyMode: "read-only" });
 
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
 	});
 
-	test("an entry leads to its group until the session can amend it", async ({
+	test("an entry wears the write stripe, and amends the plan once the raise is confirmed", async ({
 		page,
 		sql,
 	}) => {
@@ -745,15 +744,22 @@ test.describe("upgrade calendar below write", () => {
 		});
 
 		await page.goto("/upgrades");
-		await raiseTo(page, "write");
-		await page.getByTestId("calendar-entry").click();
+		const entry = page.getByTestId("calendar-entry");
+		await expect(entry).toHaveCSS("background-image", /rgba\(255, 152, 0/);
+
+		await entry.click();
+		const raise = page.getByRole("dialog");
+		await expect(
+			raise.getByRole("heading", { name: "Amend upgrade plan for kamaka" }),
+		).toBeVisible();
+		await expect(page).toHaveURL(/\/upgrades$/);
+		await raise.getByRole("button", { name: "Continue in write mode" }).click();
 		await expect(page.getByTestId("edit-plan")).toBeVisible();
 		await page.keyboard.press("Escape");
 		await expect(page.getByTestId("edit-plan")).toHaveCount(0);
 
-		await lower(page);
-		await page.getByTestId("calendar-entry").click();
-		await expect(page).toHaveURL(new RegExp(`/fleet/groups/${group.id}$`));
+		// Raised, the entry is usable and wears no stripe.
+		await expect(entry).toHaveCSS("background-image", "none");
 	});
 });
 

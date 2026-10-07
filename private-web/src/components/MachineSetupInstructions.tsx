@@ -38,10 +38,13 @@ import type { EnrollmentTicket } from "../types";
 /// reissues (deliberately) or cancels.
 export default function MachineSetupInstructions({
 	machineId,
+	machineName,
 	onRegistered,
 	reEnroll = false,
 }: {
 	machineId: string;
+	/// What the enrollment controls name the machine as when they ask to raise.
+	machineName?: string;
 	/// Fired once when enrollment completes. For initial setup that's the first
 	/// `registered_at`; for re-enroll it's `registered_at` *changing* from its
 	/// value at mount (a new device completing the handshake).
@@ -50,6 +53,7 @@ export default function MachineSetupInstructions({
 	/// ticket; re-enroll waits for the operator to press "Re-enroll a device".
 	reEnroll?: boolean;
 }) {
+	const target = machineName ?? "this machine";
 	const mint = useApiAction("fleet/machines", "mint_enrollment");
 	const revoke = useApiAction("fleet/machines", "revoke_enrollment");
 	const [ticket, setTicket] = useState<EnrollmentTicket | null>(null);
@@ -170,7 +174,10 @@ export default function MachineSetupInstructions({
 	) {
 		return (
 			<Box>
-				<GradedAction calls="fleet/machines/mint_enrollment">
+				<GradedAction
+					calls="fleet/machines/mint_enrollment"
+					action={`Issue enrollment ticket for ${target}`}
+				>
 					<Button variant="outlined" onClick={doMint}>
 						Issue enrollment ticket
 					</Button>
@@ -184,7 +191,10 @@ export default function MachineSetupInstructions({
 	if (reEnroll && statusLoaded && !outstanding && !ticket && !mint.pending) {
 		return (
 			<Box>
-				<GradedAction calls="fleet/machines/mint_enrollment">
+				<GradedAction
+					calls="fleet/machines/mint_enrollment"
+					action={`Re-enroll a device for ${target}`}
+				>
 					<Button variant="outlined" onClick={doMint}>
 						Re-enroll a device
 					</Button>
@@ -208,15 +218,16 @@ export default function MachineSetupInstructions({
 	}
 
 	const reissueButton = (
-		<GradedAction calls="fleet/machines/mint_enrollment">
+		<GradedAction
+			calls="fleet/machines/mint_enrollment"
+			action={`Reissue enrollment ticket for ${target}`}
+		>
 			<Tooltip title="Generates a new ticket and passphrase; the current ones immediately stop working.">
 				<Button
 					size="small"
 					startIcon={<RefreshIcon />}
 					onClick={doMint}
-					// A tooltip keeps its child's own props over the ones the
-					// wrapper passes in, so the blocked state is named here too.
-					disabled={mint.pending || minting.blocked}
+					disabled={mint.pending}
 				>
 					{mint.pending ? "Reissuing…" : "Reissue"}
 				</Button>
@@ -371,7 +382,10 @@ export default function MachineSetupInstructions({
 
 				{reEnroll && (ticket != null || outstanding) && (
 					<Box>
-						<GradedAction calls="fleet/machines/revoke_enrollment">
+						<GradedAction
+							calls="fleet/machines/revoke_enrollment"
+							action={`Cancel re-enrollment of ${target}`}
+						>
 							<Button
 								size="small"
 								onClick={onCancel}

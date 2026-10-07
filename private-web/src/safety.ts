@@ -7,8 +7,13 @@
 // lets the interface block it and say which mode it wants, rather than letting
 // the operator find out by being refused.
 
+import type { DangerReason } from "./safety-modes";
+
 /** A rung of the ladder: the mode a session is in, or one a control requires. */
 export type SafetyMode = "read-only" | "write" | "danger";
+
+/** A mode above read-only: one that has a stripe, and one a raise can be to. */
+export type RaisedMode = Exclude<SafetyMode, "read-only">;
 
 /** Low to high. The index is the comparison, for every reading of the ladder. */
 export const LADDER: readonly SafetyMode[] = ["read-only", "write", "danger"];
@@ -34,6 +39,37 @@ export function modeLabel(mode: SafetyMode): string {
 		case "danger":
 			return "Danger";
 	}
+}
+
+/**
+ * What an operator is told about each reason a handler is danger, in the order
+ * the SAFE spec lists them. Each completes "it …", so a blocked control's raise
+ * reads "it acts directly on servers and invalidates credentials".
+ */
+const DANGER_REASON_WORDING: Record<DangerReason, string> = {
+	irreversible: "cannot be undone",
+	fleet: "acts directly on servers",
+	unprotects: "removes a protection",
+	issues: "issues credentials",
+	invalidates: "invalidates credentials",
+};
+
+/** "a", "a and b", "a, b and c". */
+export function joinWithAnd(items: readonly string[]): string {
+	if (items.length <= 1) return items.join("");
+	return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/**
+ * Why a danger control needs danger, as the operator is told it: "it acts
+ * directly on servers and invalidates credentials". Reasons are worded in the
+ * order of {@link DANGER_REASON_WORDING}, whatever order they are given in.
+ */
+export function dangerReasonsSentence(reasons: readonly DangerReason[]): string {
+	const ordered = (Object.keys(DANGER_REASON_WORDING) as DangerReason[]).filter(
+		(reason) => reasons.includes(reason),
+	);
+	return `it ${joinWithAnd(ordered.map((reason) => DANGER_REASON_WORDING[reason]))}`;
 }
 
 // The session identifier every request carries.

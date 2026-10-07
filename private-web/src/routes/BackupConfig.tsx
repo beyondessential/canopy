@@ -178,7 +178,10 @@ function ConfigForm({
 					</Typography>
 					{error && <Alert severity="error">{error.message}</Alert>}
 					<Stack direction="row" spacing={1}>
-						<GradedAction calls="backups/update">
+						<GradedAction
+							calls="backups/update"
+							action={`Save backup configuration for bucket ${bucket}`}
+						>
 							<Button variant="contained" onClick={persist} disabled={pending}>
 								{pending ? "Saving…" : "Save"}
 							</Button>
@@ -238,7 +241,10 @@ function ConfigForm({
 						<Alert severity="error">{createShared.error.message}</Alert>
 					)}
 					<Stack direction="row" spacing={1}>
-						<GradedAction calls="backups/create_shared">
+						<GradedAction
+							calls="backups/create_shared"
+							action="Create shared backup bucket for this group"
+						>
 							<Button
 								variant="contained"
 								onClick={persistShared}
@@ -377,7 +383,10 @@ function ConfigForm({
 									Re-check
 								</Button>
 							)}
-							<GradedAction calls={["backups/create", "backups/create_repo"]}>
+							<GradedAction
+								calls={["backups/create", "backups/create_repo"]}
+								action={`Create backup configuration for bucket ${bucket}`}
+							>
 								<Button
 									variant="contained"
 									onClick={persist}

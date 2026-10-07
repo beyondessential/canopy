@@ -423,6 +423,8 @@ function IssueActions({
 		?? silenceMachine.error
 		?? silenceGroup.error;
 
+	const subject = headerCheckName(issue) ?? issue.ref;
+
 	const silenceCalls: Calls = [
 		...(issue.application_id != null ? ["silenced_refs/silence_server" as const] : []),
 		...(issue.machine_id != null ? ["silenced_refs/silence_machine" as const] : []),
@@ -433,7 +435,10 @@ function IssueActions({
 		<Box sx={{ mt: 1 }}>
 			<Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }} useFlexGap>
 				{issue.resolved_at ? (
-					<GradedAction calls="issues/unresolve">
+					<GradedAction
+						calls="issues/unresolve"
+						action={`Unresolve issue ${subject}`}
+					>
 						<Button
 							size="small"
 							variant="outlined"
@@ -444,7 +449,10 @@ function IssueActions({
 						</Button>
 					</GradedAction>
 				) : (
-					<GradedAction calls="issues/resolve">
+					<GradedAction
+						calls="issues/resolve"
+						action={`Resolve issue ${subject}`}
+					>
 						<Button
 							size="small"
 							variant="outlined"
@@ -456,7 +464,10 @@ function IssueActions({
 					</GradedAction>
 				)}
 				{snoozeActive ? (
-					<GradedAction calls="issues/unsnooze">
+					<GradedAction
+						calls="issues/unsnooze"
+						action={`Unsnooze issue ${subject}`}
+					>
 						<Button
 							size="small"
 							variant="outlined"
@@ -467,7 +478,10 @@ function IssueActions({
 						</Button>
 					</GradedAction>
 				) : (
-					<GradedAction calls="issues/snooze">
+					<GradedAction
+						calls="issues/snooze"
+						action={`Snooze issue ${subject}`}
+					>
 						<Button
 							size="small"
 							variant="outlined"
@@ -478,7 +492,10 @@ function IssueActions({
 						</Button>
 					</GradedAction>
 				)}
-				<GradedAction opens={silenceCalls}>
+				<GradedAction
+					opens={silenceCalls}
+					action={`Silence check ${subject}`}
+				>
 					<Button
 						size="small"
 						variant="outlined"
@@ -514,7 +531,10 @@ function IssueActions({
 							</MenuItem>
 						))}
 					</TextField>
-					<GradedAction calls="issues/resolve">
+					<GradedAction
+						calls="issues/resolve"
+						action={`Resolve issue ${subject}`}
+					>
 						<Button
 							variant="outlined"
 							size="small"
@@ -548,7 +568,10 @@ function IssueActions({
 						sx={{ width: 100 }}
 						slotProps={{ htmlInput: { min: 1, max: 24 * 30 } }}
 					/>
-					<GradedAction calls="issues/snooze">
+					<GradedAction
+						calls="issues/snooze"
+						action={`Snooze issue ${subject}`}
+					>
 						<Button
 							variant="outlined"
 							size="small"
@@ -617,7 +640,10 @@ function IssueActions({
 					)}
 					<Stack direction="row" spacing={1}>
 						{issue.application_id != null && (
-							<GradedAction calls="silenced_refs/silence_server">
+							<GradedAction
+								calls="silenced_refs/silence_server"
+								action={`Silence check ${subject} for this server`}
+							>
 								<Button
 									variant="outlined"
 									size="small"
@@ -638,7 +664,10 @@ function IssueActions({
 							</GradedAction>
 						)}
 						{issue.machine_id != null && (
-							<GradedAction calls="silenced_refs/silence_machine">
+							<GradedAction
+								calls="silenced_refs/silence_machine"
+								action={`Silence check ${subject} for this machine`}
+							>
 								<Button
 									variant="outlined"
 									size="small"
@@ -659,7 +688,10 @@ function IssueActions({
 							</GradedAction>
 						)}
 						{issue.server_group_id && (
-							<GradedAction calls="silenced_refs/silence_group">
+							<GradedAction
+								calls="silenced_refs/silence_group"
+								action={`Silence check ${subject} for this group`}
+							>
 								<Button
 									variant="outlined"
 									size="small"

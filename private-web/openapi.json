@@ -61,6 +61,9 @@
             "tailscale-admin": []
           }
         ],
+        "x-canopy-danger-reasons": [
+          "issues"
+        ],
         "x-canopy-safety-mode": "danger"
       }
     },
@@ -111,6 +114,9 @@
           {
             "tailscale-admin": []
           }
+        ],
+        "x-canopy-danger-reasons": [
+          "invalidates"
         ],
         "x-canopy-safety-mode": "danger"
       }
@@ -420,6 +426,9 @@
             "tailscale-admin": []
           }
         ],
+        "x-canopy-danger-reasons": [
+          "unprotects"
+        ],
         "x-canopy-safety-mode": "danger"
       }
     },
@@ -703,7 +712,11 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "irreversible",
+          "invalidates"
+        ]
       }
     },
     "/api/backups/disallow_restore": {
@@ -734,7 +747,10 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "unprotects"
+        ]
       }
     },
     "/api/backups/get": {
@@ -1146,6 +1162,9 @@
             "tailscale-admin": []
           }
         ],
+        "x-canopy-danger-reasons": [
+          "fleet"
+        ],
         "x-canopy-safety-mode": "danger"
       }
     },
@@ -1365,7 +1384,10 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "unprotects"
+        ]
       }
     },
     "/api/backups/set_machine_schedule": {
@@ -1786,7 +1808,11 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "issues",
+          "unprotects"
+        ]
       }
     },
     "/api/bestool/delete_snippet": {
@@ -2373,7 +2399,10 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "unprotects"
+        ]
       }
     },
     "/api/certificates/release": {
@@ -2516,7 +2545,11 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "fleet",
+          "invalidates"
+        ]
       }
     },
     "/api/certificates/set_profile": {
@@ -2843,7 +2876,10 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "issues"
+        ]
       }
     },
     "/api/devices/attach_tailscale": {
@@ -2911,7 +2947,10 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "issues"
+        ]
       }
     },
     "/api/devices/connection_count": {
@@ -3023,7 +3062,10 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "invalidates"
+        ]
       }
     },
     "/api/devices/detach_tailscale": {
@@ -3071,6 +3113,9 @@
             "tailscale-admin": []
           }
         ],
+        "x-canopy-danger-reasons": [
+          "invalidates"
+        ],
         "x-canopy-safety-mode": "danger"
       }
     },
@@ -3102,7 +3147,10 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "invalidates"
+        ]
       }
     },
     "/api/devices/get_device_by_id": {
@@ -3287,6 +3335,9 @@
             "tailscale-admin": []
           }
         ],
+        "x-canopy-danger-reasons": [
+          "irreversible"
+        ],
         "x-canopy-safety-mode": "danger"
       }
     },
@@ -3335,7 +3386,10 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "issues"
+        ]
       }
     },
     "/api/devices/reactivate_key": {
@@ -3366,7 +3420,10 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "issues"
+        ]
       }
     },
     "/api/devices/resolve_tailnet_identifier": {
@@ -3526,6 +3583,10 @@
           {
             "tailscale-admin": []
           }
+        ],
+        "x-canopy-danger-reasons": [
+          "issues",
+          "invalidates"
         ],
         "x-canopy-safety-mode": "danger"
       }
@@ -3704,6 +3765,9 @@
           {
             "tailscale-admin": []
           }
+        ],
+        "x-canopy-danger-reasons": [
+          "unprotects"
         ],
         "x-canopy-safety-mode": "danger"
       }
@@ -4618,7 +4682,10 @@
             "tailscale-user": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "invalidates"
+        ]
       }
     },
     "/api/fleet/machines/attach_tailscale_device": {
@@ -4687,7 +4754,10 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "issues"
+        ]
       }
     },
     "/api/fleet/machines/create": {
@@ -4999,6 +5069,9 @@
             "tailscale-admin": []
           }
         ],
+        "x-canopy-danger-reasons": [
+          "issues"
+        ],
         "x-canopy-safety-mode": "danger"
       }
     },
@@ -5040,7 +5113,10 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "invalidates"
+        ]
       }
     },
     "/api/fleet/machines/update": {
@@ -5158,6 +5234,9 @@
           {
             "tailscale-admin": []
           }
+        ],
+        "x-canopy-danger-reasons": [
+          "unprotects"
         ],
         "x-canopy-safety-mode": "danger"
       }
@@ -5329,7 +5408,10 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "unprotects"
+        ]
       }
     },
     "/api/healthchecks/set_source_reachability": {
@@ -7097,6 +7179,9 @@
             "tailscale-admin": []
           }
         ],
+        "x-canopy-danger-reasons": [
+          "issues"
+        ],
         "x-canopy-safety-mode": "danger"
       }
     },
@@ -7145,6 +7230,10 @@
             "tailscale-admin": []
           }
         ],
+        "x-canopy-danger-reasons": [
+          "issues",
+          "invalidates"
+        ],
         "x-canopy-safety-mode": "danger"
       }
     },
@@ -7192,6 +7281,10 @@
           {
             "tailscale-admin": []
           }
+        ],
+        "x-canopy-danger-reasons": [
+          "irreversible",
+          "invalidates"
         ],
         "x-canopy-safety-mode": "danger"
       }
@@ -7614,6 +7707,9 @@
             "tailscale-admin": []
           }
         ],
+        "x-canopy-danger-reasons": [
+          "issues"
+        ],
         "x-canopy-safety-mode": "danger"
       }
     },
@@ -7674,6 +7770,10 @@
           {
             "tailscale-admin": []
           }
+        ],
+        "x-canopy-danger-reasons": [
+          "irreversible",
+          "invalidates"
         ],
         "x-canopy-safety-mode": "danger"
       }
@@ -8018,6 +8118,9 @@
           {
             "tailscale-admin": []
           }
+        ],
+        "x-canopy-danger-reasons": [
+          "invalidates"
         ],
         "x-canopy-safety-mode": "danger"
       }
@@ -8668,7 +8771,10 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "unprotects"
+        ]
       }
     },
     "/api/silenced_refs/silence_group": {
@@ -8716,7 +8822,10 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "unprotects"
+        ]
       }
     },
     "/api/silenced_refs/silence_machine": {
@@ -8764,7 +8873,10 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "unprotects"
+        ]
       }
     },
     "/api/silenced_refs/silence_server": {
@@ -8812,7 +8924,10 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "unprotects"
+        ]
       }
     },
     "/api/silenced_refs/unsilence_cluster": {
@@ -9908,7 +10023,10 @@
             "tailscale-admin": []
           }
         ],
-        "x-canopy-safety-mode": "danger"
+        "x-canopy-safety-mode": "danger",
+        "x-canopy-danger-reasons": [
+          "irreversible"
+        ]
       }
     },
     "/api/versions/get_grouped_versions": {

@@ -1,16 +1,4 @@
-import WarningAmberIcon from "@mui/icons-material/WarningAmber";
-import {
-	Box,
-	Button,
-	Dialog,
-	DialogActions,
-	DialogContent,
-	DialogTitle,
-	ListItemText,
-	Menu,
-	MenuItem,
-	Typography,
-} from "@mui/material";
+import { Box, Button, ListItemText, Menu, MenuItem } from "@mui/material";
 import { useState } from "react";
 import type { Theme } from "@mui/material/styles";
 import { useRemainingMs, useSafetyMode } from "../hooks/useSafetyMode";
@@ -71,22 +59,9 @@ function remaining(ms: number): string {
  * Always visible, so the mode is never something to go and check.
  */
 export function SafetyModeControl() {
-	const { mode, raise, lower, busy } = useSafetyMode();
+	const { mode, raise, lower, requestRaise, busy } = useSafetyMode();
 	const remainingMs = useRemainingMs();
 	const [anchor, setAnchor] = useState<null | HTMLElement>(null);
-	const [confirming, setConfirming] = useState(false);
-	const [failed, setFailed] = useState(false);
-
-	async function to(next: SafetyMode) {
-		setAnchor(null);
-		setFailed(false);
-		try {
-			if (next === "read-only") await lower();
-			else await raise(next);
-		} catch {
-			setFailed(true);
-		}
-	}
 
 	return (
 		<>
@@ -140,8 +115,9 @@ export function SafetyModeControl() {
 							// accessibility tree, and from the pointer.
 							setAnchor(null);
 							if (option === mode) return;
-							if (option === "danger") setConfirming(true);
-							else to(option);
+							if (option === "danger") requestRaise({ mode: "danger" });
+							else if (option === "write") raise("write");
+							else lower();
 						}}
 						// Each raised mode wears the stripe its blocked controls
 						// carry, so the menu is where the operator learns it.
@@ -170,56 +146,6 @@ export function SafetyModeControl() {
 					</MenuItem>
 				))}
 			</Menu>
-
-			<Dialog open={confirming} onClose={() => setConfirming(false)}>
-				<DialogTitle
-					sx={{
-						display: "flex",
-						alignItems: "center",
-						gap: 1.25,
-						color: "error.main",
-					}}
-				>
-					<WarningAmberIcon />
-					Enter danger mode?
-				</DialogTitle>
-				<DialogContent>
-					<Typography color="text.secondary" sx={{ mb: 2 }}>
-						Danger mode unlocks actions that cannot be undone, act directly on
-						production servers, or remove a protection.
-					</Typography>
-					<Typography color="text.secondary">
-						It lasts ten minutes, then drops back to read-only.
-					</Typography>
-				</DialogContent>
-				<DialogActions>
-					<Button color="inherit" onClick={() => setConfirming(false)}>
-						Cancel
-					</Button>
-					<Button
-						variant="contained"
-						color="error"
-						onClick={() => {
-							setConfirming(false);
-							to("danger");
-						}}
-					>
-						Enter danger mode
-					</Button>
-				</DialogActions>
-			</Dialog>
-
-			<Dialog open={failed} onClose={() => setFailed(false)}>
-				<DialogTitle>Mode unchanged</DialogTitle>
-				<DialogContent>
-					<Typography color="text.secondary">
-						Could not change mode.
-					</Typography>
-				</DialogContent>
-				<DialogActions>
-					<Button onClick={() => setFailed(false)}>Close</Button>
-				</DialogActions>
-			</Dialog>
 		</>
 	);
 }

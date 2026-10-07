@@ -153,6 +153,7 @@ function KeysBox({
 	const [confirmDisableAll, setConfirmDisableAll] = useState(false);
 	const disableAll = useApiAction("devices", "disable_all_keys");
 	const hasActiveKey = device.keys.some((k) => k.is_active);
+	const label = deviceLabel(deviceName(device));
 
 	const onDisableAll = async () => {
 		try {
@@ -181,12 +182,18 @@ function KeysBox({
 					Public Keys ({device.keys.length})
 				</Typography>
 				<Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
-					<GradedAction calls="devices/add_key">
+					<GradedAction
+						calls="devices/add_key"
+						action={`Add public key to ${label}`}
+					>
 						<Button variant="outlined" onClick={() => setAddOpen(true)}>
 							Add from public key
 						</Button>
 					</GradedAction>
-					<GradedAction calls="devices/provision_credential">
+					<GradedAction
+						calls="devices/provision_credential"
+						action={`Generate new key for ${label}`}
+					>
 						<Button variant="contained" onClick={() => setGenerateOpen(true)}>
 							Generate new key
 						</Button>
@@ -194,7 +201,10 @@ function KeysBox({
 					{hasActiveKey &&
 						(confirmDisableAll ? (
 							<>
-								<GradedAction calls="devices/disable_all_keys">
+								<GradedAction
+									calls="devices/disable_all_keys"
+									action={`Disable all keys for ${label}`}
+								>
 									<Button
 										variant="contained"
 										onClick={onDisableAll}
@@ -212,7 +222,10 @@ function KeysBox({
 								</Button>
 							</>
 						) : (
-							<GradedAction calls="devices/disable_all_keys">
+							<GradedAction
+								calls="devices/disable_all_keys"
+								action={`Disable all keys for ${label}`}
+							>
 								<Button
 									variant="outlined"
 									onClick={() => setConfirmDisableAll(true)}
@@ -263,6 +276,7 @@ function KeyRow({
 	const disable = useApiAction("devices", "deactivate_key");
 	const enable = useApiAction("devices", "reactivate_key");
 	const toggling = disable.pending || enable.pending;
+	const keyLabel = keyData.name ? `key ${keyData.name}` : "unnamed key";
 
 	const save = async () => {
 		const trimmed = name.trim();
@@ -300,7 +314,10 @@ function KeyRow({
 						placeholder="Key name"
 						disabled={action.pending}
 					/>
-					<GradedAction calls="devices/update_key_name">
+					<GradedAction
+						calls="devices/update_key_name"
+						action={`Rename ${keyLabel}`}
+					>
 						<Button
 							variant="contained"
 							onClick={save}
@@ -336,7 +353,10 @@ function KeyRow({
 						)}
 					</Stack>
 					<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
-						<GradedAction calls={keyData.is_active ? "devices/deactivate_key" : "devices/reactivate_key"}>
+						<GradedAction
+							calls={keyData.is_active ? "devices/deactivate_key" : "devices/reactivate_key"}
+							action={`${keyData.is_active ? "Disable" : "Enable"} ${keyLabel}`}
+						>
 							<Button
 								size="small"
 								variant="outlined"
@@ -352,7 +372,10 @@ function KeyRow({
 										: "Enable"}
 							</Button>
 						</GradedAction>
-						<GradedAction calls="devices/update_key_name">
+						<GradedAction
+							calls="devices/update_key_name"
+							action={`Rename ${keyLabel}`}
+						>
 							<IconButton
 								aria-label={`edit name for ${keyData.name ?? "key"}`}
 								size="small"
@@ -427,7 +450,10 @@ function RoleControls({
 						</MenuItem>
 					))}
 				</TextField>
-				<GradedAction calls="devices/update_role">
+				<GradedAction
+					calls="devices/update_role"
+					action={`Change role of ${deviceLabel(deviceName(device))} to ${selected}`}
+				>
 					<Button
 						variant="contained"
 						onClick={onSave}

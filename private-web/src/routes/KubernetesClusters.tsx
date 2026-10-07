@@ -89,7 +89,10 @@ export default function KubernetesClusters() {
 			</Typography>
 
 			<Box>
-				<GradedAction calls="kubernetes_clusters/register">
+				<GradedAction
+					calls="kubernetes_clusters/register"
+					action="Register Kubernetes cluster"
+				>
 					<Button variant="contained" onClick={() => setWizardOpen(true)}>
 						Register cluster
 					</Button>
@@ -166,7 +169,10 @@ export default function KubernetesClusters() {
 				</DialogContent>
 				<DialogActions>
 					<Button onClick={() => setConfirmRemove(null)}>Cancel</Button>
-					<GradedAction calls="kubernetes_clusters/remove">
+					<GradedAction
+						calls="kubernetes_clusters/remove"
+						action={`Remove Kubernetes cluster ${confirmRemove?.name}`}
+					>
 						<Button
 							onClick={() => confirmRemove && onRemove(confirmRemove)}
 						>
@@ -249,7 +255,10 @@ function ClusterSection({
 								</TableCell>
 								<TableCell align="right">
 									{onCheck && (
-										<GradedAction calls="kubernetes_clusters/confirm">
+										<GradedAction
+											calls="kubernetes_clusters/confirm"
+											action={`Check connection to Kubernetes cluster ${c.name}`}
+										>
 											<Tooltip title="Check connection">
 												<IconButton
 													size="small"
@@ -261,7 +270,10 @@ function ClusterSection({
 											</Tooltip>
 										</GradedAction>
 									)}
-									<GradedAction calls="kubernetes_clusters/reissue">
+									<GradedAction
+										calls="kubernetes_clusters/reissue"
+										action={`Re-issue relay credential for Kubernetes cluster ${c.name}`}
+									>
 										<Tooltip title="Re-issue credential">
 											<IconButton
 												size="small"
@@ -272,7 +284,10 @@ function ClusterSection({
 											</IconButton>
 										</Tooltip>
 									</GradedAction>
-									<GradedAction calls="kubernetes_clusters/remove">
+									<GradedAction
+										calls="kubernetes_clusters/remove"
+										action={`Remove Kubernetes cluster ${c.name}`}
+									>
 										<Tooltip title="Remove">
 											<IconButton
 												size="small"
@@ -422,7 +437,10 @@ function RegisterWizard({
 						<Button onClick={close} disabled={pending}>
 							Cancel
 						</Button>
-						<GradedAction calls="kubernetes_clusters/register">
+						<GradedAction
+							calls="kubernetes_clusters/register"
+							action={`Register Kubernetes cluster ${name.trim()}`}
+						>
 							<Button variant="contained" onClick={onRegister} disabled={pending}>
 								{pending ? "Registering…" : "Register"}
 							</Button>

@@ -148,7 +148,10 @@ function View({ detail }: { detail: Detail }) {
 							<Alert severity="error">{updateAction.error.message}</Alert>
 						)}
 						<Stack direction="row" spacing={1}>
-							<GradedAction calls="bestool/save_snippet">
+							<GradedAction
+								calls="bestool/save_snippet"
+								action={`Save snippet ${detail.name}`}
+							>
 								<Button
 									type="submit"
 									variant="contained"
@@ -197,12 +200,18 @@ function View({ detail }: { detail: Detail }) {
 					<Typography variant="body2" color="text.secondary">
 						Last edit by {detail.editor}
 					</Typography>
-					<GradedAction calls="bestool/save_snippet">
+					<GradedAction
+						calls="bestool/save_snippet"
+						action={`Edit snippet ${detail.name}`}
+					>
 						<Button variant="contained" onClick={() => setEditing(true)}>
 							Edit
 						</Button>
 					</GradedAction>
-					<GradedAction calls="bestool/delete_snippet">
+					<GradedAction
+						calls="bestool/delete_snippet"
+						action={`Delete snippet ${detail.name}`}
+					>
 						<Button
 							variant="outlined"
 							onClick={() => setConfirmDelete(true)}
@@ -254,7 +263,10 @@ function View({ detail }: { detail: Detail }) {
 					>
 						Cancel
 					</Button>
-					<GradedAction calls="bestool/delete_snippet">
+					<GradedAction
+						calls="bestool/delete_snippet"
+						action={`Delete snippet ${detail.name}`}
+					>
 						<Button
 							variant="contained"
 							onClick={onDelete}

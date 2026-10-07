@@ -103,6 +103,7 @@ export function AddNoteButton({
 	const [open, setOpen] = useState(false);
 	const [draft, setDraft] = useState("");
 	const add = useApiAction(apiModule, "add_note");
+	const parent = apiModule === "issues" ? "issue" : "incident";
 
 	const close = () => {
 		setOpen(false);
@@ -123,7 +124,10 @@ export function AddNoteButton({
 
 	return (
 		<>
-			<GradedAction calls={`${apiModule}/add_note`}>
+			<GradedAction
+				calls={`${apiModule}/add_note`}
+				action={`Add note to this ${parent}`}
+			>
 				<Button
 					size="small"
 					variant={variant}
@@ -156,7 +160,10 @@ export function AddNoteButton({
 					<Button onClick={close} disabled={add.pending}>
 						Cancel
 					</Button>
-					<GradedAction calls={`${apiModule}/add_note`}>
+					<GradedAction
+						calls={`${apiModule}/add_note`}
+						action={`Add note to this ${parent}`}
+					>
 						<Button
 							variant="contained"
 							onClick={submit}
@@ -183,6 +190,7 @@ function NoteRow({
 	onChanged: () => void;
 }) {
 	const del = useApiAction(apiModule, "delete_note");
+	const parent = apiModule === "issues" ? "issue" : "incident";
 
 	const remove = async () => {
 		try {
@@ -216,7 +224,10 @@ function NoteRow({
 						<TimeAgo timestamp={note.created_at} />
 					</Typography>
 					{canEdit && (
-						<GradedAction calls={`${apiModule}/delete_note`}>
+						<GradedAction
+							calls={`${apiModule}/delete_note`}
+							action={`Delete note by ${note.author} from this ${parent}`}
+						>
 							<IconButton
 								size="small"
 								aria-label="Delete"
