@@ -440,7 +440,12 @@ test.describe("safety modes", () => {
 		await expect(page.getByText(/bestool canopy register/)).toHaveCount(0);
 		expect(await tickets()).toBe(0);
 
-		// Reaching for it asks for the raise, and confirming mints.
+		// Reaching for it asks for the raise, and confirming mints, once: the
+		// activation does, not the raise.
+		let mints = 0;
+		page.on("request", (request) => {
+			if (request.url().endsWith("/api/fleet/machines/mint_enrollment")) mints++;
+		});
 		await issue.click();
 		await page
 			.getByRole("dialog")
@@ -448,6 +453,7 @@ test.describe("safety modes", () => {
 			.click();
 		await expect(page.getByText(/bestool canopy register/)).toBeVisible();
 		expect(await tickets()).toBeGreaterThan(0);
+		expect(mints).toBe(1);
 	});
 
 	test("a control that opens a form carries the grade of what the form saves", async ({

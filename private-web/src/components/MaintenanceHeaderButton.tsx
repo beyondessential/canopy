@@ -22,7 +22,7 @@ export default function MaintenanceHeaderButton({
 	scope: MaintenanceScope;
 	id: string;
 	/** What the target is called, so a blocked button says what it would act on. */
-	targetLabel?: string;
+	targetLabel: string;
 	/** Drawn as the page's compact action buttons rather than a full one. */
 	compact?: boolean;
 	onDone: () => void;
@@ -32,7 +32,7 @@ export default function MaintenanceHeaderButton({
 		<>
 			<GradedAction
 				opens={["maintenance/declare", "maintenance/amend"]}
-				action={`Declare maintenance${targetLabel ? ` on ${targetLabel}` : ""}`}
+				action={`Declare maintenance on ${targetLabel}`}
 			>
 				{compact ? (
 					<ActionButton

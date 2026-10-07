@@ -44,7 +44,7 @@ export default function MachineSetupInstructions({
 }: {
 	machineId: string;
 	/// What the enrollment controls name the machine as when they ask to raise.
-	machineName?: string;
+	machineName: string;
 	/// Fired once when enrollment completes. For initial setup that's the first
 	/// `registered_at`; for re-enroll it's `registered_at` *changing* from its
 	/// value at mount (a new device completing the handshake).
@@ -53,7 +53,6 @@ export default function MachineSetupInstructions({
 	/// ticket; re-enroll waits for the operator to press "Re-enroll a device".
 	reEnroll?: boolean;
 }) {
-	const target = machineName ?? "this machine";
 	const mint = useApiAction("fleet/machines", "mint_enrollment");
 	const revoke = useApiAction("fleet/machines", "revoke_enrollment");
 	const [ticket, setTicket] = useState<EnrollmentTicket | null>(null);
@@ -105,17 +104,23 @@ export default function MachineSetupInstructions({
 
 	// Initial setup auto-mints once — but only when nothing is outstanding, so a
 	// reload mid-enrollment shows the pending ticket instead of clobbering it.
-	// Minting is danger, so a session below it waits for the operator to raise
-	// rather than asking and being refused.
+	// Minting is danger, so a session below it offers the ticket as a control
+	// instead, and from then on the operator's activation is what mints it: the
+	// raise carries that activation out, so minting on the raise as well would
+	// mint twice.
 	const autoMinted = useRef(false);
 	const minting = useGrade("fleet/machines/mint_enrollment");
+	const [offered, setOffered] = useState(false);
+	const awaitingTicket =
+		!reEnroll && statusLoaded && !outstanding && !ticket && !mint.pending;
+	if (awaitingTicket && minting.blocked && !offered) setOffered(true);
 	useEffect(() => {
 		if (reEnroll || !statusLoaded || autoMinted.current || ticket) return;
-		if (outstanding || minting.blocked) return;
+		if (outstanding || minting.blocked || offered) return;
 		autoMinted.current = true;
 		doMint();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [reEnroll, statusLoaded, outstanding, ticket, minting.blocked]);
+	}, [reEnroll, statusLoaded, outstanding, ticket, minting.blocked, offered]);
 
 	// Notify the parent once when (re-)registration completes.
 	const [notified, setNotified] = useState(false);
@@ -162,21 +167,14 @@ export default function MachineSetupInstructions({
 		}
 	};
 
-	// Initial setup that cannot mint yet: the ticket it would have minted on its
-	// own, offered as the control it needs a higher mode for.
-	if (
-		!reEnroll &&
-		minting.blocked &&
-		statusLoaded &&
-		!outstanding &&
-		!ticket &&
-		!mint.pending
-	) {
+	// Initial setup that could not mint on its own: the ticket offered as a
+	// control, which stays in place once the mode permits it.
+	if (awaitingTicket && offered) {
 		return (
 			<Box>
 				<GradedAction
 					calls="fleet/machines/mint_enrollment"
-					action={`Issue enrollment ticket for ${target}`}
+					action={`Issue enrollment ticket for ${machineName}`}
 				>
 					<Button variant="outlined" onClick={doMint}>
 						Issue enrollment ticket
@@ -193,7 +191,7 @@ export default function MachineSetupInstructions({
 			<Box>
 				<GradedAction
 					calls="fleet/machines/mint_enrollment"
-					action={`Re-enroll a device for ${target}`}
+					action={`Re-enroll a device for ${machineName}`}
 				>
 					<Button variant="outlined" onClick={doMint}>
 						Re-enroll a device
@@ -220,7 +218,7 @@ export default function MachineSetupInstructions({
 	const reissueButton = (
 		<GradedAction
 			calls="fleet/machines/mint_enrollment"
-			action={`Reissue enrollment ticket for ${target}`}
+			action={`Reissue enrollment ticket for ${machineName}`}
 		>
 			<Tooltip title="Generates a new ticket and passphrase; the current ones immediately stop working.">
 				<Button
@@ -384,7 +382,7 @@ export default function MachineSetupInstructions({
 					<Box>
 						<GradedAction
 							calls="fleet/machines/revoke_enrollment"
-							action={`Cancel re-enrollment of ${target}`}
+							action={`Cancel re-enrollment of ${machineName}`}
 						>
 							<Button
 								size="small"

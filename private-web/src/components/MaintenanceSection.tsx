@@ -49,7 +49,7 @@ export default function MaintenanceSection({
 	scope: MaintenanceScope;
 	id: string;
 	/** What the target is called, so the section's actions say what they act on. */
-	targetLabel?: string;
+	targetLabel: string;
 	/** For an application, the box it runs on: a machine's window covers every
 	 * application on it, so the application is under maintenance without having
 	 * a window of its own. Its own surface has to say so. */
@@ -75,7 +75,7 @@ export default function MaintenanceSection({
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const [amending, setAmending] = useState<MaintenanceWindow | null>(null);
 	const lift = useApiAction("maintenance", "lift");
-	const onTarget = targetLabel ? ` on ${targetLabel}` : "";
+	const onTarget = ` on ${targetLabel}`;
 
 	const result = useApi(
 		"maintenance",

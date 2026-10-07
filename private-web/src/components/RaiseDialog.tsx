@@ -16,6 +16,14 @@ import {
 import type { DangerReason } from "../safety-modes";
 
 /** A request to raise the session, and what the operator is told about it. */
+/** The attribute marking the raise dialog in the page. */
+const RAISE_DIALOG = "data-raise-dialog";
+
+/** Whether `element` is inside the raise dialog. */
+export function inRaiseDialog(element: Element): boolean {
+	return !!element.closest(`[${RAISE_DIALOG}]`);
+}
+
 export interface RaiseRequest {
 	/** The mode to raise to. */
 	mode: RaisedMode;
@@ -62,10 +70,10 @@ export function RaiseDialog({
 	return (
 		<Dialog
 			open={request !== null}
-			// The control that asked may be redrawn by the raise, so it returns
-			// focus itself rather than to an element that no longer exists.
+			// The control that asked returns focus itself, to the very element the
+			// operator activated (see `inRaiseDialog`).
 			disableRestoreFocus
-			data-raise-dialog
+			{...{ [RAISE_DIALOG]: "" }}
 			// A click that lands on the backdrop is not a decision: the second click
 			// of a double click on the control that asked lands there.
 			onClose={(_, reason) => {

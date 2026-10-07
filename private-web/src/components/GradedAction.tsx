@@ -1,4 +1,4 @@
-import { Box, MenuItem, type MenuItemProps, Tooltip } from "@mui/material";
+import { Box, Tooltip } from "@mui/material";
 import { type Theme, alpha } from "@mui/material/styles";
 import {
 	type ReactElement,
@@ -6,8 +6,10 @@ import {
 	type SyntheticEvent,
 	cloneElement,
 	useCallback,
+	useMemo,
 } from "react";
 import { type RaiseOutcome, useSafetyMode } from "../hooks/useSafetyMode";
+import { inRaiseDialog } from "./RaiseDialog";
 import {
 	LADDER,
 	type RaisedMode,
@@ -176,8 +178,11 @@ export function dangerReasons(
 export function useGradedActivation(grading: Grading) {
 	const { requestRaise } = useSafetyMode();
 	const { required, blocked } = useModeGrade(gradingMode(grading));
-	const reasons = dangerReasons(grading, required);
-	const reasonKey = reasons.join();
+	const reasonKey = dangerReasons(grading, required).join();
+	// Keyed on the joined reasons, so the list keeps its identity across renders
+	// that do not change it, and `activate` with it.
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	const reasons = useMemo(() => dangerReasons(grading, required), [reasonKey, required]);
 
 	const activate = useCallback(
 		async (run: () => void, action = grading.action): Promise<RaiseOutcome> => {
@@ -188,12 +193,12 @@ export function useGradedActivation(grading: Grading) {
 			const outcome = await requestRaise({
 				mode: required as RaisedMode,
 				action,
-				reasons: reasonKey ? (reasonKey.split(",") as DangerReason[]) : [],
+				reasons,
 			});
 			if (outcome === "permits") run();
 			return outcome;
 		},
-		[blocked, required, grading.action, reasonKey, requestRaise],
+		[blocked, required, grading.action, reasons, requestRaise],
 	);
 	return { required, blocked, activate };
 }
@@ -365,7 +370,7 @@ function returnFocus(control: HTMLElement): void {
 		const lost =
 			!active ||
 			active === document.body ||
-			!!active.closest("[data-raise-dialog]");
+			inRaiseDialog(active);
 		if (lost && control.isConnected) control.focus();
 	});
 }
@@ -480,70 +485,6 @@ export function GradedAction({
 			>
 				{usable ? inGradeColour(children, required) : children}
 			</Box>
-		</Tooltip>
-	);
-}
-
-type GradedMenuItemProps = Omit<MenuItemProps, "action"> &
-	Grading & {
-		/**
-		 * Closes the menu the item is in. A blocked item calls it before asking for
-		 * the raise, as any choice closes its menu, so the confirmation is not asked
-		 * over an open menu.
-		 */
-		onCloseMenu?: () => void;
-	};
-
-/**
- * A menu item graded like {@link GradedAction}.
- *
- * Kept a direct child of its menu, which is what the menu's keyboard handling
- * expects, so it cannot be wrapped: blocked, it keeps its place and carries the
- * stripe, and choosing it closes the menu, asks for the raise, and then does
- * what choosing it does.
- */
-export function GradedMenuItem(item: GradedMenuItemProps) {
-	const {
-		calls: _calls,
-		opens: _opens,
-		action: _action,
-		onCloseMenu,
-		onClick,
-		sx,
-		...props
-	} = item;
-	const { required, blocked, activate } = useGradedActivation(item);
-	if (!blocked) {
-		return (
-			<MenuItem
-				onClick={onClick}
-				sx={[
-					!!gradeColour(required) && {
-						color: `${gradeColour(required)}.main`,
-					},
-					...(Array.isArray(sx) ? sx : sx ? [sx] : []),
-				]}
-				{...props}
-			/>
-		);
-	}
-
-	return (
-		<Tooltip title={blockedTitle(required)} placement="left" describeChild>
-			<MenuItem
-				{...props}
-				onClick={(event) => {
-					// React clears the target once the dispatch returns, and the
-					// handler runs after the raise, so it is put back for it.
-					const { currentTarget } = event;
-					onCloseMenu?.();
-					activate(() => {
-						event.currentTarget = currentTarget;
-						onClick?.(event);
-					});
-				}}
-				sx={[blockedSx(required), ...(Array.isArray(sx) ? sx : sx ? [sx] : [])]}
-			/>
 		</Tooltip>
 	);
 }

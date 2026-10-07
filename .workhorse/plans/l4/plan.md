@@ -76,7 +76,7 @@ Check each one against its handler when you declare it. Short names: `irreversib
 - [x] Add a `dangerReasons(grading)` helper: the union, in list order, of `DANGER_REASONS` over the endpoints whose grade equals the required mode
 - [x] Blocked `GradedAction`: stop cloning `disabled: true` and drop `pointer-events: none` on the child. Keep the stripe and the "Requires … mode" tooltip, and use a pointer cursor instead of `not-allowed`. `aria-disabled` goes: the control is operable, and Playwright (like a screen reader) reads an `aria-disabled` ancestor as disabled. Intercept `onClickCapture` on the wrapper (`preventDefault` + `stopPropagation`), then `requestRaise`, and on `true` click the marked control again, and focus it if nothing took focus
 - [x] Own-reason disabled: when the child, or the control inside a `Tooltip` child, has `disabled`, render it the way a usable control renders, with no stripe and no interception, whatever the mode
-- [x] Blocked `GradedMenuItem`: call `onCloseMenu`, then `requestRaise`, then `onClick` on `true`. Its former caller in `MaintenanceSection.tsx` is gone, so it has no end-to-end coverage
+- [x] `GradedMenuItem` removed: its only caller, `MaintenanceSection.tsx`'s declare-over-environment menu, became the dialog's picker. A graded menu built later closes itself before asking for the raise, per the spec
 - [x] Add a `useGradedActivation(grading)` hook returning `{ required, blocked, activate(run, action?) }` for the controls that can't take the wrapper; `action` overrides the grading's for a control standing for one of many
 - [x] Rewrite the `GradedAction` and `GradedMenuItem` doc comments that say raising is never a by-product of a blocked control
 

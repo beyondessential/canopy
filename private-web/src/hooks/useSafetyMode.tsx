@@ -214,7 +214,15 @@ export function SafetyModeProvider({ children }: { children: ReactNode }) {
 		if (!asked) return;
 		const { request, settle } = asked;
 		setAsked(null);
-		raise(request.mode).then(settle);
+		// Settled on the mode this client now reads, not on the request having
+		// gone through: a raise whose expiry it cannot honour, such as one from a
+		// server whose clock is behind, leaves the control blocked, and carrying the
+		// activation out would only ask again.
+		raise(request.mode).then((made) => {
+			const reached = made && permits(modeRef.current, request.mode);
+			if (made && !reached) setFailed(true);
+			settle(reached);
+		});
 	};
 	const cancelAsked = () => {
 		asked?.settle(false);
