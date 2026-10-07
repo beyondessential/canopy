@@ -540,13 +540,15 @@ async fn a_window_a_run_is_served_against_stays_until_the_lease_is_released() {
 			&mut conn,
 			site.group,
 			ServerRank::Production,
+			&[site.production_box],
 			RunIntent::Configure,
 			Some("op"),
 			None,
 			false,
 		)
 		.await
-		.expect("take");
+		.expect("take")
+		.expect("the declarer is served against their own window");
 
 		assert!(
 			window
@@ -678,15 +680,19 @@ async fn coverage_marks_agree_with_suspension() {
 	.await
 }
 
+/// Taking a lease reads the windows over the environment under the group's
+/// lock, so another operator's window refuses it from inside the take.
+// spec: INV#work-under-way
 #[tokio::test(flavor = "multi_thread")]
-async fn another_operators_lease_does_not_hold_a_window_in_place() {
+async fn a_take_under_another_operators_window_is_refused_inside_the_lock() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let site = site(&mut conn).await;
 		let window = declare_group(&mut conn, site.group, Some(ServerRank::Production)).await;
-		InventoryLease::take(
+		let refused = InventoryLease::take(
 			&mut conn,
 			site.group,
 			ServerRank::Production,
+			&[site.production_box],
 			RunIntent::Configure,
 			Some("someone-else"),
 			None,
@@ -694,6 +700,29 @@ async fn another_operators_lease_does_not_hold_a_window_in_place() {
 		)
 		.await
 		.expect("take");
+		assert_eq!(
+			refused.map(|lease| lease.id).map_err(|window| window.id),
+			Err(window.id),
+			"the window that refuses it comes back"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn another_operators_lease_does_not_hold_a_window_in_place() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let site = site(&mut conn).await;
+		let window = declare_group(&mut conn, site.group, Some(ServerRank::Production)).await;
+		// Taken before the window, since one taken under it would be refused.
+		sql_query(
+			"INSERT INTO inventory_leases (server_group_id, rank, intent, held_by, expires_at) \
+			 VALUES ($1, 'production', 'configure', 'someone-else', NOW() + INTERVAL '1 hour')",
+		)
+		.bind::<sql_types::Uuid, _>(site.group)
+		.execute(&mut conn)
+		.await
+		.expect("lease");
 
 		MaintenanceWindow::amend(
 			&mut conn,
@@ -882,35 +911,6 @@ async fn an_applications_line_of_descent_is_what_contains_it() {
 	.await
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn grains_the_start_has_none_of_are_passed_over() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let lone_box = insert_machine(&mut conn, None, "lone").await;
-		let lone_app =
-			insert_application(&mut conn, None, lone_box, Some("production"), "lone").await;
-		let descent = line_of_descent(&mut conn, Grain::machine(lone_box))
-			.await
-			.expect("descent");
-		assert_eq!(
-			grains(&descent),
-			vec![
-				(Grain::machine(lone_box), 0),
-				(Grain::application(lone_app), 1),
-			],
-			"a machine in no group offers its applications alone"
-		);
-
-		let group = insert_group(&mut conn, "samoa").await;
-		let pending_box = insert_machine(&mut conn, Some(group), "pending").await;
-		insert_application(&mut conn, Some(group), pending_box, None, "pending").await;
-		let descent = line_of_descent(&mut conn, Grain::machine(pending_box))
-			.await
-			.expect("descent");
-		assert_eq!(
-			descent.entries[0].grain,
-			Grain::group(group),
-			"a pending machine offers its group"
-		);
 /// A machine ranked before anything on it has reported is already in its
 /// environment, so it is listed there rather than with the pending boxes.
 // spec: GRP#environments
@@ -940,6 +940,35 @@ async fn a_ranked_box_with_nothing_on_it_is_in_its_environment() {
 	.await
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn grains_the_start_has_none_of_are_passed_over() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let lone_box = insert_machine(&mut conn, None, "lone").await;
+		let lone_app =
+			insert_application(&mut conn, None, lone_box, Some("production"), "lone").await;
+		let descent = line_of_descent(&mut conn, Grain::machine(lone_box))
+			.await
+			.expect("descent");
+		assert_eq!(
+			grains(&descent),
+			vec![
+				(Grain::machine(lone_box), 0),
+				(Grain::application(lone_app), 1),
+			],
+			"a machine in no group offers its applications alone"
+		);
+
+		let group = insert_group(&mut conn, "samoa").await;
+		let pending_box = insert_machine(&mut conn, Some(group), "pending").await;
+		insert_application(&mut conn, Some(group), pending_box, None, "pending").await;
+		let descent = line_of_descent(&mut conn, Grain::machine(pending_box))
+			.await
+			.expect("descent");
+		assert_eq!(
+			descent.entries[0].grain,
+			Grain::group(group),
+			"a pending machine offers its group"
+		);
 		assert_eq!(
 			descent.entries[1].depth, 1,
 			"with no environment between them"

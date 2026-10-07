@@ -587,6 +587,13 @@ impl MaintenanceWindow {
 							"this window is past its expected end; extend it to move it".into(),
 						));
 					}
+					// A run lease taken on what the window covers while it moves
+					// would be served against a window that has gone, so the move
+					// and the take queue on the group's row.
+					// spec: INV#work-under-way
+					if let Some(group) = group_of(conn, from).await? {
+						crate::inventory_leases::lock_group(conn, group).await?;
+					}
 					window.check_movable(conn, from, to, now).await?;
 					let latest = MaintenanceWindowMove::latest_for_window(conn, id).await?;
 					let covered_from = window.covered_from(latest.as_ref());
@@ -870,6 +877,22 @@ impl MaintenanceWindow {
 			.load(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// Of `windows`, the one a run lease taken by `login` is refused for: one
+	/// holding over the environment that belongs to somebody else. Taking a
+	/// lease and the group page read the same windows this way, so they cannot
+	/// disagree.
+	// spec: INV#work-under-way
+	pub fn refusing_run<'a>(windows: &'a [Self], login: &str, now: Timestamp) -> Option<&'a Self> {
+		windows.iter().find(|window| {
+			window.holds_at(now)
+				&& window
+					.declared_by
+					.as_deref()
+					.is_some_and(|who| who != login)
+				&& window.amended_by.as_deref() != Some(login)
+		})
 	}
 
 	/// Every window still holding, most recently declared first.
@@ -1366,6 +1389,16 @@ async fn spans_over_target(
 		});
 	}
 	Ok(out)
+}
+
+/// The group a grain belongs to, where it belongs to one.
+async fn group_of(db: &mut AsyncPgConnection, grain: Grain) -> Result<Option<Uuid>> {
+	Ok(match grain.scope() {
+		Scope::Group(id) => Some(id),
+		Scope::Machine(id) => Machine::get_by_id(db, id).await?.group_id,
+		Scope::Application(id) => Application::get_by_id(db, id).await?.group_id,
+		Scope::Cluster(_) | Scope::Global => None,
+	})
 }
 
 fn ended_is_history() -> AppError {
