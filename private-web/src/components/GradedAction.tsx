@@ -1,12 +1,26 @@
-import { Box, MenuItem, type MenuItemProps, Tooltip } from "@mui/material";
+import { Box, Tooltip } from "@mui/material";
 import { type Theme, alpha } from "@mui/material/styles";
-import { type ReactElement, type ReactNode, cloneElement } from "react";
-import { useSafetyMode } from "../hooks/useSafetyMode";
-import { LADDER, type SafetyMode, modeLabel, permits } from "../safety";
-import { type GradedEndpoint, SAFETY_MODES } from "../safety-modes";
-
-/** A mode above read-only: one that has a stripe. */
-export type RaisedMode = Exclude<SafetyMode, "read-only">;
+import {
+	type ReactElement,
+	type ReactNode,
+	type SyntheticEvent,
+	cloneElement,
+} from "react";
+import { type RaiseOutcome, useSafetyMode } from "../hooks/useSafetyMode";
+import { inRaiseDialog } from "./RaiseDialog";
+import {
+	LADDER,
+	type RaisedMode,
+	type SafetyMode,
+	modeLabel,
+	permits,
+} from "../safety";
+import {
+	DANGER_REASONS,
+	type DangerReason,
+	type GradedEndpoint,
+	SAFETY_MODES,
+} from "../safety-modes";
 
 /** The palette a raised mode is drawn in, wherever it appears. */
 export function modePalette(mode: RaisedMode): "warning" | "error" {
@@ -106,13 +120,80 @@ export function useGrade(calls: Calls) {
  * that opens a form, dialog, or popover for making them needs the lowest, so it
  * is blocked exactly when nothing inside could be submitted either.
  */
-export type Grading = { calls: Calls; opens?: never } | { opens: Calls; calls?: never };
+export type Grading = (
+	| { calls: Calls; opens?: never }
+	| { opens: Calls; calls?: never }
+) & {
+	/**
+	 * What the control does and to what, such as "Revoke certificate for
+	 * host-3". It titles the raise offered when the control is blocked, so it
+	 * names the object where the visible label does not.
+	 */
+	action: string;
+};
 
 /** The mode a control graded by {@link Grading} needs. */
 function gradingMode(grading: Grading): SafetyMode {
 	return grading.opens !== undefined
 		? lowestMode(grading.opens)
 		: requiredMode(grading.calls);
+}
+
+/** The endpoints a grading names, whichever way it names them. */
+function endpointsOf(grading: Grading): readonly GradedEndpoint[] {
+	const calls = grading.opens !== undefined ? grading.opens : grading.calls;
+	return typeof calls === "string" ? [calls] : calls;
+}
+
+/**
+ * Why a control needing `required` needs it, when that is danger: the reasons
+ * declared by the danger endpoints it calls, each once.
+ */
+export function dangerReasons(
+	grading: Grading,
+	required: SafetyMode,
+): DangerReason[] {
+	if (required !== "danger") return [];
+	const declared = DANGER_REASONS as Partial<
+		Record<GradedEndpoint, readonly DangerReason[]>
+	>;
+	const reasons = new Set<DangerReason>();
+	for (const endpoint of endpointsOf(grading)) {
+		if (SAFETY_MODES[endpoint] !== "danger") continue;
+		for (const reason of declared[endpoint] ?? []) reasons.add(reason);
+	}
+	return [...reasons];
+}
+
+/**
+ * A control graded by `grading`, for one that cannot take the
+ * {@link GradedAction} wrapper: whether it is blocked, and `activate`, which
+ * runs what the control does at once when it is usable and otherwise asks the
+ * operator to raise first, running it only if they do. A control that stands
+ * for several things, such as one per row, gives `activate` the `action` of the
+ * one activated.
+ */
+export function useGradedActivation(grading: Grading) {
+	const { requestRaise } = useSafetyMode();
+	const { required, blocked } = useModeGrade(gradingMode(grading));
+
+	const activate = async (
+		run: () => void,
+		action = grading.action,
+	): Promise<RaiseOutcome> => {
+		if (!blocked) {
+			run();
+			return "permits";
+		}
+		const outcome = await requestRaise({
+			mode: required as RaisedMode,
+			action,
+			reasons: dangerReasons(grading, required),
+		});
+		if (outcome === "permits") run();
+		return outcome;
+	};
+	return { required, blocked, activate };
 }
 
 /** What a blocked control says about itself: the mode it needs. */
@@ -142,7 +223,7 @@ export function mutedStripe(theme: Theme, mode: RaisedMode) {
 /** The blocked treatment's styles, for nesting inside another `sx`. */
 function blockedStyles(theme: Theme, required: SafetyMode) {
 	return {
-		cursor: "not-allowed",
+		cursor: "pointer",
 		...mutedStripe(theme, required as RaisedMode),
 	};
 }
@@ -150,7 +231,8 @@ function blockedStyles(theme: Theme, required: SafetyMode) {
 /**
  * The blocked treatment, for a control that cannot take the
  * {@link GradedAction} wrapper: the grade's stripe, muted at rest and coming to
- * full colour under the pointer. The control itself has to ignore activation.
+ * full colour under the pointer. The control itself asks for the raise when
+ * activated (see {@link useGradedActivation}).
  */
 export function blockedSx(required: SafetyMode) {
 	return (theme: Theme) => blockedStyles(theme, required);
@@ -188,11 +270,109 @@ function inGradeColour(
 	return cloneElement(control, { color: colour });
 }
 
+/**
+ * The control a graded child stands for: the child itself, or the one inside
+ * the tooltip that is the child.
+ */
+function controlOf(
+	child: ReactElement<GradedChildProps>,
+): ReactElement<GradedChildProps> {
+	return child.type === Tooltip
+		? controlOf(child.props.children as ReactElement<GradedChildProps>)
+		: child;
+}
+
+/** Whether the control is disabled for a reason of its own. */
+function disabledItself(child: ReactElement<GradedChildProps>): boolean {
+	return !!controlOf(child).props.disabled;
+}
+
+/** What an operator can activate inside a graded control. */
+const ACTIVATABLE = [
+	"button",
+	"a[href]",
+	"input",
+	"select",
+	"textarea",
+	"label",
+	"summary",
+	...[
+		"button",
+		"link",
+		"checkbox",
+		"switch",
+		"radio",
+		"tab",
+		"option",
+		"menuitem",
+		"combobox",
+	].map((role) => `[role=${role}]`),
+].join(", ");
+
+/** The keys that open a combobox. */
+const OPENING_KEYS = [" ", "Enter", "ArrowUp", "ArrowDown"];
+
+/**
+ * The element inside `wrapper` that an event activated: the nearest activatable
+ * one to where it landed, such as the one button of a group that was pressed.
+ * None where it landed on something that does nothing, such as the space
+ * between a group's buttons, which is no reason to ask for a raise.
+ */
+function activatedWithin(
+	wrapper: HTMLElement,
+	target: EventTarget | null,
+): HTMLElement | null {
+	const hit =
+		target instanceof Element ? target.closest<HTMLElement>(ACTIVATABLE) : null;
+	return hit && wrapper.contains(hit) ? hit : null;
+}
+
+/** Whether `target` is in a combobox, which opens on press rather than click. */
+function inCombobox(target: EventTarget | null): boolean {
+	return target instanceof Element && !!target.closest("[role=combobox]");
+}
+
+/**
+ * Carry out on `control` the activation that asked for a raise.
+ *
+ * The control is the element the operator activated, still in place: the
+ * wrapper is kept whether the control is blocked or not, so a raise redraws the
+ * control rather than replacing it. A combobox opens on press, so it is pressed;
+ * anything else is clicked. Focus is returned to the control unless the
+ * activation moved it somewhere of its own, such as a dialog it opened.
+ */
+function replay(control: HTMLElement): void {
+	if (!control.isConnected) return;
+	if (control.getAttribute("role") === "combobox") {
+		control.dispatchEvent(
+			new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }),
+		);
+	} else {
+		control.click();
+	}
+	returnFocus(control);
+}
+
+/**
+ * Return focus to `control`, unless something else has taken it since, such as
+ * a dialog the activation opened.
+ */
+function returnFocus(control: HTMLElement): void {
+	requestAnimationFrame(() => {
+		const active = document.activeElement;
+		const lost =
+			!active ||
+			active === document.body ||
+			inRaiseDialog(active);
+		if (lost && control.isConnected) control.focus();
+	});
+}
+
 type GradedActionProps = Grading & {
 	/**
 	 * The control itself. When the operator's mode reaches it, it is given its
-	 * grade's `color` (see {@link inGradeColour}); while blocked it is given
-	 * `disabled`. It must accept both, or be a tooltip around one that does.
+	 * grade's `color` (see {@link inGradeColour}). It must accept that, or be a
+	 * tooltip around one that does.
 	 */
 	children: ReactElement<GradedChildProps>;
 	/** Stretch to the width available, for a control that is itself full width. */
@@ -207,20 +387,25 @@ type GradedActionProps = Grading & {
  *
  * A control the operator could use in a higher mode stays where it is and is
  * blocked, so the surface has the same shape whatever mode they are in. Blocked
- * means it does not act and says which mode it wants; raising is done from the
- * mode control, never as a by-product of reaching for a blocked control.
+ * means it carries the grade's stripe, says which mode it wants, and when
+ * activated asks the operator to raise to that mode and then carries the
+ * activation out as it would have been carried out unblocked. A raise is only
+ * ever made by the operator choosing to continue, never by the activation alone.
+ *
+ * The activation is intercepted at the wrapper rather than inside the control,
+ * so a click, Enter or Space on the control, Enter in a field of its form, and
+ * the press that opens a combobox, are all caught whatever the control is and
+ * without touching its handlers. The wrapper stays in place once the control is
+ * usable, so the raise redraws the control rather than replacing it, and the
+ * activation is carried out on the very element the operator activated.
  *
  * When the mode reaches the control it is rendered in its grade's colour and
- * otherwise as given, so a control disabled for its own reasons (a request in
- * flight, an incomplete form) carries no stripe.
+ * otherwise as given. A control disabled for a reason of its own (a request in
+ * flight, an incomplete form) is rendered that way in every mode: it carries no
+ * stripe and offers no raise, so the treatment never misreports why a control
+ * is unavailable. A tooltip child passes this through to the control inside.
  *
- * A blocked control is disabled as well as inert to the pointer, so it cannot
- * be reached from the keyboard. A child that is a tooltip passes that on to the
- * control inside, except where that control names `disabled` itself: a tooltip
- * keeps its child's own props, so such a control has to name the blocked state
- * as well (see `MachineSetupInstructions`).
- *
- * Nothing here decides anything — the server refuses the request regardless.
+ * Nothing here decides anything: the server refuses the request regardless.
  * This is what stops an operator finding that out by being refused.
  */
 export function GradedAction({
@@ -229,69 +414,79 @@ export function GradedAction({
 	title,
 	...grading
 }: GradedActionProps) {
-	const { required, blocked } = useModeGrade(gradingMode(grading));
-	if (!blocked) return inGradeColour(children, required);
+	const { required, blocked, activate } = useGradedActivation(grading);
+	const usable = !blocked || disabledItself(children);
+
+	const intercept = (event: SyntheticEvent<HTMLElement>) => {
+		event.preventDefault();
+		event.stopPropagation();
+		const control = activatedWithin(event.currentTarget, event.target);
+		if (!control) return;
+		activate(() => replay(control)).then((outcome) => {
+			if (outcome === "declined") returnFocus(control);
+		});
+	};
 
 	return (
-		<Tooltip title={title ?? blockedTitle(required)}>
-			{/* The wrapper carries the cursor and the tooltip. The control inside
-			    takes no pointer events, so a click never reaches its handler, and
-			    is disabled, so it cannot be reached from the keyboard either and
-			    does not submit its form when Enter is pressed in a field. */}
+		<Tooltip title={usable ? null : (title ?? blockedTitle(required))}>
+			{/* The wrapper carries the cursor, the tooltip, and the interception.
+			    The control inside is left as it is, so it can be focused and
+			    activated like any other; capturing the activation here stops its
+			    own handler, or its form's submission, until the raise is made. */}
 			<Box
 				component="span"
-				aria-disabled
+				onClickCapture={
+					usable
+						? undefined
+						: (event) => {
+								// A combobox was already intercepted on the press that opens it.
+								if (inCombobox(event.target)) {
+									event.preventDefault();
+									event.stopPropagation();
+								} else {
+									intercept(event);
+								}
+							}
+				}
+				// A middle click opens a link in a new tab, as a click would have
+				// followed it here, so it asks for the raise the same way.
+				onAuxClickCapture={
+					usable
+						? undefined
+						: (event) => {
+								if (event.button === 1) intercept(event);
+							}
+				}
+				onMouseDownCapture={
+					usable
+						? undefined
+						: (event) => {
+								if (event.button === 0 && inCombobox(event.target)) intercept(event);
+							}
+				}
+				onKeyDownCapture={
+					usable
+						? undefined
+						: (event) => {
+								if (OPENING_KEYS.includes(event.key) && inCombobox(event.target)) {
+									intercept(event);
+								}
+							}
+				}
 				sx={(theme) => ({
 					display: fullWidth ? "flex" : "inline-flex",
 					width: fullWidth ? "100%" : undefined,
-					cursor: "not-allowed",
-					// The same treatment a control that cannot take the wrapper
-					// applies to itself, so the convention is written once.
-					"& > *": { pointerEvents: "none", ...blockedStyles(theme, required) },
-					"&:hover > *": { filter: "grayscale(0)" },
+					...(!usable && {
+						cursor: "pointer",
+						// The same treatment a control that cannot take the wrapper
+						// applies to itself, so the convention is written once.
+						"& > *": blockedStyles(theme, required),
+						"&:hover > *": { filter: "grayscale(0)" },
+					}),
 				})}
 			>
-				{cloneElement(children, { disabled: true })}
+				{usable ? inGradeColour(children, required) : children}
 			</Box>
-		</Tooltip>
-	);
-}
-
-type GradedMenuItemProps = MenuItemProps & Grading;
-
-/**
- * A menu item graded like {@link GradedAction}.
- *
- * Kept a direct child of its menu, which is what the menu's keyboard handling
- * expects, so it cannot be wrapped: blocked, it keeps its place, carries the
- * stripe, and ignores being chosen.
- */
-export function GradedMenuItem(item: GradedMenuItemProps) {
-	const { calls: _calls, opens: _opens, onClick, sx, ...props } = item;
-	const { required, blocked } = useModeGrade(gradingMode(item));
-	if (!blocked) {
-		return (
-			<MenuItem
-				onClick={onClick}
-				sx={[
-					!!gradeColour(required) && {
-						color: `${gradeColour(required)}.main`,
-					},
-					...(Array.isArray(sx) ? sx : sx ? [sx] : []),
-				]}
-				{...props}
-			/>
-		);
-	}
-
-	return (
-		<Tooltip title={blockedTitle(required)} placement="left">
-			<MenuItem
-				{...props}
-				aria-disabled
-				onClick={(event) => event.preventDefault()}
-				sx={[blockedSx(required), ...(Array.isArray(sx) ? sx : sx ? [sx] : [])]}
-			/>
 		</Tooltip>
 	);
 }

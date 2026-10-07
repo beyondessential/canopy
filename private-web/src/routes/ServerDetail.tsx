@@ -134,6 +134,7 @@ export default function ServerDetail() {
 			{archived ? (
 				<ArchivedBanner
 					serverId={data.server.id}
+					serverName={applicationName(data.server)}
 					isAdmin={admin}
 					onRestored={() => detail.reload()}
 				/>
@@ -190,6 +191,7 @@ export default function ServerDetail() {
 				scope="application"
 				anchor="maintenance"
 				id={data.server.id}
+				targetLabel={applicationName(data.server)}
 				machineId={data.server.machine_id}
 				machineName={data.machine_name ?? null}
 				groupId={data.group?.id ?? null}
@@ -317,6 +319,7 @@ function Header({
 						<MaintenanceHeaderButton
 							scope="application"
 							id={data.server.id}
+							targetLabel={applicationName(data.server)}
 							compact
 							onDone={onMaintenance}
 						/>
@@ -326,7 +329,10 @@ function Header({
 						    second form that would answer "where do I edit
 						    this" differently. */}
 						{/* spec: FLT#groups */}
-						<GradedAction opens="fleet/machines/update">
+						<GradedAction
+							opens="fleet/machines/update"
+							action={`Edit machine hosting ${applicationName(data.server)}`}
+						>
 							<ActionButton
 								to={`/fleet/machines/${data.server.machine_id}/edit`}
 								icon={<EditIcon />}
@@ -378,7 +384,10 @@ function DeleteServerButton({
 
 	return (
 		<>
-			<GradedAction calls="fleet/applications/delete">
+			<GradedAction
+				calls="fleet/applications/delete"
+				action={`Archive server ${serverName}`}
+			>
 				<ActionButton
 					icon={<ArchiveIcon />}
 					label="Archive"
@@ -403,7 +412,10 @@ function DeleteServerButton({
 					<Button onClick={() => setOpen(false)} disabled={action.pending}>
 						Cancel
 					</Button>
-					<GradedAction calls="fleet/applications/delete">
+					<GradedAction
+						calls="fleet/applications/delete"
+						action={`Archive server ${serverName}`}
+					>
 						<Button
 							variant="contained"
 							onClick={onConfirm}
@@ -422,10 +434,12 @@ function DeleteServerButton({
 /// archived. Keeps the rest of the page (history, status, etc.) visible.
 function ArchivedBanner({
 	serverId,
+	serverName,
 	isAdmin,
 	onRestored,
 }: {
 	serverId: string;
+	serverName: string;
 	isAdmin: boolean;
 	onRestored: () => void;
 }) {
@@ -443,7 +457,10 @@ function ArchivedBanner({
 			severity="warning"
 			action={
 				isAdmin ? (
-					<GradedAction calls="fleet/applications/restore">
+					<GradedAction
+						calls="fleet/applications/restore"
+						action={`Restore archived server ${serverName}`}
+					>
 						<Button
 							size="small"
 							startIcon={<RestoreIcon />}

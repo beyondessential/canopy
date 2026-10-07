@@ -576,13 +576,17 @@ test.describe("safety grading", () => {
 		const type = page.getByTestId("type-schedule-tamanu-postgres");
 		const row = page.getByRole("row").filter({ hasText: "graded-box" });
 
-		// Read-only: every schedule control is there and blocked.
+		// Read-only: every schedule control is there and blocked for write.
 		await expect(
-			type.getByRole("button", { name: /^edit schedule override$/i }),
-		).toBeDisabled();
+			type
+				.getByLabel(/requires write mode/i)
+				.getByRole("button", { name: /^edit schedule override$/i }),
+		).toBeVisible();
 		await expect(
-			row.getByRole("button", { name: /override tamanu-postgres schedule/i }),
-		).toBeDisabled();
+			row
+				.getByLabel(/requires write mode/i)
+				.getByRole("button", { name: /override tamanu-postgres schedule/i }),
+		).toBeVisible();
 
 		await raiseTo(page, "write");
 
@@ -619,10 +623,15 @@ test.describe("safety grading", () => {
 		const reset = type.getByRole("button", {
 			name: /reset retention to default/i,
 		});
-		await expect(reset).toBeDisabled();
-		await raiseTo(page, "danger");
-		await expect(reset).toBeEnabled();
+		await expect(
+			type.getByLabel(/requires danger mode/i).getByRole("button", {
+				name: /reset retention to default/i,
+			}),
+		).toBeVisible();
 		await reset.click();
+		const raise = page.getByRole("dialog");
+		await expect(raise).toContainText("This action needs danger mode");
+		await raise.getByRole("button", { name: "Continue in danger mode" }).click();
 		await expect(
 			type.getByText("retention override", { exact: true }),
 		).toHaveCount(0);

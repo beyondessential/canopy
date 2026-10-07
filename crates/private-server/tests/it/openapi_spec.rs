@@ -357,3 +357,58 @@ fn every_operation_declares_a_safety_mode() {
 	);
 	assert!(graded > 100, "expected the whole surface, found {graded}");
 }
+
+/// Every danger operation says why it is danger, with reasons the interface
+/// knows how to word, and no other operation carries any.
+///
+/// spec: SAFE#grading-the-administrative-surface
+#[test]
+fn every_danger_operation_declares_known_reasons() {
+	let spec = build_spec();
+	let paths = spec["paths"].as_object().expect("paths object");
+
+	let mut problems: std::collections::BTreeSet<String> = Default::default();
+	let mut danger = 0usize;
+
+	for (path, item) in paths {
+		for (method, op) in item.as_object().expect("path item object") {
+			let Some(op) = op.as_object() else { continue };
+			let is_danger =
+				op.get("x-canopy-safety-mode").and_then(|v| v.as_str()) == Some("danger");
+			let reasons = op.get("x-canopy-danger-reasons");
+			match (is_danger, reasons) {
+				(true, Some(list)) => {
+					danger += 1;
+					let list = list.as_array().expect("reasons are an array");
+					if list.is_empty() {
+						problems.insert(format!("{method} {path}: no reasons"));
+					}
+					for reason in list {
+						let known = reason
+							.as_str()
+							.is_some_and(|r| canopy_utoipa_axum::DANGER_REASONS.contains(&r));
+						if !known {
+							problems.insert(format!("{method} {path}: unknown reason {reason}"));
+						}
+					}
+				}
+				(true, None) => {
+					problems.insert(format!("{method} {path}: danger with no reasons"));
+				}
+				(false, Some(_)) => {
+					problems.insert(format!(
+						"{method} {path}: reasons on a handler that is not danger"
+					));
+				}
+				(false, None) => {}
+			}
+		}
+	}
+
+	assert!(
+		problems.is_empty(),
+		"danger reasons are malformed:\n{}",
+		problems.into_iter().collect::<Vec<_>>().join("\n"),
+	);
+	assert!(danger > 30, "expected every danger handler, found {danger}");
+}

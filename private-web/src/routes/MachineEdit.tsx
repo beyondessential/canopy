@@ -539,7 +539,10 @@ function Form({
 			{error && <Alert severity="error">{error}</Alert>}
 
 			<Stack direction="row" spacing={1}>
-				<GradedAction calls={saveCalls}>
+				<GradedAction
+					calls={saveCalls}
+					action={`Save changes to machine ${machine.name}`}
+				>
 					<Button
 						type="submit"
 						variant="contained"

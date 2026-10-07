@@ -261,7 +261,14 @@ function TypeDefaultEditor({
 				)}
 				{save.error && <Alert severity="error">{save.error.message}</Alert>}
 				<Box>
-					<GradedAction calls="backups/set_type_default">
+					<GradedAction
+						calls="backups/set_type_default"
+						action={
+							creating
+								? `Add default for backup type ${trimmedType}`
+								: `Save default for backup type ${value.type}`
+						}
+					>
 						<Button variant="contained" onClick={onSave} disabled={!canSave}>
 							{creating
 								? save.pending

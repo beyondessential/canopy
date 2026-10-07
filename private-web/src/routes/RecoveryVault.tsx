@@ -156,7 +156,10 @@ export default function RecoveryVault() {
 					</Typography>
 
 					<Stack direction="row" spacing={1}>
-						<GradedAction calls="backups/recovery_challenge">
+						<GradedAction
+							calls="backups/recovery_challenge"
+							action="Issue recovery vault verification challenge"
+						>
 							<Button
 								variant="contained"
 								onClick={startChallenge}
@@ -197,7 +200,10 @@ export default function RecoveryVault() {
 							{verify.error && (
 								<Alert severity="error">{verify.error.message}</Alert>
 							)}
-							<GradedAction calls="backups/recovery_verify">
+							<GradedAction
+								calls="backups/recovery_verify"
+								action="Submit recovery vault verification answer"
+							>
 								<Button
 									variant="contained"
 									onClick={submitAnswer}

@@ -139,7 +139,10 @@ export default function BackupPanel() {
 				<Alert severity="info">Backups not set up for this group.</Alert>
 				{isAdmin && (
 					<Box>
-						<GradedAction opens={["backups/create_shared", "backups/create"]}>
+						<GradedAction
+							opens={["backups/create_shared", "backups/create"]}
+							action={`Set up backups for ${groupName ?? "this group"}`}
+						>
 							<Button
 								component={RouterLink}
 								to={`/fleet/groups/${id}/backups/config`}
@@ -197,7 +200,10 @@ export default function BackupPanel() {
 					</Stack>
 					{isAdmin && (
 						<Stack direction="row" spacing={1}>
-							<GradedAction opens="backups/update">
+							<GradedAction
+								opens="backups/update"
+								action={`Edit backup configuration for bucket ${data.bucket}`}
+							>
 								<Button
 									component={RouterLink}
 									to={`/fleet/groups/${id}/backups/config`}
@@ -207,7 +213,11 @@ export default function BackupPanel() {
 									Edit config
 								</Button>
 							</GradedAction>
-							<DeleteConfigButton groupId={id} onDeleted={configForTick.reload} />
+							<DeleteConfigButton
+								groupId={id}
+								bucket={data.bucket}
+								onDeleted={configForTick.reload}
+							/>
 						</Stack>
 					)}
 				</Stack>
@@ -266,9 +276,11 @@ export default function BackupPanel() {
 /// untouched. Confirms first since it stops credential issuance for the group.
 function DeleteConfigButton({
 	groupId,
+	bucket,
 	onDeleted,
 }: {
 	groupId: string;
+	bucket: string;
 	onDeleted: () => void;
 }) {
 	const [open, setOpen] = useState(false);
@@ -286,7 +298,10 @@ function DeleteConfigButton({
 
 	return (
 		<>
-			<GradedAction calls="backups/delete">
+			<GradedAction
+				calls="backups/delete"
+				action={`Delete backup configuration for bucket ${bucket}`}
+			>
 				<Button
 					variant="outlined"
 					startIcon={<DeleteIcon />}
@@ -313,7 +328,10 @@ function DeleteConfigButton({
 					<Button onClick={() => setOpen(false)} disabled={del.pending}>
 						Cancel
 					</Button>
-					<GradedAction calls="backups/delete">
+					<GradedAction
+						calls="backups/delete"
+						action={`Delete backup configuration for bucket ${bucket}`}
+					>
 						<Button
 							variant="contained"
 							onClick={onConfirm}
@@ -452,6 +470,7 @@ function TypeSchedule({
 				{isAdmin && editing !== "schedule" && (
 					<GradedAction
 						opens={["backups/set_schedule", "backups/clear_schedule"]}
+						action={`${overridden ? "Edit" : "Override"} ${schedule.type} schedule`}
 					>
 						<Button size="small" onClick={() => setEditing("schedule")}>
 							{overridden ? "Edit schedule override" : "Override schedule"}
@@ -493,6 +512,7 @@ function TypeSchedule({
 				{isAdmin && editing !== "retention" && (
 					<GradedAction
 						opens={["backups/set_retention", "backups/clear_retention"]}
+						action={`${schedule.has_retention_override ? "Edit" : "Override"} ${schedule.type} retention`}
 					>
 						<Button size="small" onClick={() => setEditing("retention")}>
 							{schedule.has_retention_override
@@ -588,7 +608,10 @@ function ScheduleOverrideEditor({
 			<ScheduleHistory layer="group" type={schedule.type} groupId={groupId} />
 			{error && <Alert severity="error">{error.message}</Alert>}
 			<Stack direction="row" spacing={1}>
-				<GradedAction calls="backups/set_schedule">
+				<GradedAction
+					calls="backups/set_schedule"
+					action={`Save ${schedule.type} schedule override`}
+				>
 					<Button
 						variant="contained"
 						size="small"
@@ -599,7 +622,10 @@ function ScheduleOverrideEditor({
 					</Button>
 				</GradedAction>
 				{overridden && (
-					<GradedAction calls="backups/clear_schedule">
+					<GradedAction
+						calls="backups/clear_schedule"
+						action={`Reset ${schedule.type} schedule to default`}
+					>
 						<Button size="small" onClick={reset} disabled={pending}>
 							Reset to default
 						</Button>
@@ -712,7 +738,10 @@ function RetentionOverrideEditor({
 			)}
 			{error && <Alert severity="error">{error.message}</Alert>}
 			<Stack direction="row" spacing={1}>
-				<GradedAction calls="backups/set_retention">
+				<GradedAction
+					calls="backups/set_retention"
+					action={`Save ${schedule.type} retention override`}
+				>
 					<Button
 						variant="contained"
 						size="small"
@@ -723,7 +752,10 @@ function RetentionOverrideEditor({
 					</Button>
 				</GradedAction>
 				{schedule.has_retention_override && (
-					<GradedAction calls="backups/clear_retention">
+					<GradedAction
+						calls="backups/clear_retention"
+						action={`Reset ${schedule.type} retention to default`}
+					>
 						<Button size="small" onClick={reset} disabled={pending}>
 							Reset retention to default
 						</Button>
@@ -764,7 +796,10 @@ function ProvisioningCard({
 					</Alert>
 					{isAdmin && (
 						<Box>
-							<GradedAction calls="backups/create_repo">
+							<GradedAction
+								calls="backups/create_repo"
+								action={`Retry repository creation for bucket ${config.bucket}`}
+							>
 								<Button
 									variant="contained"
 									startIcon={<RefreshIcon />}
@@ -1637,7 +1672,10 @@ function MaintenancePanel({
 										: "Full run queued"
 								}
 							/>
-							<GradedAction calls="backups/cancel_maintenance">
+							<GradedAction
+								calls="backups/cancel_maintenance"
+								action={`Cancel queued full maintenance for bucket ${config.bucket}`}
+							>
 								<Button
 									size="small"
 									disabled={cancel.pending}
@@ -1656,7 +1694,10 @@ function MaintenancePanel({
 							}
 						>
 							<span>
-								<GradedAction calls="backups/request_maintenance">
+								<GradedAction
+									calls="backups/request_maintenance"
+									action={`Run full maintenance for bucket ${config.bucket}`}
+								>
 									<Button
 										size="small"
 										variant="outlined"
@@ -1765,6 +1806,8 @@ function ServersPanel({
 		stats.status === "ok" ? stats.data.restore_windows : [];
 	const restoreWindowFor = (machineId: string) =>
 		restoreWindows.find((w) => w.machine_id === machineId);
+	const machineName = (machineId: string) =>
+		members.find((m) => m.machine.id === machineId)?.machine.name ?? "machine";
 
 	const onAllowRestore = async (machineId: string) => {
 		try {
@@ -1810,7 +1853,10 @@ function ServersPanel({
 							</>
 						}
 					/>
-					<GradedAction calls="backups/disallow_restore">
+					<GradedAction
+						calls="backups/disallow_restore"
+						action={`Disallow restores on ${machineName(machineId)}`}
+					>
 						<Button
 							size="small"
 							onClick={() => onDisallowRestore(machineId)}
@@ -1823,7 +1869,10 @@ function ServersPanel({
 			);
 		}
 		return (
-			<GradedAction calls="backups/allow_restore">
+			<GradedAction
+				calls="backups/allow_restore"
+				action={`Allow restores on ${machineName(machineId)}`}
+			>
 				<Button
 					size="small"
 					startIcon={<RestoreIcon />}
@@ -1906,7 +1955,10 @@ function ServersPanel({
 						}
 					/>
 					{isAdmin && (
-						<GradedAction calls="backups/cancel_request">
+						<GradedAction
+							calls="backups/cancel_request"
+							action={`Cancel ${type} backup request for ${machineName(machineId)}`}
+						>
 							<Button
 								size="small"
 								onClick={() => onCancel(machineId, type)}
@@ -1921,7 +1973,10 @@ function ServersPanel({
 		}
 		return (
 			isAdmin && (
-				<GradedAction calls="backups/request_now">
+				<GradedAction
+					calls="backups/request_now"
+					action={`Request ${type} backup for ${machineName(machineId)}`}
+				>
 					<Button
 						size="small"
 						variant="outlined"

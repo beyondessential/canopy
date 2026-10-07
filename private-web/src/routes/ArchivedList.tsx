@@ -89,8 +89,7 @@ function RestoreButton({
 	onClick: () => void;
 	/** Forwarded to the button, so `GradedAction` can give it its grade's colour. */
 	color?: ButtonProps["color"];
-	/** Forwarded to the button, so a caller that blocks this control (see
-	 * `GradedAction`) takes it out of the keyboard's reach as well. */
+	/** Forwarded to the button. */
 	disabled?: boolean;
 }) {
 	return (
@@ -142,7 +141,10 @@ function ArchivedGroupRow({
 			</MuiLink>
 			<Box sx={{ ml: "auto" }}>
 				{admin && (
-					<GradedAction calls="fleet/groups/restore">
+					<GradedAction
+						calls="fleet/groups/restore"
+						action={`Restore group ${name}`}
+					>
 						<RestoreButton pending={action.pending} onClick={onRestore} />
 					</GradedAction>
 				)}
@@ -180,7 +182,10 @@ function ArchivedServerRow({
 				<ServerShorty server={server} />
 			</Box>
 			{admin && (
-				<GradedAction calls="fleet/applications/restore">
+				<GradedAction
+					calls="fleet/applications/restore"
+					action={`Restore application ${server.name || server.display_host}`}
+				>
 					<RestoreButton pending={action.pending} onClick={onRestore} />
 				</GradedAction>
 			)}

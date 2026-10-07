@@ -91,7 +91,10 @@ export default function TailnetIdentitySection({
 				)}
 
 				<Stack direction="row" spacing={1} useFlexGap>
-					<GradedAction calls="devices/attach_tailscale">
+					<GradedAction
+						calls="devices/attach_tailscale"
+						action={`${nodeId ? "Replace" : "Attach"} Tailscale identity on this device`}
+					>
 						<Button
 							variant="contained"
 							onClick={() => setAttachOpen(true)}
@@ -102,7 +105,10 @@ export default function TailnetIdentitySection({
 					{nodeId &&
 						(confirmDetach ? (
 							<Stack direction="row" spacing={1}>
-								<GradedAction calls="devices/detach_tailscale">
+								<GradedAction
+									calls="devices/detach_tailscale"
+									action="Detach Tailscale identity from this device"
+								>
 									<Button
 										variant="contained"
 										onClick={onDetach}
@@ -122,7 +128,10 @@ export default function TailnetIdentitySection({
 								</Button>
 							</Stack>
 						) : (
-							<GradedAction calls="devices/detach_tailscale">
+							<GradedAction
+								calls="devices/detach_tailscale"
+								action="Detach Tailscale identity from this device"
+							>
 								<Button
 									variant="outlined"
 									onClick={() => setConfirmDetach(true)}
@@ -131,7 +140,10 @@ export default function TailnetIdentitySection({
 								</Button>
 							</GradedAction>
 						))}
-					<GradedAction calls="devices/merge_into">
+					<GradedAction
+						calls="devices/merge_into"
+						action="Merge this device into another device"
+					>
 						<Button variant="outlined" onClick={() => setMergeOpen(true)}>
 							Merge into existing device…
 						</Button>
@@ -354,7 +366,10 @@ function AttachTailscaleDialog({
 				<Button onClick={onClose} disabled={attachAction.pending}>
 					Cancel
 				</Button>
-				<GradedAction calls="devices/attach_tailscale">
+				<GradedAction
+					calls="devices/attach_tailscale"
+					action={`Attach Tailscale identity ${preview?.display_name ?? identifier.trim()} to this device`}
+				>
 					<Button
 						variant="contained"
 						onClick={onConfirm}
@@ -429,7 +444,10 @@ function MergeIntoDialog({
 				<Button onClick={onClose} disabled={mergeAction.pending}>
 					Cancel
 				</Button>
-				<GradedAction calls="devices/merge_into">
+				<GradedAction
+					calls="devices/merge_into"
+					action={`Merge this device into device ${targetId}`}
+				>
 					<Button
 						variant="contained"
 						onClick={onConfirm}

@@ -318,7 +318,10 @@ function HealthcheckRow({
 							</>
 						)}
 						{canEdit && (
-							<GradedAction calls="healthchecks/update">
+							<GradedAction
+								calls="healthchecks/update"
+								action={`Update ceiling and escalation for check ${row.check_name}`}
+							>
 								<Button
 									size="small"
 									variant="outlined"
@@ -371,7 +374,10 @@ function HealthcheckRow({
 							<Chip label="gone quiet" color="warning" size="small" />
 						)}
 						{canEdit && goneQuiet && (
-							<GradedAction calls="healthchecks/decommission">
+							<GradedAction
+								calls="healthchecks/decommission"
+								action={`Decommission check ${row.check_name}`}
+							>
 								<Button
 									size="small"
 									variant="outlined"

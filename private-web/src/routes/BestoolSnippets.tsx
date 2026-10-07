@@ -46,7 +46,10 @@ export default function BestoolSnippets() {
 				<Typography variant="h4" component="h1">
 					PSQL Snippets
 				</Typography>
-				<GradedAction calls={showCreate ? [] : "bestool/save_snippet"}>
+				<GradedAction
+					calls={showCreate ? [] : "bestool/save_snippet"}
+					action="Add PSQL snippet"
+				>
 					<Button
 						variant={showCreate ? "outlined" : "contained"}
 						color={showCreate ? "error" : undefined}
@@ -186,7 +189,10 @@ function CreateSnippetForm({ onCreated }: { onCreated: () => void }) {
 					<Alert severity="error">{action.error.message}</Alert>
 				)}
 				<Box>
-					<GradedAction calls="bestool/save_snippet">
+					<GradedAction
+						calls="bestool/save_snippet"
+						action="Add PSQL snippet"
+					>
 						<Button
 							type="submit"
 							variant="contained"

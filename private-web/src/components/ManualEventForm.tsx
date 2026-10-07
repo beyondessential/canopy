@@ -102,7 +102,10 @@ export default function ManualEventForm({
 				<MuiAlert severity="error">{action.error.message}</MuiAlert>
 			)}
 			<Box>
-				<GradedAction calls="issues/submit_manual_event">
+				<GradedAction
+					calls="issues/submit_manual_event"
+					action="Submit manual issue on this server"
+				>
 					<Button
 						variant="contained"
 						onClick={submit}

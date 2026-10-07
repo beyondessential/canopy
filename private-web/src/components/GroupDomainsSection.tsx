@@ -210,7 +210,10 @@ function DomainRow({
 					{createdBy && ` by ${createdBy}`}
 				</Typography>
 				{isAdmin && (
-					<GradedAction calls="domains/release">
+					<GradedAction
+						calls="domains/release"
+						action={`Release domain ${domain}`}
+					>
 						<IconButton
 							size="small"
 							aria-label={`Release ${domain}`}
@@ -334,7 +337,10 @@ function ClaimForm({
 						sx={{ flex: 1, maxWidth: 420 }}
 						helperText={`Must be at or under one of: ${zoneApexes.join(", ")}`}
 					/>
-					<GradedAction calls="domains/claim">
+					<GradedAction
+						calls="domains/claim"
+						action="Claim domain for group"
+					>
 						<Button
 							type="submit"
 							variant="outlined"

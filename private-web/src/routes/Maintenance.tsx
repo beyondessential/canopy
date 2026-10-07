@@ -45,7 +45,10 @@ function AmendWindow({
 	}
 	return (
 		<>
-			<GradedAction opens={["maintenance/amend", "maintenance/lift"]}>
+			<GradedAction
+				opens={["maintenance/amend", "maintenance/lift"]}
+				action={`Amend maintenance window for ${target}`}
+			>
 				<Button size="small" onClick={() => setOpen(true)}>
 					Amend
 				</Button>
@@ -194,7 +197,10 @@ export default function Maintenance() {
 													target={target}
 													onAmended={list.reload}
 												/>
-												<GradedAction calls="maintenance/lift">
+												<GradedAction
+													calls="maintenance/lift"
+													action={`Lift maintenance window for ${target}`}
+												>
 													<Button
 														size="small"
 														disabled={lift.pending}

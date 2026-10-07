@@ -15,11 +15,14 @@ import type { MaintenanceScope } from "../types";
 export default function MaintenanceHeaderButton({
 	scope,
 	id,
+	targetLabel,
 	compact,
 	onDone,
 }: {
 	scope: MaintenanceScope;
 	id: string;
+	/** What the target is called, so a blocked button says what it would act on. */
+	targetLabel: string;
 	/** Drawn as the page's compact action buttons rather than a full one. */
 	compact?: boolean;
 	onDone: () => void;
@@ -27,7 +30,10 @@ export default function MaintenanceHeaderButton({
 	const [open, setOpen] = useState(false);
 	return (
 		<>
-			<GradedAction opens={["maintenance/declare", "maintenance/amend"]}>
+			<GradedAction
+				opens={["maintenance/declare", "maintenance/amend"]}
+				action={`Declare maintenance on ${targetLabel}`}
+			>
 				{compact ? (
 					<ActionButton
 						icon={<BuildOutlinedIcon />}

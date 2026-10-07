@@ -35,12 +35,14 @@ import type { DeviceInfo, TailnetLiveInfo } from "../types";
 /// box, and one box can carry several workloads.
 export default function MachineIdentitySection({
 	machineId,
+	machineName,
 	deviceInfo,
 	isAdmin,
 	enrolled,
 	refresh,
 }: {
 	machineId: string;
+	machineName: string;
 	deviceInfo: DeviceInfo | null;
 	isAdmin: boolean;
 	enrolled: boolean;
@@ -58,6 +60,7 @@ export default function MachineIdentitySection({
 					<Stack spacing={2}>
 						<DeviceCard
 							machineId={machineId}
+							machineName={machineName}
 							deviceInfo={deviceInfo}
 							refresh={refresh}
 						/>
@@ -70,6 +73,7 @@ export default function MachineIdentitySection({
 						{isAdmin && enrolled && (
 							<MachineSetupInstructions
 								machineId={machineId}
+								machineName={machineName}
 								reEnroll
 								onRegistered={refresh}
 							/>
@@ -83,10 +87,12 @@ export default function MachineIdentitySection({
 
 function DeviceCard({
 	machineId,
+	machineName,
 	deviceInfo,
 	refresh,
 }: {
 	machineId: string;
+	machineName: string;
 	deviceInfo: DeviceInfo | null;
 	refresh: () => void;
 }) {
@@ -139,7 +145,10 @@ function DeviceCard({
 							node and canopy will auto-create the device row if
 							it doesn't exist yet.
 						</Typography>
-						<GradedAction calls="fleet/machines/attach_tailscale_device">
+						<GradedAction
+							calls="fleet/machines/attach_tailscale_device"
+							action={`Attach Tailscale device to ${machineName}`}
+						>
 							<Button
 								variant="contained"
 								onClick={() => setAttachOpen(true)}
@@ -154,6 +163,7 @@ function DeviceCard({
 				open={attachOpen}
 				onClose={() => setAttachOpen(false)}
 				machineId={machineId}
+				machineName={machineName}
 				onAttached={() => {
 					setAttachOpen(false);
 					refresh();
@@ -167,11 +177,13 @@ function AttachMachineDeviceDialog({
 	open,
 	onClose,
 	machineId,
+	machineName,
 	onAttached,
 }: {
 	open: boolean;
 	onClose: () => void;
 	machineId: string;
+	machineName: string;
 	onAttached: () => void;
 }) {
 	const [identifier, setIdentifier] = useState("");
@@ -286,7 +298,10 @@ function AttachMachineDeviceDialog({
 				<Button onClick={onClose} disabled={attachAction.pending}>
 					Cancel
 				</Button>
-				<GradedAction calls="fleet/machines/attach_tailscale_device">
+				<GradedAction
+					calls="fleet/machines/attach_tailscale_device"
+					action={`Attach Tailscale device ${preview?.display_name ?? identifier.trim()} to ${machineName}`}
+				>
 					<Button
 						variant="contained"
 						onClick={onConfirm}

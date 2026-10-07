@@ -176,12 +176,16 @@ export default function MachineDetail() {
 						<MaintenanceHeaderButton
 							scope="machine"
 							id={data.machine.id}
+							targetLabel={data.machine.name}
 							compact
 							onDone={bumpRefresh}
 						/>
 					)}
 					{isAdmin && (
-						<GradedAction opens="fleet/machines/update">
+						<GradedAction
+							opens="fleet/machines/update"
+							action={`Edit machine ${data.machine.name}`}
+						>
 							<ActionButton
 								to={`/fleet/machines/${data.machine.id}/edit`}
 								icon={<EditIcon />}
@@ -210,6 +214,7 @@ export default function MachineDetail() {
 					</Alert>
 					<MachineSetupInstructions
 						machineId={data.machine.id}
+						machineName={data.machine.name}
 						onRegistered={() => detail.reload()}
 					/>
 				</>
@@ -323,6 +328,7 @@ export default function MachineDetail() {
 
 			<MachineIdentitySection
 				machineId={data.machine.id}
+				machineName={data.machine.name}
 				deviceInfo={data.device_info}
 				isAdmin={isAdmin}
 				enrolled={enrolled}
@@ -340,6 +346,7 @@ export default function MachineDetail() {
 				scope="machine"
 				anchor="maintenance"
 				id={data.machine.id}
+				targetLabel={data.machine.name}
 				groupId={data.group?.id ?? null}
 				groupName={data.group?.name ?? null}
 				rank={rank}

@@ -221,7 +221,10 @@ function PauseBanner({
 			icon={<PauseCircleIcon />}
 			action={
 				isAdmin && (
-					<GradedAction calls="certificates/resume">
+					<GradedAction
+						calls="certificates/resume"
+						action="Resume certificate management for this server"
+					>
 						<Button
 							size="small"
 							startIcon={<PlayCircleIcon />}
@@ -281,7 +284,10 @@ function PauseButton({
 
 	return (
 		<>
-			<GradedAction calls="certificates/pause">
+			<GradedAction
+				calls="certificates/pause"
+				action="Pause certificate management for this server"
+			>
 				<Button
 					size="small"
 					startIcon={<PauseCircleIcon />}
@@ -317,7 +323,10 @@ function PauseButton({
 				</DialogContent>
 				<DialogActions>
 					<Button onClick={() => setOpen(false)}>Cancel</Button>
-					<GradedAction calls="certificates/pause">
+					<GradedAction
+						calls="certificates/pause"
+						action="Pause certificate management for this server"
+					>
 						<Button
 							variant="contained"
 							onClick={onConfirm}
@@ -375,7 +384,10 @@ function ProfilePicker({
 	return (
 		<Box>
 			<Stack direction="row" spacing={1} sx={{ alignItems: "flex-start" }}>
-				<GradedAction calls="certificates/set_profile">
+				<GradedAction
+					calls="certificates/set_profile"
+					action="Set certificate lifetime for this server"
+				>
 					<TextField
 						select
 						size="small"
@@ -491,25 +503,31 @@ function DeclareField({
 	};
 
 	return (
-		<Box>
+		<Box
+			component="form"
+			onSubmit={(e) => {
+				e.preventDefault();
+				onDeclare();
+			}}
+		>
 			<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 				<TextField
 					size="small"
 					placeholder="app.example.tamanu.app"
 					value={name}
 					onChange={(e) => setName(e.target.value)}
-					onKeyDown={(e) => {
-						if (e.key === "Enter" && name.trim() !== "") onDeclare();
-					}}
 					disabled={declare.pending}
 					slotProps={{ htmlInput: { "aria-label": "DNS name to declare" } }}
 					sx={{ minWidth: 280, "& input": { fontFamily: "monospace" } }}
 				/>
-				<GradedAction calls="certificates/declare">
+				<GradedAction
+					calls="certificates/declare"
+					action={`Declare DNS name ${name.trim()}`}
+				>
 					<Button
+						type="submit"
 						variant="outlined"
 						size="small"
-						onClick={onDeclare}
 						disabled={declare.pending || name.trim() === ""}
 					>
 						Declare
@@ -621,7 +639,10 @@ function NameRowView({
 					)}
 				</Typography>
 				{isAdmin && (
-					<GradedAction calls="certificates/release">
+					<GradedAction
+						calls="certificates/release"
+						action={`Release DNS name ${row.name}`}
+					>
 						<Button
 							size="small"
 							color="error"
@@ -862,7 +883,10 @@ function RevokeButton({
 
 	return (
 		<>
-			<GradedAction calls="certificates/revoke">
+			<GradedAction
+				calls="certificates/revoke"
+				action={`Revoke certificate for ${name}`}
+			>
 				<Button size="small" color="error" onClick={() => setOpen(true)}>
 					Revoke
 				</Button>
@@ -904,7 +928,10 @@ function RevokeButton({
 				</DialogContent>
 				<DialogActions>
 					<Button onClick={() => setOpen(false)}>Cancel</Button>
-					<GradedAction calls="certificates/revoke">
+					<GradedAction
+						calls="certificates/revoke"
+						action={`Revoke certificate for ${name}`}
+					>
 						<Button
 							variant="contained"
 							onClick={onConfirm}

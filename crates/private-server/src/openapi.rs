@@ -14,7 +14,7 @@ use utoipa::{
 		contact(name = "BES Developers", email = "contact@bes.au"),
 		license(name = "GPL-3.0-or-later"),
 	),
-	modifiers(&SecuritySchemes, &RequestCompression),
+	modifiers(&SecuritySchemes, &RequestCompression, &DangerReasons),
 	tags(
 		(name = "admins", description = "Admin email allow-list management."),
 		(name = "backups", description = "Group backup-repo onboarding, scheduling, and stats."),
@@ -64,6 +64,23 @@ impl Modify for RequestCompression {
 				)
 				.build(),
 		);
+	}
+}
+
+/// Every reason a handler can be danger for, in the order the operator is given
+/// them, so the interface reads the list from the document rather than keeping
+/// its own copy. Merged in, so it runs after [`RequestCompression`].
+struct DangerReasons;
+
+impl Modify for DangerReasons {
+	fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+		openapi
+			.extensions
+			.get_or_insert_with(Default::default)
+			.merge(utoipa::openapi::extensions::Extensions::from_iter([(
+				canopy_utoipa_axum::DANGER_REASONS_EXTENSION,
+				canopy_utoipa_axum::DANGER_REASONS.to_vec(),
+			)]));
 	}
 }
 

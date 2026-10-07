@@ -191,6 +191,7 @@ export default function DeclareMaintenanceDialog({
 	const choiceOf = (target: MaintenanceTarget) =>
 		choices.find((choice) => targetKey(choice.target) === targetKey(target));
 	const chosenChoice = choiceOf(chosen);
+	const targetLabel = chosenChoice?.label;
 
 	// Offered over a target with a window of its own, the declaration amends
 	// that window from the start, so choosing another grain moves it.
@@ -386,7 +387,10 @@ export default function DeclareMaintenanceDialog({
 			</DialogContent>
 			<DialogActions>
 				{offerLift && own && !moving && (
-					<GradedAction calls="maintenance/lift">
+					<GradedAction
+						calls="maintenance/lift"
+						action={`Lift maintenance${targetLabel ? ` on ${targetLabel}` : ""}`}
+					>
 						<Button
 							disabled={pending}
 							onClick={async () => {
@@ -405,7 +409,10 @@ export default function DeclareMaintenanceDialog({
 					</GradedAction>
 				)}
 				<Button onClick={onClose}>Cancel</Button>
-				<GradedAction calls={amending ? "maintenance/amend" : "maintenance/declare"}>
+				<GradedAction
+					calls={amending ? "maintenance/amend" : "maintenance/declare"}
+					action={`${amending ? "Amend" : "Declare"} maintenance${targetLabel ? ` on ${targetLabel}` : ""}`}
+				>
 					<Button
 						variant="contained"
 						onClick={submit}

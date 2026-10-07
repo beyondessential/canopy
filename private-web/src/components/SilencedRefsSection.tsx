@@ -286,7 +286,10 @@ function SilencedRow({
 					{createdBy && ` by ${createdBy}`}
 				</Typography>
 				{isAdmin && (
-					<GradedAction calls={unsilenceCall}>
+					<GradedAction
+						calls={unsilenceCall}
+						action={`Un-silence ${source}/${refName}`}
+					>
 						<Button
 							size="small"
 							variant="outlined"

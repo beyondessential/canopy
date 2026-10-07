@@ -19,14 +19,14 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(read_only: list_for_servers))
 		.routes(routes!(read_only: list_for_machine))
 		.routes(routes!(read_only: list_for_group))
-		.routes(routes!(danger: silence_server))
+		.routes(routes!(danger(unprotects): silence_server))
 		.routes(routes!(write: unsilence_server))
-		.routes(routes!(danger: silence_machine))
+		.routes(routes!(danger(unprotects): silence_machine))
 		.routes(routes!(write: unsilence_machine))
 		.routes(routes!(read_only: list_for_cluster))
-		.routes(routes!(danger: silence_cluster))
+		.routes(routes!(danger(unprotects): silence_cluster))
 		.routes(routes!(write: unsilence_cluster))
-		.routes(routes!(danger: silence_group))
+		.routes(routes!(danger(unprotects): silence_group))
 		.routes(routes!(write: unsilence_group))
 }
 

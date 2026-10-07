@@ -26,7 +26,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(read_only: for_group))
 		.routes(routes!(read_only: grant_availability))
 		.routes(routes!(write: claim))
-		.routes(routes!(danger: release))
+		.routes(routes!(danger(unprotects): release))
 }
 
 /// A DNS zone Canopy can write records in.
