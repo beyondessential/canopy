@@ -11,6 +11,7 @@
 import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
+	seedCheckPolicy,
 	seedMachine,
 	seedServer,
 	seedServerCertificate,
@@ -234,6 +235,118 @@ test.describe("safety modes", () => {
 		await expect(pause).toBeVisible();
 		await expect(pause.and(page.locator(":focus-within"))).toHaveCount(1);
 		await expect(page.getByText("Paused")).toHaveCount(0);
+	});
+
+	test("a blocked control that passes nothing on to the page still acts once the raise is confirmed", async ({
+		page,
+		sql,
+	}) => {
+		await resetSeededTables(sql);
+		const machine = await seedMachine(sql, { name: "plain-box" });
+
+		await page.goto(`/fleet/machines/${machine.id}`);
+		await page.getByRole("link", { name: "Edit", exact: true }).click();
+		await page
+			.getByRole("dialog")
+			.getByRole("button", { name: "Continue in write mode" })
+			.click();
+
+		await expect(page).toHaveURL(new RegExp(`/fleet/machines/${machine.id}/edit$`));
+	});
+
+	test("a blocked toggle group carries out the very option chosen", async ({
+		page,
+		sql,
+	}) => {
+		await resetSeededTables(sql);
+		await seedCheckPolicy(sql, { source: "alertd", checkName: "db_connect" });
+
+		await page.goto("/settings/healthchecks/sources");
+		const row = page.getByRole("row", { name: /alertd/ }).first();
+		await row.getByRole("button", { name: "quiet", exact: true }).click();
+		await page
+			.getByRole("dialog")
+			.getByRole("button", { name: "Continue in write mode" })
+			.click();
+
+		// The option chosen goes on to its own confirmation, not the group's first.
+		const confirm = page
+			.getByRole("dialog")
+			.filter({ hasText: /set alertd reachability to .quiet./i });
+		await confirm.getByRole("button", { name: /confirm/i }).click();
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ reachability: string }>(
+					`SELECT reachability FROM source_policies WHERE source = 'alertd'`,
+				);
+				return rows[0]?.reachability ?? null;
+			})
+			.toBe("quiet");
+	});
+
+	test("a blocked select offers the raise on the press that opens it, then opens", async ({
+		page,
+		sql,
+	}) => {
+		await resetSeededTables(sql);
+		const group = await seedServerGroup(sql, { name: "picker" });
+		await seedServerGroupDomain(sql, {
+			groupId: group.id,
+			domain: "fiji.tamanu.app",
+		});
+		const server = await seedServer(sql, {
+			name: "central",
+			groupId: group.id,
+			mayManageTls: true,
+		});
+
+		await page.goto(`/fleet/applications/${server.id}`);
+		await page.getByLabel("Certificate lifetime").click();
+
+		// Nothing is offered to choose until the raise is made.
+		await expect(page.getByRole("option", { name: "shortlived" })).toHaveCount(0);
+		await page
+			.getByRole("dialog")
+			.getByRole("button", { name: "Continue in write mode" })
+			.click();
+
+		await page.getByRole("option", { name: "shortlived" }).click();
+		await expect
+			.poll(async () => {
+				const [row] = await sql.query<{ certificate_profile: string | null }>(
+					"SELECT certificate_profile FROM applications WHERE id = $1",
+					[server.id],
+				);
+				return row.certificate_profile;
+			})
+			.toBe("shortlived");
+	});
+
+	test("a blocked select offers the raise from the keyboard too", async ({
+		page,
+		sql,
+	}) => {
+		await resetSeededTables(sql);
+		const group = await seedServerGroup(sql, { name: "picker-keys" });
+		await seedServerGroupDomain(sql, {
+			groupId: group.id,
+			domain: "fiji.tamanu.app",
+		});
+		const server = await seedServer(sql, {
+			name: "central",
+			groupId: group.id,
+			mayManageTls: true,
+		});
+
+		await page.goto(`/fleet/applications/${server.id}`);
+		await page.getByLabel("Certificate lifetime").focus();
+		await page.keyboard.press("ArrowDown");
+		const dialog = page.getByRole("dialog");
+		await expect(dialog).toContainText("This action needs write mode");
+		await expect(page.getByRole("option", { name: "shortlived" })).toHaveCount(0);
+		await dialog.getByRole("button", { name: "Continue in write mode" }).click();
+
+		await expect(page.getByRole("option", { name: "shortlived" })).toBeVisible();
 	});
 
 	test("a failed raise says the mode is unchanged, and does not carry the action out", async ({

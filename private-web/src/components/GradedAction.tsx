@@ -3,11 +3,11 @@ import { type Theme, alpha } from "@mui/material/styles";
 import {
 	type ReactElement,
 	type ReactNode,
+	type SyntheticEvent,
 	cloneElement,
 	useCallback,
-	useId,
 } from "react";
-import { useSafetyMode } from "../hooks/useSafetyMode";
+import { type RaiseOutcome, useSafetyMode } from "../hooks/useSafetyMode";
 import {
 	LADDER,
 	type RaisedMode,
@@ -180,18 +180,18 @@ export function useGradedActivation(grading: Grading) {
 	const reasonKey = reasons.join();
 
 	const activate = useCallback(
-		async (run: () => void, action = grading.action): Promise<boolean> => {
+		async (run: () => void, action = grading.action): Promise<RaiseOutcome> => {
 			if (!blocked) {
 				run();
-				return true;
+				return "permits";
 			}
-			const raised = await requestRaise({
+			const outcome = await requestRaise({
 				mode: required as RaisedMode,
 				action,
 				reasons: reasonKey ? (reasonKey.split(",") as DangerReason[]) : [],
 			});
-			if (raised) run();
-			return raised;
+			if (outcome === "permits") run();
+			return outcome;
 		},
 		[blocked, required, grading.action, reasonKey, requestRaise],
 	);
@@ -272,9 +272,6 @@ function inGradeColour(
 	return cloneElement(control, { color: colour });
 }
 
-/** The attribute that finds a control again once a raise has redrawn it. */
-const MARKER = "data-graded-action";
-
 /**
  * The control a graded child stands for: the child itself, or the one inside
  * the tooltip that is the child.
@@ -292,63 +289,92 @@ function disabledItself(child: ReactElement<GradedChildProps>): boolean {
 	return !!controlOf(child).props.disabled;
 }
 
-/** Name the control, so it can be found again after a raise has redrawn it. */
-function marked(
-	child: ReactElement<GradedChildProps>,
-	id: string,
-): ReactElement<GradedChildProps> {
-	if (child.type === Tooltip) {
-		return cloneElement(child, {
-			children: marked(
-				child.props.children as ReactElement<GradedChildProps>,
-				id,
-			),
-		});
-	}
-	return cloneElement(child, { [MARKER]: id } as Partial<GradedChildProps>);
+/** What an operator can activate inside a graded control. */
+const ACTIVATABLE = [
+	"button",
+	"a[href]",
+	"input",
+	"select",
+	"textarea",
+	"label",
+	"summary",
+	...[
+		"button",
+		"link",
+		"checkbox",
+		"switch",
+		"radio",
+		"tab",
+		"option",
+		"menuitem",
+		"combobox",
+	].map((role) => `[role=${role}]`),
+].join(", ");
+
+/** The keys that open a combobox. */
+const OPENING_KEYS = [" ", "Enter", "ArrowUp", "ArrowDown"];
+
+/**
+ * The element inside `wrapper` that an event activated: the nearest activatable
+ * one to where it landed, such as the one button of a group that was pressed,
+ * or the control itself.
+ */
+function activatedWithin(
+	wrapper: HTMLElement,
+	target: EventTarget | null,
+): HTMLElement | null {
+	const hit =
+		target instanceof Element ? target.closest<HTMLElement>(ACTIVATABLE) : null;
+	if (hit && wrapper.contains(hit)) return hit;
+	return wrapper.firstElementChild as HTMLElement | null;
+}
+
+/** Whether `target` is in a combobox, which opens on press rather than click. */
+function inCombobox(target: EventTarget | null): boolean {
+	return target instanceof Element && !!target.closest("[role=combobox]");
 }
 
 /**
- * Activate the control marked `id` as it stands now.
+ * Carry out on `control` the activation that asked for a raise.
  *
- * Raising redraws a blocked control as a usable one, which is a different
- * element, so the activation that asked for the raise is carried out on the
- * new one. A switch or checkbox is its input that takes the click, and focus
- * is returned to the control unless the activation moved it somewhere of its
- * own, such as a dialog it opened.
+ * The control is the element the operator activated, still in place: the
+ * wrapper is kept whether the control is blocked or not, so a raise redraws the
+ * control rather than replacing it. A combobox opens on press, so it is pressed;
+ * anything else is clicked. Focus is returned to the control unless the
+ * activation moved it somewhere of its own, such as a dialog it opened.
  */
-function activateMarked(id: string): void {
-	const control = document.querySelector<HTMLElement>(`[${MARKER}="${id}"]`);
-	if (!control) return;
-	const target =
-		control.querySelector<HTMLElement>(
-			"input[type=checkbox], input[type=radio]",
-		) ?? control;
-	target.click();
-	returnFocus(id);
+function replay(control: HTMLElement): void {
+	if (!control.isConnected) return;
+	if (control.getAttribute("role") === "combobox") {
+		control.dispatchEvent(
+			new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }),
+		);
+	} else {
+		control.click();
+	}
+	returnFocus(control);
 }
 
 /**
- * Return focus to the control marked `id`, unless something else has taken it
- * since, such as a dialog the activation opened.
+ * Return focus to `control`, unless something else has taken it since, such as
+ * a dialog the activation opened.
  */
-function returnFocus(id: string): void {
+function returnFocus(control: HTMLElement): void {
 	requestAnimationFrame(() => {
 		const active = document.activeElement;
 		const lost =
 			!active ||
 			active === document.body ||
 			!!active.closest("[data-raise-dialog]");
-		if (!lost) return;
-		document.querySelector<HTMLElement>(`[${MARKER}="${id}"]`)?.focus();
+		if (lost && control.isConnected) control.focus();
 	});
 }
 
 type GradedActionProps = Grading & {
 	/**
 	 * The control itself. When the operator's mode reaches it, it is given its
-	 * grade's `color` (see {@link inGradeColour}). It must accept that and a
-	 * `data-graded-action` attribute, or be a tooltip around one that does.
+	 * grade's `color` (see {@link inGradeColour}). It must accept that, or be a
+	 * tooltip around one that does.
 	 */
 	children: ReactElement<GradedChildProps>;
 	/** Stretch to the width available, for a control that is itself full width. */
@@ -369,8 +395,11 @@ type GradedActionProps = Grading & {
  * ever made by the operator choosing to continue, never by the activation alone.
  *
  * The activation is intercepted at the wrapper rather than inside the control,
- * so a click, Enter or Space on the control, and Enter in a field of its form,
- * are all caught whatever the control is and without touching its handlers.
+ * so a click, Enter or Space on the control, Enter in a field of its form, and
+ * the press that opens a combobox, are all caught whatever the control is and
+ * without touching its handlers. The wrapper stays in place once the control is
+ * usable, so the raise redraws the control rather than replacing it, and the
+ * activation is carried out on the very element the operator activated.
  *
  * When the mode reaches the control it is rendered in its grade's colour and
  * otherwise as given. A control disabled for a reason of its own (a request in
@@ -388,38 +417,68 @@ export function GradedAction({
 	...grading
 }: GradedActionProps) {
 	const { required, blocked, activate } = useGradedActivation(grading);
-	const id = useId();
-	const control = marked(children, id);
-	if (!blocked || disabledItself(children)) {
-		return inGradeColour(control, required);
-	}
+	const usable = !blocked || disabledItself(children);
+
+	const intercept = (event: SyntheticEvent<HTMLElement>) => {
+		event.preventDefault();
+		event.stopPropagation();
+		const control = activatedWithin(event.currentTarget, event.target);
+		if (!control) return;
+		activate(() => replay(control)).then((outcome) => {
+			if (outcome === "declined") returnFocus(control);
+		});
+	};
 
 	return (
-		<Tooltip title={title ?? blockedTitle(required)}>
+		<Tooltip title={usable ? null : (title ?? blockedTitle(required))}>
 			{/* The wrapper carries the cursor, the tooltip, and the interception.
 			    The control inside is left as it is, so it can be focused and
-			    activated like any other; capturing the click here stops its own
-			    handler, or its form's submission, until the raise is made. */}
+			    activated like any other; capturing the activation here stops its
+			    own handler, or its form's submission, until the raise is made. */}
 			<Box
 				component="span"
-				onClickCapture={(event) => {
-					event.preventDefault();
-					event.stopPropagation();
-					activate(() => activateMarked(id)).then((ran) => {
-						if (!ran) returnFocus(id);
-					});
-				}}
+				onClickCapture={
+					usable
+						? undefined
+						: (event) => {
+								// A combobox was already intercepted on the press that opens it.
+								if (inCombobox(event.target)) {
+									event.preventDefault();
+									event.stopPropagation();
+								} else {
+									intercept(event);
+								}
+							}
+				}
+				onMouseDownCapture={
+					usable
+						? undefined
+						: (event) => {
+								if (event.button === 0 && inCombobox(event.target)) intercept(event);
+							}
+				}
+				onKeyDownCapture={
+					usable
+						? undefined
+						: (event) => {
+								if (OPENING_KEYS.includes(event.key) && inCombobox(event.target)) {
+									intercept(event);
+								}
+							}
+				}
 				sx={(theme) => ({
 					display: fullWidth ? "flex" : "inline-flex",
 					width: fullWidth ? "100%" : undefined,
-					cursor: "pointer",
-					// The same treatment a control that cannot take the wrapper
-					// applies to itself, so the convention is written once.
-					"& > *": blockedStyles(theme, required),
-					"&:hover > *": { filter: "grayscale(0)" },
+					...(!usable && {
+						cursor: "pointer",
+						// The same treatment a control that cannot take the wrapper
+						// applies to itself, so the convention is written once.
+						"& > *": blockedStyles(theme, required),
+						"&:hover > *": { filter: "grayscale(0)" },
+					}),
 				})}
 			>
-				{control}
+				{usable ? inGradeColour(children, required) : children}
 			</Box>
 		</Tooltip>
 	);
@@ -474,8 +533,14 @@ export function GradedMenuItem(item: GradedMenuItemProps) {
 			<MenuItem
 				{...props}
 				onClick={(event) => {
+					// React clears the target once the dispatch returns, and the
+					// handler runs after the raise, so it is put back for it.
+					const { currentTarget } = event;
 					onCloseMenu?.();
-					activate(() => onClick?.(event));
+					activate(() => {
+						event.currentTarget = currentTarget;
+						onClick?.(event);
+					});
 				}}
 				sx={[blockedSx(required), ...(Array.isArray(sx) ? sx : sx ? [sx] : [])]}
 			/>

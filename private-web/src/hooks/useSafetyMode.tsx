@@ -27,6 +27,13 @@ interface SessionState {
 	raise_expires_at?: string | null;
 }
 
+/**
+ * How a request for a raise came out: the mode now `permits` the action, whether
+ * it already did or the raise has landed; the operator `declined`, or the raise
+ * failed; or nothing was asked, because another request is `already-asking`.
+ */
+export type RaiseOutcome = "permits" | "declined" | "already-asking";
+
 export interface SafetyStatus {
 	/** The mode the session is in. Read-only until the operator raises it. */
 	mode: SafetyMode;
@@ -41,12 +48,11 @@ export interface SafetyStatus {
 	 */
 	lower: () => Promise<boolean>;
 	/**
-	 * Ask the operator to confirm a raise, and make it. Resolves `true` once the
-	 * raise has landed and the new mode has rendered, so a control that was
-	 * blocked is already usable; `false` if the operator cancelled, the raise
-	 * failed, or another request is already being asked for or made.
+	 * Ask the operator to confirm a raise, and make it. Resolves `permits` once
+	 * the raise has landed and the new mode has rendered, so a control that was
+	 * blocked is already usable (see {@link RaiseOutcome}).
 	 */
-	requestRaise: (request: RaiseRequest) => Promise<boolean>;
+	requestRaise: (request: RaiseRequest) => Promise<RaiseOutcome>;
 	/** True while a raise or lower is in flight. */
 	busy: boolean;
 }
@@ -188,15 +194,17 @@ export function SafetyModeProvider({ children }: { children: ReactNode }) {
 	} | null>(null);
 
 	const requestRaise = useCallback((request: RaiseRequest) => {
-		if (permits(modeRef.current, request.mode)) return Promise.resolve(true);
-		if (requesting.current) return Promise.resolve(false);
+		if (permits(modeRef.current, request.mode)) {
+			return Promise.resolve<RaiseOutcome>("permits");
+		}
+		if (requesting.current) return Promise.resolve<RaiseOutcome>("already-asking");
 		requesting.current = true;
-		return new Promise<boolean>((resolve) => {
+		return new Promise<RaiseOutcome>((resolve) => {
 			setAsked({
 				request,
 				settle: (raised) => {
 					requesting.current = false;
-					resolve(raised);
+					resolve(raised ? "permits" : "declined");
 				},
 			});
 		});

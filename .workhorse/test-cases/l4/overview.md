@@ -51,6 +51,11 @@ Unless a case says otherwise, start each one from a fresh page load as an admini
 ## Menus and hand-wired controls
 
 - [ ] Choose a blocked item in a graded menu: the menu closes first, then the raise dialog appears, and confirming does what the item does (verifies spec: SAFE). No menu uses `GradedMenuItem` at present, since maintenance's declare-over-environment menu became the dialog's picker, so this is owed once one does
+- [x] On a machine's page, click the blocked compact Edit, a control that passes nothing of its own on to the page: confirming the raise opens the machine's edit form (verifies spec: SAFE)
+- [x] On the sources settings page, click a blocked reachability option other than the current one: confirming the raise goes on to that option's own confirmation, not the group's first option (verifies spec: SAFE)
+- [x] On a server's certificates section, click the blocked certificate lifetime picker: the raise is offered before any option is shown, and confirming opens the picker (verifies spec: SAFE)
+- [x] Focus that blocked picker and press ArrowDown: the raise is offered, and confirming opens the picker (verifies spec: SAFE)
+- [ ] Double-click a blocked control, then cancel the raise: focus stays in the raise dialog while it is open, and returns to the control once it closes (verifies spec: SAFE)
 - [ ] On a group's inventory section, click a blocked remove chip: the raise dialog names the variable being removed, and confirming removes it (verifies spec: SAFE)
 - [x] On the upgrades calendar in read-only, an open plan entry wears the write stripe, and clicking it offers the raise, then opens that plan's amend form (verifies spec: SAFE, UPG)
 - [ ] On the upgrades calendar, an entry for a met plan still links to its group in every mode
