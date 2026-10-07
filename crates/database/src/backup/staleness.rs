@@ -545,10 +545,13 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 	// A machine whose every scheduled type has since gone manual-only, or been
 	// disabled, is no longer scanned, and a manual-only type is never stale: so
 	// its open findings are brought to rest here, having nothing to stay open for.
-	for machine_id in machines_with_open_backup_checks(db).await? {
-		if by_machine.contains_key(&machine_id) {
-			continue;
+	let mut resting: std::collections::BTreeMap<Uuid, Vec<String>> = Default::default();
+	for (machine_id, check) in open_backup_checks(db).await? {
+		if !by_machine.contains_key(&machine_id) {
+			resting.entry(machine_id).or_default().push(check);
 		}
+	}
+	for (machine_id, open) in resting {
 		let machine = crate::machines::Machine::get_by_id(db, machine_id).await?;
 		let label = machine.name.clone();
 		for (check, documentation, message) in [
@@ -563,7 +566,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				format!("Application {label} has now backed up everything expected of it"),
 			),
 		] {
-			if !open_machine_issue_active(db, machine_id, check).await? {
+			if !open.iter().any(|c| c == check) {
 				continue;
 			}
 			file_check_instances(
@@ -634,12 +637,12 @@ async fn held_backup_checks(
 	Ok(HeldBackupChecks(states))
 }
 
-/// Every machine with an open, active staleness or never-backed-up finding.
-async fn machines_with_open_backup_checks(db: &mut AsyncPgConnection) -> Result<Vec<Uuid>> {
+/// Every open, active staleness or never-backed-up finding, as the machine
+/// it is on and which of the two it is.
+async fn open_backup_checks(db: &mut AsyncPgConnection) -> Result<Vec<(Uuid, String)>> {
 	use crate::schema::issues::dsl;
-	let ids: Vec<Option<Uuid>> = dsl::issues
-		.select(dsl::machine_id)
-		.distinct()
+	let rows: Vec<(Option<Uuid>, String)> = dsl::issues
+		.select((dsl::machine_id, dsl::ref_))
 		.filter(dsl::machine_id.is_not_null())
 		.filter(dsl::source.eq(refs::CANOPY_SOURCE))
 		.filter(dsl::ref_.eq_any([refs::STALENESS, refs::NEVER]))
@@ -647,7 +650,10 @@ async fn machines_with_open_backup_checks(db: &mut AsyncPgConnection) -> Result<
 		.filter(dsl::resolved_at.is_null())
 		.load(db)
 		.await?;
-	Ok(ids.into_iter().flatten().collect())
+	Ok(rows
+		.into_iter()
+		.filter_map(|(machine, check)| Some((machine?, check)))
+		.collect())
 }
 
 /// Group-level maintenance health, per `status='ready'` group:
