@@ -31,6 +31,7 @@ diesel = { workspace = true, features = [
 	"postgres_backend",
 ] }
 diesel-async.workspace = true
+hickory-resolver = "0.26.3"
 http.workspace = true
 instant-acme = { version = "0.8.5", features = ["time", "x509-parser"] }
 jiff.workspace = true
