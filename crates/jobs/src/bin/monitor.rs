@@ -72,28 +72,6 @@ async fn reconcile_on_startup(pool: &database::Db) {
 	}
 }
 
-/// One-shot backfill of check-stability records from status history. Runs
-/// as its own task so a multi-minute replay never delays the sweeps; the
-/// marker table and advisory lock inside make it safe to fire on every
-/// startup and from several pods at once. Deliberately not a data
-/// migration: a single fleet-wide transaction would hold FK row locks on
-/// live issues rows for its whole run, blocking ingestion filings.
-///
-/// TODO(backfill-removal): transitional; delete this (and its call
-/// below) once every Canopy instance has run it — see
-/// `database::stability::backfill_from_statuses`.
-async fn backfill_stability_on_startup(pool: &database::Db) {
-	let Ok(mut db) = pool.get().await else {
-		warn!("stability backfill: failed to get database connection");
-		return;
-	};
-	match database::stability::backfill_from_statuses(&mut db).await {
-		Ok(None) => debug!("stability backfill: already done (or another pod is on it)"),
-		Ok(Some(n)) => info!("stability backfill: replayed history into {n} state record(s)"),
-		Err(err) => warn!("stability backfill: failed (will retry next startup): {err}"),
-	}
-}
-
 /// Provision the histories' weekly ranges ahead of now.
 ///
 /// Never fatal, and deliberately quiet in the steady state: once the runway is
@@ -138,9 +116,6 @@ pub fn spawn() -> JoinHandle<()> {
 			Ok(mut db) => ensure_partition_runway(&mut db).await,
 			Err(err) => warn!("partition provisioning: no database connection at startup: {err}"),
 		}
-
-		let backfill_pool = pool.clone();
-		task::spawn(async move { backfill_stability_on_startup(&backfill_pool).await });
 
 		// Operator sessions, on their own hourly timer: a raise lapses on its
 		// own and is decided as read-only wherever it is read, so this is only

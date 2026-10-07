@@ -339,12 +339,6 @@ diesel::table! {
 }
 
 diesel::table! {
-	check_stability_backfill (done_at) {
-		done_at -> Timestamptz,
-	}
-}
-
-diesel::table! {
 	chrome_releases (version) {
 		version -> Text,
 		release_date -> Text,
@@ -1075,7 +1069,6 @@ diesel::allow_tables_to_appear_in_same_query!(
 	bestool_snippets,
 	check_policies,
 	check_stability,
-	check_stability_backfill,
 	chrome_releases,
 	compromised_keys,
 	denied_dns_names,
