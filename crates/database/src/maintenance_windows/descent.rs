@@ -3,7 +3,7 @@
 //!
 //! Containment here is the containment suspension reads, so a grain this says
 //! covers an issue is one whose window would suspend it: an application sits
-//! on its machine, a machine in the environment its applications' rank names,
+//! on its machine, a machine in the environment its rank names,
 //! and an environment in its group. A pending machine is in no environment and
 //! sits directly in its group, and so does a cluster-hosted application, which
 //! has no box for an environment's window to reach.
@@ -203,8 +203,10 @@ pub async fn line_of_descent(db: &mut AsyncPgConnection, start: Grain) -> Result
 		}
 	};
 
-	let machine_ids: Vec<Uuid> = machines.iter().map(|machine| machine.id).collect();
-	let ranks = Machine::ranks(db, &machine_ids).await?;
+	let ranks: HashMap<Uuid, ServerRank> = machines
+		.iter()
+		.filter_map(|machine| Some((machine.id, machine.environment_rank()?)))
+		.collect();
 
 	// The whole tree, in listing order, with each grain's container.
 	let mut tree: Vec<(Grain, String, Option<Grain>)> = Vec::new();

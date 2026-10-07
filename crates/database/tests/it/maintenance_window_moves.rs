@@ -911,6 +911,35 @@ async fn grains_the_start_has_none_of_are_passed_over() {
 			Grain::group(group),
 			"a pending machine offers its group"
 		);
+/// A machine ranked before anything on it has reported is already in its
+/// environment, so it is listed there rather than with the pending boxes.
+// spec: GRP#environments
+#[tokio::test(flavor = "multi_thread")]
+async fn a_ranked_box_with_nothing_on_it_is_in_its_environment() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let site = site(&mut conn).await;
+		let fresh = insert_machine(&mut conn, Some(site.group), "fj-new").await;
+		sql_query("UPDATE machines SET rank = 'clone' WHERE id = $1")
+			.bind::<sql_types::Uuid, _>(fresh)
+			.execute(&mut conn)
+			.await
+			.expect("rank the box");
+
+		let descent = line_of_descent(&mut conn, Grain::machine(fresh))
+			.await
+			.expect("descent");
+		assert_eq!(
+			grains(&descent),
+			vec![
+				(Grain::group(site.group), 0),
+				(Grain::environment(site.group, ServerRank::Clone), 1),
+				(Grain::machine(fresh), 2),
+			],
+		);
+	})
+	.await
+}
+
 		assert_eq!(
 			descent.entries[1].depth, 1,
 			"with no environment between them"

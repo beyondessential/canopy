@@ -729,7 +729,7 @@ impl MaintenanceWindow {
 			(Scope::Group(group_id), Some(rank)) => Some((group_id, rank)),
 			(Scope::Machine(machine_id), _) => {
 				let machine = Machine::get_by_id(db, machine_id).await?;
-				machine.group_id.zip(Machine::rank(db, machine_id).await?)
+				machine.group_id.zip(machine.environment_rank())
 			}
 			(Scope::Application(application_id), _) => {
 				let application = Application::get_by_id(db, application_id).await?;

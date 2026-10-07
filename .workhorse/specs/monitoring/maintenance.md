@@ -31,7 +31,7 @@ The machine's own checks stay watched with it, since the box is not being taken 
 A group's window covers the group's own checks and those of every machine in it, including machines that join while it holds.
 
 A window over one of a group's environments covers the machines serving that environment and nothing else of the group: an upgrade rehearsed on a site's clone leaves its production watched, and the group's own checks such as its backups with it.
-The machines serving an environment are those in it, a machine being in the environment its applications' rank names (see [GRP](../servers/groups.md), "Environments").
+The machines serving an environment are those in it, a machine being in the environment its rank names (see [GRP](../servers/groups.md), "Environments").
 A window over a group's headline environment leaves the group's own checks watched too: their incidents are the headline environment's, but they are on none of its machines.
 
 A target stays suspended until the last window covering it has ended: for an application, its own and its machine's; for a machine, its own, its environment's and its group's.
