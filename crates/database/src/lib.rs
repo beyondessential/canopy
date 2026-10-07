@@ -1,14 +1,13 @@
 use std::time::Duration;
 
 use commons_types::backoff::Backoff;
+use diesel::ConnectionError;
 use diesel_async::{
 	AsyncPgConnection,
-	pooled_connection::{
-		AsyncDieselConnectionManager, PoolError,
-		mobc::{Pool, PooledConnection},
-	},
+	pooled_connection::{AsyncDieselConnectionManager, PoolError, PoolableConnection},
 };
 use jiff::SignedDuration;
+use tokio::time::{Instant, timeout};
 
 pub mod admins;
 pub mod application_certificates;
@@ -91,12 +90,58 @@ pub use server_domains::ServerGroupDomain;
 /// A pool of connections to one database role (primary or read-only).
 ///
 /// Wraps the bare `mobc` pool so checkout can retry a transient connect
-/// failure (see [`Db::get`]) without changing any of the ~230 call sites
-/// across the workspace that only ever call `.get()` or `.clone()` on this
-/// type — both derives below are free, since `mobc::Pool` already
-/// implements them.
+/// failure (see [`Db::get`]) without changing any of the call sites across
+/// the workspace, which only ever call `.get()` or `.clone()` on this type.
 #[derive(Clone, Debug)]
-pub struct Db(Pool<AsyncPgConnection>);
+pub struct Db(mobc::Pool<ConnectionManager>);
+
+/// A connection checked out of a [`Db`].
+pub type PooledConnection = mobc::Connection<ConnectionManager>;
+
+/// diesel-async's mobc manager, with the check-in validation corrected and a
+/// time limit on each round trip a checkout makes to the server.
+///
+/// diesel-async 0.9's `validate` returns `is_broken()`, but mobc keeps a
+/// connection when `validate` returns true. So it discards every healthy
+/// connection on check-in and returns the broken ones to the idle list,
+/// including any left inside a transaction by a cancelled request.
+#[derive(Debug)]
+pub struct ConnectionManager(AsyncDieselConnectionManager<AsyncPgConnection>);
+
+/// Limits each connect and each check-out health check. A dropped node
+/// doesn't refuse connections, it just never answers, and without this an
+/// attempt against one waits for the operating system's TCP timeout.
+const SERVER_TIMEOUT: Duration = Duration::from_secs(3);
+
+#[mobc::async_trait]
+impl mobc::Manager for ConnectionManager {
+	type Connection = AsyncPgConnection;
+	type Error = PoolError;
+
+	async fn connect(&self) -> Result<Self::Connection, Self::Error> {
+		timeout(SERVER_TIMEOUT, mobc::Manager::connect(&self.0))
+			.await
+			.unwrap_or_else(|_| {
+				Err(PoolError::ConnectionError(ConnectionError::BadConnection(
+					format!("timed out connecting after {SERVER_TIMEOUT:?}"),
+				)))
+			})
+	}
+
+	async fn check(&self, conn: Self::Connection) -> Result<Self::Connection, Self::Error> {
+		timeout(SERVER_TIMEOUT, mobc::Manager::check(&self.0, conn))
+			.await
+			.unwrap_or_else(|_| {
+				Err(PoolError::ConnectionError(ConnectionError::BadConnection(
+					format!("health check timed out after {SERVER_TIMEOUT:?}"),
+				)))
+			})
+	}
+
+	fn validate(&self, conn: &mut Self::Connection) -> bool {
+		!std::thread::panicking() && !conn.is_broken()
+	}
+}
 
 // Re-export for use in other crates
 pub use diesel_async;
@@ -135,18 +180,19 @@ pub fn init_ro_to(url: &str) -> Db {
 // role via env, and recycle connections so a failover doesn't leave the pool
 // holding dead backends.
 fn build_pool(url: &str, max_open_key: &str, max_idle_key: &str) -> Db {
-	let max_open = env_u64(max_open_key, 5);
-	let max_idle = env_u64(max_idle_key, 2);
-	Db(Pool::builder()
+	pool(url, env_u64(max_open_key, 5), env_u64(max_idle_key, 2))
+}
+
+fn pool(url: &str, max_open: u64, max_idle: u64) -> Db {
+	Db(mobc::Pool::builder()
 		.max_open(max_open)
 		.max_idle(max_idle)
 		.max_lifetime(Some(Duration::from_secs(30 * 60)))
 		.max_idle_lifetime(Some(Duration::from_secs(10 * 60)))
-		// Bounds a single checkout attempt, so a connect that hangs rather
-		// than fails cleanly can't make Db::get's retry loop run for minutes
-		// instead of the ~20s it's sized for.
-		.get_timeout(Some(Duration::from_secs(3)))
-		.build(AsyncDieselConnectionManager::<AsyncPgConnection>::new(url)))
+		// Each checkout passes its own limit (see Db::get); this is only the
+		// fallback for anything reaching the pool another way.
+		.get_timeout(Some(CHECKOUT.timeout))
+		.build(ConnectionManager(AsyncDieselConnectionManager::new(url))))
 }
 
 fn env_u64(key: &str, default: u64) -> u64 {
@@ -156,47 +202,66 @@ fn env_u64(key: &str, default: u64) -> u64 {
 		.unwrap_or(default)
 }
 
-/// Doubling backoff between pool checkout attempts: 250ms, 500ms, 1s, then
-/// held at the 2s cap (itself below the pool's 3s per-attempt
-/// `get_timeout` above, so the two bounds don't fight each other) for the
-/// rest of [`CHECKOUT_MAX_ATTEMPTS`].
-const CHECKOUT_RETRY: Backoff = Backoff::new(
-	SignedDuration::from_millis(250),
-	SignedDuration::from_secs(2),
-);
+/// How a checkout waits and retries.
+#[derive(Clone, Copy, Debug)]
+struct Checkout {
+	/// Wait between attempts after a failure to reach the server.
+	backoff: Backoff,
+	/// No retry starts once this long has passed since the first attempt.
+	retry_window: Duration,
+	/// The longest a checkout takes in total, retries and waiting for a free
+	/// connection included.
+	timeout: Duration,
+}
 
-/// Chosen so the cumulative wait across the schedule above lands just under
-/// the ~20s primary-failover window confirmed in prod (see the
-/// `checkout_backoff_window` test for the pinned total).
-const CHECKOUT_MAX_ATTEMPTS: u32 = 13;
+/// The retry window covers the primary failovers seen in production, which
+/// take up to about 20s. The timeout is mobc's default, so a request waiting
+/// for a connection another request holds waits as long as it always has.
+const CHECKOUT: Checkout = Checkout {
+	backoff: Backoff::new(
+		SignedDuration::from_millis(250),
+		SignedDuration::from_secs(2),
+	),
+	retry_window: Duration::from_secs(20),
+	timeout: Duration::from_secs(30),
+};
 
 impl Db {
-	/// Checks out a connection, retrying a failed attempt with a growing
-	/// wait instead of surfacing it on the first failure.
+	/// Checks out a connection, retrying a failure to reach the server with
+	/// a growing wait instead of surfacing it on the first failure.
 	///
 	/// Covers a brief loss of the primary during a failover: a request that
 	/// can get a connection within the retry window proceeds normally. A
-	/// database that's still unreachable once the window is exhausted fails
-	/// exactly as it would have without retrying — same error, same shape —
-	/// so `AppError::DatabasePool` and everything downstream of it is
-	/// unaffected either way.
-	pub async fn get(&self) -> Result<PooledConnection<AsyncPgConnection>, mobc::Error<PoolError>> {
-		self.get_retrying(CHECKOUT_RETRY, CHECKOUT_MAX_ATTEMPTS)
-			.await
+	/// database that's still unreachable once the window is over fails
+	/// exactly as it would have without retrying, so `AppError::DatabasePool`
+	/// and everything downstream of it is unaffected either way.
+	///
+	/// Only connect failures are retried. A checkout that timed out waiting
+	/// for a connection other requests hold has already waited its full
+	/// limit, and a closed pool won't reopen.
+	pub async fn get(&self) -> Result<PooledConnection, mobc::Error<PoolError>> {
+		self.get_with(CHECKOUT).await
 	}
 
-	async fn get_retrying(
+	async fn get_with(
 		&self,
-		retry: Backoff,
-		max_attempts: u32,
-	) -> Result<PooledConnection<AsyncPgConnection>, mobc::Error<PoolError>> {
+		checkout: Checkout,
+	) -> Result<PooledConnection, mobc::Error<PoolError>> {
+		let start = Instant::now();
+		let deadline = start + checkout.timeout;
+		let retry_until = start + checkout.retry_window;
 		let mut attempt = 1;
 		loop {
-			match self.0.get().await {
+			let remaining = deadline.saturating_duration_since(Instant::now());
+			match self.0.get_timeout(remaining).await {
 				Ok(conn) => return Ok(conn),
-				Err(err) if attempt < max_attempts => {
+				Err(err @ mobc::Error::Inner(_)) => {
+					let wait = checkout.backoff.after(attempt).unsigned_abs();
+					if Instant::now() + wait >= retry_until {
+						return Err(err);
+					}
 					tracing::warn!(attempt, %err, "db checkout failed, retrying");
-					tokio::time::sleep(retry.after(attempt).unsigned_abs()).await;
+					tokio::time::sleep(wait).await;
 					attempt += 1;
 				}
 				Err(err) => return Err(err),
@@ -207,34 +272,37 @@ impl Db {
 
 #[cfg(test)]
 mod tests {
+	use diesel_async::{AsyncConnection, TransactionManager};
+
 	use super::*;
 
-	// Pins the arithmetic behind CHECKOUT_RETRY / CHECKOUT_MAX_ATTEMPTS, so a
-	// change to either shows up here rather than only in behaviour nobody
-	// can see until a real failover happens.
-	#[test]
-	fn checkout_backoff_window() {
-		assert_eq!(CHECKOUT_RETRY.after(1), SignedDuration::from_millis(250));
-		assert_eq!(CHECKOUT_RETRY.after(2), SignedDuration::from_millis(500));
-		assert_eq!(CHECKOUT_RETRY.after(3), SignedDuration::from_secs(1));
-		// Capped from the fourth attempt on (250ms * 2^3 == the 2s cap).
-		assert_eq!(CHECKOUT_RETRY.after(4), SignedDuration::from_secs(2));
-		assert_eq!(
-			CHECKOUT_RETRY.after(CHECKOUT_MAX_ATTEMPTS),
-			SignedDuration::from_secs(2)
-		);
+	/// A schedule small enough that exhausting it costs the suite nothing.
+	const QUICK: Checkout = Checkout {
+		backoff: Backoff::new(
+			SignedDuration::from_millis(1),
+			SignedDuration::from_millis(10),
+		),
+		retry_window: Duration::from_millis(200),
+		timeout: Duration::from_secs(2),
+	};
 
-		let total: Duration = (1..CHECKOUT_MAX_ATTEMPTS)
-			.map(|attempt| CHECKOUT_RETRY.after(attempt).unsigned_abs())
-			.sum();
-		// Just under the ~20s failover window observed in prod (DBR), with
-		// enough margin below it that an operator watching logs can still
-		// tell a passing switchover from a database that's actually down.
-		assert_eq!(total, Duration::from_millis(19_750));
+	/// Nothing listens here, so every connect is refused straight away.
+	const UNREACHABLE: &str = "postgres://127.0.0.1:1/nonexistent";
+
+	/// Check-in runs on a spawned task, so give it a moment to land.
+	async fn settled_state(db: &Db) -> mobc::State {
+		let give_up = Instant::now() + Duration::from_secs(2);
+		loop {
+			let state = db.0.state().await;
+			if state.in_use == 0 || Instant::now() > give_up {
+				return state;
+			}
+			tokio::time::sleep(Duration::from_millis(10)).await;
+		}
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
-	async fn get_succeeds_on_a_healthy_pool_without_retry() {
+	async fn get_succeeds_on_a_healthy_pool() {
 		commons_tests::db::TestDb::run(async |_conn, url| {
 			let db = init_to(&url);
 			db.get()
@@ -245,30 +313,181 @@ mod tests {
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
-	async fn get_exhausts_retries_and_fails_like_a_non_retrying_pool() {
-		// Nothing listens on this port, so every attempt fails fast
-		// (connection refused). Shrink the schedule so the test doesn't
-		// spend the real ~20s the production constants are sized for.
-		let db = init_to("postgres://127.0.0.1:1/nonexistent");
-		let tiny = Backoff::new(
-			SignedDuration::from_millis(1),
-			SignedDuration::from_millis(5),
-		);
+	async fn a_returned_connection_is_reused() {
+		commons_tests::db::TestDb::run(async |_conn, url| {
+			let db = pool(&url, 5, 2);
+			drop(db.get().await.expect("first checkout"));
+			let state = settled_state(&db).await;
+			assert_eq!((state.connections, state.idle), (1, 1), "{state:?}");
+
+			drop(db.get().await.expect("second checkout"));
+			let state = settled_state(&db).await;
+			assert_eq!(
+				state.connections, 1,
+				"second checkout reused the first: {state:?}"
+			);
+		})
+		.await;
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn a_connection_left_in_a_transaction_is_discarded() {
+		commons_tests::db::TestDb::run(async |_conn, url| {
+			let db = pool(&url, 5, 2);
+			let mut conn = db.get().await.expect("checkout");
+			<AsyncPgConnection as AsyncConnection>::TransactionManager::begin_transaction(
+				&mut *conn,
+			)
+			.await
+			.expect("begin");
+			drop(conn);
+
+			let state = settled_state(&db).await;
+			assert_eq!((state.connections, state.idle), (0, 0), "{state:?}");
+		})
+		.await;
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn an_unreachable_server_is_retried_for_the_window_then_fails_as_without_retry() {
+		let db = pool(UNREACHABLE, 5, 2);
 
 		// `PooledConnection` isn't `Debug`, so `expect_err` (which requires
-		// the `Ok` side to be) doesn't fit here — match it out instead.
+		// the `Ok` side to be) doesn't fit here; match it out instead.
 		let no_retry = match db.0.get().await {
 			Err(err) => err,
 			Ok(_) => panic!("unexpectedly connected to nothing listening on this port"),
 		};
-		let retried = match db.get_retrying(tiny, 3).await {
+
+		let start = Instant::now();
+		let retried = match db.get_with(QUICK).await {
 			Err(err) => err,
 			Ok(_) => panic!("unexpectedly connected after retrying against nothing listening"),
 		};
+		let elapsed = start.elapsed();
 
-		// Same error shape either way: retrying only changes when the
-		// failure is reported once the window is exhausted, not what gets
-		// reported.
+		assert!(
+			elapsed >= QUICK.retry_window - QUICK.backoff.cap().unsigned_abs(),
+			"gave up after {elapsed:?}, before the retry window was used"
+		);
+		assert!(elapsed < QUICK.timeout, "ran on for {elapsed:?}");
 		assert_eq!(no_retry.to_string(), retried.to_string());
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn a_server_that_never_answers_fails_the_attempt_at_its_limit() {
+		// Accepts connections and never says anything, like a node that has
+		// dropped off the network mid-handshake.
+		let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+			.await
+			.expect("bind");
+		let url = format!("postgres://{}/silent", listener.local_addr().expect("addr"));
+		let silent = tokio::spawn(async move {
+			let mut held = Vec::new();
+			while let Ok((socket, _)) = listener.accept().await {
+				held.push(socket);
+			}
+		});
+
+		let one_attempt = Checkout {
+			retry_window: Duration::ZERO,
+			timeout: Duration::from_secs(30),
+			..QUICK
+		};
+		let start = Instant::now();
+		let err = match pool(&url, 5, 2).get_with(one_attempt).await {
+			Err(err) => err,
+			Ok(_) => panic!("connected to a server that never answers"),
+		};
+		let elapsed = start.elapsed();
+		silent.abort();
+
+		assert!(matches!(err, mobc::Error::Inner(_)), "{err}");
+		assert!(
+			elapsed >= SERVER_TIMEOUT && elapsed < SERVER_TIMEOUT * 2,
+			"attempt ended after {elapsed:?}"
+		);
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn a_server_that_comes_back_within_the_window_is_reached() {
+		commons_tests::db::TestDb::run(async |_conn, url| {
+			let target = url::Url::parse(&url).expect("test url");
+			let upstream = format!(
+				"{}:{}",
+				target.host_str().expect("host"),
+				target.port().unwrap_or(5432)
+			);
+
+			// Reserve a port, then leave it closed so connects are refused
+			// until the proxy below starts listening on it.
+			let port = std::net::TcpListener::bind("127.0.0.1:0")
+				.expect("reserve")
+				.local_addr()
+				.expect("addr")
+				.port();
+			let mut via_proxy = target.clone();
+			via_proxy.set_host(Some("127.0.0.1")).expect("host");
+			via_proxy.set_port(Some(port)).expect("port");
+
+			let proxy = tokio::spawn(async move {
+				tokio::time::sleep(Duration::from_millis(100)).await;
+				let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+					.await
+					.expect("proxy bind");
+				while let Ok((mut client, _)) = listener.accept().await {
+					let upstream = upstream.clone();
+					tokio::spawn(async move {
+						let mut server = tokio::net::TcpStream::connect(upstream)
+							.await
+							.expect("upstream");
+						let _ = tokio::io::copy_bidirectional(&mut client, &mut server).await;
+					});
+				}
+			});
+
+			let comes_back = Checkout {
+				retry_window: Duration::from_secs(5),
+				..QUICK
+			};
+			let db = pool(via_proxy.as_str(), 5, 2);
+			let mut conn = match db.get_with(comes_back).await {
+				Ok(conn) => conn,
+				Err(err) => panic!("server came back but checkout failed: {err}"),
+			};
+			diesel_async::SimpleAsyncConnection::batch_execute(&mut *conn, "SELECT 1")
+				.await
+				.expect("query over the recovered connection");
+			drop(conn);
+			proxy.abort();
+		})
+		.await;
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn waiting_for_a_busy_pool_is_not_retried() {
+		commons_tests::db::TestDb::run(async |_conn, url| {
+			let db = pool(&url, 1, 1);
+			let _held = db.get().await.expect("take the only connection");
+
+			let busy = Checkout {
+				timeout: Duration::from_millis(200),
+				retry_window: Duration::from_secs(10),
+				..QUICK
+			};
+			let start = Instant::now();
+			let err = match db.get_with(busy).await {
+				Err(err) => err,
+				Ok(_) => panic!("checked out a second connection from a pool of one"),
+			};
+
+			assert!(matches!(err, mobc::Error::Timeout), "{err}");
+			assert!(
+				start.elapsed() < Duration::from_secs(1),
+				"{:?}",
+				start.elapsed()
+			);
+		})
+		.await;
 	}
 }
