@@ -10,7 +10,7 @@ use commons_errors::Result;
 use commons_types::backup::{BackupType, RestoreIntent, RunOutcome};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use jiff::Timestamp;
+use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -41,6 +41,17 @@ pub async fn candidate_for(
 	db: &mut AsyncPgConnection,
 	server: &Application,
 ) -> Result<Option<Version>> {
+	Ok(candidate_plan_for(db, server)
+		.await?
+		.map(|(_, version)| version))
+}
+
+/// The open plan naming `server`'s candidate, alongside that candidate.
+// spec: RST#candidate-versions
+pub async fn candidate_plan_for(
+	db: &mut AsyncPgConnection,
+	server: &Application,
+) -> Result<Option<(crate::upgrade_plans::UpgradePlan, Version)>> {
 	// The migrations under test are Tamanu's, so only Tamanu has candidates —
 	// a central and a facility alike, both being upgraded along the same train.
 	// spec: RST#candidate-versions
@@ -55,7 +66,14 @@ pub async fn candidate_for(
 		return Ok(None);
 	};
 
-	crate::upgrade_plans::planned_target(db, group_id, rank).await
+	let Some(plan) =
+		crate::upgrade_plans::UpgradePlan::open_for_environment(db, group_id, rank).await?
+	else {
+		return Ok(None);
+	};
+	Ok(crate::upgrade_plans::target_of(db, &plan)
+		.await?
+		.map(|version| (plan, version)))
 }
 
 /// The version each of `applications` should be tested against, by application
@@ -261,6 +279,15 @@ impl MigrationTest {
 		let application_id = test.application_id;
 		let target_version_id = test.target_version_id;
 		let failed_migration = test.failed_migration.clone();
+		let machine_id = report.machine_id;
+		let began_at = run_began_at(
+			db,
+			report.consumer_device_id,
+			report.run_id,
+			report.observed_at,
+			test.total_elapsed.0,
+		)
+		.await?;
 
 		let restore_failed = report.outcome != RunOutcome::Success;
 
@@ -305,6 +332,10 @@ impl MigrationTest {
 				.values(timings)
 				.execute(db)
 				.await?;
+		}
+
+		if let Some(machine_id) = machine_id {
+			MigrationTestRequest::clear(db, machine_id, target_version_id, began_at).await?;
 		}
 
 		// The finding is held against the application whose candidate this was:
@@ -432,6 +463,296 @@ pub async fn has_verdict(
 		.optional()?;
 
 	Ok(existing.is_some())
+}
+
+/// The workload a migration test of a box is for: the application, the open
+/// plan naming its candidate, that candidate, and the ask pending against it.
+pub struct BoxCandidate<'a> {
+	pub application: &'a Application,
+	pub plan: crate::upgrade_plans::UpgradePlan,
+	pub version: Version,
+	pub request: Option<MigrationTestRequest>,
+}
+
+/// Which workload on a box a migration test of the box is for, and the ask
+/// pending against it.
+///
+/// A box's applications share one rank, so they share one environment and one
+/// plan: the first with a candidate stands for the box.
+// spec: RST#candidate-versions
+pub async fn candidate_on_box<'a>(
+	db: &mut AsyncPgConnection,
+	machine_id: Uuid,
+	applications: &'a [Application],
+) -> Result<Option<BoxCandidate<'a>>> {
+	for application in applications {
+		if let Some((plan, version)) = candidate_plan_for(db, application).await? {
+			let request = MigrationTestRequest::pending(db, machine_id, plan.id).await?;
+			return Ok(Some(BoxCandidate {
+				application,
+				plan,
+				version,
+				request,
+			}));
+		}
+	}
+	Ok(None)
+}
+
+/// When a box's pair fell due for a test under a migrating declaration, or
+/// `None` while it is not due.
+///
+/// An ask makes it due from when it was made. A declaration on request is due
+/// only then; one on the schedule is due by the schedule as well, whichever
+/// came first, so pressing for a test never pushes back a test already owed.
+// spec: RST#dispatching-a-migration-test
+pub async fn due_at(
+	db: &mut AsyncPgConnection,
+	machine_id: Uuid,
+	migrates_on_request: bool,
+	candidate: &BoxCandidate<'_>,
+	snapshot_id: &str,
+	snapshot_at: Timestamp,
+	now: Timestamp,
+) -> Result<Option<Timestamp>> {
+	let asked = candidate
+		.request
+		.as_ref()
+		.map(|request| request.requested_at.max(snapshot_at));
+	if migrates_on_request {
+		return Ok(asked);
+	}
+	let scheduled = scheduled_due(
+		db,
+		machine_id,
+		&candidate.plan,
+		&candidate.version,
+		snapshot_id,
+		snapshot_at,
+		now,
+	)
+	.await?;
+	Ok(scheduled.into_iter().chain(asked).min())
+}
+
+/// How long a declaration on the schedule goes between tests of a pair.
+pub const SCHEDULED_EVERY: SignedDuration = SignedDuration::from_hours(7 * 24);
+
+/// How far ahead of a plan's start a declaration on the schedule tests again,
+/// so the last answer before the upgrade is against the latest data.
+pub const BEFORE_UPGRADE: SignedDuration = SignedDuration::from_hours(24);
+
+/// When a pair under a declaration on the schedule fell due, or `None` while
+/// it is not due.
+///
+/// Due once a week, and once more in the day before its environment's plan
+/// starts. A snapshot that already has a verdict is never due, so backups that
+/// stopped arriving do not spend a restore a week on an answer already held.
+// spec: RST#dispatching-a-migration-test
+pub async fn scheduled_due(
+	db: &mut AsyncPgConnection,
+	machine_id: Uuid,
+	plan: &crate::upgrade_plans::UpgradePlan,
+	version: &Version,
+	snapshot_id: &str,
+	snapshot_at: Timestamp,
+	now: Timestamp,
+) -> Result<Option<Timestamp>> {
+	if has_verdict(db, machine_id, snapshot_id, version.id).await? {
+		return Ok(None);
+	}
+	let last = last_tested_at(db, machine_id, version.id).await?;
+
+	let weekly = match last {
+		None => Some(snapshot_at),
+		Some(tested) if now.duration_since(tested) >= SCHEDULED_EVERY => {
+			Some(tested + SCHEDULED_EVERY)
+		}
+		Some(_) => None,
+	};
+	let before_upgrade = crate::upgrade_plans::planned_start(plan).and_then(|start| {
+		let lead = start - BEFORE_UPGRADE;
+		(now >= lead && now < start && last.is_none_or(|tested| tested < lead)).then_some(lead)
+	});
+	Ok(weekly.into_iter().chain(before_upgrade).min())
+}
+
+/// When the most recent test of a pair reached Canopy, whatever its snapshot.
+/// The consumer's own clock is not trusted with the schedule: a report dated
+/// in the future would hold the pair off it for good.
+async fn last_tested_at(
+	db: &mut AsyncPgConnection,
+	machine_id: Uuid,
+	target_version_id: Uuid,
+) -> Result<Option<Timestamp>> {
+	use crate::schema::{backup_restore_checks, migration_tests};
+
+	let at: Option<jiff_diesel::Timestamp> = migration_tests::table
+		.inner_join(backup_restore_checks::table)
+		.filter(migration_tests::target_version_id.eq(target_version_id))
+		.filter(backup_restore_checks::machine_id.eq(machine_id))
+		.select(diesel::dsl::max(backup_restore_checks::reported_at))
+		.first(db)
+		.await?;
+	Ok(at.map(Timestamp::from))
+}
+
+/// An operator asking for a machine's data to be tested against its
+/// environment's plan.
+///
+/// Held until a test that began after it answers it. While held it puts the
+/// pair on the worklist against the latest snapshot, whether or not that
+/// snapshot already has a verdict, and it is the only thing that dispatches a
+/// declaration that migrates on request. It belongs to the plan, so once the
+/// plan closes the ask matches nothing.
+// spec: RST#dispatching-a-migration-test
+#[derive(Debug, Clone, Serialize, Deserialize, Queryable, Selectable)]
+#[diesel(table_name = crate::schema::migration_test_requests)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct MigrationTestRequest {
+	pub machine_id: Uuid,
+	pub plan_id: Uuid,
+	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
+	pub requested_at: Timestamp,
+	pub requested_by: Option<String>,
+}
+
+impl MigrationTestRequest {
+	/// Ask for every machine of an environment to be tested against its open
+	/// plan. Returns the requests made, none where the environment has no plan
+	/// or no application the migrations apply to.
+	pub async fn request_environment(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		rank: commons_types::server::rank::ServerRank,
+		requested_by: Option<&str>,
+	) -> Result<Vec<Self>> {
+		use crate::schema::migration_test_requests::dsl;
+
+		let mut plan_id = None;
+		let mut machines = std::collections::BTreeSet::new();
+		for application in Application::list_live_in_group(db, group_id).await? {
+			let Some(machine_id) = application.machine_id else {
+				continue;
+			};
+			if let Some((plan, _)) = candidate_plan_for(db, &application).await?
+				&& plan.rank == rank
+			{
+				plan_id = Some(plan.id);
+				machines.insert(machine_id);
+			}
+		}
+		let Some(plan_id) = plan_id else {
+			return Ok(Vec::new());
+		};
+
+		let rows: Vec<_> = machines
+			.into_iter()
+			.map(|machine_id| {
+				(
+					dsl::machine_id.eq(machine_id),
+					dsl::plan_id.eq(plan_id),
+					dsl::requested_by.eq(requested_by),
+				)
+			})
+			.collect();
+		Ok(diesel::insert_into(dsl::migration_test_requests)
+			.values(rows)
+			.on_conflict((dsl::machine_id, dsl::plan_id))
+			.do_update()
+			.set((
+				dsl::requested_at.eq(diesel::dsl::now),
+				dsl::requested_by.eq(requested_by),
+			))
+			.returning(Self::as_select())
+			.get_results(db)
+			.await?)
+	}
+
+	/// The ask held for a machine under a plan, if any.
+	pub async fn pending(
+		db: &mut AsyncPgConnection,
+		machine_id: Uuid,
+		plan_id: Uuid,
+	) -> Result<Option<Self>> {
+		use crate::schema::migration_test_requests::dsl;
+
+		Ok(dsl::migration_test_requests
+			.filter(dsl::machine_id.eq(machine_id))
+			.filter(dsl::plan_id.eq(plan_id))
+			.select(Self::as_select())
+			.first(db)
+			.await
+			.optional()?)
+	}
+
+	/// The asks held against any of `plan_ids`.
+	pub async fn pending_for_plans(
+		db: &mut AsyncPgConnection,
+		plan_ids: &[Uuid],
+	) -> Result<Vec<Self>> {
+		use crate::schema::migration_test_requests::dsl;
+
+		if plan_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+		Ok(dsl::migration_test_requests
+			.filter(dsl::plan_id.eq_any(plan_ids))
+			.select(Self::as_select())
+			.load(db)
+			.await?)
+	}
+
+	/// Clear the asks a test of `machine_id` against `version_id` answers: those
+	/// made before the test began.
+	async fn clear(
+		db: &mut AsyncPgConnection,
+		machine_id: Uuid,
+		version_id: Uuid,
+		began_at: Timestamp,
+	) -> Result<()> {
+		use crate::schema::{migration_test_requests::dsl, upgrade_plans};
+
+		let plans = upgrade_plans::table
+			.filter(upgrade_plans::target_version_id.eq(version_id))
+			.select(upgrade_plans::id);
+		diesel::delete(
+			dsl::migration_test_requests
+				.filter(dsl::machine_id.eq(machine_id))
+				.filter(dsl::plan_id.eq_any(plans))
+				.filter(dsl::requested_at.lt(jiff_diesel::Timestamp::from(began_at))),
+		)
+		.execute(db)
+		.await?;
+		Ok(())
+	}
+}
+
+/// When the run behind a report began: the first credentials issued to the
+/// reporting consumer for it, which it requests as the run starts. A report
+/// naming no run of its own is taken to have begun its elapsed time before it
+/// says it finished, and no later than now.
+async fn run_began_at(
+	db: &mut AsyncPgConnection,
+	consumer_device_id: Uuid,
+	run_id: Option<Uuid>,
+	observed_at: Timestamp,
+	elapsed: SignedDuration,
+) -> Result<Timestamp> {
+	use crate::schema::backup_credential_issuances::dsl;
+
+	if let Some(run_id) = run_id {
+		let first: Option<jiff_diesel::Timestamp> = dsl::backup_credential_issuances
+			.filter(dsl::run_id.eq(run_id))
+			.filter(dsl::device_id.eq(consumer_device_id))
+			.select(diesel::dsl::min(dsl::issued_at))
+			.first(db)
+			.await?;
+		if let Some(first) = first {
+			return Ok(first.into());
+		}
+	}
+	Ok(observed_at.min(Timestamp::now()) - elapsed)
 }
 
 /// The latest recorded verdict for one replica key.

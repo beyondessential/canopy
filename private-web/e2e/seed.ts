@@ -167,7 +167,7 @@ async function applicationTypeOf(sql: Sql, applicationId: string): Promise<strin
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, machine_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, reporting_schema_builds, reporting_schema_requests, upgrade_plans, maintenance_windows, inventory_variables, inventory_leases, version_known_issues, recovery_vault_writes, application_names, application_certificates, kubernetes_clusters, compromised_keys RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, machine_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, reporting_schema_builds, reporting_schema_requests, migration_test_requests, upgrade_plans, maintenance_windows, inventory_variables, inventory_leases, version_known_issues, recovery_vault_writes, application_names, application_certificates, kubernetes_clusters, compromised_keys RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" application with
 	// it; self-alerts attach to that row, so put it back.
@@ -1680,6 +1680,8 @@ export async function seedRestoreReplica(
 		redacts?: boolean;
 		/** Whether the operator has made this the group's schema publisher. */
 		publishesSchemas?: boolean;
+		/** Whether a migrating declaration tests only when asked. */
+		migratesOnRequest?: boolean;
 	},
 ): Promise<SeededRestoreReplica> {
 	const id = randomUUID();
@@ -1688,8 +1690,8 @@ export async function seedRestoreReplica(
 	if (overdue == null) {
 		await sql.query(
 			`INSERT INTO restore_replicas
-			 (id, consumer_device_id, group_id, machine_id, type, intent, name, params, enabled, redacts, publishes_schemas)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11)`,
+			 (id, consumer_device_id, group_id, machine_id, type, intent, name, params, enabled, redacts, publishes_schemas, migrates_on_request)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12)`,
 			[
 				id,
 				opts.consumerDeviceId,
@@ -1702,13 +1704,14 @@ export async function seedRestoreReplica(
 				opts.enabled ?? true,
 				opts.redacts ?? false,
 				opts.publishesSchemas ?? false,
+				opts.migratesOnRequest ?? false,
 			],
 		);
 	} else {
 		await sql.query(
 			`INSERT INTO restore_replicas
-			 (id, consumer_device_id, group_id, machine_id, type, intent, name, overdue_after, params, enabled, redacts, publishes_schemas)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, make_interval(secs => $8), $9::jsonb, $10, $11, $12)`,
+			 (id, consumer_device_id, group_id, machine_id, type, intent, name, overdue_after, params, enabled, redacts, publishes_schemas, migrates_on_request)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, make_interval(secs => $8), $9::jsonb, $10, $11, $12, $13)`,
 			[
 				id,
 				opts.consumerDeviceId,
@@ -1722,6 +1725,7 @@ export async function seedRestoreReplica(
 				opts.enabled ?? true,
 				opts.redacts ?? false,
 				opts.publishesSchemas ?? false,
+				opts.migratesOnRequest ?? false,
 			],
 		);
 	}

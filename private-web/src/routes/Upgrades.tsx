@@ -7,6 +7,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import ScienceOutlinedIcon from "@mui/icons-material/ScienceOutlined";
 import {
 	Alert,
 	Autocomplete,
@@ -140,6 +141,7 @@ export default function Upgrades() {
 								<TableCell>Running</TableCell>
 								<TableCell>Going to</TableCell>
 								<TableCell>Data survives it</TableCell>
+								<TableCell>Testing</TableCell>
 								<TableCell>Planned for</TableCell>
 								<TableCell>Window</TableCell>
 								<TableCell>Note</TableCell>
@@ -175,6 +177,23 @@ export default function Upgrades() {
 													tally={row.tally}
 												/>
 												<AttemptChip attempt={row.attempt} />
+											</Stack>
+										</TableCell>
+										<TableCell>
+											<Stack
+												direction="row"
+												spacing={0.5}
+												sx={{ alignItems: "center" }}
+											>
+												<TestingChip testing={row.testing} />
+												<RequestTest
+													groupId={row.group_id}
+													rank={row.rank}
+													groupName={environmentName(row.group_name, row.rank)}
+													testable={row.testing != null}
+													request={row.test_request}
+													onRequested={() => setTick((t) => t + 1)}
+												/>
 											</Stack>
 										</TableCell>
 										<TableCell>
@@ -1548,6 +1567,111 @@ function AttemptChip({
 		);
 	}
 	return null;
+}
+
+/// Whether the environment is tested on the schedule or only when someone asks.
+// spec: RST#dispatching-a-migration-test
+function TestingChip({
+	testing,
+}: {
+	testing: "scheduled" | "on_request" | null | undefined;
+}) {
+	if (!testing) return null;
+	const scheduled = testing === "scheduled";
+	return (
+		<Tooltip
+			title={
+				scheduled
+					? "Tested automatically: weekly, and once more in the 24 hours before the upgrade"
+					: "Tested only when someone presses the test button"
+			}
+		>
+			<Chip
+				size="small"
+				variant="outlined"
+				label={scheduled ? "weekly" : "on request"}
+				data-testid="migration-testing"
+			/>
+		</Tooltip>
+	);
+}
+
+/// Ask for the environment's data to be tested against its plan, or say that
+/// an ask is waiting on a verdict.
+// spec: RST#dispatching-a-migration-test
+function RequestTest({
+	groupId,
+	rank,
+	groupName,
+	testable,
+	request,
+	onRequested,
+}: {
+	groupId: string;
+	rank: ServerRank;
+	groupName: string;
+	testable: boolean;
+	request: { requested_at: string; requested_by?: string | null } | null | undefined;
+	onRequested: () => void;
+}) {
+	const ask = useApiAction("migration_tests", "request");
+	if (request) {
+		return (
+			<Tooltip
+				title={
+					<>
+						Asked for <TimeAgo timestamp={request.requested_at} />
+						{request.requested_by ? ` by ${request.requested_by}` : ""}; each
+						machine runs once against its latest backup
+					</>
+				}
+			>
+				<Chip
+					size="small"
+					color="info"
+					variant="outlined"
+					label="requested"
+					data-testid="migration-test-requested"
+				/>
+			</Tooltip>
+		);
+	}
+	if (!testable) return null;
+	return (
+		<>
+			<GradedAction
+				calls="migration_tests/request"
+				action={`Test migrations for ${groupName}`}
+			>
+				<Tooltip title="Test the migrations against this environment's latest backup">
+					<IconButton
+						size="small"
+						aria-label={`Test migrations for ${groupName}`}
+						disabled={ask.pending}
+						onClick={async () => {
+							try {
+								await ask.call({ group_id: groupId, rank });
+								onRequested();
+							} catch {
+								/* ask.error is shown beside the button */
+							}
+						}}
+					>
+						<ScienceOutlinedIcon fontSize="small" />
+					</IconButton>
+				</Tooltip>
+			</GradedAction>
+			{ask.error && (
+				<Typography
+					variant="caption"
+					color="error"
+					data-testid="migration-test-request-error"
+				>
+					{ask.error.message}
+				</Typography>
+			)}
+		</>
+	);
 }
 
 function PlannedFor({ date, late }: { date: string | null; late: boolean }) {

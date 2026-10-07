@@ -100,6 +100,11 @@ pub struct RestoreReplicaView {
 	/// True when the intent carries the `reporting-schema` semantic, so the
 	/// declaration can be made the group's publisher.
 	pub can_publish_schemas: bool,
+	/// Whether this migrating declaration tests only when an operator asks.
+	pub migrates_on_request: bool,
+	/// True when the intent migration-tests candidate versions, so the
+	/// declaration can choose between the schedule and on request.
+	pub can_migrate_on_request: bool,
 	/// Servers this declaration covers that cannot currently be redacted:
 	/// either their product publishes no masking manifest, or the version
 	/// they report has none published. Each is withheld from the worklist
@@ -203,6 +208,11 @@ pub struct RestoreReplicasCreateArgs {
 	/// consumer publishes only where an operator has said it may.
 	#[serde(default)]
 	pub publishes_schemas: bool,
+	/// Whether a migrating declaration tests only when an operator asks from
+	/// the upgrades view, rather than weekly and in the day before the upgrade
+	/// while its environment has a plan open. Defaults to false.
+	#[serde(default)]
+	pub migrates_on_request: bool,
 }
 
 /// Request to update an existing declaration.
@@ -253,6 +263,11 @@ pub struct RestoreReplicasUpdateArgs {
 	/// carries the `reporting-schema` semantic. Defaults to false.
 	#[serde(default)]
 	pub publishes_schemas: bool,
+	/// Whether a migrating declaration tests only when an operator asks from
+	/// the upgrades view, rather than weekly and in the day before the upgrade
+	/// while its environment has a plan open. Defaults to false.
+	#[serde(default)]
+	pub migrates_on_request: bool,
 	/// Whether the declaration should be active.
 	pub enabled: bool,
 }
@@ -444,6 +459,14 @@ async fn to_views(
 					.get(&r.consumer_device_id)
 					.and_then(|descs| descs.iter().find(|d| d.intent == r.intent))
 					.is_some_and(|d| d.has_semantic(semantics::REPORTING_SCHEMA)),
+				can_migrate_on_request: caps
+					.get(&r.consumer_device_id)
+					.and_then(|descs| descs.iter().find(|d| d.intent == r.intent))
+					.is_some_and(|d| {
+						d.has_semantic(semantics::MIGRATE)
+							&& !d.has_semantic(semantics::REPORTING_SCHEMA)
+					}),
+				migrates_on_request: r.migrates_on_request,
 				publishes_schemas: r.publishes_schemas,
 				redacts: r.redacts,
 				redaction_gaps: gaps.remove(&r.id).unwrap_or_default(),
@@ -815,6 +838,7 @@ pub async fn create(
 			params: serde_json::to_value(&params).expect("params serialize"),
 			redacts: args.redacts,
 			publishes_schemas: args.publishes_schemas,
+			migrates_on_request: args.migrates_on_request,
 			created_by: Some(admin.login),
 		},
 	)
@@ -885,6 +909,7 @@ pub async fn update(
 			params: serde_json::to_value(&params).expect("params serialize"),
 			redacts: args.redacts,
 			publishes_schemas: args.publishes_schemas,
+			migrates_on_request: args.migrates_on_request,
 			enabled: args.enabled,
 		},
 	)

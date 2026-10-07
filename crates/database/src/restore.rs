@@ -88,6 +88,10 @@ pub struct RestoreReplica {
 	/// published for it.
 	// spec: RPT#the-build-contract
 	pub publishes_schemas: bool,
+	/// Whether a migrating declaration tests only when an operator asks, rather
+	/// than on the schedule while its environment has a plan open.
+	// spec: RST#dispatching-a-migration-test
+	pub migrates_on_request: bool,
 	/// Whether this declaration is currently active. When disabled, it
 	/// produces no work and grants no access, but is kept for reference.
 	pub enabled: bool,
@@ -115,6 +119,7 @@ pub struct NewRestoreReplica {
 	pub params: serde_json::Value,
 	pub redacts: bool,
 	pub publishes_schemas: bool,
+	pub migrates_on_request: bool,
 	pub created_by: Option<String>,
 }
 
@@ -133,6 +138,7 @@ pub struct RestoreReplicaUpdate {
 	pub params: serde_json::Value,
 	pub redacts: bool,
 	pub publishes_schemas: bool,
+	pub migrates_on_request: bool,
 	pub enabled: bool,
 }
 
@@ -279,6 +285,7 @@ impl RestoreReplica {
 				dsl::params.eq(update.params),
 				dsl::redacts.eq(update.redacts),
 				dsl::publishes_schemas.eq(update.publishes_schemas),
+				dsl::migrates_on_request.eq(update.migrates_on_request),
 				dsl::enabled.eq(update.enabled),
 			))
 			.returning(Self::as_select())
@@ -588,15 +595,59 @@ pub async fn group_migrates(db: &mut AsyncPgConnection, group_id: Uuid) -> Resul
 // spec: RST#verdicts
 #[derive(Debug, Clone, Default)]
 pub struct MigratingEnvironments {
-	whole_group: bool,
-	ranks: HashSet<commons_types::server::rank::ServerRank>,
+	whole_group: Option<Coverage>,
+	ranks: HashMap<commons_types::server::rank::ServerRank, Coverage>,
+}
+
+/// How an environment's data is migration-tested while its plan is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Testing {
+	/// Only when an operator asks.
+	OnRequest,
+	/// Weekly, and once more in the day before the upgrade.
+	Scheduled,
+}
+
+/// What the declarations covering one environment do with its restores: a
+/// declaration building reporting schemas migrates them without testing the
+/// plan, so it covers the environment and leaves it untested.
+#[derive(Debug, Clone, Copy, Default)]
+struct Coverage {
+	testing: Option<Testing>,
+}
+
+impl Coverage {
+	fn merge(&mut self, testing: Option<Testing>) {
+		self.testing = self.testing.max(testing);
+	}
 }
 
 impl MigratingEnvironments {
+	fn coverage(&self, rank: commons_types::server::rank::ServerRank) -> Option<Coverage> {
+		match (self.whole_group, self.ranks.get(&rank)) {
+			(None, None) => None,
+			(whole, own) => {
+				let mut merged = Coverage::default();
+				for coverage in whole.iter().chain(own) {
+					merged.merge(coverage.testing);
+				}
+				Some(merged)
+			}
+		}
+	}
+
 	/// A group-wide declaration covers every environment, one over a single
 	/// machine covers the environment that machine serves.
 	pub fn covers(&self, rank: commons_types::server::rank::ServerRank) -> bool {
-		self.whole_group || self.ranks.contains(&rank)
+		self.coverage(rank).is_some()
+	}
+
+	/// How the declarations covering the environment test it, the schedule
+	/// winning over asking. `None` where none of them tests the plan.
+	// spec: RST#dispatching-a-migration-test
+	pub fn testing(&self, rank: commons_types::server::rank::ServerRank) -> Option<Testing> {
+		self.coverage(rank).and_then(|coverage| coverage.testing)
 	}
 }
 
@@ -625,19 +676,28 @@ pub async fn migrating_environments(
 					.await?,
 			),
 		};
-		if !descriptors
+		let Some(descriptor) = descriptors
 			.iter()
-			.any(|d| d.intent == replica.intent && d.has_semantic(semantics::MIGRATE))
-		{
+			.find(|d| d.intent == replica.intent && d.has_semantic(semantics::MIGRATE))
+		else {
 			continue;
-		}
-		match replica.machine_id {
-			None => out.whole_group = true,
-			Some(machine_id) => {
-				if let Some(rank) = ranks.get(&machine_id) {
-					out.ranks.insert(*rank);
-				}
-			}
+		};
+		let testing = match (
+			descriptor.has_semantic(semantics::REPORTING_SCHEMA),
+			replica.migrates_on_request,
+		) {
+			(true, _) => None,
+			(false, true) => Some(Testing::OnRequest),
+			(false, false) => Some(Testing::Scheduled),
+		};
+		let coverage = match replica.machine_id {
+			None => Some(out.whole_group.get_or_insert_default()),
+			Some(machine_id) => ranks
+				.get(&machine_id)
+				.map(|rank| out.ranks.entry(*rank).or_default()),
+		};
+		if let Some(coverage) = coverage {
+			coverage.merge(testing);
 		}
 	}
 	Ok(out)
@@ -1542,26 +1602,30 @@ async fn untried_candidate(
 	let Some(snapshot_id) = run.snapshot_id.as_ref() else {
 		return Ok(None);
 	};
-	let mut candidate = None;
-	for application in machine.applications(db).await? {
-		if let Some(version) = crate::migration_tests::candidate_for(db, &application).await? {
-			candidate = Some(version);
-			break;
-		}
-	}
-	let Some(version) = candidate else {
+	let applications = machine.applications(db).await?;
+	let Some(candidate) =
+		crate::migration_tests::candidate_on_box(db, machine.id, &applications).await?
+	else {
 		return Ok(None);
 	};
-	if crate::migration_tests::has_verdict(db, machine.id, snapshot_id, version.id).await? {
+	let Some(since) = crate::migration_tests::due_at(
+		db,
+		machine.id,
+		declaration.migrates_on_request,
+		&candidate,
+		snapshot_id,
+		run.reported_at,
+		now,
+	)
+	.await?
+	else {
 		return Ok(None);
-	}
-	// Measured from when the snapshot landed, which is when it became available
-	// to migrate, not how old the data inside it is.
-	if now.duration_since(run.reported_at) <= bound.0 {
+	};
+	if now.duration_since(since) <= bound.0 {
 		return Ok(None);
 	}
 	Ok(Some((
-		version.as_semver().to_string(),
+		candidate.version.as_semver().to_string(),
 		snapshot_id.to_owned(),
 	)))
 }

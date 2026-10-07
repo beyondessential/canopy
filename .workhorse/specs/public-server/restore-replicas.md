@@ -48,6 +48,7 @@ The role is read-only by contract, enforced at the API:
 - A `backup-restore` caller requesting backup (write) credentials is rejected.
   The read-only guarantee is enforced by Canopy rather than trusted to the caller, so a compromised consumer cannot pivot to writing or poisoning a repo.
 - A `backup-restore` caller may obtain credentials and the worklist only for a `(group, type)` it has been authorised for.
+- A report names the machine it restored, and that machine must be one of the reported group's: a verdict recorded against it, and the asks it answers, belong to that group.
 
 Authorization is the set of declared replicas (below): a consumer is authorised for exactly the `(group, type)` pairs that appear in its enabled replica declarations.
 There is no separate grant object — declaring a replica *is* the authorization to read what that replica needs.
@@ -245,7 +246,7 @@ An application's candidate is the version its own environment's open plan moves 
 An environment with no open plan has no candidate, so none of its applications are tested, and neither is a pending application, being in no environment (see [GRP](../servers/groups.md), "Environments").
 A site's clone is often planned ahead of its production, so the two are tested against different versions at once.
 
-Recording a plan is what asks for the testing.
+Recording a plan is what makes an environment testable.
 A run costs hours of a consumer's capacity per replica, and which minor an environment moves to is not something Canopy can derive, so aiming at whatever is newest would spend that capacity on versions nobody has decided to take.
 An environment that wants its data tested says where it is going, and gets an answer about the version it will actually apply.
 
@@ -271,7 +272,7 @@ An intent that verifies backups therefore does not also migrate: it would go und
 An intent that keeps a replica queryable does not migrate either: a migrated replica sits at a version its group is not running, so a declaration promoted to it would give an operator a schema that does not match production.
 
 A verifying intent and a migrating intent restore the same snapshot separately.
-A verifying intent restores once per snapshot, and a migrating intent's `once` is keyed to the snapshot and target version together, so it restores when a new candidate version appears rather than on every snapshot.
+A verifying intent restores once per snapshot, and a migrating intent's `once` is keyed to the snapshot and target version together and paced by the declaration's schedule, so it restores when a new candidate version appears or its pair falls due rather than on every snapshot.
 
 An entry for a `migrate` intent names the target version alongside the snapshot, and the application whose candidate it is.
 A report echoes that application back, so the finding lands on the workload the version belongs to rather than being re-derived; a consumer that does not send it has it resolved from the machine and the version.
@@ -280,9 +281,27 @@ A consumer obtains that version's migrations from its published artifacts, the s
 A machine none of whose applications has a candidate version contributes no entry, whatever its declaration says.
 There is nothing to migrate to, and an entry naming no version would ask a consumer to restore a database for no reason.
 
-`once` is keyed to the pair of snapshot and target version: an entry is omitted once that pair has a verdict, and reinstated when either a newer snapshot or a new candidate version appears.
+`once` is keyed to the pair of snapshot and target version: an entry is omitted once that pair has a verdict, and reinstated when a new candidate version appears or, for a newer snapshot, when the declaration's schedule says the pair is due.
 A failed verdict settles that pair rather than leaving it retryable.
 A restore can fail for transient reasons and is worth retrying, but a migration failing against a fixed snapshot fails the same way every time, and a retry costs a full restore for an answer already held.
+
+A migrating declaration says when it tests: on a schedule while its environment has a plan open, or only when an operator asks.
+A test costs a full restore and migrate per machine, and a group's data rarely changes in a way that alters the answer from one day's snapshot to the next, so a declaration does not test every snapshot.
+On the schedule, a pair falls due once a week, and once more in the day before its environment's plan starts, so the last answer before the upgrade is against the latest data.
+A plan's start is the opening of its window where it recorded an hour, and the start of its planned day in UTC otherwise.
+A snapshot that already has a verdict for the version is never due, so backups that stopped arriving do not spend a restore a week on an answer already held.
+A week is counted from when the last test's report reached Canopy, since a consumer's clock is not one the schedule can rest on.
+The schedule is the default; asking is for trying a version out, and for a group too large to restore weekly.
+
+An operator asks from the environment's row in the upgrades view, and the ask covers every machine whose application the plan applies to.
+An ask puts each of those machines on the worklist against its latest snapshot, including one whose pair is already settled, since an ask after a fix to the pipeline or to the data is a request for a new answer.
+It is answered for a machine once a verdict for that machine and version lands from a test that began after the ask, and until then the environment's row says it is waiting.
+A test begins when its consumer is first issued credentials for its run, so a run already under way when the ask is made does not answer it; a report naming no run is taken to have begun its elapsed time before it finished.
+An ask on a declaration on the schedule never puts off a test already owed: the pair is due from whichever came first.
+A declaration building reporting schemas migrates without testing the plan, so on its own it leaves an environment with nothing to ask for.
+An ask belongs to the plan it was made under: once that plan is met, withdrawn, or replaced, the ask dispatches nothing.
+A restore that fails before migrating leaves the ask standing, as it leaves the pair retryable.
+A declaration is overdue when a pair it is due to test, by the schedule or by an ask, goes untried past the bound; one that tests on request is never overdue for want of a test nobody asked for.
 
 ### What a migration test reports
 

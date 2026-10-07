@@ -463,23 +463,29 @@ async fn worklist(
 			// whose candidate it carries alongside the machine whose snapshot it
 			// restores: the one place the two grains interleave.
 			// spec: RST#dispatching-a-migration-test
-			let target = if migrates {
-				let mut found = None;
-				for application in &on_box {
-					if let Some(version) =
-						migration_tests::candidate_for(&mut conn, application).await?
-					{
-						found = Some((application.r#type.clone(), version.id, version.as_semver()));
-						break;
-					}
-				}
-				match found {
-					Some(t) => Some(t),
+			let candidate = if migrates {
+				match migration_tests::candidate_on_box(&mut conn, machine.id, &on_box).await? {
+					Some(found) => Some(found),
 					None => continue,
 				}
 			} else {
 				None
 			};
+			let target = candidate.as_ref().map(|c| {
+				(
+					c.application.r#type.clone(),
+					c.version.id,
+					c.version.as_semver(),
+				)
+			});
+
+			// A declaration on request waits for an ask; without one it has
+			// nothing to restore whatever the snapshot.
+			// spec: RST#dispatching-a-migration-test
+			let requested = candidate.as_ref().is_some_and(|c| c.request.is_some());
+			if migrates && d.migrates_on_request && !requested {
+				continue;
+			}
 
 			// The masking parameters are Canopy's for a `redact` intent: resolved
 			// from the server's product when the declaration redacts, sent unset
@@ -504,17 +510,26 @@ async fn worklist(
 			};
 
 			// A `once` intent drops off the worklist once its work is settled for
-			// the latest snapshot, and reappears only when a newer one exists. For
-			// a `migrate` intent that settling is keyed to the target version too,
-			// and a failure settles it as firmly as a pass.
-			if once {
-				let settled = match (&target, latest.and_then(|r| r.snapshot_id.as_ref())) {
-					(Some((_, version_id, _)), Some(snapshot)) => {
-						migration_tests::has_verdict(&mut conn, machine.id, snapshot, *version_id)
-							.await?
-					}
+			// the latest snapshot, and reappears only when a newer one exists. A
+			// `migrate` intent is settled until its pair falls due, by its
+			// schedule or by an ask, and a failure settles it as firmly as a pass.
+			if once || d.migrates_on_request {
+				let snapshot = latest.and_then(|r| r.snapshot_id.as_ref().map(|id| (id, r)));
+				let settled = match (&candidate, snapshot) {
+					(Some(c), Some((snapshot, run))) => migration_tests::due_at(
+						&mut conn,
+						machine.id,
+						d.migrates_on_request,
+						c,
+						snapshot,
+						run.reported_at,
+						jiff::Timestamp::now(),
+					)
+					.await?
+					.is_none(),
 					(Some(_), None) => false,
 					(None, snapshot) => {
+						let snapshot = snapshot.map(|(id, _)| id);
 						// Keyed by name as well: each named replica of a scope
 						// verifies its own snapshot, so one of them settling does
 						// not take its siblings off the worklist.
@@ -1000,6 +1015,16 @@ async fn verification(
 	if !RestoreReplica::authorizes(&mut conn, consumer_device_id, args.group, &args.r#type).await? {
 		return Err(AppError::AuthInsufficientPermissions {
 			required: "an enabled restore-replica declaration for this group and type".into(),
+		});
+	}
+	// The machine is the consumer's word, and a report records a verdict and
+	// answers asks against it, so it must be one of the group's.
+	let reported = database::machines::Machine::get_by_id(&mut conn, machine_id)
+		.await
+		.map_err(|_| AppError::NotFound("no such machine".into()))?;
+	if reported.group_id != Some(args.group) {
+		return Err(AppError::AuthInsufficientPermissions {
+			required: "the reported machine to belong to the reported group".into(),
 		});
 	}
 

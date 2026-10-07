@@ -455,6 +455,19 @@ pub fn planned_window(plan: &UpgradePlan) -> Option<(Timestamp, Timestamp)> {
 	Some((start, end))
 }
 
+/// When a plan's work starts: its window's opening where it recorded an hour,
+/// otherwise the start of its planned day in UTC, a zone being recorded only
+/// with an hour.
+pub fn planned_start(plan: &UpgradePlan) -> Option<Timestamp> {
+	if let Some((start, _)) = planned_window(plan) {
+		return Some(start);
+	}
+	plan.planned_for?
+		.to_zoned(TimeZone::UTC)
+		.ok()
+		.map(|zoned| zoned.timestamp())
+}
+
 /// The instant a plan's own window closes.
 pub fn planned_window_end(plan: &UpgradePlan) -> Option<Timestamp> {
 	planned_window(plan).map(|(_, end)| end)

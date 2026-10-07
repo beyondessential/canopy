@@ -167,6 +167,7 @@ fn new_replica(
 		params: serde_json::json!({}),
 		redacts: false,
 		publishes_schemas: false,
+		migrates_on_request: false,
 		created_by: Some("op@example.com".into()),
 	}
 }
@@ -185,6 +186,7 @@ fn update_from(r: &RestoreReplica) -> RestoreReplicaUpdate {
 		params: r.params.clone(),
 		redacts: r.redacts,
 		publishes_schemas: r.publishes_schemas,
+		migrates_on_request: r.migrates_on_request,
 		enabled: r.enabled,
 	}
 }

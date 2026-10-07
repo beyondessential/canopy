@@ -7770,11 +7770,33 @@
               "null"
             ]
           },
+          "test_request": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TestRequest",
+                "description": "The most recent ask for this environment to be tested against its plan\nthat has yet to be answered for every machine it covers. `null` where\nnone is pending."
+              }
+            ]
+          },
           "testable": {
             "description": "Whether anything is declared to migrate this group's data. A plan on a\ngroup with nothing declared is never dispatched, so its verdict would sit\nat \"not tested\" indefinitely with nothing on its way. `null` without a\nplan.",
             "type": [
               "boolean",
               "null"
+            ]
+          },
+          "testing": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Testing",
+                "description": "How the environment is tested: `scheduled` where a declaration covering\nit tests weekly and in the day before the upgrade, `on_request` where\nevery one covering it waits to be asked. `null` where nothing tests it."
+              }
             ]
           },
           "verdict": {
@@ -8577,6 +8599,25 @@
         ],
         "type": "object"
       },
+      "RequestMigrationTestArgs": {
+        "description": "Request body for asking for an environment's data to be migration-tested.",
+        "properties": {
+          "group_id": {
+            "description": "The group the environment belongs to.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "rank": {
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "The environment's rank."
+          }
+        },
+        "required": [
+          "group_id",
+          "rank"
+        ],
+        "type": "object"
+      },
       "ResolveIncidentArgs": {
         "description": "Request to mark an incident resolved.",
         "properties": {
@@ -8884,6 +8925,10 @@
       "RestoreReplicaView": {
         "description": "A managed-restore declaration, as shown to operators.\n\nA declaration instructs a restore consumer to maintain a restored replica\nof a backup, for a given purpose (intent). It also grants the consumer\nread access to the covered backups while it is enabled.",
         "properties": {
+          "can_migrate_on_request": {
+            "description": "True when the intent migration-tests candidate versions, so the\ndeclaration can choose between the schedule and on request.",
+            "type": "boolean"
+          },
           "can_publish_schemas": {
             "description": "True when the intent carries the `reporting-schema` semantic, so the\ndeclaration can be made the group's publisher.",
             "type": "boolean"
@@ -8945,6 +8990,10 @@
               "null"
             ]
           },
+          "migrates_on_request": {
+            "description": "Whether this migrating declaration tests only when an operator asks.",
+            "type": "boolean"
+          },
           "name": {
             "description": "Operator-chosen display name for the declaration.",
             "type": "string"
@@ -8996,6 +9045,8 @@
           "can_redact",
           "publishes_schemas",
           "can_publish_schemas",
+          "migrates_on_request",
+          "can_migrate_on_request",
           "redaction_gaps",
           "enabled",
           "gap",
@@ -9028,6 +9079,10 @@
               "string",
               "null"
             ]
+          },
+          "migrates_on_request": {
+            "description": "Whether a migrating declaration tests only when an operator asks from\nthe upgrades view, rather than weekly and in the day before the upgrade\nwhile its environment has a plan open. Defaults to false.",
+            "type": "boolean"
           },
           "name": {
             "description": "Display name for the declaration, unique among the consumer's\ndeclarations.",
@@ -9113,6 +9168,10 @@
               "string",
               "null"
             ]
+          },
+          "migrates_on_request": {
+            "description": "Whether a migrating declaration tests only when an operator asks from\nthe upgrades view, rather than weekly and in the day before the upgrade\nwhile its environment has a plan open. Defaults to false.",
+            "type": "boolean"
           },
           "name": {
             "description": "New display name for the declaration, unique among the consumer's\ndeclarations.",
@@ -11877,6 +11936,35 @@
           "rank"
         ],
         "type": "object"
+      },
+      "TestRequest": {
+        "description": "An ask for an environment to be migration-tested, still waiting on a verdict.",
+        "properties": {
+          "requested_at": {
+            "description": "When it was asked for.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "requested_by": {
+            "description": "Who asked.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "requested_at"
+        ],
+        "type": "object"
+      },
+      "Testing": {
+        "description": "How an environment's data is migration-tested while its plan is open.",
+        "enum": [
+          "on_request",
+          "scheduled"
+        ],
+        "type": "string"
       },
       "Transition": {
         "description": "One healthy↔degraded transition: the state became (or was first\nobserved) `degraded`/healthy at `at`.",
@@ -20471,6 +20559,67 @@
           "migration_tests"
         ],
         "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/migration_tests/request": {
+      "post": {
+        "description": "Every machine in the environment whose application the plan applies to is\ntested once against its latest snapshot, including one already tested\nagainst that snapshot. This is the only thing that dispatches a declaration\nmigrating on request.",
+        "operationId": "migration_tests_request",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestMigrationTestArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "How many machines were asked for."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Ask for an environment's data to be tested against its open plan's version.",
+        "tags": [
+          "migration_tests"
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/reporting_schemas/build": {

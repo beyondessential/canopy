@@ -181,6 +181,95 @@ test.describe("restore replicas", () => {
 		expect(rows[0]?.redacts).toBe(true);
 	});
 
+	/// spec: RST#dispatching-a-migration-test
+	test("a migrating declaration tests on the schedule unless told otherwise", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedRestoreConsumerCapability(sql, {
+			deviceId: consumer.id,
+			intents: [{ intent: "upgrade", semantics: ["check", "once", "migrate"] }],
+		});
+		const groupId = await groupWithBackups(sql, "migrate-declare");
+		await seedServer(sql, { groupId, name: "migrate-srv" });
+
+		await page.goto(`/fleet/groups/${groupId}/backups`);
+		await page.getByRole("button", { name: /declare replica/i }).click();
+
+		const dialog = page.getByRole("dialog");
+		await expect(
+			dialog.getByRole("radio", { name: /weekly, and the day before/i }),
+		).toBeChecked();
+		await dialog.getByRole("radio", { name: /when requested/i }).check();
+		await dialog.getByRole("button", { name: "Declare" }).click();
+
+		await expect(dialog).toHaveCount(0);
+		const rows = await sql.query<{ migrates_on_request: boolean }>(
+			`SELECT migrates_on_request FROM restore_replicas WHERE consumer_device_id = $1`,
+			[consumer.id],
+		);
+		expect(rows[0]?.migrates_on_request).toBe(true);
+	});
+
+	/// spec: RST#dispatching-a-migration-test
+	test("a declaration's test schedule is edited and survives the enabled switch", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedRestoreConsumerCapability(sql, {
+			deviceId: consumer.id,
+			intents: [{ intent: "upgrade", semantics: ["check", "once", "migrate"] }],
+		});
+		const groupId = await groupWithBackups(sql, "migrate-edit");
+		const replica = await seedRestoreReplica(sql, {
+			consumerDeviceId: consumer.id,
+			groupId,
+			intent: "upgrade",
+			name: "kamaka-upgrade",
+			migratesOnRequest: true,
+		});
+		const stored = async () =>
+			(
+				await sql.query<{ migrates_on_request: boolean; enabled: boolean }>(
+					"SELECT migrates_on_request, enabled FROM restore_replicas WHERE id = $1",
+					[replica.id],
+				)
+			)[0]!;
+
+		await page.goto(`/fleet/groups/${groupId}/backups`);
+		const row = page.getByRole("row", { name: /kamaka-upgrade/ });
+		await expect(row.getByText("on request")).toBeVisible();
+
+		await page.getByRole("switch", { name: "toggle kamaka-upgrade" }).click();
+		await expect.poll(async () => (await stored()).enabled).toBe(false);
+		expect((await stored()).migrates_on_request).toBe(true);
+
+		await page.getByRole("button", { name: "edit kamaka-upgrade" }).click();
+		const dialog = page.getByRole("dialog");
+		await expect(dialog.getByRole("radio", { name: /when requested/i })).toBeChecked();
+		await dialog.getByRole("radio", { name: /weekly, and the day before/i }).check();
+		await dialog.getByRole("button", { name: /^save$/i }).click();
+
+		await expect(dialog).toHaveCount(0);
+		expect((await stored()).migrates_on_request).toBe(false);
+		await expect(row.getByText("on request")).toHaveCount(0);
+	});
+
+	test("a schema-building intent offers no test schedule", async ({ page, sql }) => {
+		await schemaBuildingConsumer(sql);
+		const groupId = await groupWithBackups(sql, "schema-no-schedule");
+		await seedServer(sql, { groupId, name: "schema-srv" });
+
+		await page.goto(`/fleet/groups/${groupId}/backups`);
+		await page.getByRole("button", { name: /declare replica/i }).click();
+
+		const dialog = page.getByRole("dialog");
+		await expect(dialog.getByText(/publish this group's reporting schema/i)).toBeVisible();
+		await expect(dialog.getByTestId("migration-schedule")).toHaveCount(0);
+	});
+
 	/** A consumer advertising an intent that builds reporting schemas. */
 	async function schemaBuildingConsumer(sql: Sql): Promise<string> {
 		const consumer = await seedDevice(sql, { role: "backup-restore" });

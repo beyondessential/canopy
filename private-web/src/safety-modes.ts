@@ -172,6 +172,7 @@ export const SAFETY_MODES = {
 	"mcp_tokens/mint": "danger",
 	"mcp_tokens/revoke": "danger",
 	"migration_tests/for_group": "read-only",
+	"migration_tests/request": "write",
 	"reporting_schemas/build": "write",
 	"reporting_schemas/for_group": "read-only",
 	"restore_replicas/checks": "read-only",
