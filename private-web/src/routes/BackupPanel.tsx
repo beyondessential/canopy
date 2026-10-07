@@ -512,6 +512,7 @@ function TypeSchedule({
 				{isAdmin && editing !== "retention" && (
 					<GradedAction
 						opens={["backups/set_retention", "backups/clear_retention"]}
+						action={`${schedule.has_retention_override ? "Edit" : "Override"} ${schedule.type} retention`}
 					>
 						<Button size="small" onClick={() => setEditing("retention")}>
 							{schedule.has_retention_override
@@ -607,7 +608,10 @@ function ScheduleOverrideEditor({
 			<ScheduleHistory layer="group" type={schedule.type} groupId={groupId} />
 			{error && <Alert severity="error">{error.message}</Alert>}
 			<Stack direction="row" spacing={1}>
-				<GradedAction calls="backups/set_schedule">
+				<GradedAction
+					calls="backups/set_schedule"
+					action={`Save ${schedule.type} schedule override`}
+				>
 					<Button
 						variant="contained"
 						size="small"
@@ -618,7 +622,10 @@ function ScheduleOverrideEditor({
 					</Button>
 				</GradedAction>
 				{overridden && (
-					<GradedAction calls="backups/clear_schedule">
+					<GradedAction
+						calls="backups/clear_schedule"
+						action={`Reset ${schedule.type} schedule to default`}
+					>
 						<Button size="small" onClick={reset} disabled={pending}>
 							Reset to default
 						</Button>
