@@ -1,4 +1,3 @@
-import { Button, Dialog, DialogActions, DialogContent, DialogTitle, Typography } from "@mui/material";
 import {
 	type ReactNode,
 	createContext,
@@ -11,6 +10,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { callApi } from "../api";
+import { ModeUnchangedDialog } from "../components/ModeUnchangedDialog";
 import { RaiseDialog, type RaiseRequest } from "../components/RaiseDialog";
 import {
 	RAISE_DURATION_MS,
@@ -244,15 +244,7 @@ export function SafetyModeProvider({ children }: { children: ReactNode }) {
 				onConfirm={confirmAsked}
 				onCancel={cancelAsked}
 			/>
-			<Dialog open={failed} onClose={() => setFailed(false)}>
-				<DialogTitle>Mode unchanged</DialogTitle>
-				<DialogContent>
-					<Typography color="text.secondary">Could not change mode.</Typography>
-				</DialogContent>
-				<DialogActions>
-					<Button onClick={() => setFailed(false)}>Close</Button>
-				</DialogActions>
-			</Dialog>
+			<ModeUnchangedDialog open={failed} onClose={() => setFailed(false)} />
 		</SafetyContext.Provider>
 	);
 }

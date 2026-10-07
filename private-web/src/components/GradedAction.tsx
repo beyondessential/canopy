@@ -5,8 +5,6 @@ import {
 	type ReactNode,
 	type SyntheticEvent,
 	cloneElement,
-	useCallback,
-	useMemo,
 } from "react";
 import { type RaiseOutcome, useSafetyMode } from "../hooks/useSafetyMode";
 import { inRaiseDialog } from "./RaiseDialog";
@@ -178,28 +176,23 @@ export function dangerReasons(
 export function useGradedActivation(grading: Grading) {
 	const { requestRaise } = useSafetyMode();
 	const { required, blocked } = useModeGrade(gradingMode(grading));
-	const reasonKey = dangerReasons(grading, required).join();
-	// Keyed on the joined reasons, so the list keeps its identity across renders
-	// that do not change it, and `activate` with it.
-	// eslint-disable-next-line react-hooks/exhaustive-deps
-	const reasons = useMemo(() => dangerReasons(grading, required), [reasonKey, required]);
 
-	const activate = useCallback(
-		async (run: () => void, action = grading.action): Promise<RaiseOutcome> => {
-			if (!blocked) {
-				run();
-				return "permits";
-			}
-			const outcome = await requestRaise({
-				mode: required as RaisedMode,
-				action,
-				reasons,
-			});
-			if (outcome === "permits") run();
-			return outcome;
-		},
-		[blocked, required, grading.action, reasons, requestRaise],
-	);
+	const activate = async (
+		run: () => void,
+		action = grading.action,
+	): Promise<RaiseOutcome> => {
+		if (!blocked) {
+			run();
+			return "permits";
+		}
+		const outcome = await requestRaise({
+			mode: required as RaisedMode,
+			action,
+			reasons: dangerReasons(grading, required),
+		});
+		if (outcome === "permits") run();
+		return outcome;
+	};
 	return { required, blocked, activate };
 }
 
@@ -321,8 +314,9 @@ const OPENING_KEYS = [" ", "Enter", "ArrowUp", "ArrowDown"];
 
 /**
  * The element inside `wrapper` that an event activated: the nearest activatable
- * one to where it landed, such as the one button of a group that was pressed,
- * or the control itself.
+ * one to where it landed, such as the one button of a group that was pressed.
+ * None where it landed on something that does nothing, such as the space
+ * between a group's buttons, which is no reason to ask for a raise.
  */
 function activatedWithin(
 	wrapper: HTMLElement,
@@ -330,8 +324,7 @@ function activatedWithin(
 ): HTMLElement | null {
 	const hit =
 		target instanceof Element ? target.closest<HTMLElement>(ACTIVATABLE) : null;
-	if (hit && wrapper.contains(hit)) return hit;
-	return wrapper.firstElementChild as HTMLElement | null;
+	return hit && wrapper.contains(hit) ? hit : null;
 }
 
 /** Whether `target` is in a combobox, which opens on press rather than click. */
@@ -453,6 +446,15 @@ export function GradedAction({
 								} else {
 									intercept(event);
 								}
+							}
+				}
+				// A middle click opens a link in a new tab, as a click would have
+				// followed it here, so it asks for the raise the same way.
+				onAuxClickCapture={
+					usable
+						? undefined
+						: (event) => {
+								if (event.button === 1) intercept(event);
 							}
 				}
 				onMouseDownCapture={

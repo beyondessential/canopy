@@ -254,6 +254,27 @@ test.describe("safety modes", () => {
 		await expect(page).toHaveURL(new RegExp(`/fleet/machines/${machine.id}/edit$`));
 	});
 
+	test("a middle click on a blocked link asks for the raise rather than opening it", async ({
+		page,
+		sql,
+		context,
+	}) => {
+		await resetSeededTables(sql);
+		const machine = await seedMachine(sql, { name: "middle-box" });
+
+		await page.goto(`/fleet/machines/${machine.id}`);
+		const pages = context.pages().length;
+		await page.getByRole("link", { name: "Edit", exact: true }).click({ button: "middle" });
+
+		await expect(page.getByRole("dialog")).toContainText("This action needs write mode");
+		expect(context.pages()).toHaveLength(pages);
+		await page
+			.getByRole("dialog")
+			.getByRole("button", { name: "Continue in write mode" })
+			.click();
+		await expect(page).toHaveURL(new RegExp(`/fleet/machines/${machine.id}/edit$`));
+	});
+
 	test("a blocked toggle group carries out the very option chosen", async ({
 		page,
 		sql,

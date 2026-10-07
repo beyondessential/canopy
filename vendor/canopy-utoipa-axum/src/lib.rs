@@ -113,6 +113,36 @@ pub const DANGER_REASONS: [&str; 5] = [
     "invalidates",
 ];
 
+/// Fail compilation with `error` unless `name` is one of [`DANGER_REASONS`].
+/// Called by the [`routes`] macro, from a constant, so an unknown reason is a
+/// build error rather than a runtime one; not meant to be called directly.
+#[doc(hidden)]
+pub const fn __assert_danger_reason(name: &str, error: &str) {
+    let mut i = 0;
+    while i < DANGER_REASONS.len() {
+        if const_str_eq(DANGER_REASONS[i], name) {
+            return;
+        }
+        i += 1;
+    }
+    panic!("{}", error);
+}
+
+const fn const_str_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
 /// Record why a handler is danger on its OpenAPI operation. Called by the
 /// [`routes`] macro; not meant to be called directly.
 #[doc(hidden)]
@@ -192,19 +222,20 @@ macro_rules! routes {
         compile_error!(
             "a danger handler declares why it is danger: \
              routes!(danger(reason, ...): handler), with each reason one of \
-             irreversible, fleet, unprotects, issues, invalidates. See the SAFE spec."
+             canopy_utoipa_axum::DANGER_REASONS. See the SAFE spec."
         )
     };
-    ( @reason irreversible ) => { "irreversible" };
-    ( @reason fleet ) => { "fleet" };
-    ( @reason unprotects ) => { "unprotects" };
-    ( @reason issues ) => { "issues" };
-    ( @reason invalidates ) => { "invalidates" };
-    ( @reason $unknown:ident ) => {
-        compile_error!(concat!(
-            "`", stringify!($unknown), "` is not a danger reason. The reasons are: \
-             irreversible, fleet, unprotects, issues, invalidates."
-        ))
+    ( @reason $reason:ident ) => {
+        {
+            const _: () = $crate::__assert_danger_reason(
+                stringify!($reason),
+                concat!(
+                    "`", stringify!($reason), "` is not a danger reason: each reason is one of \
+                     canopy_utoipa_axum::DANGER_REASONS. See the SAFE spec."
+                ),
+            );
+            stringify!($reason)
+        }
     };
     // The device-facing public API is a different surface: its callers are
     // machines presenting a certificate, not operators holding a session, so
@@ -264,8 +295,8 @@ macro_rules! routes {
         compile_error!(
             "this handler declares no safety mode. Every handler on the administrative \
              surface says which mode it requires: routes!(read_only: handler), \
-             routes!(write: handler), or routes!(danger: handler). See the SAFE spec for \
-             which one a handler takes."
+             routes!(write: handler), or routes!(danger(reason, ...): handler). See the \
+             SAFE spec for which one a handler takes."
         )
     };
     ( @resolve_types $handler:path : $schemas:tt ) => {
