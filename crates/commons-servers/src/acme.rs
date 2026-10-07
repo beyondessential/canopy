@@ -18,7 +18,7 @@ use commons_errors::{AppError, Result};
 use commons_types::dns::ManagedZone;
 use hickory_resolver::{
 	Resolver, TokioResolver,
-	config::{CLOUDFLARE, GOOGLE, ResolverConfig, ResolverOpts, ServerGroup},
+	config::{CLOUDFLARE, NameServerConfig, ResolverConfig, ResolverOpts, ServerGroup},
 	net::runtime::TokioRuntimeProvider,
 	proto::rr::{RData, RecordType},
 };
@@ -45,12 +45,12 @@ const AUTHORISATION_TIMEOUT: Duration = Duration::from_secs(180);
 const FINALISE_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// How long to wait for a freshly-published challenge record to become visible
-/// to resolvers independent of Canopy's own zone before telling the authority
-/// to look. The authority validates promptly once asked and does not keep
+/// on the zone's own authoritative nameservers before telling the authority to
+/// look. The authority validates promptly once asked and does not keep
 /// retrying the DNS lookup on Canopy's behalf, so signalling ready before the
-/// write has propagated anywhere wastes the whole attempt rather than merely
-/// risking it — [`AUTHORISATION_TIMEOUT`] is patience for the authority's
-/// answer, not for the record to exist in the first place.
+/// write has propagated wastes the whole attempt rather than merely risking it
+/// — [`AUTHORISATION_TIMEOUT`] is patience for the authority's answer, not for
+/// the record to exist in the first place.
 const PROPAGATION_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// How often to recheck while waiting for propagation.
@@ -543,7 +543,7 @@ impl Acme {
 			// checking back on Canopy's behalf, so confirm the record is
 			// actually visible — to resolvers that never asked Route 53 and so
 			// cannot simply be agreeing with itself — before asking it to look.
-			Self::wait_for_propagation(&record_name, &dns_value).await?;
+			Self::wait_for_propagation(dns, zone, &record_name, &dns_value).await?;
 
 			challenge
 				.set_ready()
@@ -565,10 +565,10 @@ impl Acme {
 		}
 	}
 
-	/// A resolver for one public DNS service, bypassing whatever resolver Canopy's
-	/// own network would otherwise use — the point of the check below is to ask
-	/// someone who never saw the Route 53 write, so Route 53 agreeing with itself
-	/// proves nothing.
+	/// A resolver for one public DNS service. Used only to learn the addresses
+	/// of `zone`'s own nameservers below: resolving a long-lived, globally
+	/// stable `ns-*.awsdns-*` hostname carries none of the staleness risk that
+	/// asking about the churning challenge record itself would.
 	fn public_resolver(group: &ServerGroup<'_>) -> AcmeResult<TokioResolver> {
 		// `ResolverOpts` is `#[non_exhaustive]`, so built from the default and
 		// adjusted rather than as a struct literal.
@@ -577,6 +577,58 @@ impl Acme {
 		options.attempts = 1;
 		Resolver::builder_with_config(
 			ResolverConfig::udp_and_tcp(group),
+			TokioRuntimeProvider::default(),
+		)
+		.with_options(options)
+		.build()
+		.map_err(|e| Failure::order(format!("could not build a resolver: {e}")))
+	}
+
+	/// A resolver pointed directly at `zone`'s own authoritative nameservers,
+	/// learned from Route 53 itself rather than from a DNS lookup of the zone.
+	///
+	/// This is deliberately not a public recursive resolver: one of those
+	/// caches a negative answer for as long as the zone's SOA says to, and
+	/// Canopy's own retries are frequent enough to have already taught several
+	/// of them a day-long "this doesn't exist" for this exact name — asking one
+	/// of those would just replay the same stale answer on every poll, however
+	/// long the wait. An authoritative server has no cache in front of its own
+	/// data, so it cannot make that mistake.
+	async fn authoritative_resolver(
+		dns: &DnsProvider,
+		zone: &ManagedZone,
+	) -> AcmeResult<TokioResolver> {
+		let hostnames = dns.authoritative_nameservers(zone).await?;
+		if hostnames.is_empty() {
+			return Err(Failure::order(format!(
+				"route 53 named no authoritative nameservers for zone {}",
+				zone.apex
+			)));
+		}
+
+		let bootstrap = Self::public_resolver(&CLOUDFLARE)?;
+		let mut addresses = Vec::new();
+		for host in &hostnames {
+			if let Ok(lookup) = bootstrap.lookup_ip(host.as_str()).await {
+				addresses.extend(lookup.iter());
+			}
+		}
+		if addresses.is_empty() {
+			return Err(Failure::order(format!(
+				"could not resolve an address for any of {}'s nameservers {hostnames:?}",
+				zone.apex
+			)));
+		}
+
+		let mut options = ResolverOpts::default();
+		options.timeout = PROPAGATION_QUERY_TIMEOUT;
+		options.attempts = 1;
+		let name_servers = addresses
+			.into_iter()
+			.map(NameServerConfig::udp_and_tcp)
+			.collect();
+		Resolver::builder_with_config(
+			ResolverConfig::from_name_servers(name_servers),
 			TokioRuntimeProvider::default(),
 		)
 		.with_options(options)
@@ -600,31 +652,26 @@ impl Acme {
 		})
 	}
 
-	/// Wait until `name` resolves to `expected` for at least one resolver
-	/// independent of Canopy's own zone, or give up after [`PROPAGATION_TIMEOUT`]
-	/// and let the caller's ordinary order-level retry handle it.
-	///
-	/// Asking just one public resolver would only move the race rather than
-	/// closing it, so this asks two unrelated services and accepts either: the
-	/// point is evidence the write has left Route 53's own edge, not a survey of
-	/// the whole internet's resolvers (the authority's own validation servers
-	/// query independently and are not necessarily either of these).
-	async fn wait_for_propagation(name: &str, expected: &str) -> AcmeResult<()> {
-		let cloudflare = Self::public_resolver(&CLOUDFLARE)?;
-		let google = Self::public_resolver(&GOOGLE)?;
+	/// Wait until `name` resolves to `expected` on `zone`'s own authoritative
+	/// nameservers, or give up after [`PROPAGATION_TIMEOUT`] and let the
+	/// caller's ordinary order-level retry handle it.
+	async fn wait_for_propagation(
+		dns: &DnsProvider,
+		zone: &ManagedZone,
+		name: &str,
+		expected: &str,
+	) -> AcmeResult<()> {
+		let resolver = Self::authoritative_resolver(dns, zone).await?;
 		let deadline = Instant::now() + PROPAGATION_TIMEOUT;
 		loop {
-			let (seen_cloudflare, seen_google) = tokio::join!(
-				Self::resolver_sees(&cloudflare, name, expected),
-				Self::resolver_sees(&google, name, expected),
-			);
-			if seen_cloudflare || seen_google {
+			if Self::resolver_sees(&resolver, name, expected).await {
 				return Ok(());
 			}
 			if Instant::now() >= deadline {
 				return Err(Failure::order(format!(
-					"the challenge record at {name} had not propagated to public resolvers within \
-					 {}s",
+					"the challenge record at {name} had not propagated to {}'s own nameservers \
+					 within {}s",
+					zone.apex,
 					PROPAGATION_TIMEOUT.as_secs()
 				)));
 			}
