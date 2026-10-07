@@ -110,6 +110,6 @@ Name each action with its object taken from the data in scope, such as "Revoke c
 
 ### Verify
 
-- [ ] `just check`, `just typecheck`, `cargo fmt`, and `npm run lint` in `private-web/`
+- [ ] `just check`, `just typecheck`, `just lint`, `cargo fmt`
 - [ ] `just test-package private-server` and `just check-generated`
 - [ ] `env -u PORT just test-e2e`
