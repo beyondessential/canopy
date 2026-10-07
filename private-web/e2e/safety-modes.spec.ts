@@ -275,6 +275,35 @@ test.describe("safety modes", () => {
 		await expect(page).toHaveURL(new RegExp(`/fleet/machines/${machine.id}/edit$`));
 	});
 
+	test("Enter in a field beside a blocked declare offers the raise, then declares", async ({
+		page,
+		sql,
+	}) => {
+		await resetSeededTables(sql);
+		const group = await seedServerGroup(sql, { name: "declare-enter" });
+		await seedServerGroupDomain(sql, {
+			groupId: group.id,
+			domain: "fiji.tamanu.app",
+		});
+		const server = await seedServer(sql, {
+			name: "central",
+			groupId: group.id,
+			mayManageTls: true,
+		});
+
+		await page.goto(`/fleet/applications/${server.id}`);
+		const field = page.getByLabel("DNS name to declare");
+		await field.fill("extra.fiji.tamanu.app");
+		await field.press("Enter");
+
+		const dialog = page.getByRole("dialog");
+		await expect(dialog).toContainText("This action needs");
+		await expect(field).toHaveValue("extra.fiji.tamanu.app");
+		await dialog.getByRole("button", { name: /Continue in/ }).click();
+		await expect(page.getByText("extra.fiji.tamanu.app").first()).toBeVisible();
+		await expect(field).toHaveValue("");
+	});
+
 	test("a blocked toggle group carries out the very option chosen", async ({
 		page,
 		sql,

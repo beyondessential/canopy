@@ -38,6 +38,7 @@ Unless a case says otherwise, start each one from a fresh page load as an admini
 - [x] With the blocked "Add admin" focused, press Enter: the raise dialog opens, just as a click opens it (verifies spec: SAFE)
 - [x] With the blocked "Add admin" focused, press Space: the raise dialog opens, and the Space keyup doesn't confirm it (verifies spec: SAFE)
 - [x] Type an email in the Admins form and press Enter in the field: the raise dialog opens, and confirming adds the email (verifies spec: SAFE)
+- [x] On a server's certificates section, type a DNS name and press Enter in the field while declaring is blocked: the raise is offered, the name stays in the field, and confirming declares it (verifies spec: SAFE)
 - [x] When the raise dialog opens from the keyboard, focus is inside the dialog but not on "Continue in … mode" (verifies spec: SAFE)
 - [x] Cancel the raise dialog with Escape: focus returns to the blocked control (verifies spec: SAFE)
 - [x] Confirm a raise for an opener such as Pause on a server's certificates section: focus ends up in the opened dialog, not back on the control behind it (verifies spec: SAFE)

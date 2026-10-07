@@ -503,16 +503,19 @@ function DeclareField({
 	};
 
 	return (
-		<Box>
+		<Box
+			component="form"
+			onSubmit={(e) => {
+				e.preventDefault();
+				onDeclare();
+			}}
+		>
 			<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 				<TextField
 					size="small"
 					placeholder="app.example.tamanu.app"
 					value={name}
 					onChange={(e) => setName(e.target.value)}
-					onKeyDown={(e) => {
-						if (e.key === "Enter" && name.trim() !== "") onDeclare();
-					}}
 					disabled={declare.pending}
 					slotProps={{ htmlInput: { "aria-label": "DNS name to declare" } }}
 					sx={{ minWidth: 280, "& input": { fontFamily: "monospace" } }}
@@ -522,9 +525,9 @@ function DeclareField({
 					action={`Declare DNS name ${name.trim()}`}
 				>
 					<Button
+						type="submit"
 						variant="outlined"
 						size="small"
-						onClick={onDeclare}
 						disabled={declare.pending || name.trim() === ""}
 					>
 						Declare
