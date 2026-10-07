@@ -1898,7 +1898,7 @@ pub async fn schedule_preview(
 			machines: Vec::new(),
 		}));
 	};
-	let expr = CronExpr::parse(expression).map_err(|e| AppError::BadRequest(e.to_string()))?;
+	let expr = CronExpr::read(expression).map_err(|e| AppError::BadRequest(e.to_string()))?;
 	let count = args.count.unwrap_or(5).clamp(1, 20) as usize;
 	let now = Timestamp::now();
 
