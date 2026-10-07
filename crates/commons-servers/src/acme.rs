@@ -637,13 +637,25 @@ impl Acme {
 			)));
 		}
 
+		Self::propagation_resolver(
+			addresses
+				.into_iter()
+				.map(NameServerConfig::udp_and_tcp)
+				.collect(),
+		)
+	}
+
+	/// A resolver that asks `name_servers` and remembers nothing.
+	///
+	/// The cache is off because the check polls one name until it appears: the
+	/// first poll can land before the write has propagated, and a resolver that
+	/// cached that negative answer would replay it for every poll after, for
+	/// the whole wait, however live the record had become on the server.
+	fn propagation_resolver(name_servers: Vec<NameServerConfig>) -> AcmeResult<TokioResolver> {
 		let mut options = ResolverOpts::default();
 		options.timeout = PROPAGATION_QUERY_TIMEOUT;
 		options.attempts = 1;
-		let name_servers = addresses
-			.into_iter()
-			.map(NameServerConfig::udp_and_tcp)
-			.collect();
+		options.cache_size = 0;
 		Resolver::builder_with_config(
 			ResolverConfig::from_name_servers(name_servers),
 			TokioRuntimeProvider::default(),
@@ -945,5 +957,65 @@ mod tests {
 			RevokeFor::from_stored("something else"),
 			RevokeFor::Unspecified
 		);
+	}
+
+	/// A server that denies the name on its first answer and has it from then
+	/// on, which is a record becoming visible mid-wait.
+	#[tokio::test]
+	async fn the_propagation_check_does_not_replay_an_early_negative_answer() {
+		use hickory_resolver::proto::op::{Message, OpCode, ResponseCode};
+		use hickory_resolver::proto::rr::{
+			Name, Record,
+			rdata::{SOA, TXT},
+		};
+
+		let socket = tokio::net::UdpSocket::bind("127.0.0.1:0")
+			.await
+			.expect("bind");
+		let port = socket.local_addr().expect("addr").port();
+		tokio::spawn(async move {
+			let mut buf = [0u8; 512];
+			let mut answered = 0;
+			loop {
+				let Ok((len, peer)) = socket.recv_from(&mut buf).await else {
+					return;
+				};
+				let request = Message::from_vec(&buf[..len]).expect("query");
+				let query = request.queries.first().expect("a question").clone();
+				let reply = if answered == 0 {
+					let apex = Name::from_ascii("tamanu.app.").expect("name");
+					let soa = SOA::new(apex.clone(), apex.clone(), 1, 7200, 900, 1209600, 900);
+					let mut reply = Message::error_msg(
+						request.metadata.id,
+						OpCode::Query,
+						ResponseCode::NXDomain,
+					);
+					reply.add_query(query);
+					reply.add_authority(Record::from_rdata(apex, 900, RData::SOA(soa)));
+					reply
+				} else {
+					let mut reply = Message::response(request.metadata.id, OpCode::Query);
+					let txt = RData::TXT(TXT::new(vec!["expected".into()]));
+					reply.add_answer(Record::from_rdata(query.name().clone(), 60, txt));
+					reply.add_query(query);
+					reply
+				};
+				answered += 1;
+				socket
+					.send_to(&reply.to_vec().expect("encode"), peer)
+					.await
+					.expect("reply");
+			}
+		});
+
+		let mut server = NameServerConfig::udp_and_tcp("127.0.0.1".parse().expect("addr"));
+		for connection in &mut server.connections {
+			connection.port = port;
+		}
+		let resolver = Acme::propagation_resolver(vec![server]).expect("resolver");
+		let name = "_acme-challenge.a.tamanu.app";
+
+		assert!(!Acme::resolver_sees(&resolver, name, "expected").await);
+		assert!(Acme::resolver_sees(&resolver, name, "expected").await);
 	}
 }
