@@ -72,7 +72,7 @@ When either day field starts with `*` a day must match both of them, and otherwi
 Any field may instead be `H` on its own, standing for a single value Canopy derives from the machine and the type and maps into that field's range.
 The derived value is stable, so a machine's backup of a type always lands in the same slot, while a box's types and a group's machines spread out across the field.
 
-An expression is refused when it would never fire, or when any two consecutive firings would be less than an hour apart.
+An expression is refused when it would never fire, when any two consecutive firings would be less than an hour apart, or when it is far longer than any schedule needs.
 Validation considers every value `H` could take, so an expression accepted for one machine is valid for every machine.
 Validation reads the expression on a clock without daylight-saving changes; what those changes do to firings is settled when the expression runs.
 An expression is validated when it is set and only read when it runs.

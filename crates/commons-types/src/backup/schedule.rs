@@ -32,6 +32,11 @@ const LOOKBACK_DAYS: [i64; 6] = [2, 14, 62, 400, 1500, 3000];
 /// year, so a 29 February expression fires within the four years searched.
 const VALIDATION_START: &str = "2024-01-01T00:00:00Z";
 
+/// The longest expression accepted. A fully spelled-out minute list fits with
+/// room to spare; the bound keeps validation, which reparses the expression
+/// for every value `H` could take, cheap.
+const MAX_EXPRESSION_LEN: usize = 512;
+
 /// What a schedule can be refused for.
 // spec: BKO#cron-expressions
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -40,6 +45,8 @@ pub enum ScheduleError {
 	IntervalTooShort,
 	#[error("a cron schedule needs an expression")]
 	EmptyExpression,
+	#[error("a cron expression is at most {MAX_EXPRESSION_LEN} characters")]
+	TooLong,
 	#[error(
 		"a cron expression has five fields (minute, hour, day of month, month, day of week), \
 		 but this one has {0}"
@@ -452,6 +459,9 @@ impl CronExpr {
 	/// Split an expression into its fields and check where it uses `H`,
 	/// without checking when it fires.
 	fn read(input: &str) -> Result<Self, ScheduleError> {
+		if input.len() > MAX_EXPRESSION_LEN {
+			return Err(ScheduleError::TooLong);
+		}
 		let fields: Vec<&str> = input.split_whitespace().collect();
 		match fields.len() {
 			0 => return Err(ScheduleError::EmptyExpression),
@@ -934,6 +944,17 @@ mod tests {
 		CronExpr::parse("0 * * * *").unwrap();
 		CronExpr::parse("H * * * *").unwrap();
 		CronExpr::parse("45 */2 * * *").unwrap();
+	}
+
+	#[test]
+	fn an_overlong_expression_is_refused_before_it_is_checked() {
+		let minutes = vec!["0"; 300].join(",");
+		assert_eq!(
+			refusal(&format!("{minutes} 2 H H H")),
+			ScheduleError::TooLong
+		);
+		let every_minute_spelled_out = (0..60).map(|m| m.to_string()).collect::<Vec<_>>();
+		assert!(CronExpr::read(&format!("{} 2 * * *", every_minute_spelled_out.join(","))).is_ok());
 	}
 
 	#[test]
