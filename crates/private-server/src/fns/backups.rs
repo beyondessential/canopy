@@ -1903,37 +1903,34 @@ pub async fn schedule_preview(
 	let now = Timestamp::now();
 
 	let mut conn = state.db.get().await?;
-	let book = ScheduleBook::load(&mut conn, None, None).await?;
 
 	// The machines the schedule would apply to.
-	let mut applicable: Vec<Machine> = Vec::new();
-	if let Some(machine_id) = args.machine_id {
-		applicable.push(Machine::get_by_id(&mut conn, machine_id).await?);
-	} else {
-		for cap in MachineBackupCapability::list_enabled(&mut conn).await? {
-			if cap.r#type != args.r#type {
-				continue;
-			}
-			let Ok(machine) = Machine::get_by_id(&mut conn, cap.machine_id).await else {
-				continue;
-			};
-			if machine.deleted_at.is_some() {
-				continue;
-			}
-			let layer = book
-				.resolve(machine.id, machine.group_id, &args.r#type)
-				.layer;
-			let applies = match args.group_id {
-				Some(group) => {
-					machine.group_id == Some(group) && layer != Some(ScheduleLayer::Machine)
-				}
-				None => matches!(layer, None | Some(ScheduleLayer::Fleet)),
-			};
-			if applies {
-				applicable.push(machine);
-			}
+	let candidates = match args.machine_id {
+		Some(machine_id) => vec![Machine::get_by_id(&mut conn, machine_id).await?],
+		None => {
+			MachineBackupCapability::machines_enabled_for(&mut conn, &args.r#type, args.group_id)
+				.await?
 		}
-	}
+	};
+	let machine_ids: Vec<Uuid> = candidates.iter().map(|m| m.id).collect();
+	let group_ids: Vec<Uuid> = candidates.iter().filter_map(|m| m.group_id).collect();
+	let book = ScheduleBook::load(&mut conn, Some(&group_ids), Some(&machine_ids)).await?;
+	let mut applicable: Vec<Machine> = if args.machine_id.is_some() {
+		candidates
+	} else {
+		candidates
+			.into_iter()
+			.filter(|machine| {
+				let layer = book
+					.resolve(machine.id, machine.group_id, &args.r#type)
+					.layer;
+				match args.group_id {
+					Some(_) => layer != Some(ScheduleLayer::Machine),
+					None => matches!(layer, None | Some(ScheduleLayer::Fleet)),
+				}
+			})
+			.collect()
+	};
 	applicable.sort_by(|a, b| a.name.cmp(&b.name));
 
 	// One machine for each distinct zone.

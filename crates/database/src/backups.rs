@@ -751,6 +751,28 @@ impl MachineBackupCapability {
 			.map_err(AppError::from)
 	}
 
+	/// The non-archived machines with this type enabled, within one group when
+	/// given.
+	pub async fn machines_enabled_for(
+		db: &mut AsyncPgConnection,
+		r#type: &BackupType,
+		group_id: Option<Uuid>,
+	) -> Result<Vec<crate::machines::Machine>> {
+		use crate::schema::{machine_backup_capabilities as cap, machines};
+
+		let mut q = cap::table
+			.inner_join(machines::table.on(machines::id.eq(cap::machine_id)))
+			.filter(cap::type_.eq(r#type.as_str()))
+			.filter(cap::enabled.eq(true))
+			.filter(machines::deleted_at.is_null())
+			.select(crate::machines::Machine::as_select())
+			.into_boxed();
+		if let Some(group_id) = group_id {
+			q = q.filter(machines::group_id.eq(group_id));
+		}
+		q.load(db).await.map_err(AppError::from)
+	}
+
 	/// Every enabled `(machine, type)` on a non-archived machine in the group.
 	pub async fn enabled_for_group(
 		db: &mut AsyncPgConnection,
