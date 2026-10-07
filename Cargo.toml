@@ -77,9 +77,11 @@ utoipa = { version = "5", features = ["jiff_0_2", "uuid", "axum_extras"] }
 canopy-utoipa-axum = { path = "vendor/canopy-utoipa-axum" }
 utoipa-swagger-ui = { version = "9", default-features = false, features = ["axum", "vendored"] }
 
+# Fat LTO with one codegen unit serialises each binary's whole build onto a single
+# thread, and CD builds a dozen of them. Thin LTO with the default codegen units
+# parallelises it for a small cost in runtime speed.
 [profile.release]
-lto = true
-codegen-units = 1
+lto = "thin"
 strip = "symbols"
 
 # Full debuginfo makes each integration-test binary ~720MB (86% DWARF), and
