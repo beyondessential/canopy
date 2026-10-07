@@ -54,8 +54,10 @@ A handler that changes something is danger when any of the following holds, and 
 
 - It cannot be undone from the interface. Deleting a backup configuration qualifies; creating one does not.
 - It acts on the fleet rather than amending Canopy's own records. Revoking a machine's certificate qualifies; renaming a group does not.
-- It removes a protection without destroying anything at the time. Closing a machine's restore window, pausing certificate renewal, and clearing a backup schedule all qualify.
+- It removes a protection without destroying anything at the time. Closing a machine's restore window and pausing certificate renewal both qualify.
 - It issues or invalidates credentials or trust material. Minting a fleet-query access token and changing the certificate authority both qualify.
+
+Changing a backup schedule at any layer is graded write, including setting it to manual-only or clearing it: a schedule is routine configuration, set back from the same editor, and every change to it is recorded (see [BKO](backup.md)).
 
 A handler that lets an already-trusted machine obtain credentials is graded write, because making a machine trusted is itself danger and the decision to trust it has already been made there.
 Opening a machine's restore window is graded on this basis.

@@ -59,6 +59,7 @@ Each `(machine, type)` has a schedule, which is one of:
 A machine's schedule for a type is the `(machine, type)` override when one is set, otherwise the `(group, type)` override, otherwise the fleet-wide default for the type.
 An override replaces the schedule beneath it whole: its kind, its timing, and its timezone.
 Each layer is set and cleared on its own, and clearing one falls back to the next.
+A machine's override stays with the machine when it moves to another group or the type is disabled on it.
 Wherever a schedule is shown, it says which layer it comes from.
 Every change to a layer, setting or clearing it, is recorded with who made it and when, and each layer's history is shown where it is edited.
 
@@ -76,8 +77,9 @@ Validation considers every value `H` could take, so an expression accepted for o
 Validation reads the expression on a clock without daylight-saving changes; what those changes do to firings is settled when the expression runs.
 
 An expression is read in the timezone set on its schedule, otherwise in the operating system timezone the machine reports (see [FIG](figures.md)), otherwise in UTC.
+A reported Windows zone name is read as its IANA equivalent.
 So a fleet default of nightly at 2am backs each machine up at its own 2am.
-A machine whose cron schedule falls back to UTC because it has reported no timezone is flagged as such wherever its schedule or next backup is shown, and in the firing preview, so an operator can tell a deliberate UTC schedule from one waiting on the machine.
+A machine whose cron schedule falls back to UTC because it has reported no timezone, or one Canopy does not recognise, is flagged as such wherever its schedule or next backup is shown, and in the firing preview, so an operator can tell a deliberate UTC schedule from one waiting on the machine.
 Firings follow the zone's wall clock across daylight-saving changes, so a firing at a time the clocks skip does not happen that day.
 A firing is skipped when it falls less than an hour after the previous one, or repeats the previous one's wall-clock time as the clocks go back: it opens no window and does not count as a firing, so the previous firing's window runs on to halfway to the next firing that is kept.
 
@@ -90,6 +92,7 @@ Under an interval, the backup is due once the interval has passed since the snap
 Under a cron expression, each firing opens a due window that closes halfway to the next firing.
 The backup is due while a window is open and no backup of the type has succeeded with a snapshot moment since its firing, so a failed run is retried within the window.
 A window that closes unmet is a missed firing: the backup waits for the next firing rather than running whenever the machine is next in contact, so it never runs outside the time the operator chose.
+A machine that starts participating while a window is open is due at once, since that is still within the time the operator chose.
 
 An expression without `H` opens each machine's window a short distance after the firing, derived stably from the machine and the type, so a group sharing one schedule does not reach its storage all at once.
 The distance stays small against the window, so the backup still starts close to the time the operator chose.
@@ -102,19 +105,22 @@ A run already in progress is unaffected.
 
 ### Editing schedules
 
-The fleet-wide default and the `(group, type)` override are edited where they are today, offering all three kinds.
+The fleet-wide default is edited on the backup defaults settings page and the `(group, type)` override on the group's backup view, each offering all three kinds.
 A `(machine, type)` override is edited both beside the machine's participation on the group's backup view and on the machine's own page, each showing the schedule the machine inherits when it has no override.
 
 While a cron expression is being edited, the operator sees the next few firings it produces, in the zone each is read in and with `H` resolved, so a mistyped expression is caught before it is saved.
-For a machine override these are the machine's own; for a group override or fleet default they are shown for a sample of the machines it applies to.
+For a machine override these are the machine's own; for a group override or fleet default they are shown for one machine in each distinct timezone among the machines it applies to.
 An expression that would be refused is reported as the operator types it, saying why.
 
-Each machine's next scheduled backup of each type is shown against it, in the machine's zone, wherever its backups are listed.
+Each machine's next scheduled backup of each type is shown against it wherever its backups are listed.
+Under a cron expression that is the next firing in the zone the expression is read in, or, while a window is open, that the backup is due until the window closes.
+Under an interval it is when the backup next falls due, or that it is due now.
+A manual-only type is shown as manual.
 
 ## Retention
 
 Each `(group, type)` has a retention policy, taken from a per-`(group, type)` override when set, otherwise from the fleet-wide default for that type.
-Retention is the group's because its machines share one repository, so a machine's schedule override leaves it untouched.
+Retention belongs to the group because its machines share one repository.
 Retention is floored to an organisational minimum; a configuration may deliberately opt out of the floor, which is recorded as the dangerous choice it is.
 
 ## Participation and on-demand

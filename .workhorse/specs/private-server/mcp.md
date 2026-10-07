@@ -70,11 +70,11 @@ It returns a bounded list of matching machines in compact form — identifier, n
 **Get application** takes an application identifier and returns the full record for one application: its own fields (type, rank, name, public name, URL, tags), its reported figures (version, database engine version, runtime version, configured timezone), its overall health and per-check health, its reachability, when it was last seen, its owning group, the count of its siblings in that group, and the machine it runs on.
 Its per-check health is its own checks as the operator UI presents them (see [CHK](../monitoring/checks.md), "Presentation"); its machine's checks are read with **Get machine**.
 
-**Get machine** takes a machine identifier and returns the full record for one machine: its own fields (name, group, whether it is cloud-hosted, geolocation, tags), its reported figures (platform, operating system timezone, hostname, bestool version, processor count, memory, filesystems, uptime, addresses), its overall health and per-check health, its reachability, when it was last seen, the applications running on it in compact form, which backup types it is capable of, and the most recent successful backup for each.
+**Get machine** takes a machine identifier and returns the full record for one machine: its own fields (name, group, whether it is cloud-hosted, geolocation, tags), its reported figures (platform, operating system timezone, hostname, bestool version, processor count, memory, filesystems, uptime, addresses), its overall health and per-check health, its reachability, when it was last seen, the applications running on it in compact form, which backup types it is capable of, and for each its effective schedule with the layer it comes from, its next scheduled backup, and its most recent successful backup.
 
 Backup capability and history are the machine's rather than any application's, so a box hosting two workloads reports one set (see [BAK](../public-server/backup.md)).
 
-**Get group** takes a group identifier and returns the full record for one group: its own fields, its members in compact form with each member's version and health, its backup configuration and per-type schedules, its repository statistics, its recent backup and maintenance activity, and when its repository was last inspected.
+**Get group** takes a group identifier and returns the full record for one group: its own fields, its members in compact form with each member's version and health, its backup configuration, per-type schedules, and its machines' schedule overrides, its repository statistics, its recent backup and maintenance activity, and when its repository was last inspected.
 
 ### Versions
 
