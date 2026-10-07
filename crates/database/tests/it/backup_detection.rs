@@ -518,6 +518,7 @@ fn scan_row(
 			layer: Some(ScheduleLayer::Group),
 			zone: None,
 			since: None,
+			layers_since: None,
 		},
 		config_created_at,
 		machine_registered_at: None,

@@ -6832,6 +6832,14 @@ export interface components {
         EffectiveSchedule: {
             layer?: null | components["schemas"]["ScheduleLayer"];
             /**
+             * Format: date-time
+             * @description When a change to a layer last altered what this resolves to. Unlike
+             *     `since`, a change in the timezone the machine reports doesn't move it,
+             *     so it bounds which firings count as missed: a zone change moves when
+             *     firings fall, not how many a machine has missed.
+             */
+            layers_since?: string | null;
+            /**
              * @description What the machine follows: manual-only, an interval, or a cron
              *     expression.
              */

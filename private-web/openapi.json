@@ -13235,6 +13235,14 @@
               }
             ]
           },
+          "layers_since": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When a change to a layer last altered what this resolves to. Unlike\n`since`, a change in the timezone the machine reports doesn't move it,\nso it bounds which firings count as missed: a zone change moves when\nfirings fall, not how many a machine has missed."
+          },
           "schedule": {
             "$ref": "#/components/schemas/Schedule",
             "description": "What the machine follows: manual-only, an interval, or a cron\nexpression."

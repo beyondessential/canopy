@@ -63,6 +63,7 @@ Canopy reconciles three sources — what a device reported, what credentials wer
   Under an interval that is twice the interval.
   Under a cron expression it is two consecutive firings whose due windows have closed with no successful backup since the earlier of them, and a machine that has never backed up is stale once two such firings have closed since its expectation began.
   Only firings since the schedule took effect count, so a new schedule is not judged against firings it never had.
+  A change in the timezone the machine reports moves when its firings fall without restarting that count, so a machine whose reported timezone keeps changing is still found stale.
   A machine already stale when a schedule of either kind takes effect stays stale until it backs up, so changing a schedule never clears staleness on its own.
   A manual-only type is never stale.
 - **reconcile** — a device reported a successful backup naming the snapshot it created and the repository does not hold that snapshot (the report is false or the upload didn't persist), or a fresh snapshot exists but no recent report (the reporting path is broken).

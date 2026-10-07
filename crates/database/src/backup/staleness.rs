@@ -194,7 +194,7 @@ impl ScanRow {
 			}
 		};
 
-		let since = self.schedule.since;
+		let since = self.schedule.layers_since;
 		let none_since_effective =
 			since.is_some_and(|s| self.last_success_at.is_none_or(|l| l < s));
 		if matches!(verdict, StalenessVerdict::Ok | StalenessVerdict::Recovered)

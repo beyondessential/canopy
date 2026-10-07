@@ -250,6 +250,11 @@ pub struct EffectiveSchedule {
 	/// When this schedule took effect: a firing from before then opens no
 	/// window. None when it has always applied.
 	pub since: Option<Timestamp>,
+	/// When a change to a layer last altered what this resolves to. Unlike
+	/// `since`, a change in the timezone the machine reports doesn't move it,
+	/// so it bounds which firings count as missed: a zone change moves when
+	/// firings fall, not how many a machine has missed.
+	pub layers_since: Option<Timestamp>,
 }
 
 impl EffectiveSchedule {
@@ -259,6 +264,7 @@ impl EffectiveSchedule {
 			layer: None,
 			zone: None,
 			since: None,
+			layers_since: None,
 		}
 	}
 
@@ -334,7 +340,7 @@ impl EffectiveSchedule {
 
 	/// Whether the two most recent firings whose windows have closed both went
 	/// without a successful backup since the earlier one. `began` bounds which
-	/// firings count, besides the schedule's own effective moment. An
+	/// firings count, besides the moment a layer last changed the schedule. An
 	/// expression that can no longer be read has missed them all.
 	// spec: BKJ#detection
 	pub fn missed_two_firings(
@@ -349,7 +355,7 @@ impl EffectiveSchedule {
 			Some(Err(_)) => return true,
 			Some(Ok(cron)) => cron,
 		};
-		let not_before = match (self.since, began) {
+		let not_before = match (self.layers_since, began) {
 			(Some(a), Some(b)) => Some(a.max(b)),
 			(a, b) => a.or(b),
 		};
@@ -457,8 +463,8 @@ impl CronExpr {
 	}
 
 	/// Split an expression into its fields and check where it uses `H`,
-	/// without checking when it fires.
-	fn read(input: &str) -> Result<Self, ScheduleError> {
+	/// without checking when it fires: for one already validated.
+	pub fn read(input: &str) -> Result<Self, ScheduleError> {
 		if input.len() > MAX_EXPRESSION_LEN {
 			return Err(ScheduleError::TooLong);
 		}
@@ -1187,6 +1193,7 @@ mod tests {
 			layer: Some(ScheduleLayer::Fleet),
 			zone: Some(resolve_zone(Some(zone), None)),
 			since: since.map(ts),
+			layers_since: since.map(ts),
 		}
 	}
 
@@ -1253,6 +1260,7 @@ mod tests {
 			layer: Some(ScheduleLayer::Group),
 			zone: None,
 			since: Some(now),
+			layers_since: Some(now),
 		};
 		assert!(interval.is_due(1, now, None));
 		assert!(!interval.is_due(1, now, Some(now - SignedDuration::from_hours(23))));
@@ -1273,6 +1281,7 @@ mod tests {
 			layer: Some(ScheduleLayer::Fleet),
 			zone: None,
 			since: None,
+			layers_since: None,
 		};
 		assert_eq!(interval.next_backup(1, now, None), NextBackup::DueNow);
 		let last = now - SignedDuration::from_hours(20);

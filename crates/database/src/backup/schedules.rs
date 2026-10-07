@@ -666,7 +666,8 @@ impl ScheduleBook {
 			_ => None,
 		};
 
-		let mut since = self.layers_changed_at(machine_id, group_id, r#type);
+		let layers_since = self.layers_changed_at(machine_id, group_id, r#type);
+		let mut since = layers_since;
 		// A zone read off the machine takes effect anew when the machine
 		// reports a different one.
 		if let (Some(zone), Some(reported)) = (&zone, reported)
@@ -680,6 +681,7 @@ impl ScheduleBook {
 			layer,
 			zone,
 			since,
+			layers_since,
 		}
 	}
 

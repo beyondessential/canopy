@@ -772,6 +772,7 @@ fn cron_row(since: Option<&str>, last_success: Option<&str>) -> ScanRow {
 				None,
 			)),
 			since: since.map(ts),
+			layers_since: since.map(ts),
 		},
 		config_created_at: ts("2026-09-01T00:00:00Z"),
 		machine_registered_at: None,
@@ -853,6 +854,22 @@ fn a_machine_already_stale_when_a_cron_schedule_takes_effect_stays_stale() {
 			}
 		),
 		StalenessVerdict::Never
+	);
+}
+
+/// A machine whose reported timezone keeps changing is still judged against
+/// the firings it missed: the change moves when firings fall, not how many
+/// have passed.
+// spec: BKJ#detection
+#[test]
+fn a_reported_zone_change_does_not_hide_missed_firings() {
+	let mut row = cron_row(None, Some("2026-10-01T02:10:00Z"));
+	let now = ts("2026-10-06T03:00:00Z");
+	row.schedule.since = Some(now - SignedDuration::from_mins(1));
+	assert_eq!(row.classify(now, false), StalenessVerdict::Stale);
+	assert!(
+		!row.schedule.is_due(1, now, None),
+		"no window opens from before the change"
 	);
 }
 
