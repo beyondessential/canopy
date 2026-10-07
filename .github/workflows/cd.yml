@@ -22,14 +22,25 @@ env:
 
 jobs:
   build-binaries:
-    name: Build ${{ matrix.arch }} binaries
-    runs-on: ${{ matrix.runner }}
+    name: Build ${{ matrix.group }} binaries
+    runs-on: ubuntu-24.04-arm
     strategy:
+      fail-fast: true
       matrix:
+        # Each group builds on its own runner, because every release binary
+        # pays for its own link and LTO pass and a single runner serialises
+        # them. A binary has to be listed here to ship in the image.
         include:
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
+          - group: private-server
+            bins: private-server
+          - group: public-server
+            bins: public-server migrate relay
+          - group: jobs-core
+            bins: backups monitor relayhub
+          - group: jobs-misc
+            bins: domains slacker_outbox chrome_versions
+    env:
+      TARGET: aarch64-unknown-linux-gnu
     steps:
       - name: Free up space
         run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
@@ -39,7 +50,7 @@ jobs:
         run: |
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
-          rustup target add ${{ matrix.target }}
+          rustup target add "$TARGET"
 
       - uses: taiki-e/install-action@v2.87.12
         with:
@@ -47,28 +58,26 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.arch }}-release
+          key: arm64-release-${{ matrix.group }}
 
       # The runner image ships with Node + npm; private-server's build.rs
       # uses them to produce the embedded private-web/dist/ bundle.
       - name: Build binaries
-        run: just build-servers-release ${{ matrix.target }}
+        run: just build-release "$TARGET" ${{ matrix.bins }}
         env:
           RUSTFLAGS: "-C target-feature=+crt-static"
 
       - name: Prepare artifacts
         run: |
-          mkdir -p artifacts/${{ matrix.arch }}
-          cargo metadata --format-version=1 --no-deps \
-            | jq -r '.packages[].targets[] | select(.kind | index("bin")) | .name' \
-            | while IFS= read -r bin; do
-                cp "target/${{ matrix.target }}/release/$bin" "artifacts/${{ matrix.arch }}/"
-              done
+          mkdir -p artifacts
+          for bin in ${{ matrix.bins }}; do
+            cp "target/$TARGET/release/$bin" artifacts/
+          done
 
       - uses: actions/upload-artifact@v7
         with:
-          name: binaries-${{ matrix.arch }}
-          path: artifacts/${{ matrix.arch }}/
+          name: binaries-arm64-${{ matrix.group }}
+          path: artifacts/
           retention-days: 1
 
   build-image:
@@ -91,7 +100,8 @@ jobs:
       - name: Download ARM64 binaries
         uses: actions/download-artifact@v8
         with:
-          name: binaries-arm64
+          pattern: binaries-arm64-*
+          merge-multiple: true
           path: .github/build-context/arm64/
 
       # Stage the public-server's static assets into the build context.
