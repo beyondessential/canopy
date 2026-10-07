@@ -247,10 +247,22 @@ impl std::fmt::Debug for Acme {
 	}
 }
 
-impl Acme {
-	/// Build from the Canopy instance's configuration, or `None` where no account
-	/// key is set — an instance that has not been given one is not expected to issue,
-	/// and the worker says so once rather than failing every order.
+/// Canopy's certificate authority configuration as read from the environment,
+/// before anything has been said to the authority.
+///
+/// Kept apart from building the account so the directory in effect is known
+/// even when the account cannot be built: an operator looking at a broken
+/// authority wants to see which one Canopy was trying to use.
+pub struct AcmeConfig {
+	key_pem: String,
+	/// The authority's directory URL, with the default applied where none is set.
+	pub directory: String,
+}
+
+impl AcmeConfig {
+	/// Read from the Canopy instance's configuration, or `None` where no account
+	/// key is set — an instance that has not been given one is not expected to
+	/// issue, whatever else is set.
 	///
 	/// - `CANOPY_ACME_ACCOUNT_KEY`: PKCS#8 PEM private key for Canopy's account at
 	///   the authority. The account is found or created from the key on every
@@ -258,16 +270,18 @@ impl Acme {
 	/// - `CANOPY_ACME_DIRECTORY`: the authority's directory URL. Defaults to
 	///   Let's Encrypt production.
 	/// - `CANOPY_ACME_CONTACT`: a contact URI (`mailto:…`) the authority can reach
-	///   an operator at.
-	pub async fn from_env() -> AcmeResult<Option<Self>> {
-		let Ok(key_pem) = std::env::var("CANOPY_ACME_ACCOUNT_KEY") else {
-			return Ok(None);
-		};
+	///   an operator at, read when the account is built.
+	pub fn from_env() -> Option<Self> {
+		let key_pem = std::env::var("CANOPY_ACME_ACCOUNT_KEY").ok()?;
 		let directory = std::env::var("CANOPY_ACME_DIRECTORY")
 			.unwrap_or_else(|_| LetsEncrypt::Production.url().to_string());
+		Some(Self { key_pem, directory })
+	}
 
+	/// Find or create the account at the authority.
+	pub async fn connect(&self) -> AcmeResult<Acme> {
 		let pkcs8 =
-			PrivatePkcs8KeyDer::from_pem_slice(key_pem.as_bytes()).map_err(|e| Failure {
+			PrivatePkcs8KeyDer::from_pem_slice(self.key_pem.as_bytes()).map_err(|e| Failure {
 				fault: Fault::Account,
 				message: format!("CANOPY_ACME_ACCOUNT_KEY is not a PKCS#8 PEM private key: {e}"),
 			})?;
@@ -277,7 +291,7 @@ impl Acme {
 		let builder = Account::builder()
 			.map_err(|e| Failure::from_acme("could not build an ACME client", e))?;
 		let (account, _credentials) = builder
-			.create_from_key((key, PrivateKeyDer::Pkcs8(pkcs8)), directory.clone())
+			.create_from_key((key, PrivateKeyDer::Pkcs8(pkcs8)), self.directory.clone())
 			.await
 			.map_err(|e| Failure::from_acme("could not use the ACME account", e))?;
 
@@ -291,12 +305,24 @@ impl Acme {
 		}
 
 		info!(
-			directory = %directory,
+			directory = %self.directory,
 			account = %account.id(),
 			profiles = ?account.profiles().map(|p| p.name.to_string()).collect::<Vec<_>>(),
 			"ACME account ready"
 		);
-		Ok(Some(Self::Real(Arc::new(account))))
+		Ok(Acme::Real(Arc::new(account)))
+	}
+}
+
+impl Acme {
+	/// Build from the Canopy instance's configuration (see [`AcmeConfig::from_env`]),
+	/// or `None` where no account key is set, so the worker says so once rather
+	/// than failing every order.
+	pub async fn from_env() -> AcmeResult<Option<Self>> {
+		match AcmeConfig::from_env() {
+			Some(config) => config.connect().await.map(Some),
+			None => Ok(None),
+		}
 	}
 
 	/// An authority that signs its own certificates without leaving the process.
