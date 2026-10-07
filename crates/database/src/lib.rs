@@ -67,8 +67,7 @@ pub use backups::{
 	BackupRequest, BackupRun, BackupRunFilters, BackupRunProgress, BackupTypeDefault,
 	MachineBackupCapability, MaintenanceOutcomeFilter, NewBackupCredentialIssuance, NewBackupRun,
 	NewBackupRunProgress, NewBackupTypeDefault, NewObservedSnapshot, NewServerGroupBackupConfig,
-	NewServerGroupBackupSchedule, RetentionPolicy, ServerGroupBackupConfig,
-	ServerGroupBackupSchedule,
+	RetentionPolicy, ServerGroupBackupConfig, ServerGroupBackupSchedule,
 };
 pub use bestool_snippets::{BestoolSnippet, NewBestoolSnippet};
 pub use commons_types::backup::{

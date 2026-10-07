@@ -1812,6 +1812,7 @@ version = "1.0.0"
 dependencies = [
  "base64 0.23.1",
  "commons-errors",
+ "cronexpr",
  "diesel",
  "jiff",
  "node-semver",
@@ -1959,6 +1960,15 @@ name = "critical-section"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
+
+[[package]]
+name = "cronexpr"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d3e7b64b1638ac6014adf454b9eb374ec80803512ba2aaafd77dedfc4554485"
+dependencies = [
+ "jiff",
+]
 
 [[package]]
 name = "crossbeam-channel"

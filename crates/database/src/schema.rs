@@ -279,6 +279,23 @@ diesel::table! {
 }
 
 diesel::table! {
+	backup_schedule_history (id) {
+		id -> Int8,
+		layer -> Text,
+		#[sql_name = "type"]
+		type_ -> Text,
+		group_id -> Nullable<Uuid>,
+		machine_id -> Nullable<Uuid>,
+		kind -> Nullable<Text>,
+		interval -> Nullable<Interval>,
+		cron -> Nullable<Text>,
+		zone -> Nullable<Text>,
+		changed_by -> Nullable<Text>,
+		changed_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	backup_type_defaults (type_) {
 		#[sql_name = "type"]
 		type_ -> Text,
@@ -286,6 +303,8 @@ diesel::table! {
 		default_retention -> Jsonb,
 		auto_enable -> Bool,
 		allow_below_floor -> Bool,
+		default_cron -> Nullable<Text>,
+		default_zone -> Nullable<Text>,
 	}
 }
 
@@ -546,6 +565,19 @@ diesel::table! {
 }
 
 diesel::table! {
+	machine_backup_schedule (machine_id, type_) {
+		machine_id -> Uuid,
+		#[sql_name = "type"]
+		type_ -> Text,
+		expected_interval -> Nullable<Interval>,
+		expected_cron -> Nullable<Text>,
+		schedule_zone -> Nullable<Text>,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	machine_enrollment_challenges (id) {
 		id -> Uuid,
 		machine_id -> Uuid,
@@ -575,6 +607,14 @@ diesel::table! {
 		source -> Text,
 		extra -> Jsonb,
 		reported_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
+	machine_reported_timezone (machine_id) {
+		machine_id -> Uuid,
+		timezone -> Text,
+		changed_at -> Timestamptz,
 	}
 }
 
@@ -797,6 +837,9 @@ diesel::table! {
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
 		allow_below_floor -> Bool,
+		expected_cron -> Nullable<Text>,
+		schedule_zone -> Nullable<Text>,
+		has_schedule -> Bool,
 	}
 }
 
@@ -981,6 +1024,8 @@ diesel::joinable!(backup_run_progress -> server_groups (group_id));
 diesel::joinable!(backup_runs -> devices (device_id));
 diesel::joinable!(backup_runs -> machines (machine_id));
 diesel::joinable!(backup_runs -> server_groups (group_id));
+diesel::joinable!(backup_schedule_history -> machines (machine_id));
+diesel::joinable!(backup_schedule_history -> server_groups (group_id));
 diesel::joinable!(check_stability -> issues (issue_id));
 diesel::joinable!(compromised_keys -> application_certificates (certificate_id));
 diesel::joinable!(denied_dns_names -> machines (machine_id));
@@ -1002,9 +1047,11 @@ diesel::joinable!(issues -> machines (machine_id));
 diesel::joinable!(issues -> server_groups (server_group_id));
 diesel::joinable!(kubernetes_clusters -> devices (relay_identity_id));
 diesel::joinable!(machine_backup_capabilities -> machines (machine_id));
+diesel::joinable!(machine_backup_schedule -> machines (machine_id));
 diesel::joinable!(machine_enrollment_challenges -> machines (machine_id));
 diesel::joinable!(machine_enrollment_tokens -> machines (machine_id));
 diesel::joinable!(machine_reported_detail -> machines (machine_id));
+diesel::joinable!(machine_reported_timezone -> machines (machine_id));
 diesel::joinable!(machines -> devices (device_id));
 diesel::joinable!(machines -> server_groups (group_id));
 diesel::joinable!(maintenance_window_moves -> applications (application_id));
@@ -1065,6 +1112,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	backup_restore_checks,
 	backup_run_progress,
 	backup_runs,
+	backup_schedule_history,
 	backup_type_defaults,
 	bestool_snippets,
 	check_policies,
@@ -1085,9 +1133,11 @@ diesel::allow_tables_to_appear_in_same_query!(
 	issues,
 	kubernetes_clusters,
 	machine_backup_capabilities,
+	machine_backup_schedule,
 	machine_enrollment_challenges,
 	machine_enrollment_tokens,
 	machine_reported_detail,
+	machine_reported_timezone,
 	machines,
 	maintenance_window_moves,
 	maintenance_windows,

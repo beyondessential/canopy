@@ -334,14 +334,55 @@
         "x-canopy-safety-mode": "read-only"
       }
     },
-    "/api/backups/clear_schedule": {
+    "/api/backups/clear_machine_schedule": {
       "post": {
         "tags": [
           "backups"
         ],
-        "summary": "Remove a group's schedule and retention override for a backup type.",
-        "description": "The type reverts to inheriting the canopy-wide default schedule and\nretention. Returns the updated configuration.",
-        "operationId": "backups_clear_schedule",
+        "summary": "Remove a machine's own schedule for a backup type.",
+        "description": "The machine follows its group's schedule override, or the fleet-wide\ndefault's, again. Clearing an override that isn't set changes nothing.",
+        "operationId": "backups_clear_machine_schedule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearMachineScheduleArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/backups/clear_retention": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Remove a group's retention override for a backup type.",
+        "description": "The type reverts to inheriting the fleet-wide default retention. Graded\ndanger, unlike a schedule, because shortening retention destroys snapshots\nat the next maintenance. A schedule override on the same group and type is\nleft as it is. Returns the updated configuration.",
+        "operationId": "backups_clear_retention",
         "requestBody": {
           "content": {
             "application/json": {
@@ -380,6 +421,54 @@
           }
         ],
         "x-canopy-safety-mode": "danger"
+      }
+    },
+    "/api/backups/clear_schedule": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Remove a group's schedule override for a backup type.",
+        "description": "The type reverts to inheriting the fleet-wide default schedule. A retention\noverride on the same group and type is left as it is. Returns the updated\nconfiguration.",
+        "operationId": "backups_clear_schedule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearScheduleArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupConfigView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/backups/create": {
@@ -709,7 +798,7 @@
           "backups"
         ],
         "summary": "List the effective schedule and retention for every backup type a group's\napplications have declared support for (not just the ones currently enabled).",
-        "description": "A type with no scheduled interval still appears, with a null\n`effective_interval`, since a manually run backup of that type is still\nretained under its own policy.",
+        "description": "A manual-only type still appears, since a manually run backup of that type is\nstill retained under its own policy.",
         "operationId": "backups_group_schedules",
         "requestBody": {
           "content": {
@@ -1149,6 +1238,95 @@
         "x-canopy-safety-mode": "read-only"
       }
     },
+    "/api/backups/schedule_history": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "List the changes made to one schedule layer, newest first.",
+        "description": "Every set and clear of a layer is recorded with who made it and when. A\nchange whose `schedule` is null cleared the layer, so it no longer\noverrides the one beneath. The `group` layer needs `group_id` and the\n`machine` layer `machine_id`; the `fleet` layer needs neither.",
+        "operationId": "backups_schedule_history",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleHistoryArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScheduleChangeView"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/backups/schedule_preview": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Preview the next firings of a cron schedule being edited.",
+        "description": "Says why the schedule would be refused when it would. Otherwise, for a\ncron expression, lists the next few firings with `H` resolved per machine:\nthe machine's own for a machine override, and for a group override or the\nfleet-wide default one machine in each distinct zone among those it applies\nto. Nothing is saved.",
+        "operationId": "backups_schedule_preview",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SchedulePreviewArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulePreview"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
     "/api/backups/set_capability": {
       "post": {
         "tags": [
@@ -1190,13 +1368,122 @@
         "x-canopy-safety-mode": "danger"
       }
     },
+    "/api/backups/set_machine_schedule": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Set a machine's own schedule for one backup type.",
+        "description": "It replaces the group's and the fleet-wide default's schedule whole, and\nstays with the machine through a group move and through the type being\ndisabled and enabled again.",
+        "operationId": "backups_set_machine_schedule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMachineScheduleArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/backups/set_retention": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "Set the retention override for one backup type of a group.",
+        "description": "A policy below the organization's retention floor is rejected with 400,\nunless `allow_below_floor` is set. A schedule override on the same group\nand type is left as it is.",
+        "operationId": "backups_set_retention",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRetentionArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupConfigView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
     "/api/backups/set_schedule": {
       "post": {
         "tags": [
           "backups"
         ],
-        "summary": "Set the schedule and retention override for one backup type of a group.",
-        "description": "A null interval means manual-only backups (no schedule). A specified\nretention policy is validated against the organization's retention floor\nand rejected with 400 if it falls below it, unless `allow_below_floor` is\nset.",
+        "summary": "Set the schedule override for one backup type of a group.",
+        "description": "The group's machines without their own override follow it, replacing the\nfleet-wide default's schedule whole. A schedule that would be refused (a\ncron expression that never fires or fires within the hour, an interval\nunder an hour, an unknown timezone) is rejected with 400. A retention\noverride on the same group and type is left as it is.",
         "operationId": "backups_set_schedule",
         "requestBody": {
           "content": {
@@ -1254,7 +1541,7 @@
           "backups"
         ],
         "summary": "Set the canopy-wide default schedule and retention for a backup type.",
-        "description": "A retention policy below the organization's retention floor is rejected\nwith 400, unless `allow_below_floor` is set.",
+        "description": "A retention policy below the organization's retention floor, or a schedule\nthat would be refused, is rejected with 400. The former is allowed when\n`allow_below_floor` is set.",
         "operationId": "backups_set_type_default",
         "requestBody": {
           "content": {
@@ -11761,9 +12048,28 @@
           "skipped"
         ]
       },
+      "ClearMachineScheduleArgs": {
+        "type": "object",
+        "description": "Identifies a machine's schedule override for a backup type.",
+        "required": [
+          "machine_id",
+          "type"
+        ],
+        "properties": {
+          "machine_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The machine to update."
+          },
+          "type": {
+            "type": "string",
+            "description": "Backup type whose override to remove."
+          }
+        }
+      },
       "ClearScheduleArgs": {
         "type": "object",
-        "description": "Identifies a server group's schedule override for a backup type.",
+        "description": "Identifies a server group's schedule or retention override for a backup type.",
         "required": [
           "server_group_id",
           "type"
@@ -11776,7 +12082,7 @@
           },
           "type": {
             "type": "string",
-            "description": "Backup type whose schedule override to remove."
+            "description": "Backup type whose override to remove."
           }
         }
       },
@@ -12911,6 +13217,57 @@
           }
         }
       },
+      "EffectiveSchedule": {
+        "type": "object",
+        "description": "What a machine's schedule for one type resolved to.",
+        "required": [
+          "schedule"
+        ],
+        "properties": {
+          "layer": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ScheduleLayer",
+                "description": "The layer it comes from; none when no layer sets one, which is\nmanual-only."
+              }
+            ]
+          },
+          "layers_since": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When a change to a layer last altered what this resolves to. Unlike\n`since`, a change in the timezone the machine reports doesn't move it,\nso it bounds which firings count as missed: a zone change moves when\nfirings fall, not how many a machine has missed."
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/Schedule",
+            "description": "What the machine follows: manual-only, an interval, or a cron\nexpression."
+          },
+          "since": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this schedule took effect: a firing from before then opens no\nwindow. None when it has always applied."
+          },
+          "zone": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ZoneUsed",
+                "description": "The zone it is read in, for a cron schedule."
+              }
+            ]
+          }
+        }
+      },
       "EnrollmentStatus": {
         "type": "object",
         "description": "A machine's enrollment state: whether a device has registered, and\nwhether an enrollment token is currently outstanding.",
@@ -13659,11 +14016,13 @@
       },
       "GroupTypeScheduleView": {
         "type": "object",
-        "description": "Effective schedule and retention for one backup type of a group, combining\nany per-group override with the canopy-wide default.",
+        "description": "Effective schedule and retention for one backup type of a group, combining\nany per-group override with the fleet-wide default.",
         "required": [
           "type",
+          "fleet_schedule",
+          "schedule",
           "effective_retention",
-          "has_override",
+          "has_retention_override",
           "allow_below_floor"
         ],
         "properties": {
@@ -13671,29 +14030,43 @@
             "type": "boolean",
             "description": "Whether the effective config opts out of the org retention floor — taken\nfrom the override if present, else the type default."
           },
-          "effective_interval": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Seconds between scheduled runs; null = manual-only (no scheduled interval)."
-          },
           "effective_retention": {
             "$ref": "#/components/schemas/RetentionPolicy",
-            "description": "Retention policy that currently applies: the group's override if set,\nelse the canopy-wide default for this type, else the organization's\nminimum retention floor."
+            "description": "Retention policy that currently applies: the group's override if set,\nelse the fleet-wide default for this type, else the organization's\nminimum retention floor."
           },
-          "has_override": {
+          "fleet_schedule": {
+            "$ref": "#/components/schemas/Schedule",
+            "description": "The fleet-wide default schedule for the type; manual-only when it has\nnone."
+          },
+          "group_schedule": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Schedule",
+                "description": "The group's own schedule override; null when the group inherits."
+              }
+            ]
+          },
+          "has_retention_override": {
             "type": "boolean",
-            "description": "Whether this group has an explicit override for this type, rather\nthan inheriting the canopy-wide default."
+            "description": "Whether this group has its own retention override for this type, rather\nthan inheriting the fleet-wide default."
           },
-          "next_run_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "When the next scheduled backup of this type is expected: the group's most\nrecent successful backup of the type plus the interval — or \"now\" if the\ntype is scheduled but has never succeeded yet. Null for manual-only types."
+          "layer": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ScheduleLayer",
+                "description": "The layer `schedule` comes from; null when nothing sets one, which is\nmanual-only."
+              }
+            ]
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/Schedule",
+            "description": "What the group's machines without an override of their own follow: the\ngroup's override, else the fleet-wide default."
           },
           "type": {
             "type": "string",
@@ -15675,7 +16048,8 @@
         "required": [
           "machine_id",
           "type",
-          "enabled"
+          "enabled",
+          "schedule"
         ],
         "properties": {
           "enabled": {
@@ -15710,13 +16084,16 @@
             "format": "uuid",
             "description": "The server this capability belongs to."
           },
-          "next_backup_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "When this server's next backup of this type is expected: the server's own\nlast success plus the effective interval, or \"now\" (overdue) if it's\nscheduled but has never succeeded. `None` for disabled or manual-only\n(no-interval) types. Per-server, so a lagging member isn't masked by a\nfreshly-backed-up sibling."
+          "next_backup": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NextBackup",
+                "description": "When this machine's next backup of this type is expected: the next\nfiring, that the backup is due until a window closes, when an interval\nnext elapses, that it is due now, or manual. Null for a type that is\ndisabled. Per machine, so a lagging member isn't masked by a\nfreshly-backed-up sibling."
+              }
+            ]
           },
           "processing_since": {
             "type": [
@@ -15736,6 +16113,10 @@
                 "description": "Live figures for the in-flight run of this type, when it is reporting\nprogress. `None` when nothing is in flight, or when the run reports no\nprogress — which is unknown, not zero."
               }
             ]
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/EffectiveSchedule",
+            "description": "The schedule this machine follows for the type, the layer it comes\nfrom, the zone a cron schedule is read in, and when it took effect."
           },
           "type": {
             "type": "string",
@@ -16853,6 +17234,98 @@
           }
         }
       },
+      "NextBackup": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Backed up only on request.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "manual"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Due now, with no end to the window.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "due_now"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A window is open and the backup is due until it closes.",
+            "required": [
+              "at",
+              "kind"
+            ],
+            "properties": {
+              "at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "A window is open and the backup is due until it closes."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "due_until"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The next firing, or when the interval next elapses.",
+            "required": [
+              "at",
+              "kind"
+            ],
+            "properties": {
+              "at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "The next firing, or when the interval next elapses."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "at"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A stored cron expression that can no longer be read, so nothing runs.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "unreadable"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "When a machine's next backup of a type is expected."
+      },
       "OpenWindow": {
         "type": "object",
         "description": "An open window with the target it covers, named so a fleet-wide view\nreads without a lookup per row.",
@@ -17717,6 +18190,43 @@
             "type": "string",
             "format": "uuid",
             "description": "The group to read."
+          }
+        }
+      },
+      "PreviewMachine": {
+        "type": "object",
+        "description": "The next firings of a cron schedule for one machine.",
+        "required": [
+          "zone",
+          "firings"
+        ],
+        "properties": {
+          "firings": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "The firings, in order. Each is an instant; present it in `zone`."
+          },
+          "machine_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The machine the firings are read for; null when no machine applies and\nthe preview stands in for one."
+          },
+          "machine_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The machine's name, when there is one."
+          },
+          "zone": {
+            "$ref": "#/components/schemas/ZoneUsed",
+            "description": "The zone the expression is read in for this machine, and where that\ncame from. A UTC fallback is flagged by its source."
           }
         }
       },
@@ -19342,6 +19852,214 @@
           }
         }
       },
+      "Schedule": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Backed up only on an explicit request.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "manual"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Backed up once this many seconds have passed since the last success.",
+            "required": [
+              "seconds",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "interval"
+                ]
+              },
+              "seconds": {
+                "type": "integer",
+                "format": "int64"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Backed up in the windows a cron expression opens, read in `zone` when\ngiven, otherwise in the machine's own timezone.",
+            "required": [
+              "expression",
+              "kind"
+            ],
+            "properties": {
+              "expression": {
+                "type": "string",
+                "description": "Five fields: minute, hour, day of month, month, day of week."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "cron"
+                ]
+              },
+              "zone": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "An IANA timezone name."
+              }
+            }
+          }
+        ],
+        "description": "What a schedule is, as an operator sets it at one layer."
+      },
+      "ScheduleChangeView": {
+        "type": "object",
+        "description": "One change to a schedule layer.",
+        "required": [
+          "changed_at"
+        ],
+        "properties": {
+          "changed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the change was made."
+          },
+          "changed_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The operator who made the change, when known."
+          },
+          "schedule": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Schedule",
+                "description": "What the layer held after the change; null when the change cleared it."
+              }
+            ]
+          }
+        }
+      },
+      "ScheduleHistoryArgs": {
+        "type": "object",
+        "description": "Which schedule layer's history to read.",
+        "required": [
+          "layer",
+          "type"
+        ],
+        "properties": {
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The group, for the `group` layer."
+          },
+          "layer": {
+            "$ref": "#/components/schemas/ScheduleLayer",
+            "description": "The layer: `fleet`, `group` or `machine`."
+          },
+          "machine_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The machine, for the `machine` layer."
+          },
+          "type": {
+            "type": "string",
+            "description": "Backup type."
+          }
+        }
+      },
+      "ScheduleLayer": {
+        "type": "string",
+        "description": "Which layer a machine's schedule for a type comes from.",
+        "enum": [
+          "machine",
+          "group",
+          "fleet"
+        ]
+      },
+      "SchedulePreview": {
+        "type": "object",
+        "description": "What a schedule being edited would do.",
+        "required": [
+          "machines"
+        ],
+        "properties": {
+          "machines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PreviewMachine"
+            },
+            "description": "For a machine override, the machine's own firings; for a group override\nor the fleet default, one machine in each distinct zone among those it\napplies to. Empty unless the schedule is a cron expression."
+          },
+          "refusal": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the schedule would be refused, when it would."
+          }
+        }
+      },
+      "SchedulePreviewArgs": {
+        "type": "object",
+        "description": "A schedule being edited, and whose firings to preview.",
+        "required": [
+          "type",
+          "schedule"
+        ],
+        "properties": {
+          "count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "How many firings to show for each machine (default 5, at most 20).",
+            "minimum": 0
+          },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Preview for the machines this group's override would apply to. With\nneither this nor `machine_id`, the fleet-wide default's."
+          },
+          "machine_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Preview for this machine alone: the machine override being edited."
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/Schedule",
+            "description": "The schedule as typed, not yet saved."
+          },
+          "type": {
+            "type": "string",
+            "description": "Backup type."
+          }
+        }
+      },
       "ScheduleView": {
         "type": "object",
         "description": "A schedule and retention override for one backup type of a server group.",
@@ -19354,14 +20072,6 @@
             "type": "boolean",
             "description": "Whether this override is allowed to fall below the organization's\nminimum retention floor."
           },
-          "expected_interval": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Expected seconds between scheduled backups of this type; null means\nmanual-only (no schedule), which is distinct from an interval of zero."
-          },
           "retention": {
             "oneOf": [
               {
@@ -19370,6 +20080,17 @@
               {
                 "$ref": "#/components/schemas/RetentionPolicy",
                 "description": "Retention policy override; null means inherit the canopy-wide default\nfor this backup type."
+              }
+            ]
+          },
+          "schedule": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Schedule",
+                "description": "The group's schedule override; null when the group inherits the\nfleet-wide default schedule and only overrides retention."
               }
             ]
           },
@@ -20568,6 +21289,30 @@
           }
         }
       },
+      "SetMachineScheduleArgs": {
+        "type": "object",
+        "description": "Request to set a machine's schedule override for one backup type.",
+        "required": [
+          "machine_id",
+          "type",
+          "schedule"
+        ],
+        "properties": {
+          "machine_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The machine to configure."
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/Schedule",
+            "description": "The schedule the machine follows, replacing its group's and the\nfleet-wide default's whole."
+          },
+          "type": {
+            "type": "string",
+            "description": "Backup type this schedule applies to."
+          }
+        }
+      },
       "SetProfileArgs": {
         "type": "object",
         "description": "The profile a server's certificates are requested under.",
@@ -20589,36 +21334,22 @@
           }
         }
       },
-      "SetScheduleArgs": {
+      "SetRetentionArgs": {
         "type": "object",
-        "description": "Request to set (or override) the schedule and retention for one backup\ntype of a server group.",
+        "description": "Request to set a group's retention override for one backup type.",
         "required": [
           "server_group_id",
-          "type"
+          "type",
+          "retention"
         ],
         "properties": {
           "allow_below_floor": {
             "type": "boolean",
             "description": "Allows this override to specify retention below the organization's\nminimum retention floor. Defaults to false."
           },
-          "expected_interval": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Expected seconds between scheduled backups of this type; null means\nmanual-only (no schedule), which is distinct from an interval of zero."
-          },
           "retention": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/RetentionPolicy",
-                "description": "Retention policy to apply; null means inherit the canopy-wide default\nfor this backup type. A specified policy is validated against the\norganization's minimum retention floor unless `allow_below_floor` is\nset."
-              }
-            ]
+            "$ref": "#/components/schemas/RetentionPolicy",
+            "description": "Retention policy to apply. A specified policy is validated against the\norganization's minimum retention floor unless `allow_below_floor` is\nset."
           },
           "server_group_id": {
             "type": "string",
@@ -20627,7 +21358,31 @@
           },
           "type": {
             "type": "string",
-            "description": "Backup type this schedule and retention apply to."
+            "description": "Backup type this retention applies to."
+          }
+        }
+      },
+      "SetScheduleArgs": {
+        "type": "object",
+        "description": "Request to set a group's schedule override for one backup type.",
+        "required": [
+          "server_group_id",
+          "type",
+          "schedule"
+        ],
+        "properties": {
+          "schedule": {
+            "$ref": "#/components/schemas/Schedule",
+            "description": "The schedule the group's machines follow, replacing the fleet-wide\ndefault's whole: its kind, its timing, and its timezone."
+          },
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The server group to configure."
+          },
+          "type": {
+            "type": "string",
+            "description": "Backup type this schedule applies to."
           }
         }
       },
@@ -20672,6 +21427,7 @@
         "description": "Request to set the canopy-wide default schedule and retention for a\nbackup type.",
         "required": [
           "type",
+          "default_schedule",
           "default_retention"
         ],
         "properties": {
@@ -20683,17 +21439,13 @@
             "type": "boolean",
             "description": "Whether a server's capability for this type should be enabled by\ndefault when first advertised."
           },
-          "default_interval": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Seconds between scheduled runs; null = manual-only."
-          },
           "default_retention": {
             "$ref": "#/components/schemas/RetentionPolicy",
             "description": "Default retention policy for this type."
+          },
+          "default_schedule": {
+            "$ref": "#/components/schemas/Schedule",
+            "description": "The default schedule for every group and machine without an override."
           },
           "type": {
             "type": "string",
@@ -21536,6 +22288,7 @@
         "description": "Canopy-wide default schedule and retention for a backup type.",
         "required": [
           "type",
+          "default_schedule",
           "auto_enable",
           "allow_below_floor"
         ],
@@ -21548,14 +22301,6 @@
             "type": "boolean",
             "description": "Whether a server's capability for this type is enabled by default\nwhen first advertised."
           },
-          "default_interval": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Seconds between scheduled runs; null = manual-only."
-          },
           "default_retention": {
             "oneOf": [
               {
@@ -21566,6 +22311,10 @@
                 "description": "Default retention policy for this type, if set."
               }
             ]
+          },
+          "default_schedule": {
+            "$ref": "#/components/schemas/Schedule",
+            "description": "The default schedule; manual-only, an interval, or a cron expression."
           },
           "type": {
             "type": "string",
@@ -22204,6 +22953,34 @@
             "type": "string",
             "format": "uuid",
             "description": "The plan to withdraw."
+          }
+        }
+      },
+      "ZoneSource": {
+        "type": "string",
+        "description": "Where the zone a cron schedule is read in came from.",
+        "enum": [
+          "schedule",
+          "machine",
+          "unreported_utc",
+          "unrecognised_utc"
+        ]
+      },
+      "ZoneUsed": {
+        "type": "object",
+        "description": "A zone a cron schedule is read in, and how it was settled on.",
+        "required": [
+          "name",
+          "source"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "An IANA timezone name."
+          },
+          "source": {
+            "$ref": "#/components/schemas/ZoneSource",
+            "description": "Where the zone came from, which says whether UTC is a choice or a\nfallback."
           }
         }
       }

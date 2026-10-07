@@ -19,16 +19,21 @@ use commons_types::{
 	Uuid,
 	backup::{
 		BackupConfigStatus, BackupPlacement, BackupPurpose, BackupRepoMode, BackupType, RunOutcome,
+		schedule::{
+			CronExpr, EffectiveSchedule, NextBackup, Schedule, ScheduleLayer, ZoneUsed,
+			resolve_zone, schedule_seed,
+		},
 	},
 };
 use database::backups::BackupCredentialIssuance;
-use database::diesel_async::AsyncPgConnection;
 use database::pg_duration::PgDuration;
 use database::{
 	BackupMaintenanceRun, BackupRecoveryVerification, BackupRepoStats, BackupRequest, BackupRun,
 	BackupTypeDefault, MachineBackupCapability, NewBackupTypeDefault, NewServerGroupBackupConfig,
-	NewServerGroupBackupSchedule, RecoveryVaultWrite, RetentionPolicy, ServerGroupBackupConfig,
-	ServerGroupBackupSchedule, machines::Machine, server_groups::ServerGroup,
+	RecoveryVaultWrite, RetentionPolicy, ServerGroupBackupConfig, ServerGroupBackupSchedule,
+	backup::schedules::{self, LayerKey, ScheduleBook, ScheduleChange},
+	machines::Machine,
+	server_groups::ServerGroup,
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -59,7 +64,13 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(read_only: probe))
 		.routes(routes!(write: update))
 		.routes(routes!(write: set_schedule))
-		.routes(routes!(danger: clear_schedule))
+		.routes(routes!(write: clear_schedule))
+		.routes(routes!(write: set_retention))
+		.routes(routes!(danger: clear_retention))
+		.routes(routes!(write: set_machine_schedule))
+		.routes(routes!(write: clear_machine_schedule))
+		.routes(routes!(read_only: schedule_history))
+		.routes(routes!(read_only: schedule_preview))
 		.routes(routes!(read_only: group_schedules))
 		.routes(routes!(read_only: type_defaults))
 		.routes(routes!(write: set_type_default))
@@ -90,10 +101,9 @@ pub struct ScheduleView {
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
-	/// Expected seconds between scheduled backups of this type; null means
-	/// manual-only (no schedule), which is distinct from an interval of zero.
-	#[schema(value_type = Option<i64>, format = "int64")]
-	pub expected_interval: Option<PgDuration>,
+	/// The group's schedule override; null when the group inherits the
+	/// fleet-wide default schedule and only overrides retention.
+	pub schedule: Option<Schedule>,
 	/// Retention policy override; null means inherit the canopy-wide default
 	/// for this backup type.
 	pub retention: Option<RetentionPolicy>,
@@ -163,8 +173,8 @@ impl BackupConfigView {
 			.await?
 			.into_iter()
 			.map(|s| ScheduleView {
+				schedule: s.schedule(),
 				r#type: s.r#type,
-				expected_interval: s.expected_interval,
 				retention: s.retention.as_ref().and_then(RetentionPolicy::from_json),
 				allow_below_floor: s.allow_below_floor,
 			})
@@ -288,29 +298,62 @@ pub struct UpdateBackupConfigArgs {
 	pub region: Option<String>,
 }
 
-/// Request to set (or override) the schedule and retention for one backup
-/// type of a server group.
+/// Request to set a group's schedule override for one backup type.
 #[derive(Deserialize, ToSchema)]
 pub struct SetScheduleArgs {
 	/// The server group to configure.
 	pub server_group_id: Uuid,
-	/// Backup type this schedule and retention apply to.
+	/// Backup type this schedule applies to.
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
-	/// Expected seconds between scheduled backups of this type; null means
-	/// manual-only (no schedule), which is distinct from an interval of zero.
-	#[schema(value_type = Option<i64>, format = "int64")]
-	pub expected_interval: Option<PgDuration>,
-	/// Retention policy to apply; null means inherit the canopy-wide default
-	/// for this backup type. A specified policy is validated against the
+	/// The schedule the group's machines follow, replacing the fleet-wide
+	/// default's whole: its kind, its timing, and its timezone.
+	pub schedule: Schedule,
+}
+
+/// Request to set a group's retention override for one backup type.
+#[derive(Deserialize, ToSchema)]
+pub struct SetRetentionArgs {
+	/// The server group to configure.
+	pub server_group_id: Uuid,
+	/// Backup type this retention applies to.
+	#[serde(rename = "type")]
+	#[schema(value_type = String)]
+	pub r#type: BackupType,
+	/// Retention policy to apply. A specified policy is validated against the
 	/// organization's minimum retention floor unless `allow_below_floor` is
 	/// set.
-	pub retention: Option<RetentionPolicy>,
+	pub retention: RetentionPolicy,
 	/// Allows this override to specify retention below the organization's
 	/// minimum retention floor. Defaults to false.
 	#[serde(default)]
 	pub allow_below_floor: bool,
+}
+
+/// Request to set a machine's schedule override for one backup type.
+#[derive(Deserialize, ToSchema)]
+pub struct SetMachineScheduleArgs {
+	/// The machine to configure.
+	pub machine_id: Uuid,
+	/// Backup type this schedule applies to.
+	#[serde(rename = "type")]
+	#[schema(value_type = String)]
+	pub r#type: BackupType,
+	/// The schedule the machine follows, replacing its group's and the
+	/// fleet-wide default's whole.
+	pub schedule: Schedule,
+}
+
+/// Identifies a machine's schedule override for a backup type.
+#[derive(Deserialize, ToSchema)]
+pub struct ClearMachineScheduleArgs {
+	/// The machine to update.
+	pub machine_id: Uuid,
+	/// Backup type whose override to remove.
+	#[serde(rename = "type")]
+	#[schema(value_type = String)]
+	pub r#type: BackupType,
 }
 
 /// Identifies a one-off backup or restore request for a server.
@@ -837,19 +880,6 @@ impl RestoreWindowView {
 	}
 }
 
-/// Effective scheduled interval (seconds) for a `(group, type)`: the per-group
-/// override row if there is one (a NULL interval there being manual-only), else
-/// the canopy-wide default. `None` = manual-only.
-async fn effective_interval_secs(
-	conn: &mut AsyncPgConnection,
-	group_id: Uuid,
-	ty: &BackupType,
-) -> Result<Option<i64>> {
-	Ok(database::backups::effective_interval(conn, group_id, ty)
-		.await?
-		.map(|pg| pg.0.as_secs()))
-}
-
 /// `Some(issued_at)` when a backup looks in flight: a backup credential is still
 /// within its validity window (`now < expires_at`) and no run has been reported
 /// since it was issued. `None` otherwise. The window is the credential lifetime
@@ -883,23 +913,22 @@ fn in_flight_run_id(
 	issuance?.run_id
 }
 
-/// Next expected backup for one `(server, type)`: the server's own last success
-/// plus the interval, or `now` (overdue) if scheduled-but-never-run. `None` when
-/// disabled or manual-only.
-fn next_backup_at(
+/// A machine's schedule for a type and what to expect next from it. A disabled
+/// type has no next backup.
+fn schedule_fields(
+	book: &ScheduleBook,
+	machine_id: Uuid,
+	group_id: Option<Uuid>,
+	ty: &BackupType,
 	enabled: bool,
-	interval_secs: Option<i64>,
 	last_success_at: Option<Timestamp>,
 	now: Timestamp,
-) -> Option<Timestamp> {
-	if !enabled {
-		return None;
-	}
-	let secs = interval_secs?;
-	Some(match last_success_at {
-		Some(last) => Timestamp::from_second(last.as_second() + secs).unwrap_or(now),
-		None => now,
-	})
+) -> (EffectiveSchedule, Option<NextBackup>) {
+	let schedule = book.resolve(machine_id, group_id, ty);
+	let next = enabled.then(|| {
+		schedule.next_backup(schedule_seed(machine_id, ty.as_str()), now, last_success_at)
+	});
+	(schedule, next)
 }
 
 /// One backup type a server has advertised support for, whether the operator
@@ -924,12 +953,15 @@ pub struct MachineBackupCapabilityView {
 	pub latest_snapshot_at: Option<Timestamp>,
 	/// Bytes uploaded by that run, if reported.
 	pub latest_snapshot_bytes: Option<i64>,
-	/// When this server's next backup of this type is expected: the server's own
-	/// last success plus the effective interval, or "now" (overdue) if it's
-	/// scheduled but has never succeeded. `None` for disabled or manual-only
-	/// (no-interval) types. Per-server, so a lagging member isn't masked by a
+	/// The schedule this machine follows for the type, the layer it comes
+	/// from, the zone a cron schedule is read in, and when it took effect.
+	pub schedule: EffectiveSchedule,
+	/// When this machine's next backup of this type is expected: the next
+	/// firing, that the backup is due until a window closes, when an interval
+	/// next elapses, that it is due now, or manual. Null for a type that is
+	/// disabled. Per machine, so a lagging member isn't masked by a
 	/// freshly-backed-up sibling.
-	pub next_backup_at: Option<Timestamp>,
+	pub next_backup: Option<NextBackup>,
 	/// `Some(issued_at)` when a backup of this type appears to be in flight:
 	/// backup credentials were issued and are still valid, and no run has
 	/// been reported since they were issued. `None` otherwise. Lets the UI
@@ -1487,12 +1519,13 @@ pub async fn update(
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
 }
 
-/// Set the schedule and retention override for one backup type of a group.
+/// Set the schedule override for one backup type of a group.
 ///
-/// A null interval means manual-only backups (no schedule). A specified
-/// retention policy is validated against the organization's retention floor
-/// and rejected with 400 if it falls below it, unless `allow_below_floor` is
-/// set.
+/// The group's machines without their own override follow it, replacing the
+/// fleet-wide default's schedule whole. A schedule that would be refused (a
+/// cron expression that never fires or fires within the hour, an interval
+/// under an hour, an unknown timezone) is rejected with 400. A retention
+/// override on the same group and type is left as it is.
 #[utoipa::path(
 	post,
 	path = "/set_schedule",
@@ -1508,25 +1541,57 @@ pub async fn update(
 )]
 pub async fn set_schedule(
 	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
+	TailscaleAdmin(admin): TailscaleAdmin,
 	Json(args): Json<SetScheduleArgs>,
 ) -> Result<Json<BackupConfigView>> {
 	let mut conn = state.db.get().await?;
 	require_config(&mut conn, args.server_group_id).await?;
-	if let Some(policy) = &args.retention {
-		if !args.allow_below_floor {
-			policy.validate_floor()?;
-		}
-	}
-	ServerGroupBackupSchedule::upsert(
+	schedules::set_group_schedule(
 		&mut conn,
-		NewServerGroupBackupSchedule {
-			group_id: args.server_group_id,
-			r#type: args.r#type,
-			expected_interval: args.expected_interval,
-			retention: args.retention.map(|r| r.to_json()),
-			allow_below_floor: args.allow_below_floor,
-		},
+		args.server_group_id,
+		&args.r#type,
+		&args.schedule,
+		Some(&admin.login),
+	)
+	.await?;
+	let config = require_config(&mut conn, args.server_group_id).await?;
+	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
+}
+
+/// Set the retention override for one backup type of a group.
+///
+/// A policy below the organization's retention floor is rejected with 400,
+/// unless `allow_below_floor` is set. A schedule override on the same group
+/// and type is left as it is.
+#[utoipa::path(
+	post,
+	path = "/set_retention",
+	operation_id = "backups_set_retention",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	request_body = SetRetentionArgs,
+	responses(
+		(status = 200, body = BackupConfigView),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn set_retention(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<SetRetentionArgs>,
+) -> Result<Json<BackupConfigView>> {
+	let mut conn = state.db.get().await?;
+	require_config(&mut conn, args.server_group_id).await?;
+	if !args.allow_below_floor {
+		args.retention.validate_floor()?;
+	}
+	ServerGroupBackupSchedule::set_retention(
+		&mut conn,
+		args.server_group_id,
+		&args.r#type,
+		&args.retention.to_json(),
+		args.allow_below_floor,
 	)
 	.await?;
 	let config = require_config(&mut conn, args.server_group_id).await?;
@@ -1545,21 +1610,22 @@ const FLOOR_RETENTION: RetentionPolicy = RetentionPolicy {
 	keep_annual: 0,
 };
 
-/// Identifies a server group's schedule override for a backup type.
+/// Identifies a server group's schedule or retention override for a backup type.
 #[derive(Deserialize, ToSchema)]
 pub struct ClearScheduleArgs {
 	/// The server group to update.
 	pub server_group_id: Uuid,
-	/// Backup type whose schedule override to remove.
+	/// Backup type whose override to remove.
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
 }
 
-/// Remove a group's schedule and retention override for a backup type.
+/// Remove a group's schedule override for a backup type.
 ///
-/// The type reverts to inheriting the canopy-wide default schedule and
-/// retention. Returns the updated configuration.
+/// The type reverts to inheriting the fleet-wide default schedule. A retention
+/// override on the same group and type is left as it is. Returns the updated
+/// configuration.
 #[utoipa::path(
 	post,
 	path = "/clear_schedule",
@@ -1574,48 +1640,370 @@ pub struct ClearScheduleArgs {
 )]
 pub async fn clear_schedule(
 	State(state): State<AppState>,
+	TailscaleAdmin(admin): TailscaleAdmin,
+	Json(args): Json<ClearScheduleArgs>,
+) -> Result<Json<BackupConfigView>> {
+	let mut conn = state.db.get().await?;
+	require_config(&mut conn, args.server_group_id).await?;
+	schedules::clear_group_schedule(
+		&mut conn,
+		args.server_group_id,
+		&args.r#type,
+		Some(&admin.login),
+	)
+	.await?;
+	let config = require_config(&mut conn, args.server_group_id).await?;
+	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
+}
+
+/// Remove a group's retention override for a backup type.
+///
+/// The type reverts to inheriting the fleet-wide default retention. Graded
+/// danger, unlike a schedule, because shortening retention destroys snapshots
+/// at the next maintenance. A schedule override on the same group and type is
+/// left as it is. Returns the updated configuration.
+#[utoipa::path(
+	post,
+	path = "/clear_retention",
+	operation_id = "backups_clear_retention",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	request_body = ClearScheduleArgs,
+	responses(
+		(status = 200, body = BackupConfigView),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn clear_retention(
+	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
 	Json(args): Json<ClearScheduleArgs>,
 ) -> Result<Json<BackupConfigView>> {
 	let mut conn = state.db.get().await?;
 	require_config(&mut conn, args.server_group_id).await?;
-	ServerGroupBackupSchedule::delete(&mut conn, args.server_group_id, &args.r#type).await?;
+	ServerGroupBackupSchedule::clear_retention(&mut conn, args.server_group_id, &args.r#type)
+		.await?;
 	let config = require_config(&mut conn, args.server_group_id).await?;
 	Ok(Json(BackupConfigView::build(&mut conn, config).await?))
 }
 
+/// Set a machine's own schedule for one backup type.
+///
+/// It replaces the group's and the fleet-wide default's schedule whole, and
+/// stays with the machine through a group move and through the type being
+/// disabled and enabled again.
+#[utoipa::path(
+	post,
+	path = "/set_machine_schedule",
+	operation_id = "backups_set_machine_schedule",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	request_body = SetMachineScheduleArgs,
+	responses(
+		(status = 200),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn set_machine_schedule(
+	State(state): State<AppState>,
+	TailscaleAdmin(admin): TailscaleAdmin,
+	Json(args): Json<SetMachineScheduleArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	Machine::get_by_id(&mut conn, args.machine_id).await?;
+	schedules::set_machine_schedule(
+		&mut conn,
+		args.machine_id,
+		&args.r#type,
+		&args.schedule,
+		Some(&admin.login),
+	)
+	.await?;
+	Ok(Json(()))
+}
+
+/// Remove a machine's own schedule for a backup type.
+///
+/// The machine follows its group's schedule override, or the fleet-wide
+/// default's, again. Clearing an override that isn't set changes nothing.
+#[utoipa::path(
+	post,
+	path = "/clear_machine_schedule",
+	operation_id = "backups_clear_machine_schedule",
+	tag = "backups",
+	security(("tailscale-admin" = [])),
+	request_body = ClearMachineScheduleArgs,
+	responses((status = 200), (status = 404, body = ProblemDetailsSchema)),
+)]
+pub async fn clear_machine_schedule(
+	State(state): State<AppState>,
+	TailscaleAdmin(admin): TailscaleAdmin,
+	Json(args): Json<ClearMachineScheduleArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	Machine::get_by_id(&mut conn, args.machine_id).await?;
+	schedules::clear_machine_schedule(&mut conn, args.machine_id, &args.r#type, Some(&admin.login))
+		.await?;
+	Ok(Json(()))
+}
+
+/// Which schedule layer's history to read.
+#[derive(Deserialize, ToSchema)]
+pub struct ScheduleHistoryArgs {
+	/// The layer: `fleet`, `group` or `machine`.
+	pub layer: ScheduleLayer,
+	/// Backup type.
+	#[serde(rename = "type")]
+	#[schema(value_type = String)]
+	pub r#type: BackupType,
+	/// The group, for the `group` layer.
+	pub group_id: Option<Uuid>,
+	/// The machine, for the `machine` layer.
+	pub machine_id: Option<Uuid>,
+}
+
+/// One change to a schedule layer.
+#[derive(Serialize, ToSchema)]
+pub struct ScheduleChangeView {
+	/// What the layer held after the change; null when the change cleared it.
+	pub schedule: Option<Schedule>,
+	/// The operator who made the change, when known.
+	pub changed_by: Option<String>,
+	/// When the change was made.
+	pub changed_at: Timestamp,
+}
+
+/// List the changes made to one schedule layer, newest first.
+///
+/// Every set and clear of a layer is recorded with who made it and when. A
+/// change whose `schedule` is null cleared the layer, so it no longer
+/// overrides the one beneath. The `group` layer needs `group_id` and the
+/// `machine` layer `machine_id`; the `fleet` layer needs neither.
+#[utoipa::path(
+	post,
+	path = "/schedule_history",
+	operation_id = "backups_schedule_history",
+	tag = "backups",
+	security(("tailscale-user" = [])),
+	request_body = ScheduleHistoryArgs,
+	responses(
+		(status = 200, body = Vec<ScheduleChangeView>),
+		(status = 400, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn schedule_history(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+	Json(args): Json<ScheduleHistoryArgs>,
+) -> Result<Json<Vec<ScheduleChangeView>>> {
+	let key = match (args.layer, args.group_id, args.machine_id) {
+		(ScheduleLayer::Fleet, _, _) => LayerKey::Fleet,
+		(ScheduleLayer::Group, Some(group), _) => LayerKey::Group(group),
+		(ScheduleLayer::Machine, _, Some(machine)) => LayerKey::Machine(machine),
+		_ => {
+			return Err(AppError::BadRequest(
+				"the group layer needs a group_id and the machine layer a machine_id".into(),
+			));
+		}
+	};
+	let mut conn = state.db.get().await?;
+	let changes = ScheduleChange::list_for_layer(&mut conn, key, &args.r#type).await?;
+	Ok(Json(
+		changes
+			.into_iter()
+			.map(|c| ScheduleChangeView {
+				schedule: c.schedule(),
+				changed_by: c.changed_by,
+				changed_at: c.changed_at,
+			})
+			.collect(),
+	))
+}
+
+/// A schedule being edited, and whose firings to preview.
+#[derive(Deserialize, ToSchema)]
+pub struct SchedulePreviewArgs {
+	/// Backup type.
+	#[serde(rename = "type")]
+	#[schema(value_type = String)]
+	pub r#type: BackupType,
+	/// The schedule as typed, not yet saved.
+	pub schedule: Schedule,
+	/// Preview for this machine alone: the machine override being edited.
+	pub machine_id: Option<Uuid>,
+	/// Preview for the machines this group's override would apply to. With
+	/// neither this nor `machine_id`, the fleet-wide default's.
+	pub group_id: Option<Uuid>,
+	/// How many firings to show for each machine (default 5, at most 20).
+	pub count: Option<u32>,
+}
+
+/// The next firings of a cron schedule for one machine.
+#[derive(Serialize, ToSchema)]
+pub struct PreviewMachine {
+	/// The machine the firings are read for; null when no machine applies and
+	/// the preview stands in for one.
+	pub machine_id: Option<Uuid>,
+	/// The machine's name, when there is one.
+	pub machine_name: Option<String>,
+	/// The zone the expression is read in for this machine, and where that
+	/// came from. A UTC fallback is flagged by its source.
+	pub zone: ZoneUsed,
+	/// The firings, in order. Each is an instant; present it in `zone`.
+	pub firings: Vec<Timestamp>,
+}
+
+/// What a schedule being edited would do.
+#[derive(Serialize, ToSchema)]
+pub struct SchedulePreview {
+	/// Why the schedule would be refused, when it would.
+	pub refusal: Option<String>,
+	/// For a machine override, the machine's own firings; for a group override
+	/// or the fleet default, one machine in each distinct zone among those it
+	/// applies to. Empty unless the schedule is a cron expression.
+	pub machines: Vec<PreviewMachine>,
+}
+
+/// Preview the next firings of a cron schedule being edited.
+///
+/// Says why the schedule would be refused when it would. Otherwise, for a
+/// cron expression, lists the next few firings with `H` resolved per machine:
+/// the machine's own for a machine override, and for a group override or the
+/// fleet-wide default one machine in each distinct zone among those it applies
+/// to. Nothing is saved.
+#[utoipa::path(
+	post,
+	path = "/schedule_preview",
+	operation_id = "backups_schedule_preview",
+	tag = "backups",
+	security(("tailscale-user" = [])),
+	request_body = SchedulePreviewArgs,
+	responses((status = 200, body = SchedulePreview)),
+)]
+pub async fn schedule_preview(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+	Json(args): Json<SchedulePreviewArgs>,
+) -> Result<Json<SchedulePreview>> {
+	if let Err(refusal) = args.schedule.validate() {
+		return Ok(Json(SchedulePreview {
+			refusal: Some(refusal.to_string()),
+			machines: Vec::new(),
+		}));
+	}
+	let Schedule::Cron { expression, zone } = &args.schedule else {
+		return Ok(Json(SchedulePreview {
+			refusal: None,
+			machines: Vec::new(),
+		}));
+	};
+	let expr = CronExpr::read(expression).map_err(|e| AppError::BadRequest(e.to_string()))?;
+	let count = args.count.unwrap_or(5).clamp(1, 20) as usize;
+	let now = Timestamp::now();
+
+	let mut conn = state.db.get().await?;
+
+	// The machines the schedule would apply to.
+	let candidates = match args.machine_id {
+		Some(machine_id) => vec![Machine::get_by_id(&mut conn, machine_id).await?],
+		None => {
+			MachineBackupCapability::machines_enabled_for(&mut conn, &args.r#type, args.group_id)
+				.await?
+		}
+	};
+	let machine_ids: Vec<Uuid> = candidates.iter().map(|m| m.id).collect();
+	let group_ids: Vec<Uuid> = candidates.iter().filter_map(|m| m.group_id).collect();
+	let book = ScheduleBook::load(&mut conn, Some(&group_ids), Some(&machine_ids)).await?;
+	let mut applicable: Vec<Machine> = if args.machine_id.is_some() {
+		candidates
+	} else {
+		candidates
+			.into_iter()
+			.filter(|machine| {
+				let layer = book
+					.resolve(machine.id, machine.group_id, &args.r#type)
+					.layer;
+				match args.group_id {
+					Some(_) => layer != Some(ScheduleLayer::Machine),
+					None => matches!(layer, None | Some(ScheduleLayer::Fleet)),
+				}
+			})
+			.collect()
+	};
+	applicable.sort_by(|a, b| a.name.cmp(&b.name));
+
+	// One machine for each distinct zone.
+	let mut by_zone: std::collections::BTreeMap<String, (Option<Machine>, ZoneUsed)> =
+		std::collections::BTreeMap::new();
+	for machine in applicable {
+		let used = resolve_zone(zone.as_deref(), book.reported_zone(machine.id));
+		by_zone
+			.entry(used.name.clone())
+			.or_insert((Some(machine), used));
+	}
+	if by_zone.is_empty() {
+		let used = resolve_zone(zone.as_deref(), None);
+		by_zone.insert(used.name.clone(), (None, used));
+	}
+
+	let mut machines = Vec::with_capacity(by_zone.len());
+	for (_, (machine, used)) in by_zone {
+		let id = machine.as_ref().map_or(Uuid::nil(), |m| m.id);
+		let seed = schedule_seed(id, args.r#type.as_str());
+		let firings = expr
+			.bind(seed, &used.name)
+			.map(|cron| cron.firings_after(now).take(count).collect())
+			.unwrap_or_default();
+		machines.push(PreviewMachine {
+			machine_id: machine.as_ref().map(|m| m.id),
+			machine_name: machine.map(|m| m.name),
+			zone: used,
+			firings,
+		});
+	}
+	Ok(Json(SchedulePreview {
+		refusal: None,
+		machines,
+	}))
+}
+
 /// Effective schedule and retention for one backup type of a group, combining
-/// any per-group override with the canopy-wide default.
+/// any per-group override with the fleet-wide default.
 #[derive(Serialize, ToSchema)]
 pub struct GroupTypeScheduleView {
 	/// Backup type this schedule and retention apply to.
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
-	/// Seconds between scheduled runs; null = manual-only (no scheduled interval).
-	pub effective_interval: Option<i64>,
+	/// The fleet-wide default schedule for the type; manual-only when it has
+	/// none.
+	pub fleet_schedule: Schedule,
+	/// The group's own schedule override; null when the group inherits.
+	pub group_schedule: Option<Schedule>,
+	/// What the group's machines without an override of their own follow: the
+	/// group's override, else the fleet-wide default.
+	pub schedule: Schedule,
+	/// The layer `schedule` comes from; null when nothing sets one, which is
+	/// manual-only.
+	pub layer: Option<ScheduleLayer>,
 	/// Retention policy that currently applies: the group's override if set,
-	/// else the canopy-wide default for this type, else the organization's
+	/// else the fleet-wide default for this type, else the organization's
 	/// minimum retention floor.
 	pub effective_retention: RetentionPolicy,
-	/// Whether this group has an explicit override for this type, rather
-	/// than inheriting the canopy-wide default.
-	pub has_override: bool,
+	/// Whether this group has its own retention override for this type, rather
+	/// than inheriting the fleet-wide default.
+	pub has_retention_override: bool,
 	/// Whether the effective config opts out of the org retention floor — taken
 	/// from the override if present, else the type default.
 	pub allow_below_floor: bool,
-	/// When the next scheduled backup of this type is expected: the group's most
-	/// recent successful backup of the type plus the interval — or "now" if the
-	/// type is scheduled but has never succeeded yet. Null for manual-only types.
-	pub next_run_at: Option<Timestamp>,
 }
 
 /// List the effective schedule and retention for every backup type a group's
 /// applications have declared support for (not just the ones currently enabled).
 ///
-/// A type with no scheduled interval still appears, with a null
-/// `effective_interval`, since a manually run backup of that type is still
-/// retained under its own policy.
+/// A manual-only type still appears, since a manually run backup of that type is
+/// still retained under its own policy.
 #[utoipa::path(
 	post,
 	path = "/group_schedules",
@@ -1634,36 +2022,17 @@ pub async fn group_schedules(
 	let types =
 		MachineBackupCapability::declared_types_for_group(&mut conn, args.server_group_id).await?;
 
-	// Anchor for the next-expected-run estimate: the group's most recent
-	// successful backup per type (max over its applications).
-	let mut last_success: std::collections::HashMap<BackupType, Timestamp> =
-		std::collections::HashMap::new();
-	for ((_, ty), run) in
-		BackupRun::latest_success_by_machine_type_for_group(&mut conn, args.server_group_id).await?
-	{
-		let at = run.anchor();
-		last_success
-			.entry(ty)
-			.and_modify(|t| {
-				if at > *t {
-					*t = at;
-				}
-			})
-			.or_insert(at);
-	}
-	let now = Timestamp::now();
-
 	let mut out = Vec::with_capacity(types.len());
 	for ty in types {
 		let over = ServerGroupBackupSchedule::get(&mut conn, args.server_group_id, &ty).await?;
 		let def = BackupTypeDefault::get(&mut conn, &ty).await?;
-		// An override row decides alone (NULL interval = manual-only); only its
-		// absence inherits the type default. Same precedence as the schedulers.
-		let effective_interval = match over.as_ref() {
-			Some(over) => over.expected_interval,
-			None => def.as_ref().and_then(|d| d.default_interval),
-		}
-		.map(|pg| pg.0.as_secs());
+		let fleet_schedule = def.as_ref().map_or(Schedule::Manual, |d| d.schedule());
+		let group_schedule = over.as_ref().and_then(|s| s.schedule());
+		let (schedule, layer) = match (&group_schedule, &def) {
+			(Some(s), _) => (s.clone(), Some(ScheduleLayer::Group)),
+			(None, Some(_)) => (fleet_schedule.clone(), Some(ScheduleLayer::Fleet)),
+			(None, None) => (Schedule::Manual, None),
+		};
 		let effective_retention = over
 			.as_ref()
 			.and_then(|s| s.retention.as_ref())
@@ -1681,21 +2050,15 @@ pub async fn group_schedules(
 			.map(|s| s.allow_below_floor)
 			.or_else(|| def.as_ref().map(|d| d.allow_below_floor))
 			.unwrap_or(false);
-		// Scheduled types: latest success + interval (or now if never run yet).
-		// Manual-only types (no interval) have no expected next run.
-		let next_run_at = effective_interval.map(|secs| {
-			last_success
-				.get(&ty)
-				.and_then(|last| Timestamp::from_second(last.as_second() + secs).ok())
-				.unwrap_or(now)
-		});
 		out.push(GroupTypeScheduleView {
 			r#type: ty,
-			effective_interval,
+			fleet_schedule,
+			group_schedule,
+			schedule,
+			layer,
 			effective_retention,
+			has_retention_override: over.as_ref().is_some_and(|s| s.retention.is_some()),
 			allow_below_floor,
-			has_override: over.is_some(),
-			next_run_at,
 		});
 	}
 	Ok(Json(out))
@@ -1708,8 +2071,8 @@ pub struct TypeDefaultView {
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
-	/// Seconds between scheduled runs; null = manual-only.
-	pub default_interval: Option<i64>,
+	/// The default schedule; manual-only, an interval, or a cron expression.
+	pub default_schedule: Schedule,
 	/// Default retention policy for this type, if set.
 	pub default_retention: Option<RetentionPolicy>,
 	/// Whether a server's capability for this type is enabled by default
@@ -1740,8 +2103,8 @@ pub async fn type_defaults(
 	Ok(Json(
 		rows.into_iter()
 			.map(|d| TypeDefaultView {
+				default_schedule: d.schedule(),
 				r#type: d.r#type,
-				default_interval: d.default_interval.map(|pg| pg.0.as_secs()),
 				default_retention: RetentionPolicy::from_json(&d.default_retention),
 				auto_enable: d.auto_enable,
 				allow_below_floor: d.allow_below_floor,
@@ -1758,9 +2121,8 @@ pub struct SetTypeDefaultArgs {
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
-	/// Seconds between scheduled runs; null = manual-only.
-	#[schema(value_type = Option<i64>, format = "int64")]
-	pub default_interval: Option<PgDuration>,
+	/// The default schedule for every group and machine without an override.
+	pub default_schedule: Schedule,
 	/// Default retention policy for this type.
 	pub default_retention: RetentionPolicy,
 	/// Whether a server's capability for this type should be enabled by
@@ -1775,8 +2137,9 @@ pub struct SetTypeDefaultArgs {
 
 /// Set the canopy-wide default schedule and retention for a backup type.
 ///
-/// A retention policy below the organization's retention floor is rejected
-/// with 400, unless `allow_below_floor` is set.
+/// A retention policy below the organization's retention floor, or a schedule
+/// that would be refused, is rejected with 400. The former is allowed when
+/// `allow_below_floor` is set.
 #[utoipa::path(
 	post,
 	path = "/set_type_default",
@@ -1788,22 +2151,26 @@ pub struct SetTypeDefaultArgs {
 )]
 pub async fn set_type_default(
 	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
+	TailscaleAdmin(admin): TailscaleAdmin,
 	Json(args): Json<SetTypeDefaultArgs>,
 ) -> Result<Json<()>> {
 	if !args.allow_below_floor {
 		args.default_retention.validate_floor()?;
 	}
+	let (interval, cron, zone) = args.default_schedule.to_columns();
 	let mut conn = state.db.get().await?;
-	BackupTypeDefault::upsert(
+	schedules::upsert_default(
 		&mut conn,
 		NewBackupTypeDefault {
 			r#type: args.r#type,
-			default_interval: args.default_interval,
+			default_interval: interval.map(|s| PgDuration(jiff::SignedDuration::from_secs(s))),
+			default_cron: cron,
+			default_zone: zone,
 			default_retention: args.default_retention.to_json(),
 			auto_enable: args.auto_enable,
 			allow_below_floor: args.allow_below_floor,
 		},
+		Some(&admin.login),
 	)
 	.await?;
 	Ok(Json(()))
@@ -2201,8 +2568,9 @@ pub async fn stats(
 		now,
 		RECENT_LIMIT as usize,
 	);
-	let mut intervals: std::collections::HashMap<BackupType, Option<i64>> =
-		std::collections::HashMap::new();
+	let machine_ids: Vec<Uuid> = machines.iter().map(|m| m.id).collect();
+	let book =
+		ScheduleBook::load(&mut conn, Some(&[args.server_group_id]), Some(&machine_ids)).await?;
 	let mut pending_requests = Vec::new();
 	let mut capabilities = Vec::new();
 	let mut restore_windows = Vec::new();
@@ -2227,15 +2595,15 @@ pub async fn stats(
 		}
 		for cap in MachineBackupCapability::list_for_machine(&mut conn, machine.id).await? {
 			let last = latest_by.get(&(cap.machine_id, cap.r#type.clone()));
-			let interval = match intervals.get(&cap.r#type) {
-				Some(v) => *v,
-				None => {
-					let v = effective_interval_secs(&mut conn, args.server_group_id, &cap.r#type)
-						.await?;
-					intervals.insert(cap.r#type.clone(), v);
-					v
-				}
-			};
+			let (schedule, next_backup) = schedule_fields(
+				&book,
+				cap.machine_id,
+				Some(args.server_group_id),
+				&cap.r#type,
+				cap.enabled,
+				last.map(|r| r.anchor()),
+				now,
+			);
 			let issuance = device_by_machine
 				.get(&cap.machine_id)
 				.copied()
@@ -2249,12 +2617,8 @@ pub async fn stats(
 				latest_snapshot_id: last.and_then(|r| r.snapshot_id.clone()),
 				latest_snapshot_at: last.map(|r| r.anchor()),
 				latest_snapshot_bytes: last.and_then(|r| r.bytes_uploaded),
-				next_backup_at: next_backup_at(
-					cap.enabled,
-					interval,
-					last.map(|r| r.anchor()),
-					now,
-				),
+				schedule,
+				next_backup,
 				processing_since: processing_since(now, issuance, last_report),
 				progress: in_flight_run_id(now, issuance, last_report)
 					.and_then(|rid| capability_progress.get(&rid).cloned()),
@@ -2409,14 +2773,21 @@ pub async fn capabilities(
 	)
 	.await?;
 	let rows = MachineBackupCapability::list_for_machine(&mut conn, args.machine_id).await?;
+	let group_ids: Vec<Uuid> = group_id.into_iter().collect();
+	let book = ScheduleBook::load(&mut conn, Some(&group_ids), Some(&[args.machine_id])).await?;
 	let mut out = Vec::with_capacity(rows.len());
 	for c in rows {
 		let last =
 			BackupRun::latest_success_for_machine(&mut conn, c.machine_id, &c.r#type).await?;
-		let interval = match group_id {
-			Some(g) => effective_interval_secs(&mut conn, g, &c.r#type).await?,
-			None => None,
-		};
+		let (schedule, next_backup) = schedule_fields(
+			&book,
+			c.machine_id,
+			group_id,
+			&c.r#type,
+			c.enabled,
+			last.as_ref().map(|r| r.anchor()),
+			now,
+		);
 		let issuance = device_id.and_then(|d| latest_issuance.get(&(d, c.r#type.clone())).copied());
 		let last_report = latest_report
 			.get(&(c.machine_id, c.r#type.clone()))
@@ -2426,12 +2797,8 @@ pub async fn capabilities(
 			latest_snapshot_id: last.as_ref().and_then(|r| r.snapshot_id.clone()),
 			latest_snapshot_at: last.as_ref().map(|r| r.anchor()),
 			latest_snapshot_bytes: last.as_ref().and_then(|r| r.bytes_uploaded),
-			next_backup_at: next_backup_at(
-				c.enabled,
-				interval,
-				last.as_ref().map(|r| r.anchor()),
-				now,
-			),
+			schedule,
+			next_backup,
 			processing_since: processing_since(now, issuance, last_report),
 			progress: in_flight_run_id(now, issuance, last_report)
 				.and_then(|rid| capability_progress.get(&rid).cloned()),

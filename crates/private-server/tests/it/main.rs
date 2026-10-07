@@ -8,6 +8,7 @@ mod application_host;
 mod application_paths;
 mod application_types;
 mod artifacts;
+mod backup_schedules;
 mod backups;
 mod bestool;
 mod certificates;

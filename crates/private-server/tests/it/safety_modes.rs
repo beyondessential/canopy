@@ -709,3 +709,77 @@ async fn a_path_served_by_another_method_is_the_routers_to_refuse() {
 	})
 	.await;
 }
+
+/// Changing a backup schedule at any layer is write, including clearing it; only
+/// clearing a retention override, which shortens what is kept, needs danger.
+// spec: SAFE
+#[tokio::test(flavor = "multi_thread")]
+async fn backup_schedules_are_write_and_clearing_retention_is_danger() {
+	trust_headers();
+
+	commons_tests::server::run(async |mut conn, _public, private| {
+		Admin::add(&mut conn, OPERATOR).await.expect("add admin");
+		let id = new_session(&private, OPERATOR).await;
+		private
+			.post("/api/safety/raise")
+			.add_header("Tailscale-User-Login", OPERATOR)
+			.add_header("Tailscale-User-Name", "Operator")
+			.add_header(SESSION_HEADER, &id)
+			.json(&json!({"mode": "write"}))
+			.await
+			.assert_status_ok();
+
+		let nobody = "00000000-0000-0000-0000-000000000000";
+		let call = async |path: &str, body: serde_json::Value| {
+			private
+				.post(path)
+				.add_header("Tailscale-User-Login", OPERATOR)
+				.add_header("Tailscale-User-Name", "Operator")
+				.add_header(SESSION_HEADER, &id)
+				.json(&body)
+				.await
+				.status_code()
+		};
+
+		// Each is answered (these name nothing that exists, so it is a 404 or
+		// 400 from the handler) rather than refused at the boundary.
+		for (path, body) in [
+			(
+				"/api/backups/set_schedule",
+				json!({"server_group_id": nobody, "type": "files", "schedule": {"kind": "manual"}}),
+			),
+			(
+				"/api/backups/clear_schedule",
+				json!({"server_group_id": nobody, "type": "files"}),
+			),
+			(
+				"/api/backups/set_machine_schedule",
+				json!({"machine_id": nobody, "type": "files", "schedule": {"kind": "manual"}}),
+			),
+			(
+				"/api/backups/clear_machine_schedule",
+				json!({"machine_id": nobody, "type": "files"}),
+			),
+			(
+				"/api/backups/set_type_default",
+				json!({
+					"type": "files", "default_schedule": {"kind": "manual"},
+					"default_retention": {"keep_daily": 7, "keep_weekly": 4, "keep_monthly": 6},
+				}),
+			),
+		] {
+			assert_ne!(call(path, body).await, 403, "{path} is a write");
+		}
+
+		assert_eq!(
+			call(
+				"/api/backups/clear_retention",
+				json!({"server_group_id": nobody, "type": "files"})
+			)
+			.await,
+			403,
+			"clearing retention is danger"
+		);
+	})
+	.await;
+}

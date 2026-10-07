@@ -14,16 +14,18 @@
 //! issue's own membership isolates the `is_monitored` gate from that noise.
 
 use commons_tests::db::TestDb;
-use commons_types::backup::BackupType;
+use commons_types::backup::{
+	BackupType,
+	schedule::{EffectiveSchedule, Schedule, ScheduleLayer},
+};
 use commons_types::status::CheckResult;
 use database::backup::refs;
 use database::backup::staleness::{ScanRow, StalenessVerdict};
 use database::diesel_async::AsyncPgConnection;
-use database::pg_duration::PgDuration;
 use database::{
 	BackupConfigStatus, BackupPurpose, BackupRepoObservedSnapshot, BackupRepoSnapshot, BackupRun,
 	MachineBackupCapability, NewBackupRun, NewObservedSnapshot, NewServerGroupBackupConfig,
-	NewServerGroupBackupSchedule, RunOutcome, ServerGroupBackupConfig, ServerGroupBackupSchedule,
+	RunOutcome, ServerGroupBackupConfig, ServerGroupBackupSchedule,
 };
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
@@ -151,18 +153,19 @@ async fn insert_schedule(
 	ty: &BackupType,
 	interval: SignedDuration,
 ) {
-	ServerGroupBackupSchedule::upsert(
+	ServerGroupBackupSchedule::set_schedule(
 		conn,
-		NewServerGroupBackupSchedule {
-			group_id,
-			r#type: ty.clone(),
-			expected_interval: Some(PgDuration(interval)),
-			retention: Some(retention()),
-			allow_below_floor: false,
+		group_id,
+		ty,
+		&Schedule::Interval {
+			seconds: interval.as_secs(),
 		},
 	)
 	.await
 	.expect("insert schedule");
+	ServerGroupBackupSchedule::set_retention(conn, group_id, ty, &retention(), false)
+		.await
+		.expect("insert retention");
 }
 
 async fn enable_capability(conn: &mut AsyncPgConnection, machine_id: Uuid, ty: &BackupType) {
@@ -508,7 +511,15 @@ fn scan_row(
 		device_id: None,
 		r#type: BackupType::TamanuPostgres,
 		is_monitored: true,
-		expected_interval: interval,
+		schedule: EffectiveSchedule {
+			schedule: Schedule::Interval {
+				seconds: interval.as_secs(),
+			},
+			layer: Some(ScheduleLayer::Group),
+			zone: None,
+			since: None,
+			layers_since: None,
+		},
 		config_created_at,
 		machine_registered_at: None,
 		last_success_at,
@@ -622,10 +633,13 @@ async fn scan_includes_pair_inheriting_the_type_default_interval() {
 			.find(|r| r.machine_id == machine_id && r.r#type == pg)
 			.expect("pair inheriting the type default is in the scan set");
 		assert_eq!(
-			row.expected_interval,
-			SignedDuration::from_hours(6),
+			row.schedule.schedule,
+			Schedule::Interval {
+				seconds: SignedDuration::from_hours(6).as_secs(),
+			},
 			"the inherited interval is the type default",
 		);
+		assert_eq!(row.schedule.layer, Some(ScheduleLayer::Fleet));
 	})
 	.await;
 }
@@ -641,18 +655,9 @@ async fn scan_excludes_pair_whose_override_makes_it_manual_only() {
 
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
 		enable_capability(&mut conn, machine_id, &pg).await;
-		ServerGroupBackupSchedule::upsert(
-			&mut conn,
-			NewServerGroupBackupSchedule {
-				group_id,
-				r#type: pg.clone(),
-				expected_interval: None,
-				retention: Some(retention()),
-				allow_below_floor: false,
-			},
-		)
-		.await
-		.expect("insert manual-only override");
+		ServerGroupBackupSchedule::set_schedule(&mut conn, group_id, &pg, &Schedule::Manual)
+			.await
+			.expect("insert manual-only override");
 
 		let rows = database::backup::staleness::scan_rows(&mut conn)
 			.await

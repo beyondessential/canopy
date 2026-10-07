@@ -3,6 +3,7 @@
 //! the periodic *logic*: staleness and report-vs-inventory reconciliation.
 //!
 //! - [`refs`] — the stable `(source, ref)` alert keys (a contract).
+//! - [`schedules`] — where schedules are stored and how a machine's resolves.
 //! - [`staleness`] — staleness scan over reported runs + maintenance staleness.
 //! - [`reconcile`] — reconcile device reports against repo inventory.
 //!
@@ -15,6 +16,7 @@
 
 pub mod reconcile;
 pub mod refs;
+pub mod schedules;
 pub mod staleness;
 
 use commons_errors::Result;

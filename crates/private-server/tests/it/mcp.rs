@@ -922,7 +922,10 @@ async fn backup_defaults_lists_seeded_org_default() {
 			.iter()
 			.find(|d| d["type"] == "tamanu-postgres")
 			.expect("seeded default present");
-		assert_eq!(tpg["default_interval_seconds"], 6 * 60 * 60);
+		assert_eq!(
+			tpg["default_schedule"],
+			serde_json::json!({"kind": "interval", "seconds": 6 * 60 * 60})
+		);
 		assert_eq!(tpg["default_retention"]["keep_daily"], 7);
 		assert_eq!(tpg["auto_enable"], false);
 	})
@@ -1758,4 +1761,73 @@ async fn get_server_returns_its_own_checks() {
 		assert!(!names.contains(&"disk_free"), "{names:?}");
 	})
 	.await
+}
+
+/// Get machine carries, for each backup type the box can run, the schedule it
+/// follows with the layer that sets it, its next scheduled backup, and whether
+/// it is enabled; Get group carries the machines' own overrides.
+// spec: MCP#discovery
+#[tokio::test(flavor = "multi_thread")]
+async fn get_machine_and_get_group_carry_backup_schedules() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		seed(&mut conn).await;
+		conn.batch_execute(&format!(
+			"INSERT INTO machine_backup_capabilities (machine_id, type, enabled) VALUES \
+				('{SRV_GROUPED}', 'tamanu-postgres', true), ('{SRV_GROUPED}', 'files', true), \
+				('{SRV_GROUPED}', 'logs', false); \
+			 INSERT INTO server_group_backup_schedule (group_id, type, expected_cron, schedule_zone) \
+				VALUES ('{GROUP}', 'tamanu-postgres', '0 2 * * *', 'Pacific/Auckland'); \
+			 INSERT INTO machine_backup_schedule (machine_id, type, expected_interval) \
+				VALUES ('{SRV_GROUPED}', 'files', INTERVAL '12 hours');"
+		))
+		.await
+		.expect("seed backups");
+
+		let machine = call_tool!(
+			private,
+			"get_machine",
+			serde_json::json!({ "machine_id": SRV_GROUPED })
+		);
+		let backups = machine["backups"].as_array().expect("backups");
+		let of = |ty: &str| {
+			backups
+				.iter()
+				.find(|b| b["type"] == ty)
+				.unwrap_or_else(|| panic!("{ty} in {backups:?}"))
+		};
+
+		let pg = of("tamanu-postgres");
+		assert_eq!(pg["enabled"], true);
+		assert_eq!(pg["schedule"]["layer"], "group");
+		assert_eq!(pg["schedule"]["schedule"]["kind"], "cron");
+		assert_eq!(pg["schedule"]["zone"]["name"], "Pacific/Auckland");
+		assert_eq!(pg["schedule"]["zone"]["source"], "schedule");
+		assert!(
+			["at", "due_until"].contains(&pg["next_backup"]["kind"].as_str().unwrap()),
+			"{pg}"
+		);
+
+		let files = of("files");
+		assert_eq!(files["schedule"]["layer"], "machine");
+		assert_eq!(files["schedule"]["schedule"]["seconds"], 12 * 3600);
+		assert_eq!(files["next_backup"]["kind"], "due_now", "never backed up");
+
+		let logs = of("logs");
+		assert_eq!(logs["enabled"], false);
+		assert!(logs["next_backup"].is_null(), "a disabled type has none");
+		assert_eq!(logs["schedule"]["schedule"]["kind"], "manual");
+
+		let group = call_tool!(
+			private,
+			"get_group",
+			serde_json::json!({ "group_id": GROUP })
+		);
+		let overrides = group["backups"]["machine_schedules"]
+			.as_array()
+			.expect("machine_schedules");
+		assert_eq!(overrides.len(), 1);
+		assert_eq!(overrides[0]["machine_id"], SRV_GROUPED);
+		assert_eq!(overrides[0]["type"], "files");
+	})
+	.await;
 }

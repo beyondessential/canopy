@@ -48,10 +48,82 @@ A bucket holding unrelated content is refused rather than written into; Canopy n
 Either way Canopy creates and owns the passphrase secret, and configuration and secret are created together — if the secret cannot be stored, the configuration is rolled back, so a configuration never exists without its passphrase.
 The supplied or generated passphrase is only the starting point: Canopy rotates it on a cadence thereafter (see [BKJ](../jobs/backup.md)), and the recovery ceremony recovers whatever the current passphrase is.
 
-## Scheduling and retention
+## Scheduling
 
-Each `(group, type)` has an expected backup interval and a retention policy, taken from a per-`(group, type)` override when set, otherwise from the fleet-wide default for that type.
-A manual-only type has no interval and is backed up only on an explicit request.
+Each `(machine, type)` has a schedule, which is one of:
+
+- **manual-only**, backed up only on an explicit request;
+- **an interval**, of at least an hour;
+- **a cron expression**, optionally with the timezone it is read in.
+
+A machine's schedule for a type is the `(machine, type)` override when one is set, otherwise the `(group, type)` override, otherwise the fleet-wide default for the type.
+An override replaces the schedule beneath it whole: its kind, its timing, and its timezone.
+Each layer is set and cleared on its own, and clearing one falls back to the next.
+A machine's override stays with the machine when it moves to another group or the type is disabled on it.
+Wherever a schedule is shown, it says which layer it comes from.
+Every change to a layer, setting or clearing it, is recorded with who made it and when, and each layer's history is shown where it is edited.
+
+### Cron expressions
+
+A cron expression has the five standard fields: minute, hour, day of month, month, and day of week.
+Each field takes single values, ranges, steps, and lists, months and weekdays may be given by their three-letter English names, and Sunday is either 0 or 7.
+Day of month also takes `L` for the last day of the month and `15W` for the weekday nearest the 15th; day of week also takes `5L` for the month's last Friday and `5#3` for its third Friday.
+When either day field starts with `*` a day must match both of them, and otherwise a day matching either one fires, as in Vixie cron.
+Any field may instead be `H` on its own, standing for a single value Canopy derives from the machine and the type and maps into that field's range.
+The derived value is stable, so a machine's backup of a type always lands in the same slot, while a box's types and a group's machines spread out across the field.
+
+An expression is refused when it would never fire, when any two consecutive firings would be less than an hour apart, or when it is far longer than any schedule needs.
+Validation considers every value `H` could take, so an expression accepted for one machine is valid for every machine.
+Validation reads the expression on a clock without daylight-saving changes; what those changes do to firings is settled when the expression runs.
+An expression is validated when it is set and only read when it runs.
+A stored expression that can no longer be read makes no backup due, is shown as unreadable wherever the machine's next backup is shown, and counts as missing every firing, so the machine goes stale rather than appearing manual-only.
+
+An expression is read in the timezone set on its schedule, otherwise in the operating system timezone the machine reports (see [FIG](figures.md)), otherwise in UTC.
+A reported Windows zone name is read as its IANA equivalent.
+So a fleet default of nightly at 2am backs each machine up at its own 2am.
+A machine whose cron schedule falls back to UTC because it has reported no timezone, or one Canopy does not recognise, is flagged as such wherever its schedule or next backup is shown, and in the firing preview, so an operator can tell a deliberate UTC schedule from one waiting on the machine.
+Firings follow the zone's wall clock across daylight-saving changes, so a firing at a time the clocks skip does not happen that day.
+A firing is skipped when it falls less than an hour after the previous one, or repeats the previous one's wall-clock time as the clocks go back: it opens no window and does not count as a firing, so the previous firing's window runs on to halfway to the next firing that is kept.
+
+### When a backup is due
+
+A machine's backup of a type is due only while the type is an enabled capability of the machine and the group's configuration is ready, and Canopy tells the machine on its next status report (see [STA](../public-server/statuses.md)).
+
+Under an interval, the backup is due once the interval has passed since the snapshot moment of the machine's latest successful backup of the type, or immediately if there is none, and stays due until one succeeds.
+
+Under a cron expression, each firing opens a due window that closes halfway to the next firing.
+The backup is due while a window is open and no backup of the type has succeeded with a snapshot moment since its firing, so a failed run is retried within the window.
+A window that closes unmet is a missed firing: the backup waits for the next firing rather than running whenever the machine is next in contact, so it never runs outside the time the operator chose.
+A machine that starts participating while a window is open is due at once, since that is still within the time the operator chose.
+
+An expression without `H` opens each machine's window a short distance after the firing, derived stably from the machine and the type, so a group sharing one schedule does not reach its storage all at once.
+The distance stays small against the window, so the backup still starts close to the time the operator chose.
+An expression with `H` is the operator's own spread, and its windows open at the firing exactly.
+
+A backup is always due according to the machine's schedule as it stands.
+Canopy records when each machine's schedule for a type took effect: the latest moment a change at any layer altered what the schedule resolves to, or the timezone it is read in changed, including the machine reporting a different one.
+A machine reporting another name for the zone it was read in, or one unrecognised name in place of another, has not changed its timezone.
+A firing from before that moment opens no window, so a change never makes a backup due at a time neither the old schedule nor the new one chose.
+A run already in progress is unaffected.
+
+### Editing schedules
+
+The fleet-wide default is edited on the backup defaults settings page and the `(group, type)` override on the group's backup view, each offering all three kinds.
+A `(machine, type)` override is edited both beside the machine's participation on the group's backup view and on the machine's own page, each showing the schedule the machine inherits when it has no override.
+
+While a cron expression is being edited, the operator sees the next few firings it produces, in the zone each is read in and with `H` resolved, so a mistyped expression is caught before it is saved.
+For a machine override these are the machine's own; for a group override or fleet default they are shown for one machine in each distinct timezone among the machines it applies to.
+An expression that would be refused is reported as the operator types it, saying why.
+
+Each machine's next scheduled backup of each type is shown against it wherever its backups are listed.
+Under a cron expression that is the next firing in the zone the expression is read in, or, while a window is open, that the backup is due until the window closes.
+Under an interval it is when the backup next falls due, or that it is due now.
+A manual-only type is shown as manual.
+
+## Retention
+
+Each `(group, type)` has a retention policy, taken from a per-`(group, type)` override when set, otherwise from the fleet-wide default for that type.
+Retention belongs to the group because its machines share one repository.
 Retention is floored to an organisational minimum; a configuration may deliberately opt out of the floor, which is recorded as the dangerous choice it is.
 
 ## Participation and on-demand
