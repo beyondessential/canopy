@@ -1467,6 +1467,27 @@ impl BackupRun {
 			.map_err(AppError::from)
 	}
 
+	/// Latest successful backup of each type for one machine, by the same
+	/// measure as [`Self::latest_success_for_machine`].
+	pub async fn latest_success_by_type_for_machine(
+		db: &mut AsyncPgConnection,
+		machine_id: Uuid,
+	) -> Result<HashMap<BackupType, Self>> {
+		use crate::schema::backup_runs::dsl;
+
+		let rows: Vec<Self> = dsl::backup_runs
+			.filter(dsl::machine_id.eq(machine_id))
+			.filter(dsl::purpose.eq(BackupPurpose::Backup))
+			.filter(dsl::outcome.eq(RunOutcome::Success))
+			.distinct_on(dsl::type_)
+			.order_by((dsl::type_, anchor_expr().desc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(rows.into_iter().map(|r| (r.r#type.clone(), r)).collect())
+	}
+
 	/// Latest successful backup per `(server, type)` within a group — the bulk
 	/// staleness-scan input. Keyed `(machine_id, type)`; rows with a NULL
 	/// `machine_id` are skipped (they can't be attributed to a server).

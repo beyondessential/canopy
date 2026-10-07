@@ -1962,9 +1962,18 @@ async fn latest_success_selects_by_data_age_not_report_order() {
 			.await
 			.unwrap();
 		assert_eq!(
-			map.get(&(machine_id, pg)).map(|r| r.id),
+			map.get(&(machine_id, pg.clone())).map(|r| r.id),
 			Some(a),
 			"the batch loader must agree with the single-server query",
+		);
+
+		let by_type = BackupRun::latest_success_by_type_for_machine(&mut conn, machine_id)
+			.await
+			.unwrap();
+		assert_eq!(
+			by_type.get(&pg).map(|r| r.id),
+			Some(a),
+			"the per-machine loader must agree with the single-type query",
 		);
 	})
 	.await;

@@ -202,6 +202,7 @@ pub async fn backups_due_now_for_machine(
 	}
 
 	let book = ScheduleBook::load(db, Some(&[group_id]), Some(&[machine_id])).await?;
+	let latest = BackupRun::latest_success_by_type_for_machine(db, machine_id).await?;
 	for cap in MachineBackupCapability::list_for_machine(db, machine_id).await? {
 		if !cap.enabled {
 			continue;
@@ -213,9 +214,7 @@ pub async fn backups_due_now_for_machine(
 		// Due-ness is measured from the data's own moment, matching staleness
 		// detection — otherwise a server could be flagged stale without ever being
 		// asked to back up.
-		let last = BackupRun::latest_success_for_machine(db, machine_id, &cap.r#type)
-			.await?
-			.map(|r| r.anchor());
+		let last = latest.get(&cap.r#type).map(|r| r.anchor());
 		let seed = schedule_seed(machine_id, cap.r#type.as_str());
 		if schedule.is_due(seed, now, last) {
 			due.insert(cap.r#type);

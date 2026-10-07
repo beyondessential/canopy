@@ -367,12 +367,13 @@ impl CanopyMcp {
 		let book = ScheduleBook::load(&mut conn, Some(&group_ids), Some(&[id]))
 			.await
 			.map_err(mcp_err)?;
+		let mut latest = BackupRun::latest_success_by_type_for_machine(&mut conn, id)
+			.await
+			.map_err(mcp_err)?;
 		let now = Timestamp::now();
 		let mut backups = Vec::with_capacity(capabilities.len());
 		for cap in capabilities {
-			let last = BackupRun::latest_success_for_machine(&mut conn, id, &cap.r#type)
-				.await
-				.map_err(mcp_err)?;
+			let last = latest.remove(&cap.r#type);
 			let latest_success_at = last.as_ref().map(|r| r.anchor());
 			let schedule = book.resolve(id, machine.group_id, &cap.r#type);
 			let next_backup = cap.enabled.then(|| {
