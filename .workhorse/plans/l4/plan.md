@@ -10,7 +10,7 @@
 - A control `disabled` for its own reason stays `disabled` and unstriped even when also below its grade. `GradedAction` today striped-and-disables everything blocked; it now has to tell the two apart (child's own `disabled` prop wins), and only intercept activation when the child isn't disabled.
 - Calendar entries in `Upgrades.tsx` (~line 439) drop the "link to the group when amending is blocked" fallback and become blocked openers of the amend form like any other, so in read-only every open entry wears the write stripe.
 - `MachineSetupInstructions` passes `disabled={mint.pending || minting.blocked}` to its re-mint button, naming the blocked state itself because the button sits inside a `Tooltip`. Under the own-reason rule that reads as "disabled for its own reason", so it has to drop `minting.blocked` and leave blocking to `GradedAction`. Auto-mint still waits while minting is blocked: the spec gives a raise only to an operator's activation, never to a page load.
-- `GradedMenuItem`'s single caller (`MaintenanceSection.tsx`) closes the menu inside its own `onClick`. The menu has to close before the raise is asked for, so the item gets an `onCloseMenu` prop that it calls first, then asks for the raise, then calls `onClick`.
+- `GradedMenuItem` had a single caller (`MaintenanceSection.tsx`'s declare-over-environment menu, since replaced by the dialog's picker, leaving it with no caller) that closed the menu inside its own `onClick`. The menu has to close before the raise is asked for, so the item gets an `onCloseMenu` prop that it calls first, then asks for the raise, then calls `onClick`.
 
 ## Proposed danger reasons
 
@@ -76,7 +76,7 @@ Check each one against its handler when you declare it. Short names: `irreversib
 - [x] Add a `dangerReasons(grading)` helper: the union, in list order, of `DANGER_REASONS` over the endpoints whose grade equals the required mode
 - [x] Blocked `GradedAction`: stop cloning `disabled: true` and drop `pointer-events: none` on the child. Keep the stripe and the "Requires … mode" tooltip, and use a pointer cursor instead of `not-allowed`. `aria-disabled` goes: the control is operable, and Playwright (like a screen reader) reads an `aria-disabled` ancestor as disabled. Intercept `onClickCapture` on the wrapper (`preventDefault` + `stopPropagation`), then `requestRaise`, and on `true` click the marked control again, and focus it if nothing took focus
 - [x] Own-reason disabled: when the child, or the control inside a `Tooltip` child, has `disabled`, render it the way a usable control renders, with no stripe and no interception, whatever the mode
-- [x] Blocked `GradedMenuItem`: call `onCloseMenu`, then `requestRaise`, then `onClick` on `true`. Update `MaintenanceSection.tsx`
+- [x] Blocked `GradedMenuItem`: call `onCloseMenu`, then `requestRaise`, then `onClick` on `true`. Its former caller in `MaintenanceSection.tsx` is gone, so it has no end-to-end coverage
 - [x] Add a `useGradedActivation(grading)` hook returning `{ required, blocked, activate(run, action?) }` for the controls that can't take the wrapper; `action` overrides the grading's for a control standing for one of many
 - [x] Rewrite the `GradedAction` and `GradedMenuItem` doc comments that say raising is never a by-product of a blocked control
 

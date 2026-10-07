@@ -50,7 +50,7 @@ Unless a case says otherwise, start each one from a fresh page load as an admini
 
 ## Menus and hand-wired controls
 
-- [x] On a group's maintenance section, open the declare menu and choose a blocked environment: the menu closes first, then the raise dialog appears, and confirming opens the declare dialog for that environment (verifies spec: SAFE)
+- [ ] Choose a blocked item in a graded menu: the menu closes first, then the raise dialog appears, and confirming does what the item does (verifies spec: SAFE). No menu uses `GradedMenuItem` at present, since maintenance's declare-over-environment menu became the dialog's picker, so this is owed once one does
 - [ ] On a group's inventory section, click a blocked remove chip: the raise dialog names the variable being removed, and confirming removes it (verifies spec: SAFE)
 - [x] On the upgrades calendar in read-only, an open plan entry wears the write stripe, and clicking it offers the raise, then opens that plan's amend form (verifies spec: SAFE, UPG)
 - [ ] On the upgrades calendar, an entry for a met plan still links to its group in every mode

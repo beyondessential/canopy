@@ -12,7 +12,6 @@ import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
 	seedMachine,
-	seedMaintenanceWindow,
 	seedServer,
 	seedServerCertificate,
 	seedServerGroup,
@@ -271,40 +270,6 @@ test.describe("safety modes", () => {
 			.getByRole("button", { name: "Continue in danger mode" })
 			.click();
 		await expect(page.getByText("twice@example.invalid")).toHaveCount(1);
-	});
-
-	test("a blocked menu item closes its menu, then asks for the raise", async ({
-		page,
-		sql,
-	}) => {
-		await resetSeededTables(sql);
-		const group = await seedServerGroup(sql, { name: "menu-group" });
-		await seedServer(sql, {
-			name: "menu-central",
-			groupId: group.id,
-			rank: "production",
-		});
-		await seedMaintenanceWindow(sql, { serverGroupId: group.id });
-
-		// Raised to write the menu opens, and the session then runs out under it,
-		// which is how an item is blocked inside a menu that is already open.
-		await page.clock.install();
-		await page.goto(`/fleet/groups/${group.id}`);
-		await raiseTo(page, "write");
-		await page
-			.getByRole("button", { name: "Declare over an environment" })
-			.click();
-		await expect(page.getByRole("menuitem", { name: "production" })).toBeVisible();
-		await page.clock.fastForward("11:00");
-
-		await page.getByRole("menuitem", { name: "production" }).click();
-		await expect(page.getByRole("menu")).toHaveCount(0);
-		const dialog = page.getByRole("dialog");
-		await expect(dialog).toContainText("This action needs write mode");
-		await dialog.getByRole("button", { name: "Continue in write mode" }).click();
-		await expect(
-			page.getByRole("heading", { name: "Declare maintenance" }),
-		).toBeVisible();
 	});
 
 	test("a raise made before the page has its session is not undone when the session arrives", async ({
