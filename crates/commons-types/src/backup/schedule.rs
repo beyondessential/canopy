@@ -256,13 +256,16 @@ impl EffectiveSchedule {
 	}
 
 	/// The expression made runnable for one machine's type, when this is a cron
-	/// schedule that still parses.
-	pub fn bind(&self, seed: u64) -> Option<BoundCron> {
+	/// schedule. An error is a stored expression that can no longer be read.
+	///
+	/// The expression was validated when it was set, so it is only read here,
+	/// not validated again: validation tries every value `H` could take.
+	pub fn bind(&self, seed: u64) -> Option<Result<BoundCron, ScheduleError>> {
 		let Schedule::Cron { expression, .. } = &self.schedule else {
 			return None;
 		};
 		let zone = self.zone.as_ref().map_or("UTC", |z| z.name.as_str());
-		CronExpr::parse(expression).ok()?.bind(seed, zone).ok()
+		Some(CronExpr::read(expression).and_then(|expr| expr.bind(seed, zone)))
 	}
 
 	/// Whether the backup is due now, given when the last success's snapshot
@@ -274,6 +277,7 @@ impl EffectiveSchedule {
 			Schedule::Interval { seconds } => interval_due(*seconds, now, last_success),
 			Schedule::Cron { .. } => self
 				.bind(seed)
+				.and_then(Result::ok)
 				.and_then(|cron| cron.window_at(now, self.since))
 				.is_some_and(|w| w.is_due(now, last_success)),
 		}
@@ -297,8 +301,8 @@ impl EffectiveSchedule {
 				None => NextBackup::DueNow,
 			},
 			Schedule::Cron { .. } => {
-				let Some(cron) = self.bind(seed) else {
-					return NextBackup::Manual;
+				let Some(Ok(cron)) = self.bind(seed) else {
+					return NextBackup::Unreadable;
 				};
 				if let Some(window) = cron.window_at(now, self.since)
 					&& now < window.closes
@@ -323,7 +327,8 @@ impl EffectiveSchedule {
 
 	/// Whether the two most recent firings whose windows have closed both went
 	/// without a successful backup since the earlier one. `began` bounds which
-	/// firings count, besides the schedule's own effective moment.
+	/// firings count, besides the schedule's own effective moment. An
+	/// expression that can no longer be read has missed them all.
 	// spec: BKJ#detection
 	pub fn missed_two_firings(
 		&self,
@@ -332,8 +337,10 @@ impl EffectiveSchedule {
 		last_success: Option<Timestamp>,
 		began: Option<Timestamp>,
 	) -> bool {
-		let Some(cron) = self.bind(seed) else {
-			return false;
+		let cron = match self.bind(seed) {
+			None => return false,
+			Some(Err(_)) => return true,
+			Some(Ok(cron)) => cron,
 		};
 		let not_before = match (self.since, began) {
 			(Some(a), Some(b)) => Some(a.max(b)),
@@ -367,6 +374,8 @@ pub enum NextBackup {
 	DueUntil(Timestamp),
 	/// The next firing, or when the interval next elapses.
 	At(Timestamp),
+	/// A stored cron expression that can no longer be read, so nothing runs.
+	Unreadable,
 }
 
 /// The window a firing opens: the backup is due from `opens` until `closes`,
@@ -434,6 +443,15 @@ impl CronExpr {
 	/// Parse and validate an expression: it must be well formed, ever fire,
 	/// and never fire twice within an hour, for every value `H` could take.
 	pub fn parse(input: &str) -> Result<Self, ScheduleError> {
+		let expr = Self::read(input)?;
+		expr.check_fires()?;
+		expr.check_gaps()?;
+		Ok(expr)
+	}
+
+	/// Split an expression into its fields and check where it uses `H`,
+	/// without checking when it fires.
+	fn read(input: &str) -> Result<Self, ScheduleError> {
 		let fields: Vec<&str> = input.split_whitespace().collect();
 		match fields.len() {
 			0 => return Err(ScheduleError::EmptyExpression),
@@ -452,8 +470,6 @@ impl CronExpr {
 				});
 			}
 		}
-		expr.check_fires()?;
-		expr.check_gaps()?;
 		Ok(expr)
 	}
 
@@ -1160,6 +1176,7 @@ mod tests {
 		let firing = s
 			.bind(seed)
 			.unwrap()
+			.unwrap()
 			.firings_after(ts("2026-10-07T00:00:00Z"))
 			.next()
 			.unwrap();
@@ -1303,9 +1320,18 @@ mod tests {
 	}
 
 	#[test]
+	fn an_unreadable_stored_expression_is_never_due_and_always_late() {
+		let s = effective("0 2 * * * *", "UTC", None);
+		let now = ts("2026-10-07T20:00:00Z");
+		assert!(!s.is_due(1, now, None));
+		assert_eq!(s.next_backup(1, now, None), NextBackup::Unreadable);
+		assert!(s.missed_two_firings(1, now, Some(now), None));
+	}
+
+	#[test]
 	fn sparse_expressions_are_found_however_far_back() {
 		let s = effective("0 0 1 1 *", "UTC", None);
-		let c = s.bind(1).unwrap();
+		let c = s.bind(1).unwrap().unwrap();
 		let w = c.window_at(ts("2026-10-07T00:00:00Z"), None).unwrap();
 		assert_eq!(w.firing, ts("2026-01-01T00:00:00Z"));
 	}

@@ -17299,6 +17299,21 @@
                 ]
               }
             }
+          },
+          {
+            "type": "object",
+            "description": "A stored cron expression that can no longer be read, so nothing runs.",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "unreadable"
+                ]
+              }
+            }
           }
         ],
         "description": "When a machine's next backup of a type is expected."

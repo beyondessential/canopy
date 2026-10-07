@@ -507,6 +507,25 @@ test.describe("machine schedule override", () => {
 		).toHaveCount(0);
 	});
 
+	test("a stored expression that can no longer be read shows as unreadable, not manual", async ({
+		page,
+		sql,
+	}) => {
+		const { box } = await seedGroupWithBox(sql, {
+			name: "unreadable-group",
+			box: "unreadable-box",
+		});
+		await seedMachineBackupSchedule(sql, {
+			machineId: box.machineId,
+			cron: { expression: "0 2 * * * *" },
+		});
+
+		await page.goto(`/fleet/machines/${box.machineId}`);
+		const backups = page.locator("#backups");
+		await expect(backups.getByText("unreadable schedule")).toBeVisible();
+		await expect(backups.getByText(/next backup:\s*manual/i)).toHaveCount(0);
+	});
+
 	test("a machine override wins over the group's", async ({
 		page,
 		sql,

@@ -283,6 +283,12 @@ export function NextBackupText({
 					<When at={next.at} zone={zone?.name} />
 				</span>
 			);
+		case "unreadable":
+			return (
+				<Typography variant="body2" color="error" component="span">
+					unreadable schedule
+				</Typography>
+			);
 	}
 }
 

@@ -9353,6 +9353,9 @@ export interface components {
             at: string;
             /** @enum {string} */
             kind: "at";
+        } | {
+            /** @enum {string} */
+            kind: "unreadable";
         };
         /**
          * @description An open window with the target it covers, named so a fleet-wide view

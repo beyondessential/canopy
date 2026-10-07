@@ -75,6 +75,8 @@ The derived value is stable, so a machine's backup of a type always lands in the
 An expression is refused when it would never fire, or when any two consecutive firings would be less than an hour apart.
 Validation considers every value `H` could take, so an expression accepted for one machine is valid for every machine.
 Validation reads the expression on a clock without daylight-saving changes; what those changes do to firings is settled when the expression runs.
+An expression is validated when it is set and only read when it runs.
+A stored expression that can no longer be read makes no backup due, is shown as unreadable wherever the machine's next backup is shown, and counts as missing every firing, so the machine goes stale rather than appearing manual-only.
 
 An expression is read in the timezone set on its schedule, otherwise in the operating system timezone the machine reports (see [FIG](figures.md)), otherwise in UTC.
 A reported Windows zone name is read as its IANA equivalent.
