@@ -100,6 +100,7 @@ An expression with `H` is the operator's own spread, and its windows open at the
 
 A backup is always due according to the machine's schedule as it stands.
 Canopy records when each machine's schedule for a type took effect: the latest moment a change at any layer altered what the schedule resolves to, or the timezone it is read in changed, including the machine reporting a different one.
+A machine reporting another name for the zone it was read in, or one unrecognised name in place of another, has not changed its timezone.
 A firing from before that moment opens no window, so a change never makes a backup due at a time neither the old schedule nor the new one chose.
 A run already in progress is unaffected.
 

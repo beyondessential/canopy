@@ -484,19 +484,30 @@ pub struct MachineReportedTimezone {
 
 impl MachineReportedTimezone {
 	/// Note a timezone a machine's report carried. Its moment of change moves
-	/// only when the zone is a different one from the last reported, so a
-	/// machine repeating itself takes nothing with it.
+	/// only when the zone it is read as differs from the last reported one's,
+	/// so a machine repeating itself, renaming its zone, or swapping one
+	/// unrecognised name for another takes nothing with it.
 	pub async fn observe(
 		db: &mut AsyncPgConnection,
 		machine_id: Uuid,
 		timezone: &str,
 	) -> Result<()> {
 		use crate::schema::machine_reported_timezone::dsl;
-		if Self::get(db, machine_id)
-			.await?
-			.is_some_and(|held| held.timezone == timezone)
-		{
-			return Ok(());
+		let read_as = |reported: &str| resolve_zone(None, Some(reported)).name;
+		if let Some(held) = Self::get(db, machine_id).await? {
+			if held.timezone == timezone {
+				return Ok(());
+			}
+			if read_as(&held.timezone) == read_as(timezone) {
+				diesel::update(
+					dsl::machine_reported_timezone.filter(dsl::machine_id.eq(machine_id)),
+				)
+				.set(dsl::timezone.eq(timezone))
+				.execute(db)
+				.await
+				.map_err(AppError::from)?;
+				return Ok(());
+			}
 		}
 		diesel::insert_into(dsl::machine_reported_timezone)
 			.values((dsl::machine_id.eq(machine_id), dsl::timezone.eq(timezone)))

@@ -629,6 +629,37 @@ async fn a_report_moves_the_zone_change_only_when_the_zone_is_different() {
 		assert_eq!(held.changed_at, ts("2020-01-01T00:00:00Z"));
 		assert_eq!(held.timezone, "Pacific/Auckland");
 
+		// Another name for the same zone, or flipping between names nobody
+		// recognises, keeps the name current without moving the change.
+		let unmoved = async |conn: &mut AsyncPgConnection, reported: &str| {
+			MachineReportedDetail::record(
+				conn,
+				machine,
+				"alertd",
+				&serde_json::json!({"osTimezone": reported}),
+			)
+			.await
+			.unwrap();
+			let held = MachineReportedTimezone::get(conn, machine)
+				.await
+				.unwrap()
+				.unwrap();
+			assert_eq!(held.timezone, reported);
+			assert_eq!(held.changed_at, ts("2020-01-01T00:00:00Z"), "{reported}");
+		};
+		unmoved(&mut conn, "New Zealand Standard Time").await;
+		sql_query("UPDATE machine_reported_timezone SET timezone = 'x0'")
+			.execute(&mut conn)
+			.await
+			.unwrap();
+		unmoved(&mut conn, "x1").await;
+		unmoved(&mut conn, "x2").await;
+		unmoved(&mut conn, "UTC").await;
+		sql_query("UPDATE machine_reported_timezone SET timezone = 'Pacific/Auckland'")
+			.execute(&mut conn)
+			.await
+			.unwrap();
+
 		// A different zone does.
 		MachineReportedDetail::record(
 			&mut conn,
