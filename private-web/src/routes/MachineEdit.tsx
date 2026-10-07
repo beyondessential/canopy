@@ -164,6 +164,8 @@ function Form({
 		id: string;
 		name: string;
 		group_id?: string | null;
+		rank?: ServerRank | null;
+		deleted_at?: string | null;
 		cloud?: boolean | null;
 		geolocation?: { lat: number; lon: number } | null;
 		is_monitored: boolean;
@@ -182,7 +184,7 @@ function Form({
 		cloud: machine.cloud == null ? "" : machine.cloud ? "true" : "false",
 		lat: machine.geolocation?.lat?.toString() ?? "",
 		lon: machine.geolocation?.lon?.toString() ?? "",
-		rank: applications.find((a) => a.rank)?.rank ?? "",
+		rank: machine.rank ?? "",
 		isMonitored: machine.is_monitored,
 		alertWhenUnreachable: !machineReachabilitySilenced,
 		alertWhenDownMinutes: minutesOf(machine.alert_when_down_for),
@@ -365,8 +367,17 @@ function Form({
 						onChange={(e) =>
 							setBox({ ...box, rank: e.target.value as ServerRank })
 						}
-						disabled={pending || applications.length === 0}
+						// An archived box with nothing live on it keeps the rank it
+						// was archived at.
+						// spec: FLT#archival
+						disabled={
+							pending ||
+							(machine.deleted_at != null && applications.length === 0)
+						}
+						// The empty value still shows a placeholder, so the label has
+						// to float above it rather than sit on top of it.
 						slotProps={{
+							inputLabel: { shrink: true },
 							select: {
 								displayEmpty: true,
 								renderValue: (value) =>

@@ -77,18 +77,32 @@ impl From<ServerRank> for String {
 	}
 }
 
+impl ServerRank {
+	/// Every spelling a rank is read from, case aside, with the rank it names:
+	/// its own, and the older ones stored values may still carry. Parsing reads
+	/// this table, and so does the test holding the database's own reading of
+	/// a rank to it.
+	pub const SPELLINGS: &[(&str, ServerRank)] = &[
+		("production", Self::Production),
+		("live", Self::Production),
+		("prod", Self::Production),
+		("clone", Self::Clone),
+		("staging", Self::Clone),
+		("demo", Self::Demo),
+		("test", Self::Test),
+		("dev", Self::Dev),
+	];
+}
+
 impl FromStr for ServerRank {
 	type Err = ServerRankFromStringError;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		match s.to_ascii_lowercase().as_ref() {
-			"live" | "prod" | "production" => Ok(Self::Production),
-			"clone" | "staging" => Ok(Self::Clone),
-			"demo" => Ok(Self::Demo),
-			"test" => Ok(Self::Test),
-			"dev" => Ok(Self::Dev),
-			_ => Err(ServerRankFromStringError),
-		}
+		Self::SPELLINGS
+			.iter()
+			.find(|(spelling, _)| spelling.eq_ignore_ascii_case(s))
+			.map(|(_, rank)| *rank)
+			.ok_or(ServerRankFromStringError)
 	}
 }
 

@@ -153,6 +153,30 @@ test.describe("the group's tree on the detail pages", () => {
 		await expect(section).not.toContainText("awaiting a rank");
 	});
 
+	/// A box ranked before anything on it has reported is in its environment
+	/// already, and still says it is waiting to hear from the box.
+	///
+	/// spec: FLT#navigating-the-two-grains
+	test("a ranked box with nothing on it sits under its rank, awaiting check-in", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "ranked-silent-group" });
+		await seedMachine(sql, {
+			name: "ranked-silent-box",
+			groupId: group.id,
+			rank: "test",
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+
+		const section = page.getByTestId("group-tree").getByTestId("tree-environment");
+		await expect(section).toHaveCount(1);
+		await expect(section).toHaveAttribute("data-rank", "test");
+		await expect(section).toContainText("ranked-silent-box");
+		await expect(section).toContainText("Awaiting check-in.");
+	});
+
 	/// The title says which thing the page is about. Whether that thing is well
 	/// is the tree's and the checks' business, so no dot rides alongside the
 	/// name.

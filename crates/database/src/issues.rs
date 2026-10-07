@@ -1265,7 +1265,8 @@ impl Scope {
 #[derive(Debug, Default)]
 struct ScopeTargets {
 	applications: std::collections::HashMap<Uuid, Application>,
-	/// Each machine with the rank it serves (see [`crate::machines::Machine::rank`]).
+	/// Each machine with the environment it serves (see
+	/// [`crate::machines::Machine::environment_rank`]).
 	machines: std::collections::HashMap<Uuid, (crate::machines::Machine, Option<ServerRank>)>,
 	/// The headline rank of each group a scope names that has one.
 	group_headlines: std::collections::HashMap<Uuid, ServerRank>,
@@ -1305,12 +1306,11 @@ impl ScopeTargets {
 				.collect();
 		}
 		if !machine_ids.is_empty() {
-			let mut ranks = Machine::ranks(conn, &machine_ids).await?;
 			targets.machines = Machine::get_by_ids(conn, &machine_ids)
 				.await?
 				.into_iter()
 				.map(|machine| {
-					let rank = ranks.remove(&machine.id);
+					let rank = machine.environment_rank();
 					(machine.id, (machine, rank))
 				})
 				.collect();
@@ -3893,8 +3893,7 @@ pub async fn reevaluate_open_issues_for_machine_ref(
 		return Ok(());
 	};
 	let monitored = machine.is_monitored;
-	let rank = crate::machines::Machine::rank(db, machine_id).await?;
-	let Some(target) = IncidentTarget::of_member(gid, rank) else {
+	let Some(target) = IncidentTarget::of_member(gid, machine.environment_rank()) else {
 		return Ok(());
 	};
 
@@ -4231,7 +4230,6 @@ async fn issue_targets_and_monitored(
 			.into_iter()
 			.map(|machine| (machine.id, machine))
 			.collect();
-	let ranks = crate::machines::Machine::ranks(conn, &machine_ids).await?;
 	let group_ids: Vec<Uuid> = scopes
 		.iter()
 		.filter_map(|(_, scope)| match scope {
@@ -4258,7 +4256,7 @@ async fn issue_targets_and_monitored(
 			Scope::Machine(mid) => machines.get(&mid).and_then(|machine| {
 				member_target(
 					machine.group_id,
-					ranks.get(&mid).copied(),
+					machine.environment_rank(),
 					machine.is_monitored,
 				)
 			}),

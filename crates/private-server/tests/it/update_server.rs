@@ -522,11 +522,11 @@ async fn a_machine_edit_that_fails_does_not_change_its_rank() {
 	.await
 }
 
-/// A machine holds its rank through the applications on it, so one with none
-/// has nothing to rank.
+/// A machine carries its own rank, so one with nothing on it yet is ranked all
+/// the same.
 // spec: FLT#editing
 #[tokio::test(flavor = "multi_thread")]
-async fn a_machine_with_no_application_cannot_be_ranked() {
+async fn a_machine_with_no_application_can_be_ranked() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(&format!(
 			"INSERT INTO machines (name, id) VALUES ('empty', '{BOX}')"
@@ -534,11 +534,74 @@ async fn a_machine_with_no_application_cannot_be_ranked() {
 		.await
 		.unwrap();
 
-		private
+		let response = private
 			.post("/api/fleet/machines/update")
 			.json(&json!({ "machine_id": BOX, "rank": "test" }))
+			.await;
+		response.assert_status_ok();
+		assert_eq!(response.json::<serde_json::Value>()["rank"], "test");
+
+		let machine = Machine::get_by_id(&mut conn, BOX.parse().unwrap())
+			.await
+			.unwrap();
+		assert_eq!(
+			machine.rank,
+			Some(commons_types::server::rank::ServerRank::Test)
+		);
+	})
+	.await
+}
+
+/// An archived box serves nothing, so it is refused a rank, and the refusal
+/// leaves the rest of the edit unapplied.
+// spec: FLT#editing
+#[tokio::test(flavor = "multi_thread")]
+async fn an_archived_machine_cannot_be_ranked() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (name, id, deleted_at) VALUES ('gone', '{BOX}', NOW())"
+		))
+		.await
+		.unwrap();
+
+		private
+			.post("/api/fleet/machines/update")
+			.json(&json!({ "machine_id": BOX, "rank": "test", "name": "renamed" }))
 			.await
 			.assert_status_bad_request();
+
+		let machine = Machine::get_by_id(&mut conn, BOX.parse().unwrap())
+			.await
+			.unwrap();
+		assert_eq!(machine.name, "gone");
+		assert_eq!(machine.rank, None);
+	})
+	.await
+}
+
+/// Naming the rank an archived box already carries changes nothing, so the
+/// rest of the edit saves.
+// spec: FLT#archival
+#[tokio::test(flavor = "multi_thread")]
+async fn an_edit_naming_an_archived_machines_own_rank_saves() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (name, id, rank, deleted_at) \
+			 VALUES ('gone', '{BOX}', 'test', NOW())"
+		))
+		.await
+		.unwrap();
+
+		private
+			.post("/api/fleet/machines/update")
+			.json(&json!({ "machine_id": BOX, "rank": "test", "name": "renamed" }))
+			.await
+			.assert_status_ok();
+
+		let machine = Machine::get_by_id(&mut conn, BOX.parse().unwrap())
+			.await
+			.unwrap();
+		assert_eq!(machine.name, "renamed");
 	})
 	.await
 }

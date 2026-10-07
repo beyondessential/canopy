@@ -36,7 +36,7 @@ A report is the only thing that creates an application.
 An operator never enters an application, its type, or its version, and there is no flow that asks them to.
 
 Canopy adopts what it is told without ceremony: an application it has not seen before on a machine that reports it is created and monitored from that moment.
-It takes the rank the applications already on the machine share, or is pending where they carry none (see [GRP](groups.md), "Environments").
+It takes its machine's rank, or is pending where the machine has none (see [GRP](groups.md), "Environments").
 
 A report never removes an application.
 An application that stops appearing in its machine's reports becomes unreachable and stays, however long it stays away, and only an operator archives it (see [CHK](../monitoring/checks.md), "Reachability").
@@ -63,6 +63,8 @@ A machine and an application are each archived rather than deleted, and each is 
 Archiving a machine archives the applications on it, a box going away taking its workloads with it.
 
 An archived machine or application leaves the live fleet, and its record and history remain.
+An archived machine keeps the rank it was archived at and serves no environment, and it cannot be ranked again while nothing on it is live.
+An application restored onto a machine comes back at the machine's rank, so restoring an archived box's applications one by one brings each back at the rank they shared.
 
 ## Groups
 
@@ -79,12 +81,13 @@ A cluster therefore belongs to no group itself, unlike a machine.
 ### Environments
 
 A machine serves one environment, since a box is not given a production workload and a demo one.
-So the applications on it share one rank, the machine is in the environment that rank names, and a database running beside a site's production central is part of that site's production (see [GRP](groups.md), "Environments").
-A machine whose applications carry no rank yet is pending, and so is every application on it.
+So a machine carries one rank, the applications on it share it, the machine is in the environment that rank names, and a database running beside a site's production central is part of that site's production (see [GRP](groups.md), "Environments").
+A machine with no rank yet is pending, and so is every application on it.
+A machine can be ranked before anything on it has reported, so the applications that arrive on it are ranked from the start.
 
 ## What each carries
 
-A **machine** carries the name its operator gave it, its identity, its group, where it is (whether it is cloud-hosted and its geolocation), and how long it may be silent before it is considered unreachable.
+A **machine** carries the name its operator gave it, its identity, its group, its rank, where it is (whether it is cloud-hosted and its geolocation), and how long it may be silent before it is considered unreachable.
 
 An **application** carries its type, its rank, its optional name, its public name, the URL it is reached at, the DNS names it serves at and the DNS name grants and pause state that work from them, its notes and tags, and how long it may be silent before it is considered unreachable.
 
@@ -105,7 +108,8 @@ So a machine fact has one place it is edited, and a shared box is edited where e
 Editing an application leads to that form, its own fields being a section of it rather than a form of their own.
 
 The group is offered on the machine alone, since the applications on it take it and an application's group is never set independently.
-The rank is offered on the machine's own section too, since the applications on it share one: setting it ranks every application on the machine, and once set it can be changed but not cleared.
+The rank is offered on the machine's own section too, since the applications on it share it: setting it ranks the machine and every application on it, and once set it can be changed but not cleared.
+It is offered whether or not anything on the machine has reported yet.
 An identity is not offered at all: it is bound by enrolment rather than by editing a form.
 A machine's name is required when a box is created and not when it is edited, so a box that arrived without one stays editable.
 
@@ -126,8 +130,9 @@ A version or a database engine is not there, those being a workload's rather tha
 An application's page names the machine it runs on.
 
 A group presents its machines, and under each the applications on it, bucketed by rank.
-A machine takes the rank its applications share, which is also its billing stage (see [APP](application-types.md), "Billing attribution").
+A machine's rank, which its applications share, is also its billing stage (see [APP](application-types.md), "Billing attribution").
 A machine carrying nothing yet appears in the group as awaiting check-in rather than being absent, since an operator who has just added a box needs to see it.
+It sits under its rank where it has been given one, and apart from the environments where it has not.
 A pending machine appears in the group as awaiting a rank, apart from its environments, since a box that has reported but serves no environment yet needs an operator to rank it.
 
 ## Identities

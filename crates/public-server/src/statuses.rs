@@ -531,9 +531,15 @@ async fn create(
 	// spec: FLT#applications-come-from-reports
 	let resolved = db
 		.transaction::<_, AppError, _>(async |conn| {
-			if record {
-				Machine::get_by_id_for_update(conn, machine.id).await?;
-			}
+			// What is adopted takes the box's rank as the locked row holds it,
+			// so a rank change landing since the box was read above is not
+			// written back over by the application it would have ranked.
+			let locked = if record {
+				Some(Machine::get_by_id_for_update(conn, machine.id).await?)
+			} else {
+				None
+			};
+			let machine = locked.as_ref().unwrap_or(&machine);
 			match ingest {
 				Ingest::Split {
 					machine: machine_report,
@@ -546,7 +552,7 @@ async fn create(
 						// rather than standing up a record.
 						let Some(application) = Application::from_report_key(
 							conn,
-							&machine,
+							machine,
 							&key,
 							&reported.r#type,
 							record,
@@ -563,8 +569,7 @@ async fn create(
 					})
 				}
 				Ingest::Unified { health, extra } => Ok(ResolvedPush::Unified {
-					application: resolve_unified_application(conn, &machine, &extra, record)
-						.await?,
+					application: resolve_unified_application(conn, machine, &extra, record).await?,
 					health,
 					extra,
 				}),

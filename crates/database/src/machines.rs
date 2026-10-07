@@ -41,6 +41,19 @@ pub struct Machine {
 	/// fact the box has no way of knowing. The applications on it take it.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub group_id: Option<Uuid>,
+	/// The rank this box carries, which every live application on it shares.
+	/// `None` while the machine is pending.
+	///
+	/// Kept when the machine is archived, as an archived application keeps its
+	/// own, so what was on it comes back at it. The environment the box serves
+	/// is [`Machine::environment_rank`], which an archived box has none of.
+	///
+	/// Ranked through [`Machine::set_rank`]; triggers keep it and the
+	/// applications' rank together under any other writer.
+	// spec: FLT#environments
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(treat_none_as_default_value = false)]
+	pub rank: Option<commons_types::server::rank::ServerRank>,
 	/// The identity that authenticates this machine, if one is enrolled. A
 	/// machine has at most one, and an identity belongs to at most one
 	/// machine, so resolving either from the other is unambiguous.
@@ -561,60 +574,63 @@ impl Machine {
 			.map_err(AppError::from)
 	}
 
-	/// Rank the machine: every live application on it takes `rank` in one
-	/// write, since a box serves one environment and its applications share
-	/// the rank (see [`Self::rank`]).
+	/// Rank the machine, and every live application on it with it: a box
+	/// serves one environment and its applications share the rank. The
+	/// applications take it from the machine's row by trigger, the same one
+	/// that keeps any other writer from leaving the two apart.
 	///
-	/// A machine holds no rank of its own, so one with no live application
-	/// has nothing to rank and is refused. Open issues of the machine and of
-	/// everything on it are re-evaluated against the environment they now
-	/// belong to, and so are the group's own checks when its headline rank
-	/// moved, `by` attributing an incident that closes as a result.
+	/// A machine with nothing on it is ranked all the same, so what arrives on
+	/// it later takes the rank rather than being pending. An archived machine
+	/// with nothing live on it is refused (see [`Self::check_rankable`]).
+	/// Open issues of the machine and of everything on it are re-evaluated
+	/// against the environment they now belong to, and so are the group's own
+	/// checks when its headline rank moved, `by` attributing an incident that
+	/// closes as a result. Ranking a box at the rank it carries writes nothing.
+	///
+	/// Returns the machine as it stands once ranked.
 	// spec: GRP#environments
 	pub async fn set_rank(
 		db: &mut AsyncPgConnection,
 		machine_id: Uuid,
 		rank: commons_types::server::rank::ServerRank,
 		by: Option<&str>,
-	) -> Result<()> {
-		use crate::schema::applications::dsl;
+	) -> Result<Self> {
+		use crate::schema::machines::dsl;
 		use diesel_async::AsyncConnection;
 
-		let (group_id, headline, changed) = db
+		let (ranked, headline, changed) = db
 			.transaction::<_, AppError, _>(async |conn| {
 				// The box's row serialises this against a report adopting beside it.
 				let machine = Self::get_by_id_for_update(conn, machine_id).await?;
-				if !Self::has_live_application(conn, machine_id).await? {
-					return Err(AppError::BadRequest(
-						"a machine takes its rank from the applications on it, and none has reported yet".into(),
-					));
+				if machine.rank == Some(rank) {
+					return Ok((machine, None, false));
 				}
+				machine.check_rankable(conn, rank).await?;
 				let headline =
 					crate::server_groups::ServerGroup::headline_rank(conn, machine.group_id)
 						.await?;
-				let changed = diesel::update(dsl::applications)
-					.filter(dsl::machine_id.eq(machine_id))
-					.filter(dsl::deleted_at.is_null())
-					.filter(dsl::rank.is_distinct_from(rank))
+				let ranked = diesel::update(dsl::machines.filter(dsl::id.eq(machine_id)))
 					.set(dsl::rank.eq(rank))
-					.execute(conn)
+					.returning(Self::as_select())
+					.get_result(conn)
 					.await?;
-				Ok((machine.group_id, headline, changed))
+				Ok((ranked, headline, true))
 			})
 			.await?;
-		if changed == 0 {
-			return Ok(());
+		if !changed {
+			return Ok(ranked);
 		}
 
-		crate::applications::recompute_groups(db, [group_id]).await?;
+		crate::applications::recompute_groups(db, [ranked.group_id]).await?;
 		crate::issues::reevaluate_after_rank_change(
 			db,
 			crate::issues::Scope::Machine(machine_id),
-			group_id,
+			ranked.group_id,
 			headline,
 			by,
 		)
-		.await
+		.await?;
+		Ok(ranked)
 	}
 
 	/// Whether any application on the machine is live (not archived).
@@ -634,64 +650,61 @@ impl Machine {
 		.map_err(AppError::from)
 	}
 
-	/// The environment this machine serves: the rank its live applications
-	/// share, and none while they are all pending (or there are none).
-	///
-	/// The applications on a box share one rank, which the schema holds, so
-	/// reading the highest of them is reading the one.
-	// spec: FLT#environments
-	pub async fn rank(
+	/// Refuse to move an archived machine to `rank` while nothing on it is
+	/// live. Archiving a box archives everything on it, so a rank given then
+	/// would describe nothing; an application restored onto it is live again,
+	/// and its rank is the box's to change. The rank the box already carries
+	/// is never refused, so an edit naming it changes nothing.
+	pub async fn check_rankable(
+		&self,
 		db: &mut AsyncPgConnection,
-		machine: Uuid,
-	) -> Result<Option<commons_types::server::rank::ServerRank>> {
-		Ok(Self::ranks(db, &[machine]).await?.get(&machine).copied())
+		rank: commons_types::server::rank::ServerRank,
+	) -> Result<()> {
+		if self.deleted_at.is_none()
+			|| self.rank == Some(rank)
+			|| Self::has_live_application(db, self.id).await?
+		{
+			return Ok(());
+		}
+		Err(AppError::BadRequest(
+			"an archived machine with nothing live on it has no rank to change".into(),
+		))
 	}
 
-	/// The rank each of `machines` serves, by the same rule as [`Self::rank`].
-	///
-	/// A pending box is absent from the map rather than present with a
-	/// default: it serves no environment.
+	/// The environment this machine serves: its rank, and none while it is
+	/// pending or once it is archived, an archived box serving nothing.
 	// spec: FLT#environments
-	pub async fn ranks(
+	pub fn environment_rank(&self) -> Option<commons_types::server::rank::ServerRank> {
+		if self.deleted_at.is_some() {
+			return None;
+		}
+		self.rank
+	}
+
+	/// The environment each of `machines` serves, by the same rule as
+	/// [`Self::environment_rank`], without loading the machines themselves.
+	///
+	/// A box serving none is absent from the map rather than present with a
+	/// default.
+	// spec: FLT#environments
+	pub async fn environment_ranks(
 		db: &mut AsyncPgConnection,
 		machines: &[Uuid],
 	) -> Result<std::collections::HashMap<Uuid, commons_types::server::rank::ServerRank>> {
-		use crate::schema::applications::dsl;
-		use std::collections::HashMap;
+		use crate::schema::machines::dsl;
 
 		if machines.is_empty() {
-			return Ok(HashMap::new());
+			return Ok(std::collections::HashMap::new());
 		}
-		// `applications.rank` is unconstrained text, so an unknown spelling
-		// leaves its application unranked and the rest of the read intact.
-		let rows: Vec<(Uuid, Option<String>)> = dsl::applications
-			// The filter keeps only rows whose machine is in `machines`, so the
-			// column is non-null here even though it is nullable in general.
-			.select((dsl::machine_id.assume_not_null(), dsl::rank))
-			.filter(dsl::machine_id.eq_any(machines))
+		let rows: Vec<(Uuid, commons_types::server::rank::ServerRank)> = dsl::machines
+			.select((dsl::id, dsl::rank.assume_not_null()))
+			.filter(dsl::id.eq_any(machines))
+			.filter(dsl::rank.is_not_null())
 			.filter(dsl::deleted_at.is_null())
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
-
-		let mut out = HashMap::new();
-		for (machine, rank) in rows {
-			let Some(rank): Option<commons_types::server::rank::ServerRank> =
-				rank.and_then(|rank| rank.parse().ok())
-			else {
-				continue;
-			};
-			out.entry(machine)
-				.and_modify(|held: &mut commons_types::server::rank::ServerRank| {
-					if crate::server_groups::rank_priority(Some(rank))
-						< crate::server_groups::rank_priority(Some(*held))
-					{
-						*held = rank;
-					}
-				})
-				.or_insert(rank);
-		}
-		Ok(out)
+		Ok(rows.into_iter().collect())
 	}
 
 	/// This machine's tags over its group's, so a check filed against a

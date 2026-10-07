@@ -7050,6 +7050,7 @@ export interface components {
          *     failing while its workloads are fine is a state only this can show.
          */
         GroupMachine: {
+            environment_rank?: null | components["schemas"]["ServerRank"];
             /**
              * @description The box's own health, from the checks filed against it. What the
              *     applications on it make of their own checks is each application's.
@@ -8339,6 +8340,7 @@ export interface components {
             name: string;
             /** @description Free-form operator notes about this machine. */
             notes?: string;
+            rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: date-time
              * @description When an identity completed enrolment for this machine. While `None`,
@@ -8533,6 +8535,7 @@ export interface components {
             /** @description The machine's own checks across every source, graded and classified. */
             checks: components["schemas"]["ConsolidatedChecks"];
             device_info?: null | components["schemas"]["DeviceInfo"];
+            environment_rank?: null | components["schemas"]["ServerRank"];
             /**
              * @description What the box reports about itself, resolved across every source
              *     reporting on it: platform, hardware, addresses, uptime.
@@ -8566,7 +8569,10 @@ export interface components {
              * @description When the box last reported anything, across every source.
              */
             last_reported_at?: string | null;
-            /** @description The machine's own record. */
+            /**
+             * @description The machine's own record. Its `rank` is the rank the box carries,
+             *     which an archived box keeps.
+             */
             machine: components["schemas"]["Machine"];
             /**
              * @description Whether a maintenance window suspends this machine, its own or its

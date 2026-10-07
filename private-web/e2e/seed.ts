@@ -261,13 +261,19 @@ export interface SeededServer {
  * between an operator adding it and the first report arriving. */
 export async function seedMachine(
 	sql: Sql,
-	opts: { name?: string; groupId?: string | null; deviceId?: string } = {},
+	opts: {
+		name?: string;
+		groupId?: string | null;
+		deviceId?: string;
+		/** Unranked by default, as a box an operator has just added is. */
+		rank?: ServerRank | null;
+	} = {},
 ): Promise<{ id: string; name: string }> {
 	const id = randomUUID();
 	const name = opts.name ?? randomLabel("box");
 	await sql.query(
-		`INSERT INTO machines (id, name, group_id, device_id) VALUES ($1, $2, $3, $4)`,
-		[id, name, opts.groupId ?? null, opts.deviceId ?? null],
+		`INSERT INTO machines (id, name, group_id, device_id, rank) VALUES ($1, $2, $3, $4, $5)`,
+		[id, name, opts.groupId ?? null, opts.deviceId ?? null, opts.rank ?? null],
 	);
 	return { id, name };
 }
@@ -340,9 +346,10 @@ export async function seedServer(
 		host?: string;
 		/** What the application is. Defaults to a Tamanu central. */
 		type?: ApplicationType;
-		/** Defaults to the rank of the other workloads on the box, or production
-		 * for a box of its own. Pass `null` for a pending application: one
-		 * nothing has ranked yet. */
+		/** Defaults to the rank of the box it goes on, or production for a box
+		 * of its own or one not yet ranked. Pass `null` for a pending
+		 * application, which only an unranked box can carry: on a ranked box
+		 * it takes the box's rank. */
 		rank?: ServerRank | null;
 		groupId?: string | null;
 		deviceId?: string;
@@ -372,11 +379,9 @@ export async function seedServer(
 	if (opts.rank !== undefined) {
 		rank = opts.rank;
 	} else if (opts.machineId !== undefined) {
-		// A box's workloads share one rank, which the schema holds.
-		const rows = await sql.query<{ rank: ServerRank }>(
-			`SELECT rank FROM applications
-			 WHERE machine_id = $1 AND deleted_at IS NULL AND rank IS NOT NULL
-			 LIMIT 1`,
+		// A box's workloads share its rank, which the schema holds.
+		const rows = await sql.query<{ rank: ServerRank | null }>(
+			`SELECT rank FROM machines WHERE id = $1`,
 			[opts.machineId],
 		);
 		rank = rows[0]?.rank ?? "production";

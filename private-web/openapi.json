@@ -13437,6 +13437,17 @@
           "own_window"
         ],
         "properties": {
+          "environment_rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "The environment the box serves, which the applications on it share.\nAbsent while it is pending; a box can serve one before anything on it\nhas reported."
+              }
+            ]
+          },
           "health": {
             "$ref": "#/components/schemas/HealthState",
             "description": "The box's own health, from the checks filed against it. What the\napplications on it make of their own checks is each application's."
@@ -15395,6 +15406,17 @@
             "type": "string",
             "description": "Free-form operator notes about this machine."
           },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "The rank this box carries, which every live application on it shares.\n`None` while the machine is pending.\n\nKept when the machine is archived, as an archived application keeps its\nown, so what was on it comes back at it. The environment the box serves\nis [`Machine::environment_rank`], which an archived box has none of.\n\nRanked through [`Machine::set_rank`]; triggers keep it and the\napplications' rank together under any other writer."
+              }
+            ]
+          },
           "registered_at": {
             "type": [
               "string",
@@ -15723,6 +15745,17 @@
               }
             ]
           },
+          "environment_rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "The environment the box serves: its rank, absent while it is pending\nor once it is archived."
+              }
+            ]
+          },
           "figures": {
             "type": "object",
             "description": "What the box reports about itself, resolved across every source\nreporting on it: platform, hardware, addresses, uptime."
@@ -15773,7 +15806,7 @@
           },
           "machine": {
             "$ref": "#/components/schemas/Machine",
-            "description": "The machine's own record."
+            "description": "The machine's own record. Its `rank` is the rank the box carries,\nwhich an archived box keeps."
           },
           "maintained": {
             "type": "boolean",
@@ -16023,7 +16056,7 @@
               },
               {
                 "$ref": "#/components/schemas/ServerRank",
-                "description": "New rank for the box, which every application on it takes. Omit to\nleave unchanged. A rank can be changed but not cleared, so `null` is\nrefused, and a box with no application on it has nothing to rank."
+                "description": "New rank for the box, which every application on it takes, and so does\nevery application that arrives on it later. Omit to leave unchanged. A\nrank can be changed but not cleared, so `null` is refused."
               }
             ]
           },

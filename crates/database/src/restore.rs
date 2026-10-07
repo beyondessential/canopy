@@ -613,7 +613,7 @@ pub async fn migrating_environments(
 		.filter(|replica| replica.enabled)
 		.collect();
 	let machine_ids: Vec<Uuid> = replicas.iter().filter_map(|r| r.machine_id).collect();
-	let ranks = crate::machines::Machine::ranks(db, &machine_ids).await?;
+	let ranks = crate::machines::Machine::environment_ranks(db, &machine_ids).await?;
 
 	let mut out = MigratingEnvironments::default();
 	let mut advertised: HashMap<Uuid, Vec<IntentDescriptor>> = HashMap::new();
