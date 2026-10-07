@@ -180,14 +180,18 @@ export function useGradedActivation(grading: Grading) {
 	const reasonKey = reasons.join();
 
 	const activate = useCallback(
-		async (run: () => void, action = grading.action) => {
-			if (!blocked) return run();
+		async (run: () => void, action = grading.action): Promise<boolean> => {
+			if (!blocked) {
+				run();
+				return true;
+			}
 			const raised = await requestRaise({
 				mode: required as RaisedMode,
 				action,
 				reasons: reasonKey ? (reasonKey.split(",") as DangerReason[]) : [],
 			});
 			if (raised) run();
+			return raised;
 		},
 		[blocked, required, grading.action, reasonKey, requestRaise],
 	);
@@ -321,9 +325,22 @@ function activateMarked(id: string): void {
 			"input[type=checkbox], input[type=radio]",
 		) ?? control;
 	target.click();
+	returnFocus(id);
+}
+
+/**
+ * Return focus to the control marked `id`, unless something else has taken it
+ * since, such as a dialog the activation opened.
+ */
+function returnFocus(id: string): void {
 	requestAnimationFrame(() => {
 		const active = document.activeElement;
-		if (!active || active === document.body) control.focus();
+		const lost =
+			!active ||
+			active === document.body ||
+			!!active.closest("[data-raise-dialog]");
+		if (!lost) return;
+		document.querySelector<HTMLElement>(`[${MARKER}="${id}"]`)?.focus();
 	});
 }
 
@@ -388,7 +405,9 @@ export function GradedAction({
 				onClickCapture={(event) => {
 					event.preventDefault();
 					event.stopPropagation();
-					activate(() => activateMarked(id));
+					activate(() => activateMarked(id)).then((ran) => {
+						if (!ran) returnFocus(id);
+					});
 				}}
 				sx={(theme) => ({
 					display: fullWidth ? "flex" : "inline-flex",

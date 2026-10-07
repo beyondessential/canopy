@@ -13,6 +13,10 @@ fn main() {
 	let (_router, openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())
 		.merge(fns::routes())
 		.split_for_parts();
-	let json = serde_json::to_string_pretty(&openapi).expect("serialize spec");
+	// Through a `Value`, whose maps are ordered, because utoipa holds an
+	// operation's extensions in a `HashMap`: written directly, an operation with
+	// more than one would come out in a different order on every run.
+	let value = serde_json::to_value(&openapi).expect("serialize spec");
+	let json = serde_json::to_string_pretty(&value).expect("serialize spec");
 	println!("{json}");
 }

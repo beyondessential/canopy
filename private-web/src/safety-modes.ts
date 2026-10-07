@@ -244,7 +244,7 @@ export type DangerReason = "irreversible" | "fleet" | "unprotects" | "issues" | 
 export const DANGER_REASONS = {
 	"admins/add": ["issues"],
 	"admins/delete": ["invalidates"],
-	"backups/clear_schedule": ["unprotects"],
+	"backups/clear_retention": ["irreversible"],
 	"backups/delete": ["irreversible", "invalidates"],
 	"backups/disallow_restore": ["unprotects"],
 	"backups/request_now": ["fleet"],

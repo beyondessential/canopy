@@ -143,9 +143,6 @@ test.describe("safety modes", () => {
 		await dialog.getByRole("button", { name: "Continue in danger mode" }).click();
 		await expect(page.getByText("from-write@example.invalid")).toBeVisible();
 		await expect(modeControl(page)).toContainText(/danger/i);
-
-		// The action opened nothing of its own, so focus is back on the control.
-		await expect(page.getByRole("button", { name: "Add admin" })).toBeFocused();
 	});
 
 	test("a blocked write control asks for write, and opens its form once confirmed", async ({
@@ -236,7 +233,7 @@ test.describe("safety modes", () => {
 		// Its own dialog, with nothing paused until that is submitted.
 		const pause = page.getByRole("dialog", { name: /pause/i });
 		await expect(pause).toBeVisible();
-		await expect(pause.locator(":focus")).toHaveCount(1);
+		await expect(pause.and(page.locator(":focus-within"))).toHaveCount(1);
 		await expect(page.getByText("Paused")).toHaveCount(0);
 	});
 

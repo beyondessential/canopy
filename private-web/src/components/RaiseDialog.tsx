@@ -62,6 +62,10 @@ export function RaiseDialog({
 	return (
 		<Dialog
 			open={request !== null}
+			// The control that asked may be redrawn by the raise, so it returns
+			// focus itself rather than to an element that no longer exists.
+			disableRestoreFocus
+			data-raise-dialog
 			// A click that lands on the backdrop is not a decision: the second click
 			// of a double click on the control that asked lands there.
 			onClose={(_, reason) => {

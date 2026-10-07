@@ -108,8 +108,10 @@ Name each action with its object taken from the data in scope, such as "Revoke c
 - [x] Calendar: in read-only an open entry wears the write stripe, and clicking it raises and opens the amend form
 - [x] Update "machine setup below danger offers its ticket blocked" for the raise flow
 
+- [x] `private-openapi-dump` writes through a `serde_json::Value`, so `openapi.json` comes out in one order: utoipa keeps an operation's extensions in a `HashMap`, and with two per danger operation the direct dump reordered them every run
+
 ### Verify
 
-- [ ] `just check`, `just typecheck`, `just lint`, `cargo fmt`
-- [ ] `just test-package private-server` and `just check-generated`
-- [ ] `env -u PORT just test-e2e`
+- [x] `just typecheck`, `just lint`, `cargo fmt`
+- [x] `openapi_spec` and `safety_modes` tests in private-server, the canopy-utoipa-axum tests, and `just check-generated`
+- [x] `e2e/safety-modes.spec.ts` and `e2e/upgrades.spec.ts` locally; the full e2e suite is left to CI
