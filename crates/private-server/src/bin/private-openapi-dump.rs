@@ -5,15 +5,24 @@
 //! No database or network is required — the spec is fully derived from compile-
 //! time annotations.
 
-use canopy_utoipa_axum::router::OpenApiRouter;
+use canopy_utoipa_axum::{DANGER_REASONS, DANGER_REASONS_EXTENSION, router::OpenApiRouter};
 use private_server::{fns, openapi::ApiDoc};
 use serde_json::Value;
-use utoipa::OpenApi;
+use utoipa::{OpenApi, openapi::extensions::Extensions};
 
 fn main() {
-	let (_router, openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())
+	let (_router, mut openapi) = OpenApiRouter::with_openapi(ApiDoc::openapi())
 		.merge(fns::routes())
 		.split_for_parts();
+	// Every danger reason, in the order the operator is given them, so the
+	// interface reads the list from here rather than keeping its own copy.
+	openapi
+		.extensions
+		.get_or_insert_with(Extensions::default)
+		.merge(Extensions::from_iter([(
+			DANGER_REASONS_EXTENSION,
+			DANGER_REASONS.to_vec(),
+		)]));
 	// utoipa holds an operation's extensions in a `HashMap`, so written directly
 	// an operation with more than one would come out in a different order on
 	// every run. Sorted explicitly rather than left to `Value`'s maps, which keep

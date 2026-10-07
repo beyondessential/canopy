@@ -147,7 +147,7 @@ function endpointsOf(grading: Grading): readonly GradedEndpoint[] {
 
 /**
  * Why a control needing `required` needs it, when that is danger: the reasons
- * declared by the danger endpoints it calls, each once, in list order.
+ * declared by the danger endpoints it calls, each once.
  */
 export function dangerReasons(
 	grading: Grading,

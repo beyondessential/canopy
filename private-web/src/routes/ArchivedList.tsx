@@ -89,8 +89,7 @@ function RestoreButton({
 	onClick: () => void;
 	/** Forwarded to the button, so `GradedAction` can give it its grade's colour. */
 	color?: ButtonProps["color"];
-	/** Forwarded to the button, so a caller that blocks this control (see
-	 * `GradedAction`) takes it out of the keyboard's reach as well. */
+	/** Forwarded to the button. */
 	disabled?: boolean;
 }) {
 	return (

@@ -66,7 +66,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(write: set_schedule))
 		.routes(routes!(write: clear_schedule))
 		.routes(routes!(write: set_retention))
-		.routes(routes!(danger(irreversible): clear_retention))
+		.routes(routes!(danger(unprotects): clear_retention))
 		.routes(routes!(write: set_machine_schedule))
 		.routes(routes!(write: clear_machine_schedule))
 		.routes(routes!(read_only: schedule_history))

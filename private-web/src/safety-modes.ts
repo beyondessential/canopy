@@ -237,14 +237,17 @@ export const SAFETY_MODES = {
  */
 export type GradedEndpoint = keyof typeof SAFETY_MODES;
 
+/** Every reason a handler can be danger for, in the order the operator is given them. */
+export const DANGER_REASON_ORDER = ["irreversible", "fleet", "unprotects", "issues", "invalidates"] as const;
+
 /** Why a handler is danger. Declared on its `routes!` entry beside its grade. */
-export type DangerReason = "irreversible" | "fleet" | "unprotects" | "issues" | "invalidates";
+export type DangerReason = (typeof DANGER_REASON_ORDER)[number];
 
 /** The reasons each danger endpoint declares, in the order they are listed. */
 export const DANGER_REASONS = {
 	"admins/add": ["issues"],
 	"admins/delete": ["invalidates"],
-	"backups/clear_retention": ["irreversible"],
+	"backups/clear_retention": ["unprotects"],
 	"backups/delete": ["irreversible", "invalidates"],
 	"backups/disallow_restore": ["unprotects"],
 	"backups/request_now": ["fleet"],

@@ -19,11 +19,15 @@ const root = join(here, "..");
 const EXTENSION = "x-canopy-safety-mode";
 const REASONS_EXTENSION = "x-canopy-danger-reasons";
 const MODES = new Set(["read-only", "write", "danger"]);
-// In the order the SAFE spec lists them, which is the order the operator is
-// given them in. Keep in step with `DANGER_REASONS` in canopy-utoipa-axum.
-const REASONS = ["irreversible", "fleet", "unprotects", "issues", "invalidates"];
 
 const document = JSON.parse(readFileSync(join(root, "openapi.json"), "utf8"));
+
+// Every reason, in the order the operator is given them: the server's own list,
+// carried on the document's root.
+const REASONS = document[REASONS_EXTENSION];
+if (!Array.isArray(REASONS) || REASONS.length === 0) {
+	throw new Error(`openapi.json carries no ${REASONS_EXTENSION} list on its root`);
+}
 
 const grades = new Map();
 const reasonsByKey = new Map();
@@ -85,8 +89,11 @@ ${entries.map(([key, mode]) => `\t"${key}": "${mode}",`).join("\n")}
  */
 export type GradedEndpoint = keyof typeof SAFETY_MODES;
 
+/** Every reason a handler can be danger for, in the order the operator is given them. */
+export const DANGER_REASON_ORDER = [${REASONS.map((reason) => `"${reason}"`).join(", ")}] as const;
+
 /** Why a handler is danger. Declared on its \`routes!\` entry beside its grade. */
-export type DangerReason = ${REASONS.map((reason) => `"${reason}"`).join(" | ")};
+export type DangerReason = (typeof DANGER_REASON_ORDER)[number];
 
 /** The reasons each danger endpoint declares, in the order they are listed. */
 export const DANGER_REASONS = {

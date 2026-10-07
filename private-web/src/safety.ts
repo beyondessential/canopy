@@ -7,7 +7,7 @@
 // lets the interface block it and say which mode it wants, rather than letting
 // the operator find out by being refused.
 
-import type { DangerReason } from "./safety-modes";
+import { DANGER_REASON_ORDER, type DangerReason } from "./safety-modes";
 
 /** A rung of the ladder: the mode a session is in, or one a control requires. */
 export type SafetyMode = "read-only" | "write" | "danger";
@@ -42,9 +42,9 @@ export function modeLabel(mode: SafetyMode): string {
 }
 
 /**
- * What an operator is told about each reason a handler is danger, in the order
- * the SAFE spec lists them. Each completes "it …", so a blocked control's raise
- * reads "it acts directly on servers and invalidates credentials".
+ * What an operator is told about each reason a handler is danger. Each completes
+ * "it …", so a blocked control's raise reads "it acts directly on servers and
+ * invalidates credentials".
  */
 const DANGER_REASON_WORDING: Record<DangerReason, string> = {
 	irreversible: "cannot be undone",
@@ -63,12 +63,10 @@ export function joinWithAnd(items: readonly string[]): string {
 /**
  * Why a danger control needs danger, as the operator is told it: "it acts
  * directly on servers and invalidates credentials". Reasons are worded in the
- * order of {@link DANGER_REASON_WORDING}, whatever order they are given in.
+ * order of {@link DANGER_REASON_ORDER}, whatever order they are given in.
  */
 export function dangerReasonsSentence(reasons: readonly DangerReason[]): string {
-	const ordered = (Object.keys(DANGER_REASON_WORDING) as DangerReason[]).filter(
-		(reason) => reasons.includes(reason),
-	);
+	const ordered = DANGER_REASON_ORDER.filter((reason) => reasons.includes(reason));
 	return `it ${joinWithAnd(ordered.map((reason) => DANGER_REASON_WORDING[reason]))}`;
 }
 

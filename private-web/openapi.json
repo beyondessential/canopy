@@ -13061,7 +13061,7 @@
           "backups"
         ],
         "x-canopy-danger-reasons": [
-          "irreversible"
+          "unprotects"
         ],
         "x-canopy-safety-mode": "danger"
       }
@@ -23231,6 +23231,13 @@
       "description": "Canopy release versions and downloadable artifacts.",
       "name": "versions"
     }
+  ],
+  "x-canopy-danger-reasons": [
+    "irreversible",
+    "fleet",
+    "unprotects",
+    "issues",
+    "invalidates"
   ],
   "x-request-compression": {
     "accepted": [
