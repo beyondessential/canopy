@@ -45,7 +45,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(read_only: checks))
 		.routes(routes!(write: create))
 		.routes(routes!(write: update))
-		.routes(routes!(danger: delete))
+		.routes(routes!(danger(invalidates): delete))
 }
 
 // ── Wire types ──────────────────────────────────────────────────────────────

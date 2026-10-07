@@ -330,10 +330,13 @@ test.describe("machine detail", () => {
 		});
 
 		await page.goto(`/fleet/machines/${first.machineId}/edit`);
-		const rank = page
-			.getByTestId("machine-section")
-			.getByRole("combobox", { name: "Rank" });
+		const section = page.getByTestId("machine-section");
+		const rank = section.getByRole("combobox", { name: "Rank" });
 		await expect(rank).toHaveText("Not ranked yet");
+		// The label floats above the placeholder instead of overlapping it.
+		await expect(
+			section.locator("[data-shrink]", { hasText: /^Rank$/ }),
+		).toHaveAttribute("data-shrink", "true");
 
 		await rank.click();
 		await page.getByRole("option", { name: "demo" }).click();
@@ -345,6 +348,62 @@ test.describe("machine detail", () => {
 			[[first.id, second.id]],
 		);
 		expect(ranks.map((row) => row.rank)).toEqual(["demo", "demo"]);
+	});
+
+	/// An archived box with nothing live on it keeps the rank it was archived
+	/// at, so the form offers no change to it.
+	///
+	/// spec: FLT#archival
+	test("an archived box with nothing on it offers no rank to change", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "archived-rank-group" });
+		const machine = await seedMachine(sql, {
+			name: "archived-rank-box",
+			groupId: group.id,
+			rank: "test",
+		});
+		await sql.query("UPDATE machines SET deleted_at = NOW() WHERE id = $1", [
+			machine.id,
+		]);
+
+		await page.goto(`/fleet/machines/${machine.id}/edit`);
+		const rank = page
+			.getByTestId("machine-section")
+			.getByRole("combobox", { name: "Rank" });
+		await expect(rank).toHaveText("test");
+		await expect(rank).toHaveAttribute("aria-disabled", "true");
+	});
+
+	/// A box an operator has just added carries nothing yet, and is ranked all
+	/// the same, so what arrives on it is never pending.
+	///
+	/// spec: FLT#editing
+	test("a box with nothing on it can be ranked", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "empty-group" });
+		const machine = await seedMachine(sql, {
+			name: "empty-box",
+			groupId: group.id,
+		});
+
+		await page.goto(`/fleet/machines/${machine.id}/edit`);
+		const rank = page
+			.getByTestId("machine-section")
+			.getByRole("combobox", { name: "Rank" });
+		await expect(rank).toHaveText("Not ranked yet");
+		await expect(rank).not.toHaveAttribute("aria-disabled", "true");
+
+		await rank.click();
+		await page.getByRole("option", { name: "test" }).click();
+		await page.getByRole("button", { name: "Save" }).click();
+		await expect(page).toHaveURL(new RegExp(`/fleet/machines/${machine.id}$`));
+
+		const rows = await sql.query<{ rank: string | null }>(
+			"SELECT rank FROM machines WHERE id = $1",
+			[machine.id],
+		);
+		expect(rows.map((row) => row.rank)).toEqual(["test"]);
 	});
 
 	/// A machine always has a name, so the edit form will not save one

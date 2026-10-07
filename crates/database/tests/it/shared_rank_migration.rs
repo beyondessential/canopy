@@ -3,8 +3,11 @@
 //! each incident that targeted a group itself onto the group's headline
 //! environment.
 //!
-//! Replays it for real: reverts the migration, seeds the shapes the deployed
-//! database holds, then re-applies it.
+//! Replays it for real: reverts it and the migrations after it, seeds the
+//! shapes the deployed database holds, then re-applies them in order. The
+//! later `machine_rank` migration keeps a box's rank and its applications'
+//! together by trigger, which would rewrite the mixed ranks seeded here before
+//! this migration ever saw them.
 //!
 //! spec: GRP#environments
 
@@ -15,6 +18,10 @@ use uuid::Uuid;
 const UP: &str = include_str!("../../../../migrations/2026-10-05-151834-0000_shared_rank/up.sql");
 const DOWN: &str =
 	include_str!("../../../../migrations/2026-10-05-151834-0000_shared_rank/down.sql");
+const MACHINE_RANK_UP: &str =
+	include_str!("../../../../migrations/2026-10-06-040849-0000_machine_rank/up.sql");
+const MACHINE_RANK_DOWN: &str =
+	include_str!("../../../../migrations/2026-10-06-040849-0000_machine_rank/down.sql");
 
 #[derive(QueryableByName)]
 struct RowId {
@@ -35,11 +42,17 @@ struct Count {
 }
 
 async fn revert(conn: &mut AsyncPgConnection) {
+	conn.batch_execute(MACHINE_RANK_DOWN)
+		.await
+		.expect("revert machine_rank");
 	conn.batch_execute(DOWN).await.expect("revert");
 }
 
 async fn apply(conn: &mut AsyncPgConnection) {
 	conn.batch_execute(UP).await.expect("apply");
+	conn.batch_execute(MACHINE_RANK_UP)
+		.await
+		.expect("apply machine_rank");
 }
 
 async fn group(conn: &mut AsyncPgConnection) -> Uuid {
@@ -222,6 +235,12 @@ async fn the_constraint_holds_after_the_migration() {
 		)
 		.await;
 		apply(&mut conn).await;
+		// The later machine_rank triggers give an application written onto a
+		// ranked box the box's rank, so the constraint this migration installs
+		// is only reached with them out of the way.
+		conn.batch_execute("ALTER TABLE applications DISABLE TRIGGER USER")
+			.await
+			.expect("bypass the triggers");
 
 		let refused = sql_query(
 			"INSERT INTO applications (type, host, group_id, rank, machine_id) \

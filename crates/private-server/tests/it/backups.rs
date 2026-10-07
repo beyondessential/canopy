@@ -118,7 +118,7 @@ async fn create_missing_group_is_404() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn set_schedule_floor_rejected_and_accepted() {
+async fn set_retention_floor_rejected_and_accepted() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;
 		private
@@ -135,11 +135,10 @@ async fn set_schedule_floor_rejected_and_accepted() {
 
 		// Below floor → 400.
 		let resp = private
-			.post("/api/backups/set_schedule")
+			.post("/api/backups/set_retention")
 			.json(&serde_json::json!({
 				"server_group_id": group_id,
 				"type": "tamanu-postgres",
-				"expected_interval": 3600,
 				"retention": {
 					"keep_latest": 1, "keep_daily": 1, "keep_weekly": 1,
 					"keep_monthly": 1, "keep_annual": 0
@@ -148,13 +147,13 @@ async fn set_schedule_floor_rejected_and_accepted() {
 			.await;
 		resp.assert_status_bad_request();
 
-		// At/above floor → ok, and the schedule round-trips into the view.
+		// At/above floor → ok, and the retention round-trips into the view
+		// without becoming a schedule override.
 		let resp = private
-			.post("/api/backups/set_schedule")
+			.post("/api/backups/set_retention")
 			.json(&serde_json::json!({
 				"server_group_id": group_id,
 				"type": "tamanu-postgres",
-				"expected_interval": 3600,
 				"retention": retention_json(),
 			}))
 			.await;
@@ -162,18 +161,17 @@ async fn set_schedule_floor_rejected_and_accepted() {
 		let body: serde_json::Value = resp.json();
 		let sched = &body["schedules"][0];
 		assert_eq!(sched["type"], "tamanu-postgres");
-		assert_eq!(sched["expected_interval"], 3600);
+		assert!(sched["schedule"].is_null(), "retention only: {sched}");
 		assert_eq!(sched["retention"]["keep_daily"], 7);
 		assert_eq!(sched["allow_below_floor"], false);
 
 		// Below floor but allow_below_floor → accepted, and the dangerous flag
 		// round-trips into the view.
 		let resp = private
-			.post("/api/backups/set_schedule")
+			.post("/api/backups/set_retention")
 			.json(&serde_json::json!({
 				"server_group_id": group_id,
 				"type": "tamanu-postgres",
-				"expected_interval": 3600,
 				"retention": {
 					"keep_latest": 1, "keep_daily": 2, "keep_weekly": 0,
 					"keep_monthly": 0, "keep_annual": 0
@@ -191,7 +189,7 @@ async fn set_schedule_floor_rejected_and_accepted() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn manual_only_interval_is_null() {
+async fn manual_only_is_a_schedule_override() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;
 		private
@@ -210,13 +208,74 @@ async fn manual_only_interval_is_null() {
 			.json(&serde_json::json!({
 				"server_group_id": group_id,
 				"type": "tamanu-postgres",
-				"expected_interval": null,
-				"retention": retention_json(),
+				"schedule": { "kind": "manual" },
 			}))
 			.await;
 		resp.assert_status_ok();
 		let body: serde_json::Value = resp.json();
-		assert!(body["schedules"][0]["expected_interval"].is_null());
+		assert_eq!(body["schedules"][0]["schedule"]["kind"], "manual");
+		assert!(body["schedules"][0]["retention"].is_null());
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn set_schedule_takes_cron_and_refuses_what_cannot_run() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		private
+			.post("/api/backups/create")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "b",
+				"target_role_arn": "arn",
+				"maintenance_role_arn": "maint-arn",
+				"mode": "from_birth",
+			}))
+			.await
+			.assert_status_ok();
+
+		let set = async |schedule: serde_json::Value| {
+			private
+				.post("/api/backups/set_schedule")
+				.json(&serde_json::json!({
+					"server_group_id": group_id,
+					"type": "tamanu-postgres",
+					"schedule": schedule,
+				}))
+				.await
+		};
+
+		let resp = set(serde_json::json!({
+			"kind": "cron", "expression": "0 2 * * *", "zone": "Pacific/Auckland",
+		}))
+		.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		let schedule = &body["schedules"][0]["schedule"];
+		assert_eq!(schedule["kind"], "cron");
+		assert_eq!(schedule["expression"], "0 2 * * *");
+		assert_eq!(schedule["zone"], "Pacific/Auckland");
+
+		for refused in [
+			serde_json::json!({"kind": "cron", "expression": "*/30 * * * *"}),
+			serde_json::json!({"kind": "cron", "expression": "0 0 30 2 *"}),
+			serde_json::json!({"kind": "cron", "expression": "0 2 * * * UTC"}),
+			serde_json::json!({"kind": "cron", "expression": "H/15 * * * *"}),
+			serde_json::json!({"kind": "cron", "expression": "0 2 * * *", "zone": "Mars/Olympus"}),
+			serde_json::json!({"kind": "interval", "seconds": 1800}),
+		] {
+			set(refused.clone()).await.assert_status_bad_request();
+		}
+		// None of the refusals disturbed what was set.
+		let resp = private
+			.post("/api/backups/get")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await;
+		assert_eq!(
+			resp.json::<serde_json::Value>()["schedules"][0]["schedule"]["expression"],
+			"0 2 * * *"
+		);
 	})
 	.await;
 }
@@ -739,7 +798,7 @@ async fn stats_restore_run_resolves_snapshot_size_from_the_producing_backup() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn group_schedules_reports_next_run_from_last_success_plus_interval() {
+async fn group_schedules_reports_the_groups_schedule_and_layer() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;
 		let device_id = Uuid::new_v4();
@@ -768,9 +827,14 @@ async fn group_schedules_reports_next_run_from_last_success_plus_interval() {
 		let body: serde_json::Value = resp.json();
 		let row = &body[0];
 		assert_eq!(row["type"], "tamanu-postgres");
-		assert_eq!(row["effective_interval"], 3600);
-		// next run = last success (00:00:00Z) + 1h.
-		assert_eq!(row["next_run_at"], "2026-06-01T01:00:00Z");
+		assert_eq!(row["schedule"], serde_json::json!({"kind": "interval", "seconds": 3600}));
+		assert_eq!(row["group_schedule"], row["schedule"]);
+		assert_eq!(row["layer"], "group");
+		// The seeded fleet default is what it would otherwise inherit.
+		assert_eq!(
+			row["fleet_schedule"],
+			serde_json::json!({"kind": "interval", "seconds": 21600})
+		);
 	})
 	.await;
 }
@@ -805,11 +869,11 @@ async fn group_schedules_reports_manual_only_override_as_no_schedule() {
 			.iter()
 			.find(|r| r["type"] == "tamanu-postgres")
 			.expect("the overridden type appears in schedule/retention");
-		assert!(
-			row["effective_interval"].is_null(),
+		assert_eq!(
+			row["schedule"]["kind"], "manual",
 			"manual-only must not resurrect the type default",
 		);
-		assert!(row["next_run_at"].is_null());
+		assert_eq!(row["layer"], "group");
 	})
 	.await;
 }
@@ -844,8 +908,8 @@ async fn group_schedules_includes_disabled_declared_types() {
 			.expect("disabled declared type appears in schedule/retention");
 		// Manual-only: no schedule, but a (floor) retention policy that applies to
 		// manual backups of this type.
-		assert!(row["effective_interval"].is_null());
-		assert!(row["next_run_at"].is_null());
+		assert_eq!(row["schedule"]["kind"], "manual");
+		assert!(row["group_schedule"].is_null());
 		assert!(row["effective_retention"]["keep_daily"].as_i64().unwrap() >= 7);
 	})
 	.await;
@@ -1307,7 +1371,10 @@ async fn type_defaults_list_and_set_roundtrip() {
 			.iter()
 			.find(|d| d["type"] == "tamanu-postgres")
 			.expect("seeded default present");
-		assert_eq!(td["default_interval"], 21600); // 6h
+		assert_eq!(
+			td["default_schedule"],
+			serde_json::json!({"kind": "interval", "seconds": 21600}),
+		); // 6h
 		assert_eq!(td["auto_enable"], false); // capabilities stay opt-in
 
 		// Update it.
@@ -1315,7 +1382,7 @@ async fn type_defaults_list_and_set_roundtrip() {
 			.post("/api/backups/set_type_default")
 			.json(&serde_json::json!({
 				"type": "tamanu-postgres",
-				"default_interval": 7200,
+				"default_schedule": {"kind": "interval", "seconds": 7200},
 				"default_retention": retention_json(),
 				"auto_enable": false,
 			}))
@@ -1332,7 +1399,7 @@ async fn type_defaults_list_and_set_roundtrip() {
 			.iter()
 			.find(|d| d["type"] == "tamanu-postgres")
 			.unwrap();
-		assert_eq!(td["default_interval"], 7200);
+		assert_eq!(td["default_schedule"]["seconds"], 7200);
 		assert_eq!(td["auto_enable"], false);
 
 		assert_eq!(td["allow_below_floor"], false);
@@ -1342,7 +1409,7 @@ async fn type_defaults_list_and_set_roundtrip() {
 			.post("/api/backups/set_type_default")
 			.json(&serde_json::json!({
 				"type": "tamanu-postgres",
-				"default_interval": null,
+				"default_schedule": {"kind": "manual"},
 				"default_retention": {
 					"keep_latest": 1, "keep_daily": 1, "keep_weekly": 1,
 					"keep_monthly": 1, "keep_annual": 0
@@ -1356,7 +1423,7 @@ async fn type_defaults_list_and_set_roundtrip() {
 			.post("/api/backups/set_type_default")
 			.json(&serde_json::json!({
 				"type": "tamanu-postgres",
-				"default_interval": null,
+				"default_schedule": {"kind": "manual"},
 				"default_retention": {
 					"keep_latest": 1, "keep_daily": 1, "keep_weekly": 0,
 					"keep_monthly": 0, "keep_annual": 0
@@ -1404,8 +1471,7 @@ async fn clear_schedule_removes_override() {
 			.json(&serde_json::json!({
 				"server_group_id": group_id,
 				"type": "tamanu-postgres",
-				"expected_interval": 3600,
-				"retention": retention_json(),
+				"schedule": {"kind": "interval", "seconds": 3600},
 			}))
 			.await
 			.assert_status_ok();

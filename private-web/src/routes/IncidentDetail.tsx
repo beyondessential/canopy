@@ -38,6 +38,7 @@ import {
 	RESOLVED_REASON_LABEL,
 	incidentTargetName,
 	isIncidentLingering,
+	maintenanceTarget,
 	type CheckResult,
 	type IncidentIssueData,
 	type IncidentNoteData,
@@ -313,7 +314,10 @@ function Header({
 				useFlexGap
 			>
 				{isAdmin && (incident.resolved_at ? (
-					<GradedAction calls="incidents/unresolve">
+					<GradedAction
+						calls="incidents/unresolve"
+						action={`Unresolve incident ${incident.id.slice(0, 8)}`}
+					>
 						<Button
 							size="small"
 							variant="outlined"
@@ -326,7 +330,10 @@ function Header({
 						</Button>
 					</GradedAction>
 				) : (
-					<GradedAction calls="incidents/resolve">
+					<GradedAction
+						calls="incidents/resolve"
+						action={`Resolve incident ${incident.id.slice(0, 8)}`}
+					>
 						<Button
 							size="small"
 							variant="outlined"
@@ -353,7 +360,10 @@ function Header({
 				{/* spec: MNT#declaring */}
 				{isAdmin && incident.server_group_id != null && (
 					<>
-						<GradedAction calls="maintenance/declare">
+						<GradedAction
+							calls="maintenance/declare"
+							action={`Declare maintenance for ${incident.server_group_name ?? "this group"}`}
+						>
 							<Button
 								size="small"
 								variant="outlined"
@@ -363,12 +373,18 @@ function Header({
 								This is maintenance…
 							</Button>
 						</GradedAction>
+						{/* It starts at the incident's environment, and marks the
+						    choices that leave some of its failures contributing. */}
+						{/* spec: MNT#choosing-what-to-cover */}
 						<DeclareMaintenanceDialog
 							open={maintenanceOpen}
 							onClose={() => setMaintenanceOpen(false)}
-							scope="group"
-							id={incident.server_group_id}
-							targetLabel={incident.server_group_name ?? undefined}
+							start={maintenanceTarget(
+								"group",
+								incident.server_group_id,
+								incident.rank,
+							)}
+							incidentId={incident.id}
 							onDone={onChanged}
 						/>
 					</>
@@ -404,7 +420,10 @@ function Header({
 							</MenuItem>
 						))}
 					</TextField>
-					<GradedAction calls="incidents/resolve">
+					<GradedAction
+						calls="incidents/resolve"
+						action={`Resolve incident ${incident.id.slice(0, 8)}`}
+					>
 						<Button
 							variant="outlined"
 							size="small"

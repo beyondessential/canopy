@@ -975,6 +975,52 @@ async fn ignores_a_window_over_a_machine_at_another_rank() {
 	.await
 }
 
+/// A window over another of the group's environments is not over this one, so
+/// it refuses nothing here, while one over this environment does.
+// spec: INV#work-under-way
+#[tokio::test(flavor = "multi_thread")]
+async fn only_this_environments_window_refuses_a_lease() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_ranked_application(
+			&mut conn,
+			group,
+			"kamaka-central",
+			"tamanu-central",
+			Some("production"),
+			None,
+		)
+		.await;
+		insert_ranked_application(
+			&mut conn,
+			group,
+			"kamaka-demo",
+			"tamanu-central",
+			Some("demo"),
+			None,
+		)
+		.await;
+		conn.batch_execute(&format!(
+			"INSERT INTO maintenance_windows (server_group_id, rank, expected_end, declared_by)
+			 VALUES ('{group}', 'demo', NOW() + INTERVAL '2 hours', 'someone.else@bes.au')"
+		))
+		.await
+		.expect("declare over the demo");
+
+		private
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "server_group_id": group, "rank": "production" }))
+			.await
+			.assert_status_ok();
+		private
+			.post("/api/inventory/take_lease")
+			.json(&json!({ "server_group_id": group, "rank": "demo" }))
+			.await
+			.assert_status(axum::http::StatusCode::CONFLICT);
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn takes_a_lease_once_a_window_has_passed_its_end() {
 	commons_tests::server::run(async move |mut conn, _public, private| {

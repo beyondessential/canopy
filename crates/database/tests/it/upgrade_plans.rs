@@ -9,7 +9,7 @@ use commons_types::{
 use database::{
 	applications::Application,
 	issues::Scope,
-	maintenance_windows::MaintenanceWindow,
+	maintenance_windows::{Amendment, Grain, MaintenanceWindow},
 	migration_tests::candidate_for,
 	reported_detail::ReportedDetail,
 	server_groups::ServerGroup,
@@ -515,6 +515,145 @@ async fn a_window_over_the_group_holds_its_environments_plans_open() {
 			0,
 			"a window over the whole group covers the environment in it"
 		);
+	})
+	.await
+}
+
+/// The window declared from a plan's offer stays over its environment, so the
+/// plan it holds open is not released partway through the work.
+// spec: MNT#moving-a-window
+#[tokio::test(flavor = "multi_thread")]
+async fn a_window_declared_from_the_plan_cannot_be_moved() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, server) = group_running(&mut conn, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+		let plan = UpgradePlan::record(
+			&mut conn,
+			group,
+			ServerRank::Production,
+			target.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
+
+		let window = MaintenanceWindow::declare_from_plan(
+			&mut conn,
+			plan.id,
+			Scope::Group(group),
+			Some(ServerRank::Production),
+			Timestamp::now() + SignedDuration::from_hours(4),
+			Some("upgrading to 2.61"),
+			Some("a@example.com"),
+		)
+		.await
+		.expect("declare from the plan");
+		assert_eq!(window.upgrade_plan_id, Some(plan.id));
+
+		let moved = MaintenanceWindow::amend(
+			&mut conn,
+			window.id,
+			Amendment {
+				target: Some(Grain::machine(server.machine_id.unwrap())),
+				..Amendment::default()
+			},
+			Some("a@example.com"),
+		)
+		.await;
+		assert!(
+			matches!(moved, Err(commons_errors::AppError::Conflict(_))),
+			"the plan's window stays over its environment: {moved:?}"
+		);
+		MaintenanceWindow::amend(
+			&mut conn,
+			window.id,
+			Amendment {
+				expected_end: Some(Timestamp::now() + SignedDuration::from_hours(6)),
+				..Amendment::default()
+			},
+			Some("a@example.com"),
+		)
+		.await
+		.expect("but it can still be amended");
+
+		let elsewhere = MaintenanceWindow::declare_from_plan(
+			&mut conn,
+			plan.id,
+			Scope::Group(group),
+			Some(ServerRank::Clone),
+			Timestamp::now() + SignedDuration::from_hours(4),
+			None,
+			Some("a@example.com"),
+		)
+		.await;
+		assert!(
+			matches!(elsewhere, Err(commons_errors::AppError::BadRequest(_))),
+			"a plan's offer is over the plan's environment: {elsewhere:?}"
+		);
+	})
+	.await
+}
+
+/// A window over the environment that was not declared from the plan is the
+/// operator's own, and moves like any other.
+// spec: MNT#moving-a-window
+#[tokio::test(flavor = "multi_thread")]
+async fn a_window_the_plan_did_not_open_moves_like_any_other() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, server) = group_running(&mut conn, "2.60.0").await;
+		let window = MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group),
+			Some(ServerRank::Production),
+			Timestamp::now() + SignedDuration::from_hours(4),
+			None,
+			Some("a@example.com"),
+		)
+		.await
+		.expect("declare before any plan");
+		let target = publish(&mut conn, 61, 0).await;
+		let plan = UpgradePlan::record(
+			&mut conn,
+			group,
+			ServerRank::Production,
+			target.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
+
+		let amended = MaintenanceWindow::declare_from_plan(
+			&mut conn,
+			plan.id,
+			Scope::Group(group),
+			Some(ServerRank::Production),
+			Timestamp::now() + SignedDuration::from_hours(5),
+			None,
+			Some("a@example.com"),
+		)
+		.await
+		.expect("declaring from the plan amends the open window");
+		assert_eq!(amended.id, window.id);
+		assert_eq!(
+			amended.upgrade_plan_id, None,
+			"amending through the plan's offer leaves it the operator's own"
+		);
+
+		MaintenanceWindow::amend(
+			&mut conn,
+			window.id,
+			Amendment {
+				target: Some(Grain::machine(server.machine_id.unwrap())),
+				..Amendment::default()
+			},
+			Some("a@example.com"),
+		)
+		.await
+		.expect("moves");
 	})
 	.await
 }

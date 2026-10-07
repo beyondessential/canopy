@@ -13,8 +13,14 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
+import {
+	ScheduleEditor,
+	ScheduleHistory,
+	useScheduleState,
+} from "../components/BackupSchedule";
 import { GradedAction } from "../components/GradedAction";
 import { usePageTitle } from "../hooks/usePageTitle";
+import type { TypeDefaultView } from "../types";
 
 type Retention = {
 	keep_latest: number;
@@ -24,13 +30,7 @@ type Retention = {
 	keep_annual: number;
 };
 
-type TypeDefault = {
-	type: string;
-	default_interval: number | null;
-	default_retention: Retention | null;
-	auto_enable: boolean;
-	allow_below_floor: boolean;
-};
+type TypeDefault = TypeDefaultView;
 
 const FLOOR_RETENTION: Retention = {
 	keep_latest: 1,
@@ -52,7 +52,7 @@ const RETENTION_FIELDS: Array<{ key: keyof Retention; label: string; floor?: num
 /// retention floor, matching the seeded `tamanu-postgres` default.
 const BLANK_DEFAULT: TypeDefault = {
 	type: "",
-	default_interval: 6 * 3600,
+	default_schedule: { kind: "interval", seconds: 6 * 3600 },
 	default_retention: FLOOR_RETENTION,
 	auto_enable: false,
 	allow_below_floor: false,
@@ -124,12 +124,6 @@ function TypeDefaultEditor({
 }) {
 	const save = useApiAction("backups", "set_type_default");
 	const [typeName, setTypeName] = useState(value.type);
-	const [scheduled, setScheduled] = useState(value.default_interval != null);
-	const [hours, setHours] = useState(
-		value.default_interval != null
-			? String(Math.max(1, Math.round(value.default_interval / 3600)))
-			: "6",
-	);
 	const [autoEnable, setAutoEnable] = useState(value.auto_enable);
 	const [retention, setRetention] = useState<Retention>(
 		value.default_retention ?? FLOOR_RETENTION,
@@ -140,6 +134,11 @@ function TypeDefaultEditor({
 
 	const trimmedType = typeName.trim();
 	const duplicate = creating && existingTypes.includes(trimmedType);
+	const schedule = useScheduleState(value.default_schedule, {
+		type: creating ? trimmedType : value.type,
+	});
+	// Bumped after a save so the history beside the editor refetches.
+	const [savedNonce, setSavedNonce] = useState(0);
 
 	const floorError = allowBelowFloor
 		? []
@@ -149,17 +148,25 @@ function TypeDefaultEditor({
 
 	const canSave =
 		!save.pending &&
+		schedule.schedule != null &&
 		floorError.length === 0 &&
 		(!creating || (trimmedType !== "" && !duplicate));
 
 	const onSave = async () => {
-		await save.call({
-			type: creating ? trimmedType : value.type,
-			default_interval: scheduled ? Math.max(1, Number(hours)) * 3600 : null,
-			default_retention: retention,
-			auto_enable: autoEnable,
-			allow_below_floor: allowBelowFloor,
-		});
+		if (!schedule.schedule) return;
+		try {
+			await save.call({
+				type: creating ? trimmedType : value.type,
+				default_schedule: schedule.schedule,
+				default_retention: retention,
+				auto_enable: autoEnable,
+				allow_below_floor: allowBelowFloor,
+			});
+		} catch {
+			/* surfaced via save.error */
+			return;
+		}
+		setSavedNonce((n) => n + 1);
 		onSaved();
 	};
 
@@ -188,26 +195,12 @@ function TypeDefaultEditor({
 				) : (
 					<Typography sx={{ fontFamily: "monospace" }}>{value.type}</Typography>
 				)}
-				<FormControlLabel
-					control={
-						<Switch
-							checked={scheduled}
-							onChange={(e) => setScheduled(e.target.checked)}
-							disabled={save.pending}
-						/>
-					}
-					label={scheduled ? "Scheduled" : "Manual only"}
-				/>
-				{scheduled && (
-					<TextField
-						label="Back up every (hours)"
-						type="number"
-						size="small"
-						value={hours}
-						onChange={(e) => setHours(e.target.value)}
-						disabled={save.pending}
-						slotProps={{ htmlInput: { min: 1, step: 1 } }}
-						sx={{ width: 200 }}
+				<ScheduleEditor state={schedule} disabled={save.pending} />
+				{!creating && (
+					<ScheduleHistory
+						layer="fleet"
+						type={value.type}
+						reloadKey={savedNonce}
 					/>
 				)}
 				<Stack direction={{ xs: "column", md: "row" }} spacing={1}>
@@ -268,7 +261,14 @@ function TypeDefaultEditor({
 				)}
 				{save.error && <Alert severity="error">{save.error.message}</Alert>}
 				<Box>
-					<GradedAction calls="backups/set_type_default">
+					<GradedAction
+						calls="backups/set_type_default"
+						action={
+							creating
+								? `Add default for backup type ${trimmedType}`
+								: `Save default for backup type ${value.type}`
+						}
+					>
 						<Button variant="contained" onClick={onSave} disabled={!canSave}>
 							{creating
 								? save.pending

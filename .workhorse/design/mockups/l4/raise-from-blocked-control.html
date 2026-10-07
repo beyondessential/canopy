@@ -1,0 +1,207 @@
+<!-- spec: private-server/safety-modes.md -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Raise from a blocked control</title>
+<style>
+	* { box-sizing: border-box; }
+	body {
+		margin: 0;
+		font-family: Roboto, "Helvetica Neue", Arial, sans-serif;
+		background: #f5f5f5;
+		color: rgba(0, 0, 0, 0.87);
+	}
+	.frames { display: flex; gap: 32px; padding: 32px; flex-wrap: wrap; }
+	.frame { width: 620px; }
+	.caption { font-size: 13px; color: rgba(0, 0, 0, 0.6); margin: 0 0 8px; }
+	.screen {
+		position: relative;
+		height: 420px;
+		background: #fff;
+		border-radius: 4px;
+		overflow: hidden;
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+	}
+
+	.appbar {
+		display: flex;
+		align-items: center;
+		gap: 16px;
+		height: 48px;
+		padding: 0 24px;
+		background: #f5f5f5;
+		box-shadow: 0 2px 1px -1px rgba(0,0,0,.2), 0 1px 1px rgba(0,0,0,.14), 0 1px 3px rgba(0,0,0,.12);
+	}
+	.appbar .brand { font-size: 20px; font-weight: 500; }
+	.appbar .nav { font-size: 14px; color: rgba(0, 0, 0, 0.6); }
+	.appbar .spacer { flex: 1; }
+	.mode {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		padding: 4px 10px;
+		border: 1px solid rgba(0, 0, 0, 0.12);
+		border-radius: 32px;
+		font-size: 13px;
+		font-weight: 500;
+		color: rgba(0, 0, 0, 0.6);
+		background: #fff;
+	}
+	.mode .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+
+	.page { padding: 24px; }
+	.page h1 { font-size: 24px; font-weight: 400; margin: 0 0 16px; }
+	.row { display: flex; gap: 8px; }
+	.btn {
+		font: inherit;
+		font-size: 14px;
+		font-weight: 500;
+		letter-spacing: 0.02857em;
+		text-transform: uppercase;
+		padding: 5px 15px;
+		border-radius: 4px;
+		border: 1px solid;
+		background: none;
+		cursor: pointer;
+	}
+	.btn.write-blocked {
+		color: #ed6c02;
+		border-color: rgba(237, 108, 2, 0.5);
+		background-image: repeating-linear-gradient(135deg, rgba(255,152,0,.24), rgba(255,152,0,.24) 6px, rgba(255,152,0,.07) 6px, rgba(255,152,0,.07) 12px);
+		filter: grayscale(0.8);
+	}
+	.btn.danger-blocked {
+		color: #d32f2f;
+		border-color: rgba(211, 47, 47, 0.5);
+		background-image: repeating-linear-gradient(45deg, rgba(239,83,80,.24), rgba(239,83,80,.24) 6px, rgba(239,83,80,.07) 6px, rgba(239,83,80,.07) 12px);
+		filter: grayscale(0.8);
+	}
+	.btn.active { filter: grayscale(0); }
+
+	.backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.5); }
+	.dialog {
+		position: absolute;
+		left: 50%;
+		top: 50%;
+		transform: translate(-50%, -50%);
+		width: 444px;
+		background: #fff;
+		border-radius: 4px;
+		box-shadow: 0 11px 15px -7px rgba(0,0,0,.2), 0 24px 38px 3px rgba(0,0,0,.14), 0 9px 46px 8px rgba(0,0,0,.12);
+	}
+	.dialog h2 {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin: 0;
+		padding: 16px 24px;
+		font-size: 20px;
+		font-weight: 500;
+	}
+	.dialog h2.write { color: #ed6c02; }
+	.dialog h2.danger { color: #d32f2f; }
+	.dialog .content { padding: 0 24px 20px; }
+	.dialog p { margin: 0 0 16px; font-size: 16px; line-height: 1.5; color: rgba(0, 0, 0, 0.6); }
+	.dialog p:last-child { margin-bottom: 0; }
+	.actions { display: flex; justify-content: flex-end; gap: 8px; padding: 8px; }
+	.text-btn {
+		font: inherit;
+		font-size: 14px;
+		font-weight: 500;
+		letter-spacing: 0.02857em;
+		text-transform: uppercase;
+		padding: 6px 8px;
+		border: 0;
+		background: none;
+		color: inherit;
+		border-radius: 4px;
+	}
+	.contained {
+		font: inherit;
+		font-size: 14px;
+		font-weight: 500;
+		letter-spacing: 0.02857em;
+		text-transform: uppercase;
+		padding: 6px 16px;
+		border: 0;
+		border-radius: 4px;
+		color: #fff;
+		box-shadow: 0 3px 1px -2px rgba(0,0,0,.2), 0 2px 2px rgba(0,0,0,.14), 0 1px 5px rgba(0,0,0,.12);
+	}
+	.contained.write { background: #ed6c02; }
+	.contained.danger { background: #d32f2f; }
+	svg { width: 24px; height: 24px; fill: currentColor; }
+</style>
+</head>
+<body>
+<div class="frames">
+
+	<div class="frame">
+		<p class="caption">Clicking a blocked write control in read-only</p>
+		<div class="screen">
+			<div class="appbar">
+				<span class="brand">Canopy</span>
+				<span class="nav">Status</span>
+				<span class="nav">Groups</span>
+				<span class="spacer"></span>
+				<span class="mode"><span class="dot"></span>Read-only</span>
+			</div>
+			<div class="page">
+				<h1>alpha</h1>
+				<div class="row">
+					<button class="btn write-blocked active">Edit</button>
+					<button class="btn danger-blocked">Archive</button>
+				</div>
+			</div>
+			<div class="backdrop"></div>
+			<div class="dialog" role="dialog">
+				<h2 class="write">Edit group alpha</h2>
+				<div class="content">
+					<p>This action needs write mode.</p>
+				</div>
+				<div class="actions">
+					<button class="text-btn">Cancel</button>
+					<button class="contained write">Continue in write mode</button>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<div class="frame">
+		<p class="caption">Clicking a blocked danger control in read-only or write</p>
+		<div class="screen">
+			<div class="appbar">
+				<span class="brand">Canopy</span>
+				<span class="nav">Status</span>
+				<span class="nav">Groups</span>
+				<span class="spacer"></span>
+				<span class="mode"><span class="dot"></span>Read-only</span>
+			</div>
+			<div class="page">
+				<h1>host-3</h1>
+				<div class="row">
+					<button class="btn write-blocked">Edit</button>
+					<button class="btn danger-blocked active">Revoke</button>
+				</div>
+			</div>
+			<div class="backdrop"></div>
+			<div class="dialog" role="dialog">
+				<h2 class="danger">
+					<svg viewBox="0 0 24 24"><path d="M12 5.99 19.53 19H4.47zM12 2 1 21h22zm1 14h-2v2h2zm0-6h-2v4h2z"/></svg>
+					Revoke certificate for host-3
+				</h2>
+				<div class="content">
+					<p>This action needs danger mode: it acts directly on servers and invalidates credentials.</p>
+				</div>
+				<div class="actions">
+					<button class="text-btn">Cancel</button>
+					<button class="contained danger">Continue in danger mode</button>
+				</div>
+			</div>
+		</div>
+	</div>
+
+</div>
+</body>
+</html>

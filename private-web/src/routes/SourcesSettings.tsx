@@ -182,7 +182,10 @@ function SourceRow({
 			</TableCell>
 			<TableCell>
 				{canEdit ? (
-					<GradedAction calls="healthchecks/set_source_reachability">
+					<GradedAction
+						calls="healthchecks/set_source_reachability"
+						action={`Change reachability mode of source ${row.source}`}
+					>
 						<ToggleButtonGroup
 							size="small"
 							exclusive
@@ -208,7 +211,10 @@ function SourceRow({
 			</TableCell>
 			<TableCell>
 				{canEdit ? (
-					<GradedAction calls="healthchecks/set_source_ingest">
+					<GradedAction
+						calls="healthchecks/set_source_ingest"
+						action={`Change ingest mode of source ${row.source}`}
+					>
 						<ToggleButtonGroup
 							size="small"
 							exclusive
@@ -278,11 +284,14 @@ function ConfirmModeDialog({
 				<Button onClick={onCancel} disabled={pending}>
 					Cancel
 				</Button>
-				<GradedAction calls={
-					kind === "reachability"
-						? "healthchecks/set_source_reachability"
-						: "healthchecks/set_source_ingest"
-				}>
+				<GradedAction
+					calls={
+						kind === "reachability"
+							? "healthchecks/set_source_reachability"
+							: "healthchecks/set_source_ingest"
+					}
+					action={`Set ${label} of source ${source} to ${to}`}
+				>
 					<Button variant="contained" onClick={onConfirm} disabled={pending}>
 						Confirm
 					</Button>

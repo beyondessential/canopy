@@ -45,7 +45,17 @@ import {
 	s3EgressRateForRegion,
 } from "../lib/s3Pricing";
 import { usePageTitle } from "../hooks/usePageTitle";
+import {
+	EffectiveScheduleLine,
+	NextBackupText,
+	ScheduleEditor,
+	ScheduleHistory,
+	ScheduleLayerChip,
+	ScheduleSummary,
+	useScheduleState,
+} from "../components/BackupSchedule";
 import { GradedAction } from "../components/GradedAction";
+import MachineScheduleControl from "../components/MachineScheduleControl";
 import TimeAgo from "../components/TimeAgo";
 import { LatestSnapshot, SnapshotId } from "../components/SnapshotId";
 import { BackupProcessingChip } from "../components/BackupProcessingChip";
@@ -59,6 +69,7 @@ import {
 	type BackupConfigStatus,
 	type BackupConfigView,
 	type BackupMaintenanceRun,
+	type GroupTypeScheduleView,
 	groupServersByRank,
 	type LiveProgress,
 	type RankedMachine,
@@ -128,7 +139,10 @@ export default function BackupPanel() {
 				<Alert severity="info">Backups not set up for this group.</Alert>
 				{isAdmin && (
 					<Box>
-						<GradedAction opens={["backups/create_shared", "backups/create"]}>
+						<GradedAction
+							opens={["backups/create_shared", "backups/create"]}
+							action={`Set up backups for ${groupName ?? "this group"}`}
+						>
 							<Button
 								component={RouterLink}
 								to={`/fleet/groups/${id}/backups/config`}
@@ -186,7 +200,10 @@ export default function BackupPanel() {
 					</Stack>
 					{isAdmin && (
 						<Stack direction="row" spacing={1}>
-							<GradedAction opens="backups/update">
+							<GradedAction
+								opens="backups/update"
+								action={`Edit backup configuration for bucket ${data.bucket}`}
+							>
 								<Button
 									component={RouterLink}
 									to={`/fleet/groups/${id}/backups/config`}
@@ -196,7 +213,11 @@ export default function BackupPanel() {
 									Edit config
 								</Button>
 							</GradedAction>
-							<DeleteConfigButton groupId={id} onDeleted={configForTick.reload} />
+							<DeleteConfigButton
+								groupId={id}
+								bucket={data.bucket}
+								onDeleted={configForTick.reload}
+							/>
 						</Stack>
 					)}
 				</Stack>
@@ -255,9 +276,11 @@ export default function BackupPanel() {
 /// untouched. Confirms first since it stops credential issuance for the group.
 function DeleteConfigButton({
 	groupId,
+	bucket,
 	onDeleted,
 }: {
 	groupId: string;
+	bucket: string;
 	onDeleted: () => void;
 }) {
 	const [open, setOpen] = useState(false);
@@ -275,7 +298,10 @@ function DeleteConfigButton({
 
 	return (
 		<>
-			<GradedAction calls="backups/delete">
+			<GradedAction
+				calls="backups/delete"
+				action={`Delete backup configuration for bucket ${bucket}`}
+			>
 				<Button
 					variant="outlined"
 					startIcon={<DeleteIcon />}
@@ -302,7 +328,10 @@ function DeleteConfigButton({
 					<Button onClick={() => setOpen(false)} disabled={del.pending}>
 						Cancel
 					</Button>
-					<GradedAction calls="backups/delete">
+					<GradedAction
+						calls="backups/delete"
+						action={`Delete backup configuration for bucket ${bucket}`}
+					>
 						<Button
 							variant="contained"
 							onClick={onConfirm}
@@ -339,9 +368,12 @@ function ConfigSummary({ config }: { config: BackupConfigView }) {
 	);
 }
 
-/// Per backup type, the group's effective schedule + retention (inherited from
-/// the canopy-wide default, or a per-group override). Admins can override a type
-/// or reset it back to the default.
+/// Per backup type, the schedule the group's machines follow and the group's
+/// retention: each inherited from the fleet-wide default, or a per-group
+/// override, set and reset on its own. Admins can override either or reset it.
+/// A machine can still carry a schedule of its own; those are edited against
+/// the machine, further down.
+/// spec: BKO#editing-schedules
 function SchedulesPanel({
 	groupId,
 	isAdmin,
@@ -388,21 +420,6 @@ function SchedulesPanel({
 	);
 }
 
-type GroupTypeSchedule = {
-	type: string;
-	effective_interval: number | null;
-	effective_retention: {
-		keep_latest: number;
-		keep_daily: number;
-		keep_weekly: number;
-		keep_monthly: number;
-		keep_annual: number;
-	};
-	has_override: boolean;
-	allow_below_floor: boolean;
-	next_run_at: string | null;
-};
-
 function TypeSchedule({
 	groupId,
 	schedule,
@@ -410,55 +427,107 @@ function TypeSchedule({
 	onChanged,
 }: {
 	groupId: string;
-	schedule: GroupTypeSchedule;
+	schedule: GroupTypeScheduleView;
 	isAdmin: boolean;
 	onChanged: () => void;
 }) {
-	const [editing, setEditing] = useState(false);
+	const [editing, setEditing] = useState<"schedule" | "retention" | null>(null);
 	const r = schedule.effective_retention;
+	const overridden = schedule.group_schedule != null;
+	const done = () => {
+		setEditing(null);
+		onChanged();
+	};
 
 	return (
-		<Box sx={{ borderTop: 1, borderColor: "divider", pt: 1.5 }}>
+		<Box
+			sx={{ borderTop: 1, borderColor: "divider", pt: 1.5 }}
+			data-testid={`type-schedule-${schedule.type}`}
+		>
 			<Stack
 				direction="row"
 				spacing={1}
 				sx={{ alignItems: "center", flexWrap: "wrap" }}
 			>
 				<Typography sx={{ fontFamily: "monospace" }}>{schedule.type}</Typography>
-				<Chip
-					size="small"
-					label={schedule.has_override ? "Override" : "Inherited default"}
-					color={schedule.has_override ? "secondary" : "default"}
-					variant={schedule.has_override ? "filled" : "outlined"}
-				/>
 				{schedule.allow_below_floor && (
 					<Chip size="small" color="error" label="below floor" />
 				)}
+			</Stack>
+			<Stack
+				direction="row"
+				spacing={1}
+				sx={{ alignItems: "center", flexWrap: "wrap", minHeight: 32 }}
+			>
+				<Typography variant="body2" color="text.secondary">
+					Schedule:
+				</Typography>
+				<Typography variant="body2">
+					<ScheduleSummary schedule={schedule.schedule} />
+				</Typography>
+				<ScheduleLayerChip layer={schedule.layer} />
 				<Box sx={{ flex: 1 }} />
-				{isAdmin && !editing && (
-					<GradedAction calls="backups/set_schedule">
-						<Button size="small" onClick={() => setEditing(true)}>
-							{schedule.has_override ? "Edit override" : "Override"}
+				{isAdmin && editing !== "schedule" && (
+					<GradedAction
+						opens={["backups/set_schedule", "backups/clear_schedule"]}
+						action={`${overridden ? "Edit" : "Override"} ${schedule.type} schedule`}
+					>
+						<Button size="small" onClick={() => setEditing("schedule")}>
+							{overridden ? "Edit schedule override" : "Override schedule"}
 						</Button>
 					</GradedAction>
 				)}
 			</Stack>
-			<Typography variant="body2" color="text.secondary">
-				{schedule.effective_interval != null
-					? `Every ${humanSeconds(schedule.effective_interval)}`
-					: "Manual only (no scheduled interval)"}{" "}
-				· retention latest {r.keep_latest}, daily {r.keep_daily}, weekly{" "}
-				{r.keep_weekly}, monthly {r.keep_monthly}, annual {r.keep_annual}
-			</Typography>
-			{editing && (
-				<OverrideEditor
+			{editing === "schedule" && (
+				<ScheduleOverrideEditor
 					groupId={groupId}
 					schedule={schedule}
-					onDone={() => {
-						setEditing(false);
-						onChanged();
-					}}
-					onCancel={() => setEditing(false)}
+					onDone={done}
+					onCancel={() => setEditing(null)}
+				/>
+			)}
+			<Stack
+				direction="row"
+				spacing={1}
+				sx={{ alignItems: "center", flexWrap: "wrap", minHeight: 32 }}
+			>
+				<Typography variant="body2" color="text.secondary">
+					Retention:
+				</Typography>
+				<Typography variant="body2">
+					latest {r.keep_latest}, daily {r.keep_daily}, weekly {r.keep_weekly},
+					monthly {r.keep_monthly}, annual {r.keep_annual}
+				</Typography>
+				<Chip
+					size="small"
+					label={
+						schedule.has_retention_override
+							? "retention override"
+							: "fleet default"
+					}
+					color={schedule.has_retention_override ? "secondary" : "default"}
+					variant={schedule.has_retention_override ? "filled" : "outlined"}
+				/>
+				<Box sx={{ flex: 1 }} />
+				{isAdmin && editing !== "retention" && (
+					<GradedAction
+						opens={["backups/set_retention", "backups/clear_retention"]}
+						action={`${schedule.has_retention_override ? "Edit" : "Override"} ${schedule.type} retention`}
+					>
+						<Button size="small" onClick={() => setEditing("retention")}>
+							{schedule.has_retention_override
+								? "Edit retention override"
+								: "Override retention"}
+						</Button>
+					</GradedAction>
+				)}
+			</Stack>
+			{editing === "retention" && (
+				<RetentionOverrideEditor
+					groupId={groupId}
+					schedule={schedule}
+					onDone={done}
+					onCancel={() => setEditing(null)}
 				/>
 			)}
 		</Box>
@@ -466,7 +535,7 @@ function TypeSchedule({
 }
 
 const RETENTION_FIELDS: Array<{
-	key: keyof GroupTypeSchedule["effective_retention"];
+	key: keyof GroupTypeScheduleView["effective_retention"];
 	label: string;
 	floor?: number;
 }> = [
@@ -477,28 +546,113 @@ const RETENTION_FIELDS: Array<{
 	{ key: "keep_annual", label: "Annual" },
 ];
 
-function OverrideEditor({
+/// The group's schedule for a type, in place of the fleet default's. Starts
+/// from what the group's machines follow now, so a small change stays small.
+function ScheduleOverrideEditor({
 	groupId,
 	schedule,
 	onDone,
 	onCancel,
 }: {
 	groupId: string;
-	schedule: GroupTypeSchedule;
+	schedule: GroupTypeScheduleView;
 	onDone: () => void;
 	onCancel: () => void;
 }) {
 	const setSchedule = useApiAction("backups", "set_schedule");
 	const clearSchedule = useApiAction("backups", "clear_schedule");
-	const [scheduled, setScheduled] = useState(
-		schedule.effective_interval != null,
+	const overridden = schedule.group_schedule != null;
+	const state = useScheduleState(schedule.schedule, {
+		type: schedule.type,
+		groupId,
+	});
+
+	const save = async () => {
+		if (!state.schedule) return;
+		try {
+			await setSchedule.call({
+				server_group_id: groupId,
+				type: schedule.type,
+				schedule: state.schedule,
+			});
+			onDone();
+		} catch {
+			/* surfaced via setSchedule.error */
+		}
+	};
+	const reset = async () => {
+		try {
+			await clearSchedule.call({
+				server_group_id: groupId,
+				type: schedule.type,
+			});
+			onDone();
+		} catch {
+			/* surfaced via clearSchedule.error */
+		}
+	};
+
+	const pending = setSchedule.pending || clearSchedule.pending;
+	const error = setSchedule.error || clearSchedule.error;
+
+	return (
+		<Stack spacing={1.5} sx={{ my: 1.5 }} data-testid="schedule-override-editor">
+			{!overridden && (
+				<Alert severity="info" icon={false}>
+					Following the fleet default,{" "}
+					<ScheduleSummary schedule={schedule.fleet_schedule} />. An override
+					replaces it whole.
+				</Alert>
+			)}
+			<ScheduleEditor state={state} disabled={pending} />
+			<ScheduleHistory layer="group" type={schedule.type} groupId={groupId} />
+			{error && <Alert severity="error">{error.message}</Alert>}
+			<Stack direction="row" spacing={1}>
+				<GradedAction
+					calls="backups/set_schedule"
+					action={`Save ${schedule.type} schedule override`}
+				>
+					<Button
+						variant="contained"
+						size="small"
+						onClick={save}
+						disabled={pending || !state.schedule}
+					>
+						{setSchedule.pending ? "Saving…" : "Save schedule override"}
+					</Button>
+				</GradedAction>
+				{overridden && (
+					<GradedAction
+						calls="backups/clear_schedule"
+						action={`Reset ${schedule.type} schedule to default`}
+					>
+						<Button size="small" onClick={reset} disabled={pending}>
+							Reset to default
+						</Button>
+					</GradedAction>
+				)}
+				<Button size="small" onClick={onCancel} disabled={pending}>
+					Cancel
+				</Button>
+			</Stack>
+		</Stack>
 	);
-	const [hours, setHours] = useState(
-		schedule.effective_interval != null
-			? String(Math.max(1, Math.round(schedule.effective_interval / 3600)))
-			: "6",
-	);
-	const [retention, setRetention] = useState(schedule.effective_retention);
+}
+
+function RetentionOverrideEditor({
+	groupId,
+	schedule,
+	onDone,
+	onCancel,
+}: {
+	groupId: string;
+	schedule: GroupTypeScheduleView;
+	onDone: () => void;
+	onCancel: () => void;
+}) {
+	const setRetention = useApiAction("backups", "set_retention");
+	const clearRetention = useApiAction("backups", "clear_retention");
+	const [retention, setRetentionDraft] = useState(schedule.effective_retention);
 	const [allowBelowFloor, setAllowBelowFloor] = useState(
 		schedule.allow_below_floor,
 	);
@@ -510,47 +664,35 @@ function OverrideEditor({
 			).map((f) => `${f.label} must be ≥ ${f.floor}`);
 
 	const save = async () => {
-		await setSchedule.call({
-			server_group_id: groupId,
-			type: schedule.type,
-			expected_interval: scheduled ? Math.max(1, Number(hours)) * 3600 : null,
-			retention,
-			allow_below_floor: allowBelowFloor,
-		});
-		onDone();
+		try {
+			await setRetention.call({
+				server_group_id: groupId,
+				type: schedule.type,
+				retention,
+				allow_below_floor: allowBelowFloor,
+			});
+			onDone();
+		} catch {
+			/* surfaced via setRetention.error */
+		}
 	};
 	const reset = async () => {
-		await clearSchedule.call({ server_group_id: groupId, type: schedule.type });
-		onDone();
+		try {
+			await clearRetention.call({
+				server_group_id: groupId,
+				type: schedule.type,
+			});
+			onDone();
+		} catch {
+			/* surfaced via clearRetention.error */
+		}
 	};
 
-	const pending = setSchedule.pending || clearSchedule.pending;
-	const error = setSchedule.error || clearSchedule.error;
+	const pending = setRetention.pending || clearRetention.pending;
+	const error = setRetention.error || clearRetention.error;
 
 	return (
-		<Stack spacing={1.5} sx={{ mt: 1.5 }}>
-			<FormControlLabel
-				control={
-					<Switch
-						checked={scheduled}
-						onChange={(e) => setScheduled(e.target.checked)}
-						disabled={pending}
-					/>
-				}
-				label={scheduled ? "Scheduled" : "Manual only"}
-			/>
-			{scheduled && (
-				<TextField
-					label="Back up every (hours)"
-					type="number"
-					size="small"
-					value={hours}
-					onChange={(e) => setHours(e.target.value)}
-					disabled={pending}
-					slotProps={{ htmlInput: { min: 1, step: 1 } }}
-					sx={{ width: 200 }}
-				/>
-			)}
+		<Stack spacing={1.5} sx={{ my: 1.5 }} data-testid="retention-override-editor">
 			<Stack direction={{ xs: "column", md: "row" }} spacing={1}>
 				{RETENTION_FIELDS.map((f) => (
 					<TextField
@@ -560,7 +702,7 @@ function OverrideEditor({
 						size="small"
 						value={retention[f.key]}
 						onChange={(e) =>
-							setRetention({ ...retention, [f.key]: Number(e.target.value) })
+							setRetentionDraft({ ...retention, [f.key]: Number(e.target.value) })
 						}
 						disabled={pending}
 						error={!allowBelowFloor && f.floor != null && retention[f.key] < f.floor}
@@ -596,24 +738,26 @@ function OverrideEditor({
 			)}
 			{error && <Alert severity="error">{error.message}</Alert>}
 			<Stack direction="row" spacing={1}>
-				<GradedAction calls="backups/set_schedule">
+				<GradedAction
+					calls="backups/set_retention"
+					action={`Save ${schedule.type} retention override`}
+				>
 					<Button
 						variant="contained"
 						size="small"
 						onClick={save}
 						disabled={pending || floorError.length > 0}
 					>
-						{pending ? "Saving…" : "Save override"}
+						{setRetention.pending ? "Saving…" : "Save retention override"}
 					</Button>
 				</GradedAction>
-				{schedule.has_override && (
-					<GradedAction calls="backups/clear_schedule">
-						<Button
-							size="small"
-							onClick={reset}
-							disabled={pending}
-						>
-							Reset to default
+				{schedule.has_retention_override && (
+					<GradedAction
+						calls="backups/clear_retention"
+						action={`Reset ${schedule.type} retention to default`}
+					>
+						<Button size="small" onClick={reset} disabled={pending}>
+							Reset retention to default
 						</Button>
 					</GradedAction>
 				)}
@@ -652,7 +796,10 @@ function ProvisioningCard({
 					</Alert>
 					{isAdmin && (
 						<Box>
-							<GradedAction calls="backups/create_repo">
+							<GradedAction
+								calls="backups/create_repo"
+								action={`Retry repository creation for bucket ${config.bucket}`}
+							>
 								<Button
 									variant="contained"
 									startIcon={<RefreshIcon />}
@@ -1525,7 +1672,10 @@ function MaintenancePanel({
 										: "Full run queued"
 								}
 							/>
-							<GradedAction calls="backups/cancel_maintenance">
+							<GradedAction
+								calls="backups/cancel_maintenance"
+								action={`Cancel queued full maintenance for bucket ${config.bucket}`}
+							>
 								<Button
 									size="small"
 									disabled={cancel.pending}
@@ -1544,7 +1694,10 @@ function MaintenancePanel({
 							}
 						>
 							<span>
-								<GradedAction calls="backups/request_maintenance">
+								<GradedAction
+									calls="backups/request_maintenance"
+									action={`Run full maintenance for bucket ${config.bucket}`}
+								>
 									<Button
 										size="small"
 										variant="outlined"
@@ -1653,6 +1806,8 @@ function ServersPanel({
 		stats.status === "ok" ? stats.data.restore_windows : [];
 	const restoreWindowFor = (machineId: string) =>
 		restoreWindows.find((w) => w.machine_id === machineId);
+	const machineName = (machineId: string) =>
+		members.find((m) => m.machine.id === machineId)?.machine.name ?? "machine";
 
 	const onAllowRestore = async (machineId: string) => {
 		try {
@@ -1698,7 +1853,10 @@ function ServersPanel({
 							</>
 						}
 					/>
-					<GradedAction calls="backups/disallow_restore">
+					<GradedAction
+						calls="backups/disallow_restore"
+						action={`Disallow restores on ${machineName(machineId)}`}
+					>
 						<Button
 							size="small"
 							onClick={() => onDisallowRestore(machineId)}
@@ -1711,7 +1869,10 @@ function ServersPanel({
 			);
 		}
 		return (
-			<GradedAction calls="backups/allow_restore">
+			<GradedAction
+				calls="backups/allow_restore"
+				action={`Allow restores on ${machineName(machineId)}`}
+			>
 				<Button
 					size="small"
 					startIcon={<RestoreIcon />}
@@ -1794,7 +1955,10 @@ function ServersPanel({
 						}
 					/>
 					{isAdmin && (
-						<GradedAction calls="backups/cancel_request">
+						<GradedAction
+							calls="backups/cancel_request"
+							action={`Cancel ${type} backup request for ${machineName(machineId)}`}
+						>
 							<Button
 								size="small"
 								onClick={() => onCancel(machineId, type)}
@@ -1809,7 +1973,10 @@ function ServersPanel({
 		}
 		return (
 			isAdmin && (
-				<GradedAction calls="backups/request_now">
+				<GradedAction
+					calls="backups/request_now"
+					action={`Request ${type} backup for ${machineName(machineId)}`}
+				>
 					<Button
 						size="small"
 						variant="outlined"
@@ -1840,6 +2007,7 @@ function ServersPanel({
 							<TableRow>
 								<TableCell>Machine</TableCell>
 								<TableCell>Type</TableCell>
+								<TableCell>Schedule</TableCell>
 								<TableCell>Next backup</TableCell>
 								<TableCell>Latest snapshot</TableCell>
 								<TableCell align="right">Actions</TableCell>
@@ -1851,7 +2019,7 @@ function ServersPanel({
 									{rank && (
 										<TableRow>
 											<TableCell
-												colSpan={5}
+												colSpan={6}
 												sx={{ borderBottom: "none", pb: 0 }}
 											>
 												<Typography
@@ -1874,7 +2042,7 @@ function ServersPanel({
 															{restoreControl(m.machine.id)}
 														</Stack>
 													</TableCell>
-													<TableCell colSpan={3}>
+													<TableCell colSpan={4}>
 														<Typography variant="body2" color="text.secondary">
 															No backup types registered yet
 														</Typography>
@@ -1943,13 +2111,29 @@ function ServersPanel({
 														<BackupLiveProgress progress={cap?.progress} />
 													</TableCell>
 													<TableCell>
-														{cap?.next_backup_at ? (
-															<TimeAgo timestamp={cap.next_backup_at} />
+														{cap ? (
+															<Stack spacing={0.5} sx={{ alignItems: "flex-start" }}>
+																<EffectiveScheduleLine effective={cap.schedule} />
+																{isAdmin && (
+																	<MachineScheduleControl
+																		machineId={m.machine.id}
+																		machineName={m.machine.name}
+																		cap={cap}
+																		onChanged={stats.reload}
+																	/>
+																)}
+															</Stack>
 														) : (
 															<Typography variant="body2" color="text.secondary">
 																—
 															</Typography>
 														)}
+													</TableCell>
+													<TableCell>
+														<NextBackupText
+															next={cap?.next_backup}
+															zone={cap?.schedule.zone}
+														/>
 													</TableCell>
 													<TableCell>
 														<LatestSnapshot

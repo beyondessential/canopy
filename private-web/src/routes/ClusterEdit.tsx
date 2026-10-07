@@ -99,7 +99,10 @@ function Form({ cluster }: { cluster: ClusterDetail["cluster"] }) {
 			{error && <Alert severity="error">{error}</Alert>}
 
 			<Stack direction="row" spacing={1}>
-				<GradedAction calls="fleet/clusters/update">
+				<GradedAction
+					calls="fleet/clusters/update"
+					action={`Update cluster ${cluster.name}`}
+				>
 					<Button
 						type="submit"
 						variant="contained"

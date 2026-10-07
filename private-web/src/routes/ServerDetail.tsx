@@ -26,6 +26,7 @@ import { ChecksTable, HealthIndicator } from "../components/ChecksTable";
 import IncidentsLink from "../components/IncidentsLink";
 import ManualEventButton from "../components/ManualEventButton";
 import ServerCertificatesSection from "../components/ServerCertificatesSection";
+import MaintenanceHeaderButton from "../components/MaintenanceHeaderButton";
 import MaintenanceSection from "../components/MaintenanceSection";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import GroupTree from "../components/GroupTree";
@@ -121,6 +122,7 @@ export default function ServerDetail() {
 				hasOpenIncident={hasOpenIncident}
 				refreshTick={refreshTick}
 				onEventSubmitted={bumpRefresh}
+				onMaintenance={bumpRefresh}
 				onArchived={() => detail.reload()}
 			/>
 			{openIncident && (
@@ -132,6 +134,7 @@ export default function ServerDetail() {
 			{archived ? (
 				<ArchivedBanner
 					serverId={data.server.id}
+					serverName={applicationName(data.server)}
 					isAdmin={admin}
 					onRestored={() => detail.reload()}
 				/>
@@ -194,6 +197,7 @@ export default function ServerDetail() {
 				groupId={data.group?.id ?? null}
 				groupName={data.group?.name ?? null}
 				rank={data.machine_rank ?? null}
+				reloadKey={refreshTick}
 				onChanged={() => detail.reload()}
 			/>
 			<SilencedRefsSection
@@ -238,6 +242,7 @@ function Header({
 	hasOpenIncident,
 	refreshTick,
 	onEventSubmitted,
+	onMaintenance,
 	onArchived,
 }: {
 	data: ServerDetailData;
@@ -245,6 +250,7 @@ function Header({
 	hasOpenIncident: boolean;
 	refreshTick: number;
 	onEventSubmitted: () => void;
+	onMaintenance: () => void;
 	onArchived: () => void;
 }) {
 	const archived = data.server.archived;
@@ -307,12 +313,26 @@ function Header({
 							onSubmitted={onEventSubmitted}
 							action
 						/>
+						{/* An archived application is watched by no one, so there is
+						    nothing to declare over. */}
+						{!archived && (
+						<MaintenanceHeaderButton
+							scope="application"
+							id={data.server.id}
+							targetLabel={applicationName(data.server)}
+							compact
+							onDone={onMaintenance}
+						/>
+						)}
 						{/* One form per machine, holding this application's own
 						    section — so Edit goes to the box rather than to a
 						    second form that would answer "where do I edit
 						    this" differently. */}
 						{/* spec: FLT#groups */}
-						<GradedAction opens="fleet/machines/update">
+						<GradedAction
+							opens="fleet/machines/update"
+							action={`Edit machine hosting ${applicationName(data.server)}`}
+						>
 							<ActionButton
 								to={`/fleet/machines/${data.server.machine_id}/edit`}
 								icon={<EditIcon />}
@@ -364,7 +384,10 @@ function DeleteServerButton({
 
 	return (
 		<>
-			<GradedAction calls="fleet/applications/delete">
+			<GradedAction
+				calls="fleet/applications/delete"
+				action={`Archive server ${serverName}`}
+			>
 				<ActionButton
 					icon={<ArchiveIcon />}
 					label="Archive"
@@ -389,7 +412,10 @@ function DeleteServerButton({
 					<Button onClick={() => setOpen(false)} disabled={action.pending}>
 						Cancel
 					</Button>
-					<GradedAction calls="fleet/applications/delete">
+					<GradedAction
+						calls="fleet/applications/delete"
+						action={`Archive server ${serverName}`}
+					>
 						<Button
 							variant="contained"
 							onClick={onConfirm}
@@ -408,10 +434,12 @@ function DeleteServerButton({
 /// archived. Keeps the rest of the page (history, status, etc.) visible.
 function ArchivedBanner({
 	serverId,
+	serverName,
 	isAdmin,
 	onRestored,
 }: {
 	serverId: string;
+	serverName: string;
 	isAdmin: boolean;
 	onRestored: () => void;
 }) {
@@ -429,7 +457,10 @@ function ArchivedBanner({
 			severity="warning"
 			action={
 				isAdmin ? (
-					<GradedAction calls="fleet/applications/restore">
+					<GradedAction
+						calls="fleet/applications/restore"
+						action={`Restore archived server ${serverName}`}
+					>
 						<Button
 							size="small"
 							startIcon={<RestoreIcon />}

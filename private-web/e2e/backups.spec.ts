@@ -197,14 +197,14 @@ test.describe("backups ready: stats + backup-now", () => {
 			.locator("..");
 		// No override yet → inherits the seeded canopy-wide default.
 		await expect(schedules.getByText("tamanu-postgres")).toBeVisible();
-		await expect(schedules.getByText("Inherited default")).toBeVisible();
+		await expect(schedules.getByText("fleet default").first()).toBeVisible();
 
 		// Override the interval to 12h.
-		await page.getByRole("button", { name: /^override$/i }).click();
+		await page.getByRole("button", { name: /^override schedule$/i }).click();
 		await page.getByLabel("Back up every (hours)").fill("12");
-		await page.getByRole("button", { name: /save override/i }).click();
+		await page.getByRole("button", { name: /save schedule override/i }).click();
 
-		await expect(page.getByText("Override", { exact: true })).toBeVisible();
+		await expect(schedules.getByText("group override")).toBeVisible();
 		const rows = await sql.query<{ secs: string }>(
 			`SELECT EXTRACT(EPOCH FROM expected_interval)::text AS secs
 			 FROM server_group_backup_schedule
@@ -228,7 +228,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		});
 
 		await page.goto(`/fleet/groups/${group.id}/backups`);
-		await page.getByRole("button", { name: /^override$/i }).click();
+		await page.getByRole("button", { name: /^override retention$/i }).click();
 
 		// Below-floor daily is blocked until the dangerous toggle is on.
 		await page.getByLabel("Daily").fill("2");
@@ -236,7 +236,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		await page
 			.getByLabel(/allow retention below the org minimum/i)
 			.check();
-		await page.getByRole("button", { name: /save override/i }).click();
+		await page.getByRole("button", { name: /save retention override/i }).click();
 
 		await expect(page.getByText("below floor")).toBeVisible();
 		await expect
@@ -981,8 +981,7 @@ test.describe("backups ready: stats + backup-now", () => {
 
 		// The behind box never backed up → due now (not masked by `ahead`).
 		const behindRow = panel.getByRole("row").filter({ hasText: "srv-behind" });
-		// exact: the "Backup now" button also contains "now".
-		await expect(behindRow.getByText("now", { exact: true })).toBeVisible();
+		await expect(behindRow.getByText("due now")).toBeVisible();
 		await expect(behindRow.getByText(/no snapshot yet/i)).toBeVisible();
 	});
 

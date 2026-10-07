@@ -228,14 +228,11 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 		let mut any_size = false;
 
 		for row in server_rows {
-			let grace = row.expected_interval.saturating_mul(2);
-			let report_fresh = row
-				.last_success_at
-				.is_some_and(|t| now.duration_since(t) <= grace);
+			let report_fresh = row.last_success_at.is_some_and(|t| row.fresh(t, now));
 			let snap = snaps.get(&(row.machine_id, row.r#type.clone()));
 			let snapshot_fresh = snap
 				.and_then(|s| s.latest_snapshot_at)
-				.is_some_and(|t| now.duration_since(t) <= grace);
+				.is_some_and(|t| row.fresh(t, now));
 			let run = latest_success.get(&(row.machine_id, row.r#type.clone()));
 
 			// The device named the snapshot it created and the repo doesn't hold

@@ -51,13 +51,19 @@ import {
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import DeclareMaintenanceDialog from "../components/DeclareMaintenanceDialog";
-import { GradedAction, useGrade } from "../components/GradedAction";
+import {
+	GradedAction,
+	blockedSx,
+	blockedTitle,
+	useGradedActivation,
+} from "../components/GradedAction";
+import type { SafetyMode } from "../safety";
 import ServerRankChip from "../components/ServerRankChip";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { errorPreview } from "../lib/errorText";
-import { environmentName } from "../types";
+import { environmentName, maintenanceTarget, targetOfWindow } from "../types";
 import type { ApiResponse, MaintenanceWindow, ServerRank } from "../types";
 
 type PastPlan = ApiResponse<"upgrade_plans", "history">[number];
@@ -83,7 +89,10 @@ export default function Upgrades() {
 		return <Alert severity="error">{fleet.error.message}</Alert>;
 	}
 
-	const planned = fleet.data.filter((row) => row.plan);
+	const planned = fleet.data.filter(
+		(row): row is typeof row & { plan: NonNullable<typeof row.plan> } =>
+			row.plan !== null,
+	);
 	// The gap this list is for: a group's headline environment, behind the
 	// newest version, with nothing recorded.
 	const unplanned = fleet.data.filter(
@@ -189,50 +198,51 @@ export default function Upgrades() {
 										</TableCell>
 										<TableCell>
 											<PlannedFor
-												date={row.plan?.planned_for ?? null}
+												date={row.plan.planned_for ?? null}
 												late={row.late}
 											/>
 										</TableCell>
 										<TableCell>
 											<Stack spacing={0.25}>
 												<PlannedTime
-													time={row.plan?.planned_time ?? null}
-													end={row.plan?.planned_end_time ?? null}
-													zone={row.plan?.planned_zone ?? null}
+													time={row.plan.planned_time ?? null}
+													end={row.plan.planned_end_time ?? null}
+													zone={row.plan.planned_zone ?? null}
 												/>
 												<UnderMaintenance held={row.maintenance_window} />
 											</Stack>
 										</TableCell>
 										<TableCell>
 											<PlanNote
-												note={row.plan?.note ?? null}
+												note={row.plan.note ?? null}
 												testId="planned-upgrade-note"
 											/>
 										</TableCell>
 										{isAdmin && (
 											<TableCell align="right">
 												<EditPlan
-													planId={row.plan?.id ?? ""}
+													planId={row.plan.id}
 													groupName={environmentName(row.group_name, row.rank)}
 													targetVersion={row.target_version ?? ""}
-													plannedFor={row.plan?.planned_for ?? null}
-													plannedTime={row.plan?.planned_time ?? null}
-													plannedEnd={row.plan?.planned_end_time ?? null}
-													plannedZone={row.plan?.planned_zone ?? null}
-													note={row.plan?.note ?? null}
+													plannedFor={row.plan.planned_for ?? null}
+													plannedTime={row.plan.planned_time ?? null}
+													plannedEnd={row.plan.planned_end_time ?? null}
+													plannedZone={row.plan.planned_zone ?? null}
+													note={row.plan.note ?? null}
 													onAmended={() => setTick((t) => t + 1)}
 												/>
 												<WithdrawPlan
-													planId={row.plan?.id ?? ""}
+													planId={row.plan.id}
 													groupName={environmentName(row.group_name, row.rank)}
 													targetVersion={row.target_version ?? ""}
 													onWithdrawn={() => setTick((t) => t + 1)}
 												/>
 												<DeclareFromPlan
+													planId={row.plan.id}
 													groupId={row.group_id}
 													rank={row.rank}
 													groupName={environmentName(row.group_name, row.rank)}
-													note={row.plan?.note ?? null}
+													note={row.plan.note ?? null}
 													held={row.maintenance_window}
 													planned={row.planned_window}
 													onDeclared={() => setTick((t) => t + 1)}
@@ -347,6 +357,11 @@ type Block = Segment & { lane: number; lanes: number };
 /// named.
 type Tone = "open" | "late" | "done";
 
+/// How a calendar entry amends its plan, where it can: `blocked` is the mode
+/// the session has yet to reach, when it hasn't.
+type Edit = { open: () => void; blocked: SafetyMode | null };
+type Editor = (entry: Entry) => Edit | null;
+
 type Entry = {
 	planId: string;
 	date: string;
@@ -450,13 +465,22 @@ function PlanCalendar({
 	).length;
 
 	// A met plan is history and no longer amendable, so it keeps the link out
-	// to the group instead. So does every entry below the mode amending needs:
-	// the entry is the calendar's way to its group first, the editor a shortcut
-	// the plan's own row also offers, graded there.
-	const amending = useGrade("upgrade_plans/amend");
-	const editor = (entry: Entry) =>
-		isAdmin && entry.tone !== "done" && !amending.blocked
-			? () => setEditing(entry)
+	// to the group instead. Every other entry opens the amend form, and below the
+	// mode amending needs it wears that mode's stripe and asks for the raise first.
+	const amending = useGradedActivation({
+		calls: "upgrade_plans/amend",
+		action: "Amend upgrade plan",
+	});
+	const editor: Editor = (entry) =>
+		isAdmin && entry.tone !== "done"
+			? {
+					open: () =>
+						amending.activate(
+							() => setEditing(entry),
+							`Amend upgrade plan for ${entry.group}`,
+						),
+					blocked: amending.blocked ? amending.required : null,
+				}
 			: null;
 
 	return (
@@ -579,7 +603,7 @@ function MonthGrid({
 	month: string;
 	today: string;
 	entries: Entry[];
-	editor: (entry: Entry) => (() => void) | null;
+	editor: Editor;
 	onOpenDay: (date: string) => void;
 }) {
 	return (
@@ -631,7 +655,7 @@ function MonthGrid({
 							<CalendarEntry
 								key={entry.planId}
 								entry={entry}
-								onEdit={editor(entry)}
+								edit={editor(entry)}
 							/>
 						))}
 						{overflow.length > 0 && (
@@ -664,7 +688,7 @@ function TimeGrid({
 	days: string[];
 	today: string;
 	entries: Entry[];
-	editor: (entry: Entry) => (() => void) | null;
+	editor: Editor;
 }) {
 	const hours = useRef<HTMLDivElement>(null);
 	const now = useMinute();
@@ -753,7 +777,7 @@ function TimeGrid({
 									<TimeBlock
 										key={`${block.entry.planId}${block.tail ? "-tail" : ""}`}
 										block={block}
-										onEdit={editor(block.entry)}
+										edit={editor(block.entry)}
 									/>
 								))}
 						</Box>
@@ -766,16 +790,16 @@ function TimeGrid({
 
 function CalendarEntry({
 	entry,
-	onEdit,
+	edit,
 }: {
 	entry: Entry;
-	onEdit: (() => void) | null;
+	edit: Edit | null;
 }) {
 	return (
-		<CalendarTooltip title={<EntryTooltip entry={entry} />}>
+		<CalendarTooltip title={<EntryTooltip entry={entry} blocked={edit?.blocked} />}>
 			<Box
-				{...(onEdit
-					? { component: "button" as const, type: "button", onClick: onEdit }
+				{...(edit
+					? { component: "button" as const, type: "button", onClick: edit.open }
 					: { component: RouterLink, to: `/fleet/groups/${entry.groupId}` })}
 				data-testid="calendar-entry"
 				sx={[
@@ -784,7 +808,8 @@ function CalendarEntry({
 						bgcolor: alpha(toneColour(theme, entry.tone), 0.14),
 						"&:hover": { bgcolor: alpha(toneColour(theme, entry.tone), 0.26) },
 					}),
-					!!onEdit && ENTRY_BUTTON,
+					!!edit && ENTRY_BUTTON,
+					!!edit?.blocked && blockedSx(edit.blocked),
 				]}
 			>
 				<Box sx={ENTRY_LABEL}>
@@ -810,18 +835,18 @@ function CalendarEntry({
 /// One window on the hour grid, sized to how long it runs.
 function TimeBlock({
 	block,
-	onEdit,
+	edit,
 }: {
 	block: Block;
-	onEdit: (() => void) | null;
+	edit: Edit | null;
 }) {
 	const { entry } = block;
 
 	return (
-		<CalendarTooltip title={<EntryTooltip entry={entry} />}>
+		<CalendarTooltip title={<EntryTooltip entry={entry} blocked={edit?.blocked} />}>
 			<Box
-				{...(onEdit
-					? { component: "button" as const, type: "button", onClick: onEdit }
+				{...(edit
+					? { component: "button" as const, type: "button", onClick: edit.open }
 					: { component: RouterLink, to: `/fleet/groups/${entry.groupId}` })}
 				data-testid="calendar-entry"
 				{...(block.tail ? { "data-continues": "true" } : null)}
@@ -836,7 +861,8 @@ function TimeBlock({
 						borderColor: alpha(toneColour(theme, entry.tone), 0.45),
 						"&:hover": { bgcolor: alpha(toneColour(theme, entry.tone), 0.28) },
 					}),
-					!!onEdit && BLOCK_BUTTON,
+					!!edit && BLOCK_BUTTON,
+					!!edit?.blocked && blockedSx(edit.blocked),
 				]}
 			>
 				<Box sx={ENTRY_LABEL}>
@@ -890,7 +916,13 @@ const CALENDAR_TOOLTIP_SLOTS = {
 	},
 } as const;
 
-function EntryTooltip({ entry }: { entry: Entry }) {
+function EntryTooltip({
+	entry,
+	blocked,
+}: {
+	entry: Entry;
+	blocked?: SafetyMode | null;
+}) {
 	return (
 		<>
 			{entry.tone === "done"
@@ -903,6 +935,7 @@ function EntryTooltip({ entry }: { entry: Entry }) {
 				</Box>
 			)}
 			{entry.note && <Box sx={ENTRY_NOTE}>{entry.note}</Box>}
+			{blocked && <Box sx={ENTRY_NOTE}>{blockedTitle(blocked)}</Box>}
 		</>
 	);
 }
@@ -1606,7 +1639,10 @@ function RequestTest({
 	if (!testable) return null;
 	return (
 		<>
-			<GradedAction calls="migration_tests/request">
+			<GradedAction
+				calls="migration_tests/request"
+				action={`Test migrations for ${groupName}`}
+			>
 				<Tooltip title="Test the migrations against this environment's latest backup">
 					<IconButton
 						size="small"
@@ -1981,7 +2017,7 @@ function RecordPlan({
 
 	return (
 		<>
-			<GradedAction calls="upgrade_plans/record">
+			<GradedAction calls="upgrade_plans/record" action="Record upgrade plan">
 				<Button
 					variant="contained"
 					startIcon={<AddIcon />}
@@ -2219,7 +2255,10 @@ function RecordPlanDialog({
 			</DialogContent>
 			<DialogActions>
 				<Button onClick={onClose}>Cancel</Button>
-				<GradedAction calls="upgrade_plans/record">
+				<GradedAction
+					calls="upgrade_plans/record"
+					action={`Record upgrade plan for ${groups.find((g) => g.id === groupId)?.name ?? "a group"}`}
+				>
 					<Button
 						variant="contained"
 						disabled={!chosen || !versionId || record.pending}
@@ -2252,7 +2291,10 @@ function EditPlan({
 
 	return (
 		<>
-			<GradedAction calls="upgrade_plans/amend">
+			<GradedAction
+				calls="upgrade_plans/amend"
+				action={`Amend upgrade plan for ${groupName}`}
+			>
 				<IconButton
 					size="small"
 					aria-label={`Edit ${groupName}'s plan`}
@@ -2401,7 +2443,10 @@ function EditPlanDialog({
 			</DialogContent>
 			<DialogActions>
 				<Button onClick={onClose}>Cancel</Button>
-				<GradedAction calls="upgrade_plans/amend">
+				<GradedAction
+					calls="upgrade_plans/amend"
+					action={`Amend upgrade plan for ${groupName}`}
+				>
 					<Button variant="contained" onClick={save} disabled={amend.pending}>
 						Save
 					</Button>
@@ -2442,7 +2487,10 @@ function WithdrawPlan({
 	};
 
 	return (
-		<GradedAction calls="upgrade_plans/withdraw">
+		<GradedAction
+			calls="upgrade_plans/withdraw"
+			action={`Withdraw upgrade plan for ${groupName}`}
+		>
 			<IconButton
 				size="small"
 				aria-label={`Withdraw ${groupName}'s plan`}
@@ -2487,6 +2535,7 @@ function plannedLength(
  * nothing: this is an operator saying the work is starting now. */
 // spec: MNT#declaring
 function DeclareFromPlan({
+	planId,
 	groupId,
 	rank,
 	groupName,
@@ -2495,6 +2544,10 @@ function DeclareFromPlan({
 	planned,
 	onDeclared,
 }: {
+	/// The plan being declared from. A window it opens stays over the plan's
+	/// environment.
+	// spec: MNT#moving-a-window
+	planId: string;
 	groupId: string;
 	rank: ServerRank;
 	groupName: string;
@@ -2531,6 +2584,7 @@ function DeclareFromPlan({
 						? ["maintenance/declare", "maintenance/lift"]
 						: "maintenance/declare"
 				}
+				action={`${ownWindow ? "Amend" : "Declare"} maintenance for ${groupName}`}
 			>
 				<Tooltip
 					title={
@@ -2583,7 +2637,10 @@ function DeclareFromPlan({
 							Adjust
 						</Button>
 						<Button onClick={() => setOpen(false)}>Cancel</Button>
-						<GradedAction calls="maintenance/declare">
+						<GradedAction
+							calls="maintenance/declare"
+							action={`Declare maintenance for ${groupName}`}
+						>
 							<Button
 								variant="contained"
 								disabled={declare.pending}
@@ -2594,6 +2651,7 @@ function DeclareFromPlan({
 											rank,
 											expected_end: planned.ends_at,
 											note: note ?? undefined,
+											upgrade_plan_id: planId,
 										});
 										setOpen(false);
 										onDeclared();
@@ -2611,11 +2669,14 @@ function DeclareFromPlan({
 			<DeclareMaintenanceDialog
 				open={open && (!confirmable || adjusting)}
 				onClose={() => setOpen(false)}
-				scope="group"
-				id={groupId}
-				rank={ownWindow ? (ownWindow.rank ?? undefined) : rank}
-				targetLabel={groupName}
+				start={
+					(ownWindow && targetOfWindow(ownWindow)) ??
+					maintenanceTarget("group", groupId, rank)
+				}
 				existing={ownWindow}
+				fixed="The plan's environment"
+				startLabel={groupName}
+				upgradePlanId={planId}
 				offerLift
 				prefill={
 					ownWindow

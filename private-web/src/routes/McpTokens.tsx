@@ -104,7 +104,10 @@ export default function McpTokens() {
 							onChange={(e) => setName(e.target.value)}
 							disabled={pending}
 						/>
-						<GradedAction calls="mcp_tokens/mint">
+						<GradedAction
+							calls="mcp_tokens/mint"
+							action={`Mint MCP token ${name.trim()}`}
+						>
 							<Button
 								type="submit"
 								variant="contained"
@@ -163,7 +166,10 @@ export default function McpTokens() {
 									</TableCell>
 									<TableCell align="right">
 										{!token.revoked_at && (
-											<GradedAction calls="mcp_tokens/revoke">
+											<GradedAction
+												calls="mcp_tokens/revoke"
+												action={`Revoke MCP token ${token.name}`}
+											>
 												<Tooltip title="Revoke">
 													<IconButton
 														size="small"
@@ -232,7 +238,10 @@ export default function McpTokens() {
 				</DialogContent>
 				<DialogActions>
 					<Button onClick={() => setConfirmRevoke(null)}>Cancel</Button>
-					<GradedAction calls="mcp_tokens/revoke">
+					<GradedAction
+						calls="mcp_tokens/revoke"
+						action={`Revoke MCP token ${confirmRevoke?.name}`}
+					>
 						<Button
 							onClick={() => confirmRevoke && onRevoke(confirmRevoke)}
 						>

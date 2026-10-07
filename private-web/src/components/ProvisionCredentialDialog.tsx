@@ -202,7 +202,10 @@ export default function ProvisionCredentialDialog({
 						<Button onClick={close} disabled={action.pending}>
 							Cancel
 						</Button>
-						<GradedAction calls="devices/provision_credential">
+						<GradedAction
+							calls="devices/provision_credential"
+							action={deviceId ? `Provision ${effectiveRole} credential for this device` : `Create device with ${effectiveRole} credential`}
+						>
 							<Button
 								variant="contained"
 								onClick={onProvision}

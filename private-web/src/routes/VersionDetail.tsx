@@ -159,7 +159,10 @@ function StatusControl({
 				<MenuItem value="published">Published</MenuItem>
 				<MenuItem value="yanked">Yanked</MenuItem>
 			</Select>
-			<GradedAction calls="versions/update_version_status">
+			<GradedAction
+				calls="versions/update_version_status"
+				action={`Change status of version ${versionStr} to ${selected}`}
+			>
 				<Button
 					variant="contained"
 					disabled={!dirty || action.pending}
@@ -230,7 +233,10 @@ function ChangelogSection({
 				{isAdmin &&
 					(editing ? (
 						<Stack direction="row" spacing={1}>
-							<GradedAction calls="versions/update_version_changelog">
+							<GradedAction
+								calls="versions/update_version_changelog"
+								action={`Update changelog of version ${versionStr}`}
+							>
 								<Button
 									variant="contained"
 									onClick={save}
@@ -249,7 +255,10 @@ function ChangelogSection({
 							</Button>
 						</Stack>
 					) : (
-						<GradedAction calls="versions/update_version_changelog">
+						<GradedAction
+							calls="versions/update_version_changelog"
+							action={`Edit changelog of version ${versionStr}`}
+						>
 							<Button
 								variant="outlined"
 								startIcon={<EditIcon />}
@@ -359,6 +368,7 @@ function ArtifactsSection({
 										? []
 										: ["versions/create_artifact", "versions/upload_artifact"]
 								}
+								action={`Create artifact for version ${version}`}
 							>
 								<Button
 									variant={showCreate ? "outlined" : "contained"}
@@ -380,6 +390,7 @@ function ArtifactsSection({
 											"versions/delete_artifact",
 										]
 							}
+							action={`Unlock artifact editing for version ${version}`}
 						>
 							<Button
 								variant="outlined"
@@ -541,7 +552,10 @@ function ArtifactRow({
 				<TableCell align="right">
 					{confirmDelete ? (
 						<Stack direction="row" spacing={0.5} sx={{ justifyContent: "flex-end" }}>
-							<GradedAction calls="versions/delete_artifact">
+							<GradedAction
+								calls="versions/delete_artifact"
+								action={`Delete artifact ${artifactLabel(artifact)}`}
+							>
 								<Button
 									size="small"
 									variant="contained"
@@ -562,7 +576,10 @@ function ArtifactRow({
 						</Stack>
 					) : (
 						<Stack direction="row" spacing={0.5} sx={{ justifyContent: "flex-end" }}>
-							<GradedAction calls="versions/update_artifact">
+							<GradedAction
+								calls="versions/update_artifact"
+								action={`Edit artifact ${artifactLabel(artifact)}`}
+							>
 								<IconButton
 									aria-label={`edit ${artifactLabel(artifact)}`}
 									size="small"
@@ -571,7 +588,10 @@ function ArtifactRow({
 									<EditIcon fontSize="small" />
 								</IconButton>
 							</GradedAction>
-							<GradedAction calls="versions/delete_artifact">
+							<GradedAction
+								calls="versions/delete_artifact"
+								action={`Delete artifact ${artifactLabel(artifact)}`}
+							>
 								<IconButton
 									aria-label={`delete ${artifactLabel(artifact)}`}
 									size="small"
@@ -653,7 +673,10 @@ function EditArtifactRow({
 			</TableCell>
 			<TableCell align="right">
 				<Stack direction="row" spacing={0.5} sx={{ justifyContent: "flex-end" }}>
-					<GradedAction calls="versions/update_artifact">
+					<GradedAction
+						calls="versions/update_artifact"
+						action={`Update artifact ${artifactLabel(artifact)}`}
+					>
 						<Button
 							size="small"
 							variant="contained"
@@ -848,7 +871,10 @@ function CreateArtifactForm({
 							required
 						/>
 					)}
-					<GradedAction calls={scoped ? "versions/upload_artifact" : "versions/create_artifact"}>
+					<GradedAction
+						calls={scoped ? "versions/upload_artifact" : "versions/create_artifact"}
+						action={`${scoped ? "Upload" : "Create"} artifact ${type} ${platform}`}
+					>
 						<Button
 							type="submit"
 							variant="contained"
@@ -960,7 +986,10 @@ function KnownIssuesSection({
 					Known issues
 				</Typography>
 				{isAdmin && (
-					<GradedAction calls="versions/add_known_issue">
+					<GradedAction
+						calls="versions/add_known_issue"
+						action={`Add known issue to version ${currentVersion.major}.${currentVersion.minor}.${currentVersion.patch}`}
+					>
 						<Button
 							variant="outlined"
 							size="small"
@@ -1012,6 +1041,7 @@ function KnownIssuesSection({
 				open={addOpen}
 				onClose={() => setAddOpen(false)}
 				versionId={versionId}
+				versionLabel={`${currentVersion.major}.${currentVersion.minor}.${currentVersion.patch}`}
 				onAdded={() => {
 					setAddOpen(false);
 					onChanged();
@@ -1070,7 +1100,10 @@ function KnownIssueRow({
 					{issue.author} • <TimeAgo timestamp={issue.created_at} />
 				</Typography>
 				{open && isAdmin && (
-					<GradedAction calls="versions/resolve_known_issue">
+					<GradedAction
+						calls="versions/resolve_known_issue"
+						action={`Resolve known issue on version ${currentVersion.major}.${currentVersion.minor}.${currentVersion.patch}`}
+					>
 						<Button size="small" onClick={() => setResolveOpen(true)}>
 							Resolve
 						</Button>
@@ -1136,11 +1169,13 @@ function AddKnownIssueDialog({
 	open,
 	onClose,
 	versionId,
+	versionLabel,
 	onAdded,
 }: {
 	open: boolean;
 	onClose: () => void;
 	versionId: string;
+	versionLabel: string;
 	onAdded: () => void;
 }) {
 	const [draft, setDraft] = useState("");
@@ -1185,7 +1220,10 @@ function AddKnownIssueDialog({
 				<Button onClick={cancel} disabled={action.pending}>
 					Cancel
 				</Button>
-				<GradedAction calls="versions/add_known_issue">
+				<GradedAction
+					calls="versions/add_known_issue"
+					action={`Add known issue to version ${versionLabel}`}
+				>
 					<Button
 						variant="contained"
 						onClick={submit}
@@ -1300,7 +1338,10 @@ function ResolveKnownIssueDialog({
 				<Button onClick={cancel} disabled={action.pending}>
 					Cancel
 				</Button>
-				<GradedAction calls="versions/resolve_known_issue">
+				<GradedAction
+					calls="versions/resolve_known_issue"
+					action={`Resolve known issue on version ${currentVersion.major}.${currentVersion.minor}.${currentVersion.patch}`}
+				>
 					<Button
 						variant="contained"
 						onClick={submit}

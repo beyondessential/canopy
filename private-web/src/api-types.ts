@@ -157,6 +157,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backups/clear_machine_schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove a machine's own schedule for a backup type.
+         * @description The machine follows its group's schedule override, or the fleet-wide
+         *     default's, again. Clearing an override that isn't set changes nothing.
+         */
+        post: operations["backups_clear_machine_schedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/clear_retention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove a group's retention override for a backup type.
+         * @description The type reverts to inheriting the fleet-wide default retention. Graded
+         *     danger, unlike a schedule, because shortening retention destroys snapshots
+         *     at the next maintenance. A schedule override on the same group and type is
+         *     left as it is. Returns the updated configuration.
+         */
+        post: operations["backups_clear_retention"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backups/clear_schedule": {
         parameters: {
             query?: never;
@@ -167,9 +211,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Remove a group's schedule and retention override for a backup type.
-         * @description The type reverts to inheriting the canopy-wide default schedule and
-         *     retention. Returns the updated configuration.
+         * Remove a group's schedule override for a backup type.
+         * @description The type reverts to inheriting the fleet-wide default schedule. A retention
+         *     override on the same group and type is left as it is. Returns the updated
+         *     configuration.
          */
         post: operations["backups_clear_schedule"];
         delete?: never;
@@ -333,9 +378,8 @@ export interface paths {
         /**
          * List the effective schedule and retention for every backup type a group's
          *     applications have declared support for (not just the ones currently enabled).
-         * @description A type with no scheduled interval still appears, with a null
-         *     `effective_interval`, since a manually run backup of that type is still
-         *     retained under its own policy.
+         * @description A manual-only type still appears, since a manually run backup of that type is
+         *     still retained under its own policy.
          */
         post: operations["backups_group_schedules"];
         delete?: never;
@@ -551,6 +595,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backups/schedule_history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List the changes made to one schedule layer, newest first.
+         * @description Every set and clear of a layer is recorded with who made it and when. A
+         *     change whose `schedule` is null cleared the layer, so it no longer
+         *     overrides the one beneath. The `group` layer needs `group_id` and the
+         *     `machine` layer `machine_id`; the `fleet` layer needs neither.
+         */
+        post: operations["backups_schedule_history"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/schedule_preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview the next firings of a cron schedule being edited.
+         * @description Says why the schedule would be refused when it would. Otherwise, for a
+         *     cron expression, lists the next few firings with `H` resolved per machine:
+         *     the machine's own for a machine override, and for a group override or the
+         *     fleet-wide default one machine in each distinct zone among those it applies
+         *     to. Nothing is saved.
+         */
+        post: operations["backups_schedule_preview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backups/set_capability": {
         parameters: {
             query?: never;
@@ -572,6 +663,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backups/set_machine_schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a machine's own schedule for one backup type.
+         * @description It replaces the group's and the fleet-wide default's schedule whole, and
+         *     stays with the machine through a group move and through the type being
+         *     disabled and enabled again.
+         */
+        post: operations["backups_set_machine_schedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/backups/set_retention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set the retention override for one backup type of a group.
+         * @description A policy below the organization's retention floor is rejected with 400,
+         *     unless `allow_below_floor` is set. A schedule override on the same group
+         *     and type is left as it is.
+         */
+        post: operations["backups_set_retention"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backups/set_schedule": {
         parameters: {
             query?: never;
@@ -582,11 +717,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Set the schedule and retention override for one backup type of a group.
-         * @description A null interval means manual-only backups (no schedule). A specified
-         *     retention policy is validated against the organization's retention floor
-         *     and rejected with 400 if it falls below it, unless `allow_below_floor` is
-         *     set.
+         * Set the schedule override for one backup type of a group.
+         * @description The group's machines without their own override follow it, replacing the
+         *     fleet-wide default's schedule whole. A schedule that would be refused (a
+         *     cron expression that never fires or fires within the hour, an interval
+         *     under an hour, an unknown timezone) is rejected with 400. A retention
+         *     override on the same group and type is left as it is.
          */
         post: operations["backups_set_schedule"];
         delete?: never;
@@ -606,8 +742,9 @@ export interface paths {
         put?: never;
         /**
          * Set the canopy-wide default schedule and retention for a backup type.
-         * @description A retention policy below the organization's retention floor is rejected
-         *     with 400, unless `allow_below_floor` is set.
+         * @description A retention policy below the organization's retention floor, or a schedule
+         *     that would be refused, is rejected with 400. The former is allowed when
+         *     `allow_below_floor` is set.
          */
         post: operations["backups_set_type_default"];
         delete?: never;
@@ -3329,6 +3466,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/maintenance/amend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Amend an open window: its end, its note, or what it covers.
+         * @description Only what the request names changes. A new target moves the window there:
+         *     it stays the same window, the target it left settles as though the window
+         *     had ended over it, and what it newly covers is suspended from now. A window
+         *     declared from an upgrade plan, or one a configuration run's lease is being
+         *     served against, cannot move.
+         *     Requires admin access.
+         */
+        post: operations["amend"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/maintenance/declare": {
         parameters: {
             query?: never;
@@ -3368,8 +3530,10 @@ export interface paths {
         put?: never;
         /**
          * A target's maintenance windows.
-         * @description Open and ended, most recently declared first, so what was being done the
-         *     last time the target went quiet is readable against it.
+         * @description Those still covering it first, then the rest by when they stopped, so what
+         *     was being done the last time the target went quiet is readable against it.
+         *     A group's include the windows over its environments, so the history is read
+         *     per application, machine, or group, and a rank is refused.
          */
         post: operations["for_target"];
         delete?: never;
@@ -3416,6 +3580,29 @@ export interface paths {
          *     period runs.
          */
         post: operations["list_open"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/maintenance/targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The grains a declaration offered over `start` can cover.
+         * @description Whatever contains the starting grain and whatever it contains, nested
+         *     group over environment over machine over application, each with its own
+         *     open window. Offered from an incident, each choice says whether a window
+         *     there would cover every failing check in it.
+         */
+        post: operations["targets"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4904,6 +5091,25 @@ export interface components {
             planned_zone?: string | null;
         };
         /**
+         * @description What to change about an open window. A field left out keeps the window's
+         *     own, so amending someone else's window changes only what was chosen.
+         */
+        AmendWindowArgs: {
+            /**
+             * Format: date-time
+             * @description A new expected end.
+             */
+            expected_end?: string | null;
+            /**
+             * Format: uuid
+             * @description The window to amend.
+             */
+            id: string;
+            /** @description A new note. Null clears it; leaving it out keeps the window's own. */
+            note?: string | null;
+            target?: null | components["schemas"]["MaintenanceTarget"];
+        };
+        /**
          * @description A single application in the fleet: the unit that reports status, files
          *     issues, and is monitored for reachability. An application runs on a
          *     machine and may belong to a server group. The identity that reports for
@@ -5953,14 +6159,24 @@ export interface components {
          * @enum {string}
          */
         CheckResult: "passed" | "warning" | "failed" | "broken" | "skipped";
-        /** @description Identifies a server group's schedule override for a backup type. */
+        /** @description Identifies a machine's schedule override for a backup type. */
+        ClearMachineScheduleArgs: {
+            /**
+             * Format: uuid
+             * @description The machine to update.
+             */
+            machine_id: string;
+            /** @description Backup type whose override to remove. */
+            type: string;
+        };
+        /** @description Identifies a server group's schedule or retention override for a backup type. */
         ClearScheduleArgs: {
             /**
              * Format: uuid
              * @description The server group to update.
              */
             server_group_id: string;
-            /** @description Backup type whose schedule override to remove. */
+            /** @description Backup type whose override to remove. */
             type: string;
         };
         /** @description A cluster, as its page presents it. */
@@ -6388,31 +6604,20 @@ export interface components {
             name: string;
         };
         /** @description Declare a window over a target, or amend the one it already has. */
-        DeclareArgs: {
-            /**
-             * Format: uuid
-             * @description The application, for a window over one workload. Covers that
-             *     application and nothing else on the box it runs on.
-             */
-            application_id?: string | null;
+        DeclareArgs: components["schemas"]["MaintenanceTarget"] & {
             /**
              * Format: date-time
              * @description When the work is expected to finish. The window ends itself then.
              */
             expected_end: string;
-            /**
-             * Format: uuid
-             * @description The machine, for a window over one box. Covers every application on it.
-             */
-            machine_id?: string | null;
             /** @description What is being done. */
             note?: string | null;
-            rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: uuid
-             * @description The group, for a window over a whole group or one of its environments.
+             * @description The upgrade plan this is declared from, over the plan's environment. A
+             *     window it opens stays over that environment for as long as it holds.
              */
-            server_group_id?: string | null;
+            upgrade_plan_id?: string | null;
         };
         /** @description Request body for decommissioning a check. */
         DecommissionArgs: {
@@ -6645,6 +6850,30 @@ export interface components {
              * @description Observations landing in this hour-of-week.
              */
             observations: number;
+        };
+        /** @description What a machine's schedule for one type resolved to. */
+        EffectiveSchedule: {
+            layer?: null | components["schemas"]["ScheduleLayer"];
+            /**
+             * Format: date-time
+             * @description When a change to a layer last altered what this resolves to. Unlike
+             *     `since`, a change in the timezone the machine reports doesn't move it,
+             *     so it bounds which firings count as missed: a zone change moves when
+             *     firings fall, not how many a machine has missed.
+             */
+            layers_since?: string | null;
+            /**
+             * @description What the machine follows: manual-only, an interval, or a cron
+             *     expression.
+             */
+            schedule: components["schemas"]["Schedule"];
+            /**
+             * Format: date-time
+             * @description When this schedule took effect: a firing from before then opens no
+             *     window. None when it has always applied.
+             */
+            since?: string | null;
+            zone?: null | components["schemas"]["ZoneUsed"];
         };
         /**
          * @description A machine's enrollment state: whether a device has registered, and
@@ -7073,6 +7302,7 @@ export interface components {
          *     failing while its workloads are fine is a state only this can show.
          */
         GroupMachine: {
+            environment_rank?: null | components["schemas"]["ServerRank"];
             /**
              * @description The box's own health, from the checks filed against it. What the
              *     applications on it make of their own checks is each application's.
@@ -7129,7 +7359,7 @@ export interface components {
         };
         /**
          * @description Effective schedule and retention for one backup type of a group, combining
-         *     any per-group override with the canopy-wide default.
+         *     any per-group override with the fleet-wide default.
          */
         GroupTypeScheduleView: {
             /**
@@ -7138,28 +7368,28 @@ export interface components {
              */
             allow_below_floor: boolean;
             /**
-             * Format: int64
-             * @description Seconds between scheduled runs; null = manual-only (no scheduled interval).
-             */
-            effective_interval?: number | null;
-            /**
              * @description Retention policy that currently applies: the group's override if set,
-             *     else the canopy-wide default for this type, else the organization's
+             *     else the fleet-wide default for this type, else the organization's
              *     minimum retention floor.
              */
             effective_retention: components["schemas"]["RetentionPolicy"];
             /**
-             * @description Whether this group has an explicit override for this type, rather
-             *     than inheriting the canopy-wide default.
+             * @description The fleet-wide default schedule for the type; manual-only when it has
+             *     none.
              */
-            has_override: boolean;
+            fleet_schedule: components["schemas"]["Schedule"];
+            group_schedule?: null | components["schemas"]["Schedule"];
             /**
-             * Format: date-time
-             * @description When the next scheduled backup of this type is expected: the group's most
-             *     recent successful backup of the type plus the interval — or "now" if the
-             *     type is scheduled but has never succeeded yet. Null for manual-only types.
+             * @description Whether this group has its own retention override for this type, rather
+             *     than inheriting the fleet-wide default.
              */
-            next_run_at?: string | null;
+            has_retention_override: boolean;
+            layer?: null | components["schemas"]["ScheduleLayer"];
+            /**
+             * @description What the group's machines without an override of their own follow: the
+             *     group's override, else the fleet-wide default.
+             */
+            schedule: components["schemas"]["Schedule"];
             /** @description Backup type this schedule and retention apply to. */
             type: string;
         };
@@ -7275,6 +7505,21 @@ export interface components {
             notes?: string | null;
             /** @description The source whose check to update. */
             source: string;
+        };
+        /** @description What keeps a window over the target it covers. */
+        HeldInPlace: {
+            /** @enum {string} */
+            kind: "upgrade_plan";
+            /**
+             * Format: uuid
+             * @description The plan it was declared from.
+             */
+            plan_id: string;
+        } | {
+            /** @description The operator running. */
+            held_by?: string | null;
+            /** @enum {string} */
+            kind: "run_lease";
         };
         /** @description Pagination parameters for browsing the shared query history. */
         HistoryArgs: {
@@ -8362,6 +8607,7 @@ export interface components {
             name: string;
             /** @description Free-form operator notes about this machine. */
             notes?: string;
+            rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: date-time
              * @description When an identity completed enrolment for this machine. While `None`,
@@ -8447,15 +8693,7 @@ export interface components {
              * @description The server this capability belongs to.
              */
             machine_id: string;
-            /**
-             * Format: date-time
-             * @description When this server's next backup of this type is expected: the server's own
-             *     last success plus the effective interval, or "now" (overdue) if it's
-             *     scheduled but has never succeeded. `None` for disabled or manual-only
-             *     (no-interval) types. Per-server, so a lagging member isn't masked by a
-             *     freshly-backed-up sibling.
-             */
-            next_backup_at?: string | null;
+            next_backup?: null | components["schemas"]["NextBackup"];
             /**
              * Format: date-time
              * @description `Some(issued_at)` when a backup of this type appears to be in flight:
@@ -8465,6 +8703,11 @@ export interface components {
              */
             processing_since?: string | null;
             progress?: null | components["schemas"]["LiveProgress"];
+            /**
+             * @description The schedule this machine follows for the type, the layer it comes
+             *     from, the zone a cron schedule is read in, and when it took effect.
+             */
+            schedule: components["schemas"]["EffectiveSchedule"];
             /** @description Backup type this capability describes. */
             type: string;
         };
@@ -8556,6 +8799,7 @@ export interface components {
             /** @description The machine's own checks across every source, graded and classified. */
             checks: components["schemas"]["ConsolidatedChecks"];
             device_info?: null | components["schemas"]["DeviceInfo"];
+            environment_rank?: null | components["schemas"]["ServerRank"];
             /**
              * @description What the box reports about itself, resolved across every source
              *     reporting on it: platform, hardware, addresses, uptime.
@@ -8589,7 +8833,10 @@ export interface components {
              * @description When the box last reported anything, across every source.
              */
             last_reported_at?: string | null;
-            /** @description The machine's own record. */
+            /**
+             * @description The machine's own record. Its `rank` is the rank the box carries,
+             *     which an archived box keeps.
+             */
             machine: components["schemas"]["Machine"];
             /**
              * @description Whether a maintenance window suspends this machine, its own or its
@@ -8747,6 +8994,79 @@ export interface components {
          */
         MaintenanceKind: "quick" | "full";
         /**
+         * @description A target a window can cover, named the way a declaration names it: exactly
+         *     one of the ids, and with the group, optionally the rank of one of its
+         *     environments.
+         */
+        MaintenanceTarget: {
+            /**
+             * Format: uuid
+             * @description The application, for a window over one workload.
+             */
+            application_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The machine, for a window over one box.
+             */
+            machine_id?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
+            /**
+             * Format: uuid
+             * @description The group, for a window over a whole group or one of its environments.
+             */
+            server_group_id?: string | null;
+        };
+        /** @description One grain a declaration can cover. */
+        MaintenanceTargetChoice: {
+            /**
+             * @description Offered from an incident: whether a window here would cover every one
+             *     of its failing checks.
+             */
+            covers_failures?: boolean | null;
+            /**
+             * Format: int32
+             * @description How many of the listed grains contain this one.
+             */
+            depth: number;
+            /**
+             * @description The grain's own name: a group's, a machine's, an application's, or an
+             *     environment's rank.
+             */
+            label: string;
+            /** @description The target a window here would cover. */
+            target: components["schemas"]["MaintenanceTarget"];
+            window?: null | components["schemas"]["MaintenanceWindow"];
+        };
+        /**
+         * @description The grains a declaration can cover, nested in the order they contain one
+         *     another.
+         */
+        MaintenanceTargets: {
+            amends?: null | components["schemas"]["MaintenanceWindow"];
+            /**
+             * @description Whatever contains the starting grain and whatever it contains, nested
+             *     in the order they contain one another.
+             */
+            choices: components["schemas"]["MaintenanceTargetChoice"][];
+            held_in_place?: null | components["schemas"]["HeldInPlace"];
+        };
+        /** @description Where a declaration starts, and what it is read against. */
+        MaintenanceTargetsArgs: {
+            /**
+             * Format: uuid
+             * @description The incident it is offered from, to mark the choices that leave some of
+             *     its failing checks contributing.
+             */
+            incident_id?: string | null;
+            /** @description The target the declaration is offered over. */
+            start: components["schemas"]["MaintenanceTarget"];
+            /**
+             * Format: uuid
+             * @description The window being amended, where the declaration is an amendment.
+             */
+            window_id?: string | null;
+        };
+        /**
          * @description A declaration that an application, a machine, a group, or one of a group's
          *     environments is being worked on.
          */
@@ -8823,6 +9143,12 @@ export interface components {
              * @description When this record was last modified.
              */
             updated_at: string;
+            /**
+             * Format: uuid
+             * @description The upgrade plan this window was declared from, which keeps it over the
+             *     plan's environment for as long as it holds.
+             */
+            upgrade_plan_id?: string | null;
         };
         /**
          * @description A DNS zone Canopy can write records in.
@@ -9034,6 +9360,33 @@ export interface components {
              *     are unqualified.
              */
             subject?: string | null;
+        };
+        /** @description When a machine's next backup of a type is expected. */
+        NextBackup: {
+            /** @enum {string} */
+            kind: "manual";
+        } | {
+            /** @enum {string} */
+            kind: "due_now";
+        } | {
+            /**
+             * Format: date-time
+             * @description A window is open and the backup is due until it closes.
+             */
+            at: string;
+            /** @enum {string} */
+            kind: "due_until";
+        } | {
+            /**
+             * Format: date-time
+             * @description The next firing, or when the interval next elapses.
+             */
+            at: string;
+            /** @enum {string} */
+            kind: "at";
+        } | {
+            /** @enum {string} */
+            kind: "unreadable";
         };
         /**
          * @description An open window with the target it covers, named so a fleet-wide view
@@ -9483,6 +9836,24 @@ export interface components {
              * @description The group to read.
              */
             group_id: string;
+        };
+        /** @description The next firings of a cron schedule for one machine. */
+        PreviewMachine: {
+            /** @description The firings, in order. Each is an instant; present it in `zone`. */
+            firings: string[];
+            /**
+             * Format: uuid
+             * @description The machine the firings are read for; null when no machine applies and
+             *     the preview stands in for one.
+             */
+            machine_id?: string | null;
+            /** @description The machine's name, when there is one. */
+            machine_name?: string | null;
+            /**
+             * @description The zone the expression is read in for this machine, and where that
+             *     came from. A UTC fallback is flagged by its source.
+             */
+            zone: components["schemas"]["ZoneUsed"];
         };
         /** @description Request to inspect a bucket/prefix before configuring backups on it. */
         ProbeArgs: {
@@ -10608,6 +10979,90 @@ export interface components {
              */
             supersedes?: string | null;
         };
+        /** @description What a schedule is, as an operator sets it at one layer. */
+        Schedule: {
+            /** @enum {string} */
+            kind: "manual";
+        } | {
+            /** @enum {string} */
+            kind: "interval";
+            /** Format: int64 */
+            seconds: number;
+        } | {
+            /** @description Five fields: minute, hour, day of month, month, day of week. */
+            expression: string;
+            /** @enum {string} */
+            kind: "cron";
+            /** @description An IANA timezone name. */
+            zone?: string | null;
+        };
+        /** @description One change to a schedule layer. */
+        ScheduleChangeView: {
+            /**
+             * Format: date-time
+             * @description When the change was made.
+             */
+            changed_at: string;
+            /** @description The operator who made the change, when known. */
+            changed_by?: string | null;
+            schedule?: null | components["schemas"]["Schedule"];
+        };
+        /** @description Which schedule layer's history to read. */
+        ScheduleHistoryArgs: {
+            /**
+             * Format: uuid
+             * @description The group, for the `group` layer.
+             */
+            group_id?: string | null;
+            /** @description The layer: `fleet`, `group` or `machine`. */
+            layer: components["schemas"]["ScheduleLayer"];
+            /**
+             * Format: uuid
+             * @description The machine, for the `machine` layer.
+             */
+            machine_id?: string | null;
+            /** @description Backup type. */
+            type: string;
+        };
+        /**
+         * @description Which layer a machine's schedule for a type comes from.
+         * @enum {string}
+         */
+        ScheduleLayer: "machine" | "group" | "fleet";
+        /** @description What a schedule being edited would do. */
+        SchedulePreview: {
+            /**
+             * @description For a machine override, the machine's own firings; for a group override
+             *     or the fleet default, one machine in each distinct zone among those it
+             *     applies to. Empty unless the schedule is a cron expression.
+             */
+            machines: components["schemas"]["PreviewMachine"][];
+            /** @description Why the schedule would be refused, when it would. */
+            refusal?: string | null;
+        };
+        /** @description A schedule being edited, and whose firings to preview. */
+        SchedulePreviewArgs: {
+            /**
+             * Format: int32
+             * @description How many firings to show for each machine (default 5, at most 20).
+             */
+            count?: number | null;
+            /**
+             * Format: uuid
+             * @description Preview for the machines this group's override would apply to. With
+             *     neither this nor `machine_id`, the fleet-wide default's.
+             */
+            group_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Preview for this machine alone: the machine override being edited.
+             */
+            machine_id?: string | null;
+            /** @description The schedule as typed, not yet saved. */
+            schedule: components["schemas"]["Schedule"];
+            /** @description Backup type. */
+            type: string;
+        };
         /** @description A schedule and retention override for one backup type of a server group. */
         ScheduleView: {
             /**
@@ -10615,13 +11070,8 @@ export interface components {
              *     minimum retention floor.
              */
             allow_below_floor: boolean;
-            /**
-             * Format: int64
-             * @description Expected seconds between scheduled backups of this type; null means
-             *     manual-only (no schedule), which is distinct from an interval of zero.
-             */
-            expected_interval?: number | null;
             retention?: null | components["schemas"]["RetentionPolicy"];
+            schedule?: null | components["schemas"]["Schedule"];
             /** @description Backup type this override applies to. */
             type: string;
         };
@@ -11345,6 +11795,21 @@ export interface components {
             /** @description Backup type to enable or disable. */
             type: string;
         };
+        /** @description Request to set a machine's schedule override for one backup type. */
+        SetMachineScheduleArgs: {
+            /**
+             * Format: uuid
+             * @description The machine to configure.
+             */
+            machine_id: string;
+            /**
+             * @description The schedule the machine follows, replacing its group's and the
+             *     fleet-wide default's whole.
+             */
+            schedule: components["schemas"]["Schedule"];
+            /** @description Backup type this schedule applies to. */
+            type: string;
+        };
         /** @description The profile a server's certificates are requested under. */
         SetProfileArgs: {
             /**
@@ -11359,29 +11824,40 @@ export interface components {
              */
             server_id: string;
         };
-        /**
-         * @description Request to set (or override) the schedule and retention for one backup
-         *     type of a server group.
-         */
-        SetScheduleArgs: {
+        /** @description Request to set a group's retention override for one backup type. */
+        SetRetentionArgs: {
             /**
              * @description Allows this override to specify retention below the organization's
              *     minimum retention floor. Defaults to false.
              */
             allow_below_floor?: boolean;
             /**
-             * Format: int64
-             * @description Expected seconds between scheduled backups of this type; null means
-             *     manual-only (no schedule), which is distinct from an interval of zero.
+             * @description Retention policy to apply. A specified policy is validated against the
+             *     organization's minimum retention floor unless `allow_below_floor` is
+             *     set.
              */
-            expected_interval?: number | null;
-            retention?: null | components["schemas"]["RetentionPolicy"];
+            retention: components["schemas"]["RetentionPolicy"];
             /**
              * Format: uuid
              * @description The server group to configure.
              */
             server_group_id: string;
-            /** @description Backup type this schedule and retention apply to. */
+            /** @description Backup type this retention applies to. */
+            type: string;
+        };
+        /** @description Request to set a group's schedule override for one backup type. */
+        SetScheduleArgs: {
+            /**
+             * @description The schedule the group's machines follow, replacing the fleet-wide
+             *     default's whole: its kind, its timing, and its timezone.
+             */
+            schedule: components["schemas"]["Schedule"];
+            /**
+             * Format: uuid
+             * @description The server group to configure.
+             */
+            server_group_id: string;
+            /** @description Backup type this schedule applies to. */
             type: string;
         };
         /** @description Request body for setting a source's ingest mode. */
@@ -11419,13 +11895,10 @@ export interface components {
              *     default when first advertised.
              */
             auto_enable?: boolean;
-            /**
-             * Format: int64
-             * @description Seconds between scheduled runs; null = manual-only.
-             */
-            default_interval?: number | null;
             /** @description Default retention policy for this type. */
             default_retention: components["schemas"]["RetentionPolicy"];
+            /** @description The default schedule for every group and machine without an override. */
+            default_schedule: components["schemas"]["Schedule"];
             /** @description Backup type these defaults apply to. */
             type: string;
         };
@@ -11913,24 +12386,24 @@ export interface components {
              */
             total: number;
         };
-        /** @description The target a window covers: exactly one of the ids is set. */
-        TargetArgs: {
+        /** @description One span of a window over a target, as the target's history reads it. */
+        TargetWindow: {
             /**
-             * Format: uuid
-             * @description The application, for a window over one workload. Covers that
-             *     application and nothing else on the box it runs on.
+             * Format: date-time
+             * @description When the window started covering this target: its declaration, or the
+             *     move that brought it here.
              */
-            application_id?: string | null;
+            covered_from: string;
+            covered_rank?: null | components["schemas"]["ServerRank"];
             /**
-             * Format: uuid
-             * @description The machine, for a window over one box. Covers every application on it.
+             * Format: date-time
+             * @description When the window moved off this target, for a span that ended that way.
              */
-            machine_id?: string | null;
-            /**
-             * Format: uuid
-             * @description The group, for a window over a whole group or one of its environments.
-             */
-            server_group_id?: string | null;
+            moved_at?: string | null;
+            /** @description Where it moved to, as it reads to an operator. */
+            moved_to?: string | null;
+            /** @description The window, as it stands now. */
+            window: components["schemas"]["MaintenanceWindow"];
         };
         /** @description Request body for the versions an environment could be planned onto. */
         TargetsArgs: {
@@ -11989,12 +12462,9 @@ export interface components {
              *     when first advertised.
              */
             auto_enable: boolean;
-            /**
-             * Format: int64
-             * @description Seconds between scheduled runs; null = manual-only.
-             */
-            default_interval?: number | null;
             default_retention?: null | components["schemas"]["RetentionPolicy"];
+            /** @description The default schedule; manual-only, an interval, or a cron expression. */
+            default_schedule: components["schemas"]["Schedule"];
             /** @description Backup type these defaults apply to. */
             type: string;
         };
@@ -12381,6 +12851,21 @@ export interface components {
              */
             id: string;
         };
+        /**
+         * @description Where the zone a cron schedule is read in came from.
+         * @enum {string}
+         */
+        ZoneSource: "schedule" | "machine" | "unreported_utc" | "unrecognised_utc";
+        /** @description A zone a cron schedule is read in, and how it was settled on. */
+        ZoneUsed: {
+            /** @description An IANA timezone name. */
+            name: string;
+            /**
+             * @description Where the zone came from, which says whether UTC is a choice or a
+             *     fallback.
+             */
+            source: components["schemas"]["ZoneSource"];
+        };
     };
     responses: never;
     parameters: never;
@@ -12604,6 +13089,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MachineBackupCapabilityView"][];
+                };
+            };
+        };
+    };
+    backups_clear_machine_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClearMachineScheduleArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_clear_retention: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClearScheduleArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupConfigView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
         };
@@ -13137,6 +13682,60 @@ export interface operations {
             };
         };
     };
+    backups_schedule_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleHistoryArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleChangeView"][];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_schedule_preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SchedulePreviewArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulePreview"];
+                };
+            };
+        };
+    };
     backups_set_capability: {
         parameters: {
             query?: never;
@@ -13155,6 +13754,82 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_set_machine_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetMachineScheduleArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_set_retention: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetRetentionArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupConfigView"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
             };
             404: {
                 headers: {
@@ -17006,6 +17681,54 @@ export interface operations {
             };
         };
     };
+    amend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AmendWindowArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceWindow"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The target has a window of its own, or the window is held where it is by an upgrade plan or a configuration run */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     declare: {
         parameters: {
             query?: never;
@@ -17046,7 +17769,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TargetArgs"];
+                "application/json": components["schemas"]["MaintenanceTarget"];
             };
         };
         responses: {
@@ -17055,7 +17778,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MaintenanceWindow"][];
+                    "application/json": components["schemas"]["TargetWindow"][];
                 };
             };
             400: {
@@ -17118,6 +17841,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OpenWindow"][];
+                };
+            };
+        };
+    };
+    targets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MaintenanceTargetsArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceTargets"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
         };

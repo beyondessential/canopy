@@ -22,10 +22,36 @@ That margin is not offered to the operator and does not appear anywhere: it exis
 
 ## Raising and lowering
 
-Raising to write takes effect without confirmation.
-Raising to danger asks the operator to confirm first.
+An operator raises from the mode control, or by reaching for a blocked control (see "Raising from a blocked control").
+From the mode control, raising to write takes effect without confirmation, and raising to danger asks the operator to confirm first.
 
-An operator lowers their mode from the same control at any time, without waiting for the remaining time to run out.
+An operator lowers their mode from the mode control at any time, without waiting for the remaining time to run out.
+
+## Raising from a blocked control
+
+Activating a blocked control asks the operator to raise to the mode that control requires.
+This holds for write as well as danger, so a stray click on a blocked control raises nothing by itself.
+The confirmation is titled with the name of the action the control takes (see "Presenting graded controls"), and says the action needs that mode.
+Its confirming choice says the action continues in that mode, since confirming both raises and carries the action out.
+For danger, it also says why, giving every reason declared by the handlers the control calls (see "Grading the administrative surface"), as in "This action needs danger mode: it acts directly on servers and invalidates credentials."
+A control requiring danger raises straight to danger, from read-only as from write.
+A blocked save asks for the mode its submission needs as the form stands when it is activated.
+
+Confirming raises the session to that mode and then carries out the activation as it would have been carried out unblocked, whether the control makes a change itself or opens or leads to a form, dialog, or confirmation for one.
+A control with a confirmation of its own still shows it after the raise: one confirms the mode, the other the action.
+Activating the control again while its raise is being asked for or made does nothing further, so the action is carried out once.
+A raise made this way lasts as long as one made from the mode control.
+
+Cancelling leaves the mode and the control as they were.
+If the raise fails, the operator is told their mode is unchanged and the action is not carried out.
+What the operator has entered in a form is kept whether they confirm, cancel, or the raise fails.
+
+A blocked item in a menu closes the menu when chosen, as any other choice does, before asking for the raise.
+
+A blocked control is reachable from the keyboard, and activating it there does what clicking it does.
+Pressing Enter in a field of a form whose save is blocked does what activating the save does.
+Focus moves into the confirmation without landing on its confirming choice, so the keypress that activated the control cannot also confirm the raise.
+When the confirmation closes without the action opening something of its own, focus returns to the control.
 
 ## The session
 
@@ -54,8 +80,15 @@ A handler that changes something is danger when any of the following holds, and 
 
 - It cannot be undone from the interface. Deleting a backup configuration qualifies; creating one does not.
 - It acts on the fleet rather than amending Canopy's own records. Revoking a machine's certificate qualifies; renaming a group does not.
-- It removes a protection without destroying anything at the time. Closing a machine's restore window, pausing certificate renewal, and clearing a backup schedule all qualify.
+- It removes a protection without destroying anything at the time. Closing a machine's restore window and pausing certificate renewal both qualify.
 - It issues or invalidates credentials or trust material. Minting a fleet-query access token and changing the certificate authority both qualify.
+
+A handler graded danger declares which of these hold for it, and one that declares none fails the build.
+Issuing credentials and invalidating them are declared apart, so the reason given to the operator says which.
+The declared reasons are available to the operator interface alongside the grade.
+The operator is given them, in the order of the list above, as: it cannot be undone, it acts directly on servers, it removes a protection, it issues credentials, and it invalidates credentials.
+
+Changing a backup schedule at any layer is graded write, including setting it to manual-only or clearing it: a schedule is routine configuration, set back from the same editor, and every change to it is recorded (see [BKO](backup.md)).
 
 A handler that lets an already-trusted machine obtain credentials is graded write, because making a machine trusted is itself danger and the decision to trust it has already been made there.
 Opening a machine's restore window is graded on this basis.
@@ -84,9 +117,11 @@ A reloaded page is read-only.
 ## Presenting graded controls
 
 A control the operator could use in a higher mode is present and blocked rather than removed, so the surface has the same shape whatever mode the operator is in.
-A blocked control does not act when clicked, and names the mode it requires.
-Raising is done from the mode control rather than as a by-product of reaching for a blocked control.
+A blocked control names the mode it requires, and activating it offers the raise (see "Raising from a blocked control").
 
+Every graded control has a name for its action that says what it acts on, such as "Revoke certificate for host-3", beyond its visible label, and that name titles the raise it offers when blocked.
+
+A control that makes several changes carries the highest of their grades.
 A control that opens a form, dialog, or confirmation for making a change carries the grade of that change, so the operator is never led through filling in something they cannot submit.
 Where what the form saves needs a higher mode for some inputs than for others, its opener carries the lowest of them, and the save carries the grade of the submission it would make.
 A control that opens something also worth reading without making a change, such as a detail view with an edit inside it, is not graded; the change inside it is.
@@ -99,6 +134,7 @@ A control the operator can use is drawn in the colour of the grade it requires, 
 The grade's colour takes the place of any colour the control would otherwise have, so a colour means the same grade wherever it appears.
 A control that requires no mode keeps its own colour.
 
-A control disabled for a reason unrelated to its grade, such as a request in flight or an incomplete form, carries no stripe, so the treatment never misreports why a control is unavailable.
+A control disabled for a reason unrelated to its grade, such as a request in flight or an incomplete form, is disabled rather than blocked whatever the operator's mode: it carries no stripe and offers no raise, so the treatment never misreports why a control is unavailable.
+Once that reason clears, it is blocked or usable according to its grade.
 
 A control the operator can never use, because they are not an administrator, is absent rather than blocked (see [ADM](admin-access.md)).

@@ -27,8 +27,7 @@ export default function ActionButton({
 	href?: string;
 	to?: string;
 	onClick?: () => void;
-	/** Forwarded to the button, so a caller that blocks this control (see
-	 * `GradedAction`) takes it out of the keyboard's reach as well. */
+	/** Forwarded to the button. */
 	disabled?: boolean;
 }) {
 	const common = {

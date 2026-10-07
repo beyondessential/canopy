@@ -74,7 +74,10 @@ export default function Admins() {
 							onChange={(e) => setEmail(e.target.value)}
 							disabled={pending}
 						/>
-						<GradedAction calls="admins/add">
+						<GradedAction
+							calls="admins/add"
+							action="Add admin"
+						>
 							<Button
 								type="submit"
 								variant="contained"
@@ -110,7 +113,10 @@ export default function Admins() {
 								key={admin}
 								divider
 								secondaryAction={
-									<GradedAction calls="admins/delete">
+									<GradedAction
+										calls="admins/delete"
+										action={`Delete admin ${admin}`}
+									>
 										<IconButton
 											edge="end"
 											aria-label={`delete ${admin}`}

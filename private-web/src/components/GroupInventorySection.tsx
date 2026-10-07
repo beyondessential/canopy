@@ -24,7 +24,7 @@ import {
 	blockedSx,
 	blockedTitle,
 	gradeColour,
-	useGrade,
+	useGradedActivation,
 } from "./GradedAction";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import type {
@@ -33,7 +33,7 @@ import type {
 	MaintenanceWindow,
 	ServerRank,
 } from "../types";
-import { SERVER_RANK_ORDER } from "../types";
+import { SERVER_RANK_ORDER, maintenanceTarget } from "../types";
 import DeclareMaintenanceDialog from "./DeclareMaintenanceDialog";
 import TimeAgo from "./TimeAgo";
 
@@ -339,7 +339,10 @@ function Run({
 				</Typography>
 			) : (
 				<Stack spacing={0.5} sx={{ mt: 1, alignItems: "flex-start" }}>
-					<GradedAction calls="maintenance/declare">
+					<GradedAction
+						calls="maintenance/declare"
+						action={`Declare work on ${groupName} ${rank}`}
+					>
 						<Button
 							size="small"
 							variant="outlined"
@@ -359,9 +362,9 @@ function Run({
 			<DeclareMaintenanceDialog
 				open={dialogOpen}
 				onClose={() => setDialogOpen(false)}
-				scope="group"
-				id={groupId}
-				targetLabel={groupName}
+				start={maintenanceTarget("group", groupId, rank)}
+				fixed="The environment the run is served against"
+				startLabel={groupName}
 				prefill={{ note: `configuring ${rank}` }}
 				onDone={onDeclared}
 			/>
@@ -395,7 +398,10 @@ function Vars({
 	const remove = useApiAction("inventory_variables", "remove");
 	// The delete icon belongs to the chip, which clones it to attach its own
 	// handler, so it takes the blocked treatment directly rather than a wrapper.
-	const removal = useGrade("inventory_variables/remove");
+	const removal = useGradedActivation({
+		calls: "inventory_variables/remove",
+		action: "Remove inventory variable",
+	});
 
 	if (items.length === 0) {
 		return (
@@ -437,20 +443,21 @@ function Vars({
 								}
 								sx={{ fontFamily: "monospace", maxWidth: "100%" }}
 								onDelete={
-									onRemove && removal.blocked
-										? () => {}
-										: onRemove
-										? () => {
-												remove
-													.call({
-														...scopeOf(variable),
-														name: variable.name,
-													})
-													.then(onRemove)
-													.catch(() => {
-														// Surfaced by the alert below.
-													});
-											}
+									onRemove
+										? () =>
+												removal.activate(
+													() =>
+														remove
+															.call({
+																...scopeOf(variable),
+																name: variable.name,
+															})
+															.then(onRemove)
+															.catch(() => {
+																// Surfaced by the alert below.
+															}),
+													`Remove variable ${variable.name}`,
+												)
 										: undefined
 								}
 								deleteIcon={
@@ -577,7 +584,10 @@ function SetVariable({
 					}
 					label="Secret"
 				/>
-				<GradedAction calls="inventory_variables/set">
+				<GradedAction
+					calls="inventory_variables/set"
+					action="Set inventory variable"
+				>
 					<Button
 						variant="outlined"
 						onClick={submit}

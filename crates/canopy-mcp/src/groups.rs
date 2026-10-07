@@ -9,6 +9,7 @@ use commons_types::{
 	version::VersionStr,
 };
 use database::{
+	backup::schedules::MachineBackupSchedule,
 	backups::{
 		BackupMaintenanceRun, BackupRepoSnapshot, BackupRepoStats, BackupRun,
 		ServerGroupBackupConfig, ServerGroupBackupSchedule,
@@ -76,7 +77,12 @@ struct BackupConfigOut {
 #[derive(Serialize)]
 struct GroupBackups {
 	config: Option<BackupConfigOut>,
+	/// The group's per-type overrides of the fleet-wide default schedule and
+	/// retention. A row whose `has_schedule` is false overrides retention only.
 	schedules: Vec<ServerGroupBackupSchedule>,
+	/// The schedule overrides of the group's machines, which replace the
+	/// group's and the fleet default's for those machines.
+	machine_schedules: Vec<MachineBackupSchedule>,
 	repo_stats: Option<BackupRepoStats>,
 	recent_runs: Vec<BackupRun>,
 	maintenance_runs: Vec<BackupMaintenanceRun>,
@@ -222,6 +228,9 @@ impl CanopyMcp {
 		let schedules = ServerGroupBackupSchedule::list_for_group(&mut conn, id)
 			.await
 			.map_err(mcp_err)?;
+		let machine_schedules = MachineBackupSchedule::list_for_group(&mut conn, id)
+			.await
+			.map_err(mcp_err)?;
 		let repo_stats = BackupRepoStats::get(&mut conn, id).await.map_err(mcp_err)?;
 		let recent_runs = BackupRun::list_for_group(&mut conn, id, 10)
 			.await
@@ -248,6 +257,7 @@ impl CanopyMcp {
 			backups: GroupBackups {
 				config,
 				schedules,
+				machine_schedules,
 				repo_stats,
 				recent_runs,
 				maintenance_runs,

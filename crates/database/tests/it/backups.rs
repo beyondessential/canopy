@@ -3,6 +3,7 @@
 
 use commons_errors::AppError;
 use commons_tests::db::TestDb;
+use commons_types::backup::schedule::Schedule;
 use database::diesel_async::AsyncPgConnection;
 use database::pg_duration::PgDuration;
 use database::{
@@ -10,8 +11,8 @@ use database::{
 	BackupRepoSnapshot, BackupRepoStats, BackupRequest, BackupRun, BackupRunFilters,
 	BackupRunProgress, BackupType, BackupTypeDefault, MachineBackupCapability, MaintenanceKind,
 	MaintenanceOutcomeFilter, NewBackupCredentialIssuance, NewBackupRun, NewBackupRunProgress,
-	NewBackupTypeDefault, NewServerGroupBackupConfig, NewServerGroupBackupSchedule, RunOutcome,
-	ServerGroupBackupConfig, ServerGroupBackupSchedule, backups::BackupMaintenanceRun,
+	NewBackupTypeDefault, NewServerGroupBackupConfig, RunOutcome, ServerGroupBackupConfig,
+	ServerGroupBackupSchedule, backups::BackupMaintenanceRun,
 };
 use diesel::{sql_query, sql_types};
 use diesel_async::RunQueryDsl;
@@ -151,6 +152,8 @@ async fn type_defaults_retention_must_be_object() {
 			NewBackupTypeDefault {
 				r#type: BackupType::TamanuPostgres,
 				default_interval: Some(PgDuration(SignedDuration::from_hours(24))),
+				default_cron: None,
+				default_zone: None,
 				default_retention: retention(),
 				auto_enable: true,
 				allow_below_floor: false,
@@ -167,6 +170,8 @@ async fn type_defaults_retention_must_be_object() {
 			NewBackupTypeDefault {
 				r#type: BackupType::from("bad"),
 				default_interval: None,
+				default_cron: None,
+				default_zone: None,
 				default_retention: serde_json::json!([1, 2, 3]),
 				auto_enable: false,
 				allow_below_floor: false,
@@ -1426,141 +1431,75 @@ async fn capability_register_seeds_once_then_operator_controls() {
 // --- schedule ---------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
-async fn schedule_upsert_and_get() {
+async fn schedule_and_retention_are_set_and_cleared_apart() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
 		let pg = BackupType::TamanuPostgres;
+		let every_12h = Schedule::Interval {
+			seconds: SignedDuration::from_hours(12).as_secs(),
+		};
 
-		ServerGroupBackupSchedule::upsert(
-			&mut conn,
-			NewServerGroupBackupSchedule {
-				group_id,
-				r#type: pg.clone(),
-				expected_interval: Some(PgDuration(SignedDuration::from_hours(12))),
-				retention: Some(retention()),
-				allow_below_floor: false,
-			},
-		)
-		.await
-		.unwrap();
-
+		ServerGroupBackupSchedule::set_schedule(&mut conn, group_id, &pg, &every_12h)
+			.await
+			.unwrap();
 		let got = ServerGroupBackupSchedule::get(&mut conn, group_id, &pg)
 			.await
 			.unwrap()
 			.unwrap();
-		assert_eq!(
-			got.expected_interval,
-			Some(PgDuration(SignedDuration::from_hours(12)))
-		);
+		assert_eq!(got.schedule(), Some(every_12h.clone()));
+		assert!(got.retention.is_none(), "retention is inherited");
+
+		// Setting retention leaves the schedule alone.
+		ServerGroupBackupSchedule::set_retention(&mut conn, group_id, &pg, &retention(), false)
+			.await
+			.unwrap();
+		let got = ServerGroupBackupSchedule::get(&mut conn, group_id, &pg)
+			.await
+			.unwrap()
+			.unwrap();
+		assert_eq!(got.schedule(), Some(every_12h.clone()));
 		assert!(got.retention.is_some());
 
-		// Upsert overrides in place.
-		ServerGroupBackupSchedule::upsert(
-			&mut conn,
-			NewServerGroupBackupSchedule {
-				group_id,
-				r#type: pg.clone(),
-				expected_interval: None,
-				retention: None,
-				allow_below_floor: false,
-			},
-		)
-		.await
-		.unwrap();
+		// Clearing the schedule leaves the retention override on the row.
+		ServerGroupBackupSchedule::clear_schedule(&mut conn, group_id, &pg)
+			.await
+			.unwrap();
+		let got = ServerGroupBackupSchedule::get(&mut conn, group_id, &pg)
+			.await
+			.unwrap()
+			.expect("a retention override keeps the row");
+		assert_eq!(got.schedule(), None);
+		assert!(got.retention.is_some());
+
+		// Clearing that too leaves nothing, so the row goes.
+		ServerGroupBackupSchedule::clear_retention(&mut conn, group_id, &pg)
+			.await
+			.unwrap();
+		assert!(
+			ServerGroupBackupSchedule::get(&mut conn, group_id, &pg)
+				.await
+				.unwrap()
+				.is_none()
+		);
+
+		// A retention-only row doesn't override the schedule, and clearing the
+		// retention removes it.
+		ServerGroupBackupSchedule::set_retention(&mut conn, group_id, &pg, &retention(), false)
+			.await
+			.unwrap();
 		let got = ServerGroupBackupSchedule::get(&mut conn, group_id, &pg)
 			.await
 			.unwrap()
 			.unwrap();
-		assert_eq!(got.expected_interval, None);
-		assert_eq!(
+		assert_eq!(got.schedule(), None);
+		ServerGroupBackupSchedule::clear_retention(&mut conn, group_id, &pg)
+			.await
+			.unwrap();
+		assert!(
 			ServerGroupBackupSchedule::list_for_group(&mut conn, group_id)
 				.await
 				.unwrap()
-				.len(),
-			1
-		);
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn effective_interval_precedence() {
-	TestDb::run(|mut conn, _url| async move {
-		let group_id = insert_group(&mut conn, "g").await;
-		let pg = BackupType::TamanuPostgres;
-
-		BackupTypeDefault::upsert(
-			&mut conn,
-			NewBackupTypeDefault {
-				r#type: pg.clone(),
-				default_interval: Some(PgDuration(SignedDuration::from_hours(6))),
-				default_retention: retention(),
-				auto_enable: false,
-				allow_below_floor: false,
-			},
-		)
-		.await
-		.unwrap();
-
-		// No override row: inherit the type default.
-		assert_eq!(
-			database::backups::effective_interval(&mut conn, group_id, &pg)
-				.await
-				.unwrap(),
-			Some(PgDuration(SignedDuration::from_hours(6))),
-		);
-
-		// An override row with an interval wins over the default.
-		ServerGroupBackupSchedule::upsert(
-			&mut conn,
-			NewServerGroupBackupSchedule {
-				group_id,
-				r#type: pg.clone(),
-				expected_interval: Some(PgDuration(SignedDuration::from_hours(12))),
-				retention: None,
-				allow_below_floor: false,
-			},
-		)
-		.await
-		.unwrap();
-		assert_eq!(
-			database::backups::effective_interval(&mut conn, group_id, &pg)
-				.await
-				.unwrap(),
-			Some(PgDuration(SignedDuration::from_hours(12))),
-		);
-
-		// An override row with a NULL interval is manual-only: it does *not*
-		// fall through to the default, unlike the same row's NULL retention.
-		ServerGroupBackupSchedule::upsert(
-			&mut conn,
-			NewServerGroupBackupSchedule {
-				group_id,
-				r#type: pg.clone(),
-				expected_interval: None,
-				retention: None,
-				allow_below_floor: false,
-			},
-		)
-		.await
-		.unwrap();
-		assert_eq!(
-			database::backups::effective_interval(&mut conn, group_id, &pg)
-				.await
-				.unwrap(),
-			None,
-			"a present-but-NULL interval means manual-only",
-		);
-
-		// Deleting the override restores inheritance.
-		ServerGroupBackupSchedule::delete(&mut conn, group_id, &pg)
-			.await
-			.unwrap();
-		assert_eq!(
-			database::backups::effective_interval(&mut conn, group_id, &pg)
-				.await
-				.unwrap(),
-			Some(PgDuration(SignedDuration::from_hours(6))),
+				.is_empty()
 		);
 	})
 	.await;
@@ -2023,9 +1962,18 @@ async fn latest_success_selects_by_data_age_not_report_order() {
 			.await
 			.unwrap();
 		assert_eq!(
-			map.get(&(machine_id, pg)).map(|r| r.id),
+			map.get(&(machine_id, pg.clone())).map(|r| r.id),
 			Some(a),
 			"the batch loader must agree with the single-server query",
+		);
+
+		let by_type = BackupRun::latest_success_by_type_for_machine(&mut conn, machine_id)
+			.await
+			.unwrap();
+		assert_eq!(
+			by_type.get(&pg).map(|r| r.id),
+			Some(a),
+			"the per-machine loader must agree with the single-type query",
 		);
 	})
 	.await;

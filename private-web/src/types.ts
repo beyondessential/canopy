@@ -102,6 +102,47 @@ export type MaintenanceWindow = Solidify<Schemas["MaintenanceWindow"]>;
 /** The grain a window is declared at. An environment is a group with a rank.
  * spec: MNT#declaring */
 export type MaintenanceScope = "application" | "machine" | "group";
+/** One target a window can cover: exactly one of the ids, and with the group,
+ * the rank of one of its environments where it is narrowed to one.
+ * spec: MNT#choosing-what-to-cover */
+export type MaintenanceTarget = Solidify<Schemas["MaintenanceTarget"]>;
+/** What keeps a window over the target it covers. */
+export type HeldInPlace = Solidify<Schemas["HeldInPlace"]>;
+
+/** The target a window over `scope` names. */
+export function maintenanceTarget(
+	scope: MaintenanceScope,
+	id: string,
+	rank?: ServerRank | null,
+): MaintenanceTarget {
+	return {
+		application_id: scope === "application" ? id : null,
+		machine_id: scope === "machine" ? id : null,
+		server_group_id: scope === "group" ? id : null,
+		rank: scope === "group" ? (rank ?? null) : null,
+	};
+}
+
+/** The target a window covers now, where it covers one a window can name. */
+export function targetOfWindow(window: MaintenanceWindow): MaintenanceTarget | null {
+	if (window.application_id) return maintenanceTarget("application", window.application_id);
+	if (window.machine_id) return maintenanceTarget("machine", window.machine_id);
+	if (window.server_group_id)
+		return maintenanceTarget("group", window.server_group_id, window.rank);
+	return null;
+}
+
+/** What kind of target it is, as the kind chip names it. */
+export function targetKind(
+	target: MaintenanceTarget,
+): "application" | "machine" | "environment" | "group" {
+	if (target.application_id) return "application";
+	if (target.machine_id) return "machine";
+	return target.rank ? "environment" : "group";
+}
+export type MaintenanceTargetChoice = Solidify<Schemas["MaintenanceTargetChoice"]>;
+/** One span of a window over a target, as the target's history reads it. */
+export type TargetWindow = Solidify<Schemas["TargetWindow"]>;
 
 export type GroupEnvironment = Solidify<Schemas["GroupEnvironment"]>;
 export type ResolvedReason = Solidify<Schemas["ResolvedReason"]>;
@@ -218,6 +259,16 @@ export type SqlHistoryEntry = Solidify<Schemas["SqlHistoryEntry"]>;
 export type BackupConfigView = Solidify<Schemas["BackupConfigView"]>;
 export type BackupConfigSummary = Solidify<Schemas["BackupConfigSummary"]>;
 export type ScheduleView = Solidify<Schemas["ScheduleView"]>;
+export type Schedule = Solidify<Schemas["Schedule"]>;
+export type ScheduleLayer = Schemas["ScheduleLayer"];
+export type EffectiveSchedule = Solidify<Schemas["EffectiveSchedule"]>;
+export type ZoneUsed = Solidify<Schemas["ZoneUsed"]>;
+export type NextBackup = Solidify<Schemas["NextBackup"]>;
+export type ScheduleChangeView = Solidify<Schemas["ScheduleChangeView"]>;
+export type SchedulePreview = Solidify<Schemas["SchedulePreview"]>;
+export type PreviewMachine = Solidify<Schemas["PreviewMachine"]>;
+export type GroupTypeScheduleView = Solidify<Schemas["GroupTypeScheduleView"]>;
+export type TypeDefaultView = Solidify<Schemas["TypeDefaultView"]>;
 export type RetentionPolicy = Solidify<Schemas["RetentionPolicy"]>;
 export type BackupStatsView = Solidify<Schemas["BackupStatsView"]>;
 export type BackupRepoStats = Solidify<Schemas["BackupRepoStats"]>;
@@ -449,12 +500,11 @@ export interface RankedMachine {
 	name: string;
 }
 
-/// Give each machine the rank its workloads share, so a box sorts into the same
-/// bands the fleet uses everywhere else.
+/// Pair each machine with the workloads on it under its rank, so a box sorts
+/// into the same bands the fleet uses everywhere else.
 ///
-/// A box serves one environment, so every workload on it carries the same rank.
-/// A box where nothing is ranked yet, or that carries nothing yet, has no rank
-/// to take and sorts last.
+/// A box serves one environment, so every workload on it carries the box's
+/// rank. A pending box has none and sorts last.
 /// spec: FLT
 export function rankMachines(
 	machines: readonly GroupMachine[],
@@ -474,10 +524,10 @@ export function rankMachines(
 		return {
 			machine,
 			applications: on,
-			rank: best?.rank ?? null,
-			// A box carrying nothing has no type to take. It has no rank
-			// either, so it sorts last on rank alone and this never decides an
-			// ordering — naming a type here would be inventing one.
+			rank: machine.environment_rank ?? null,
+			// A box carrying nothing has no type to take, and naming one here
+			// would be inventing it. Ranked, it sorts ahead of the boxes at its
+			// rank that carry something, then by name.
 			type: best?.type ?? "",
 			name: machine.name,
 		};

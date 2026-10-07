@@ -8,12 +8,15 @@ use std::time::Duration;
 use commons_errors::Result;
 use commons_types::{
 	Uuid,
-	backup::{BackupConfigStatus, BackupPurpose, BackupType},
+	backup::{
+		BackupConfigStatus, BackupPurpose, BackupType,
+		schedule::{Schedule, schedule_seed},
+	},
 	server::{app_type::ApplicationType, rank::ServerRank, tags::TagMap},
 };
 use database::{
 	BackupRequest, BackupRun, BackupTypeDefault, MachineBackupCapability, ServerGroupBackupConfig,
-	ServerGroupBackupSchedule,
+	ServerGroupBackupSchedule, backup::schedules::ScheduleBook,
 };
 use diesel_async::AsyncPgConnection;
 use jiff::{SignedDuration, Timestamp};
@@ -136,31 +139,24 @@ pub async fn effective_retention_for_group(
 	Ok(out)
 }
 
-/// Resolve the effective backup interval for one `(group, type)`: an override
-/// row's `expected_interval` (NULL there means manual-only), else the type's
-/// `default_interval`. `None` ⇒ manual-only (no scheduled cadence).
-async fn effective_interval_for_type(
-	db: &mut AsyncPgConnection,
-	group_id: Uuid,
-	ty: &BackupType,
-) -> Result<Option<Duration>> {
-	let interval = database::backups::effective_interval(db, group_id, ty).await?;
-	// PgDuration wraps a jiff SignedDuration; whole seconds → Duration.
-	Ok(interval.map(|pg| Duration::from_secs(pg.0.as_secs().max(0) as u64)))
-}
-
-/// Resolve the effective backup interval for the group: per enabled type, the
-/// schedule `expected_interval` else the type `default_interval`; the group's
-/// effective cadence is the MINIMUM across types (the most-frequent type drives
-/// it). `None` when no enabled type has any interval.
+/// The interval the group's most frequent interval-scheduled `(machine, type)`
+/// backs up at, which sets the group's inspection cadence before the weekly
+/// floor. A cron schedule contributes nothing, so a group scheduled wholly by
+/// cron is inspected on the floor. `None` when no enabled type has an interval.
+// spec: BKJ#inspection
 pub async fn effective_interval_for_group(
 	db: &mut AsyncPgConnection,
 	group_id: Uuid,
 ) -> Result<Option<Duration>> {
-	let types = MachineBackupCapability::enabled_types_for_group(db, group_id).await?;
+	let pairs = MachineBackupCapability::enabled_for_group(db, group_id).await?;
+	let machine_ids: Vec<Uuid> = pairs.iter().map(|(m, _)| *m).collect();
+	let book = ScheduleBook::load(db, Some(&[group_id]), Some(&machine_ids)).await?;
 	let mut min: Option<Duration> = None;
-	for ty in types {
-		if let Some(d) = effective_interval_for_type(db, group_id, &ty).await? {
+	for (machine_id, ty) in pairs {
+		if let Schedule::Interval { seconds } =
+			book.resolve(machine_id, Some(group_id), &ty).schedule
+		{
+			let d = Duration::from_secs(seconds.max(0) as u64);
 			min = Some(min.map_or(d, |m| m.min(d)));
 		}
 	}
@@ -168,16 +164,21 @@ pub async fn effective_interval_for_group(
 }
 
 /// The backup types a server should back up *now*: every enabled `(server,
-/// type)` whose effective interval has elapsed since its last successful backup
-/// (schedule-due), unioned with operator one-off [`BackupRequest`]s
-/// (`purpose = backup` only — restore is operator-directed, not delivered over
-/// the heartbeat). Manual-only types (no effective interval) appear only when
+/// type)` whose schedule says it is due, unioned with operator one-off
+/// [`BackupRequest`]s (`purpose = backup` only — restore is operator-directed,
+/// not delivered over the heartbeat). Manual-only types appear only when
 /// explicitly requested. Sorted by type name for a stable wire order.
+///
+/// Under an interval a type is due once the interval has passed since its last
+/// successful backup; under a cron expression, while a window a firing opened
+/// is still open and nothing has succeeded since the firing (see
+/// [`EffectiveSchedule::is_due`]).
 ///
 /// Emitted idempotently each tick: a due type keeps appearing until a
 /// successful run reports (advancing the staleness anchor), and a one-off until
 /// the run is reported (which clears the request). The device is responsible
 /// for not starting a second run while one is already in flight.
+// spec: BKO#when-a-backup-is-due
 pub async fn backups_due_now_for_machine(
 	db: &mut AsyncPgConnection,
 	machine_id: Uuid,
@@ -200,20 +201,22 @@ pub async fn backups_due_now_for_machine(
 		}
 	}
 
+	let book = ScheduleBook::load(db, Some(&[group_id]), Some(&[machine_id])).await?;
+	let latest = BackupRun::latest_success_by_type_for_machine(db, machine_id).await?;
 	for cap in MachineBackupCapability::list_for_machine(db, machine_id).await? {
 		if !cap.enabled {
 			continue;
 		}
-		let Some(interval) = effective_interval_for_type(db, group_id, &cap.r#type).await? else {
+		let schedule = book.resolve(machine_id, Some(group_id), &cap.r#type);
+		if schedule.schedule == Schedule::Manual {
 			continue;
-		};
+		}
 		// Due-ness is measured from the data's own moment, matching staleness
 		// detection — otherwise a server could be flagged stale without ever being
 		// asked to back up.
-		let last = BackupRun::latest_success_for_machine(db, machine_id, &cap.r#type)
-			.await?
-			.map(|r| r.anchor());
-		if is_due(interval, last, now) {
+		let last = latest.get(&cap.r#type).map(|r| r.anchor());
+		let seed = schedule_seed(machine_id, cap.r#type.as_str());
+		if schedule.is_due(seed, now, last) {
 			due.insert(cap.r#type);
 		}
 	}

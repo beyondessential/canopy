@@ -15,7 +15,9 @@ export const SAFETY_MODES = {
 	"backups/cancel_maintenance": "write",
 	"backups/cancel_request": "write",
 	"backups/capabilities": "read-only",
-	"backups/clear_schedule": "danger",
+	"backups/clear_machine_schedule": "write",
+	"backups/clear_retention": "danger",
+	"backups/clear_schedule": "write",
 	"backups/create": "write",
 	"backups/create_repo": "write",
 	"backups/create_shared": "write",
@@ -32,7 +34,11 @@ export const SAFETY_MODES = {
 	"backups/request_now": "danger",
 	"backups/restore_window": "read-only",
 	"backups/run_progress": "read-only",
+	"backups/schedule_history": "read-only",
+	"backups/schedule_preview": "read-only",
 	"backups/set_capability": "danger",
+	"backups/set_machine_schedule": "write",
+	"backups/set_retention": "write",
 	"backups/set_schedule": "write",
 	"backups/set_type_default": "write",
 	"backups/stats": "read-only",
@@ -156,10 +162,12 @@ export const SAFETY_MODES = {
 	"kubernetes_clusters/register": "danger",
 	"kubernetes_clusters/reissue": "danger",
 	"kubernetes_clusters/remove": "danger",
+	"maintenance/amend": "write",
 	"maintenance/declare": "write",
 	"maintenance/for_target": "read-only",
 	"maintenance/lift": "write",
 	"maintenance/list_open": "read-only",
+	"maintenance/targets": "read-only",
 	"mcp_tokens/list": "read-only",
 	"mcp_tokens/mint": "danger",
 	"mcp_tokens/revoke": "danger",
@@ -229,3 +237,50 @@ export const SAFETY_MODES = {
  * quietly reads as needing no mode at all.
  */
 export type GradedEndpoint = keyof typeof SAFETY_MODES;
+
+/** Every reason a handler can be danger for, in the order the operator is given them. */
+export const DANGER_REASON_ORDER = ["irreversible", "fleet", "unprotects", "issues", "invalidates"] as const;
+
+/** Why a handler is danger. Declared on its `routes!` entry beside its grade. */
+export type DangerReason = (typeof DANGER_REASON_ORDER)[number];
+
+/** The reasons each danger endpoint declares, in the order they are listed. */
+export const DANGER_REASONS = {
+	"admins/add": ["issues"],
+	"admins/delete": ["invalidates"],
+	"backups/clear_retention": ["unprotects"],
+	"backups/delete": ["irreversible", "invalidates"],
+	"backups/disallow_restore": ["unprotects"],
+	"backups/request_now": ["fleet"],
+	"backups/set_capability": ["unprotects"],
+	"backups/upsert": ["unprotects", "issues"],
+	"certificates/pause": ["unprotects"],
+	"certificates/revoke": ["fleet", "invalidates"],
+	"devices/add_key": ["issues"],
+	"devices/attach_tailscale": ["issues"],
+	"devices/deactivate_key": ["invalidates"],
+	"devices/detach_tailscale": ["invalidates"],
+	"devices/disable_all_keys": ["invalidates"],
+	"devices/merge_into": ["irreversible"],
+	"devices/provision_credential": ["issues"],
+	"devices/reactivate_key": ["issues"],
+	"devices/update_role": ["issues", "invalidates"],
+	"domains/release": ["unprotects"],
+	"fleet/machines/archive": ["invalidates"],
+	"fleet/machines/attach_tailscale_device": ["issues"],
+	"fleet/machines/mint_enrollment": ["issues"],
+	"fleet/machines/revoke_enrollment": ["invalidates"],
+	"healthchecks/decommission": ["unprotects"],
+	"healthchecks/set_source_ingest": ["unprotects"],
+	"kubernetes_clusters/register": ["issues"],
+	"kubernetes_clusters/reissue": ["issues", "invalidates"],
+	"kubernetes_clusters/remove": ["irreversible", "invalidates"],
+	"mcp_tokens/mint": ["issues"],
+	"mcp_tokens/revoke": ["irreversible", "invalidates"],
+	"restore_replicas/delete": ["invalidates"],
+	"silenced_refs/silence_cluster": ["unprotects"],
+	"silenced_refs/silence_group": ["unprotects"],
+	"silenced_refs/silence_machine": ["unprotects"],
+	"silenced_refs/silence_server": ["unprotects"],
+	"versions/delete_artifact": ["irreversible"],
+} as const satisfies Partial<Record<GradedEndpoint, readonly DangerReason[]>>;

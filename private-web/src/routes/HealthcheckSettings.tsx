@@ -392,7 +392,10 @@ function CeilingCard({
 					</Typography>
 				)}
 				{canEdit && (
-					<GradedAction calls="healthchecks/update">
+					<GradedAction
+						calls="healthchecks/update"
+						action={`Update ceiling and escalation for check ${row.check_name}`}
+					>
 						<Button size="small" variant="outlined" onClick={save} disabled={update.pending}>
 							Save
 						</Button>
@@ -451,7 +454,10 @@ function NotesCard({
 			/>
 			{canEdit && (
 				<Box sx={{ mt: 1 }}>
-					<GradedAction calls="healthchecks/update">
+					<GradedAction
+						calls="healthchecks/update"
+						action={`Update notes for check ${row.check_name}`}
+					>
 						<Button size="small" variant="outlined" onClick={save} disabled={update.pending}>
 							Save notes
 						</Button>
@@ -524,7 +530,10 @@ function DocumentationCard({
 					Documentation
 				</Typography>
 				{canEdit && !editing && (
-					<GradedAction calls="healthchecks/update_documentation">
+					<GradedAction
+						calls="healthchecks/update_documentation"
+						action={`Edit documentation for check ${row.check_name}`}
+					>
 						<Button size="small" variant="outlined" onClick={startEditing}>
 							{row.documentation ? "Edit" : "Write documentation"}
 						</Button>
@@ -549,7 +558,10 @@ function DocumentationCard({
 						}}
 					/>
 					<Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-						<GradedAction calls="healthchecks/update_documentation">
+						<GradedAction
+							calls="healthchecks/update_documentation"
+							action={`Update documentation for check ${row.check_name}`}
+						>
 							<Button
 								size="small"
 								variant="contained"
@@ -660,7 +672,10 @@ function RulesCard({
 					Conditional rules
 				</Typography>
 				{canEdit && (
-					<GradedAction opens="healthchecks/update_rules">
+					<GradedAction
+						opens="healthchecks/update_rules"
+						action={`Add rule to check ${row.check_name}`}
+					>
 						<Button
 							size="small"
 							variant="contained"
@@ -721,7 +736,10 @@ function RulesCard({
 									{canEdit && (
 										<TableCell>
 											<Stack direction="row" spacing={0.5}>
-												<GradedAction opens="healthchecks/update_rules">
+												<GradedAction
+													opens="healthchecks/update_rules"
+													action={`Move rule ${idx} up for check ${row.check_name}`}
+												>
 													<IconButton
 														size="small"
 														disabled={idx === 0}
@@ -732,7 +750,10 @@ function RulesCard({
 														<ArrowUpwardIcon fontSize="small" />
 													</IconButton>
 												</GradedAction>
-												<GradedAction opens="healthchecks/update_rules">
+												<GradedAction
+													opens="healthchecks/update_rules"
+													action={`Move rule ${idx} down for check ${row.check_name}`}
+												>
 													<IconButton
 														size="small"
 														disabled={idx === branches.length - 1}
@@ -743,7 +764,10 @@ function RulesCard({
 														<ArrowDownwardIcon fontSize="small" />
 													</IconButton>
 												</GradedAction>
-												<GradedAction opens="healthchecks/update_rules">
+												<GradedAction
+													opens="healthchecks/update_rules"
+													action={`Edit rule ${idx} of check ${row.check_name}`}
+												>
 													<IconButton
 														size="small"
 														onClick={() => setDialog({ index: idx })}
@@ -751,7 +775,10 @@ function RulesCard({
 														<EditIcon fontSize="small" />
 													</IconButton>
 												</GradedAction>
-												<GradedAction opens="healthchecks/update_rules">
+												<GradedAction
+													opens="healthchecks/update_rules"
+													action={`Delete rule ${idx} from check ${row.check_name}`}
+												>
 													<IconButton
 														size="small"
 														onClick={() =>
@@ -774,7 +801,10 @@ function RulesCard({
 			)}
 			{canEdit && (
 				<Stack direction="row" spacing={1} sx={{ mt: 2 }}>
-					<GradedAction calls="healthchecks/update_rules">
+					<GradedAction
+						calls="healthchecks/update_rules"
+						action={`Save rules for check ${row.check_name}`}
+					>
 						<Button
 							size="small"
 							variant="contained"
@@ -785,7 +815,10 @@ function RulesCard({
 						</Button>
 					</GradedAction>
 					{branches.length > 0 && (
-						<GradedAction calls="healthchecks/update_rules">
+						<GradedAction
+							calls="healthchecks/update_rules"
+							action={`Delete all rules for check ${row.check_name}`}
+						>
 							<Button
 								size="small"
 								onClick={deleteAll}

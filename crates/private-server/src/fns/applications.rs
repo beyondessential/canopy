@@ -841,14 +841,11 @@ pub async fn get_detail(
 
 	// An application on a cluster has no box, so it presents no machine facts.
 	let (machine_name, machine_rank) = match server.machine_id {
-		Some(machine_id) => (
-			Some(
-				database::machines::Machine::get_by_id(&mut conn, machine_id)
-					.await?
-					.name,
-			),
-			database::machines::Machine::rank(&mut conn, machine_id).await?,
-		),
+		Some(machine_id) => {
+			let machine = database::machines::Machine::get_by_id(&mut conn, machine_id).await?;
+			let rank = machine.environment_rank();
+			(Some(machine.name), rank)
+		}
 		None => (None, None),
 	};
 

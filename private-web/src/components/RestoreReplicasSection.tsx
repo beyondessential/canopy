@@ -156,7 +156,10 @@ export default function RestoreReplicasSection({
 					Restore replicas
 				</Typography>
 				{isAdmin && (
-					<GradedAction calls="restore_replicas/create">
+					<GradedAction
+						calls="restore_replicas/create"
+						action="Declare restore replica for this group"
+					>
 						<Button
 							size="small"
 							variant="outlined"
@@ -253,7 +256,10 @@ export default function RestoreReplicasSection({
 										<ParamSummary params={r.params} />
 									</TableCell>
 									<TableCell>
-										<GradedAction calls="restore_replicas/update">
+										<GradedAction
+											calls="restore_replicas/update"
+											action={`${r.enabled ? "Disable" : "Enable"} restore replica ${r.name}`}
+										>
 											<Switch
 												checked={r.enabled}
 												disabled={!isAdmin}
@@ -264,7 +270,10 @@ export default function RestoreReplicasSection({
 									</TableCell>
 									{isAdmin && (
 										<TableCell align="right">
-											<GradedAction calls="restore_replicas/update">
+											<GradedAction
+												calls="restore_replicas/update"
+												action={`Edit restore replica ${r.name}`}
+											>
 												<IconButton
 													aria-label={`edit ${r.name}`}
 													onClick={() => setEditingReplica(r)}
@@ -272,7 +281,10 @@ export default function RestoreReplicasSection({
 													<EditIcon />
 												</IconButton>
 											</GradedAction>
-											<GradedAction calls="restore_replicas/delete">
+											<GradedAction
+												calls="restore_replicas/delete"
+												action={`Delete restore replica ${r.name}`}
+											>
 												<IconButton
 													edge="end"
 													aria-label={`delete ${r.name}`}
@@ -1104,7 +1116,10 @@ function CreateReplicaDialog({
 				<Button onClick={onClose} disabled={pending}>
 					Cancel
 				</Button>
-				<GradedAction calls="restore_replicas/create">
+				<GradedAction
+					calls="restore_replicas/create"
+					action={`Declare restore replica ${name.trim() || type}`}
+				>
 					<Button variant="contained" onClick={onSubmit} disabled={pending}>
 						{pending ? "Declaring…" : "Declare"}
 					</Button>
@@ -1332,7 +1347,10 @@ function EditReplicaDialog({
 				<Button onClick={onClose} disabled={pending}>
 					Cancel
 				</Button>
-				<GradedAction calls="restore_replicas/update">
+				<GradedAction
+					calls="restore_replicas/update"
+					action={`Save restore replica ${replica.name}`}
+				>
 					<Button variant="contained" onClick={onSubmit} disabled={pending}>
 						{pending ? "Saving…" : "Save"}
 					</Button>

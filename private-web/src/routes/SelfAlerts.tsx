@@ -144,7 +144,10 @@ export default function SelfAlerts() {
 								</Typography>
 								<Box sx={{ flex: 1 }} />
 								{isAdmin && (
-									<GradedAction calls="self_alerts/resolve">
+									<GradedAction
+										calls="self_alerts/resolve"
+										action={`Resolve Canopy alert ${a.title ?? a.ref}`}
+									>
 										<Button
 											size="small"
 											variant="outlined"

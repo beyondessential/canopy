@@ -230,9 +230,16 @@ check-api-crate:
 clean:
     cargo clean
 
-# Build server binaries for a specific target (release mode), with embedded private-web frontend
-build-servers-release target:
-    SKIP_FRONTEND_BUILD= cargo build --locked --target {{ target }} --release --bins
+# Build the named binaries for a target in release mode. CD runs one invocation
+# per group of binaries, each on its own runner. private-server's build.rs
+# embeds the private-web frontend unless SKIP_FRONTEND_BUILD is set, so it is
+# cleared here.
+build-release target +bins:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=()
+    for bin in {{ bins }}; do args+=(--bin "$bin"); done
+    SKIP_FRONTEND_BUILD= cargo build --locked --target {{ target }} --release "${args[@]}"
 
 # Install development dependencies
 install-deps:

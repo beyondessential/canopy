@@ -16,12 +16,19 @@ use std::time::Duration;
 
 use commons_errors::{AppError, Result};
 use commons_types::dns::ManagedZone;
+use hickory_resolver::{
+	Resolver, TokioResolver,
+	config::{CLOUDFLARE, NameServerConfig, ResolverConfig, ResolverOpts, ServerGroup},
+	net::runtime::TokioRuntimeProvider,
+	proto::rr::{RData, RecordType},
+};
 use instant_acme::{
 	Account, AuthorizationStatus, CertificateIdentifier, ChallengeType, Identifier, LetsEncrypt,
 	NewOrder, OrderStatus, RetryPolicy, RevocationRequest,
 };
 use jiff::Timestamp;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, pem::PemObject};
+use tokio::time::Instant;
 use tracing::{debug, info, warn};
 
 use crate::dns_provider::{DnsProvider, RecordSet};
@@ -36,6 +43,22 @@ const AUTHORISATION_TIMEOUT: Duration = Duration::from_secs(180);
 /// How long to wait for the authority to sign after the request is handed over.
 /// Signing is prompt; this is a backstop, not a budget.
 const FINALISE_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// How long to wait for a freshly-published challenge record to become visible
+/// on the zone's own authoritative nameservers before telling the authority to
+/// look. The authority validates promptly once asked and does not keep
+/// retrying the DNS lookup on Canopy's behalf, so signalling ready before the
+/// write has propagated wastes the whole attempt rather than merely risking it
+/// — [`AUTHORISATION_TIMEOUT`] is patience for the authority's answer, not for
+/// the record to exist in the first place.
+const PROPAGATION_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// How often to recheck while waiting for propagation.
+const PROPAGATION_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Per-query timeout against one public resolver, short so an unreachable
+/// resolver cannot itself eat the [`PROPAGATION_TIMEOUT`] budget.
+const PROPAGATION_QUERY_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Whose problem a failed conversation with the authority is. The type is shared
 /// with the alerting, which decides what to report from it; the classification
@@ -508,11 +531,19 @@ impl Acme {
 				}
 			};
 
-			let set = RecordSet::challenge(&subject, &challenge.key_authorization().dns_value());
+			let dns_value = challenge.key_authorization().dns_value();
+			let set = RecordSet::challenge(&subject, &dns_value);
+			let record_name = set.name.clone();
 			dns.upsert(zone, &set).await?;
 			// Recorded before the authority is told to look, so a failure between
 			// the two still gets cleaned up.
 			published.push(set);
+
+			// The authority validates promptly once asked and will not keep
+			// checking back on Canopy's behalf, so confirm the record is
+			// actually visible — to resolvers that never asked Route 53 and so
+			// cannot simply be agreeing with itself — before asking it to look.
+			Self::wait_for_propagation(zone, &record_name, &dns_value).await?;
 
 			challenge
 				.set_ready()
@@ -531,6 +562,148 @@ impl Acme {
 			other => Err(Failure::order(format!(
 				"the authority left the order {other:?} rather than ready to sign"
 			))),
+		}
+	}
+
+	/// A resolver for one public DNS service. Used only to learn which servers
+	/// are authoritative for a zone, and their addresses, in
+	/// [`Self::authoritative_resolver`]: NS records and the addresses of the
+	/// servers they name are long-lived and do not churn between Canopy's
+	/// retries, so a cached answer is no risk the way one for the challenge
+	/// record itself is.
+	fn public_resolver(group: &ServerGroup<'_>) -> AcmeResult<TokioResolver> {
+		// `ResolverOpts` is `#[non_exhaustive]`, so built from the default and
+		// adjusted rather than as a struct literal.
+		let mut options = ResolverOpts::default();
+		options.timeout = PROPAGATION_QUERY_TIMEOUT;
+		options.attempts = 1;
+		Resolver::builder_with_config(
+			ResolverConfig::udp_and_tcp(group),
+			TokioRuntimeProvider::default(),
+		)
+		.with_options(options)
+		.build()
+		.map_err(|e| Failure::order(format!("could not build a resolver: {e}")))
+	}
+
+	/// A resolver pointed directly at `zone`'s own authoritative nameservers.
+	///
+	/// This is deliberately not a public recursive resolver: one of those
+	/// caches a negative answer for up to the zone's SOA negative-caching TTL,
+	/// and the first poll of an attempt can land before the write has
+	/// propagated, so asking one would replay that stale answer on every
+	/// following poll however long the wait. An authoritative server has no
+	/// cache in front of its own data, so it cannot make that mistake.
+	///
+	/// The servers are found by an NS lookup rather than from the DNS provider's
+	/// API, because the role Canopy assumes for a zone may write records and
+	/// nothing else.
+	async fn authoritative_resolver(zone: &ManagedZone) -> AcmeResult<TokioResolver> {
+		let bootstrap = Self::public_resolver(&CLOUDFLARE)?;
+		let ns = bootstrap
+			.lookup(zone.apex.as_str(), RecordType::NS)
+			.await
+			.map_err(|e| {
+				Failure::order(format!(
+					"could not look up the nameservers for zone {}: {e}",
+					zone.apex
+				))
+			})?;
+		let hostnames: Vec<String> = ns
+			.answers()
+			.iter()
+			.filter_map(|record| match &record.data {
+				RData::NS(ns) => Some(ns.0.to_string()),
+				_ => None,
+			})
+			.collect();
+		if hostnames.is_empty() {
+			return Err(Failure::order(format!(
+				"the lookup of zone {}'s nameservers returned none",
+				zone.apex
+			)));
+		}
+
+		let mut addresses = Vec::new();
+		for host in &hostnames {
+			if let Ok(lookup) = bootstrap.lookup_ip(host.as_str()).await {
+				addresses.extend(lookup.iter());
+			}
+		}
+		if addresses.is_empty() {
+			return Err(Failure::order(format!(
+				"could not resolve an address for any of {}'s nameservers {hostnames:?}",
+				zone.apex
+			)));
+		}
+
+		Self::propagation_resolver(
+			addresses
+				.into_iter()
+				.map(NameServerConfig::udp_and_tcp)
+				.collect(),
+		)
+	}
+
+	/// A resolver that asks `name_servers` and remembers nothing.
+	///
+	/// The cache is off because the check polls one name until it appears: the
+	/// first poll can land before the write has propagated, and a resolver that
+	/// cached that negative answer would replay it for every poll after, for
+	/// the whole wait, however live the record had become on the server.
+	fn propagation_resolver(name_servers: Vec<NameServerConfig>) -> AcmeResult<TokioResolver> {
+		let mut options = ResolverOpts::default();
+		options.timeout = PROPAGATION_QUERY_TIMEOUT;
+		options.attempts = 1;
+		options.cache_size = 0;
+		Resolver::builder_with_config(
+			ResolverConfig::from_name_servers(name_servers),
+			TokioRuntimeProvider::default(),
+		)
+		.with_options(options)
+		.build()
+		.map_err(|e| Failure::order(format!("could not build a propagation-check resolver: {e}")))
+	}
+
+	/// Whether `resolver` currently answers `name`'s TXT records with `expected`
+	/// among them. A lookup error — commonly no record yet, which is exactly the
+	/// state being waited out — counts as not yet seen rather than a hard failure.
+	async fn resolver_sees(resolver: &TokioResolver, name: &str, expected: &str) -> bool {
+		let Ok(lookup) = resolver.lookup(name, RecordType::TXT).await else {
+			return false;
+		};
+		lookup.answers().iter().any(|record| match &record.data {
+			RData::TXT(txt) => txt
+				.txt_data
+				.iter()
+				.any(|segment| segment.as_ref() == expected.as_bytes()),
+			_ => false,
+		})
+	}
+
+	/// Wait until `name` resolves to `expected` on `zone`'s own authoritative
+	/// nameservers, or give up after [`PROPAGATION_TIMEOUT`] and let the
+	/// caller's ordinary order-level retry handle it.
+	async fn wait_for_propagation(
+		zone: &ManagedZone,
+		name: &str,
+		expected: &str,
+	) -> AcmeResult<()> {
+		let resolver = Self::authoritative_resolver(zone).await?;
+		let deadline = Instant::now() + PROPAGATION_TIMEOUT;
+		loop {
+			if Self::resolver_sees(&resolver, name, expected).await {
+				return Ok(());
+			}
+			if Instant::now() >= deadline {
+				return Err(Failure::order(format!(
+					"the challenge record at {name} had not propagated to {}'s own nameservers \
+					 within {}s",
+					zone.apex,
+					PROPAGATION_TIMEOUT.as_secs()
+				)));
+			}
+			tokio::time::sleep(PROPAGATION_POLL_INTERVAL).await;
 		}
 	}
 
@@ -784,5 +957,65 @@ mod tests {
 			RevokeFor::from_stored("something else"),
 			RevokeFor::Unspecified
 		);
+	}
+
+	/// A server that denies the name on its first answer and has it from then
+	/// on, which is a record becoming visible mid-wait.
+	#[tokio::test]
+	async fn the_propagation_check_does_not_replay_an_early_negative_answer() {
+		use hickory_resolver::proto::op::{Message, OpCode, ResponseCode};
+		use hickory_resolver::proto::rr::{
+			Name, Record,
+			rdata::{SOA, TXT},
+		};
+
+		let socket = tokio::net::UdpSocket::bind("127.0.0.1:0")
+			.await
+			.expect("bind");
+		let port = socket.local_addr().expect("addr").port();
+		tokio::spawn(async move {
+			let mut buf = [0u8; 512];
+			let mut answered = 0;
+			loop {
+				let Ok((len, peer)) = socket.recv_from(&mut buf).await else {
+					return;
+				};
+				let request = Message::from_vec(&buf[..len]).expect("query");
+				let query = request.queries.first().expect("a question").clone();
+				let reply = if answered == 0 {
+					let apex = Name::from_ascii("tamanu.app.").expect("name");
+					let soa = SOA::new(apex.clone(), apex.clone(), 1, 7200, 900, 1209600, 900);
+					let mut reply = Message::error_msg(
+						request.metadata.id,
+						OpCode::Query,
+						ResponseCode::NXDomain,
+					);
+					reply.add_query(query);
+					reply.add_authority(Record::from_rdata(apex, 900, RData::SOA(soa)));
+					reply
+				} else {
+					let mut reply = Message::response(request.metadata.id, OpCode::Query);
+					let txt = RData::TXT(TXT::new(vec!["expected".into()]));
+					reply.add_answer(Record::from_rdata(query.name().clone(), 60, txt));
+					reply.add_query(query);
+					reply
+				};
+				answered += 1;
+				socket
+					.send_to(&reply.to_vec().expect("encode"), peer)
+					.await
+					.expect("reply");
+			}
+		});
+
+		let mut server = NameServerConfig::udp_and_tcp("127.0.0.1".parse().expect("addr"));
+		for connection in &mut server.connections {
+			connection.port = port;
+		}
+		let resolver = Acme::propagation_resolver(vec![server]).expect("resolver");
+		let name = "_acme-challenge.a.tamanu.app";
+
+		assert!(!Acme::resolver_sees(&resolver, name, "expected").await);
+		assert!(Acme::resolver_sees(&resolver, name, "expected").await);
 	}
 }

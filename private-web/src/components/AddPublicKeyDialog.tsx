@@ -91,7 +91,10 @@ export default function AddPublicKeyDialog({
 				<Button onClick={close} disabled={action.pending}>
 					Cancel
 				</Button>
-				<GradedAction calls="devices/add_key">
+				<GradedAction
+					calls="devices/add_key"
+					action="Add public key to device"
+				>
 					<Button
 						variant="contained"
 						onClick={onAdd}

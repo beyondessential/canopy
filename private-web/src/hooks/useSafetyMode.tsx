@@ -8,10 +8,14 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { flushSync } from "react-dom";
 import { callApi } from "../api";
+import { ModeUnchangedDialog } from "../components/ModeUnchangedDialog";
+import { RaiseDialog, type RaiseRequest } from "../components/RaiseDialog";
 import {
 	RAISE_DURATION_MS,
 	type SafetyMode,
+	permits,
 	publishSession,
 	setRaiseLapsedHandler,
 } from "../safety";
@@ -23,13 +27,32 @@ interface SessionState {
 	raise_expires_at?: string | null;
 }
 
+/**
+ * How a request for a raise came out: the mode now `permits` the action, whether
+ * it already did or the raise has landed; the operator `declined`, or the raise
+ * failed; or nothing was asked, because another request is `already-asking`.
+ */
+export type RaiseOutcome = "permits" | "declined" | "already-asking";
+
 export interface SafetyStatus {
 	/** The mode the session is in. Read-only until the operator raises it. */
 	mode: SafetyMode;
-	/** Raise to a mode. */
-	raise: (mode: SafetyMode) => Promise<void>;
-	/** Return to read-only at once, without waiting for the countdown. */
-	lower: () => Promise<void>;
+	/**
+	 * Raise to a mode, without asking. Resolves whether the raise was made; when
+	 * it was not, the operator has already been told their mode is unchanged.
+	 */
+	raise: (mode: SafetyMode) => Promise<boolean>;
+	/**
+	 * Return to read-only at once, without waiting for the countdown. Resolves
+	 * whether it was done, like {@link raise}.
+	 */
+	lower: () => Promise<boolean>;
+	/**
+	 * Ask the operator to confirm a raise, and make it. Resolves `permits` once
+	 * the raise has landed and the new mode has rendered, so a control that was
+	 * blocked is already usable (see {@link RaiseOutcome}).
+	 */
+	requestRaise: (request: RaiseRequest) => Promise<RaiseOutcome>;
 	/** True while a raise or lower is in flight. */
 	busy: boolean;
 }
@@ -128,11 +151,21 @@ export function SafetyModeProvider({ children }: { children: ReactNode }) {
 		return () => setRaiseLapsedHandler(null);
 	}, []);
 
-	const raise = useCallback(
-		async (to: SafetyMode) => {
+	const [failed, setFailed] = useState(false);
+
+	// Committed synchronously, so whoever awaits a change of mode finds the
+	// controls already drawn for it.
+	const change = useCallback(
+		async (ask: () => Promise<unknown>) => {
 			setBusy(true);
+			setFailed(false);
 			try {
-				adopt((await callApi("safety", "raise", { mode: to })) as SessionState);
+				const next = (await ask()) as SessionState;
+				flushSync(() => adopt(next));
+				return true;
+			} catch {
+				setFailed(true);
+				return false;
 			} finally {
 				setBusy(false);
 			}
@@ -140,18 +173,65 @@ export function SafetyModeProvider({ children }: { children: ReactNode }) {
 		[adopt],
 	);
 
-	const lower = useCallback(async () => {
-		setBusy(true);
-		try {
-			adopt((await callApi("safety", "lower", {})) as SessionState);
-		} finally {
-			setBusy(false);
+	const raise = useCallback(
+		(to: SafetyMode) => change(() => callApi("safety", "raise", { mode: to })),
+		[change],
+	);
+
+	const lower = useCallback(
+		() => change(() => callApi("safety", "lower", {})),
+		[change],
+	);
+
+	// One request at a time: it is held from being asked until the raise has
+	// landed, so a second activation in that time does nothing further.
+	const modeRef = useRef(mode);
+	modeRef.current = mode;
+	const requesting = useRef(false);
+	const [asked, setAsked] = useState<{
+		request: RaiseRequest;
+		settle: (raised: boolean) => void;
+	} | null>(null);
+
+	const requestRaise = useCallback((request: RaiseRequest) => {
+		if (permits(modeRef.current, request.mode)) {
+			return Promise.resolve<RaiseOutcome>("permits");
 		}
-	}, [adopt]);
+		if (requesting.current) return Promise.resolve<RaiseOutcome>("already-asking");
+		requesting.current = true;
+		return new Promise<RaiseOutcome>((resolve) => {
+			setAsked({
+				request,
+				settle: (raised) => {
+					requesting.current = false;
+					resolve(raised ? "permits" : "declined");
+				},
+			});
+		});
+	}, []);
+
+	const confirmAsked = () => {
+		if (!asked) return;
+		const { request, settle } = asked;
+		setAsked(null);
+		// Settled on the mode this client now reads, not on the request having
+		// gone through: a raise whose expiry it cannot honour, such as one from a
+		// server whose clock is behind, leaves the control blocked, and carrying the
+		// activation out would only ask again.
+		raise(request.mode).then((made) => {
+			const reached = made && permits(modeRef.current, request.mode);
+			if (made && !reached) setFailed(true);
+			settle(reached);
+		});
+	};
+	const cancelAsked = () => {
+		asked?.settle(false);
+		setAsked(null);
+	};
 
 	const value = useMemo<SafetyStatus>(
-		() => ({ mode, raise, lower, busy }),
-		[mode, raise, lower, busy],
+		() => ({ mode, raise, lower, requestRaise, busy }),
+		[mode, raise, lower, requestRaise, busy],
 	);
 
 	return (
@@ -159,6 +239,12 @@ export function SafetyModeProvider({ children }: { children: ReactNode }) {
 			<RemainingContext.Provider value={remainingMs}>
 				{children}
 			</RemainingContext.Provider>
+			<RaiseDialog
+				request={asked?.request ?? null}
+				onConfirm={confirmAsked}
+				onCancel={cancelAsked}
+			/>
+			<ModeUnchangedDialog open={failed} onClose={() => setFailed(false)} />
 		</SafetyContext.Provider>
 	);
 }

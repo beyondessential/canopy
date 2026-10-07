@@ -237,7 +237,10 @@ function UndeclaredRow({
 									</MenuItem>
 								))}
 							</TextField>
-							<GradedAction calls="certificates/declare">
+							<GradedAction
+								calls="certificates/declare"
+								action={`Declare DNS name ${row.name}`}
+							>
 								<Button
 									variant="contained"
 									size="small"
@@ -247,7 +250,10 @@ function UndeclaredRow({
 									Declare
 								</Button>
 							</GradedAction>
-							<GradedAction calls="certificates/deny">
+							<GradedAction
+								calls="certificates/deny"
+								action={`Deny DNS name ${row.name}`}
+							>
 								<Button size="small" color="error" onClick={() => setDenying(true)}>
 									Deny
 								</Button>
@@ -325,7 +331,10 @@ function DenyDialog({
 			</DialogContent>
 			<DialogActions>
 				<Button onClick={onClose}>Cancel</Button>
-				<GradedAction calls="certificates/deny">
+				<GradedAction
+					calls="certificates/deny"
+					action={`Deny DNS name ${name}`}
+				>
 					<Button
 						variant="contained"
 						color="error"
@@ -379,7 +388,10 @@ function DeniedRow({
 			</TableCell>
 			<TableCell align="right">
 				{isAdmin && (
-					<GradedAction calls="certificates/lift_denial">
+					<GradedAction
+						calls="certificates/lift_denial"
+						action={`Lift denial of DNS name ${name}`}
+					>
 						<Button size="small" onClick={onLift} disabled={lift.pending}>
 							Lift
 						</Button>

@@ -223,6 +223,7 @@ export default function MachineCreate() {
 								? "fleet/machines/create"
 								: ["fleet/machines/create", "silenced_refs/silence_machine"]
 						}
+						action={`Create machine ${name.trim()}`}
 					>
 						<Button
 							type="submit"

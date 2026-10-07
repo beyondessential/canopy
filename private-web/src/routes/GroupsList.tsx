@@ -31,7 +31,10 @@ export default function GroupsList() {
 		<Stack spacing={2}>
 			{admin && (
 				<Stack direction="row" spacing={1} sx={{ justifyContent: "flex-end" }}>
-					<GradedAction opens="fleet/groups/create">
+					<GradedAction
+						opens="fleet/groups/create"
+						action="Create group"
+					>
 						<Button
 							component={RouterLink}
 							to="/fleet/groups/new"

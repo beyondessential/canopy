@@ -26,7 +26,9 @@ import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import { BackupLiveProgress } from "./BackupLiveProgress";
 import { BackupProcessingChip } from "./BackupProcessingChip";
+import { EffectiveScheduleLine, NextBackupText } from "./BackupSchedule";
 import { GradedAction } from "./GradedAction";
+import MachineScheduleControl from "./MachineScheduleControl";
 import { LatestSnapshot } from "./SnapshotId";
 import TimeAgo from "./TimeAgo";
 import { useReloadInterval } from "../hooks/useReloadInterval";
@@ -163,7 +165,10 @@ export default function BackupCapabilitiesSection({
 							severity="warning"
 							icon={<RestoreDataIcon fontSize="inherit" />}
 							action={
-								<GradedAction calls="backups/disallow_restore">
+								<GradedAction
+									calls="backups/disallow_restore"
+									action="Disable restores on this machine"
+								>
 									<Button
 										size="small"
 										onClick={onDisallowRestore}
@@ -179,7 +184,10 @@ export default function BackupCapabilitiesSection({
 							restore backups on demand.
 						</Alert>
 					) : (
-						<GradedAction calls="backups/allow_restore">
+						<GradedAction
+							calls="backups/allow_restore"
+							action="Allow restores on this machine"
+						>
 							<Button
 								size="small"
 								variant="outlined"
@@ -298,6 +306,11 @@ function BackupCapabilityRow({
 					<BackupProcessingChip since={cap.processing_since} />
 				</Stack>
 				<BackupLiveProgress progress={cap.progress} />
+				<EffectiveScheduleLine effective={cap.schedule} />
+				<Typography variant="body2" color="text.secondary">
+					Next backup:{" "}
+					<NextBackupText next={cap.next_backup} zone={cap.schedule.zone} />
+				</Typography>
 				<LatestSnapshot
 					id={cap.latest_snapshot_id}
 					at={cap.latest_snapshot_at}
@@ -305,12 +318,22 @@ function BackupCapabilityRow({
 				/>
 			</Stack>
 			<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+				{isAdmin && (
+					<MachineScheduleControl
+						machineId={machineId}
+						cap={cap}
+						onChanged={onChanged}
+					/>
+				)}
 				{setCapability.error && (
 					<Typography variant="caption" color="error">
 						{setCapability.error.message}
 					</Typography>
 				)}
-				<GradedAction calls="backups/set_capability">
+				<GradedAction
+					calls="backups/set_capability"
+					action={`${cap.enabled ? "Disable" : "Enable"} ${cap.type} backups for this machine`}
+				>
 					<Switch
 						checked={cap.enabled}
 						disabled={!isAdmin || setCapability.pending}
