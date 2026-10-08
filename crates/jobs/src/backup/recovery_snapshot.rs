@@ -13,6 +13,11 @@
 //! Recipients are **mandatory** (`CANOPY_RECOVERY_VAULT_KEYS`) — the backups pod
 //! refuses to start without them (see the `backups` bin). The blob is written to
 //! the same key each tick; bucket versioning keeps the history.
+//!
+//! A value that can't be read is left out of that tick's snapshot rather than
+//! failing it, and the snapshot names what it left out. An escrow that wasn't
+//! written whole raises the [`RECOVERY_ESCROW_REF`] self-alert and is retried
+//! hourly until it is.
 // spec: ESC
 
 use std::{
@@ -25,11 +30,13 @@ use commons_servers::{
 	backup_secrets::{BackupSecrets, ExposeSecret, SecretString},
 	recovery_vault::Recipients,
 };
+use commons_types::status::CheckResult;
 use database::{
 	BackupTypeDefault, MachineBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
 	applications::Application,
 	backup::schedules::{MachineBackupSchedule, ScheduleChange},
 	inventory_variables::{InventoryVariable, VariableScope},
+	self_alerts::{self, RECOVERY_ESCROW_DOC, RECOVERY_ESCROW_REF},
 	server_groups::ServerGroup,
 };
 use jiff::Timestamp;
@@ -46,9 +53,17 @@ use super::worker::Worker;
 /// ever one recovery-state object per bucket; bucket versioning keeps the history.
 const VAULT_OBJECT_KEY: &str = "canopy-recovery/state.age";
 const DEFAULT_SNAPSHOT_HOURS: u64 = 24;
+/// How soon an escrow that wasn't written whole is tried again, when that is
+/// sooner than the configured period.
+const RETRY_PERIOD: Duration = Duration::from_secs(3600);
+/// The key a group's passphrase keyset holds its current passphrase under.
+const REPO_PASSWORD_KEY: &str = "password";
 /// Version 3 added the fleet-wide per-type defaults, the machine schedule
 /// overrides, and the schedule history (group overrides carry cron and zone).
-const SCHEMA_VERSION: u32 = 3;
+/// Version 4 names what a snapshot left out: a keyset that couldn't be read is
+/// null with an `unreadable` reason, and a scope's secret variables that couldn't
+/// be read are listed under `unreadable`.
+const SCHEMA_VERSION: u32 = 4;
 
 /// Where + how the recovery vault is written. Recipients are mandatory; the rest
 /// comes from `CANOPY_RECOVERY_VAULT_*`.
@@ -111,8 +126,7 @@ struct RecoverySnapshot {
 }
 
 /// One scope's variables: the plain values as stored, and the secret ones read
-/// out of the Secret they live under. Secrets empty (logged) if it can't be
-/// read.
+/// out of the Secret they live under.
 #[derive(Serialize)]
 struct RecoveryInventoryVariables {
 	#[serde(flatten)]
@@ -121,6 +135,10 @@ struct RecoveryInventoryVariables {
 	values: BTreeMap<String, serde_json::Value>,
 	#[serde(serialize_with = "expose")]
 	keys: BTreeMap<String, SecretString>,
+	/// Secret variables whose value isn't in `keys`, because the Secret couldn't
+	/// be read or doesn't hold them.
+	#[serde(skip_serializing_if = "Vec::is_empty")]
+	unreadable: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -135,9 +153,12 @@ struct RecoveryConfig {
 	#[serde(flatten)]
 	config: ServerGroupBackupConfig,
 	/// The Secret's keyset (`password`, and `password_next` mid-rotation) — the
-	/// whole point of the vault. Empty (logged) if the Secret can't be read.
-	#[serde(serialize_with = "expose")]
-	keys: BTreeMap<String, SecretString>,
+	/// whole point of the vault. Null if the Secret can't be read.
+	#[serde(serialize_with = "expose_read")]
+	keys: Option<BTreeMap<String, SecretString>>,
+	/// Why the keyset isn't whole, where it isn't.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	unreadable: Option<String>,
 	schedules: Vec<ServerGroupBackupSchedule>,
 }
 
@@ -153,15 +174,35 @@ fn expose<S: serde::Serializer>(
 	)
 }
 
-/// Gather the recovery-critical state and serialise it to JSON bytes (plaintext, before
-/// encryption). Reads the passphrase keyset per group and the secret values per
-/// variable scope; a missing/unreadable Secret is logged and left empty rather
-/// than failing the whole snapshot.
-pub async fn build_snapshot_json(
+/// [`expose`] for a keyset that may not have been read, which is null.
+fn expose_read<S: serde::Serializer>(
+	keys: &Option<BTreeMap<String, SecretString>>,
+	serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+	match keys {
+		Some(keys) => expose(keys, serializer),
+		None => serializer.serialize_none(),
+	}
+}
+
+/// A serialised snapshot (plaintext, before encryption), and what it left out.
+pub struct Snapshot {
+	pub json: Vec<u8>,
+	/// One entry per Secret whose values aren't all in the snapshot, naming
+	/// it and what is missing. Empty when the snapshot is whole.
+	pub gaps: Vec<String>,
+}
+
+/// Gather the recovery-critical state and serialise it. Reads the passphrase
+/// keyset per group and the secret values per variable scope; a value that
+/// can't be read is logged, marked as left out in the snapshot, and reported
+/// in [`Snapshot::gaps`], rather than failing the whole snapshot.
+pub async fn build_snapshot(
 	db: &mut database::diesel_async::AsyncPgConnection,
 	secrets: &BackupSecrets,
 	now: Timestamp,
-) -> Result<Vec<u8>> {
+) -> Result<Snapshot> {
+	let mut gaps = Vec::new();
 	let groups = ServerGroup::list_all(db).await.context("list groups")?;
 	let configs: BTreeMap<_, _> = ServerGroupBackupConfig::list(db)
 		.await
@@ -182,19 +223,29 @@ pub async fn build_snapshot_json(
 
 		let config = match configs.get(&group.id) {
 			Some(config) => {
-				let keys = match secrets.read_secret_keys(&config.repo_password_ref).await {
-					Ok(keys) => keys,
-					Err(e) => {
-						warn!(group = %group.id, "recovery-snapshot: keyset unreadable ({e}); storing empty");
-						BTreeMap::new()
-					}
-				};
+				let (keys, unreadable) =
+					match secrets.read_secret_keys(&config.repo_password_ref).await {
+						Ok(keys) if keys.contains_key(REPO_PASSWORD_KEY) => (Some(keys), None),
+						Ok(keys) => (
+							Some(keys),
+							Some(format!("keyset has no `{REPO_PASSWORD_KEY}`")),
+						),
+						Err(e) => (None, Some(format!("keyset unreadable ({e})"))),
+					};
+				if let Some(reason) = &unreadable {
+					warn!(group = %group.id, secret = %config.repo_password_ref, "recovery-snapshot: {reason}; leaving it out");
+					gaps.push(format!(
+						"{} for group {} ({}): {reason}",
+						config.repo_password_ref, group.name, group.id
+					));
+				}
 				let schedules = ServerGroupBackupSchedule::list_for_group(db, group.id)
 					.await
 					.context("list schedules")?;
 				Some(RecoveryConfig {
 					config: config.clone(),
 					keys,
+					unreadable,
 					schedules,
 				})
 			}
@@ -229,7 +280,7 @@ pub async fn build_snapshot_json(
 			.collect();
 		// Only the names a variable still carries: a Secret can hold a key whose
 		// row is gone, and the vault it is written to is object-locked.
-		let keys = if held.is_empty() {
+		let keys: BTreeMap<String, SecretString> = if held.is_empty() {
 			BTreeMap::new()
 		} else {
 			match secrets.read_secret_keys(&secret).await {
@@ -238,11 +289,20 @@ pub async fn build_snapshot_json(
 					.filter(|(name, _)| held.contains(name.as_str()))
 					.collect(),
 				Err(e) => {
-					warn!(%secret, "recovery-snapshot: secret variables unreadable ({e}); storing empty");
+					warn!(%secret, "recovery-snapshot: secret variables unreadable ({e}); leaving them out");
 					BTreeMap::new()
 				}
 			}
 		};
+		let unreadable: Vec<String> = held
+			.iter()
+			.filter(|name| !keys.contains_key(**name))
+			.map(|name| name.to_string())
+			.collect();
+		if !unreadable.is_empty() {
+			warn!(%secret, missing = ?unreadable, "recovery-snapshot: secret variables not read; leaving them out");
+			gaps.push(format!("{secret}: {}", unreadable.join(", ")));
+		}
 		inventory_variables.push(RecoveryInventoryVariables {
 			scope,
 			secret,
@@ -251,6 +311,7 @@ pub async fn build_snapshot_json(
 				.filter_map(|(name, value)| value.map(|value| (name, value)))
 				.collect(),
 			keys,
+			unreadable,
 		});
 	}
 
@@ -273,7 +334,10 @@ pub async fn build_snapshot_json(
 			.context("list backup schedule history")?,
 		inventory_variables,
 	};
-	serde_json::to_vec(&snapshot).context("serialise snapshot")
+	Ok(Snapshot {
+		json: serde_json::to_vec(&snapshot).context("serialise snapshot")?,
+		gaps,
+	})
 }
 
 /// Encrypt the ciphertext and PUT it to the (versioned, object-locked) vault.
@@ -316,16 +380,17 @@ async fn write_vault(config: &RecoveryVaultConfig, ciphertext: Vec<u8>) -> Resul
 	Ok(())
 }
 
-async fn tick(worker: &Worker, config: &RecoveryVaultConfig) -> Result<()> {
+/// Write one escrow, answering what it left out.
+async fn tick(worker: &Worker, config: &RecoveryVaultConfig) -> Result<Vec<String>> {
 	let mut db = worker
 		.pool
 		.get()
 		.await
 		.map_err(|e| anyhow::anyhow!("db: {e}"))?;
-	let plaintext = build_snapshot_json(&mut db, &worker.secrets, Timestamp::now()).await?;
+	let snapshot = build_snapshot(&mut db, &worker.secrets, Timestamp::now()).await?;
 	let ciphertext = config
 		.recipients
-		.encrypt(&plaintext)
+		.encrypt(&snapshot.json)
 		.map_err(|e| anyhow::anyhow!("encrypt: {e}"))?;
 	let bytes = ciphertext.len();
 	write_vault(config, ciphertext).await?;
@@ -334,11 +399,50 @@ async fn tick(worker: &Worker, config: &RecoveryVaultConfig) -> Result<()> {
 		key = VAULT_OBJECT_KEY,
 		recipients = config.recipients.len(),
 		bytes,
+		left_out = snapshot.gaps.len(),
 		"recovery-snapshot: wrote encrypted vault object"
 	);
 	if let Err(e) = database::RecoveryVaultWrite::record(&mut db, bytes as i64).await {
 		warn!("recovery-snapshot: failed to record write bookkeeping: {e:#}");
 	}
+	Ok(snapshot.gaps)
+}
+
+/// Raise or recover the escrow self-alert from one tick's outcome: the
+/// error if the escrow wasn't written, else what it left out.
+// spec: ESC#keeping-the-escrow-whole
+async fn report(
+	db: &mut database::diesel_async::AsyncPgConnection,
+	outcome: &Result<Vec<String>>,
+) -> Result<()> {
+	let (title, message) = match outcome {
+		Ok(gaps) if gaps.is_empty() => {
+			self_alerts::recover(db, RECOVERY_ESCROW_REF, "the escrow was written whole").await?;
+			return Ok(());
+		}
+		Ok(gaps) => (
+			"Recovery escrow incomplete",
+			format!(
+				"the escrow was written leaving out what Canopy could not read: {}",
+				gaps.join("; ")
+			),
+		),
+		Err(e) => (
+			"Recovery escrow not written",
+			format!("the escrow could not be written: {e:#}"),
+		),
+	};
+	self_alerts::raise(
+		db,
+		RECOVERY_ESCROW_REF,
+		CheckResult::Failed,
+		CheckResult::Warning,
+		false,
+		Some(RECOVERY_ESCROW_DOC),
+		title,
+		&message,
+	)
+	.await?;
 	Ok(())
 }
 
@@ -350,10 +454,25 @@ pub fn spawn(worker: Worker, config: RecoveryVaultConfig) -> JoinHandle<()> {
 			"recovery-snapshot writer started"
 		);
 		loop {
-			if let Err(e) = tick(&worker, &config).await {
+			let outcome = tick(&worker, &config).await;
+			if let Err(e) = &outcome {
 				error!("recovery-snapshot tick failed: {e:#}");
 			}
-			sleep(config.period).await;
+			let whole = outcome.as_ref().is_ok_and(Vec::is_empty);
+			match worker.pool.get().await {
+				Ok(mut db) => {
+					if let Err(e) = report(&mut db, &outcome).await {
+						error!("recovery-snapshot: failed to report escrow state: {e:#}");
+					}
+				}
+				Err(e) => error!("recovery-snapshot: failed to report escrow state: db: {e}"),
+			}
+			let period = if whole {
+				config.period
+			} else {
+				config.period.min(RETRY_PERIOD)
+			};
+			sleep(period).await;
 		}
 	})
 }
@@ -386,10 +505,11 @@ mod tests {
 				.await
 				.unwrap();
 
-			let json = build_snapshot_json(&mut conn, &secrets, Timestamp::now())
+			let snapshot = build_snapshot(&mut conn, &secrets, Timestamp::now())
 				.await
 				.unwrap();
-			let value: serde_json::Value = serde_json::from_slice(&json).unwrap();
+			assert!(snapshot.gaps.is_empty(), "{:?}", snapshot.gaps);
+			let value: serde_json::Value = serde_json::from_slice(&snapshot.json).unwrap();
 
 			assert_eq!(value["schema_version"], SCHEMA_VERSION);
 			let group = &value["groups"][0];
@@ -398,6 +518,7 @@ mod tests {
 			assert_eq!(group["config"]["maintenance_role_arn"], "arn:maint");
 			// The passphrase keyset is the whole point — it must be present.
 			assert_eq!(group["config"]["keys"]["password"], "sekret");
+			assert!(group["config"].get("unreadable").is_none());
 		})
 		.await;
 	}
@@ -430,12 +551,12 @@ mod tests {
 			.await
 			.unwrap();
 
-			let json = build_snapshot_json(&mut conn, &BackupSecrets::memory(), Timestamp::now())
+			let snapshot = build_snapshot(&mut conn, &BackupSecrets::memory(), Timestamp::now())
 				.await
 				.unwrap();
-			let value: serde_json::Value = serde_json::from_slice(&json).unwrap();
+			let value: serde_json::Value = serde_json::from_slice(&snapshot.json).unwrap();
 
-			assert_eq!(value["schema_version"], 3);
+			assert_eq!(value["schema_version"], SCHEMA_VERSION);
 			let fleet = value["backup_type_defaults"].as_array().unwrap();
 			assert!(
 				fleet.iter().any(|d| d["type"] == "tamanu-postgres"),
@@ -479,10 +600,11 @@ mod tests {
 				.await
 				.unwrap();
 
-			let json = build_snapshot_json(&mut conn, &secrets, Timestamp::now())
+			let snapshot = build_snapshot(&mut conn, &secrets, Timestamp::now())
 				.await
 				.unwrap();
-			let value: serde_json::Value = serde_json::from_slice(&json).unwrap();
+			assert!(snapshot.gaps.is_empty(), "{:?}", snapshot.gaps);
+			let value: serde_json::Value = serde_json::from_slice(&snapshot.json).unwrap();
 
 			let entry = &value["inventory_variables"][0];
 			assert_eq!(entry["group_id"], group_id.to_string());
@@ -490,6 +612,180 @@ mod tests {
 			assert_eq!(entry["secret"], secret);
 			assert_eq!(entry["keys"]["salt"], "\"pepper\"");
 			assert_eq!(entry["values"]["timezone"], "Pacific/Fiji");
+			assert!(entry.get("unreadable").is_none());
+		})
+		.await;
+	}
+
+	async fn seed_configured_group(
+		conn: &mut database::diesel_async::AsyncPgConnection,
+	) -> uuid::Uuid {
+		let group_id = uuid::Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
+			 INSERT INTO server_group_backup_config
+			   (group_id, bucket, prefix, target_role_arn, maintenance_role_arn,
+			    repo_password_ref, status, mode)
+			 VALUES ('{group_id}', 'bkt', 'p/', 'arn:dev', 'arn:maint',
+			    'backup-repo-{group_id}', 'ready', 'from_birth');"
+		))
+		.await
+		.unwrap();
+		group_id
+	}
+
+	/// A passphrase keyset that can't be read is written as absent, not as an
+	/// empty keyset, and the snapshot is still written.
+	// spec: ESC#what-a-recovery-needs
+	#[tokio::test(flavor = "multi_thread")]
+	async fn unreadable_keyset_is_written_as_absent() {
+		TestDb::run(|mut conn, _url| async move {
+			let group_id = seed_configured_group(&mut conn).await;
+
+			let snapshot = build_snapshot(&mut conn, &BackupSecrets::memory(), Timestamp::now())
+				.await
+				.unwrap();
+			let value: serde_json::Value = serde_json::from_slice(&snapshot.json).unwrap();
+
+			let config = &value["groups"][0]["config"];
+			assert_eq!(config["bucket"], "bkt");
+			assert!(config["keys"].is_null());
+			assert!(
+				config["unreadable"]
+					.as_str()
+					.unwrap()
+					.contains("keyset unreadable")
+			);
+			assert_eq!(snapshot.gaps.len(), 1);
+			assert!(
+				snapshot.gaps[0].contains(&format!("backup-repo-{group_id}")),
+				"{:?}",
+				snapshot.gaps
+			);
+		})
+		.await;
+	}
+
+	/// A keyset that reads but holds no current passphrase can't open the
+	/// repository either, so it counts as left out too.
+	// spec: ESC#what-a-recovery-needs
+	#[tokio::test(flavor = "multi_thread")]
+	async fn keyset_without_a_password_is_a_gap() {
+		TestDb::run(|mut conn, _url| async move {
+			let group_id = seed_configured_group(&mut conn).await;
+			let secrets = BackupSecrets::memory();
+			secrets
+				.create_password(&format!("backup-repo-{group_id}"), "password_next", "nxt")
+				.await
+				.unwrap();
+
+			let snapshot = build_snapshot(&mut conn, &secrets, Timestamp::now())
+				.await
+				.unwrap();
+			let value: serde_json::Value = serde_json::from_slice(&snapshot.json).unwrap();
+
+			let config = &value["groups"][0]["config"];
+			assert_eq!(config["keys"]["password_next"], "nxt");
+			assert!(config["unreadable"].as_str().unwrap().contains("password"));
+			assert_eq!(snapshot.gaps.len(), 1);
+		})
+		.await;
+	}
+
+	/// Secret variables whose values can't be read are named, so the snapshot
+	/// still says they exist; a Secret that reads but lacks one is the same.
+	// spec: ESC#what-a-recovery-needs
+	#[tokio::test(flavor = "multi_thread")]
+	async fn unreadable_secret_variables_are_named() {
+		TestDb::run(|mut conn, _url| async move {
+			let group_id = uuid::Uuid::new_v4();
+			let machine_id = uuid::Uuid::new_v4();
+			conn.batch_execute(&format!(
+				"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
+				 INSERT INTO machines (id, name, group_id) VALUES ('{machine_id}', 'box', '{group_id}');
+				 INSERT INTO inventory_variables (server_group_id, rank, name, is_secret)
+				 VALUES ('{group_id}', 'production', 'salt', TRUE);
+				 INSERT INTO inventory_variables (machine_id, name, is_secret)
+				 VALUES ('{machine_id}', 'token', TRUE), ('{machine_id}', 'key', TRUE);"
+			))
+			.await
+			.unwrap();
+
+			// The environment's Secret is absent; the machine's lacks `key`.
+			let secrets = BackupSecrets::memory();
+			let machine_secret = format!("inv-vars-m-{machine_id}");
+			secrets
+				.put_keys(
+					&machine_secret,
+					&BTreeMap::from([("token".to_string(), "\"t\"".to_string())]),
+				)
+				.await
+				.unwrap();
+
+			let snapshot = build_snapshot(&mut conn, &secrets, Timestamp::now())
+				.await
+				.unwrap();
+			let value: serde_json::Value = serde_json::from_slice(&snapshot.json).unwrap();
+
+			let entries = value["inventory_variables"].as_array().unwrap();
+			let env = entries.iter().find(|e| e["rank"] == "production").unwrap();
+			assert_eq!(env["unreadable"], serde_json::json!(["salt"]));
+			assert_eq!(env["keys"], serde_json::json!({}));
+			let machine = entries
+				.iter()
+				.find(|e| e["machine_id"] == machine_id.to_string())
+				.unwrap();
+			assert_eq!(machine["keys"]["token"], "\"t\"");
+			assert_eq!(machine["unreadable"], serde_json::json!(["key"]));
+			assert_eq!(snapshot.gaps.len(), 2, "{:?}", snapshot.gaps);
+		})
+		.await;
+	}
+
+	/// An escrow left incomplete or unwritten raises the self-alert, shipped
+	/// at a warning ceiling; the next whole write recovers it.
+	// spec: ESC#keeping-the-escrow-whole, SELF
+	#[tokio::test(flavor = "multi_thread")]
+	async fn report_raises_and_recovers_the_escrow_alert() {
+		TestDb::run(|mut conn, _url| async move {
+			report(&mut conn, &Ok(vec!["inv-vars-g-x: salt".into()]))
+				.await
+				.unwrap();
+			let issue = self_alerts::current(&mut conn, RECOVERY_ESCROW_REF)
+				.await
+				.unwrap()
+				.expect("raised");
+			assert!(issue.active);
+			assert!(
+				issue.message.contains("inv-vars-g-x: salt"),
+				"{}",
+				issue.message
+			);
+			assert_eq!(issue.effective_result, Some(CheckResult::Warning));
+
+			report(&mut conn, &Ok(Vec::new())).await.unwrap();
+			let issue = self_alerts::current(&mut conn, RECOVERY_ESCROW_REF)
+				.await
+				.unwrap()
+				.unwrap();
+			assert!(!issue.active);
+
+			report(
+				&mut conn,
+				&Err(anyhow::anyhow!("put recovery vault object")),
+			)
+			.await
+			.unwrap();
+			let issue = self_alerts::current(&mut conn, RECOVERY_ESCROW_REF)
+				.await
+				.unwrap()
+				.unwrap();
+			assert!(issue.active);
+			assert!(
+				issue.message.contains("could not be written"),
+				"{}",
+				issue.message
+			);
 		})
 		.await;
 	}

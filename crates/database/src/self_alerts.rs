@@ -33,6 +33,26 @@ The Slack outbox drainer gave up delivering a notification after exhausting its 
 
 Check the abandoned row's last error and response in the slack_outbox table, and the webhook URLs in the drainer's configuration. Slack workflow-trigger changes are the usual cause.";
 
+/// The recovery escrow wasn't written whole: either not written at all, or
+/// written leaving out values Canopy couldn't read. Recovers on the next
+/// whole write.
+// spec: ESC#keeping-the-escrow-whole
+pub const RECOVERY_ESCROW_REF: &str = "recovery-escrow";
+
+pub const RECOVERY_ESCROW_DOC: &str = "## Description
+
+Canopy holds the only copy of every backup repository passphrase and every secret inventory variable, and escrows them to the recovery vault so they can be recovered without Canopy. This alert means the latest escrow is not a whole copy: it either could not be written, or was written with values Canopy could not read left out.
+
+A partial escrow is still written, so everything Canopy could read stays current, and the escrow names what it left out. Earlier versions of the vault object still hold what a later one left out, but only until their object-lock retention expires. A value that stays unreadable will eventually have no escrowed copy at all.
+
+## Results
+
+- **fail** — the latest escrow was not written, or left something out. Ships at a warning ceiling. Canopy retries hourly while this stands, and it recovers on the first whole write.
+
+## Solve
+
+The message names what is missing. For a value left out, check that the named Secret exists in Canopy's namespace and that the backups pod can read it: a passphrase Secret needs a `password` key, and a variables Secret a key for every secret variable at its scope. A Secret that has been lost needs restoring from an earlier vault version before that version's retention runs out. For an escrow that could not be written, the message carries the error; the vault bucket, the role assumed to write it, and the recipients are the usual causes.";
+
 /// One or more catalogued checks have gone unreported across the whole
 /// fleet for the stale-alert window. Coalescing: one alert lists them all.
 /// Recovers when none remain — each having been reported again or
