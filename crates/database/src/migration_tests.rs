@@ -618,9 +618,9 @@ pub struct MigrationTestRequest {
 }
 
 impl MigrationTestRequest {
-	/// Ask for every machine of an environment to be tested against its open
-	/// plan. Returns the requests made, none where the environment has no plan
-	/// or no application the migrations apply to.
+	/// Ask for every machine of an environment that a testing declaration
+	/// restores to be tested against its open plan. Returns the requests made,
+	/// none where the environment has no plan or no such machine.
 	pub async fn request_environment(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
@@ -629,12 +629,16 @@ impl MigrationTestRequest {
 	) -> Result<Vec<Self>> {
 		use crate::schema::migration_test_requests::dsl;
 
+		let declared = crate::restore::migrating_environments(db, group_id).await?;
 		let mut plan_id = None;
 		let mut machines = std::collections::BTreeSet::new();
 		for application in Application::list_live_in_group(db, group_id).await? {
 			let Some(machine_id) = application.machine_id else {
 				continue;
 			};
+			if !declared.tests_machine(machine_id) {
+				continue;
+			}
 			if let Some((plan, _)) = candidate_plan_for(db, &application).await?
 				&& plan.rank == rank
 			{

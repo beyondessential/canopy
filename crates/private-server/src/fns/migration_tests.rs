@@ -28,10 +28,10 @@ pub struct RequestMigrationTestArgs {
 
 /// Ask for an environment's data to be tested against its open plan's version.
 ///
-/// Every machine in the environment whose application the plan applies to is
-/// tested once against its latest snapshot, including one already tested
-/// against that snapshot. This is the only thing that dispatches a declaration
-/// migrating on request.
+/// Every machine in the environment that a testing declaration restores, and
+/// whose application the plan applies to, is tested once against its latest
+/// snapshot, including one already tested against that snapshot. This is the
+/// only thing that dispatches a declaration migrating on request.
 // spec: RST#dispatching-a-migration-test
 #[utoipa::path(
 	post,

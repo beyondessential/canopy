@@ -20563,7 +20563,7 @@
     },
     "/api/migration_tests/request": {
       "post": {
-        "description": "Every machine in the environment whose application the plan applies to is\ntested once against its latest snapshot, including one already tested\nagainst that snapshot. This is the only thing that dispatches a declaration\nmigrating on request.",
+        "description": "Every machine in the environment that a testing declaration restores, and\nwhose application the plan applies to, is tested once against its latest\nsnapshot, including one already tested against that snapshot. This is the\nonly thing that dispatches a declaration migrating on request.",
         "operationId": "migration_tests_request",
         "requestBody": {
           "content": {
