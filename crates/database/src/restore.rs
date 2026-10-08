@@ -653,7 +653,8 @@ impl MigratingEnvironments {
 
 	/// Whether a declaration that tests the plan restores this machine.
 	pub fn tests_machine(&self, machine_id: Uuid) -> bool {
-		self.whole_group.is_some_and(|coverage| coverage.testing.is_some())
+		self.whole_group
+			.is_some_and(|coverage| coverage.testing.is_some())
 			|| self.tested_machines.contains(&machine_id)
 	}
 }
