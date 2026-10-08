@@ -17,7 +17,7 @@
 //! A value that can't be read is left out of that tick's snapshot rather than
 //! failing it, and the snapshot names what it left out. An escrow that wasn't
 //! written whole raises the [`RECOVERY_ESCROW_REF`] self-alert and is retried
-//! hourly until it is.
+//! hourly until it is, or until retrying has stopped changing anything.
 // spec: ESC
 
 use std::{
@@ -32,14 +32,15 @@ use commons_servers::{
 };
 use commons_types::status::CheckResult;
 use database::{
-	BackupTypeDefault, MachineBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
+	BackupConfigStatus, BackupTypeDefault, MachineBackupCapability, ServerGroupBackupConfig,
+	ServerGroupBackupSchedule,
 	applications::Application,
 	backup::schedules::{MachineBackupSchedule, ScheduleChange},
 	inventory_variables::{InventoryVariable, VariableScope},
 	self_alerts::{self, RECOVERY_ESCROW_DOC, RECOVERY_ESCROW_REF},
 	server_groups::ServerGroup,
 };
-use jiff::Timestamp;
+use jiff::{SignedDuration, Timestamp};
 use serde::Serialize;
 use tokio::{
 	task::{self, JoinHandle},
@@ -56,6 +57,14 @@ const DEFAULT_SNAPSHOT_HOURS: u64 = 24;
 /// How soon an escrow that wasn't written whole is tried again, when that is
 /// sooner than the configured period.
 const RETRY_PERIOD: Duration = Duration::from_secs(3600);
+/// How many times in a row an escrow may be rewritten with the very same values
+/// left out before it goes back to the configured period: each write is a new
+/// object-locked version, and a fault that has outlasted this many retries isn't
+/// a passing one.
+const MAX_UNCHANGED_RETRIES: u32 = 3;
+/// How long a backup configuration may be without its passphrase Secret before
+/// that counts as a gap. Onboarding writes the configuration, then the Secret.
+const ONBOARDING_GRACE: SignedDuration = SignedDuration::from_secs(600);
 /// The key a group's passphrase keyset holds its current passphrase under.
 const REPO_PASSWORD_KEY: &str = "password";
 /// Version 3 added the fleet-wide per-type defaults, the machine schedule
@@ -185,6 +194,56 @@ fn expose_read<S: serde::Serializer>(
 	}
 }
 
+/// What was read of a group's passphrase keyset.
+struct Keyset {
+	/// The keys that were read, if the Secret could be.
+	keys: Option<BTreeMap<String, SecretString>>,
+	/// Why the keyset isn't whole, where it isn't.
+	unreadable: Option<String>,
+	/// Whether that is a value left out (reported), as opposed to a
+	/// configuration still being onboarded.
+	gap: bool,
+}
+
+/// Read a group's passphrase keyset, keeping whatever keys can be read: a keyset
+/// without a current passphrase can't open the repository, so that is a gap too.
+async fn read_keyset(
+	secrets: &BackupSecrets,
+	config: &ServerGroupBackupConfig,
+	now: Timestamp,
+) -> Keyset {
+	match secrets
+		.try_read_secret_keys_partial(&config.repo_password_ref)
+		.await
+	{
+		Ok(Some((keys, skipped))) => {
+			let mut problems = Vec::new();
+			if !keys.contains_key(REPO_PASSWORD_KEY) {
+				problems.push(format!("keyset has no `{REPO_PASSWORD_KEY}`"));
+			}
+			if !skipped.is_empty() {
+				problems.push(format!("keys not UTF-8: {}", skipped.join(", ")));
+			}
+			Keyset {
+				keys: Some(keys),
+				gap: !problems.is_empty(),
+				unreadable: (!problems.is_empty()).then(|| problems.join("; ")),
+			}
+		}
+		Ok(None) => Keyset {
+			keys: None,
+			unreadable: Some("keyset does not exist".into()),
+			gap: !(config.status == BackupConfigStatus::Provisioning
+				&& now.duration_since(config.created_at) < ONBOARDING_GRACE),
+		},
+		Err(e) => Keyset {
+			keys: None,
+			unreadable: Some(format!("keyset unreadable ({e})")),
+			gap: true,
+		},
+	}
+}
+
 /// A serialised snapshot (plaintext, before encryption), and what it left out.
 pub struct Snapshot {
 	pub json: Vec<u8>,
@@ -223,17 +282,15 @@ pub async fn build_snapshot(
 
 		let config = match configs.get(&group.id) {
 			Some(config) => {
-				let (keys, unreadable) =
-					match secrets.read_secret_keys(&config.repo_password_ref).await {
-						Ok(keys) if keys.contains_key(REPO_PASSWORD_KEY) => (Some(keys), None),
-						Ok(keys) => (
-							Some(keys),
-							Some(format!("keyset has no `{REPO_PASSWORD_KEY}`")),
-						),
-						Err(e) => (None, Some(format!("keyset unreadable ({e})"))),
-					};
+				let Keyset {
+					keys,
+					unreadable,
+					gap,
+				} = read_keyset(secrets, config, now).await;
 				if let Some(reason) = &unreadable {
-					warn!(group = %group.id, secret = %config.repo_password_ref, "recovery-snapshot: {reason}; leaving it out");
+					warn!(group = %group.id, secret = %config.repo_password_ref, "recovery-snapshot: {reason}");
+				}
+				if let (true, Some(reason)) = (gap, &unreadable) {
 					gaps.push(format!(
 						"{} for group {} ({}): {reason}",
 						config.repo_password_ref, group.name, group.id
@@ -283,8 +340,10 @@ pub async fn build_snapshot(
 		let keys: BTreeMap<String, SecretString> = if held.is_empty() {
 			BTreeMap::new()
 		} else {
-			match secrets.read_secret_keys(&secret).await {
-				Ok(keys) => keys
+			match secrets.try_read_secret_keys_partial(&secret).await {
+				Ok(found) => found
+					.map(|(keys, _)| keys)
+					.unwrap_or_default()
 					.into_iter()
 					.filter(|(name, _)| held.contains(name.as_str()))
 					.collect(),
@@ -446,6 +505,46 @@ async fn report(
 	Ok(())
 }
 
+/// Decides how long to wait after each tick. An escrow that wasn't written
+/// is retried hourly; one written with values left out is too, until it has been
+/// rewritten with the same values left out [`MAX_UNCHANGED_RETRIES`] times over,
+/// when more retries would only pile up locked versions.
+#[derive(Default)]
+struct Backoff {
+	gaps: Vec<String>,
+	unchanged: u32,
+}
+
+impl Backoff {
+	fn after(&mut self, period: Duration, outcome: &Result<Vec<String>>) -> Duration {
+		match outcome {
+			Ok(gaps) if gaps.is_empty() => {
+				*self = Self::default();
+				period
+			}
+			Ok(gaps) => {
+				let mut gaps = gaps.clone();
+				gaps.sort();
+				if gaps == self.gaps {
+					self.unchanged += 1;
+				} else {
+					self.gaps = gaps;
+					self.unchanged = 0;
+				}
+				if self.unchanged < MAX_UNCHANGED_RETRIES {
+					period.min(RETRY_PERIOD)
+				} else {
+					period
+				}
+			}
+			Err(_) => {
+				*self = Self::default();
+				period.min(RETRY_PERIOD)
+			}
+		}
+	}
+}
+
 pub fn spawn(worker: Worker, config: RecoveryVaultConfig) -> JoinHandle<()> {
 	task::spawn(async move {
 		info!(
@@ -453,12 +552,12 @@ pub fn spawn(worker: Worker, config: RecoveryVaultConfig) -> JoinHandle<()> {
 			recipients = config.recipients.len(),
 			"recovery-snapshot writer started"
 		);
+		let mut backoff = Backoff::default();
 		loop {
 			let outcome = tick(&worker, &config).await;
 			if let Err(e) = &outcome {
 				error!("recovery-snapshot tick failed: {e:#}");
 			}
-			let whole = outcome.as_ref().is_ok_and(Vec::is_empty);
 			match worker.pool.get().await {
 				Ok(mut db) => {
 					if let Err(e) = report(&mut db, &outcome).await {
@@ -467,12 +566,7 @@ pub fn spawn(worker: Worker, config: RecoveryVaultConfig) -> JoinHandle<()> {
 				}
 				Err(e) => error!("recovery-snapshot: failed to report escrow state: db: {e}"),
 			}
-			let period = if whole {
-				config.period
-			} else {
-				config.period.min(RETRY_PERIOD)
-			};
-			sleep(period).await;
+			sleep(backoff.after(config.period, &outcome)).await;
 		}
 	})
 }
@@ -654,7 +748,7 @@ mod tests {
 				config["unreadable"]
 					.as_str()
 					.unwrap()
-					.contains("keyset unreadable")
+					.contains("keyset does not exist")
 			);
 			assert_eq!(snapshot.gaps.len(), 1);
 			assert!(
@@ -662,6 +756,33 @@ mod tests {
 				"{:?}",
 				snapshot.gaps
 			);
+		})
+		.await;
+	}
+
+	/// A configuration still being onboarded has no Secret yet; that is not
+	/// a gap until it has been that way for longer than onboarding takes.
+	// spec: ESC#what-a-recovery-needs
+	#[tokio::test(flavor = "multi_thread")]
+	async fn keyset_not_yet_created_is_a_gap_only_once_onboarding_should_be_over() {
+		TestDb::run(|mut conn, _url| async move {
+			seed_configured_group(&mut conn).await;
+			conn.batch_execute("UPDATE server_group_backup_config SET status = 'provisioning'")
+				.await
+				.unwrap();
+
+			let snapshot = build_snapshot(&mut conn, &BackupSecrets::memory(), Timestamp::now())
+				.await
+				.unwrap();
+			assert!(snapshot.gaps.is_empty(), "{:?}", snapshot.gaps);
+			let value: serde_json::Value = serde_json::from_slice(&snapshot.json).unwrap();
+			assert!(value["groups"][0]["config"]["keys"].is_null());
+
+			let later = Timestamp::now() + SignedDuration::from_secs(3600);
+			let snapshot = build_snapshot(&mut conn, &BackupSecrets::memory(), later)
+				.await
+				.unwrap();
+			assert_eq!(snapshot.gaps.len(), 1);
 		})
 		.await;
 	}
@@ -788,5 +909,45 @@ mod tests {
 			);
 		})
 		.await;
+	}
+
+	/// An escrow that can't be written is retried hourly without end; one left
+	/// incomplete the same way is retried hourly only a few times over.
+	// spec: ESC#keeping-the-escrow-whole
+	#[test]
+	fn backoff_retries_hourly_then_backs_off_while_the_gaps_stand() {
+		let day = Duration::from_secs(86400);
+		let gaps = || Ok(vec!["b".to_string(), "a".to_string()]);
+		let mut backoff = Backoff::default();
+
+		for _ in 0..=MAX_UNCHANGED_RETRIES {
+			assert_eq!(backoff.after(day, &Ok(Vec::new())), day);
+		}
+		let waits: Vec<_> = (0..MAX_UNCHANGED_RETRIES + 2)
+			.map(|_| backoff.after(day, &gaps()))
+			.collect();
+		assert_eq!(waits[..MAX_UNCHANGED_RETRIES as usize], [RETRY_PERIOD; 3]);
+		assert_eq!(waits[MAX_UNCHANGED_RETRIES as usize..], [day; 2]);
+
+		// A different gap, a failed write, or a whole write starts over.
+		let other = Ok(vec!["c".to_string()]);
+		assert_eq!(backoff.after(day, &other), RETRY_PERIOD);
+		for _ in 0..=MAX_UNCHANGED_RETRIES {
+			backoff.after(day, &other);
+		}
+		assert_eq!(
+			backoff.after(day, &Err(anyhow::anyhow!("put"))),
+			RETRY_PERIOD
+		);
+		assert_eq!(backoff.after(day, &other), RETRY_PERIOD);
+		for _ in 0..=MAX_UNCHANGED_RETRIES {
+			backoff.after(day, &other);
+		}
+		assert_eq!(backoff.after(day, &Ok(Vec::new())), day);
+		assert_eq!(backoff.after(day, &other), RETRY_PERIOD);
+
+		// A period already shorter than the retry period is kept.
+		let short = Duration::from_secs(600);
+		assert_eq!(Backoff::default().after(short, &other), short);
 	}
 }
