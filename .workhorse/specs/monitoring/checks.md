@@ -141,6 +141,9 @@ An entry carries:
 
 A check is registered in the catalog with a ceiling of `warning` the first time it is reported, and is pending operator review; operators confirm or adjust its policy from there, and checks still awaiting review are surfaced for it.
 While a check is pending review its effective result is hard-capped at warning — whatever its ceiling or rules would otherwise yield — so a never-vetted check records state but cannot open an incident (see [INC](incidents.md)); reviewing the policy, even a no-op save, lifts the cap.
+
+A change to a check's policy, a review included, takes effect on every target at once: each of the check's states is re-graded from what its most recent report observed, so no target waits for its next report to be graded under the new policy.
+The re-graded result is the state's effective result wherever it is read, incidents included (see [INC](incidents.md), "Membership").
 Canopy's own checks register already reviewed, with the policy their condition warrants instead of the default.
 
 ### Scoped policy

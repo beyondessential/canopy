@@ -34,11 +34,12 @@ While an incident is open, every issue on its target joins it — effective warn
 
 An issue leaves the incident when it stops being one: its effective result recovers (to passed or skipped, whether by report or by policy), it is resolved or snoozed, or the machine or application it is on stops being monitored.
 Warnings never hold an incident open.
+A member whose effective result falls from failed to warning stays in the incident for context, but its failure has ended as surely as if it had left.
 
-When the last effective failure leaves because its result recovered, the incident does not close immediately: it **lingers** for its target's linger window, remaining the target's open incident.
+When the last effective failure ends because the check's own report recovered or lessened it, the incident does not close immediately: it **lingers** for its target's linger window, remaining the target's open incident.
 A check whose effective result becomes failed during the window — a fresh failure or the same one returning — ends the lingering and the incident continues.
-An incident whose linger window elapses without an effective failure closes, recording the close as of when its last effective failure left.
-Lingering damps reporter flapping, not operator action: a last failure leaving through resolution, snooze, silence, a maintenance window declared over its target (see [MNT](maintenance.md)), or its target's monitoring being turned off closes the incident immediately.
+An incident whose linger window elapses without an effective failure closes, recording the close as of when its last effective failure ended.
+Lingering damps reporter flapping, not operator action: a last failure ending through resolution, snooze, silence, a change to its check's policy, a maintenance window declared over its target (see [MNT](maintenance.md)), or its target's monitoring being turned off closes the incident immediately.
 
 The membership history — which issues joined and left, and when — is kept and presented as the incident's timeline.
 An issue can leave and rejoin the same incident.
@@ -48,6 +49,7 @@ An issue with no recorded result is ordered below every graded one.
 Notes are ordered most recent first and sit below every issue.
 
 Operator actions that change what counts (monitoring toggles, group membership changes, rank changes, policy and silence changes) re-evaluate the affected issues' incident membership.
+A policy change re-grades its check's states without waiting for the check to report again (see [CHK](checks.md), "Policy"), and the re-graded results count from then on, in either direction: a failure graded away closes an incident it leaves with no effective failure, and a failure graded in opens or joins one as a reported failure would.
 A rank change moves the issues of every application sharing the rank, and of the machine they share it on, to the environment they now belong to, and a change to the group's headline rank moves its group-scoped issues with it, closing an incident the move leaves with no effective failure.
 Ranking a pending machine or namespace brings its issues and its applications' into incident membership from then on.
 
@@ -63,6 +65,7 @@ An incident notifies when it has stayed open past its target's grace period; the
 An incident that closes before its notification was sent never notifies.
 Whether an incident notified is recorded as its **published** flag, so flaps can be excluded from reporting.
 An escalating check's effective failure (see [CHK](checks.md), "Policy") notifies immediately, bypassing any remaining grace; if the incident has already notified, the join escalates it with a further notification, at most once per incident.
+A policy change that makes a member's live failure escalating escalates the incident as such a join would.
 A notified incident notifies again when it closes.
 
 A notified incident still open a day after it opened sends a reminder, and another for each further day it stays open.
