@@ -16,4 +16,4 @@ The enclosure's padding drops by 1px to absorb the thicker edge, so it stays the
 The legend block (version, status, machine, maintenance) is removed from the machine and application pages.
 Legends stay on the Status and cluster pages.
 
-The CHK "One subject per mark" section needs rewording to cover both forms and the never-reported mark.
+The checks spec ("One subject per mark") carries both forms, the never-reported mark, and where the legend appears; the maintenance spec names a machine's mark rather than its enclosure.
