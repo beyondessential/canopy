@@ -90,12 +90,13 @@
 
 	/* The machine row's own mark: with nothing to enclose there is no wash to
 	   keep quiet for, so it is a solid dot in the box's colour, its edge a
-	   shade darker. Sized like the application dots below it. */
+	   shade darker. Sized like an enclosure holding one dot, so the row keeps
+	   its height. */
 	.mmark {
 		display: inline-block;
 		font-size: 1rem;
-		width: 0.9em;
-		height: 0.9em;
+		width: calc(1.3em + 2px);
+		height: calc(1.3em + 2px);
 		border: 1px solid;
 		border-radius: 50%;
 		flex: none;
