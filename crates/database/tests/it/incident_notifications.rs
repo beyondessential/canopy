@@ -57,7 +57,8 @@ async fn file(
 		escalates,
 		detail: None,
 		title: None,
-		instanced: None,
+		instances: None,
+		inputs: None,
 	};
 	NewEvent {
 		source: "test".into(),

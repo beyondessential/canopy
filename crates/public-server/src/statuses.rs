@@ -27,7 +27,7 @@ use database::{
 	diesel_async::{AsyncConnection, AsyncPgConnection},
 	issues::{
 		CheckGrading, CheckOutcome, CheckStateStamp, GradedCheck, GradingContext, Issue, NewEvent,
-		ReportedCheck, Scope, grade_instances, is_health_structure,
+		ReportWording, ReportedCheck, Scope, grade_instances, is_health_structure,
 	},
 	machines::Machine,
 	silenced_refs::{silenced_health_checks_of_application, silenced_health_checks_of_machine},
@@ -1283,50 +1283,11 @@ async fn file_health_events(
 			previously_active.contains(*check)
 		};
 		let active = degraded(graded);
-		let (description, title, message) = if graded.is_plain() {
-			// A check with a single result is headlined by what policy made of
-			// it. A broken check retaining a failure is still broken, so the
-			// headline reads its instance's grade rather than the retained
-			// contribution.
-			let description = match graded.instances[0].effective {
-				_ if !active => None,
-				CheckResult::Broken => Some(format!("Health check '{check}' is broken")),
-				CheckResult::Failed => Some(format!("Health check '{check}' failed")),
-				_ => Some(format!("Health check '{check}' warned")),
-			};
-			let message = match graded.effective {
-				_ if active => per_check_description(&reported[*check].detail),
-				CheckResult::Skipped if was_active => {
-					Some(format!("Health check '{check}' is now skipped"))
-				}
-				CheckResult::Skipped => Some(format!("Health check '{check}' skipped")),
-				_ if was_active => Some(format!("Health check '{check}' recovered")),
-				_ => Some(format!("Health check '{check}' passing")),
-			};
-			(
-				description.clone(),
-				description,
-				message.unwrap_or_default(),
-			)
-		} else {
-			// A check with instances is headlined the same whatever its
-			// instances come to, and the title is kept whatever the result:
-			// lifting an instance silence can bring the state back into
-			// trouble at any grade, and it presents this title then. Canopy
-			// writes the message from the graded instances, so an instance
-			// a silence has taken out is never counted in it.
-			// spec: CHK#checks-with-instances
-			let title = if graded.broken {
-				format!("Health check '{check}' is broken")
-			} else {
-				format!("Health check '{check}' is degraded")
-			};
-			(
-				active.then(|| title.clone()),
-				Some(title),
-				graded.message(check),
-			)
-		};
+		let ReportWording {
+			description,
+			title,
+			message,
+		} = ReportWording::of(check, graded, was_active);
 		let stamp = CheckStateStamp::of_graded(
 			check,
 			graded,
@@ -1388,7 +1349,8 @@ async fn file_health_events(
 			escalates: false,
 			detail: None,
 			title: None,
-			instanced: None,
+			instances: None,
+			inputs: None,
 		};
 		let r#ref = format!("{HEALTH_REF}/{check}");
 		let message = format!("Health check '{check}' recovered");
@@ -1439,19 +1401,6 @@ async fn file_health_events(
 struct GrainTags<'a> {
 	application: &'a std::collections::HashMap<String, serde_json::Value>,
 	machine: &'a std::collections::HashMap<String, serde_json::Value>,
-}
-
-/// A degraded check's message: its fields, one per line.
-fn per_check_description(detail: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
-	let mut lines = Vec::new();
-	for (k, v) in detail {
-		let rendered = match v {
-			serde_json::Value::String(s) => s.clone(),
-			other => other.to_string(),
-		};
-		lines.push(format!("- **{k}**: `{rendered}`"));
-	}
-	(!lines.is_empty()).then(|| lines.join("\n"))
 }
 
 /// One target's material, as parsed off the wire: its checks and its detail.

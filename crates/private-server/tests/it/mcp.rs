@@ -952,7 +952,8 @@ async fn observe_wobbly(
 		escalates: false,
 		detail: None,
 		title: None,
-		instanced: None,
+		instances: None,
+		inputs: None,
 	};
 	database::issues::NewEvent {
 		source: "test".into(),

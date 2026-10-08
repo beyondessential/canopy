@@ -124,7 +124,8 @@ async fn opening_incident_enqueues_slack_open_row() {
 			escalates: false,
 			detail: None,
 			title: None,
-			instanced: None,
+			instances: None,
+			inputs: None,
 		};
 		let event = NewEvent {
 			source: "test".into(),
@@ -214,7 +215,8 @@ async fn resolving_incident_after_open_delivered_enqueues_resolve_row() {
 			escalates: false,
 			detail: None,
 			title: None,
-			instanced: None,
+			instances: None,
+			inputs: None,
 		};
 		let event = NewEvent {
 			source: "test".into(),
@@ -271,7 +273,8 @@ async fn resolving_before_open_ships_cancels_open_and_skips_resolve() {
 			escalates: false,
 			detail: None,
 			title: None,
-			instanced: None,
+			instances: None,
+			inputs: None,
 		};
 		let event = NewEvent {
 			source: "test".into(),
@@ -355,7 +358,8 @@ async fn resolve_is_still_sent_when_only_the_escalation_open_was_pending() {
 			escalates: false,
 			detail: None,
 			title: None,
-			instanced: None,
+			instances: None,
+			inputs: None,
 		};
 		NewEvent {
 			source: "test".into(),
@@ -387,7 +391,8 @@ async fn resolve_is_still_sent_when_only_the_escalation_open_was_pending() {
 			escalates: true,
 			detail: None,
 			title: None,
-			instanced: None,
+			instances: None,
+			inputs: None,
 		};
 		NewEvent {
 			source: "test".into(),
@@ -452,7 +457,8 @@ async fn cascade_close_via_issue_resolve_attributes_to_operator() {
 			escalates: false,
 			detail: None,
 			title: None,
-			instanced: None,
+			instances: None,
+			inputs: None,
 		};
 		let event = NewEvent {
 			source: "test".into(),
@@ -515,7 +521,8 @@ async fn nil_server_events_do_not_open_incidents() {
 			escalates: false,
 			detail: None,
 			title: None,
-			instanced: None,
+			instances: None,
+			inputs: None,
 		};
 		let event = NewEvent {
 			source: "canopy".into(),
@@ -552,7 +559,8 @@ async fn mark_given_up_removes_row_from_claim_pending() {
 			escalates: false,
 			detail: None,
 			title: None,
-			instanced: None,
+			instances: None,
+			inputs: None,
 		};
 		let event = NewEvent {
 			source: "test".into(),
@@ -608,7 +616,8 @@ async fn mark_failed_holds_the_row_back_for_its_backoff() {
 			escalates: false,
 			detail: None,
 			title: None,
-			instanced: None,
+			instances: None,
+			inputs: None,
 		};
 		let event = NewEvent {
 			source: "test".into(),
@@ -693,7 +702,8 @@ async fn claim_pending_skips_rows_whose_deliver_after_is_in_the_future() {
 			escalates: false,
 			detail: None,
 			title: None,
-			instanced: None,
+			instances: None,
+			inputs: None,
 		};
 		let event = NewEvent {
 			source: "test".into(),
@@ -746,7 +756,8 @@ async fn open_delay_honours_per_group_slack_open_delay() {
 			escalates: false,
 			detail: None,
 			title: None,
-			instanced: None,
+			instances: None,
+			inputs: None,
 		};
 		let event = NewEvent {
 			source: "test".into(),
@@ -796,7 +807,8 @@ async fn pending_opens_until_filters_to_undelivered_in_window() {
 			escalates: false,
 			detail: None,
 			title: None,
-			instanced: None,
+			instances: None,
+			inputs: None,
 		};
 		let event = NewEvent {
 			source: "test".into(),
@@ -824,7 +836,8 @@ async fn pending_opens_until_filters_to_undelivered_in_window() {
 			escalates: false,
 			detail: None,
 			title: None,
-			instanced: None,
+			instances: None,
+			inputs: None,
 		};
 		let event = NewEvent {
 			source: "test".into(),
@@ -881,7 +894,8 @@ async fn rejoining_open_incident_does_not_re_enqueue_open() {
 			escalates: false,
 			detail: None,
 			title: None,
-			instanced: None,
+			instances: None,
+			inputs: None,
 		};
 		let event_a = NewEvent {
 			source: "test".into(),
@@ -910,7 +924,8 @@ async fn rejoining_open_incident_does_not_re_enqueue_open() {
 			escalates: false,
 			detail: None,
 			title: None,
-			instanced: None,
+			instances: None,
+			inputs: None,
 		};
 		let event_b = NewEvent {
 			source: "test".into(),

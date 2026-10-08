@@ -20,6 +20,7 @@ mod mcp;
 mod names;
 mod openapi_spec;
 mod password;
+mod policy_regrade;
 mod reporting_schemas;
 mod restore;
 mod server_self;

@@ -457,6 +457,88 @@ impl GradedCheck {
 	}
 }
 
+/// How a check a reporter pushed in its `health` array is worded on its
+/// state: by what policy made of it, so a re-grade words a state just as a
+/// report graded the same way would.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReportWording {
+	/// The state's headline while degraded.
+	pub description: Option<String>,
+	/// The headline kept whatever the result (see [`Issue::title`]). `None`
+	/// keeps the one already stored.
+	pub title: Option<String>,
+	/// The state's message.
+	pub message: String,
+}
+
+impl ReportWording {
+	/// The wording for `check` as graded. `was_active` is whether its state was
+	/// degraded before this grading, which tells a recovery from a pass.
+	pub fn of(check: &str, graded: &GradedCheck, was_active: bool) -> Self {
+		let active = matches!(
+			graded.effective,
+			CheckResult::Warning | CheckResult::Failed | CheckResult::Broken
+		);
+		if graded.is_plain() {
+			// A check with a single result is headlined by what policy made of
+			// it. A broken check retaining a failure is still broken, so the
+			// headline reads its instance's grade rather than the retained
+			// contribution.
+			let description = match graded.instances[0].effective {
+				_ if !active => None,
+				CheckResult::Broken => Some(format!("Health check '{check}' is broken")),
+				CheckResult::Failed => Some(format!("Health check '{check}' failed")),
+				_ => Some(format!("Health check '{check}' warned")),
+			};
+			let message = match graded.effective {
+				_ if active => graded.shared.as_ref().and_then(per_check_description),
+				CheckResult::Skipped if was_active => {
+					Some(format!("Health check '{check}' is now skipped"))
+				}
+				CheckResult::Skipped => Some(format!("Health check '{check}' skipped")),
+				_ if was_active => Some(format!("Health check '{check}' recovered")),
+				_ => Some(format!("Health check '{check}' passing")),
+			};
+			Self {
+				description: description.clone(),
+				title: description,
+				message: message.unwrap_or_default(),
+			}
+		} else {
+			// A check with instances is headlined the same whatever its
+			// instances come to, and the title is kept whatever the result:
+			// lifting an instance silence can bring the state back into
+			// trouble at any grade, and it presents this title then. Canopy
+			// writes the message from the graded instances, so an instance
+			// a silence has taken out is never counted in it.
+			// spec: CHK#checks-with-instances
+			let title = if graded.broken {
+				format!("Health check '{check}' is broken")
+			} else {
+				format!("Health check '{check}' is degraded")
+			};
+			Self {
+				description: active.then(|| title.clone()),
+				title: Some(title),
+				message: graded.message(check),
+			}
+		}
+	}
+}
+
+/// A degraded check's message: its fields, one per line.
+fn per_check_description(detail: &Map<String, Value>) -> Option<String> {
+	let mut lines = Vec::new();
+	for (k, v) in detail {
+		let rendered = match v {
+			Value::String(s) => s.clone(),
+			other => other.to_string(),
+		};
+		lines.push(format!("- **{k}**: `{rendered}`"));
+	}
+	(!lines.is_empty()).then(|| lines.join("\n"))
+}
+
 /// A check state's instances (`issues.instances`), by key, as
 /// [`GradedCheck::stored_instances`] writes them. A state holds them only if
 /// its check has instances; a plain check's state has none.
@@ -595,20 +677,12 @@ pub struct PresentedInstances {
 	pub skipped: usize,
 }
 
-/// A check's instances and the inputs they were graded with, as a check
-/// state keeps them.
-#[derive(Debug, Clone, PartialEq)]
-pub struct InstancedState {
-	pub instances: StoredInstances,
-	pub inputs: GradingInputs,
-}
-
 /// What the rules grading a check's instances read beyond each instance: the
 /// report's fields and the target's tags, as the filing gave them
 /// (`issues.grading_context`).
 ///
-/// A state with instances keeps the inputs its last filing graded them with,
-/// so re-grading it after an instance silence changes nothing a rule reads.
+/// A state keeps the inputs its last filing graded it with, so re-grading it
+/// after a policy change or an instance silence changes nothing a rule reads.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct GradingInputs {
 	/// What rules read as `status.<field>`.

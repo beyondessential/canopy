@@ -52,7 +52,8 @@ async fn save_event(
 		escalates,
 		detail: None,
 		title: None,
-		instanced: None,
+		instances: None,
+		inputs: None,
 	};
 	NewEvent {
 		source: "test".into(),

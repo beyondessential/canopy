@@ -388,7 +388,8 @@ fn failed_stamp(check: &str) -> database::issues::CheckStateStamp {
 		escalates: false,
 		detail: None,
 		title: None,
-		instanced: None,
+		instances: None,
+		inputs: None,
 	}
 }
 

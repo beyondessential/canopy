@@ -1675,7 +1675,8 @@ async fn group_event_pages_even_when_all_members_unmonitored() {
 			escalates: true,
 			detail: None,
 			title: None,
-			instanced: None,
+			instances: None,
+			inputs: None,
 		};
 		let issue = database::issues::raise_group_event_with_state(
 			&mut conn,
@@ -1716,7 +1717,8 @@ async fn group_event_pages_even_when_all_members_unmonitored() {
 			escalates: true,
 			detail: None,
 			title: None,
-			instanced: None,
+			instances: None,
+			inputs: None,
 		};
 		database::issues::raise_group_event_with_state(
 			&mut conn,
