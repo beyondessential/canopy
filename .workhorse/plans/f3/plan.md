@@ -21,7 +21,7 @@ a member whose failure ends without leaving (failed to warning) now lets the inc
 A state filed before plain checks kept their inputs is re-graded only where no rule reads `status.*`, since graded as if its report had none a rule that held its failure would stop matching; the target's tags are loaded for it only when a rule reads them.
 
 When several states settle at once (a push, a re-grade, the deferred re-evaluation queue), failures settle first, then warnings, then recoveries (`settle_order`): a failure lessening in place now ends it, so a fresh failure has to join before the lessened one settles or an incident with no linger window closes and reopens.
-A re-grade takes every target lock it will need up front, in group order, so two concurrent saves over overlapping targets cannot take them in opposite orders.
+A policy save's re-grade locks the check's state rows first, in id order, then every target lock it will need in one ordered statement, before writing anything. That is the rows-then-group order a push takes them in, and one order for every save, so neither a push nor a concurrent save can take them the other way round.
 
 A broken state retaining a failure keeps it through a re-grade, because the state does not record which definite result it retained; its next report settles it.
 

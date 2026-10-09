@@ -1341,6 +1341,46 @@ impl ScopeTargets {
 			.ok_or_else(|| diesel::result::Error::NotFound.into())
 	}
 
+	/// The group a target at `scope` belongs to, if it is in one.
+	fn group_of(&self, scope: Scope) -> Result<Option<Uuid>> {
+		Ok(match scope {
+			Scope::Application(id) => self.application(id)?.group_id,
+			Scope::Machine(id) => self.machine(id)?.0.group_id,
+			Scope::Group(id) => Some(id),
+			Scope::Cluster(_) | Scope::Global => None,
+		})
+	}
+
+	/// The tags a rule grading a check at `scope` reads, as
+	/// [`GradingTarget::load`] reads them: an application's or a machine's own,
+	/// merged over its group's from `group_tags`, and none for anything else.
+	fn grading_tags(
+		&self,
+		scope: Scope,
+		group_tags: &std::collections::HashMap<Uuid, commons_types::server::TagMap>,
+	) -> Result<std::collections::HashMap<String, serde_json::Value>> {
+		let (own, group_id) = match scope {
+			Scope::Application(id) => {
+				let application = self.application(id)?;
+				(&application.tags, application.group_id)
+			}
+			Scope::Machine(id) => {
+				let machine = &self.machine(id)?.0;
+				(&machine.tags, machine.group_id)
+			}
+			Scope::Group(_) | Scope::Cluster(_) | Scope::Global => return Ok(Default::default()),
+		};
+		let merged = match group_id.and_then(|gid| group_tags.get(&gid)) {
+			Some(group) => own.merged_with(group),
+			None => own.clone(),
+		};
+		Ok(merged
+			.0
+			.into_iter()
+			.map(|(k, v)| (k, serde_json::Value::String(v)))
+			.collect())
+	}
+
 	/// The scopes a check filed at `scope` chains its policy from.
 	fn filing_scope(&self, scope: Scope) -> Result<crate::check_policies::FilingScope> {
 		use crate::check_policies::FilingScope;
@@ -2047,6 +2087,11 @@ pub async fn regrade_check_states(
 		// A resolved state counts toward nothing until its check reports
 		// trouble again, which grades it afresh.
 		.filter(issues::resolved_at.is_null())
+		// Locked, in one order, before any target is: a report locks the states
+		// it files and then their target, so a re-grade taking a target first
+		// and a state after can deadlock against one.
+		.order(issues::id)
+		.for_update()
 		.load(conn)
 		.await?;
 	regrade_states(conn, &mut states, source, namespace, check_name, Some(by)).await
@@ -2072,7 +2117,8 @@ pub async fn regrade_check_states(
 ///
 /// States are settled in [`settle_order`], as a push files them, so an
 /// incident one failure swaps for another in is not closed and reopened.
-/// `states` is updated in place to what each now is.
+/// `states` is updated in place to what each now is. Within a transaction the
+/// caller locks the states' rows first, before any target, as a report does.
 ///
 /// `fallback_check` names the check for a state that does not record it. `by`
 /// is the operator whose action this is, where it is known, to whom an
@@ -2085,18 +2131,47 @@ async fn regrade_states(
 	fallback_check: &str,
 	by: Option<&str>,
 ) -> Result<()> {
+	let Some((targets, changed)) =
+		grade_changed(conn, states, source, namespace, fallback_check).await?
+	else {
+		return Ok(());
+	};
+	settle_regraded(conn, states, &targets, changed, source, by).await
+}
+
+/// One state a re-grade moves: where it sits among the states being
+/// re-graded, its check, what it now grades as, and the instances it now
+/// stores.
+struct Regrade {
+	at: usize,
+	check: String,
+	graded: GradedCheck,
+	instances: Option<serde_json::Value>,
+}
+
+/// The scope a stored state is filed at.
+fn state_scope(state: &Issue) -> Scope {
+	Scope::from_columns(
+		state.application_id,
+		state.machine_id,
+		state.server_group_id,
+		state.kubernetes_cluster_id,
+	)
+}
+
+/// Grade `states` again through the policy as it now stands (see
+/// [`regrade_states`]), and return those whose grade moved, with the targets
+/// they were graded against. `None` when no state can be re-graded.
+async fn grade_changed(
+	conn: &mut AsyncPgConnection,
+	states: &[Issue],
+	source: &str,
+	namespace: &Namespace,
+	fallback_check: &str,
+) -> Result<Option<(ScopeTargets, Vec<Regrade>)>> {
 	use crate::check_policies::{CheckPolicy, ScopedCheckPolicy, VarKind};
-	use crate::schema::issues;
 	use std::collections::HashMap;
 
-	let state_scope = |state: &Issue| {
-		Scope::from_columns(
-			state.application_id,
-			state.machine_id,
-			state.server_group_id,
-			state.kubernetes_cluster_id,
-		)
-	};
 	let check_of = |state: &Issue| {
 		state
 			.check_name
@@ -2113,18 +2188,38 @@ async fn regrade_states(
 		})
 		.collect();
 	if regradable.is_empty() {
-		return Ok(());
+		return Ok(None);
 	}
 
 	// A group silence or a fleet policy covers many targets, so everything a
 	// state's grading reads that is not its own is loaded once for the lot:
-	// the targets, and per check name the catalog entry and every state's
-	// chain.
+	// the targets, the tags of the groups a state without its inputs reads,
+	// and per check name the catalog entry and every state's chain.
 	let targets = ScopeTargets::load(
 		conn,
 		regradable.iter().map(|(at, ..)| state_scope(&states[*at])),
 	)
 	.await?;
+	let mut without_inputs = Vec::new();
+	for (at, _, inputs) in &regradable {
+		if inputs.is_none()
+			&& let Some(gid) = targets.group_of(state_scope(&states[*at]))?
+		{
+			without_inputs.push(gid);
+		}
+	}
+	let group_tags = if without_inputs.is_empty() {
+		HashMap::new()
+	} else {
+		use crate::schema::server_groups;
+		server_groups::table
+			.select((server_groups::id, server_groups::tags))
+			.filter(server_groups::id.eq_any(&without_inputs))
+			.load::<(Uuid, commons_types::server::TagMap)>(conn)
+			.await?
+			.into_iter()
+			.collect()
+	};
 	let mut by_check: HashMap<String, Vec<usize>> = HashMap::new();
 	for (n, (at, ..)) in regradable.iter().enumerate() {
 		by_check.entry(check_of(&states[*at])).or_default().push(n);
@@ -2147,7 +2242,7 @@ async fn regrade_states(
 		}
 	}
 
-	let mut graded_all = Vec::with_capacity(regradable.len());
+	let mut changed = Vec::new();
 	for ((at, outcome, inputs), chain) in regradable.into_iter().zip(chains) {
 		let state = &states[at];
 		let check = check_of(state);
@@ -2165,7 +2260,7 @@ async fn regrade_states(
 			None => GradingInputs {
 				status: Default::default(),
 				tags: if grading.reads(VarKind::Tag) {
-					GradingTarget::load(conn, state_scope(state)).await?.tags
+					targets.grading_tags(state_scope(state), &group_tags)?
 				} else {
 					Default::default()
 				},
@@ -2182,13 +2277,7 @@ async fn regrade_states(
 			outcome,
 			Some(state),
 		);
-		graded_all.push((at, check, graded));
-	}
-
-	// Only the states whose grade moved are written and settled.
-	let mut changed = Vec::with_capacity(graded_all.len());
-	for (at, check, graded) in graded_all {
-		let state = &states[at];
+		// Only the states whose grade moved are written and settled.
 		let instances = graded
 			.stored_instances()
 			.map(|i| serde_json::to_value(i).expect("instances serialise"));
@@ -2196,18 +2285,35 @@ async fn regrade_states(
 			|| graded.escalates != state.escalates
 			|| instances != state.instances
 		{
-			changed.push((at, check, graded, instances));
+			changed.push(Regrade {
+				at,
+				check,
+				graded,
+				instances,
+			});
 		}
 	}
-	if changed.is_empty() {
-		return Ok(());
-	}
-	// See the ordering note above. Within each, by target, so the order never
-	// depends on the order the states were loaded in.
-	changed.sort_by_key(|(at, _, graded, _)| {
-		let state = &states[*at];
+	Ok((!changed.is_empty()).then_some((targets, changed)))
+}
+
+/// Write back each of `changed`, re-graded states among `states`, and settle
+/// its incident membership as an operator's re-grade (see [`regrade_states`]).
+async fn settle_regraded(
+	conn: &mut AsyncPgConnection,
+	states: &mut [Issue],
+	targets: &ScopeTargets,
+	mut changed: Vec<Regrade>,
+	source: &str,
+	by: Option<&str>,
+) -> Result<()> {
+	use crate::schema::issues;
+
+	// See the ordering note on `regrade_states`. Within each, by target, so the
+	// order never depends on the order the states were loaded in.
+	changed.sort_by_key(|regrade| {
+		let state = &states[regrade.at];
 		(
-			settle_order(graded.effective),
+			settle_order(regrade.graded.effective),
 			state_scope(state).to_columns(),
 			state.id,
 		)
@@ -2217,12 +2323,12 @@ async fn regrade_states(
 	// them in. Taken as settling reaches them, two re-grades over the same
 	// targets can take them in opposite orders and deadlock.
 	let mut locking = Vec::new();
-	for (at, ..) in &changed {
-		if let Some((target, _)) = targets.incident_target(state_scope(&states[*at]))? {
+	for regrade in &changed {
+		if let Some((target, _)) = targets.incident_target(state_scope(&states[regrade.at]))? {
 			locking.push(target);
 		}
 	}
-	let changed_ids: Vec<Uuid> = changed.iter().map(|(at, ..)| states[*at].id).collect();
+	let changed_ids: Vec<Uuid> = changed.iter().map(|r| states[r.at].id).collect();
 	locking.extend(
 		open_incidents_holding(conn, &changed_ids)
 			.await?
@@ -2231,7 +2337,13 @@ async fn regrade_states(
 	);
 	lock_all_targets(conn, locking).await?;
 
-	for (at, check, graded, instances) in changed {
+	for Regrade {
+		at,
+		check,
+		graded,
+		instances,
+	} in changed
+	{
 		let state = &states[at];
 		let active = matches!(
 			graded.effective,
@@ -4886,17 +4998,31 @@ async fn lock_targets(
 	Ok(())
 }
 
-/// [`lock_targets`] for any number of targets, in the same order.
-async fn lock_all_targets(
-	db: &mut AsyncPgConnection,
-	mut targets: Vec<IncidentTarget>,
-) -> Result<()> {
-	// One lock per group, so a group's environments are taken once.
-	targets.sort_by_key(|target| target.group_id());
-	targets.dedup_by_key(|target| target.group_id());
-	for target in targets {
-		lock_target(db, target).await?;
+/// [`lock_targets`] for any number of targets, in the same order: Canopy as a
+/// whole first, then each group by id, taken in one statement.
+async fn lock_all_targets(db: &mut AsyncPgConnection, targets: Vec<IncidentTarget>) -> Result<()> {
+	use crate::schema::server_groups;
+	if targets.contains(&IncidentTarget::Global) {
+		lock_target(db, IncidentTarget::Global).await?;
 	}
+	let mut groups: Vec<Uuid> = targets
+		.iter()
+		.filter_map(|target| target.group_id())
+		.collect();
+	if groups.is_empty() {
+		return Ok(());
+	}
+	groups.sort_unstable();
+	groups.dedup();
+	// Rows are locked as the sort hands them over, so the statement takes the
+	// groups in id order as the one-at-a-time path does.
+	let _group_locks: Vec<Uuid> = server_groups::table
+		.select(server_groups::id)
+		.filter(server_groups::id.eq_any(&groups))
+		.order(server_groups::id)
+		.for_update()
+		.load(db)
+		.await?;
 	Ok(())
 }
 

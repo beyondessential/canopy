@@ -547,8 +547,8 @@ impl ReportWording {
 	/// message from its re-graded instances ([`GradedCheck::message`]) until
 	/// its next sweep restores its own. A plain check graded out of trouble is
 	/// worded as a reported one would be, since the observation no longer
-	/// describes the state. Either way a state brought back into trouble
-	/// presents the title its last filing gave it.
+	/// describes the state. A Canopy check brought back into trouble presents
+	/// the title its last filing gave it.
 	pub fn regraded(source: &str, check: &str, graded: &GradedCheck, state: &Issue) -> Self {
 		let reported = Self::of(check, graded, state.active);
 		if !commons_types::namespace::is_reserved(source) {
