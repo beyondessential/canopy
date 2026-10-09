@@ -896,10 +896,15 @@ async fn pending(conn: &mut AsyncPgConnection, machine: Uuid, target: &Version) 
 }
 
 async fn ask(conn: &mut AsyncPgConnection, group: Uuid, rank: ServerRank) -> usize {
-	database::migration_tests::MigrationTestRequest::request_environment(conn, group, rank, None)
+	let declared = database::restore::migrating_environments(conn, group)
 		.await
-		.expect("ask")
-		.len()
+		.expect("declarations");
+	database::migration_tests::MigrationTestRequest::request_environment(
+		conn, group, rank, &declared, None,
+	)
+	.await
+	.expect("ask")
+	.len()
 }
 
 async fn on_request(conn: &mut AsyncPgConnection) {
@@ -1078,6 +1083,7 @@ async fn an_ask_waits_for_a_test_begun_after_it() {
 		let (machine, server) = insert_server(&mut conn, group).await;
 		let target = insert_version(&mut conn, 63).await;
 		plan_upgrade(&mut conn, group, &target).await;
+		declare_migrate(&mut conn, consumer, group, 3600).await;
 		assert_eq!(ask(&mut conn, group, ServerRank::Production).await, 1);
 
 		record_test_at(
@@ -1148,6 +1154,7 @@ async fn a_run_already_under_way_does_not_answer_an_ask() {
 		let (machine, server) = insert_server(&mut conn, group).await;
 		let target = insert_version(&mut conn, 63).await;
 		plan_upgrade(&mut conn, group, &target).await;
+		declare_migrate(&mut conn, consumer, group, 3600).await;
 		let run = Uuid::new_v4();
 		sql_query(
 			"INSERT INTO backup_credential_issuances
@@ -1201,6 +1208,7 @@ async fn only_the_reporting_consumer_s_run_says_when_it_began() {
 		let (machine, server) = insert_server(&mut conn, group).await;
 		let target = insert_version(&mut conn, 63).await;
 		plan_upgrade(&mut conn, group, &target).await;
+		declare_migrate(&mut conn, consumer, group, 3600).await;
 		let run = Uuid::new_v4();
 		sql_query(
 			"INSERT INTO backup_credential_issuances
@@ -1255,6 +1263,7 @@ async fn a_report_with_no_run_began_its_elapsed_time_before() {
 		let (machine, server) = insert_server(&mut conn, group).await;
 		let target = insert_version(&mut conn, 63).await;
 		plan_upgrade(&mut conn, group, &target).await;
+		declare_migrate(&mut conn, consumer, group, 3600).await;
 		assert_eq!(ask(&mut conn, group, ServerRank::Production).await, 1);
 		sql_query(
 			"UPDATE migration_test_requests SET requested_at = NOW() - INTERVAL '10 minutes'",
@@ -1290,7 +1299,9 @@ async fn a_report_with_no_run_began_its_elapsed_time_before() {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_ask_covers_the_environment_s_tamanu_boxes() {
 	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn).await;
+		declare_migrate(&mut conn, consumer, group, 3600).await;
 		assert_eq!(
 			ask(&mut conn, group, ServerRank::Production).await,
 			0,
@@ -1320,9 +1331,38 @@ async fn an_ask_covers_the_environment_s_tamanu_boxes() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_ask_skips_boxes_no_declaration_restores() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn).await;
+		let (central, _) = insert_server(&mut conn, group).await;
+		let (facility, _) =
+			insert_server_at(&mut conn, group, "production", "tamanu-facility", None).await;
+		let target = insert_version(&mut conn, 63).await;
+		plan_upgrade(&mut conn, group, &target).await;
+		declare_migrate(&mut conn, consumer, group, 3600).await;
+		sql_query("UPDATE restore_replicas SET machine_id = $1")
+			.bind::<sql_types::Uuid, _>(central)
+			.execute(&mut conn)
+			.await
+			.expect("pin to the central");
+
+		assert_eq!(ask(&mut conn, group, ServerRank::Production).await, 1);
+		assert!(pending(&mut conn, central, &target).await);
+		assert!(
+			!pending(&mut conn, facility, &target).await,
+			"nothing would test the facility, so its ask would never be answered"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_withdrawn_plan_s_asks_match_nothing() {
 	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn).await;
+		declare_migrate(&mut conn, consumer, group, 3600).await;
 		let (machine, _) = insert_server(&mut conn, group).await;
 		let (clone, _) = insert_server_at(&mut conn, group, "clone", "tamanu-central", None).await;
 		let target = insert_version(&mut conn, 63).await;
@@ -1355,7 +1395,9 @@ async fn a_withdrawn_plan_s_asks_match_nothing() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_box_is_tested_for_the_workload_an_ask_names() {
 	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn).await;
+		declare_migrate(&mut conn, consumer, group, 3600).await;
 		let (machine, app) = insert_server(&mut conn, group).await;
 		let production = insert_version(&mut conn, 63).await;
 		plan_upgrade(&mut conn, group, &production).await;

@@ -3712,10 +3712,10 @@ export interface paths {
         put?: never;
         /**
          * Ask for an environment's data to be tested against its open plan's version.
-         * @description Every machine in the environment whose application the plan applies to is
-         *     tested once against its latest snapshot, including one already tested
-         *     against that snapshot. This is the only thing that dispatches a declaration
-         *     migrating on request.
+         * @description Every machine in the environment that a testing declaration restores, and
+         *     whose application the plan applies to, is tested once against its latest
+         *     snapshot, including one already tested against that snapshot. This is the
+         *     only thing that dispatches a declaration migrating on request.
          */
         post: operations["migration_tests_request"];
         delete?: never;

@@ -1288,10 +1288,14 @@ async fn a_declaration_migrating_on_request_waits_to_be_asked() {
 			let unasked = worklist(&public, &cert).await;
 			assert!(unasked.is_empty(), "nobody asked: got {unasked:?}");
 
+			let declared = database::restore::migrating_environments(&mut conn, group)
+				.await
+				.expect("declarations");
 			let made = database::migration_tests::MigrationTestRequest::request_environment(
 				&mut conn,
 				group,
 				commons_types::server::rank::ServerRank::Production,
+				&declared,
 				Some("ops@example.com"),
 			)
 			.await
@@ -1351,10 +1355,14 @@ async fn a_request_reinstates_a_pair_already_settled() {
 			.await;
 			assert!(worklist(&public, &cert).await.is_empty());
 
+			let declared = database::restore::migrating_environments(&mut conn, group)
+				.await
+				.expect("declarations");
 			database::migration_tests::MigrationTestRequest::request_environment(
 				&mut conn,
 				group,
 				commons_types::server::rank::ServerRank::Production,
+				&declared,
 				None,
 			)
 			.await

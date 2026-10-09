@@ -28,10 +28,10 @@ pub struct RequestMigrationTestArgs {
 
 /// Ask for an environment's data to be tested against its open plan's version.
 ///
-/// Every machine in the environment whose application the plan applies to is
-/// tested once against its latest snapshot, including one already tested
-/// against that snapshot. This is the only thing that dispatches a declaration
-/// migrating on request.
+/// Every machine in the environment that a testing declaration restores, and
+/// whose application the plan applies to, is tested once against its latest
+/// snapshot, including one already tested against that snapshot. This is the
+/// only thing that dispatches a declaration migrating on request.
 // spec: RST#dispatching-a-migration-test
 #[utoipa::path(
 	post,
@@ -57,11 +57,8 @@ pub async fn request(
 	// A declaration that builds reporting schemas migrates without testing the
 	// plan, so an ask with nothing else covering the environment would wait for
 	// good.
-	if database::restore::migrating_environments(&mut conn, args.group_id)
-		.await?
-		.testing(args.rank)
-		.is_none()
-	{
+	let declared = database::restore::migrating_environments(&mut conn, args.group_id).await?;
+	if declared.testing(args.rank).is_none() {
 		return Err(AppError::BadRequest(
 			"nothing declared tests this environment's plan".into(),
 		));
@@ -70,12 +67,13 @@ pub async fn request(
 		&mut conn,
 		args.group_id,
 		args.rank,
+		&declared,
 		Some(&login),
 	)
 	.await?;
 	if made.is_empty() {
 		return Err(AppError::BadRequest(
-			"that environment has no open plan, or nothing the plan's migrations apply to".into(),
+			"that environment has no open plan, or nothing the plan's migrations apply to that a testing declaration restores".into(),
 		));
 	}
 	Ok(Json(made.len()))

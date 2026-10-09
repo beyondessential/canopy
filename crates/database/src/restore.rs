@@ -597,6 +597,7 @@ pub async fn group_migrates(db: &mut AsyncPgConnection, group_id: Uuid) -> Resul
 pub struct MigratingEnvironments {
 	whole_group: Option<Coverage>,
 	ranks: HashMap<commons_types::server::rank::ServerRank, Coverage>,
+	tested_machines: HashSet<Uuid>,
 }
 
 /// How an environment's data is migration-tested while its plan is open.
@@ -649,6 +650,13 @@ impl MigratingEnvironments {
 	pub fn testing(&self, rank: commons_types::server::rank::ServerRank) -> Option<Testing> {
 		self.coverage(rank).and_then(|coverage| coverage.testing)
 	}
+
+	/// Whether a declaration that tests the plan restores this machine.
+	pub fn tests_machine(&self, machine_id: Uuid) -> bool {
+		self.whole_group
+			.is_some_and(|coverage| coverage.testing.is_some())
+			|| self.tested_machines.contains(&machine_id)
+	}
 }
 
 /// The environments on `group_id` whose restores are migrated, resolved in one
@@ -690,6 +698,9 @@ pub async fn migrating_environments(
 			(false, true) => Some(Testing::OnRequest),
 			(false, false) => Some(Testing::Scheduled),
 		};
+		if let (Some(machine_id), Some(_)) = (replica.machine_id, testing) {
+			out.tested_machines.insert(machine_id);
+		}
 		let coverage = match replica.machine_id {
 			None => Some(out.whole_group.get_or_insert_default()),
 			Some(machine_id) => ranks
