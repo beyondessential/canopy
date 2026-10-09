@@ -11,8 +11,8 @@ With this project, Seedling goes production-ready across the Linux fleet; on hos
 
 ## Sequencing
 
-- **Now, unblocked**: production-grade Tamanu definitions (#U4); the Canopy test site (#V4); the Seedling carry-over (#S4, #T4); the reporting-schema polish pass; the three reporting scoping decisions. Quick wins and the bug audit (#A2) run alongside.
-- **Once the carry-over lands**: the Ansible transition stages (#W4), then the pilot Seedling test site.
+- **Now, unblocked**: production-grade Tamanu definitions (U4); the Canopy test site (V4); the Seedling carry-over (S4, T4); the reporting-schema polish pass; the three reporting scoping decisions. Quick wins and the bug audit (A2) run alongside.
+- **Once the carry-over lands**: the Ansible transition stages (W4), then the pilot Seedling test site.
 - **Once a Seedling test site exists**: Canopy-driven upgrades, built and exercised there rather than on production; the Seedling QA pass
 - **Once the pilot proves out**: fleet rollout in risk order, and greenfield Linux deployments on Seedling by default
 
@@ -22,12 +22,12 @@ With this project, Seedling goes production-ready across the Linux fleet; on hos
 
 Specified in *Seedling in production* and not built.
 
-- **Integrate the new Canopy TLS issuance** (#S4). Canopy now issues TLS certificates and bestool already has an implementation, so Seedling follows along.
-- **Integrate Canopy Backups** (#T4) and remove Seedling's own generic backup framework.
+- **Integrate the new Canopy TLS issuance** (S4). Canopy now issues TLS certificates and bestool already has an implementation, so Seedling follows along.
+- **Integrate Canopy Backups** (T4) and remove Seedling's own generic backup framework.
 
 ### Production definitions
 
-Tracked in #U4. Write production Tamanu Seedling definition bundles. These live in the Tamanu repo, change alongside it, and are published as OCI artifacts (~container images, except not) alongside Tamanu's normal container images during release. Seedling fetches them from these artifacts, and can also be pointed directly to github for dev and testing purposes.
+Tracked in U4. Write production Tamanu Seedling definition bundles. These live in the Tamanu repo, change alongside it, and are published as OCI artifacts (~container images, except not) alongside Tamanu's normal container images during release. Seedling fetches them from these artifacts, and can also be pointed directly to github for dev and testing purposes.
 
 We are greatly helped here by Tamanu no longer having json config. We therefore require that a Tamanu deployment has fully migrated to settings before it moves onto Seedling.
 
@@ -35,7 +35,7 @@ mSupply as a Seedling definition is a stretch goal, desirable to move FSM cleanl
 
 ### The transition
 
-Tracked in #W4. Four Ansible playbooks, each independently runnable and idempotent, as originally planned out for prior to the last cycle in `docs/plans/adhoc-to-seedling-migration.md` in the ops repo:
+Tracked in W4. Four Ansible playbooks, each independently runnable and idempotent, as originally planned out for prior to the last cycle in `docs/plans/adhoc-to-seedling-migration.md` in the ops repo:
 - install,
 - adopt,
 - cut over,
@@ -77,7 +77,7 @@ Environments not on Seedling keep today's passive plans, unchanged.
 A plan becomes executable only when it passes some condition gates:
 
 - Migration testing has a recent pass for this environment at the target version.
-- The upgrade manifest decisions for the versions in the gap are filled in (*Version upgrade schema manifest system*, #J3), and are passed to the upgrade once that pathway exists. **This also serves as a manual approve gate by PM.**
+- The upgrade manifest decisions for the versions in the gap are filled in (*Version upgrade schema manifest system*, J3), and are passed to the upgrade once that pathway exists. **This also serves as a manual approve gate by PM.**
 - The environment's op lease is free, so an Ansible run cannot collide.
 
 ## 3. QA
@@ -88,7 +88,7 @@ This is a project in its own right for a tester rather than per-card testing.
 
 Both Seedling and Canopy have an existing Playwright test suite, so we can use the same tooling and build everything into automations rather than make a fully manual test pass.
 
-We'll stand up a Canopy test/staging site (#V4; how it receives builds relates to #N3), and through the Seedling transition work we'll obtain a Seedling test site as well, which can both be used for the QA work.
+We'll stand up a Canopy test/staging site (V4; how it receives builds relates to N3), and through the Seedling transition work we'll obtain a Seedling test site as well, which can both be used for the QA work.
 - Alternatively, we could have dedicated QA sites, or make a Canopy clone site so it has a snapshot of all the production data.
 
 ### The UI pass
