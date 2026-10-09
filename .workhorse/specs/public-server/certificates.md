@@ -10,6 +10,10 @@ Both are confined to DNS names within the domains the application's group contro
 Canopy is the only holder of DNS write access and of the certificate authority account.
 An application holds neither, which is the point: a fleet where every application carried zone credentials would put the whole zone at the mercy of its least-defended member.
 
+The two are separate features that share infrastructure, since both end in a write to the zone.
+Each has its own declarations, requests, undeclared records, denials, and presentation, so that an application may use either without the other, and an operator can decide about one without deciding about the other.
+What they have in common is the domain a DNS name must lie within and the one application that is allowed to hold it.
+
 ## Why Canopy issues
 
 An application's DNS name resolves to an address that may not be reachable from the public internet, and often is not: a facility application sits behind someone else's NAT.
@@ -20,20 +24,24 @@ Centralising issuance also puts the authority's rate limits, the record of every
 
 ## Declared DNS names
 
-An operator declares the DNS names an application serves, and a request about a DNS name declares it for the application the request resolves to (see "Resolving the application").
-A declared DNS name is what ties a DNS name to the software that answers on it, and it is what an address registration or a certificate request is resolved against.
+An operator declares the DNS names an application serves, separately for addresses and for certificates, and a request about a DNS name declares it for the application the request resolves to, for the kind the request is (see "Resolving the application").
+A declaration is what ties a DNS name to the software that answers on it, and it is what a request is resolved against: an address registration against the DNS names declared for addresses, and a certificate request against the DNS names declared for certificates.
+The two kinds of declaration are independent.
+Declaring a DNS name for addresses neither requires nor implies declaring it for certificates, and each kind is declared, released, refused, and presented on its own.
 
-A DNS name is declared by at most one application across the whole fleet.
-Declaring a DNS name another application already holds is refused, and the refusal names the application holding it, so an operator can see what to release first.
-Exclusivity is what makes a DNS name resolve to one application without Canopy having to guess which of a machine's workloads a request is about.
+A DNS name is held by at most one application across the whole fleet, whichever kinds it is declared for.
+An application may hold a DNS name for addresses alone, for certificates alone, or for both, but two applications never hold the same DNS name, one for each kind.
+Declaring a DNS name another application already holds, for either kind, is refused, and the refusal names the application holding it, so an operator can see what to release first.
+Exclusivity is what makes a DNS name resolve to one application without Canopy having to guess which of a machine's workloads a request is about, and what stops a DNS name pointing at one application while a certificate for it sits with another.
 
 An operator may declare a DNS name that lies outside every domain the application's group controls, since the group may be about to claim the domain it sits under.
 Such a declaration routes requests like any other, and every request about it is then refused for want of a domain until the group controls one covering it (see "Identity and authorisation").
 
 An application may declare several DNS names, each held exclusively.
-Releasing a DNS name ends the application's hold on it and leaves the records and certificates already in place, as revoking a grant does.
+Releasing a DNS name for a kind ends the application's hold on it for that kind and leaves the records and certificates already in place, as revoking a grant does.
+Releasing it for the last kind it was held for frees the DNS name to be declared by another application.
 What was published stays published and what was issued stays held and collectable until it expires.
-What stops is Canopy acting on that DNS name for that application: its certificates are no longer renewed and no longer raised as running out, since renewing past a release would order for a DNS name another application may now serve, and reporting a deliberate release as a fault is noise.
+What stops is Canopy acting on that DNS name for that kind for that application: after a release for certificates its certificates are no longer renewed and no longer raised as running out, since renewing past a release would order for a DNS name another application may now serve, and reporting a deliberate release as a fault is noise.
 
 ## Identity and authorisation
 
@@ -53,28 +61,29 @@ A DNS name within another group's domain is refused as if unclaimed: the refusal
 
 ### Resolving the application
 
-A request about a DNS name denied to the machine is refused as denied before it is resolved (see "Denied DNS names"), so a denial holds however the request would otherwise have resolved.
+A request about a DNS name denied to the machine for the kind of the request is refused as denied before it is resolved (see "Denied DNS names"), so a denial holds however the request would otherwise have resolved.
 
 A request starts from every application on the machine and is narrowed in this order, stopping as soon as one application remains:
 
-1. Where an application on the machine declares the requested DNS name, to that application.
+1. Where an application on the machine holds the requested DNS name, for either kind, to that application.
 2. Where the request names an application type, to the applications of that type.
 3. To the applications holding the grant the request needs whose group controls a domain covering the DNS name.
 
-A request left with no application, or with several, is refused as undeclared.
+A request left with no application, or with several, is refused as undeclared for its kind.
 
 A machine hosting exactly one application resolves to it before anything narrows, unless the request contradicts it (see below), and its requests go on to the checks that follow, so a missing grant or an uncovered domain is refused as that rather than as undeclared.
 Naming a type is optional, because an agent on a single-application machine has nothing to tell apart, and an agent that cannot tell which of its workloads serves a DNS name may still be resolved by the grants alone.
 
-A request naming a type the machine contradicts is refused before it is narrowed: one other than the type of the application on the machine declaring the DNS name, or one none of the machine's applications is.
-The refusal names the declaring application's type, or the types the machine's applications are, and is distinguishable from every other refusal, since its remedy is correcting the agent or registering the application rather than waiting.
+A request naming a type the machine contradicts is refused before it is narrowed: one other than the type of the application on the machine holding the DNS name, or one none of the machine's applications is.
+The refusal names the holding application's type, or the types the machine's applications are, and is distinguishable from every other refusal, since its remedy is correcting the agent or registering the application rather than waiting.
 That is the machine's own business, already in its entitlements, and following the request silently would leave an agent serving a certificate attributed to the workload it said it was not, and declare the DNS name for that workload.
 
-A request that resolves declares its DNS name for the application it resolved to, so later requests and renewals resolve from the declaration.
+A request that resolves declares its DNS name for the application it resolved to, for the kind the request is, so later requests and renewals resolve from the declaration.
+A request for one kind about a DNS name the resolved application holds only for the other kind declares it for this kind as well, the grant check having passed.
 A DNS name another application holds cannot be declared that way, and the request is refused as undeclared.
 
 The undeclared refusal is distinguishable from every other refusal.
-Its remedy is an operator declaring the DNS name, or the agent naming the type, so an agent can tell a DNS name waiting on that from one it is not entitled to, and wait rather than report a fault.
+Its remedy is an operator declaring the DNS name for the kind asked about, or the agent naming the type, so an agent can tell a DNS name waiting on that from one it is not entitled to, and wait rather than report a fault.
 
 The refusal reads the same whether the DNS name is held by an application elsewhere or by nobody, so the endpoint is not a directory of what other machines serve.
 A DNS name an application on another machine holds narrows exactly as one nobody holds, so its request meets the same checks in the same order, and is refused as undeclared only where it would otherwise have declared the DNS name.
@@ -83,33 +92,35 @@ A DNS name an application on another machine holds narrows exactly as one nobody
 
 A request refused as undeclared is recorded against the machine that made it, so an operator learns that a declaration is wanted from Canopy rather than from the agent's alerts.
 The record holds the DNS name, whether it was asked about for addresses or for a certificate, and when the machine last asked.
-A machine asking again about the same DNS name updates the one record rather than adding another.
-A machine's records are bounded, since the DNS name is the machine's own input: past the bound a new DNS name is refused as usual without being recorded, and the records already held stand.
+The two kinds are recorded separately, so a machine that asks about one DNS name both ways has two records, each presented with the kind it is for.
+A machine asking again about the same DNS name for the same kind updates the one record rather than adding another.
+A machine's records are bounded, since the DNS name is the machine's own input: past the bound a new record is refused as usual without being recorded, and the records already held stand.
 
 The record reads the same whether the DNS name is declared by an application on another machine or by nobody.
 It is presented to operators alone, who already see the whole fleet, so it tells the asking machine nothing it was not already told.
 
-An operator disposes of an undeclared request by declaring the DNS name on one of the machine's applications, or by denying it to the machine.
+An operator disposes of an undeclared request by declaring the DNS name for its kind on one of the machine's applications, or by denying that kind to the machine.
 
 A record lasts only as long as it describes something an operator should act on.
-It goes when an application on the machine declares the DNS name, when the DNS name is denied to the machine, when the machine's next request about it is accepted, and when a day passes without the machine asking about it, so a DNS name the agent has stopped wanting drops off without anyone acting.
+It goes when an application on the machine declares the DNS name for that kind, when that kind is denied to the machine for the DNS name, when the machine's next request of that kind about it is accepted, and when a day passes without the machine asking about it that way, so a DNS name the agent has stopped wanting drops off without anyone acting.
 
 ### Denied DNS names
 
-An operator can deny a DNS name to a machine, for a DNS name the machine asks about that none of its applications should serve.
-A denial covers both address and certificate requests about that DNS name from that machine, and records who made it, when, and an optional note saying why, which is for operators and stays in Canopy.
+An operator can deny a DNS name to a machine for a kind of request, for a DNS name the machine asks about that none of its applications should serve that way.
+A denial is of one kind: denying address requests about a DNS name leaves certificate requests about it as they were, and the reverse, and denying both is two denials.
+A denial records who made it, when, and an optional note saying why, which is for operators and stays in Canopy.
 
-A request about a denied DNS name is refused as denied, naming the DNS name, distinguishably from every other refusal, so an agent can tell a decision against it from a declaration it is waiting on.
+A request about a DNS name denied to the machine for the kind of the request is refused as denied, naming the DNS name, distinguishably from every other refusal, so an agent can tell a decision against it from a declaration it is waiting on.
 Such a request is not recorded as undeclared, so a machine that keeps asking raises nothing however often it asks.
 
-A denial stands until an operator lifts it, or until an operator declares the DNS name on one of the machine's applications, which is the opposite decision and ends it.
+A denial stands until an operator lifts it, or until an operator declares the DNS name for that kind on one of the machine's applications, which is the opposite decision and ends it.
 Nothing the machine does lifts a denial, and it outlasts the machine ceasing to ask, since it records a decision rather than an observation.
 Lifting a denial and declaring are administrative actions, as denying is.
 
 ## What an application may act on
 
 An agent can ask Canopy what DNS names the applications on its machine are entitled to, rather than discovering the boundary by being refused.
-The answer is given per application, since the grants and the declared DNS names are each an application's own: for every application on the machine, the domains its group controls, the DNS names it declares, which of the two grants it holds, and the DNS names it already has addresses registered or certificates issued for, each with when the certificate expires.
+The answer is given per application, since the grants and the declared DNS names are each an application's own: for every application on the machine, the domains its group controls, the DNS names it declares for addresses and for certificates, kept apart, which of the two grants it holds, and the DNS names it already has addresses registered or certificates issued for, each with when the certificate expires.
 
 Answering for every application on the machine is what lets one agent serve a box running several: it learns what each of its workloads may do without knowing in advance which of them Canopy holds a grant for.
 
@@ -141,7 +152,7 @@ A request from a paused application is refused distinguishably, so an agent can 
 A pause is not a permission: it says *not now*, where a grant withheld says *not you*.
 
 Because a pause suppresses the alerting that would otherwise chase a certificate running out, the pause itself has to be what is visible.
-A paused application presents as paused wherever its certificates are presented, with who paused it, when, and why.
+A paused application presents as paused wherever its DNS names or certificates are presented, with who paused it, when, and why.
 And a pause old enough that something has lapsed underneath it is reported against Canopy, since a pause everyone has forgotten is how certificates quietly expire; what wants surfacing is the forgetting rather than the expiry it caused.
 
 ## Addresses
@@ -154,7 +165,7 @@ Canopy publishes what it is told: it does not verify that an address is really t
 Canopy changes only records it created itself.
 Because zones are shared, a DNS name may be served by records Canopy knows nothing about, and Canopy neither rewrites nor removes those; it records what it has published so it can tell its own records from everyone else's.
 
-A DNS name's addresses are the addresses of the one application that declares it, so two applications cannot fight over where one DNS name points.
+A DNS name's addresses are the addresses of the one application that holds it for addresses, so two applications cannot fight over where one DNS name points.
 
 ## Certificates
 
@@ -205,7 +216,7 @@ Failing that, Canopy renews after a fixed fraction of the certificate's own life
 Neither is a fixed interval, because a fixed interval cannot serve both lifetimes: a window measured in weeks would leave a certificate that lives days permanently overdue, and one measured in hours would renew a long-lived certificate hundreds of times over.
 Where the authority accounts for a renewal as replacing a particular certificate, Canopy tells it which, so a renewal is not mistaken for an additional certificate.
 
-Renewal stops when the certificate is no longer wanted: a DNS name whose group has released the domain it sits under is not renewed, nor is a certificate for a DNS name its application no longer declares, or for an application whose grant has been revoked or that has been archived.
+Renewal stops when the certificate is no longer wanted: a DNS name whose group has released the domain it sits under is not renewed, nor is a certificate for a DNS name its application no longer declares for certificates, or for an application whose grant has been revoked or that has been archived.
 A grant revoked does not withdraw the certificate already issued — it cannot be recalled once it exists — but it does end the renewals that would extend it.
 
 ### Revocation
@@ -238,7 +249,7 @@ A certificate that has expired outright fails regardless.
 A paused application raises none of this either, for the same reason: Canopy has been told to stop acting on its behalf, so a certificate running down is the expected consequence rather than a failure. What is reported instead is the pause, and eventually the pause having been forgotten.
 
 Except that a certificate for a DNS name the application is no longer entitled to raises nothing at all, however far past expiry it is.
-Its group may have released the domain it sat under, its application may have released the DNS name, the application's grant may have been revoked, or the application may have been archived — and in each case Canopy deliberately stopped renewing it, so its running out is the intended outcome rather than a failure to report.
+Its group may have released the domain it sat under, its application may have released the DNS name for certificates, the application's grant may have been revoked, or the application may have been archived — and in each case Canopy deliberately stopped renewing it, so its running out is the intended outcome rather than a failure to report.
 Alerting on it would mean every deliberate withdrawal left an alert behind that no action could clear, which teaches an operator to ignore the alert that matters.
 Whether the DNS name is still entitled is asked when the alert is evaluated rather than remembered from when renewal stopped, so a domain reclaimed by its group brings its certificates back into scope.
 
@@ -250,25 +261,56 @@ Reporting the two apart matters because they call for different people — an ap
 
 ## Presentation
 
-An application presents the DNS names it declares, with the addresses published for each and whether the zone has caught up with what it asked for, and the certificates Canopy holds for it, each with the DNS name it covers, the profile it was issued under, and when it expires, given both as an instant and as how long is left.
-An operator declares and releases an application's DNS names from the same place.
+DNS names and TLS certificates are presented in separate sections wherever they appear, and each section carries only its own kind.
+A DNS names section never shows a certificate or a request for one, and a TLS certificates section never shows an address or a request for one.
+An application, a machine, and a group each present the two sections the same way, differing only in which names the section covers, so the two kinds read alike wherever they are met.
+A section with nothing to show is absent.
+
+### DNS names
+
+An application presents the DNS names it declares for addresses, with the addresses published for each and whether the zone has caught up with what it asked for.
+An operator declares and releases an application's DNS names for addresses from the same place.
 A declared DNS name with no addresses registered presents as declared without addresses, distinct from one whose addresses are being withdrawn.
-A declared DNS name outside every domain the group controls presents flagged as such, since nothing can be published or certified for it until a covering domain is claimed.
+A declared DNS name outside every domain the group controls presents flagged as such, since nothing can be published for it until a covering domain is claimed.
+
+A group presents, under each domain it controls, the DNS names declared for addresses beneath it and whether each has its records published, so whether a group's DNS names are healthy is answerable without visiting each of its applications.
+
+A machine hosting several applications presents their DNS names together, since that is where an address request is resolved to one of them.
+Each shows the application declaring it.
+Any machine with undeclared address requests presents them, each with when it was last asked, with a control to declare the DNS name for addresses on one of the machine's applications and a control to deny address requests about it.
+A machine hosting one application has them only for a DNS name another application holds, and declaring there is refused with the holder named, which is what an operator needs to release it first.
+Declaring from the machine is the same declaration as declaring from the application, refused the same way.
+A machine presents the DNS names denied to it for addresses, each with who denied it, when, and the note, and a control to lift the denial.
+
+### TLS certificates
+
+An application presents the DNS names it declares for certificates and the certificates Canopy holds for it, each with the DNS name it covers, the profile it was issued under, its state, and how long is left before it expires.
+An operator declares and releases an application's DNS names for certificates from the same place.
+A declared DNS name outside every domain the group controls presents flagged as such, since nothing can be certified for it until a covering domain is claimed.
 A request that has not yet produced a certificate presents as pending, or as failed with the reason.
 An operator sets the application's profile where its other permissions are set, and pauses or unpauses it from the same place, a pause showing who set it, when, and why.
 
-A group presents, under each domain it controls, the DNS names in use beneath it and which of them hold a current certificate, so whether a group's DNS names are healthy is answerable without visiting each of its applications.
+How long is left is shown once, as a duration in a unit that suits its size, with the exact instant available from it, rather than as an instant beside a duration that says the same thing.
+It is rounded the same way wherever it is shown.
+It is coloured by how urgent it is, on the same measure as the certificate's state: relative to the certificate's own lifetime and renewal point rather than to a fixed number of days, so that a week left reads as calm on a ninety-day certificate and as urgent on a six-day one.
+It is calm while the certificate is valid, draws attention once it is due for renewal, and reads as urgent once it is expiring or expired.
 
-A machine hosting several applications presents their DNS names together, since that is where a request about a DNS name is resolved to one of them.
-Each declared DNS name shows the application declaring it and the state of its certificate.
-Any machine with undeclared requests presents them, each with what was asked for and when, with a control to declare the DNS name on one of the machine's applications and a control to deny it.
-A machine hosting one application has them only for a DNS name another application holds, and declaring there is refused with the holder named, which is what an operator needs to release it first.
+A group presents, under each domain it controls, the DNS names declared for certificates beneath it and which of them hold a current certificate, so whether a group's certificates are healthy is answerable without visiting each of its applications.
+
+A machine hosting several applications presents their DNS names declared for certificates together, since that is where a certificate request is resolved to one of them.
+Each shows the application declaring it and the state of its certificate.
+Any machine with undeclared certificate requests presents them, each with when it was last asked, with a control to declare the DNS name for certificates on one of the machine's applications and a control to deny certificate requests about it.
+A machine hosting one application has them only for a DNS name another application holds, and declaring there is refused with the holder named.
 Declaring from the machine is the same declaration as declaring from the application, refused the same way.
-A machine presents the DNS names denied to it, each with who denied it, when, and the note, and a control to lift the denial.
+A machine presents the DNS names denied to it for certificates, each with who denied it, when, and the note, and a control to lift the denial.
+
+### Notices
 
 Undeclared requests are surfaced as a notice rather than as a check: it is shown to whoever reads the pages it appears on and reaches no notification channel, since what it asks for is an operator's decision rather than a response to something down.
-A group presents a notice while any of its machines has an undeclared request, saying how many there are and on which machines, and leading to each machine.
-The Status page presents one notice across the fleet while any machine has an undeclared request, saying how many there are and in which groups, and leading to each group.
+A group presents a notice while any of its machines has an undeclared request, saying how many there are, of which kind, and on which machines, and leading to each machine.
+The Status page presents one notice across the fleet while any machine has an undeclared request, saying how many there are, of which kind, and in which groups, and leading to each group.
 A notice goes once the requests it counts are declared, denied, or drop off.
+
+### Issuance authority
 
 The authority Canopy is configured to use is presented to operators along with the profiles it advertises and whether Canopy's account with it is usable, since that is where a misconfiguration of issuance shows up rather than on any one application.
