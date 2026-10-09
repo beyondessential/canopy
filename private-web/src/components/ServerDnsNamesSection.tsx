@@ -33,16 +33,26 @@ import TimeAgo from "./TimeAgo";
 // spec: ADR#presentation
 export default function ServerDnsNamesSection({
 	serverId,
+	refreshKey,
+	onChanged,
 }: {
 	serverId: string;
+	/// Changes when the other of the application's two sections changed
+	/// something they share, such as the pause.
+	refreshKey: number;
+	onChanged: () => void;
 }) {
 	const isAdmin = useIsAdmin() === true;
 	const [tick, setTick] = useState(0);
-	const reload = () => setTick((t) => t + 1);
+	const reload = () => {
+		setTick((t) => t + 1);
+		onChanged();
+	};
 
 	const detail = useApi("dns_names", "for_server", { server_id: serverId }, [
 		serverId,
 		tick,
+		refreshKey,
 	]);
 
 	if (detail.status === "loading" || detail.status === "idle") {

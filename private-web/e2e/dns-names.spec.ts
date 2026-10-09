@@ -145,9 +145,11 @@ test.describe("DNS names", () => {
 			.getByLabel("DNS name to declare for certificates")
 			.fill("held.fiji.tamanu.app");
 		await tls.getByRole("button", { name: "Declare", exact: true }).click();
-		await expect(tls.getByRole("alert")).toContainText("already declared by");
-		await expect(tls.getByRole("alert")).toContainText("central");
-		await expect(tls.getByText("held.fiji.tamanu.app")).toHaveCount(0);
+		const refusal = tls
+			.getByRole("alert")
+			.filter({ hasText: "already declared by" });
+		await expect(refusal).toContainText("central");
+		await expect(tls.getByTestId("declared-name-row")).toHaveCount(0);
 	});
 
 	test("an undeclared request is declared on one of the box's applications", async ({
@@ -210,14 +212,22 @@ test.describe("DNS names", () => {
 			tls.getByRole("heading", { name: "TLS certificates" }),
 		).toBeVisible();
 
-		await expect(dns.getByText("records.fiji.tamanu.app")).toBeVisible();
+		await expect(
+			dns.getByText("records.fiji.tamanu.app", { exact: true }),
+		).toBeVisible();
 		await expect(dns.getByText("no-records.fiji.tamanu.app")).toBeVisible();
-		await expect(dns.getByText("tls.fiji.tamanu.app")).toHaveCount(0);
+		await expect(
+			dns.getByText("tls.fiji.tamanu.app", { exact: true }),
+		).toHaveCount(0);
 		await expect(dns.getByText("no-tls.fiji.tamanu.app")).toHaveCount(0);
 
-		await expect(tls.getByText("tls.fiji.tamanu.app")).toBeVisible();
+		await expect(
+			tls.getByText("tls.fiji.tamanu.app", { exact: true }),
+		).toBeVisible();
 		await expect(tls.getByText("no-tls.fiji.tamanu.app")).toBeVisible();
-		await expect(tls.getByText("records.fiji.tamanu.app")).toHaveCount(0);
+		await expect(
+			tls.getByText("records.fiji.tamanu.app", { exact: true }),
+		).toHaveCount(0);
 		await expect(tls.getByText("no-records.fiji.tamanu.app")).toHaveCount(0);
 
 		// Declaring one kind ends that kind's request and leaves the other's.

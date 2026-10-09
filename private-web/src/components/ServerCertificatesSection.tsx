@@ -48,16 +48,26 @@ import TimeLeft from "./TimeLeft";
 // spec: CRT#presentation
 export default function ServerCertificatesSection({
 	serverId,
+	refreshKey,
+	onChanged,
 }: {
 	serverId: string;
+	/// Changes when the other of the application's two sections changed
+	/// something they share, such as the pause.
+	refreshKey: number;
+	onChanged: () => void;
 }) {
 	const isAdmin = useIsAdmin() === true;
 	const [tick, setTick] = useState(0);
-	const reload = () => setTick((t) => t + 1);
+	const reload = () => {
+		setTick((t) => t + 1);
+		onChanged();
+	};
 
 	const detail = useApi("certificates", "for_server", { server_id: serverId }, [
 		serverId,
 		tick,
+		refreshKey,
 	]);
 	const authority = useApi("certificates", "authority", {}, []);
 
