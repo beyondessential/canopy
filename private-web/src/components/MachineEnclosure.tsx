@@ -21,9 +21,15 @@ const STATES = {
 	fine: { border: "divider", fill: "transparent" },
 	degraded: { border: "warning.main", fill: "rgba(237, 108, 2, 0.10)" },
 	down: { border: "error.main", fill: "rgba(211, 47, 47, 0.12)" },
-	// A box that has never reported: outlined like any other, washed out rather
-	// than coloured, since there is nothing yet to say about it.
-	never: { border: "action.disabled", fill: "action.disabledBackground" },
+	// A box that has never reported is drawn empty: the surface it sits on,
+	// edged with a dotted line, so it reads as not yet filled in rather than
+	// faded, which is how a target a window reaches is drawn.
+	never: {
+		border: "text.primary",
+		fill: "background.paper",
+		borderWidth: "2px",
+		borderStyle: "dotted",
+	},
 } as const;
 
 /// A skeleton wave passing over a mark whose window still holds. Work under
@@ -50,7 +56,7 @@ export const MUTED = 0.55;
 /// it resolves. It pulses the whole mark instead, on the wave's timing, from
 /// the muted weight a suspended box already carries.
 // spec: MNT#presentation
-const PILL_PULSE = keyframes`
+export const PILL_PULSE = keyframes`
 	0%, 100% { opacity: ${MUTED}; }
 	50% { opacity: ${MUTED - 0.2}; }
 `;
@@ -92,11 +98,14 @@ export function ownWindowStripes(theme: Theme, settling: boolean): string {
 	return `repeating-linear-gradient(45deg, ${ink} 0 1px, transparent 1px 3px, ${ink} 3px 4px)`;
 }
 
-function enclosureState(up: ShortStatus, health: HealthState) {
-	if (up === "gone") return STATES.never;
-	if (up === "down") return STATES.down;
-	if (health === "unhealthy" || health === "warning") return STATES.degraded;
-	return STATES.fine;
+export type MachineState = keyof typeof STATES;
+
+/// The box's own state, which both of its marks are coloured by.
+export function machineState(up: ShortStatus, health: HealthState): MachineState {
+	if (up === "gone") return "never";
+	if (up === "down") return "down";
+	if (health === "unhealthy" || health === "warning") return "degraded";
+	return "fine";
 }
 
 function enclosureTitle(up: ShortStatus, health: HealthState): string {
@@ -105,6 +114,34 @@ function enclosureTitle(up: ShortStatus, health: HealthState): string {
 	if (health === "unhealthy") return "Machine's own checks failing";
 	if (health === "warning") return "Machine's own checks warning";
 	return "Machine healthy";
+}
+
+/// What the box's tooltip says, which its two marks share: the box, its health
+/// and the window over it.
+export function machineTitle({
+	name,
+	up,
+	health,
+	maintained,
+	ownWindow,
+	settling,
+	heldBy,
+}: {
+	name?: string | null;
+	up: ShortStatus;
+	health: HealthState;
+	maintained: boolean;
+	ownWindow: boolean;
+	settling: boolean;
+	heldBy?: string | null;
+}): string {
+	return [
+		name,
+		enclosureTitle(up, health),
+		maintained ? maintenanceLine(ownWindow, settling, heldBy) : null,
+	]
+		.filter(Boolean)
+		.join(" · ");
 }
 
 export default function MachineEnclosure({
@@ -148,14 +185,16 @@ export default function MachineEnclosure({
 	/** The dots for the applications on this machine. */
 	children: ReactNode;
 }) {
-	const state = enclosureState(up, health);
-	const box = [
+	const state = STATES[machineState(up, health)];
+	const box = machineTitle({
 		name,
-		enclosureTitle(up, health),
-		maintained ? maintenanceLine(ownWindow, settling, heldBy) : null,
-	]
-		.filter(Boolean)
-		.join(" · ");
+		up,
+		health,
+		maintained,
+		ownWindow,
+		settling,
+		heldBy,
+	});
 	const title = [box, ...(describes ?? [])].join("\n");
 	return (
 		<Tooltip
@@ -184,6 +223,9 @@ export default function MachineEnclosure({
 					gap: "0.35em",
 					border: 1,
 					borderColor: state.border,
+					...("borderWidth" in state
+						? { borderWidth: state.borderWidth, borderStyle: state.borderStyle }
+						: {}),
 					bgcolor: state.fill,
 					backgroundImage: (theme) =>
 						ownWindow ? ownWindowStripes(theme, settling) : "none",
@@ -207,8 +249,9 @@ export default function MachineEnclosure({
 					borderRadius: "999px",
 					// The band keeps its old proportion to the dot inside it: both
 					// grew together, so the ring reads as the same ring.
-					px: "0.2em",
-					py: "0.2em",
+					// The never-reported edge is a pixel thicker, so the padding
+					// gives one back and the pill stays the size of its neighbours.
+					p: "borderWidth" in state ? "calc(0.2em - 1px)" : "0.2em",
 					// The dots carry their own right margin, which the pill's own
 					// gap replaces.
 					"& span": { marginRight: 0 },

@@ -22,7 +22,8 @@ import {
 	type ServerRank,
 } from "../types";
 import ApplicationTypeChip from "./ApplicationTypeChip";
-import MachineEnclosure, { waveWhileHolding } from "./MachineEnclosure";
+import { waveWhileHolding } from "./MachineEnclosure";
+import MachineMark from "./MachineMark";
 import StatusDot from "./StatusDot";
 
 /// The group as an operator navigates it: rank, then the boxes at that rank,
@@ -193,9 +194,8 @@ function MachineBlock({
 				sx={{ p: 1.5, gap: 1.5 }}
 				data-testid="tree-machine"
 			>
-				{/* The enclosure holds the dots for the applications below it, so
-				    the head says what is on the box as well as how the box is. */}
-				<MachineEnclosure
+				{/* The rows below list the applications, so the box is drawn alone. */}
+				<MachineMark
 					up={machine.up}
 					health={machine.health}
 					name={machine.name}
@@ -203,24 +203,7 @@ function MachineBlock({
 					settling={machine.maintenance_settling}
 					ownWindow={machine.own_window}
 					heldBy={boxHeldBy}
-				>
-					{applications.map((application) => (
-						<Box key={application.id} component="span" sx={dotCellSx}>
-							<StatusDot
-								up={application.up ?? "gone"}
-								health={application.health ?? undefined}
-								monitored={application.is_monitored !== false}
-								maintained={application.own_window ?? false}
-								settling={application.maintenance_settling === true}
-								suspended={
-									(application.maintained ?? false) && !machine.maintained
-								}
-								quiet
-								size={DOT_SIZE}
-							/>
-						</Box>
-					))}
-				</MachineEnclosure>
+				/>
 				<Name to={current ? null : `/fleet/machines/${machine.id}`}>{name}</Name>
 				<Meta>{machine.platform ?? ""}</Meta>
 			</Row>
@@ -238,7 +221,7 @@ function MachineBlock({
 							current={application.id === currentApplicationId}
 							data-testid="tree-application"
 							sx={{
-								// Indented past the enclosure above, so the
+								// Indented past the machine's mark above, so the
 								// workloads read as sitting on the box.
 								pl: 3.75,
 								pr: 1.5,
@@ -297,21 +280,8 @@ function environmentHatch(theme: Theme, settling: boolean): string {
 	return `repeating-linear-gradient(45deg, ${ink} 0 1px, transparent 1px 7px)`;
 }
 
-// Every dot sits in an identical fixed-size cell, so the enclosure's dots
-// align however many there are. Spacing comes from the enclosure's own gap.
-/// The dot is sized to its cell, since a flex item wider than the cell holding
-/// it is squeezed on one axis only and draws as an oval.
+/// The dot is sized in em so it follows the row's text.
 const DOT_SIZE = "0.9em";
-
-const dotCellSx = {
-	display: "inline-flex",
-	width: DOT_SIZE,
-	height: DOT_SIZE,
-	alignItems: "center",
-	justifyContent: "center",
-	flex: "none",
-	"& > span": { marginRight: 0 },
-} as const;
 
 function Row({
 	current,

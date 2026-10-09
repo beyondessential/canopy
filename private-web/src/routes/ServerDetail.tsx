@@ -38,12 +38,6 @@ import {
 	useApplicationTypeCaps,
 	useApplicationTypeLabel,
 } from "../hooks/useApplicationTypes";
-import {
-	HealthLegend,
-	MaintenanceLegend,
-	StatusLegend,
-	VersionLegend,
-} from "../components/Legends";
 import ServerRankChip from "../components/ServerRankChip";
 import { useApi, useApiAction } from "../api";
 import { GradedAction } from "../components/GradedAction";
@@ -220,18 +214,6 @@ export default function ServerDetail() {
 					/>
 				</Box>
 			)}
-			<Box>
-				<VersionLegend />
-				<Box sx={{ mt: 1 }}>
-					<StatusLegend />
-				</Box>
-				<Box sx={{ mt: 1 }}>
-					<HealthLegend />
-				</Box>
-				<Box sx={{ mt: 1 }}>
-					<MaintenanceLegend />
-				</Box>
-			</Box>
 		</Stack>
 	);
 }
