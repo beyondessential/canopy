@@ -14,14 +14,16 @@
 
 ## Migration
 
-- Every `application_names` row stays an address declaration.
-- A certificate declaration is added for each name that has a certificate row for the same application, and for each row with no addresses and no certificate (a bare declaration made from the old shared model, kept so nothing an operator set up disappears).
-- Existing denials become two, one per kind. Existing undeclared records stay as they are, which is one kind each.
-- Confirm the rule above against real rows before relying on it: a name with both addresses and a certificate becomes both.
+Canopy DNS is not in use yet, so every existing declaration was made for a certificate.
+
+- Every `application_names` row becomes a certificate declaration for the same application.
+- A row carrying registered addresses also stays in `application_names`, since those addresses are address-side data that must not be lost. Rows with no addresses leave it, so `application_names` holds only address declarations afterwards.
+- Existing denials become certificate denials. Existing undeclared records keep the kind they already carry.
+- Check against real rows before relying on the no-addresses assumption: any row found with addresses is worth a look before it is migrated.
 
 ## Steps
 
-- [ ] Migration (`just migration NAME`): certificate-name declaration table, kind on undeclared records and denials, data migration above
+- [ ] Migration (`just migration NAME`): certificate-name declaration table, kind on denials and in the key of undeclared records, data migration above
 - [ ] `database`: certificate-name declare/release, cross-table exclusivity, per-kind `record`/`clear`/`clear_for_declaration`, per-kind denial lookup
 - [ ] `public-server`: resolution against either holder, per-kind denial and undeclared handling; entitlements answer lists both kinds apart
 - [ ] `private-server`: `dns_names` module, `certificates` module trimmed to its kind, undeclared notices say which kind
