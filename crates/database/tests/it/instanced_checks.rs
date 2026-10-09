@@ -219,7 +219,12 @@ async fn a_check_without_instances_stores_its_detail_as_reported() {
 		assert_eq!(issue.detail, Some(Value::Object(detail)));
 		assert_eq!(issue.message, "low");
 		assert!(issue.instances.is_none());
-		assert!(issue.grading_context.is_none());
+		// Kept so a policy change re-grades it from what its rules read.
+		let inputs = issue.grading_inputs().expect("the filing's grading inputs");
+		assert!(
+			inputs.status.is_empty(),
+			"canopy's own filing has no report"
+		);
 	})
 	.await
 }

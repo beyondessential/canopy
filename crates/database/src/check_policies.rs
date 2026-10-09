@@ -23,7 +23,7 @@ use commons_types::server::app_type::ApplicationType;
 use commons_types::status::CheckResult;
 use diesel::dsl::{AsSelect, SqlTypeOf};
 use diesel::prelude::*;
-use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use serde_json::Value as JsonValue;
@@ -195,6 +195,44 @@ fn scoped_identity(
 	)
 }
 
+/// The filter matching every state one catalog entry grades: the check's
+/// filings by its source in its namespace.
+///
+/// A check state records its target and not its namespace, so this narrows by
+/// what the namespace implies about the target rather than by name alone: a
+/// machine entry reaches machine filings, an application entry reaches only the
+/// filings of applications of its type, and a flat entry (a curated source,
+/// whose names mean one thing fleet-wide) reaches all of them.
+pub(crate) fn states_of_entry(
+	source: &str,
+	namespace: &Namespace,
+	check_name: &str,
+) -> Predicate<crate::schema::issues::table> {
+	use crate::schema::issues::dsl as iss;
+	let in_namespace: Predicate<crate::schema::issues::table> = match namespace {
+		Namespace::Flat => Box::new(iss::id.is_not_null()),
+		Namespace::Machine => Box::new(iss::machine_id.is_not_null()),
+		Namespace::Application(ty) => {
+			use crate::schema::applications::dsl as app;
+			Box::new(
+				iss::application_id
+					.eq_any(
+						app::applications
+							.select(app::id.nullable())
+							.filter(app::type_.eq(ty.to_string())),
+					)
+					.assume_not_null(),
+			)
+		}
+	};
+	Box::new(
+		iss::source
+			.eq(source.to_owned())
+			.and(iss::check_name.eq(check_name.to_owned()).assume_not_null())
+			.and(in_namespace),
+	)
+}
+
 /// The outcome of applying a check's policy to an observed result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GradedResult {
@@ -218,6 +256,11 @@ pub struct FleetGrading {
 }
 
 impl FleetGrading {
+	/// Whether this entry's rules read anything of `kind`.
+	pub fn reads(&self, kind: VarKind) -> bool {
+		rules_read(self.rules.as_ref(), kind)
+	}
+
 	/// An unparseable stored ceiling falls back to warning rather than
 	/// failing the whole grading pass — the column is constrained, so this
 	/// only covers data written outside the model.
@@ -492,35 +535,12 @@ impl CheckPolicy {
 			.await?;
 
 		// Resolve this entry's outstanding states across the fleet, so they
-		// stop counting toward health and incidents.
-		//
-		// Only this entry's. Retiring one namespace's `disk_free` must leave
-		// another namespace's alone, so the sweep narrows by namespace and not
-		// by name: a machine entry reaches machine filings, an application
-		// entry reaches only the filings of applications of its type, and a
-		// flat entry (a curated source, whose names mean one thing fleet-wide)
-		// reaches all of them.
-		let in_namespace: Predicate<crate::schema::issues::table> = match namespace {
-			Namespace::Flat => Box::new(iss::id.is_not_null()),
-			Namespace::Machine => Box::new(iss::machine_id.is_not_null()),
-			Namespace::Application(ty) => {
-				use crate::schema::applications::dsl as app;
-				Box::new(
-					iss::application_id
-						.eq_any(
-							app::applications
-								.select(app::id.nullable())
-								.filter(app::type_.eq(ty.to_string())),
-						)
-						.assume_not_null(),
-				)
-			}
-		};
+		// stop counting toward health and incidents. Only this entry's:
+		// retiring one namespace's `disk_free` must leave another namespace's
+		// alone.
 		let state_ids: Vec<Uuid> = iss::issues
 			.select(iss::id)
-			.filter(iss::source.eq(source))
-			.filter(iss::check_name.eq(check_name))
-			.filter(in_namespace)
+			.filter(states_of_entry(source, namespace, check_name))
 			.filter(iss::resolved_at.is_null())
 			.load(db)
 			.await?;
@@ -905,6 +925,9 @@ impl CheckPolicy {
 	/// Replace the conditional-rules ladder for a check (or clear it
 	/// with `None`). Stamps `reviewed_at` / `reviewed_by`, so editing
 	/// rules also counts as a review for the catalog row.
+	///
+	/// Every state of the check is re-graded under the new rules in the same
+	/// transaction (see [`crate::issues::regrade_check_states`]).
 	pub async fn update_rules(
 		db: &mut AsyncPgConnection,
 		source: &str,
@@ -917,16 +940,22 @@ impl CheckPolicy {
 		let now = Timestamp::now();
 		let rules_json: Option<JsonValue> =
 			rules.map(|l| serde_json::to_value(l).expect("IfLadder always serialises"));
-		diesel::update(dsl::check_policies.filter(catalog_identity(source, namespace, check_name)))
+		db.transaction::<_, AppError, _>(async |conn| {
+			let row = diesel::update(
+				dsl::check_policies.filter(catalog_identity(source, namespace, check_name)),
+			)
 			.set((
 				dsl::rules.eq(rules_json),
 				dsl::reviewed_at.eq(jiff_diesel::Timestamp::from(now)),
 				dsl::reviewed_by.eq(by),
 			))
 			.returning(Self::as_select())
-			.get_result(db)
-			.await
-			.map_err(AppError::from)
+			.get_result(conn)
+			.await?;
+			crate::issues::regrade_check_states(conn, source, namespace, check_name, by).await?;
+			Ok(row)
+		})
+		.await
 	}
 
 	/// One source's catalog in one namespace as `check_name → ceiling`, for
@@ -1024,6 +1053,10 @@ impl CheckPolicy {
 	/// incident grace on an effective failure, and only a `failed` ceiling
 	/// admits a failed effective result — so it is dropped at any lower
 	/// ceiling (see [`escalates_normalised`]).
+	///
+	/// Every state of the check is re-graded under the new policy in the same
+	/// transaction (see [`crate::issues::regrade_check_states`]), a review
+	/// lifting the pending cap included.
 	pub async fn update(
 		db: &mut AsyncPgConnection,
 		source: &str,
@@ -1036,7 +1069,10 @@ impl CheckPolicy {
 	) -> Result<Self> {
 		use crate::schema::check_policies::dsl;
 		let now = Timestamp::now();
-		diesel::update(dsl::check_policies.filter(catalog_identity(source, namespace, check_name)))
+		db.transaction::<_, AppError, _>(async |conn| {
+			let row = diesel::update(
+				dsl::check_policies.filter(catalog_identity(source, namespace, check_name)),
+			)
 			.set((
 				dsl::ceiling.eq(ceiling.to_string()),
 				dsl::escalates.eq(escalates_normalised(ceiling, escalates)),
@@ -1045,9 +1081,12 @@ impl CheckPolicy {
 				dsl::reviewed_by.eq(by),
 			))
 			.returning(Self::as_select())
-			.get_result(db)
-			.await
-			.map_err(AppError::from)
+			.get_result(conn)
+			.await?;
+			crate::issues::regrade_check_states(conn, source, namespace, check_name, by).await?;
+			Ok(row)
+		})
+		.await
 	}
 }
 
@@ -1514,6 +1553,11 @@ impl ScopedCheckPolicy {
 		});
 	}
 
+	/// Whether this transform's rules read anything of `kind`.
+	pub fn reads(&self, kind: VarKind) -> bool {
+		rules_read(self.rules.as_ref(), kind)
+	}
+
 	/// Apply this transform to the effective result arriving from the
 	/// previous step in the chain: rules first (a matching branch's
 	/// result replaces the input), then the ceiling caps the outcome.
@@ -1604,7 +1648,20 @@ pub struct EvaluationContext<'a> {
 	pub tags: &'a HashMap<String, JsonValue>,
 }
 
+/// Whether stored `rules` read anything of `kind`. Rules that do not parse are
+/// ignored when grading, so they read nothing.
+fn rules_read(rules: Option<&JsonValue>, kind: VarKind) -> bool {
+	rules
+		.and_then(|rules| IfLadder::deserialize(rules).ok())
+		.is_some_and(|ladder| ladder.reads(kind))
+}
+
 impl IfLadder {
+	/// Whether any branch reads a variable of `kind`.
+	pub fn reads(&self, kind: VarKind) -> bool {
+		self.branches.iter().any(|(c, _)| c.var().kind == kind)
+	}
+
 	/// Returns the first matching branch's result, or `None` if no
 	/// branch matches. The caller falls back to the entry's ceiling in
 	/// that case.

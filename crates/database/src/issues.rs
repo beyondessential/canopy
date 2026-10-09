@@ -131,9 +131,10 @@ pub struct Issue {
 	/// check without instances, whose fields are all in `detail`; for one
 	/// with them, `detail` holds the fields they share.
 	pub instances: Option<serde_json::Value>,
-	/// What the rules grading the instances read beyond each instance, as
-	/// the last filing gave them (see [`GradingInputs`]). Set exactly when
-	/// `instances` is. Internal to grading, so never presented.
+	/// What the check's rules read beyond the check itself, as the last
+	/// filing gave them (see [`GradingInputs`]). Always set alongside
+	/// `instances`, and on a plain check's state filed since it was kept for
+	/// them too. Internal to grading, so never presented.
 	#[serde(skip)]
 	pub grading_context: Option<serde_json::Value>,
 }
@@ -338,9 +339,13 @@ pub struct CheckStateStamp {
 	/// The headline this filing gives the check, kept whatever its result
 	/// (see [`Issue::title`]). `None` keeps the one already stored.
 	pub title: Option<String>,
-	/// The check's instances and what their rules read, or `None` for a check
-	/// without instances, which clears any the state held.
-	pub instanced: Option<InstancedState>,
+	/// The check's instances, or `None` for a check without instances, which
+	/// clears any the state held.
+	pub instances: Option<StoredInstances>,
+	/// What the check's rules read beyond the check itself, kept so a re-grade
+	/// replays it. `None` only where the filing graded no rule input, as a
+	/// recovery by omission does; it is required alongside instances.
+	pub inputs: Option<GradingInputs>,
 }
 
 impl CheckStateStamp {
@@ -358,10 +363,8 @@ impl CheckStateStamp {
 			escalates: graded.escalates,
 			detail: graded.detail(),
 			title: title.map(str::to_string),
-			instanced: graded.stored_instances().map(|instances| InstancedState {
-				instances,
-				inputs: GradingInputs::of(ctx),
-			}),
+			instances: graded.stored_instances(),
+			inputs: Some(GradingInputs::of(ctx)),
 		}
 	}
 }
@@ -421,13 +424,18 @@ async fn stamp_check_state(
 		stamp.effective,
 		at,
 	);
-	let (instances, grading_context) = match &stamp.instanced {
-		Some(state) => (
-			Some(serde_json::to_value(&state.instances).expect("instances serialise")),
-			Some(serde_json::to_value(&state.inputs).expect("grading inputs serialise")),
-		),
-		None => (None, None),
-	};
+	debug_assert!(
+		stamp.instances.is_none() || stamp.inputs.is_some(),
+		"a state with instances keeps what their rules read",
+	);
+	let instances = stamp
+		.instances
+		.as_ref()
+		.map(|i| serde_json::to_value(i).expect("instances serialise"));
+	let grading_context = stamp
+		.inputs
+		.as_ref()
+		.map(|i| serde_json::to_value(i).expect("grading inputs serialise"));
 	let issue = diesel::update(issues::table.filter(issues::id.eq(issue_id)))
 		.set((
 			issues::check_name.eq(&stamp.check),
@@ -1333,6 +1341,46 @@ impl ScopeTargets {
 			.ok_or_else(|| diesel::result::Error::NotFound.into())
 	}
 
+	/// The group a target at `scope` belongs to, if it is in one.
+	fn group_of(&self, scope: Scope) -> Result<Option<Uuid>> {
+		Ok(match scope {
+			Scope::Application(id) => self.application(id)?.group_id,
+			Scope::Machine(id) => self.machine(id)?.0.group_id,
+			Scope::Group(id) => Some(id),
+			Scope::Cluster(_) | Scope::Global => None,
+		})
+	}
+
+	/// The tags a rule grading a check at `scope` reads, as
+	/// [`GradingTarget::load`] reads them: an application's or a machine's own,
+	/// merged over its group's from `group_tags`, and none for anything else.
+	fn grading_tags(
+		&self,
+		scope: Scope,
+		group_tags: &std::collections::HashMap<Uuid, commons_types::server::TagMap>,
+	) -> Result<std::collections::HashMap<String, serde_json::Value>> {
+		let (own, group_id) = match scope {
+			Scope::Application(id) => {
+				let application = self.application(id)?;
+				(&application.tags, application.group_id)
+			}
+			Scope::Machine(id) => {
+				let machine = &self.machine(id)?.0;
+				(&machine.tags, machine.group_id)
+			}
+			Scope::Group(_) | Scope::Cluster(_) | Scope::Global => return Ok(Default::default()),
+		};
+		let merged = match group_id.and_then(|gid| group_tags.get(&gid)) {
+			Some(group) => own.merged_with(group),
+			None => own.clone(),
+		};
+		Ok(merged
+			.0
+			.into_iter()
+			.map(|(k, v)| (k, serde_json::Value::String(v)))
+			.collect())
+	}
+
 	/// The scopes a check filed at `scope` chains its policy from.
 	fn filing_scope(&self, scope: Scope) -> Result<crate::check_policies::FilingScope> {
 		use crate::check_policies::FilingScope;
@@ -1512,7 +1560,7 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 
 pub use crate::check_instances::{
 	CheckGrading, CheckGradingRef, CheckInstance, CheckOutcome, GradedCheck, GradedInstance,
-	GradingContext, GradingInputs, InstancedState, PresentedInstances, ReportedCheck,
+	GradingContext, GradingInputs, PresentedInstances, ReportWording, ReportedCheck,
 	StoredInstance, StoredInstances, grade_instances, is_health_structure,
 };
 
@@ -1969,32 +2017,24 @@ pub async fn instanced_states_covered_by_each(
 
 /// Grade a check's stored states again from the instances they hold, after an
 /// instance silence covering them was set or lifted, and settle their incident
-/// membership on the result.
+/// membership on the result (see [`regrade_states`]).
 ///
 /// An instance silence can change what the whole check comes to: silencing
 /// the one failing instance leaves the check graded on the rest, so its
 /// effective result moves without any new observation. Re-checking membership
 /// alone, as a whole-check silence needs, would leave the state graded as it
-/// was until the next filing. So each state covered by `scope` is re-graded
-/// from its instances as last observed (their results and fields) and the
-/// inputs its last filing gave their rules ([`GradingInputs`]: the report's
-/// fields and the target's tags), through the policy as it now stands, so the
-/// silence is the only thing that changes. It is written back without counting
-/// as an observation: its stability record and when it was last reported are
-/// untouched. A state brought back into trouble presents the title its last
-/// filing gave it.
+/// was until the next filing.
 ///
 /// A state holding no instances is a check without them, which an instance
 /// silence never reaches, and is left alone.
 ///
+/// The re-grade is one transaction, holding the covered states' rows from
+/// when they are read until they are written back, so a report filing one of
+/// them meanwhile is not overwritten with a grade from before it.
+///
 /// Returns every state the silence covers ([`instanced_states_covered_by`]) as
 /// it now stands, so a caller presenting the silence reads them without asking
 /// again.
-///
-/// The message is Canopy's generic one for an instanced check, from the
-/// re-graded instances ([`GradedCheck::message`]). That is what a reported
-/// instanced check is filed with; Canopy's own instanced checks are filed with
-/// wording of their own, which their next sweep restores.
 // spec: CHK#silencing-one-instance
 pub async fn regrade_instanced_states(
 	conn: &mut AsyncPgConnection,
@@ -2003,42 +2043,205 @@ pub async fn regrade_instanced_states(
 	namespace: &Namespace,
 	r#ref: &str,
 ) -> Result<Vec<Issue>> {
-	use crate::check_policies::{CheckPolicy, ScopedCheckPolicy};
 	use crate::schema::issues;
+
+	conn.transaction::<_, AppError, _>(async |conn| {
+		let covered: Vec<Uuid> = instanced_states_covered_by(conn, scope, source, namespace, r#ref)
+			.await?
+			.into_iter()
+			.map(|state| state.id)
+			.collect();
+		// Locked and read again, in id order and before any target, as a
+		// policy change's re-grade takes them (see `regrade_check_states`).
+		let mut states: Vec<Issue> = issues::table
+			.select(Issue::as_select())
+			.filter(issues::id.eq_any(&covered))
+			.filter(issues::instances.is_not_null())
+			.order(issues::id)
+			.for_update()
+			.load(conn)
+			.await?;
+		regrade_states(conn, &mut states, source, namespace, r#ref, None).await?;
+		Ok(states)
+	})
+	.await
+}
+
+/// Where a check state whose effective result is now `effective` comes when
+/// several settle their incident membership at once: failures, then the rest
+/// of trouble, then everything else.
+///
+/// A failure has to join before another ends, or an incident one failure swaps
+/// for another in closes and reopens; and a failure lessening to a warning ends
+/// as surely as one recovering does, so it waits behind the failures too.
+pub fn settle_order(effective: CheckResult) -> u8 {
+	match effective {
+		CheckResult::Failed => 0,
+		CheckResult::Warning | CheckResult::Broken => 1,
+		CheckResult::Passed | CheckResult::Skipped => 2,
+	}
+}
+
+/// Grade every state of one catalog entry again through its policy as it now
+/// stands, after the policy changed, and settle their incident membership on
+/// the result (see [`regrade_states`]).
+///
+/// Without this a state stays graded under the old policy until its check next
+/// reports, which for a check filed rarely is long after the operator's
+/// decision, and an incident the change leaves with no failure stays open.
+///
+/// `by` is the operator who changed the policy, to whom an incident the change
+/// closes is attributed.
+// spec: CHK#policy
+pub async fn regrade_check_states(
+	conn: &mut AsyncPgConnection,
+	source: &str,
+	namespace: &Namespace,
+	check_name: &str,
+	by: &str,
+) -> Result<()> {
+	use crate::schema::issues;
+
+	let mut states: Vec<Issue> = issues::table
+		.select(Issue::as_select())
+		.filter(crate::check_policies::states_of_entry(
+			source, namespace, check_name,
+		))
+		// A resolved state counts toward nothing until its check reports
+		// trouble again, which grades it afresh.
+		.filter(issues::resolved_at.is_null())
+		// Locked, in one order, before any target is: a report locks the states
+		// it files and then their target, so a re-grade taking a target first
+		// and a state after can deadlock against one.
+		.order(issues::id)
+		.for_update()
+		.load(conn)
+		.await?;
+	regrade_states(conn, &mut states, source, namespace, check_name, Some(by)).await
+}
+
+/// Grade `states`, each one check's state at one target, again through the
+/// policy as it now stands, write back those whose grade moved, and settle
+/// their incident membership as an operator's re-grade (see
+/// [`re_evaluate_membership`]).
+///
+/// Each state is re-graded from what its most recent report observed: its
+/// instances as last observed (their results and fields) or a plain check's
+/// result and fields, and the inputs its last filing gave the rules
+/// ([`GradingInputs`]: the report's fields and the target's tags), so the
+/// policy is the only thing that changes. A plain state filed before those
+/// inputs were kept is left alone if a rule reads the report's fields, and
+/// otherwise reads the target's tags as they stand, until its next report
+/// keeps them. A state never graded (no observed result) is left alone.
+///
+/// A re-grade is written back without counting as an observation: its
+/// stability record and when it was last reported are untouched. It is worded
+/// by [`ReportWording::regraded`].
+///
+/// States are settled in [`settle_order`], as a push files them, so an
+/// incident one failure swaps for another in is not closed and reopened.
+/// `states` is updated in place to what each now is. Within a transaction the
+/// caller locks the states' rows first, before any target, as a report does.
+///
+/// `fallback_check` names the check for a state that does not record it. `by`
+/// is the operator whose action this is, where it is known, to whom an
+/// incident it closes is attributed.
+async fn regrade_states(
+	conn: &mut AsyncPgConnection,
+	states: &mut [Issue],
+	source: &str,
+	namespace: &Namespace,
+	fallback_check: &str,
+	by: Option<&str>,
+) -> Result<()> {
+	let Some((targets, changed)) =
+		grade_changed(conn, states, source, namespace, fallback_check).await?
+	else {
+		return Ok(());
+	};
+	settle_regraded(conn, states, &targets, changed, source, by).await
+}
+
+/// One state a re-grade moves: where it sits among the states being
+/// re-graded, its check, what it now grades as, and the instances it now
+/// stores.
+struct Regrade {
+	at: usize,
+	check: String,
+	graded: GradedCheck,
+	instances: Option<serde_json::Value>,
+}
+
+/// The scope a stored state is filed at.
+fn state_scope(state: &Issue) -> Scope {
+	Scope::from_columns(
+		state.application_id,
+		state.machine_id,
+		state.server_group_id,
+		state.kubernetes_cluster_id,
+	)
+}
+
+/// Grade `states` again through the policy as it now stands (see
+/// [`regrade_states`]), and return those whose grade moved, with the targets
+/// they were graded against. `None` when no state can be re-graded.
+async fn grade_changed(
+	conn: &mut AsyncPgConnection,
+	states: &[Issue],
+	source: &str,
+	namespace: &Namespace,
+	fallback_check: &str,
+) -> Result<Option<(ScopeTargets, Vec<Regrade>)>> {
+	use crate::check_policies::{CheckPolicy, ScopedCheckPolicy, VarKind};
 	use std::collections::HashMap;
 
-	let mut states = instanced_states_covered_by(conn, scope, source, namespace, r#ref).await?;
-	let state_scope = |state: &Issue| {
-		Scope::from_columns(
-			state.application_id,
-			state.machine_id,
-			state.server_group_id,
-			state.kubernetes_cluster_id,
-		)
+	let check_of = |state: &Issue| {
+		state
+			.check_name
+			.clone()
+			.unwrap_or_else(|| fallback_check.to_string())
 	};
-	let regradable: Vec<(usize, StoredInstances, GradingInputs)> = states
+
+	let regradable: Vec<(usize, CheckOutcome, Option<GradingInputs>)> = states
 		.iter()
 		.enumerate()
-		.filter_map(|(at, state)| Some((at, state.stored_instances()?, state.grading_inputs()?)))
+		.filter_map(|(at, state)| {
+			let (outcome, inputs) = last_observed(state)?;
+			Some((at, outcome, inputs))
+		})
 		.collect();
 	if regradable.is_empty() {
-		return Ok(states);
+		return Ok(None);
 	}
 
-	// A group silence covers every target in the group filing the check, so
-	// everything a state's grading reads that is not its own is loaded once
-	// for the lot: the targets, and per check name the catalog entry and
-	// every state's chain.
+	// A group silence or a fleet policy covers many targets, so everything a
+	// state's grading reads that is not its own is loaded once for the lot:
+	// the targets, the tags of the groups a state without its inputs reads,
+	// and per check name the catalog entry and every state's chain.
 	let targets = ScopeTargets::load(
 		conn,
 		regradable.iter().map(|(at, ..)| state_scope(&states[*at])),
 	)
 	.await?;
-	let check_of = |state: &Issue| {
-		state
-			.check_name
-			.clone()
-			.unwrap_or_else(|| r#ref.to_string())
+	let mut without_inputs = Vec::new();
+	for (at, _, inputs) in &regradable {
+		if inputs.is_none()
+			&& let Some(gid) = targets.group_of(state_scope(&states[*at]))?
+		{
+			without_inputs.push(gid);
+		}
+	}
+	let group_tags = if without_inputs.is_empty() {
+		HashMap::new()
+	} else {
+		use crate::schema::server_groups;
+		server_groups::table
+			.select((server_groups::id, server_groups::tags))
+			.filter(server_groups::id.eq_any(&without_inputs))
+			.load::<(Uuid, commons_types::server::TagMap)>(conn)
+			.await?
+			.into_iter()
+			.collect()
 	};
 	let mut by_check: HashMap<String, Vec<usize>> = HashMap::new();
 	for (n, (at, ..)) in regradable.iter().enumerate() {
@@ -2062,17 +2265,29 @@ pub async fn regrade_instanced_states(
 		}
 	}
 
-	for ((at, held, inputs), chain) in regradable.into_iter().zip(chains) {
+	let mut changed = Vec::new();
+	for ((at, outcome, inputs), chain) in regradable.into_iter().zip(chains) {
 		let state = &states[at];
 		let check = check_of(state);
 		let grading = CheckGradingRef {
 			fleet: fleet.get(&check).and_then(Option::as_ref),
 			chain: &chain,
 		};
-		let outcome = if state.observed_result == Some(CheckResult::Broken) {
-			CheckOutcome::Broken
-		} else {
-			CheckOutcome::Instances(held.observed_instances())
+		// A state filed before its inputs were kept has no record of the
+		// report's fields, so one whose rules read them is left as it is until
+		// its next report rather than graded as if the report had none. The
+		// target's tags are read as they stand, and only when a rule reads them.
+		let inputs = match inputs {
+			Some(inputs) => inputs,
+			None if grading.reads(VarKind::Status) => continue,
+			None => GradingInputs {
+				status: Default::default(),
+				tags: if grading.reads(VarKind::Tag) {
+					targets.grading_tags(state_scope(state), &group_tags)?
+				} else {
+					Default::default()
+				},
+			},
 		};
 		let shared = match &state.detail {
 			Some(serde_json::Value::Object(shared)) => Some(shared),
@@ -2085,29 +2300,103 @@ pub async fn regrade_instanced_states(
 			outcome,
 			Some(state),
 		);
+		// Only the states whose grade moved are written and settled.
+		let instances = graded
+			.stored_instances()
+			.map(|i| serde_json::to_value(i).expect("instances serialise"));
+		if Some(graded.effective) != state.effective_result
+			|| graded.escalates != state.escalates
+			|| instances != state.instances
+		{
+			changed.push(Regrade {
+				at,
+				check,
+				graded,
+				instances,
+			});
+		}
+	}
+	Ok((!changed.is_empty()).then_some((targets, changed)))
+}
+
+/// Write back each of `changed`, re-graded states among `states`, and settle
+/// its incident membership as an operator's re-grade (see [`regrade_states`]).
+async fn settle_regraded(
+	conn: &mut AsyncPgConnection,
+	states: &mut [Issue],
+	targets: &ScopeTargets,
+	mut changed: Vec<Regrade>,
+	source: &str,
+	by: Option<&str>,
+) -> Result<()> {
+	use crate::schema::issues;
+
+	// See the ordering note on `regrade_states`. Within each, by target, so the
+	// order never depends on the order the states were loaded in.
+	changed.sort_by_key(|regrade| {
+		let state = &states[regrade.at];
+		(
+			settle_order(regrade.graded.effective),
+			state_scope(state).to_columns(),
+			state.id,
+		)
+	});
+	// Every target settling takes its lock and holds it until the transaction
+	// ends, so they are all taken up front, in the one order every path takes
+	// them in. Taken as settling reaches them, two re-grades over the same
+	// targets can take them in opposite orders and deadlock.
+	let mut locking = Vec::new();
+	for regrade in &changed {
+		if let Some((target, _)) = targets.incident_target(state_scope(&states[regrade.at]))? {
+			locking.push(target);
+		}
+	}
+	let changed_ids: Vec<Uuid> = changed.iter().map(|r| states[r.at].id).collect();
+	locking.extend(
+		open_incidents_holding(conn, &changed_ids)
+			.await?
+			.iter()
+			.map(IncidentTarget::of_incident),
+	);
+	lock_all_targets(conn, locking).await?;
+
+	for Regrade {
+		at,
+		check,
+		graded,
+		instances,
+	} in changed
+	{
+		let state = &states[at];
 		let active = matches!(
 			graded.effective,
 			CheckResult::Failed | CheckResult::Warning | CheckResult::Broken
 		);
+		let ReportWording {
+			description,
+			title,
+			message,
+		} = ReportWording::regraded(source, &check, &graded, state);
 		let streak = DegradedStreak::after(
 			state.degraded_since,
 			state.last_degraded_at,
 			graded.effective,
 			Timestamp::now(),
 		);
+		let became_escalating =
+			graded.effective == CheckResult::Failed && graded.escalates && !state.escalates_now();
 		let regraded: Issue = diesel::update(issues::table.filter(issues::id.eq(state.id)))
 			.set((
 				issues::observed_result.eq(graded.observed.to_string()),
 				issues::effective_result.eq(graded.effective.to_string()),
 				issues::escalates.eq(graded.escalates),
-				issues::instances.eq(graded
-					.stored_instances()
-					.map(|i| serde_json::to_value(i).expect("instances serialise"))),
+				issues::instances.eq(instances),
 				issues::degraded_since.eq(streak.degraded_since),
 				issues::last_degraded_at.eq(streak.last_degraded_at),
 				issues::active.eq(active),
-				issues::message.eq(graded.message(&check)),
-				issues::description.eq(if active { state.title.clone() } else { None }),
+				issues::message.eq(message),
+				issues::description.eq(description),
+				issues::title.eq(title),
 			))
 			.returning(Issue::as_select())
 			.get_result(conn)
@@ -2120,14 +2409,40 @@ pub async fn regrade_instanced_states(
 				target,
 				monitored,
 				Timestamp::now(),
-				None,
-				true,
+				by,
+				Some(Regraded { became_escalating }),
 			)
 			.await?;
 		}
 		states[at] = regraded;
 	}
-	Ok(states)
+	Ok(())
+}
+
+/// What `state`'s most recent report observed, to re-grade it from, and what
+/// its rules read beyond it: `None` for a plain state filed before those
+/// inputs were kept. `None` altogether for a state that cannot be re-graded:
+/// one never graded, or one whose stored instances or inputs are unreadable,
+/// which their readers log and which is left as it is rather than graded from
+/// half of what it was filed with.
+fn last_observed(state: &Issue) -> Option<(CheckOutcome, Option<GradingInputs>)> {
+	let observed = state.observed_result?;
+	let held = match &state.instances {
+		Some(_) => Some(state.stored_instances()?),
+		None => None,
+	};
+	let inputs = match (&state.grading_context, &held) {
+		(Some(_), _) => Some(state.grading_inputs()?),
+		// Instances are always kept with the inputs that graded them.
+		(None, Some(_)) => return None,
+		(None, None) => None,
+	};
+	let outcome = match (observed, held) {
+		(CheckResult::Broken, _) => CheckOutcome::Broken,
+		(_, Some(held)) => CheckOutcome::Instances(held.observed_instances()),
+		(observed, None) => CheckOutcome::Instances(vec![CheckInstance::plain(observed, None)]),
+	};
+	Some((outcome, inputs))
 }
 
 /// One rollup input row: `(application_id, source, check_name, effective_result)`.
@@ -3322,16 +3637,24 @@ async fn re_evaluate_incident_membership(
 	transition_time: Timestamp,
 	by: Option<&str>,
 ) -> Result<()> {
-	re_evaluate_membership(conn, issue, target, monitored, transition_time, by, false).await
+	re_evaluate_membership(conn, issue, target, monitored, transition_time, by, None).await
+}
+
+/// What an operator's re-grade changed about a state, for
+/// [`re_evaluate_membership`].
+#[derive(Debug, Clone, Copy)]
+struct Regraded {
+	/// The state is now an escalating failure and was not before the re-grade.
+	became_escalating: bool,
 }
 
 /// [`re_evaluate_incident_membership`], told whether the issue's current state
-/// is an operator's doing rather than the check's own.
+/// is an operator's re-grade rather than the check's own report.
 ///
-/// An instance silence re-grades a state (see [`regrade_instanced_states`]),
-/// so a state it leaves passing reads as recovered. It is an operator's
-/// action all the same, and like any silence it closes the incident rather
-/// than lingering as a recovery would.
+/// A policy change or an instance silence re-grades a state (see
+/// [`regrade_states`]), so a state it leaves passing reads as recovered. It is
+/// an operator's action all the same, and like any silence it closes the
+/// incident rather than lingering as a recovery would.
 async fn re_evaluate_membership(
 	conn: &mut AsyncPgConnection,
 	issue: &Issue,
@@ -3339,7 +3662,7 @@ async fn re_evaluate_membership(
 	monitored: bool,
 	transition_time: Timestamp,
 	by: Option<&str>,
-	operator_regraded: bool,
+	regraded: Option<Regraded>,
 ) -> Result<()> {
 	use crate::schema::{incident_issues, incidents};
 
@@ -3450,32 +3773,7 @@ async fn re_evaluate_membership(
 			if newly_opened {
 				enqueue_slack_open(conn, incident_id, target, issue).await?;
 			} else if issue.escalates_now() {
-				// Two sub-cases when an escalating failure joins an existing incident:
-				//  - The original open is still pending in the outbox →
-				//    accelerate so the "incident opened" message lands
-				//    immediately. No second message: the open hasn't been
-				//    seen yet, so a fresh open would be redundant noise.
-				//  - The original open has already shipped → enqueue a
-				//    fresh open at Critical severity as the escalation
-				//    signal. Gated on incidents.escalated_at IS NULL so
-				//    repeated Critical joins (or a Critical leaving and
-				//    rejoining) don't re-fire the message.
-				let accelerated = accelerate_pending_open(conn, incident_id).await?;
-				if !accelerated {
-					let escalated: Option<Incident> = diesel::update(
-						incidents::table
-							.filter(incidents::id.eq(incident_id))
-							.filter(incidents::escalated_at.is_null()),
-					)
-					.set(incidents::escalated_at.eq(jiff_diesel::Timestamp::from(transition_time)))
-					.returning(Incident::as_select())
-					.get_result(conn)
-					.await
-					.optional()?;
-					if escalated.is_some() {
-						enqueue_slack_open(conn, incident_id, target, issue).await?;
-					}
-				}
+				escalate_incident(conn, incident_id, target, issue, transition_time).await?;
 			}
 		}
 		(true, _, true) => {
@@ -3488,33 +3786,88 @@ async fn re_evaluate_membership(
 			let check_recovery = !issue.active
 				&& issue.resolved_at.is_none()
 				&& !snoozed && !silenced
-				&& monitored && !operator_regraded;
+				&& monitored && regraded.is_none();
 			leave_open_incident(conn, issue, transition_time, by, check_recovery).await?;
 		}
 		_ => {
-			// A member issue re-filing as an effective failure while its
-			// incident lingers ends the lingering — the trouble is back. A
-			// leave-and-rejoin lands in the join arm above; this catches the
-			// member that never left, e.g. a warning contributor re-graded
-			// to failed.
-			if was_in && should_join && !should_leave && issue.opens_incident() {
-				let member_of: Vec<Uuid> = incident_issues::table
-					.select(incident_issues::incident_id)
-					.filter(incident_issues::issue_id.eq(issue.id))
-					.filter(incident_issues::left_at.is_null())
-					.load(conn)
+			// The member that stays. `was_in` is only true while `held` names
+			// the open incident on this target.
+			if let Some(held) = held.as_ref().filter(|_| was_in && !should_leave) {
+				if issue.opens_incident() {
+					// A member issue re-filing as an effective failure while
+					// its incident lingers ends the lingering — the trouble is
+					// back. A leave-and-rejoin lands in the join arm above;
+					// this catches the member that never left, e.g. a warning
+					// contributor re-graded to failed.
+					diesel::update(
+						incidents::table
+							.filter(incidents::id.eq(held.id))
+							.filter(incidents::closed_at.is_null())
+							.filter(incidents::closing_at.is_not_null()),
+					)
+					.set(incidents::closing_at.eq(None::<jiff_diesel::Timestamp>))
+					.execute(conn)
 					.await?;
-				diesel::update(
-					incidents::table
-						.filter(incidents::id.eq_any(member_of))
-						.filter(incidents::closed_at.is_null())
-						.filter(incidents::closing_at.is_not_null()),
-				)
-				.set(incidents::closing_at.eq(None::<jiff_diesel::Timestamp>))
-				.execute(conn)
-				.await?;
+					if regraded.is_some_and(|r| r.became_escalating) {
+						escalate_incident(conn, held.id, target, issue, transition_time).await?;
+					}
+				} else if regraded.is_some() || by.is_some() || held.closing_at.is_none() {
+					// A member whose failure ended without leaving, a failure
+					// graded down to a warning, stays for context but no
+					// longer holds the incident open. Its report lessening it
+					// lingers as a recovery would; an operator's re-grade
+					// closes. A report finding the incident already lingering
+					// has nothing to add.
+					//
+					// The target's lock, taken above, serialises this against
+					// every other member's settling. `held` was read before
+					// it, which is harmless: settling only touches an incident
+					// still open.
+					// spec: INC#membership
+					settle_if_no_failure_left(conn, held, transition_time, by, regraded.is_none())
+						.await?;
+				}
 			}
 		}
+	}
+	Ok(())
+}
+
+/// Escalate an open incident for `issue`, an escalating failure that has just
+/// become one of its live members' results.
+///
+/// Two sub-cases:
+///  - The original open is still pending in the outbox → accelerate so the
+///    "incident opened" message lands immediately. No second message: the
+///    open hasn't been seen yet, so a fresh open would be redundant noise.
+///  - The original open has already shipped → enqueue a fresh open at
+///    Critical severity as the escalation signal. Gated on
+///    `incidents.escalated_at IS NULL` so repeated Critical joins (or a
+///    Critical leaving and rejoining) don't re-fire the message.
+async fn escalate_incident(
+	conn: &mut AsyncPgConnection,
+	incident_id: Uuid,
+	target: IncidentTarget,
+	issue: &Issue,
+	transition_time: Timestamp,
+) -> Result<()> {
+	use crate::schema::incidents;
+
+	if accelerate_pending_open(conn, incident_id).await? {
+		return Ok(());
+	}
+	let escalated: Option<Incident> = diesel::update(
+		incidents::table
+			.filter(incidents::id.eq(incident_id))
+			.filter(incidents::escalated_at.is_null()),
+	)
+	.set(incidents::escalated_at.eq(jiff_diesel::Timestamp::from(transition_time)))
+	.returning(Incident::as_select())
+	.get_result(conn)
+	.await
+	.optional()?;
+	if escalated.is_some() {
+		enqueue_slack_open(conn, incident_id, target, issue).await?;
 	}
 	Ok(())
 }
@@ -3533,7 +3886,7 @@ async fn leave_open_incident(
 	by: Option<&str>,
 	check_recovery: bool,
 ) -> Result<()> {
-	use crate::schema::{incident_issues, incidents, issues};
+	use crate::schema::{incident_issues, incidents};
 
 	// Must match `open_incident_holding`'s definition of live
 	// membership, incident `closed_at` included: an issue can hold an
@@ -3586,6 +3939,30 @@ async fn leave_open_incident(
 	.execute(conn)
 	.await?;
 
+	settle_if_no_failure_left(conn, &incident, transition_time, by, check_recovery).await
+}
+
+/// Close or linger `incident` once none of its live members is an effective
+/// failure, its last one having ended at `transition_time`, by leaving or by
+/// its result lessening in place. Does nothing while a failure is live.
+///
+/// The caller holds the incident row locked, or its target's lock. Without
+/// either, two transactions each ending one of the last two failures can each
+/// observe the other's still standing and skip the close, leaving the incident
+/// open with no failure and no Slack resolve.
+///
+/// `check_recovery` is true only where the failure ended through the check's
+/// own report, the one case lingering damps; `by` naming an operator, or a
+/// zero linger window, closes immediately as well.
+async fn settle_if_no_failure_left(
+	conn: &mut AsyncPgConnection,
+	incident: &Incident,
+	transition_time: Timestamp,
+	by: Option<&str>,
+	check_recovery: bool,
+) -> Result<()> {
+	use crate::schema::{incident_issues, incidents, issues};
+
 	// Only count contributors that *currently* open an incident
 	// (effective failures). Lesser contributors stay attached for
 	// context but don't hold the incident open on their own.
@@ -3593,52 +3970,53 @@ async fn leave_open_incident(
 		.inner_join(issues::table.on(issues::id.eq(incident_issues::issue_id)))
 		.filter(
 			incident_issues::incident_id
-				.eq(open_link.incident_id)
+				.eq(incident.id)
 				.and(incident_issues::left_at.is_null())
 				.and(issues::effective_result.eq("failed")),
 		)
 		.count()
 		.get_result(conn)
 		.await?;
-	if remaining_open == 0 {
-		// A zero linger window is the operator opting out of lingering.
-		let window = linger_window(conn, IncidentTarget::of_incident(&incident)).await?;
-		if by.is_some() || !check_recovery || window.is_zero() {
-			// Filter on `closed_at IS NULL` so that when a stranded
-			// lesser contributor eventually leaves an already-closed
-			// incident (because the failure-filter close above already
-			// retired it), we skip both the no-op update and the
-			// double Slack resolve.
-			let closed: Option<Incident> = diesel::update(
-				incidents::table
-					.filter(incidents::id.eq(open_link.incident_id))
-					.filter(incidents::closed_at.is_null()),
-			)
-			.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(transition_time)))
-			.returning(Incident::as_select())
-			.get_result(conn)
-			.await
-			.optional()?;
-			if let Some(closed) = closed {
-				release_remaining_members(conn, closed.id, transition_time).await?;
-				enqueue_slack_resolve_inner(conn, &closed, by).await?;
-			}
-		} else {
-			// Start lingering: record when the last effective failure
-			// left. Stamped once — a lesser contributor leaving an
-			// already-lingering incident doesn't move the mark — and
-			// the linger sweep closes the incident when the stamp
-			// outlives the window (see `sweep_lingering_incidents`).
-			diesel::update(
-				incidents::table
-					.filter(incidents::id.eq(open_link.incident_id))
-					.filter(incidents::closed_at.is_null())
-					.filter(incidents::closing_at.is_null()),
-			)
-			.set(incidents::closing_at.eq(jiff_diesel::Timestamp::from(transition_time)))
-			.execute(conn)
-			.await?;
+	if remaining_open > 0 {
+		return Ok(());
+	}
+	// A zero linger window is the operator opting out of lingering.
+	let window = linger_window(conn, IncidentTarget::of_incident(incident)).await?;
+	if by.is_some() || !check_recovery || window.is_zero() {
+		// Filter on `closed_at IS NULL` so that when a stranded
+		// lesser contributor eventually leaves an already-closed
+		// incident (because the failure-filter close above already
+		// retired it), we skip both the no-op update and the
+		// double Slack resolve.
+		let closed: Option<Incident> = diesel::update(
+			incidents::table
+				.filter(incidents::id.eq(incident.id))
+				.filter(incidents::closed_at.is_null()),
+		)
+		.set(incidents::closed_at.eq(jiff_diesel::Timestamp::from(transition_time)))
+		.returning(Incident::as_select())
+		.get_result(conn)
+		.await
+		.optional()?;
+		if let Some(closed) = closed {
+			release_remaining_members(conn, closed.id, transition_time).await?;
+			enqueue_slack_resolve_inner(conn, &closed, by).await?;
 		}
+	} else {
+		// Start lingering: record when the last effective failure
+		// ended. Stamped once — a lesser contributor leaving an
+		// already-lingering incident doesn't move the mark — and
+		// the linger sweep closes the incident when the stamp
+		// outlives the window (see `sweep_lingering_incidents`).
+		diesel::update(
+			incidents::table
+				.filter(incidents::id.eq(incident.id))
+				.filter(incidents::closed_at.is_null())
+				.filter(incidents::closing_at.is_null()),
+		)
+		.set(incidents::closing_at.eq(jiff_diesel::Timestamp::from(transition_time)))
+		.execute(conn)
+		.await?;
 	}
 	Ok(())
 }
@@ -3739,11 +4117,11 @@ pub async fn enqueue_incident_reeval(
 /// active issues, so it can't drive the leave transitions the ingest path
 /// needs; this is the ingest-equivalent set.
 ///
-/// Active issues are evaluated before inactive ones so that when a failure
-/// replaces another within a single push, the incoming failure (re)joins
-/// the incident before the outgoing one leaves — otherwise the incident
-/// would briefly close and reopen. This mirrors the ingest-time filing
-/// order.
+/// Issues are evaluated in [`settle_order`], failures first, so that when a
+/// failure replaces another within a single push, the incoming failure
+/// (re)joins the incident before the outgoing one leaves or lessens, and a
+/// warning finds the incident a failure opens — otherwise the incident would
+/// briefly close and reopen. This mirrors the ingest-time filing order.
 pub async fn reevaluate_incidents_for_server(
 	conn: &mut AsyncPgConnection,
 	application_id: Uuid,
@@ -3779,8 +4157,14 @@ pub async fn reevaluate_incidents_for_server(
 		.load(conn)
 		.await?;
 
-	// Active (potential joiners) before inactive (leavers).
-	candidates.sort_by_key(|issue| !issue.active);
+	candidates.sort_by_key(|issue| {
+		match issue.effective_result {
+			Some(effective) if issue.active => settle_order(effective),
+			// An active issue with no graded result is trouble all the same.
+			None if issue.active => settle_order(CheckResult::Warning),
+			_ => settle_order(CheckResult::Passed),
+		}
+	});
 
 	let now = Timestamp::now();
 	for issue in candidates {
@@ -4508,6 +4892,29 @@ async fn open_incident_holding(
 		.map_err(AppError::from)
 }
 
+/// [`open_incident_holding`] for many issues at once: every open incident one
+/// of them is a live member of.
+async fn open_incidents_holding(
+	db: &mut AsyncPgConnection,
+	issue_ids: &[Uuid],
+) -> Result<Vec<Incident>> {
+	use crate::schema::{incident_issues, incidents};
+
+	incident_issues::table
+		.inner_join(incidents::table.on(incidents::id.eq(incident_issues::incident_id)))
+		.select(Incident::as_select())
+		.filter(
+			incident_issues::issue_id
+				.eq_any(issue_ids)
+				.and(incident_issues::left_at.is_null())
+				.and(incidents::closed_at.is_null()),
+		)
+		.distinct()
+		.load(db)
+		.await
+		.map_err(AppError::from)
+}
+
 /// What an issue's incident contribution attaches to: one of a group's
 /// environments, or canopy as a whole for canopy-wide issues (self-alerts).
 /// Issues on ungrouped applications and machines, and on pending ones with no
@@ -4611,6 +5018,34 @@ async fn lock_targets(
 	for target in targets {
 		lock_target(db, target).await?;
 	}
+	Ok(())
+}
+
+/// [`lock_targets`] for any number of targets, in the same order: Canopy as a
+/// whole first, then each group by id, taken in one statement.
+async fn lock_all_targets(db: &mut AsyncPgConnection, targets: Vec<IncidentTarget>) -> Result<()> {
+	use crate::schema::server_groups;
+	if targets.contains(&IncidentTarget::Global) {
+		lock_target(db, IncidentTarget::Global).await?;
+	}
+	let mut groups: Vec<Uuid> = targets
+		.iter()
+		.filter_map(|target| target.group_id())
+		.collect();
+	if groups.is_empty() {
+		return Ok(());
+	}
+	groups.sort_unstable();
+	groups.dedup();
+	// Rows are locked as the sort hands them over, so the statement takes the
+	// groups in id order as the one-at-a-time path does.
+	let _group_locks: Vec<Uuid> = server_groups::table
+		.select(server_groups::id)
+		.filter(server_groups::id.eq_any(&groups))
+		.order(server_groups::id)
+		.for_update()
+		.load(db)
+		.await?;
 	Ok(())
 }
 
