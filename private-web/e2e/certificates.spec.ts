@@ -2,6 +2,7 @@ import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
 	seedServer,
+	seedCertificateName,
 	seedServerCertificate,
 	seedServerGroup,
 	seedServerGroupDomain,
@@ -14,12 +15,12 @@ import {
 // the in-process fake — which advertises the `classic` and `shortlived`
 // profiles and accepts revocations.
 
-test.describe("server names and certificates", () => {
+test.describe("an application's DNS names and certificates", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
 	});
 
-	test("a server with neither grant and nothing registered shows no panel", async ({
+	test("a server with neither grant and nothing registered shows no section", async ({
 		page,
 		sql,
 	}) => {
@@ -30,9 +31,8 @@ test.describe("server names and certificates", () => {
 		await expect(
 			page.getByRole("heading", { level: 1, name: /plain/ }),
 		).toBeVisible();
-		await expect(
-			page.getByRole("heading", { name: "Names and certificates" }),
-		).toHaveCount(0);
+		await expect(page.getByTestId("application-names-addresses")).toHaveCount(0);
+		await expect(page.getByTestId("application-names-certificate")).toHaveCount(0);
 	});
 
 	test("registered names show their addresses and whether the zone caught up", async ({
@@ -63,9 +63,7 @@ test.describe("server names and certificates", () => {
 		});
 
 		await page.goto(`/fleet/applications/${server.id}`);
-		const panel = page
-			.getByRole("heading", { name: "Names and certificates" })
-			.locator("xpath=ancestor::div[contains(@class,'MuiPaper-root')][1]");
+		const panel = page.getByTestId("application-names-addresses");
 
 		await expect(panel.getByText("may manage DNS records")).toBeVisible();
 		await expect(panel.getByText("within fiji.tamanu.app")).toBeVisible();
@@ -104,15 +102,24 @@ test.describe("server names and certificates", () => {
 		});
 
 		await page.goto(`/fleet/applications/${server.id}`);
-		const panel = page
-			.getByRole("heading", { name: "Names and certificates" })
-			.locator("xpath=ancestor::div[contains(@class,'MuiPaper-root')][1]");
+		const panel = page.getByTestId("application-names-certificate");
 
-		await expect(panel.getByText("a.fiji.tamanu.app")).toBeVisible();
+		await expect(
+			panel.getByRole("heading", { name: /TLS certificates/ }),
+		).toBeVisible();
+		await expect(panel.getByText("a.fiji.tamanu.app").first()).toBeVisible();
 		await expect(panel.getByText("valid", { exact: true })).toBeVisible();
 		await expect(panel.getByText("classic", { exact: true })).toBeVisible();
-		// Both readings, as the spec asks: the instant and how long is left.
-		await expect(panel.getByText(/79 days left/)).toBeVisible();
+		// The expiry is shown once, as a duration, floored, with the instant on
+		// hover rather than a second reading beside it.
+		const left = panel.getByText("expires in 79 days");
+		await expect(left).toBeVisible();
+		await expect(panel.getByText(/days left/)).toHaveCount(0);
+		await expect(left).toHaveAttribute("data-risk", "none");
+		await left.hover();
+		await expect(page.getByRole("tooltip")).toContainText(/\d{4}/);
+		// Nothing about addresses in the certificates section.
+		await expect(panel.getByText("published")).toHaveCount(0);
 	});
 
 	test("a certificate past renewal reads as due, and one nearly gone as expiring", async ({
@@ -145,12 +152,19 @@ test.describe("server names and certificates", () => {
 		});
 
 		await page.goto(`/fleet/applications/${server.id}`);
-		const panel = page
-			.getByRole("heading", { name: "Names and certificates" })
-			.locator("xpath=ancestor::div[contains(@class,'MuiPaper-root')][1]");
+		const panel = page.getByTestId("application-names-certificate");
 
 		await expect(panel.getByText("due for renewal")).toBeVisible();
 		await expect(panel.getByText("expiring", { exact: true })).toBeVisible();
+		// The time left is coloured on the same measure as the chip beside it.
+		await expect(panel.getByText("expires in 19 days")).toHaveAttribute(
+			"data-risk",
+			"at_risk",
+		);
+		await expect(panel.getByText("expires in 1 day")).toHaveAttribute(
+			"data-risk",
+			"critical",
+		);
 	});
 
 	test("a pending first issuance shows its reason for failing", async ({
@@ -176,9 +190,7 @@ test.describe("server names and certificates", () => {
 		});
 
 		await page.goto(`/fleet/applications/${server.id}`);
-		const panel = page
-			.getByRole("heading", { name: "Names and certificates" })
-			.locator("xpath=ancestor::div[contains(@class,'MuiPaper-root')][1]");
+		const panel = page.getByTestId("application-names-certificate");
 
 		await expect(panel.getByText("pending", { exact: true })).toBeVisible();
 		await expect(
@@ -332,12 +344,12 @@ test.describe("server names and certificates", () => {
 	});
 });
 
-test.describe("group domain health", () => {
+test.describe("group DNS names and certificates", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
 	});
 
-	test("each domain lists the names beneath it and whether they are certified", async ({
+	test("each kind lists its own names beneath each domain", async ({
 		page,
 		sql,
 	}) => {
@@ -370,16 +382,59 @@ test.describe("group domain health", () => {
 			addresses: ["192.0.2.2"],
 			publishedAddresses: ["192.0.2.2"],
 		});
+		await seedCertificateName(sql, {
+			serverId: server.id,
+			name: "bare.fiji.tamanu.app",
+		});
+		// Certified but with no addresses of its own.
+		await seedServerCertificate(sql, {
+			serverId: server.id,
+			name: "tls-only.fiji.tamanu.app",
+		});
 
 		await page.goto(`/fleet/groups/${group.id}`);
-		const panel = page
-			.getByRole("heading", { name: "Domains" })
-			.locator("xpath=ancestor::div[contains(@class,'MuiPaper-root')][1]");
+		const dns = page.getByTestId("group-names-addresses");
+		const tls = page.getByTestId("group-names-certificate");
 
-		await expect(panel.getByText("covered.fiji.tamanu.app")).toBeVisible();
-		await expect(panel.getByText("certified")).toBeVisible();
-		await expect(panel.getByText("bare.fiji.tamanu.app")).toBeVisible();
-		await expect(panel.getByText("no certificate")).toBeVisible();
+		// Only addresses in the DNS names section, and nothing about certificates.
+		await expect(dns.getByText("covered.fiji.tamanu.app")).toBeVisible();
+		await expect(dns.getByText("bare.fiji.tamanu.app")).toBeVisible();
+		await expect(dns.getByText("tls-only.fiji.tamanu.app")).toHaveCount(0);
+		await expect(dns.getByText("certified")).toHaveCount(0);
+		await expect(dns.getByText("no certificate")).toHaveCount(0);
+
+		// Only certificates in the TLS certificates section, and nothing about
+		// records.
+		await expect(tls.getByText("covered.fiji.tamanu.app")).toBeVisible();
+		await expect(tls.getByText("tls-only.fiji.tamanu.app")).toBeVisible();
+		await expect(tls.getByText("certified", { exact: true })).toHaveCount(2);
+		await expect(tls.getByText("bare.fiji.tamanu.app")).toBeVisible();
+		await expect(tls.getByText("no certificate")).toBeVisible();
+		await expect(tls.getByText("published")).toHaveCount(0);
+	});
+
+	test("a group with names of one kind shows no section for the other", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "fiji" });
+		await seedServerGroupDomain(sql, {
+			groupId: group.id,
+			domain: "fiji.tamanu.app",
+		});
+		const server = await seedServer(sql, {
+			name: "central",
+			groupId: group.id,
+			mayManageTls: true,
+		});
+		await seedServerCertificate(sql, {
+			serverId: server.id,
+			name: "a.fiji.tamanu.app",
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		await expect(page.getByTestId("group-names-certificate")).toBeVisible();
+		await expect(page.getByTestId("group-names-addresses")).toHaveCount(0);
 	});
 });
 

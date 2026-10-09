@@ -25,7 +25,7 @@ use commons_types::server::app_type::ApplicationType;
 use database::application_certificates::OrderState;
 use database::diesel_async::AsyncPgConnection;
 use database::{
-	ApplicationCertificate, ApplicationName, AskedFor, DeniedDnsName, ServerGroupDomain,
+	ApplicationCertificate, ApplicationName, DeniedDnsName, DnsNameKind, ServerGroupDomain,
 	UndeclaredDnsName, applications::Application,
 };
 use jiff::Timestamp;
@@ -61,10 +61,10 @@ impl Grant {
 		}
 	}
 
-	fn asked_for(self) -> AskedFor {
+	fn kind(self) -> DnsNameKind {
 		match self {
-			Self::Dns => AskedFor::Addresses,
-			Self::Tls => AskedFor::Certificate,
+			Self::Dns => DnsNameKind::Addresses,
+			Self::Tls => DnsNameKind::Certificate,
 		}
 	}
 
@@ -106,11 +106,15 @@ async fn authorise(
 	grant: Grant,
 	zones: &[ManagedZone],
 ) -> Result<Application> {
-	// A denial is an operator's decision about this box and this DNS name, so it
-	// holds however the request would otherwise resolve. The note is for
-	// operators and stays in Canopy.
+	// A denial is an operator's decision about this box, this DNS name and this
+	// kind of request, so it holds however the request would otherwise resolve.
+	// The other kind is unaffected. The note is for operators and stays in
+	// Canopy.
 	// spec: DNS#denied-dns-names
-	if DeniedDnsName::get(conn, machine.id, name).await?.is_some() {
+	if DeniedDnsName::get(conn, machine.id, name, grant.kind())
+		.await?
+		.is_some()
+	{
 		return Err(AppError::DnsNameDenied(name.to_owned()));
 	}
 
@@ -166,7 +170,8 @@ async fn authorise(
 	Ok(server)
 }
 
-/// Keep the machine's undeclared record in step with how its request ended.
+/// Keep the machine's undeclared record of this kind in step with how its
+/// request ended; the other kind's record is not the request's business.
 ///
 /// Settled on the request's final outcome rather than inside [`authorise`],
 /// because declaring the DNS name, which comes after, is itself what refuses a
@@ -185,9 +190,9 @@ async fn settle_undeclared<T>(
 	outcome: &Result<T>,
 ) {
 	let kept = match outcome {
-		Ok(_) => UndeclaredDnsName::clear(conn, machine_id, name).await,
+		Ok(_) => UndeclaredDnsName::clear(conn, machine_id, name, grant.kind()).await,
 		Err(AppError::DnsNameUndeclared(_)) => {
-			UndeclaredDnsName::record(conn, machine_id, name, grant.asked_for()).await
+			UndeclaredDnsName::record(conn, machine_id, name, grant.kind()).await
 		}
 		Err(_) => Ok(()),
 	};
@@ -209,7 +214,7 @@ async fn settle_undeclared<T>(
 /// refused as what they are.
 ///
 /// TRAP: a name declared by an application on another machine must narrow
-/// exactly as a name nobody declares does. The fleet-wide unique index makes
+/// exactly as a name nobody declares does. The fleet-wide single holder makes
 /// the former cheap to detect, which is exactly the temptation; acting on it
 /// here would let an agent tell the two apart by which refusal it gets, making
 /// this endpoint a directory of what other machines serve. Declaring the name
@@ -224,10 +229,10 @@ async fn resolve(
 ) -> Result<Option<Application>> {
 	let mut candidates = machine.applications(conn).await?;
 
-	let declaring = match ApplicationName::for_name(conn, name).await? {
-		Some(declared) => candidates
-			.iter()
-			.position(|a| a.id == declared.application_id),
+	// Held for either kind: a name held for certificates alone still resolves an
+	// address request to its holder, which then declares it for addresses too.
+	let declaring = match database::dns_names::holder(conn, name).await? {
+		Some(holder) => candidates.iter().position(|a| a.id == holder),
 		None => None,
 	};
 

@@ -292,7 +292,7 @@ test.describe("safety modes", () => {
 		});
 
 		await page.goto(`/fleet/applications/${server.id}`);
-		const field = page.getByLabel("DNS name to declare");
+		const field = page.getByLabel("DNS name to declare for certificates");
 		await field.fill("extra.fiji.tamanu.app");
 		await field.press("Enter");
 

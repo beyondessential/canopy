@@ -6,7 +6,9 @@ use commons_tests::db::TestDb;
 use commons_types::dns::ManagedZone;
 use database::application_certificates::{OrderState, RevocationReason, Risk, default_renew_after};
 use database::diesel_async::AsyncPgConnection;
-use database::{ApplicationCertificate, ApplicationName, ServerGroupDomain};
+use database::{
+	ApplicationCertificate, ApplicationCertificateName, ApplicationName, ServerGroupDomain,
+};
 use diesel::{sql_query, sql_types};
 use diesel_async::{RunQueryDsl, SimpleAsyncConnection};
 use jiff::{SignedDuration, Timestamp};
@@ -1326,7 +1328,7 @@ async fn declaring_a_name_another_application_holds_names_the_holder() {
 /// leaves it. What ends is Canopy treating the name as this application's.
 // spec: DNS#declared-dns-names
 #[tokio::test(flavor = "multi_thread")]
-async fn releasing_a_name_leaves_its_certificates_in_place_and_frees_it() {
+async fn releasing_a_certificate_name_leaves_its_certificates_in_place_and_stops_renewal() {
 	TestDb::run(|mut conn, _url| async move {
 		let first = insert_server(&mut conn, "release-1").await;
 		let second = insert_server(&mut conn, "release-2").await;
@@ -1389,9 +1391,9 @@ async fn releasing_a_name_leaves_its_certificates_in_place_and_frees_it() {
 		.await
 		.expect("still issued and overdue");
 
-		ApplicationName::release(&mut conn, first, "moving.fiji.tamanu.app")
+		ApplicationCertificateName::release(&mut conn, first, "moving.fiji.tamanu.app")
 			.await
-			.expect("release");
+			.expect("release for certificates");
 
 		assert!(
 			ApplicationCertificate::get(&mut conn, cert.id)
@@ -1400,24 +1402,31 @@ async fn releasing_a_name_leaves_its_certificates_in_place_and_frees_it() {
 			"the certificate held stays held"
 		);
 		assert!(
-			ApplicationName::for_name(&mut conn, "moving.fiji.tamanu.app")
+			ApplicationCertificateName::for_name(&mut conn, "moving.fiji.tamanu.app")
 				.await
 				.expect("look up")
 				.is_none(),
-			"and the name is free"
+			"and the name is no longer held for certificates"
 		);
-
-		ApplicationName::declare(&mut conn, second, "moving.fiji.tamanu.app")
+		ApplicationCertificateName::declare(&mut conn, second, "moving.fiji.tamanu.app")
 			.await
-			.expect("free to be declared elsewhere");
+			.expect_err("still held for addresses, so not free for another application");
 
-		let missing = ApplicationName::release(&mut conn, first, "moving.fiji.tamanu.app")
+		ApplicationName::release(&mut conn, first, "moving.fiji.tamanu.app")
 			.await
-			.expect_err("releasing what this application does not hold");
+			.expect("release for addresses");
+		ApplicationCertificateName::declare(&mut conn, second, "moving.fiji.tamanu.app")
+			.await
+			.expect("free to be declared elsewhere once released for both kinds");
+
+		let missing =
+			ApplicationCertificateName::release(&mut conn, first, "moving.fiji.tamanu.app")
+				.await
+				.expect_err("releasing what this application does not hold");
 		assert!(
 			missing
 				.to_string()
-				.contains("not declared by this application")
+				.contains("not declared for certificates by this application")
 		);
 
 		// Renewing past a release would order for a name the other application
@@ -1463,11 +1472,18 @@ async fn ordering_declares_the_name_without_naming_another_holder() {
 		ApplicationCertificate::request(&mut conn, mine, "own.fiji.tamanu.app", "key-a", b"csr")
 			.await
 			.expect("order");
-		let declared = ApplicationName::for_name(&mut conn, "own.fiji.tamanu.app")
+		let declared = ApplicationCertificateName::for_name(&mut conn, "own.fiji.tamanu.app")
 			.await
 			.expect("look up")
-			.expect("ordering declared the name");
+			.expect("ordering declared the name for certificates");
 		assert_eq!(declared.application_id, mine);
+		assert!(
+			ApplicationName::for_name(&mut conn, "own.fiji.tamanu.app")
+				.await
+				.expect("look up")
+				.is_none(),
+			"and for nothing else: a certificate is not an address registration"
+		);
 
 		ApplicationName::declare(&mut conn, theirs, "elsewhere.fiji.tamanu.app")
 			.await
@@ -1501,7 +1517,8 @@ async fn ordering_declares_the_name_without_naming_another_holder() {
 // spec: DNS#undeclared-requests
 #[tokio::test(flavor = "multi_thread")]
 async fn undeclared_records_are_bounded_per_machine() {
-	use database::dns_name_dispositions::{AskedFor, UNDECLARED_PER_MACHINE, UndeclaredDnsName};
+	use database::DnsNameKind;
+	use database::dns_name_dispositions::{UNDECLARED_PER_MACHINE, UndeclaredDnsName};
 	TestDb::run(|mut conn, _url| async move {
 		let machine = Uuid::new_v4();
 		conn.batch_execute(&format!(
@@ -1515,7 +1532,7 @@ async fn undeclared_records_are_bounded_per_machine() {
 				&mut conn,
 				machine,
 				&format!("n{i}.example.org"),
-				AskedFor::Certificate,
+				DnsNameKind::Certificate,
 			)
 			.await
 			.expect("record");
@@ -1524,24 +1541,49 @@ async fn undeclared_records_are_bounded_per_machine() {
 			&mut conn,
 			machine,
 			"overflow.example.org",
-			AskedFor::Certificate,
+			DnsNameKind::Certificate,
 		)
 		.await
 		.expect("past the bound is not an error");
-		UndeclaredDnsName::record(&mut conn, machine, "n0.example.org", AskedFor::Addresses)
+		let before = UndeclaredDnsName::for_machine(&mut conn, machine, DnsNameKind::Certificate)
 			.await
-			.expect("refresh");
+			.expect("list")
+			.into_iter()
+			.find(|r| r.dns_name == "n0.example.org")
+			.expect("recorded");
+		UndeclaredDnsName::record(
+			&mut conn,
+			machine,
+			"n0.example.org",
+			DnsNameKind::Certificate,
+		)
+		.await
+		.expect("refresh");
+		// A different kind about the same DNS name is a new record, so it too
+		// is refused at the bound while the existing ones stand.
+		UndeclaredDnsName::record(&mut conn, machine, "n0.example.org", DnsNameKind::Addresses)
+			.await
+			.expect("past the bound is not an error");
 
-		let held = UndeclaredDnsName::for_machine(&mut conn, machine)
+		let held = UndeclaredDnsName::for_machine(&mut conn, machine, DnsNameKind::Certificate)
 			.await
 			.expect("list");
 		assert_eq!(held.len() as i64, UNDECLARED_PER_MACHINE);
 		assert!(held.iter().all(|r| r.dns_name != "overflow.example.org"));
-		assert_eq!(
-			held.iter()
-				.find(|r| r.dns_name == "n0.example.org")
-				.map(|r| r.asked_for),
-			Some(AskedFor::Addresses)
+		let after = held
+			.iter()
+			.find(|r| r.dns_name == "n0.example.org")
+			.expect("still held");
+		assert!(
+			after.last_asked_at >= before.last_asked_at,
+			"a record already held is refreshed"
+		);
+		assert!(
+			UndeclaredDnsName::for_machine(&mut conn, machine, DnsNameKind::Addresses)
+				.await
+				.expect("list")
+				.is_empty(),
+			"and the other kind was not recorded past the bound"
 		);
 	})
 	.await;
@@ -1557,7 +1599,7 @@ async fn lapsed_undeclared_records_are_pruned() {
 		let machine = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO machines (id, name) VALUES ('{machine}', 'box'); \
-			 INSERT INTO undeclared_dns_names (machine_id, dns_name, asked_for, first_asked_at, last_asked_at) VALUES \
+			 INSERT INTO undeclared_dns_names (machine_id, dns_name, kind, first_asked_at, last_asked_at) VALUES \
 			   ('{machine}', 'lapsed.example.org', 'certificate', now() - interval '3 days', now() - interval '25 hours'), \
 			   ('{machine}', 'fresh.example.org', 'addresses', now() - interval '3 days', now() - interval '1 hour')"
 		))
@@ -1565,12 +1607,13 @@ async fn lapsed_undeclared_records_are_pruned() {
 		.expect("seed");
 
 		assert_eq!(UndeclaredDnsName::prune(&mut conn).await.expect("prune"), 1);
-		let held: Vec<String> = UndeclaredDnsName::for_machine(&mut conn, machine)
-			.await
-			.expect("list")
-			.into_iter()
-			.map(|r| r.dns_name)
-			.collect();
+		let held: Vec<String> =
+			UndeclaredDnsName::for_machine(&mut conn, machine, database::DnsNameKind::Addresses)
+				.await
+				.expect("list")
+				.into_iter()
+				.map(|r| r.dns_name)
+				.collect();
 		assert_eq!(held, vec!["fresh.example.org".to_string()]);
 	})
 	.await;

@@ -117,7 +117,7 @@ An operator sets the application's profile where its other permissions are set, 
 
 How long is left is shown once, as a duration in a unit that suits its size, with the exact instant available from it, rather than as an instant beside a duration that says the same thing.
 It is rounded the same way wherever it is shown.
-It is coloured by how urgent it is, on the same measure as the certificate's state: relative to the certificate's own lifetime and renewal point rather than to a fixed number of days, so that a week left reads as calm on a ninety-day certificate and as urgent on a six-day one.
+It is coloured by how urgent it is, on the same measure as the certificate's state: relative to the certificate's own lifetime and renewal point rather than to a fixed number of days, so that two days left reads as urgent on a ninety-day certificate and only as due for renewal on a six-day one.
 It is calm while the certificate is valid, draws attention once it is due for renewal, and reads as urgent once it is expiring or expired.
 
 A group presents, under each domain it controls, the DNS names declared for certificates beneath it and which of them hold a current certificate, so whether a group's certificates are healthy is answerable without visiting each of its applications.

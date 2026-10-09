@@ -317,11 +317,11 @@ impl ApplicationCertificate {
 
 		let name = normalize_domain(name)?;
 
-		// An order exists only for a name the application declares, so Canopy
-		// always knows which workload a certificate is for and knows to stop
-		// renewing it once the declaration ends. Registering an address happens
-		// to declare the name; requesting a certificate has to do it explicitly,
-		// since an application may want a certificate before it is reachable.
+		// An order exists only for a name the application declares for
+		// certificates, so Canopy always knows which workload a certificate is
+		// for and knows to stop renewing it once the declaration ends. An
+		// application may want a certificate before it is reachable, so the
+		// request declares the name rather than needing an address registered.
 		//
 		// This path is device-facing, so a name another application holds is
 		// refused word for word as a name nobody declares. `declare` itself
@@ -329,12 +329,16 @@ impl ApplicationCertificate {
 		// fleet and wrong here, where it would make the endpoint a directory of
 		// what other machines serve.
 		// spec: DNS#declared-dns-names
-		crate::application_names::ApplicationName::declare(db, application_id, &name)
-			.await
-			.map_err(|err| match err {
-				AppError::Conflict(_) => AppError::DnsNameUndeclared(name.clone()),
-				other => other,
-			})?;
+		crate::application_certificate_names::ApplicationCertificateName::declare(
+			db,
+			application_id,
+			&name,
+		)
+		.await
+		.map_err(|err| match err {
+			AppError::Conflict(_) => AppError::DnsNameUndeclared(name.clone()),
+			other => other,
+		})?;
 
 		// A key revoked for compromise is never certified again, whatever asks
 		// for it: the server has to generate a new one. Its own error type, not a
@@ -869,25 +873,28 @@ pub async fn is_key_compromised(db: &mut AsyncPgConnection, key_fingerprint: &st
 type StillDeclared = diesel::dsl::exists<
 	diesel::helper_types::Filter<
 		diesel::helper_types::Filter<
-			crate::schema::application_names::table,
+			crate::schema::application_certificate_names::table,
 			diesel::dsl::Eq<
-				crate::schema::application_names::application_id,
+				crate::schema::application_certificate_names::application_id,
 				crate::schema::application_certificates::application_id,
 			>,
 		>,
 		diesel::dsl::Eq<
-			crate::schema::application_names::name,
+			crate::schema::application_certificate_names::name,
 			crate::schema::application_certificates::name,
 		>,
 	>,
 >;
 
 fn still_declared() -> StillDeclared {
-	use crate::schema::{application_certificates, application_names};
+	use crate::schema::{application_certificate_names, application_certificates};
 	diesel::dsl::exists(
-		application_names::table
-			.filter(application_names::application_id.eq(application_certificates::application_id))
-			.filter(application_names::name.eq(application_certificates::name)),
+		application_certificate_names::table
+			.filter(
+				application_certificate_names::application_id
+					.eq(application_certificates::application_id),
+			)
+			.filter(application_certificate_names::name.eq(application_certificates::name)),
 	)
 }
 

@@ -37,15 +37,6 @@ export default function GroupDomainsSection({ groupId }: { groupId: string }) {
 		[groupId, tick],
 	);
 	const zones = useApi("domains", "zones", {}, []);
-	// The names in use beneath each claim, so whether the group's names are
-	// covered is answerable here rather than server by server.
-	// spec: DNS#on-a-group
-	const health = useApi(
-		"certificates",
-		"for_group",
-		{ server_group_id: groupId },
-		[groupId, tick],
-	);
 
 	if (domains.status === "loading" || domains.status === "idle") {
 		return (
@@ -96,12 +87,6 @@ export default function GroupDomainsSection({ groupId }: { groupId: string }) {
 								zone={row.zone}
 								createdAt={row.created_at}
 								createdBy={row.created_by}
-								names={
-									health.status === "ok"
-										? (health.data.find((h) => h.domain === row.domain)
-												?.names ?? [])
-										: []
-								}
 								isAdmin={isAdmin}
 								onChanged={reload}
 							/>
@@ -140,23 +125,12 @@ function SectionHeading() {
 	);
 }
 
-type DomainName = {
-	name: string;
-	server_id: string;
-	server_name: string | null;
-	published: boolean | null;
-	certificate: boolean;
-	risk: string | null;
-	not_after: string | null;
-};
-
 function DomainRow({
 	id,
 	domain,
 	zone,
 	createdAt,
 	createdBy,
-	names,
 	isAdmin,
 	onChanged,
 }: {
@@ -165,7 +139,6 @@ function DomainRow({
 	zone: string | null;
 	createdAt: string;
 	createdBy: string | null;
-	names: DomainName[];
 	isAdmin: boolean;
 	onChanged: () => void;
 }) {
@@ -225,73 +198,12 @@ function DomainRow({
 					</GradedAction>
 				)}
 			</Stack>
-			{names.length > 0 && (
-				<Stack spacing={0.25} sx={{ mt: 0.5, ml: 2 }}>
-					{names.map((row) => (
-						<DomainNameRow key={row.name} row={row} />
-					))}
-				</Stack>
-			)}
 			{release.error && (
 				<Alert severity="error" sx={{ mt: 1 }}>
 					{release.error.message}
 				</Alert>
 			)}
 		</Box>
-	);
-}
-
-/// One name in use beneath a claim, with whether it is covered by a certificate
-/// and whether its address records have caught up.
-function DomainNameRow({ row }: { row: DomainName }) {
-	return (
-		<Stack
-			direction="row"
-			spacing={1}
-			sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 0.25 }}
-		>
-			<Typography
-				variant="caption"
-				sx={{ fontFamily: "monospace" }}
-				color="text.secondary"
-			>
-				{row.name}
-			</Typography>
-			<CertificateChip row={row} />
-			{row.published === false && (
-				<Tooltip title="Canopy has not yet written this name's address records into the zone.">
-					<Chip
-						size="small"
-						variant="outlined"
-						color="warning"
-						label="records pending"
-					/>
-				</Tooltip>
-			)}
-			<Box sx={{ flex: 1 }} />
-			{row.server_name && (
-				<Typography variant="caption" color="text.secondary">
-					{row.server_name}
-				</Typography>
-			)}
-		</Stack>
-	);
-}
-
-function CertificateChip({ row }: { row: DomainName }) {
-	if (!row.certificate) {
-		return (
-			<Tooltip title="Canopy holds no valid certificate for this name. It may never have been requested, or an order may be failing — the server's page has the reason.">
-				<Chip size="small" variant="outlined" label="no certificate" />
-			</Tooltip>
-		);
-	}
-	if (row.risk === "critical")
-		return <Chip size="small" color="error" label="expiring" />;
-	if (row.risk === "at_risk")
-		return <Chip size="small" color="warning" label="due for renewal" />;
-	return (
-		<Chip size="small" color="success" variant="outlined" label="certified" />
 	);
 }
 

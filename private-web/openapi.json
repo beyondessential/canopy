@@ -326,81 +326,6 @@
         ],
         "type": "object"
       },
-      "ApplicationNamesView": {
-        "description": "What a server's page shows about its names and certificates.",
-        "properties": {
-          "certificate_profile": {
-            "description": "The profile this server's certificates are requested under. Null means\nthe authority's own default, which is its longest-lived.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "certificates": {
-            "description": "Every certificate Canopy holds or has an order in flight for, newest\nfirst. A name may appear more than once — a key rotation leaves the\nprevious certificate behind until it expires.",
-            "items": {
-              "$ref": "#/components/schemas/CertificateView"
-            },
-            "type": "array"
-          },
-          "domains": {
-            "description": "The domains this server's group controls, so the UI can say which names\nare available to it at all.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "may_manage_dns": {
-            "description": "Whether an operator has allowed this server to manage its own DNS.",
-            "type": "boolean"
-          },
-          "may_manage_tls": {
-            "description": "Whether an operator has allowed this server to obtain its own\ncertificates.",
-            "type": "boolean"
-          },
-          "names": {
-            "description": "The public names this server has registered, by name.",
-            "items": {
-              "$ref": "#/components/schemas/NameView"
-            },
-            "type": "array"
-          },
-          "pause_reason": {
-            "description": "Why it was set.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "paused": {
-            "description": "Whether Canopy has been told to stop doing anything new for this server.",
-            "type": "boolean"
-          },
-          "paused_at": {
-            "description": "When the pause was set.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "paused_by": {
-            "description": "Who set it.",
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "may_manage_dns",
-          "may_manage_tls",
-          "paused",
-          "domains",
-          "names",
-          "certificates"
-        ],
-        "type": "object"
-      },
       "ApplicationType": {
         "description": "What an application is: the software and the role it plays, as a slug. The set is open — a report carrying a type Canopy does not know creates an application of that type, which simply carries no per-type capabilities.",
         "examples": [
@@ -541,14 +466,6 @@
           "artifact_id"
         ],
         "type": "object"
-      },
-      "AskedFor": {
-        "description": "What a refused request was for.",
-        "enum": [
-          "addresses",
-          "certificate"
-        ],
-        "type": "string"
       },
       "AttachTailscaleArgs": {
         "description": "Request to attach a device to a Tailscale network node.",
@@ -1158,6 +1075,30 @@
         ],
         "type": "object"
       },
+      "CertificateNameView": {
+        "description": "A DNS name an application holds for certificates.",
+        "properties": {
+          "id": {
+            "description": "Unique identifier of the declaration.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "description": "The DNS name, normalised.",
+            "type": "string"
+          },
+          "within_domains": {
+            "description": "Whether the DNS name lies at or beneath a domain the application's group\ncontrols. An operator may declare one that does not, ahead of the group\nclaiming its domain; nothing is certified for it until then.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "within_domains"
+        ],
+        "type": "object"
+      },
       "CertificateRevokeArgs": {
         "description": "Which certificate to revoke, and why.",
         "properties": {
@@ -1281,6 +1222,61 @@
           "risk",
           "attempts",
           "key_fingerprint"
+        ],
+        "type": "object"
+      },
+      "CertificatesView": {
+        "description": "What an application's TLS certificates section shows.",
+        "properties": {
+          "certificate_profile": {
+            "description": "The profile this application's certificates are requested under. Null\nmeans the authority's own default, which is its longest-lived.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "certificates": {
+            "description": "Every certificate Canopy holds or has an order in flight for, newest\nfirst. A DNS name may appear more than once: a key rotation leaves the\nprevious certificate behind until it expires.",
+            "items": {
+              "$ref": "#/components/schemas/CertificateView"
+            },
+            "type": "array"
+          },
+          "domains": {
+            "description": "The domains this application's group controls, so the UI can say which\nDNS names are available to it at all.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "may_manage_tls": {
+            "description": "Whether an operator has allowed this application to obtain its own\ncertificates.",
+            "type": "boolean"
+          },
+          "names": {
+            "description": "The DNS names this application holds for certificates, by name.",
+            "items": {
+              "$ref": "#/components/schemas/CertificateNameView"
+            },
+            "type": "array"
+          },
+          "pause": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PauseView",
+                "description": "The pause on this application, if it has one."
+              }
+            ]
+          }
+        },
+        "required": [
+          "may_manage_tls",
+          "domains",
+          "names",
+          "certificates"
         ],
         "type": "object"
       },
@@ -2364,15 +2360,15 @@
         "type": "object"
       },
       "DeclarationArgs": {
-        "description": "An application and the name being declared for it, or released from it.",
+        "description": "An application and the DNS name being declared for it, or released from it.",
         "properties": {
           "application_id": {
-            "description": "The application that serves the name.",
+            "description": "The application that serves the DNS name.",
             "format": "uuid",
             "type": "string"
           },
           "name": {
-            "description": "The name, in any case and with or without a trailing dot.",
+            "description": "The DNS name, in any case and with or without a trailing dot.",
             "type": "string"
           }
         },
@@ -2455,7 +2451,7 @@
         "type": "object"
       },
       "DeniedView": {
-        "description": "A DNS name an operator has denied to the machine.",
+        "description": "A DNS name an operator has denied to the machine for the section's kind.",
         "properties": {
           "denied_at": {
             "description": "When it was denied.",
@@ -2493,7 +2489,7 @@
             "type": "string"
           },
           "name": {
-            "description": "The name, in any case and with or without a trailing dot.",
+            "description": "The DNS name, in any case and with or without a trailing dot.",
             "type": "string"
           },
           "note": {
@@ -2724,6 +2720,73 @@
         ],
         "type": "object"
       },
+      "DnsNamesView": {
+        "description": "What an application's DNS names section shows.",
+        "properties": {
+          "domains": {
+            "description": "The domains this application's group controls, so the UI can say which\nnames are available to it at all.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "may_manage_dns": {
+            "description": "Whether an operator has allowed this application to manage its own DNS.",
+            "type": "boolean"
+          },
+          "names": {
+            "description": "The DNS names this application holds for addresses, by name.",
+            "items": {
+              "$ref": "#/components/schemas/NameView"
+            },
+            "type": "array"
+          },
+          "pause": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PauseView",
+                "description": "The pause on this application, if it has one."
+              }
+            ]
+          }
+        },
+        "required": [
+          "may_manage_dns",
+          "domains",
+          "names"
+        ],
+        "type": "object"
+      },
+      "DomainCertificateView": {
+        "description": "Whether a DNS name declared for certificates holds a current certificate.",
+        "properties": {
+          "current": {
+            "description": "Whether a certificate Canopy holds for it is current and collectable.",
+            "type": "boolean"
+          },
+          "not_after": {
+            "description": "When that certificate expires.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "risk": {
+            "description": "How urgently the certificate expiring last needs attention: `none`,\n`at_risk`, or `critical`, judged against its own lifetime. Null where\nthere is no certificate.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "current"
+        ],
+        "type": "object"
+      },
       "DomainClaimArgs": {
         "description": "Fields needed to claim a domain for a group.",
         "properties": {
@@ -2744,14 +2807,14 @@
         "type": "object"
       },
       "DomainHealthView": {
-        "description": "The names in use beneath one of a group's domains.",
+        "description": "The DNS names in use under one of a group's domains.",
         "properties": {
           "domain": {
-            "description": "The claimed domain these names sit beneath.",
+            "description": "The claimed domain these DNS names sit beneath.",
             "type": "string"
           },
           "names": {
-            "description": "The names in use beneath it, by name.",
+            "description": "The DNS names in use beneath it, by name.",
             "items": {
               "$ref": "#/components/schemas/DomainNameView"
             },
@@ -2779,44 +2842,37 @@
         "type": "object"
       },
       "DomainNameView": {
-        "description": "One name in use beneath a group's domain, with whether it is covered.",
+        "description": "One DNS name in use beneath a group's domain, for either kind.\n\nExactly one of `published` and `certificate` is present: the DNS names\nsection carries the first and the TLS certificates section the second.",
         "properties": {
           "certificate": {
-            "description": "Whether a certificate Canopy holds for it is current and collectable.",
-            "type": "boolean"
-          },
-          "name": {
-            "description": "The name.",
-            "type": "string"
-          },
-          "not_after": {
-            "description": "When the certificate expires.",
-            "type": [
-              "string",
-              "null"
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DomainCertificateView",
+                "description": "For certificates: what Canopy holds for it."
+              }
             ]
           },
+          "name": {
+            "description": "The DNS name.",
+            "type": "string"
+          },
           "published": {
-            "description": "Whether the address records Canopy publishes for it are up to date. Null\nwhere the name has no registration — a certificate obtained for a name\nwhose addresses the server publishes itself.",
+            "description": "For addresses: whether the address records Canopy publishes for it are up\nto date, or null where it is declared with no addresses registered. Null\nas well in the certificates section, which carries no addresses.",
             "type": [
               "boolean",
               "null"
             ]
           },
-          "risk": {
-            "description": "How urgently that certificate needs attention: `none`, `at_risk`, or\n`critical`. Null where there is no certificate.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "server_id": {
-            "description": "The server that registered it or holds its certificate.",
+            "description": "The application that declares it.",
             "format": "uuid",
             "type": "string"
           },
           "server_name": {
-            "description": "That server's name, for display.",
+            "description": "That application's name, for display.",
             "type": [
               "string",
               "null"
@@ -2825,8 +2881,7 @@
         },
         "required": [
           "name",
-          "server_id",
-          "certificate"
+          "server_id"
         ],
         "type": "object"
       },
@@ -5837,7 +5892,7 @@
         "type": "object"
       },
       "MachineDeclaredView": {
-        "description": "A DNS name declared by one of a machine's applications.",
+        "description": "A DNS name declared by one of a machine's applications, for the kind of the\nsection it is in.",
         "properties": {
           "application_id": {
             "description": "The application declaring it.",
@@ -5855,13 +5910,20 @@
               },
               {
                 "$ref": "#/components/schemas/CertificateView",
-                "description": "The newest certificate Canopy holds or is ordering for it, if any."
+                "description": "In the TLS certificates section: the newest certificate Canopy holds or\nis ordering for it, if any."
               }
             ]
           },
           "name": {
             "description": "The DNS name, normalised.",
             "type": "string"
+          },
+          "published": {
+            "description": "In the DNS names section: whether its address records are published, or\nnull where it is declared with no addresses registered. Null as well in\nthe TLS certificates section, which carries no addresses.",
+            "type": [
+              "boolean",
+              "null"
+            ]
           }
         },
         "required": [
@@ -6045,53 +6107,13 @@
             "type": "string"
           },
           "name": {
-            "description": "The name, in any case and with or without a trailing dot.",
+            "description": "The DNS name, in any case and with or without a trailing dot.",
             "type": "string"
           }
         },
         "required": [
           "machine_id",
           "name"
-        ],
-        "type": "object"
-      },
-      "MachineDnsNamesView": {
-        "description": "Everything a machine's page needs about the DNS names asked about from it.",
-        "properties": {
-          "applications": {
-            "description": "The machine's applications, to declare a DNS name on.",
-            "items": {
-              "$ref": "#/components/schemas/MachineApplicationView"
-            },
-            "type": "array"
-          },
-          "declared": {
-            "description": "The DNS names its applications declare, by name.",
-            "items": {
-              "$ref": "#/components/schemas/MachineDeclaredView"
-            },
-            "type": "array"
-          },
-          "denied": {
-            "description": "The DNS names denied to it.",
-            "items": {
-              "$ref": "#/components/schemas/DeniedView"
-            },
-            "type": "array"
-          },
-          "undeclared": {
-            "description": "Its requests that resolved to no single application and still count.",
-            "items": {
-              "$ref": "#/components/schemas/UndeclaredView"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "applications",
-          "declared",
-          "undeclared",
-          "denied"
         ],
         "type": "object"
       },
@@ -6106,6 +6128,46 @@
         },
         "required": [
           "machine_id"
+        ],
+        "type": "object"
+      },
+      "MachineNamesView": {
+        "description": "Everything a machine's section of one kind needs: the same shape for both\nkinds, so one component serves them.",
+        "properties": {
+          "applications": {
+            "description": "The machine's applications, to declare a DNS name on.",
+            "items": {
+              "$ref": "#/components/schemas/MachineApplicationView"
+            },
+            "type": "array"
+          },
+          "declared": {
+            "description": "The DNS names its applications declare for the kind, by name.",
+            "items": {
+              "$ref": "#/components/schemas/MachineDeclaredView"
+            },
+            "type": "array"
+          },
+          "denied": {
+            "description": "The DNS names denied to it for the kind.",
+            "items": {
+              "$ref": "#/components/schemas/DeniedView"
+            },
+            "type": "array"
+          },
+          "undeclared": {
+            "description": "Its requests of the kind that resolved to no single application and still\ncount.",
+            "items": {
+              "$ref": "#/components/schemas/UndeclaredView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "applications",
+          "declared",
+          "undeclared",
+          "denied"
         ],
         "type": "object"
       },
@@ -6782,10 +6844,10 @@
         "type": "object"
       },
       "NameView": {
-        "description": "A name a server has registered, and how far Canopy has got with it.",
+        "description": "A DNS name an application holds for addresses, and how far Canopy has got\nwith it.",
         "properties": {
           "addresses": {
-            "description": "The addresses the server asked to be reachable at.",
+            "description": "The addresses the application asked to be reachable at.",
             "items": {
               "type": "string"
             },
@@ -6808,7 +6870,7 @@
             "type": "string"
           },
           "published": {
-            "description": "Whether the zone has caught up with what the server asked for.",
+            "description": "Whether the zone has caught up with what the application asked for.",
             "type": "boolean"
           },
           "published_addresses": {
@@ -6826,11 +6888,11 @@
             ]
           },
           "within_domains": {
-            "description": "Whether the name lies at or beneath a domain the application's group\ncontrols. An operator may declare one that does not, ahead of the group\nclaiming its domain; nothing is published or certified for it until then.",
+            "description": "Whether the name lies at or beneath a domain the application's group\ncontrols. An operator may declare one that does not, ahead of the group\nclaiming its domain; nothing is published for it until then.",
             "type": "boolean"
           },
           "zone": {
-            "description": "Apex of the managed zone covering this name, or null where no configured\nzone does — in which case Canopy can publish nothing for it.",
+            "description": "Apex of the managed zone covering this name, or null where no configured\nzone does, in which case Canopy can publish nothing for it.",
             "type": [
               "string",
               "null"
@@ -7568,14 +7630,14 @@
         "type": "object"
       },
       "PauseArgs": {
-        "description": "Why a server is being paused.",
+        "description": "Why an application is being paused.",
         "properties": {
           "reason": {
             "description": "Why, recorded so whoever finds the pause later knows what it was for.",
             "type": "string"
           },
           "server_id": {
-            "description": "The server to pause.",
+            "description": "The application to pause.",
             "format": "uuid",
             "type": "string"
           }
@@ -7584,6 +7646,33 @@
           "server_id",
           "reason"
         ],
+        "type": "object"
+      },
+      "PauseView": {
+        "description": "That an application is paused, and who paused it and why.",
+        "properties": {
+          "paused_at": {
+            "description": "When the pause was set.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "paused_by": {
+            "description": "Who set it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "description": "Why it was set.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
         "type": "object"
       },
       "PendingRequestRow": {
@@ -12044,10 +12133,15 @@
         "type": "object"
       },
       "UndeclaredNoticeView": {
-        "description": "How many undeclared requests one machine has.",
+        "description": "How many undeclared requests one machine has, of each kind.",
         "properties": {
-          "count": {
-            "description": "How many of its requests are waiting.",
+          "addresses": {
+            "description": "How many of its address requests are waiting.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "certificates": {
+            "description": "How many of its certificate requests are waiting.",
             "format": "int64",
             "type": "integer"
           },
@@ -12079,7 +12173,8 @@
         "required": [
           "machine_id",
           "machine_name",
-          "count"
+          "addresses",
+          "certificates"
         ],
         "type": "object"
       },
@@ -12098,12 +12193,8 @@
         "type": "object"
       },
       "UndeclaredView": {
-        "description": "A request the machine made that resolved to no single application.",
+        "description": "A request of the section's kind that the machine made and that resolved to no\nsingle application.",
         "properties": {
-          "asked_for": {
-            "$ref": "#/components/schemas/AskedFor",
-            "description": "What the latest refused request was for."
-          },
           "first_asked_at": {
             "description": "When the machine first asked.",
             "type": "string"
@@ -12119,7 +12210,6 @@
         },
         "required": [
           "name",
-          "asked_for",
           "first_asked_at",
           "last_asked_at"
         ],
@@ -14791,7 +14881,7 @@
     },
     "/api/certificates/declare": {
       "post": {
-        "description": "A declaration is what an address registration or a certificate request from\nthe machine is resolved against, so it is how a box running several workloads\ngets its requests routed to the right one. It carries no addresses; the\napplication registers those itself.\n\nDeclaring a name the same application already holds changes nothing. A name\nanother application holds is refused, and the refusal names the holder so an\noperator can see what to release first.",
+        "description": "A declaration is what a certificate request from the machine is resolved\nagainst, so it is how a box running several workloads gets its requests\nrouted to the right one, and it is what Canopy renews and alerts for. It is\nnot an order: the application requests the certificate itself.\n\nDeclaring a DNS name the same application already holds for certificates\nchanges nothing. A DNS name another application holds, for either kind, is\nrefused, and the refusal names the holder so an operator can see what to\nrelease first.",
         "operationId": "certificates_declare",
         "requestBody": {
           "content": {
@@ -14808,7 +14898,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NameView"
+                  "$ref": "#/components/schemas/CertificateNameView"
                 }
               }
             },
@@ -14832,7 +14922,7 @@
                 }
               }
             },
-            "description": "Another application already declares this name."
+            "description": "Another application already declares this DNS name."
           }
         },
         "security": [
@@ -14840,7 +14930,7 @@
             "tailscale-admin": []
           }
         ],
-        "summary": "Declare that an application serves a name.",
+        "summary": "Declare that an application holds a DNS name for certificates.",
         "tags": [
           "certificates"
         ],
@@ -14849,7 +14939,7 @@
     },
     "/api/certificates/deny": {
       "post": {
-        "description": "Every address and certificate request about it from that machine is then\nrefused as denied, and is not recorded, so it raises no notice. Refused while\none of the machine's applications declares the name.",
+        "description": "Every certificate request about it from that machine is then refused as\ndenied, and is not recorded, so it raises no notice. Address requests about\nit are unaffected. Refused while one of the machine's applications declares\nthe DNS name for certificates.",
         "operationId": "certificates_deny",
         "requestBody": {
           "content": {
@@ -14890,7 +14980,7 @@
                 }
               }
             },
-            "description": "One of the machine's applications declares this name."
+            "description": "One of the machine's applications declares this DNS name for certificates."
           }
         },
         "security": [
@@ -14898,7 +14988,7 @@
             "tailscale-admin": []
           }
         ],
-        "summary": "Deny a DNS name to a machine.",
+        "summary": "Deny a DNS name to a machine for certificates.",
         "tags": [
           "certificates"
         ],
@@ -14907,7 +14997,7 @@
     },
     "/api/certificates/for_group": {
       "post": {
-        "description": "So that whether a group's names are healthy is answerable from the\ngroup's page, without visiting each of its applications.",
+        "description": "So that whether a group's certificates are healthy is answerable from the\ngroup's page, without visiting each of its applications.",
         "operationId": "certificates_for_group",
         "requestBody": {
           "content": {
@@ -14939,7 +15029,7 @@
             "tailscale-user": []
           }
         ],
-        "summary": "The names in use under each domain a group controls, and which of them hold a\ncurrent certificate.",
+        "summary": "The DNS names declared for certificates under each domain a group controls,\nand which of them hold a current certificate.",
         "tags": [
           "certificates"
         ],
@@ -14948,7 +15038,7 @@
     },
     "/api/certificates/for_machine": {
       "post": {
-        "description": "The DNS names its applications declare, the requests it made that resolved\nto none of them, and the DNS names denied to it.",
+        "description": "The DNS names its applications declare for certificates, the certificate\nrequests it made that resolved to none of them, and the DNS names denied to\nit for certificates.",
         "operationId": "certificates_for_machine",
         "requestBody": {
           "content": {
@@ -14965,7 +15055,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MachineDnsNamesView"
+                  "$ref": "#/components/schemas/MachineNamesView"
                 }
               }
             },
@@ -14987,7 +15077,7 @@
             "tailscale-user": []
           }
         ],
-        "summary": "What a machine's page shows about its DNS names.",
+        "summary": "What a machine's TLS certificates section shows.",
         "tags": [
           "certificates"
         ],
@@ -14996,7 +15086,7 @@
     },
     "/api/certificates/for_server": {
       "post": {
-        "description": "One call rather than several, because the parts are read together and a\nhalf-loaded panel would show a certificate without the pause that explains\nwhy it is not renewing.",
+        "description": "One call rather than several, because the parts are read together and a\nhalf-loaded section would show a certificate without the pause that explains\nwhy it is not renewing.",
         "operationId": "certificates_for_server",
         "requestBody": {
           "content": {
@@ -15013,7 +15103,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApplicationNamesView"
+                  "$ref": "#/components/schemas/CertificatesView"
                 }
               }
             },
@@ -15035,7 +15125,7 @@
             "tailscale-user": []
           }
         ],
-        "summary": "Everything a server's page needs about its names and certificates.",
+        "summary": "Everything an application's TLS certificates section needs.",
         "tags": [
           "certificates"
         ],
@@ -15044,7 +15134,7 @@
     },
     "/api/certificates/lift_denial": {
       "post": {
-        "description": "The machine's requests about the name then resolve as any other's do.",
+        "description": "The machine's certificate requests about the DNS name then resolve as any\nother's do. A denial of addresses for it stands.",
         "operationId": "certificates_lift_denial",
         "requestBody": {
           "content": {
@@ -15076,60 +15166,16 @@
             "tailscale-admin": []
           }
         ],
-        "summary": "Lift a denial.",
+        "summary": "Lift a denial for certificates.",
         "tags": [
           "certificates"
         ],
         "x-canopy-safety-mode": "write"
       }
     },
-    "/api/certificates/pause": {
-      "post": {
-        "description": "Nothing already in place is withdrawn — records published stand, certificates\nheld stay held and collectable until they expire, and the group keeps\nworking exactly as it did. What stops is Canopy doing anything *new*.\n\nA second pause leaves the first in place, so the original reason and time are\nnot overwritten by a later one.",
-        "operationId": "certificates_pause",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PauseArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": ""
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ],
-        "summary": "Pause a server: Canopy makes no new changes on its behalf.",
-        "tags": [
-          "certificates"
-        ],
-        "x-canopy-danger-reasons": [
-          "unprotects"
-        ],
-        "x-canopy-safety-mode": "danger"
-      }
-    },
     "/api/certificates/release": {
       "post": {
-        "description": "What is already in place stands, as revoking a grant leaves it: the records\npublished stay published and the certificates held stay held until they\nexpire. What ends is Canopy treating the name as this application's, which\nfrees it to be declared elsewhere.",
+        "description": "What is already in place stands, as revoking a grant leaves it: certificates\nheld stay held until they expire. What ends is Canopy renewing them and\nraising them as running out, and the DNS name being this application's for\ncertificates, which frees it to be declared elsewhere once it is released for\naddresses too.",
         "operationId": "certificates_release",
         "requestBody": {
           "content": {
@@ -15161,48 +15207,7 @@
             "tailscale-admin": []
           }
         ],
-        "summary": "End an application's hold on a name.",
-        "tags": [
-          "certificates"
-        ],
-        "x-canopy-safety-mode": "write"
-      }
-    },
-    "/api/certificates/resume": {
-      "post": {
-        "description": "Only an operator can do this: Canopy never lifts a pause itself, however long\nit has been in place and however much is expiring under it.",
-        "operationId": "certificates_resume",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": ""
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ],
-        "summary": "Lift a server's pause. Work resumes where it left off.",
+        "summary": "End an application's hold on a DNS name for certificates.",
         "tags": [
           "certificates"
         ],
@@ -15323,47 +15328,6 @@
           "certificates"
         ],
         "x-canopy-safety-mode": "write"
-      }
-    },
-    "/api/certificates/undeclared_notices": {
-      "post": {
-        "description": "For the notices on the group page and the Status page. Empty when there\nare none.",
-        "operationId": "certificates_undeclared_notices",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UndeclaredNoticesArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/UndeclaredNoticeView"
-                  },
-                  "type": "array"
-                }
-              }
-            },
-            "description": ""
-          }
-        },
-        "security": [
-          {
-            "tailscale-user": []
-          }
-        ],
-        "summary": "The machines with requests waiting on a declaration.",
-        "tags": [
-          "certificates"
-        ],
-        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/commons/calendar_url": {
@@ -16311,6 +16275,467 @@
           "invalidates"
         ],
         "x-canopy-safety-mode": "danger"
+      }
+    },
+    "/api/dns_names/declare": {
+      "post": {
+        "description": "A declaration is what an address registration from the machine is resolved\nagainst, so it is how a box running several workloads gets its requests\nrouted to the right one. It carries no addresses; the application registers\nthose itself.\n\nDeclaring a DNS name the same application already holds for addresses\nchanges nothing. A DNS name another application holds, for either kind, is\nrefused, and the refusal names the holder so an operator can see what to\nrelease first.",
+        "operationId": "dns_names_declare",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeclarationArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NameView"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Another application already declares this DNS name."
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Declare that an application holds a DNS name for addresses.",
+        "tags": [
+          "dns_names"
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/dns_names/deny": {
+      "post": {
+        "description": "Every address request about it from that machine is then refused as denied,\nand is not recorded, so it raises no notice. Certificate requests about it\nare unaffected. Refused while one of the machine's applications declares the\nDNS name for addresses.",
+        "operationId": "dns_names_deny",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DenyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeniedView"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "One of the machine's applications declares this DNS name for addresses."
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Deny a DNS name to a machine for addresses.",
+        "tags": [
+          "dns_names"
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/dns_names/for_group": {
+      "post": {
+        "description": "So that whether a group's DNS names are healthy is answerable from the\ngroup's page, without visiting each of its applications.",
+        "operationId": "dns_names_for_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DomainHealthView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "The DNS names declared for addresses under each domain a group controls, and\nwhether their records are published.",
+        "tags": [
+          "dns_names"
+        ],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/dns_names/for_machine": {
+      "post": {
+        "description": "The DNS names its applications declare for addresses, the address requests it\nmade that resolved to none of them, and the DNS names denied to it for\naddresses.",
+        "operationId": "dns_names_for_machine",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineNamesView"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "What a machine's DNS names section shows.",
+        "tags": [
+          "dns_names"
+        ],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/dns_names/for_server": {
+      "post": {
+        "description": "One call rather than several, because the parts are read together and a\nhalf-loaded section would show a name without the pause that explains why it\nis not being published.",
+        "operationId": "dns_names_for_server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DnsNamesView"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "Everything an application's DNS names section needs.",
+        "tags": [
+          "dns_names"
+        ],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/dns_names/lift_denial": {
+      "post": {
+        "description": "The machine's address requests about the DNS name then resolve as any\nother's do. A denial of certificates for it stands.",
+        "operationId": "dns_names_lift_denial",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineDnsNameArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Lift a denial for addresses.",
+        "tags": [
+          "dns_names"
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/dns_names/pause": {
+      "post": {
+        "description": "Nothing already in place is withdrawn: records published stand, certificates\nheld stay held and collectable until they expire, and the group keeps\nworking exactly as it did. What stops is Canopy doing anything *new*, for\neither kind.\n\nA second pause leaves the first in place, so the original reason and time are\nnot overwritten by a later one.",
+        "operationId": "dns_names_pause",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PauseArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Pause an application: Canopy makes no new changes on its behalf.",
+        "tags": [
+          "dns_names"
+        ],
+        "x-canopy-danger-reasons": [
+          "unprotects"
+        ],
+        "x-canopy-safety-mode": "danger"
+      }
+    },
+    "/api/dns_names/release": {
+      "post": {
+        "description": "What is already in place stands, as revoking a grant leaves it: the records\npublished stay published. What ends is Canopy treating the DNS name as this\napplication's for addresses, which frees it to be declared elsewhere once it\nis released for certificates too.",
+        "operationId": "dns_names_release",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeclarationArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "End an application's hold on a DNS name for addresses.",
+        "tags": [
+          "dns_names"
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/dns_names/resume": {
+      "post": {
+        "description": "Only an operator can do this: Canopy never lifts a pause itself, however long\nit has been in place and however much is expiring under it.",
+        "operationId": "dns_names_resume",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Lift an application's pause. Work resumes where it left off.",
+        "tags": [
+          "dns_names"
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/dns_names/undeclared_notices": {
+      "post": {
+        "description": "For the notices on the group page and the Status page. Empty when there\nare none.",
+        "operationId": "dns_names_undeclared_notices",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UndeclaredNoticesArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/UndeclaredNoticeView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "The machines with requests waiting on a declaration, of either kind.",
+        "tags": [
+          "dns_names"
+        ],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/domains/claim": {
@@ -23281,7 +23706,7 @@
       "name": "bestool"
     },
     {
-      "description": "TLS certificates and public names: what each server holds, the pause and profile that govern them, and revocation.",
+      "description": "TLS certificates: the DNS names each application holds them for, what it holds, the profile that governs them, and revocation.",
       "name": "certificates"
     },
     {
@@ -23295,6 +23720,10 @@
     {
       "description": "Device registry, trust, and key management.",
       "name": "devices"
+    },
+    {
+      "description": "DNS names: the address records each application asks Canopy to publish, the requests a machine made that resolved to no application, the denials, and the pause that applies to both kinds.",
+      "name": "dns_names"
     },
     {
       "description": "Managed DNS zones and the domains each group controls.",

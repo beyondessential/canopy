@@ -10,7 +10,7 @@ Where a scenario names a machine page, the same scenario applies to the applicat
 - [ ] Hovering the expiry shows the exact instant (verifies spec: CRT#presentation)
 - [ ] A certificate with 79 days left on the application page and on the machine page shows the same wording and the same number of days, not 79 on one and 80 on the other (verifies spec: CRT#presentation)
 - [ ] A 90-day certificate with 60 days left reads calm, with 25 days left reads as due for renewal, and with 10 days left reads as urgent, matching its state chip each time (verifies spec: CRT#presentation)
-- [ ] A 6-day certificate with 2 days left reads as urgent, while a 90-day certificate with 2 days left also reads as urgent, and a 90-day certificate with 7 days left does not read as urgent (verifies spec: CRT#presentation)
+- [ ] A 6-day certificate with 2 days left reads as due for renewal, while a 90-day certificate with 2 days left reads as urgent, and a 90-day certificate with 20 days left does not read as urgent (verifies spec: CRT#presentation)
 - [ ] An expired certificate shows "expired N days ago" in the urgent colour
 - [ ] A certificate with under an hour left shows minutes and a certificate with under a day left shows hours, rounded the same way on every page
 - [ ] The expiry colour and the state chip change together when the clock crosses the renewal point

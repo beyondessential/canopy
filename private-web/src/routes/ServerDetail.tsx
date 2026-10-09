@@ -26,6 +26,7 @@ import { ChecksTable, HealthIndicator } from "../components/ChecksTable";
 import IncidentsLink from "../components/IncidentsLink";
 import ManualEventButton from "../components/ManualEventButton";
 import ServerCertificatesSection from "../components/ServerCertificatesSection";
+import ServerDnsNamesSection from "../components/ServerDnsNamesSection";
 import MaintenanceHeaderButton from "../components/MaintenanceHeaderButton";
 import MaintenanceSection from "../components/MaintenanceSection";
 import SilencedRefsSection from "../components/SilencedRefsSection";
@@ -166,6 +167,7 @@ export default function ServerDetail() {
 					tags={data.server.tags}
 				/>
 			)}
+			<ServerDnsNamesSection serverId={data.server.id} />
 			<ServerCertificatesSection serverId={data.server.id} />
 			{data.server.display_host && (
 				<Paper variant="outlined" sx={{ p: 2 }}>
