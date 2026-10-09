@@ -293,7 +293,8 @@ A snapshot that already has a verdict for the version is never due, so backups t
 A week is counted from when the last test's report reached Canopy, since a consumer's clock is not one the schedule can rest on.
 The schedule is the default; asking is for trying a version out, and for a group too large to restore weekly.
 
-An operator asks from the environment's row in the upgrades view, and the ask covers every machine whose application the plan applies to.
+An operator asks from the environment's row in the upgrades view, and the ask covers every machine a testing declaration restores whose application the plan applies to.
+A machine nothing tests is left out, since no test would ever answer its ask.
 An ask puts each of those machines on the worklist against its latest snapshot, including one whose pair is already settled, since an ask after a fix to the pipeline or to the data is a request for a new answer.
 It is answered for a machine once a verdict for that machine and version lands from a test that began after the ask, and until then the environment's row says it is waiting.
 A test begins when its consumer is first issued credentials for its run, so a run already under way when the ask is made does not answer it; a report naming no run is taken to have begun its elapsed time before it finished.

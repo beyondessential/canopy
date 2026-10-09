@@ -57,11 +57,8 @@ pub async fn request(
 	// A declaration that builds reporting schemas migrates without testing the
 	// plan, so an ask with nothing else covering the environment would wait for
 	// good.
-	if database::restore::migrating_environments(&mut conn, args.group_id)
-		.await?
-		.testing(args.rank)
-		.is_none()
-	{
+	let declared = database::restore::migrating_environments(&mut conn, args.group_id).await?;
+	if declared.testing(args.rank).is_none() {
 		return Err(AppError::BadRequest(
 			"nothing declared tests this environment's plan".into(),
 		));
@@ -70,12 +67,13 @@ pub async fn request(
 		&mut conn,
 		args.group_id,
 		args.rank,
+		&declared,
 		Some(&login),
 	)
 	.await?;
 	if made.is_empty() {
 		return Err(AppError::BadRequest(
-			"that environment has no open plan, or nothing the plan's migrations apply to".into(),
+			"that environment has no open plan, or nothing the plan's migrations apply to that a testing declaration restores".into(),
 		));
 	}
 	Ok(Json(made.len()))

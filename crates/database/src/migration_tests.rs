@@ -625,11 +625,11 @@ impl MigrationTestRequest {
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
 		rank: commons_types::server::rank::ServerRank,
+		declared: &crate::restore::MigratingEnvironments,
 		requested_by: Option<&str>,
 	) -> Result<Vec<Self>> {
 		use crate::schema::migration_test_requests::dsl;
 
-		let declared = crate::restore::migrating_environments(db, group_id).await?;
 		let mut plan_id = None;
 		let mut machines = std::collections::BTreeSet::new();
 		for application in Application::list_live_in_group(db, group_id).await? {

@@ -896,10 +896,15 @@ async fn pending(conn: &mut AsyncPgConnection, machine: Uuid, target: &Version) 
 }
 
 async fn ask(conn: &mut AsyncPgConnection, group: Uuid, rank: ServerRank) -> usize {
-	database::migration_tests::MigrationTestRequest::request_environment(conn, group, rank, None)
+	let declared = database::restore::migrating_environments(conn, group)
 		.await
-		.expect("ask")
-		.len()
+		.expect("declarations");
+	database::migration_tests::MigrationTestRequest::request_environment(
+		conn, group, rank, &declared, None,
+	)
+	.await
+	.expect("ask")
+	.len()
 }
 
 async fn on_request(conn: &mut AsyncPgConnection) {
