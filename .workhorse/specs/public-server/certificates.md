@@ -6,7 +6,7 @@ id: CRT
 
 An application asks Canopy to obtain a TLS certificate for one of its DNS names, because Canopy is the only holder of the certificate authority account and the only party that can prove control of the DNS name through the zone.
 The request is refused unless an operator has granted the application permission to obtain certificates, and is confined to DNS names within the domains the application's group controls (see [DOM](../servers/domains.md)).
-Which application a request is about, what is recorded when that cannot be settled, and how an operator declares and denies DNS names for certificates are common to addresses and are in [NAM](names.md).
+Which application a request is about, what is recorded when that cannot be settled, and how an operator declares and denies DNS names for certificates are common to addresses and are in [NAM](dns-names.md).
 Certificates are declared, requested, recorded, denied, and presented without reference to addresses: an application may hold a certificate for a DNS name it has registered no addresses for, and the reverse.
 
 ## Why Canopy issues
@@ -94,7 +94,7 @@ A certificate that is running out is a fact about the application that serves it
 It warns while there is still room to recover and fails as the remaining life runs down, and both thresholds are fractions of the certificate's own lifetime rather than fixed durations — otherwise the same alert would fire far too late for a short-lived certificate and far too early for a long-lived one.
 A certificate that has expired outright fails regardless.
 
-A paused application (see [NAM](names.md), "Pausing an application") raises none of this either, for the same reason: Canopy has been told to stop acting on its behalf, so a certificate running down is the expected consequence rather than a failure. What is reported instead is the pause, and eventually the pause having been forgotten.
+A paused application (see [NAM](dns-names.md), "Pausing an application") raises none of this either, for the same reason: Canopy has been told to stop acting on its behalf, so a certificate running down is the expected consequence rather than a failure. What is reported instead is the pause, and eventually the pause having been forgotten.
 
 Except that a certificate for a DNS name the application is no longer entitled to raises nothing at all, however far past expiry it is.
 Its group may have released the domain it sat under, its application may have released the DNS name for certificates, the application's grant may have been revoked, or the application may have been archived — and in each case Canopy deliberately stopped renewing it, so its running out is the intended outcome rather than a failure to report.
@@ -109,7 +109,7 @@ Reporting the two apart matters because they call for different people — an ap
 
 ## Presentation
 
-The TLS certificates section of an application, a machine, and a group is described in [NAM](names.md), "Presentation"; this is what it carries for certificates.
+The TLS certificates section of an application, a machine, and a group is described in [NAM](dns-names.md), "Presentation"; this is what it carries for certificates.
 
 An application presents the DNS names it declares for certificates and the certificates Canopy holds for it, each with the DNS name it covers, the profile it was issued under, its state, and how long is left before it expires.
 A request that has not yet produced a certificate presents as pending, or as failed with the reason.

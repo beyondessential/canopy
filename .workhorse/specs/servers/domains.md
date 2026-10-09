@@ -101,7 +101,7 @@ A group's domains bound what its applications can act on: an application manages
 A DNS name within another group's domain, or within no group's domain, is refused, and refused the same way in both cases: an application learns that its group does not control it, never that another group does.
 
 The group domain is therefore the whole of the authorisation: the grants say whether an application may act, and the group's domains say where.
-Which application a request is about is a separate question, answered by the declared DNS name it asks about rather than by the credential it presents (see [NAM](../public-server/names.md), "Declared DNS names").
+Which application a request is about is a separate question, answered by the declared DNS name it asks about rather than by the credential it presents (see [NAM](../public-server/dns-names.md), "Declared DNS names").
 What an application does with that is publishing the addresses its DNS name resolves to, which is [ADR](../public-server/addresses.md), and obtaining a certificate for it, which is [CRT](../public-server/certificates.md).
 
 ## Presentation

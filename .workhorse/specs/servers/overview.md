@@ -91,7 +91,7 @@ A **machine** carries the name its operator gave it, its identity, its group, it
 
 An **application** carries its type, its rank, its optional name, its public name, the URL it is reached at, the DNS names it serves at and the DNS name grants and pause state that work from them, its notes and tags, and how long it may be silent before it is considered unreachable.
 
-A DNS name an application serves at is held by that application alone across the fleet, which is what lets a request about a DNS name resolve to one application on a machine hosting several (see [NAM](../public-server/names.md), "Declared DNS names").
+A DNS name an application serves at is held by that application alone across the fleet, which is what lets a request about a DNS name resolve to one application on a machine hosting several (see [NAM](../public-server/dns-names.md), "Declared DNS names").
 Its URL is where an operator reaches it, which is a presentation concern rather than an authorisation one (see [SVC](../private-server/service-links.md)).
 
 Both carry tags and effective billing labels, so a check filed against either can be graded by policy rules against the tags of its own target.
