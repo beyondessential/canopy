@@ -123,8 +123,8 @@ The ending says whether an operator lifted the window or its expected end passed
 ## Presentation
 
 A target under a window presents its own health and reachability, and is marked as under maintenance wherever they are presented as they currently stand, distinguishably from a machine nobody is watching (see [CHK](checks.md), "Monitoring gate").
-The mark is drawn at the grain the window is over, so an environment's window does not read as every machine in it having one of its own: an application's dot, a machine's enclosure, an environment's row, a group's card.
-A dot is hollowed rather than patterned or cut: a pattern needs room to resolve, and a cut is what marks a target nobody is watching, which at a dot's size would differ only by its angle.
+The mark is drawn at the grain the window is over, so an environment's window does not read as every machine in it having one of its own: an application's dot, a machine's mark, an environment's row, a group's card.
+An application's dot is hollowed rather than patterned or cut: a pattern needs room to resolve, and a cut is what marks a target nobody is watching, which at a dot's size would differ only by its angle.
 Every target the window reaches has its health muted, marked or not, and carries the window and when it ends, so a failing target under maintenance is not read as one nobody has noticed.
 A target serving out the settle period carries the mark still, distinguished from one whose window holds, so lifting a window shows on the target rather than only on the window.
 What a move leaves uncovered settles at the grain the window was over before it moved, so a group's window narrowed to one environment marks the group's card as settling and that environment's row as held.

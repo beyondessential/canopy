@@ -317,22 +317,34 @@ No surface presents one source's checks in isolation, and none exposes a source'
 A status mark says one thing about one subject, and which element carries it says what the subject is.
 
 An application's mark carries that application's state alone: healthy, warning where a check is failing but it is overall serving, failing, or never reported.
-A machine's mark encloses the marks of the applications on it and carries the box's own state.
+A machine's mark carries the box's own state: fine, degraded where its own checks are failing or warning, unreachable, or never reported.
+
+A machine's mark takes one of two forms, depending on whether the applications on it are listed beside it.
+Where they are not, as on a group's status card, the machine's mark encloses the marks of the applications on it.
 So a box carrying two applications is one enclosure holding two marks, and a box carrying one is still an enclosure — an enclosure means nothing on its own, only its contents do.
+The enclosure is an outline over a pale wash, so the marks inside it stay the loudest thing in it.
+Where the applications are listed beneath the machine, as in a group's tree of its machines (see [FLT](../servers/overview.md), "Navigating the two grains"), the machine's mark stands alone, since enclosing their marks would repeat what the rows beneath already say.
+That mark is a solid dot filled in the box's colour, its edge a shade darker, and the size of an enclosure holding one mark, so the machine's row is no shorter for it.
+A fine machine is green there: with nothing inside it, there is nothing for it to stay quieter than.
+
+A machine that has never reported is drawn empty, filled with the surface it sits on and edged with a dotted line, in either form.
+So a box nothing has yet been heard from reads as not yet filled in, rather than as faded, which is how a target a window reaches is drawn.
 
 A mark carries no second encoding for a second subject.
 Reachability was once carried alongside health on the application's mark, from when an application and the box it runs on were one record; it is the machine's, and it is on the machine's enclosure.
 
-Severity reads from colour and subject from shape, so a colour means the same thing wherever it appears.
+Severity reads from colour and subject from shape or position, so a colour means the same thing wherever it appears.
 A degraded machine is distinguished from a degraded application, since one affects everything on the box and the other affects one workload.
 
 An incident is on one of a group's environments (see [INC](incidents.md)), so wherever a group's environments are drawn the incident is marked on the one it is on.
 The group's own mark stands for whichever of its environments is in trouble, so a group with an incident anywhere in it reads as such before any environment is read.
 Where several of its environments have an incident at once, the group's mark takes the state of the most serious of them.
 
-A maintenance window is declared over an application, a machine, a group, or one of a group's environments (see [MNT](maintenance.md)), and is marked where that grain is drawn: an application's window on its mark, a machine's on its enclosure.
+A maintenance window is declared over an application, a machine, a group, or one of a group's environments (see [MNT](maintenance.md)), and is marked where that grain is drawn: an application's window on its mark, a machine's on its mark in either form.
 Where a window reaches a target it was not declared over, that target is muted without taking the mark, the window's consequence for it rather than a window of its own.
 A window's mark is distinguished from the mark for a target nobody is watching, so deliberate, temporary work does not read as neglect.
+
+The status legend accompanies the fleet's status page and a cluster's page.
 
 ## Operator controls
 

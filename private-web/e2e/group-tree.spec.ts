@@ -6,6 +6,7 @@ import {
 	seedMachine,
 	seedServer,
 	seedServerGroup,
+	seedMachineReport,
 } from "./seed";
 
 /// Every page in a group ends with the same picture of it: rank, then the
@@ -205,5 +206,117 @@ test.describe("the group's tree on the detail pages", () => {
 				.locator("xpath=..")
 				.getByTestId("status-dot"),
 		).toHaveCount(0);
+	});
+
+	/// The rows beneath a box already list its applications, so the box's mark
+	/// stands alone rather than enclosing their dots.
+	///
+	/// spec: CHK#presentation
+	test("a machine's row draws the machine alone, with the applications on their own rows", async ({
+		page,
+		sql,
+	}) => {
+		const { group, shared } = await seedTree(sql);
+
+		await page.goto(`/fleet/groups/${group.id}`);
+
+		const block = page
+			.getByTestId("tree-block")
+			.filter({ has: page.locator(`a[href="/fleet/machines/${shared.id}"]`) });
+		const head = block.getByTestId("tree-machine");
+		await expect(head.getByTestId("machine-mark")).toHaveCount(1);
+		await expect(head.getByTestId("status-dot")).toHaveCount(0);
+		await expect(block.getByTestId("tree-application")).toHaveCount(2);
+		await expect(
+			block.getByTestId("tree-application").getByTestId("status-dot"),
+		).toHaveCount(2);
+	});
+
+	/// A fine box is green when nothing is enclosed, and the mark is the size
+	/// of an enclosure holding one dot so the row is no shorter for it.
+	///
+	/// spec: CHK#presentation
+	test("a reporting machine's mark is a solid green dot", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "fine-group" });
+		const server = await seedServer(sql, {
+			name: "fine-app",
+			groupId: group.id,
+			rank: "production",
+		});
+		await seedMachineReport(sql, { machineId: server.machineId });
+
+		await page.goto(`/fleet/groups/${group.id}`);
+
+		const mark = page.getByTestId("machine-mark");
+		await expect(mark).toHaveAttribute("data-state", "fine");
+		const drawn = await mark.evaluate((el) => {
+			const style = getComputedStyle(el);
+			const box = el.getBoundingClientRect();
+			return {
+				fill: style.backgroundColor,
+				edge: style.borderTopColor,
+				radius: style.borderTopLeftRadius,
+				width: box.width,
+				height: box.height,
+			};
+		});
+		expect(drawn.fill).toBe("rgb(46, 125, 50)");
+		expect(drawn.edge).not.toBe(drawn.fill);
+		expect(drawn.radius).toBe("50%");
+		expect(drawn.width).toBe(drawn.height);
+		expect(drawn.width).toBeCloseTo(22.8, 0);
+	});
+
+	/// A box nothing has been heard from is drawn empty in either form: the
+	/// surface it sits on, edged with a dotted line.
+	///
+	/// spec: CHK#presentation
+	test("a machine that has never reported is drawn empty with a dotted edge", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "quiet-group" });
+		await seedMachine(sql, { name: "quiet-box", groupId: group.id });
+
+		await page.goto(`/fleet/groups/${group.id}`);
+
+		const mark = page.getByTestId("machine-mark");
+		await expect(mark).toHaveAttribute("data-state", "never");
+		const drawn = await mark.evaluate((el) => {
+			const style = getComputedStyle(el);
+			return {
+				style: style.borderTopStyle,
+				width: style.borderTopWidth,
+				edge: style.borderTopColor,
+			};
+		});
+		expect(drawn.style).toBe("dotted");
+		expect(drawn.width).toBe("2px");
+		expect(drawn.edge).toBe("rgba(0, 0, 0, 0.87)");
+	});
+
+	/// The legend belongs to the status page and a cluster's page; the machine
+	/// and application pages carry the tree without it.
+	///
+	/// spec: CHK#presentation
+	test("the machine and application pages carry no legend", async ({
+		page,
+		sql,
+	}) => {
+		const { shared, centralId } = await seedTree(sql);
+
+		for (const path of [
+			`/fleet/machines/${shared.id}`,
+			`/fleet/applications/${centralId}`,
+		]) {
+			await page.goto(path);
+			await expect(page.getByTestId("group-tree")).toBeVisible();
+			await expect(page.getByText("Never reported")).toHaveCount(0);
+			await expect(page.getByTestId("maintenance-legend")).toHaveCount(0);
+			await expect(page.getByTestId("maintenance-dot-key")).toHaveCount(0);
+		}
 	});
 });
