@@ -41,7 +41,7 @@ const ASKED_FOR_LABELS: Record<AskedFor, string> = {
 ///
 /// Absent altogether on a machine with nothing to show, so a box that never
 /// asks about a DNS name carries no empty section.
-// spec: NAM#on-a-machine
+// spec: DNS#on-a-machine
 export default function MachineDnsNamesSection({
 	machineId,
 	isAdmin,

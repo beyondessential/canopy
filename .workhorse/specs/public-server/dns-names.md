@@ -1,5 +1,5 @@
 ---
-id: NAM
+id: DNS
 ---
 
 # Application DNS names

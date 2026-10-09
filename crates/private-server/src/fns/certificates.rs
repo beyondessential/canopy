@@ -70,7 +70,7 @@ pub struct NameView {
 	/// Whether the name lies at or beneath a domain the application's group
 	/// controls. An operator may declare one that does not, ahead of the group
 	/// claiming its domain; nothing is published or certified for it until then.
-	// spec: NAM#on-an-application
+	// spec: DNS#on-an-application
 	pub within_domains: bool,
 }
 
@@ -279,7 +279,7 @@ pub struct DomainHealthView {
 ///
 /// So that whether a group's names are healthy is answerable from the
 /// group's page, without visiting each of its applications.
-// spec: NAM#on-a-group
+// spec: DNS#on-a-group
 #[utoipa::path(
 	post,
 	path = "/for_group",
@@ -512,7 +512,7 @@ pub struct PauseArgs {
 ///
 /// A second pause leaves the first in place, so the original reason and time are
 /// not overwritten by a later one.
-// spec: NAM#pausing-an-application
+// spec: DNS#pausing-an-application
 #[utoipa::path(
 	post,
 	path = "/pause",
@@ -537,7 +537,7 @@ pub async fn pause(
 ///
 /// Only an operator can do this: Canopy never lifts a pause itself, however long
 /// it has been in place and however much is expiring under it.
-// spec: NAM#pausing-an-application
+// spec: DNS#pausing-an-application
 #[utoipa::path(
 	post,
 	path = "/resume",
@@ -658,7 +658,7 @@ pub struct DeclarationArgs {
 /// Declaring a name the same application already holds changes nothing. A name
 /// another application holds is refused, and the refusal names the holder so an
 /// operator can see what to release first.
-// spec: NAM#declared-dns-names
+// spec: DNS#declared-dns-names
 #[utoipa::path(
 	post,
 	path = "/declare",
@@ -690,7 +690,7 @@ pub async fn declare(
 /// published stay published and the certificates held stay held until they
 /// expire. What ends is Canopy treating the name as this application's, which
 /// frees it to be declared elsewhere.
-// spec: NAM#declared-dns-names
+// spec: DNS#declared-dns-names
 #[utoipa::path(
 	post,
 	path = "/release",
@@ -807,7 +807,7 @@ pub struct MachineDnsNamesView {
 ///
 /// The DNS names its applications declare, the requests it made that resolved
 /// to none of them, and the DNS names denied to it.
-// spec: NAM#on-a-machine
+// spec: DNS#on-a-machine
 #[utoipa::path(
 	post,
 	path = "/for_machine",
@@ -908,7 +908,7 @@ pub struct UndeclaredNoticeView {
 ///
 /// For the notices on the group page and the Status page. Empty when there
 /// are none.
-// spec: NAM#notices
+// spec: DNS#notices
 #[utoipa::path(
 	post,
 	path = "/undeclared_notices",
@@ -956,7 +956,7 @@ pub struct DenyArgs {
 /// Every address and certificate request about it from that machine is then
 /// refused as denied, and is not recorded, so it raises no notice. Refused while
 /// one of the machine's applications declares the name.
-// spec: NAM#denied-dns-names
+// spec: DNS#denied-dns-names
 #[utoipa::path(
 	post,
 	path = "/deny",
@@ -1001,7 +1001,7 @@ pub struct MachineDnsNameArgs {
 /// Lift a denial.
 ///
 /// The machine's requests about the name then resolve as any other's do.
-// spec: NAM#denied-dns-names
+// spec: DNS#denied-dns-names
 #[utoipa::path(
 	post,
 	path = "/lift_denial",

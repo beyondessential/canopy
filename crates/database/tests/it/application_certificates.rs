@@ -1270,7 +1270,7 @@ async fn a_renewal_in_flight_does_not_stop_the_old_chain_being_collectable() {
 
 /// An operator ties a name to the software answering on it, so a box running
 /// several workloads has its later requests routed to the right one.
-// spec: NAM#declared-dns-names
+// spec: DNS#declared-dns-names
 #[tokio::test(flavor = "multi_thread")]
 async fn declaring_a_name_ties_it_to_one_application() {
 	TestDb::run(|mut conn, _url| async move {
@@ -1298,7 +1298,7 @@ async fn declaring_a_name_ties_it_to_one_application() {
 
 /// Safe to name the holder here, and only here: an operator already sees the
 /// whole fleet, and needs to know what to release first.
-// spec: NAM#declared-dns-names
+// spec: DNS#declared-dns-names
 #[tokio::test(flavor = "multi_thread")]
 async fn declaring_a_name_another_application_holds_names_the_holder() {
 	TestDb::run(|mut conn, _url| async move {
@@ -1324,7 +1324,7 @@ async fn declaring_a_name_another_application_holds_names_the_holder() {
 
 /// Releasing withdraws nothing already in place, exactly as revoking a grant
 /// leaves it. What ends is Canopy treating the name as this application's.
-// spec: NAM#declared-dns-names
+// spec: DNS#declared-dns-names
 #[tokio::test(flavor = "multi_thread")]
 async fn releasing_a_name_leaves_its_certificates_in_place_and_frees_it() {
 	TestDb::run(|mut conn, _url| async move {
@@ -1453,7 +1453,7 @@ async fn releasing_a_name_leaves_its_certificates_in_place_and_frees_it() {
 /// The certificate path declares the name it orders for, and does so without
 /// telling a device who else holds it — the same refusal a name nobody declares
 /// gets, so the endpoint is not a directory of what other machines serve.
-// spec: NAM#declared-dns-names
+// spec: DNS#declared-dns-names
 #[tokio::test(flavor = "multi_thread")]
 async fn ordering_declares_the_name_without_naming_another_holder() {
 	TestDb::run(|mut conn, _url| async move {
@@ -1498,7 +1498,7 @@ async fn ordering_declares_the_name_without_naming_another_holder() {
 
 /// A machine's undeclared records are bounded: past the bound a new DNS name is
 /// not recorded, and one already held is still refreshed.
-// spec: NAM#undeclared-requests
+// spec: DNS#undeclared-requests
 #[tokio::test(flavor = "multi_thread")]
 async fn undeclared_records_are_bounded_per_machine() {
 	use database::dns_name_dispositions::{AskedFor, UNDECLARED_PER_MACHINE, UndeclaredDnsName};
@@ -1549,7 +1549,7 @@ async fn undeclared_records_are_bounded_per_machine() {
 
 /// The monitor's prune drops records not asked about within the lifetime and
 /// keeps the rest, whichever machine they belong to.
-// spec: NAM#undeclared-requests
+// spec: DNS#undeclared-requests
 #[tokio::test(flavor = "multi_thread")]
 async fn lapsed_undeclared_records_are_pruned() {
 	use database::dns_name_dispositions::UndeclaredDnsName;

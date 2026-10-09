@@ -80,7 +80,7 @@ impl Grant {
 ///
 /// An identity is the box's, not the software's, so the credential says which
 /// machine is asking and nothing about which workload the request concerns.
-// spec: NAM#identity-and-authorisation
+// spec: DNS#identity-and-authorisation
 async fn asking_machine(
 	conn: &mut AsyncPgConnection,
 	device_id: Uuid,
@@ -97,7 +97,7 @@ async fn asking_machine(
 /// The order is the one CRT fixes, and each step has its own problem type so a
 /// misconfiguration is diagnosable from the refusal alone rather than by reading
 /// the message. `name` is already normalised.
-// spec: NAM#identity-and-authorisation
+// spec: DNS#identity-and-authorisation
 async fn authorise(
 	conn: &mut AsyncPgConnection,
 	machine: &database::machines::Machine,
@@ -109,7 +109,7 @@ async fn authorise(
 	// A denial is an operator's decision about this box and this DNS name, so it
 	// holds however the request would otherwise resolve. The note is for
 	// operators and stays in Canopy.
-	// spec: NAM#denied-dns-names
+	// spec: DNS#denied-dns-names
 	if DeniedDnsName::get(conn, machine.id, name).await?.is_some() {
 		return Err(AppError::DnsNameDenied(name.to_owned()));
 	}
@@ -176,7 +176,7 @@ async fn authorise(
 /// The record is for operators, not part of the answer, so failing to keep it
 /// is logged and the request's own outcome stands: an undeclared refusal stays
 /// distinguishable, and a request already carried out is not reported failed.
-// spec: NAM#undeclared-requests
+// spec: DNS#undeclared-requests
 async fn settle_undeclared<T>(
 	conn: &mut AsyncPgConnection,
 	machine_id: Uuid,
@@ -214,7 +214,7 @@ async fn settle_undeclared<T>(
 /// here would let an agent tell the two apart by which refusal it gets, making
 /// this endpoint a directory of what other machines serve. Declaring the name
 /// is what refuses it, as undeclared, and only once every earlier check passed.
-// spec: NAM#resolving-the-application
+// spec: DNS#resolving-the-application
 async fn resolve(
 	conn: &mut AsyncPgConnection,
 	machine: &database::machines::Machine,
@@ -329,7 +329,7 @@ pub struct Entitlements {
 	/// describe a single-application machine, which is every machine today;
 	/// on a machine hosting several they are left at their defaults and this
 	/// list is the answer.
-	// spec: NAM#what-an-application-may-act-on
+	// spec: DNS#what-an-application-may-act-on
 	#[serde(default)]
 	pub applications: Vec<ApplicationEntitlements>,
 }
@@ -438,7 +438,7 @@ pub async fn entitlements(
 /// status learns of a new domain without asking. The answer carries an entry
 /// per application on the box; the flat fields describe `server` itself, which
 /// on a single-application machine is the whole answer.
-// spec: NAM#what-an-application-may-act-on
+// spec: DNS#what-an-application-may-act-on
 pub async fn entitlements_for(
 	conn: &mut AsyncPgConnection,
 	machine: &database::machines::Machine,
@@ -527,7 +527,7 @@ pub struct RegisterNameArgs {
 	/// The type of the application on this machine the name is for, where the
 	/// machine hosts several and the agent knows which serves it. Unneeded once
 	/// the name is declared, and on a machine hosting one application.
-	// spec: NAM#resolving-the-application
+	// spec: DNS#resolving-the-application
 	#[serde(default)]
 	pub application_type: Option<ApplicationType>,
 }
@@ -621,7 +621,7 @@ pub struct RequestCertificateArgs {
 	/// The type of the application on this machine the name is for, where the
 	/// machine hosts several and the agent knows which serves it. Unneeded once
 	/// the name is declared, and on a machine hosting one application.
-	// spec: NAM#resolving-the-application
+	// spec: DNS#resolving-the-application
 	#[serde(default)]
 	pub application_type: Option<ApplicationType>,
 }

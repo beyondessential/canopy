@@ -12,7 +12,7 @@ type Place = { key: string; label: string; to: string | null; count: number };
 /// since what it asks for is an operator's decision rather than a response to
 /// something down. On a group's page it names that group's machines; on the
 /// Status page it names the groups.
-// spec: NAM#notices
+// spec: DNS#notices
 export default function UndeclaredDnsNamesNotice({
 	groupId,
 	refreshKey,

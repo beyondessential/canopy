@@ -17,19 +17,19 @@ Where a scenario names a machine page, the same scenario applies to the applicat
 
 ## Declarations
 
-- [ ] An operator declares a name for addresses on an application; it appears in that application's DNS names section and not in its TLS certificates section (verifies spec: NAM#declared-dns-names)
-- [ ] An operator declares a name for certificates on an application; it appears in the TLS certificates section and not in the DNS names section (verifies spec: NAM#declared-dns-names)
+- [ ] An operator declares a name for addresses on an application; it appears in that application's DNS names section and not in its TLS certificates section (verifies spec: DNS#declared-dns-names)
+- [ ] An operator declares a name for certificates on an application; it appears in the TLS certificates section and not in the DNS names section (verifies spec: DNS#declared-dns-names)
 - [ ] Declaring the same name for both kinds on the same application succeeds and shows in both sections
-- [ ] Declaring a name for certificates on application B while application A holds it for addresses is refused, and the refusal names A (verifies spec: NAM#declared-dns-names)
+- [ ] Declaring a name for certificates on application B while application A holds it for addresses is refused, and the refusal names A (verifies spec: DNS#declared-dns-names)
 - [ ] Declaring a name for addresses on application B while application A holds it for certificates is refused, and the refusal names A
-- [ ] Releasing a name for certificates leaves its address declaration in place and stops its certificates being renewed (verifies spec: NAM#declared-dns-names)
+- [ ] Releasing a name for certificates leaves its address declaration in place and stops its certificates being renewed (verifies spec: DNS#declared-dns-names)
 - [ ] After releasing a name for its last kind, another application can declare it for either kind
 - [ ] Releasing a name for addresses leaves published records published and its certificates held
 - [ ] A name outside every domain the group controls can be declared for either kind and shows flagged as outside the group's domains in the matching section
 
 ## Resolution
 
-- [ ] A certificate request about a name an application on the machine holds only for addresses resolves to that application and adds the certificate declaration, given the TLS grant (verifies spec: NAM#resolving-the-application)
+- [ ] A certificate request about a name an application on the machine holds only for addresses resolves to that application and adds the certificate declaration, given the TLS grant (verifies spec: DNS#resolving-the-application)
 - [ ] The same request from an application without the TLS grant is refused for the missing grant and adds no declaration
 - [ ] An address registration about a name held only for certificates resolves the same way, given the DNS grant
 - [ ] A request about a name another application on a different machine holds is refused as undeclared, for either kind, with the same refusal as a name nobody holds
@@ -37,7 +37,7 @@ Where a scenario names a machine page, the same scenario applies to the applicat
 
 ## Undeclared requests
 
-- [ ] A machine asking for a certificate for an undeclared name gets one record of kind certificate, shown only in the TLS certificates section (verifies spec: NAM#undeclared-requests)
+- [ ] A machine asking for a certificate for an undeclared name gets one record of kind certificate, shown only in the TLS certificates section (verifies spec: DNS#undeclared-requests)
 - [ ] The same machine then asking for addresses for that name gets a second record of kind addresses, shown only in the DNS names section, and the first record is unchanged
 - [ ] Asking again for the same kind updates the existing record's last-asked time rather than adding a row
 - [ ] Declaring the name for certificates clears the certificate record and leaves the address record
@@ -47,7 +47,7 @@ Where a scenario names a machine page, the same scenario applies to the applicat
 
 ## Denials
 
-- [ ] Denying a name for certificates refuses certificate requests about it as denied and leaves address requests about it unrefused (verifies spec: NAM#denied-dns-names)
+- [ ] Denying a name for certificates refuses certificate requests about it as denied and leaves address requests about it unrefused (verifies spec: DNS#denied-dns-names)
 - [ ] Denying a name for addresses refuses address requests as denied and leaves certificate requests unrefused
 - [ ] A request refused as denied records no undeclared record
 - [ ] Declaring the name for certificates lifts the certificate denial and leaves an address denial of the same name standing
@@ -57,7 +57,7 @@ Where a scenario names a machine page, the same scenario applies to the applicat
 
 ## Machine page
 
-- [ ] A machine with only certificate activity shows a TLS certificates section and no DNS names section (verifies spec: NAM#on-a-machine)
+- [ ] A machine with only certificate activity shows a TLS certificates section and no DNS names section (verifies spec: DNS#on-a-machine)
 - [ ] A machine with only address activity shows a DNS names section and no TLS certificates section
 - [ ] The DNS names section never shows a certificate state, an expiry, or a certificate-kind request or denial
 - [ ] The TLS certificates section never shows addresses, published state, or an address-kind request or denial
@@ -69,7 +69,7 @@ Where a scenario names a machine page, the same scenario applies to the applicat
 
 ## Group page
 
-- [ ] Under each domain, the DNS names section lists names declared for addresses beneath it with whether their records are published, and shows no certificate information (verifies spec: NAM#on-a-group)
+- [ ] Under each domain, the DNS names section lists names declared for addresses beneath it with whether their records are published, and shows no certificate information (verifies spec: DNS#on-a-group)
 - [ ] Under each domain, the TLS certificates section lists names declared for certificates beneath it with whether each holds a current certificate, and shows no address information
 - [ ] A name declared for both kinds appears under both sections
 
@@ -82,7 +82,7 @@ Where a scenario names a machine page, the same scenario applies to the applicat
 
 ## Entitlements
 
-- [ ] The entitlements answer lists the names an application declares for addresses and for certificates apart (verifies spec: NAM#what-an-application-may-act-on)
+- [ ] The entitlements answer lists the names an application declares for addresses and for certificates apart (verifies spec: DNS#what-an-application-may-act-on)
 - [ ] An application with no declarations of either kind still gets an empty entry rather than an error
 
 ## Migration

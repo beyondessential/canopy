@@ -6,7 +6,7 @@ id: ADR
 
 An application asks Canopy to publish the address records that make one of its DNS names resolve, because Canopy is the only holder of write access to the zone.
 The request is refused unless an operator has granted the application permission to manage its own DNS records, and is confined to DNS names within the domains the application's group controls (see [DOM](../servers/domains.md)).
-Which application a request is about, what is recorded when that cannot be settled, and how an operator declares and denies DNS names for addresses are common to certificates and are in [NAM](dns-names.md).
+Which application a request is about, what is recorded when that cannot be settled, and how an operator declares and denies DNS names for addresses are common to certificates and are in [DNS](dns-names.md).
 Addresses are declared, requested, recorded, denied, and presented without reference to certificates: an application may register addresses for a DNS name it holds no certificate for, and the reverse.
 
 ## Registering
@@ -23,7 +23,7 @@ A DNS name's addresses are the addresses of the one application that holds it fo
 
 ## Presentation
 
-The DNS names section of an application, a machine, and a group is described in [NAM](dns-names.md), "Presentation"; this is what it carries for addresses.
+The DNS names section of an application, a machine, and a group is described in [DNS](dns-names.md), "Presentation"; this is what it carries for addresses.
 
 An application presents the DNS names it declares for addresses, with the addresses published for each and whether the zone has caught up with what it asked for.
 A declared DNS name with no addresses registered presents as declared without addresses, distinct from one whose addresses are being withdrawn.
