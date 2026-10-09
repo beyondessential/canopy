@@ -27,7 +27,7 @@ use database::{
 	diesel_async::{AsyncConnection, AsyncPgConnection},
 	issues::{
 		CheckGrading, CheckOutcome, CheckStateStamp, GradedCheck, GradingContext, Issue, NewEvent,
-		ReportWording, ReportedCheck, Scope, grade_instances, is_health_structure,
+		ReportWording, ReportedCheck, Scope, grade_instances, is_health_structure, settle_order,
 	},
 	machines::Machine,
 	silenced_refs::{silenced_health_checks_of_application, silenced_health_checks_of_machine},
@@ -1261,20 +1261,18 @@ async fn file_health_events(
 	// contribution, or counts as a warning when there was nothing to
 	// retain (broken contributes as a warning in the rollups).
 	//
-	// Degraded checks file before recoveries: when one failure swaps for
+	// Failures file first (see `settle_order`): when one failure swaps for
 	// another in a single push, the incoming failure must join the open
-	// incident before the outgoing one leaves, or the incident closes
-	// and reopens as two.
+	// incident before the outgoing one ends, whether it recovers or lessens
+	// to a warning, or the incident closes and reopens as two.
 	let degraded = |g: &GradedCheck| {
 		matches!(
 			g.effective,
 			CheckResult::Warning | CheckResult::Failed | CheckResult::Broken
 		)
 	};
-	let filing_order = effective
-		.iter()
-		.filter(|(_, g)| degraded(g))
-		.chain(effective.iter().filter(|(_, g)| !degraded(g)));
+	let mut filing_order: Vec<_> = effective.iter().collect();
+	filing_order.sort_by_key(|(_, g)| settle_order(g.effective));
 	for (check, graded) in filing_order {
 		let on_machine = on_machine(check);
 		let was_active = if on_machine {

@@ -16,6 +16,11 @@ Canopy's own checks keep their filer's message, which describes the observation 
 Membership gets two fixes independent of policy:
 a member whose failure ends without leaving (failed to warning) now lets the incident close or linger once no effective failure is left, and a re-grade that makes a live member's failure escalating escalates the incident once.
 
+A state filed before plain checks kept their inputs is re-graded only where no rule reads `status.*`, since graded as if its report had none a rule that held its failure would stop matching; the target's tags are loaded for it only when a rule reads them.
+
+When several states settle at once (a push, a re-grade, the deferred re-evaluation queue), failures settle first, then warnings, then recoveries (`settle_order`): a failure lessening in place now ends it, so a fresh failure has to join before the lessened one settles or an incident with no linger window closes and reopens.
+A re-grade takes every target lock it will need up front, in group order, so two concurrent saves over overlapping targets cannot take them in opposite orders.
+
 A broken state retaining a failure keeps it through a re-grade, because the state does not record which definite result it retained; its next report settles it.
 
 ## Checklist
@@ -27,3 +32,4 @@ A broken state retaining a failure keeps it through a re-grade, because the stat
 - [x] `regrade_check_states` for one catalog entry, sharing the grading core with `regrade_instanced_states`; only changed states are written and re-evaluated
 - [x] Run it from `CheckPolicy::update` and `CheckPolicy::update_rules` in the same transaction as the save
 - [x] Tests (database and public-server crates) and test-cases file
+- [x] Settle failures first everywhere several states settle together; lock a re-grade's targets up front; leave legacy states a status rule reads; skip resolved states

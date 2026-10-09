@@ -2004,6 +2004,21 @@ pub async fn regrade_instanced_states(
 	Ok(states)
 }
 
+/// Where a check state whose effective result is now `effective` comes when
+/// several settle their incident membership at once: failures, then the rest
+/// of trouble, then everything else.
+///
+/// A failure has to join before another ends, or an incident one failure swaps
+/// for another in closes and reopens; and a failure lessening to a warning ends
+/// as surely as one recovering does, so it waits behind the failures too.
+pub fn settle_order(effective: CheckResult) -> u8 {
+	match effective {
+		CheckResult::Failed => 0,
+		CheckResult::Warning | CheckResult::Broken => 1,
+		CheckResult::Passed | CheckResult::Skipped => 2,
+	}
+}
+
 /// Grade every state of one catalog entry again through its policy as it now
 /// stands, after the policy changed, and settle their incident membership on
 /// the result (see [`regrade_states`]).
@@ -2025,6 +2040,9 @@ pub async fn regrade_check_states(
 		.filter(crate::check_policies::states_of_entry(
 			source, namespace, check_name,
 		))
+		// A resolved state counts toward nothing until its check reports
+		// trouble again, which grades it afresh.
+		.filter(issues::resolved_at.is_null())
 		.load(conn)
 		.await?;
 	regrade_states(conn, &mut states, source, namespace, check_name).await
@@ -2040,9 +2058,9 @@ pub async fn regrade_check_states(
 /// result and fields, and the inputs its last filing gave the rules
 /// ([`GradingInputs`]: the report's fields and the target's tags), so the
 /// policy is the only thing that changes. A plain state filed before those
-/// inputs were kept reads the target's tags as they stand and no report
-/// fields, until its next report. A state never graded (no observed result)
-/// is left alone.
+/// inputs were kept is left alone if a rule reads the report's fields, and
+/// otherwise reads the target's tags as they stand, until its next report
+/// keeps them. A state never graded (no observed result) is left alone.
 ///
 /// A re-grade is written back without counting as an observation: its
 /// stability record and when it was last reported are untouched. A reported
@@ -2053,9 +2071,9 @@ pub async fn regrade_check_states(
 /// until its next sweep restores its own; a state brought back into trouble
 /// presents the title its last filing gave it.
 ///
-/// States brought into trouble are settled before those leaving it, as a
-/// push files them, so an incident one failure swaps for another in is not
-/// closed and reopened. `states` is updated in place to what each now is.
+/// States are settled in [`settle_order`], as a push files them, so an
+/// incident one failure swaps for another in is not closed and reopened.
+/// `states` is updated in place to what each now is.
 ///
 /// `fallback_check` names the check for a state that does not record it.
 async fn regrade_states(
@@ -2065,7 +2083,7 @@ async fn regrade_states(
 	namespace: &Namespace,
 	fallback_check: &str,
 ) -> Result<()> {
-	use crate::check_policies::{CheckPolicy, ScopedCheckPolicy};
+	use crate::check_policies::{CheckPolicy, ScopedCheckPolicy, VarKind};
 	use crate::schema::issues;
 	use std::collections::HashMap;
 
@@ -2084,8 +2102,9 @@ async fn regrade_states(
 			.unwrap_or_else(|| fallback_check.to_string())
 	};
 
-	// What each state's report observed, and what its rules read beyond it.
-	let mut regradable: Vec<(usize, CheckOutcome, GradingInputs)> = Vec::new();
+	// What each state's report observed, and what its rules read beyond it:
+	// `None` for a plain state filed before those inputs were kept.
+	let mut regradable: Vec<(usize, CheckOutcome, Option<GradingInputs>)> = Vec::new();
 	for (at, state) in states.iter().enumerate() {
 		let Some(observed) = state.observed_result else {
 			continue;
@@ -2101,14 +2120,11 @@ async fn regrade_states(
 		};
 		let inputs = match (&state.grading_context, &held) {
 			(Some(_), _) => match state.grading_inputs() {
-				Some(inputs) => inputs,
+				Some(inputs) => Some(inputs),
 				None => continue,
 			},
 			(None, Some(_)) => continue,
-			(None, None) => GradingInputs {
-				status: Default::default(),
-				tags: GradingTarget::load(conn, state_scope(state)).await?.tags,
-			},
+			(None, None) => None,
 		};
 		let outcome = match (observed, held) {
 			(CheckResult::Broken, _) => CheckOutcome::Broken,
@@ -2160,6 +2176,22 @@ async fn regrade_states(
 			fleet: fleet.get(&check).and_then(Option::as_ref),
 			chain: &chain,
 		};
+		// A state filed before its inputs were kept has no record of the
+		// report's fields, so one whose rules read them is left as it is until
+		// its next report rather than graded as if the report had none. The
+		// target's tags are read as they stand, and only when a rule reads them.
+		let inputs = match inputs {
+			Some(inputs) => inputs,
+			None if grading.reads(VarKind::Status) => continue,
+			None => GradingInputs {
+				status: Default::default(),
+				tags: if grading.reads(VarKind::Tag) {
+					GradingTarget::load(conn, state_scope(state)).await?.tags
+				} else {
+					Default::default()
+				},
+			},
+		};
 		let shared = match &state.detail {
 			Some(serde_json::Value::Object(shared)) => Some(shared),
 			_ => None,
@@ -2173,25 +2205,55 @@ async fn regrade_states(
 		);
 		graded_all.push((at, check, graded));
 	}
-	// Trouble first: see the ordering note above.
-	graded_all.sort_by_key(|(_, _, graded)| {
-		!matches!(
-			graded.effective,
-			CheckResult::Failed | CheckResult::Warning | CheckResult::Broken
-		)
-	});
 
+	// Only the states whose grade moved are written and settled.
+	let mut changed = Vec::with_capacity(graded_all.len());
 	for (at, check, graded) in graded_all {
 		let state = &states[at];
 		let instances = graded
 			.stored_instances()
 			.map(|i| serde_json::to_value(i).expect("instances serialise"));
-		if Some(graded.effective) == state.effective_result
-			&& graded.escalates == state.escalates
-			&& instances == state.instances
+		if Some(graded.effective) != state.effective_result
+			|| graded.escalates != state.escalates
+			|| instances != state.instances
 		{
-			continue;
+			changed.push((at, check, graded, instances));
 		}
+	}
+	if changed.is_empty() {
+		return Ok(());
+	}
+	// See the ordering note above. Within each, by target, so the order never
+	// depends on the order the states were loaded in.
+	changed.sort_by_key(|(at, _, graded, _)| {
+		let state = &states[*at];
+		(
+			settle_order(graded.effective),
+			state_scope(state).to_columns(),
+			state.id,
+		)
+	});
+	// Every target settling takes its lock and holds it until the transaction
+	// ends, so they are all taken up front, in the one order every path takes
+	// them in. Taken as settling reaches them, two re-grades over the same
+	// targets can take them in opposite orders and deadlock.
+	let mut locking = Vec::new();
+	for (at, ..) in &changed {
+		if let Some((target, _)) = targets.incident_target(state_scope(&states[*at]))? {
+			locking.push(target);
+		}
+	}
+	let changed_ids: Vec<Uuid> = changed.iter().map(|(at, ..)| states[*at].id).collect();
+	locking.extend(
+		open_incidents_holding(conn, &changed_ids)
+			.await?
+			.iter()
+			.map(IncidentTarget::of_incident),
+	);
+	lock_all_targets(conn, locking).await?;
+
+	for (at, check, graded, instances) in changed {
+		let state = &states[at];
 		let active = matches!(
 			graded.effective,
 			CheckResult::Failed | CheckResult::Warning | CheckResult::Broken
@@ -3623,31 +3685,21 @@ async fn re_evaluate_membership(
 					if regraded.is_some_and(|r| r.became_escalating) {
 						escalate_incident(conn, held.id, target, issue, transition_time).await?;
 					}
-				} else {
+				} else if regraded.is_some() || by.is_some() || held.closing_at.is_none() {
 					// A member whose failure ended without leaving, a failure
 					// graded down to a warning, stays for context but no
 					// longer holds the incident open. Its report lessening it
 					// lingers as a recovery would; an operator's re-grade
-					// closes.
+					// closes. A report finding the incident already lingering
+					// has nothing to add.
+					//
+					// The target's lock, taken above, serialises this against
+					// every other member's settling. `held` was read before
+					// it, which is harmless: settling only touches an incident
+					// still open.
 					// spec: INC#membership
-					let incident: Option<Incident> = incidents::table
-						.select(Incident::as_select())
-						.filter(incidents::id.eq(held.id))
-						.filter(incidents::closed_at.is_null())
-						.for_update()
-						.first(conn)
-						.await
-						.optional()?;
-					if let Some(incident) = incident {
-						settle_if_no_failure_left(
-							conn,
-							&incident,
-							transition_time,
-							by,
-							regraded.is_none(),
-						)
+					settle_if_no_failure_left(conn, held, transition_time, by, regraded.is_none())
 						.await?;
-					}
 				}
 			}
 		}
@@ -3768,10 +3820,10 @@ async fn leave_open_incident(
 /// failure, its last one having ended at `transition_time`, by leaving or by
 /// its result lessening in place. Does nothing while a failure is live.
 ///
-/// The caller holds the incident row locked. Without that lock, two
-/// transactions each ending one of the last two failures can each observe the
-/// other's still standing and skip the close, leaving the incident open with
-/// no failure and no Slack resolve.
+/// The caller holds the incident row locked, or its target's lock. Without
+/// either, two transactions each ending one of the last two failures can each
+/// observe the other's still standing and skip the close, leaving the incident
+/// open with no failure and no Slack resolve.
 ///
 /// `check_recovery` is true only where the failure ended through the check's
 /// own report, the one case lingering damps; `by` naming an operator, or a
@@ -3939,11 +3991,11 @@ pub async fn enqueue_incident_reeval(
 /// active issues, so it can't drive the leave transitions the ingest path
 /// needs; this is the ingest-equivalent set.
 ///
-/// Active issues are evaluated before inactive ones so that when a failure
-/// replaces another within a single push, the incoming failure (re)joins
-/// the incident before the outgoing one leaves — otherwise the incident
-/// would briefly close and reopen. This mirrors the ingest-time filing
-/// order.
+/// Issues are evaluated in [`settle_order`], failures first, so that when a
+/// failure replaces another within a single push, the incoming failure
+/// (re)joins the incident before the outgoing one leaves or lessens, and a
+/// warning finds the incident a failure opens — otherwise the incident would
+/// briefly close and reopen. This mirrors the ingest-time filing order.
 pub async fn reevaluate_incidents_for_server(
 	conn: &mut AsyncPgConnection,
 	application_id: Uuid,
@@ -3979,8 +4031,14 @@ pub async fn reevaluate_incidents_for_server(
 		.load(conn)
 		.await?;
 
-	// Active (potential joiners) before inactive (leavers).
-	candidates.sort_by_key(|issue| !issue.active);
+	candidates.sort_by_key(|issue| {
+		match issue.effective_result {
+			Some(effective) if issue.active => settle_order(effective),
+			// An active issue with no graded result is trouble all the same.
+			None if issue.active => settle_order(CheckResult::Warning),
+			_ => settle_order(CheckResult::Passed),
+		}
+	});
 
 	let now = Timestamp::now();
 	for issue in candidates {
@@ -4708,6 +4766,29 @@ async fn open_incident_holding(
 		.map_err(AppError::from)
 }
 
+/// [`open_incident_holding`] for many issues at once: every open incident one
+/// of them is a live member of.
+async fn open_incidents_holding(
+	db: &mut AsyncPgConnection,
+	issue_ids: &[Uuid],
+) -> Result<Vec<Incident>> {
+	use crate::schema::{incident_issues, incidents};
+
+	incident_issues::table
+		.inner_join(incidents::table.on(incidents::id.eq(incident_issues::incident_id)))
+		.select(Incident::as_select())
+		.filter(
+			incident_issues::issue_id
+				.eq_any(issue_ids)
+				.and(incident_issues::left_at.is_null())
+				.and(incidents::closed_at.is_null()),
+		)
+		.distinct()
+		.load(db)
+		.await
+		.map_err(AppError::from)
+}
+
 /// What an issue's incident contribution attaches to: one of a group's
 /// environments, or canopy as a whole for canopy-wide issues (self-alerts).
 /// Issues on ungrouped applications and machines, and on pending ones with no
@@ -4808,6 +4889,20 @@ async fn lock_targets(
 		targets.push(other);
 	}
 	targets.sort_by_key(|target| target.group_id());
+	for target in targets {
+		lock_target(db, target).await?;
+	}
+	Ok(())
+}
+
+/// [`lock_targets`] for any number of targets, in the same order.
+async fn lock_all_targets(
+	db: &mut AsyncPgConnection,
+	mut targets: Vec<IncidentTarget>,
+) -> Result<()> {
+	// One lock per group, so a group's environments are taken once.
+	targets.sort_by_key(|target| target.group_id());
+	targets.dedup_by_key(|target| target.group_id());
 	for target in targets {
 		lock_target(db, target).await?;
 	}

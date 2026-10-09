@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::check_policies::{
-	CheckPolicy, EvaluationContext, FilingScope, FleetGrading, ScopedCheckPolicy,
+	CheckPolicy, EvaluationContext, FilingScope, FleetGrading, ScopedCheckPolicy, VarKind,
 };
 use crate::issues::Issue;
 
@@ -290,6 +290,15 @@ pub struct CheckGradingRef<'a> {
 	/// The scoped chain, in application order (see
 	/// [`ScopedCheckPolicy::chain_for`]).
 	pub chain: &'a [ScopedCheckPolicy],
+}
+
+impl CheckGradingRef<'_> {
+	/// Whether any rule in this grading, the catalog entry's or a scoped
+	/// transform's, reads anything of `kind`.
+	pub fn reads(&self, kind: VarKind) -> bool {
+		self.fleet.is_some_and(|fleet| fleet.reads(kind))
+			|| self.chain.iter().any(|step| step.reads(kind))
+	}
 }
 
 impl<'a> From<&'a CheckGrading> for CheckGradingRef<'a> {

@@ -1,5 +1,12 @@
 import { expect, test } from "./test-fixtures";
-import { resetSeededTables, seedCheckPolicy } from "./seed";
+import {
+	resetSeededTables,
+	seedCheckPolicy,
+	seedIncident,
+	seedIssue,
+	seedServer,
+	seedServerGroup,
+} from "./seed";
 
 test.describe("healthcheck settings page", () => {
 	test.beforeEach(async ({ sql }) => {
@@ -118,5 +125,51 @@ test.describe("healthcheck settings page", () => {
 			.getByRole("option", { name: /Failures count in full/ })
 			.click();
 		await expect(escalate).toBeEnabled();
+	});
+
+	/// A policy change re-grades the check's states at once, so the incident
+	/// its failure held open closes on the save, not at the next report.
+	///
+	/// spec: CHK#policy, INC#membership
+	test("saving a lower ceiling closes the incident its failure held open", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "regrade-group" });
+		const server = await seedServer(sql, {
+			name: "regrade-central",
+			type: "tamanu-central",
+			rank: "production",
+			groupId: group.id,
+		});
+		await seedCheckPolicy(sql, { checkName: "disk_space", ceiling: "failed" });
+		const issue = await seedIssue(sql, {
+			serverId: server.id,
+			ref: "health/disk_space",
+			severity: "error",
+		});
+		const incident = await seedIncident(sql, {
+			serverGroupId: group.id,
+			issues: [{ issueId: issue.id }],
+		});
+
+		await page.goto("/settings/healthchecks/alertd/application.tamanu-central/disk_space");
+		await page.getByRole("combobox").first().click();
+		await page
+			.getByRole("option", { name: /Failures grade down to warnings/ })
+			.click();
+		await page.getByRole("button", { name: "Save", exact: true }).click();
+
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ closed: boolean }>(
+					"SELECT closed_at IS NOT NULL AS closed FROM incidents WHERE id = $1",
+					[incident.id],
+				);
+				return rows[0]?.closed;
+			})
+			.toBe(true);
+		await page.goto(`/incidents/${incident.id}`);
+		await expect(page.getByText(/closed.*lasted/)).toBeVisible();
 	});
 });

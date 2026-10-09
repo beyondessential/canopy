@@ -333,3 +333,85 @@ async fn escalating_a_live_failure_escalates_once() {
 	)
 	.await
 }
+
+/// One push swapping which check fails keeps the incident it was in, even with
+/// no linger window to absorb a close: the fresh failure joins before the one
+/// going out lessens to a warning, whatever order the push names them in.
+// spec: INC#membership
+#[tokio::test(flavor = "multi_thread")]
+async fn a_push_swapping_its_failure_keeps_the_incident() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let (id, group) = central(&mut conn, device_id).await;
+			sql_query("UPDATE server_groups SET slack_close_delay = INTERVAL '0' WHERE id = $1")
+				.bind::<sql_types::Uuid, _>(group)
+				.execute(&mut conn)
+				.await
+				.expect("no linger window");
+			// The box's checks, which settle as the push files them.
+			let machine = Namespace::of("alertd", None);
+			for check in ["disk_free", "memory"] {
+				CheckPolicy::upsert_default(&mut conn, "alertd", &machine, check)
+					.await
+					.expect("ensure catalog row");
+				CheckPolicy::update(
+					&mut conn,
+					"alertd",
+					&machine,
+					check,
+					CheckResult::Failed,
+					false,
+					None,
+					"ops",
+				)
+				.await
+				.expect("save policy");
+			}
+			let both = |disk: &str, memory: &str| {
+				json!({ "health": [
+					{ "check": "disk_free", "result": disk },
+					{ "check": "memory", "result": memory },
+				] })
+			};
+			push(&public, &cert, &mut conn, id, both("failed", "passed")).await;
+			let opened = the_incident(&mut conn, group).await;
+
+			push(&public, &cert, &mut conn, id, both("warning", "failed")).await;
+
+			let incident = the_incident(&mut conn, group).await;
+			assert_eq!(incident.id, opened.id);
+			assert!(incident.closed_at.is_none());
+		},
+	)
+	.await
+}
+
+/// A re-grade that makes a state an escalating failure where it was none opens
+/// its incident to notify at once, as an escalating report would.
+// spec: INC#notification
+#[tokio::test(flavor = "multi_thread")]
+async fn an_escalating_regrade_opens_its_incident_to_notify_at_once() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let (id, group) = central(&mut conn, device_id).await;
+			push(&public, &cert, &mut conn, id, disk("failed")).await;
+			assert!(incidents(&mut conn, group).await.is_empty());
+
+			save_policy(&mut conn, CheckResult::Failed, true).await;
+
+			let incident = the_incident(&mut conn, group).await;
+			let due: Count = sql_query(
+				"SELECT count(*) AS n FROM slack_outbox \
+				 WHERE incident_id = $1 AND kind = 'incident_open' AND deliver_after <= NOW()",
+			)
+			.bind::<sql_types::Uuid, _>(incident.id)
+			.get_result(&mut conn)
+			.await
+			.expect("count due opens");
+			assert_eq!(due.n, 1, "the open bypasses the group's grace");
+		},
+	)
+	.await
+}

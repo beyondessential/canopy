@@ -256,6 +256,11 @@ pub struct FleetGrading {
 }
 
 impl FleetGrading {
+	/// Whether this entry's rules read anything of `kind`.
+	pub fn reads(&self, kind: VarKind) -> bool {
+		rules_read(self.rules.as_ref(), kind)
+	}
+
 	/// An unparseable stored ceiling falls back to warning rather than
 	/// failing the whole grading pass — the column is constrained, so this
 	/// only covers data written outside the model.
@@ -1548,6 +1553,11 @@ impl ScopedCheckPolicy {
 		});
 	}
 
+	/// Whether this transform's rules read anything of `kind`.
+	pub fn reads(&self, kind: VarKind) -> bool {
+		rules_read(self.rules.as_ref(), kind)
+	}
+
 	/// Apply this transform to the effective result arriving from the
 	/// previous step in the chain: rules first (a matching branch's
 	/// result replaces the input), then the ceiling caps the outcome.
@@ -1638,7 +1648,20 @@ pub struct EvaluationContext<'a> {
 	pub tags: &'a HashMap<String, JsonValue>,
 }
 
+/// Whether stored `rules` read anything of `kind`. Rules that do not parse are
+/// ignored when grading, so they read nothing.
+fn rules_read(rules: Option<&JsonValue>, kind: VarKind) -> bool {
+	rules
+		.and_then(|rules| serde_json::from_value::<IfLadder>(rules.clone()).ok())
+		.is_some_and(|ladder| ladder.reads(kind))
+}
+
 impl IfLadder {
+	/// Whether any branch reads a variable of `kind`.
+	pub fn reads(&self, kind: VarKind) -> bool {
+		self.branches.iter().any(|(c, _)| c.var().kind == kind)
+	}
+
 	/// Returns the first matching branch's result, or `None` if no
 	/// branch matches. The caller falls back to the entry's ceiling in
 	/// that case.
