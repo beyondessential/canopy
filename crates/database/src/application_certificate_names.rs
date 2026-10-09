@@ -57,7 +57,9 @@ impl ApplicationCertificateName {
 		}
 
 		let row = match Self::for_name(db, &name).await? {
-			Some(existing) => existing,
+			Some(existing) if existing.application_id == application_id => existing,
+			// Declared by another application since `holder` looked.
+			Some(_) => return Err(lost_race(db, &name).await),
 			None => match diesel::insert_into(dsl::application_certificate_names)
 				.values((dsl::application_id.eq(application_id), dsl::name.eq(&name)))
 				.returning(Self::as_select())
@@ -137,6 +139,22 @@ impl ApplicationCertificateName {
 		dsl::application_certificate_names
 			.select(Self::as_select())
 			.filter(dsl::application_id.eq(application_id))
+			.order(dsl::name.asc())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// The names any of `application_ids` holds for certificates, by name: one
+	/// query for a page listing several applications.
+	pub async fn for_applications(
+		db: &mut AsyncPgConnection,
+		application_ids: &[Uuid],
+	) -> Result<Vec<Self>> {
+		use crate::schema::application_certificate_names::dsl;
+		dsl::application_certificate_names
+			.select(Self::as_select())
+			.filter(dsl::application_id.eq_any(application_ids))
 			.order(dsl::name.asc())
 			.load(db)
 			.await

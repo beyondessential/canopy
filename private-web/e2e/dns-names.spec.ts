@@ -418,4 +418,26 @@ test.describe("DNS names", () => {
 			await expect(section.getByText(/admin@localhost/)).toBeVisible();
 		}
 	});
+
+	test("a paused application using neither kind still shows its pause, so it can be resumed", async ({
+		page,
+		sql,
+	}) => {
+		const server = await seedServer(sql, { name: "idle" });
+		await sql.query(
+			`UPDATE applications
+			 SET name_management_paused_at = now(),
+			     name_management_paused_by = 'admin@localhost',
+			     name_management_pause_reason = 'grants withdrawn mid-investigation'
+			 WHERE id = $1`,
+			[server.id],
+		);
+
+		await page.goto(`/fleet/applications/${server.id}`);
+		for (const kind of ["addresses", "certificate"]) {
+			const section = page.getByTestId(`application-names-${kind}`);
+			await expect(section.getByText("Paused")).toBeVisible();
+			await expect(section.getByRole("button", { name: "Resume" })).toBeVisible();
+		}
+	});
 });

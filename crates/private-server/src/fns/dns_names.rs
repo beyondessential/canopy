@@ -14,6 +14,8 @@
 // spec: DNS
 // spec: ADR
 
+use std::collections::HashMap;
+
 use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
@@ -262,20 +264,33 @@ pub async fn for_group(
 	}
 
 	let applications = Application::list_live_in_group(&mut conn, args.server_group_id).await?;
-	let mut rows = Vec::new();
-	for application in &applications {
-		for row in ApplicationName::for_server(&mut conn, application.id).await? {
-			rows.push(DomainNameView {
-				name: row.name.clone(),
+	let by_id = by_id(&applications);
+	let rows = ApplicationName::for_applications(&mut conn, &ids(&applications))
+		.await?
+		.into_iter()
+		.filter_map(|row| {
+			let application = by_id.get(&row.application_id)?;
+			Some(DomainNameView {
+				published: published_state(&row),
+				name: row.name,
 				server_id: application.id,
 				server_name: Some(application.display_name()),
-				published: published_state(&row),
 				certificate: None,
-			});
-		}
-	}
+			})
+		})
+		.collect();
 
 	Ok(Json(by_domain(claims, rows)))
+}
+
+/// The identifiers of `applications`, to read all of theirs in one query.
+pub(crate) fn ids(applications: &[Application]) -> Vec<Uuid> {
+	applications.iter().map(|a| a.id).collect()
+}
+
+/// `applications` by identifier, to attach a batch read's rows to their owner.
+pub(crate) fn by_id(applications: &[Application]) -> HashMap<Uuid, &Application> {
+	applications.iter().map(|a| (a.id, a)).collect()
 }
 
 /// Arrange a group's DNS names under the domains they sit beneath.
@@ -521,19 +536,21 @@ pub async fn for_machine(
 	let machine = database::Machine::get_by_id(&mut conn, args.machine_id).await?;
 	let applications = machine.applications(&mut conn).await?;
 
-	let mut declared = Vec::new();
-	for application in &applications {
-		for row in ApplicationName::for_server(&mut conn, application.id).await? {
-			declared.push(MachineDeclaredView {
+	let by_id = by_id(&applications);
+	let declared = ApplicationName::for_applications(&mut conn, &ids(&applications))
+		.await?
+		.into_iter()
+		.filter_map(|row| {
+			let application = by_id.get(&row.application_id)?;
+			Some(MachineDeclaredView {
 				published: published_state(&row),
 				certificate: None,
 				name: row.name,
 				application_id: application.id,
 				application_name: application.display_name(),
-			});
-		}
-	}
-	declared.sort_by(|a, b| a.name.cmp(&b.name));
+			})
+		})
+		.collect();
 
 	Ok(Json(
 		machine_names(

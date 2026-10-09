@@ -267,19 +267,22 @@ test.describe("an application's DNS names and certificates", () => {
 			.last()
 			.click();
 
-		await expect(page.getByText("Paused")).toBeVisible();
+		// The pause shows in both of the application's sections; this one is
+		// where it was set.
+		const tls = page.getByTestId("application-names-certificate");
+		await expect(tls.getByText("Paused")).toBeVisible();
 		await expect(
-			page.getByText(/looking into an odd request pattern/),
+			tls.getByText(/looking into an odd request pattern/),
 		).toBeVisible();
-		await expect(page.getByText(/admin@localhost/)).toBeVisible();
+		await expect(tls.getByText(/admin@localhost/)).toBeVisible();
 		// What the pause does and does not do, said where the operator is.
 		await expect(
-			page.getByText(/What is already in place stands and keeps working/),
+			tls.getByText(/What is already in place stands and keeps working/),
 		).toBeVisible();
 
-		// And it lifts again.
+		// And it lifts again, from either section.
 		page.once("dialog", (dialog) => dialog.accept());
-		await page.getByRole("button", { name: "Resume" }).click();
+		await tls.getByRole("button", { name: "Resume" }).click();
 		await expect(page.getByText("Paused")).toHaveCount(0);
 	});
 
@@ -322,7 +325,9 @@ test.describe("an application's DNS names and certificates", () => {
 
 		await expect(page.getByText("revoked", { exact: true })).toBeVisible();
 		// The pause the revocation set, without being asked.
-		await expect(page.getByText("Paused")).toBeVisible();
+		await expect(
+			page.getByTestId("application-names-certificate").getByText("Paused"),
+		).toBeVisible();
 
 		const [row] = await sql.query<{
 			state: string;

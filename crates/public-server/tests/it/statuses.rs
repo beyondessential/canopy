@@ -273,6 +273,7 @@ async fn submit_status() {
 						"paused": false,
 						"domains": [],
 						"registered_names": [],
+						"certificate_names": [],
 						"certificates": [],
 						"applications": [{
 							"type": "tamanu-facility",
@@ -281,6 +282,7 @@ async fn submit_status() {
 							"paused": false,
 							"domains": [],
 							"registered_names": [],
+							"certificate_names": [],
 							"certificates": [],
 						}],
 					},

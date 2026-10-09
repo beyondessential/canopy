@@ -92,11 +92,13 @@ export default function ServerCertificatesSection({
 
 	// No grant, no declaration, nothing held: this application does not use the
 	// feature, so keep the page short rather than showing an empty box on every
-	// application in the fleet.
+	// application in the fleet. A pause is something to show, since this
+	// section is where it is seen and lifted.
 	if (
 		!data.may_manage_tls &&
 		data.names.length === 0 &&
-		data.certificates.length === 0
+		data.certificates.length === 0 &&
+		!data.pause
 	)
 		return null;
 

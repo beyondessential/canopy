@@ -27,9 +27,9 @@ import TimeAgo from "./TimeAgo";
 /// the application's TLS certificates: the two are separate features that
 /// share infrastructure, and this one shows nothing about certificates.
 ///
-/// Absent while the application neither may manage DNS nor declares a DNS name
-/// for addresses, so a page does not carry an empty box for a feature it does
-/// not use.
+/// Absent while the application neither may manage DNS, nor declares a DNS
+/// name for addresses, nor is paused, so a page does not carry an empty box for
+/// a feature it does not use.
 // spec: ADR#presentation
 export default function ServerDnsNamesSection({
 	serverId,
@@ -73,7 +73,10 @@ export default function ServerDnsNamesSection({
 	}
 
 	const data = detail.data;
-	if (!data.may_manage_dns && data.names.length === 0) return null;
+	// A pause is something to show, since this section is where it is seen and
+	// lifted.
+	if (!data.may_manage_dns && data.names.length === 0 && !data.pause)
+		return null;
 
 	return (
 		<Paper

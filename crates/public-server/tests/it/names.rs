@@ -1432,7 +1432,8 @@ async fn an_accepted_request_ends_only_its_own_kinds_record() {
 }
 
 /// The entitlements answer keeps the two kinds apart: a name held only for
-/// certificates is not one the application registered addresses for.
+/// certificates is not one the application registered addresses for, and is
+/// listed among its certificate declarations before anything is issued for it.
 // spec: DNS#what-an-application-may-act-on
 #[tokio::test(flavor = "multi_thread")]
 async fn entitlements_keep_the_kinds_apart() {
@@ -1459,6 +1460,15 @@ async fn entitlements_keep_the_kinds_apart() {
 			assert_eq!(
 				body["registered_names"],
 				serde_json::json!(["dns-only.fiji.tamanu.app"])
+			);
+			assert_eq!(
+				body["certificate_names"],
+				serde_json::json!(["tls-only.fiji.tamanu.app"])
+			);
+			assert_eq!(body["certificates"], serde_json::json!([]));
+			assert_eq!(
+				body["applications"][0]["certificate_names"],
+				serde_json::json!(["tls-only.fiji.tamanu.app"])
 			);
 		},
 	)

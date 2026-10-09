@@ -31,8 +31,8 @@ use utoipa::ToSchema;
 use crate::fns::applications::ServerIdArgs;
 use crate::fns::dns_names::{
 	DeclarationArgs, DeniedView, DenyArgs, DomainCertificateView, DomainHealthView, DomainNameView,
-	MachineDeclaredView, MachineDnsNameArgs, MachineNamesView, PauseView, by_domain, group_domains,
-	machine_names, pause_view,
+	MachineDeclaredView, MachineDnsNameArgs, MachineNamesView, PauseView, by_domain, by_id,
+	group_domains, ids, machine_names, pause_view,
 };
 use crate::fns::server_groups::GroupIdArgs;
 use crate::state::AppState;
@@ -240,44 +240,48 @@ pub async fn for_group(
 	}
 
 	let applications = Application::list_live_in_group(&mut conn, args.server_group_id).await?;
+	let ids = ids(&applications);
+	let by_id = by_id(&applications);
+	let certificates = ApplicationCertificate::for_applications(&mut conn, &ids).await?;
 	let mut rows = Vec::new();
-	for application in &applications {
-		let certificates = ApplicationCertificate::for_server(&mut conn, application.id).await?;
-		for declared in
-			ApplicationCertificateName::for_application(&mut conn, application.id).await?
+	for declared in ApplicationCertificateName::for_applications(&mut conn, &ids).await? {
+		let Some(application) = by_id.get(&declared.application_id) else {
+			continue;
+		};
+		let mut summary = DomainCertificateView {
+			current: false,
+			risk: None,
+			not_after: None,
+		};
+		for cert in certificates
+			.iter()
+			.filter(|c| c.application_id == declared.application_id && c.name == declared.name)
 		{
-			let mut summary = DomainCertificateView {
-				current: false,
-				risk: None,
-				not_after: None,
-			};
-			for cert in certificates.iter().filter(|c| c.name == declared.name) {
-				// The newest usable certificate wins where a name has more than one:
-				// a key rotation leaves the old row behind, and the group's view is
-				// of whether the name is covered rather than of every attempt.
-				if cert.is_collectable() {
-					summary.current = true;
-				}
-				if summary.not_after.is_none() || cert.not_after > summary.not_after {
-					summary.not_after = cert.not_after;
-					summary.risk = Some(
-						match cert.risk() {
-							Risk::None => "none",
-							Risk::AtRisk => "at_risk",
-							Risk::Critical => "critical",
-						}
-						.to_string(),
-					);
-				}
+			// The newest usable certificate wins where a name has more than one:
+			// a key rotation leaves the old row behind, and the group's view is
+			// of whether the name is covered rather than of every attempt.
+			if cert.is_collectable() {
+				summary.current = true;
 			}
-			rows.push(DomainNameView {
-				name: declared.name,
-				server_id: application.id,
-				server_name: Some(application.display_name()),
-				published: None,
-				certificate: Some(summary),
-			});
+			if summary.not_after.is_none() || cert.not_after > summary.not_after {
+				summary.not_after = cert.not_after;
+				summary.risk = Some(
+					match cert.risk() {
+						Risk::None => "none",
+						Risk::AtRisk => "at_risk",
+						Risk::Critical => "critical",
+					}
+					.to_string(),
+				);
+			}
 		}
+		rows.push(DomainNameView {
+			name: declared.name,
+			server_id: application.id,
+			server_name: Some(application.display_name()),
+			published: None,
+			certificate: Some(summary),
+		});
 	}
 
 	Ok(Json(by_domain(claims, rows)))
@@ -582,26 +586,29 @@ pub async fn for_machine(
 	let machine = database::Machine::get_by_id(&mut conn, args.machine_id).await?;
 	let applications = machine.applications(&mut conn).await?;
 
-	let mut declared = Vec::new();
-	for application in &applications {
-		let certificates = ApplicationCertificate::for_server(&mut conn, application.id).await?;
-		for row in ApplicationCertificateName::for_application(&mut conn, application.id).await? {
-			// Newest first, so the first match is the one in play.
+	let ids = ids(&applications);
+	let by_id = by_id(&applications);
+	let certificates = ApplicationCertificate::for_applications(&mut conn, &ids).await?;
+	let declared = ApplicationCertificateName::for_applications(&mut conn, &ids)
+		.await?
+		.into_iter()
+		.filter_map(|row| {
+			let application = by_id.get(&row.application_id)?;
+			// Each name's newest first, so the first match is the one in play.
 			let certificate = certificates
 				.iter()
-				.find(|cert| cert.name == row.name)
+				.find(|cert| cert.application_id == row.application_id && cert.name == row.name)
 				.cloned()
 				.map(certificate_view);
-			declared.push(MachineDeclaredView {
+			Some(MachineDeclaredView {
 				published: None,
 				certificate,
 				name: row.name,
 				application_id: application.id,
 				application_name: application.display_name(),
-			});
-		}
-	}
-	declared.sort_by(|a, b| a.name.cmp(&b.name));
+			})
+		})
+		.collect();
 
 	Ok(Json(
 		machine_names(

@@ -430,6 +430,22 @@ impl ApplicationCertificate {
 			.map_err(AppError::from)
 	}
 
+	/// Every certificate and in-flight order for any of `application_ids`, each
+	/// name's newest first: one query for a page listing several applications.
+	pub async fn for_applications(
+		db: &mut AsyncPgConnection,
+		application_ids: &[Uuid],
+	) -> Result<Vec<Self>> {
+		use crate::schema::application_certificates::dsl;
+		dsl::application_certificates
+			.select(Self::as_select())
+			.filter(dsl::application_id.eq_any(application_ids))
+			.order((dsl::name.asc(), dsl::created_at.desc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Orders due to be attempted, soonest first. Claimed with `SKIP LOCKED` so
 	/// two workers never drive the same order.
 	///

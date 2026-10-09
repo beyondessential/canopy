@@ -57,26 +57,22 @@ impl TryFrom<String> for DnsNameKind {
 ///
 /// The two declaration tables never disagree about the holder: a database
 /// trigger refuses a row in one for a name the other has for a different
-/// application.
+/// application. So both are asked at once and whichever answers is the holder.
 pub async fn holder(db: &mut AsyncPgConnection, name: &str) -> Result<Option<Uuid>> {
 	use crate::schema::{application_certificate_names, application_names};
 
-	let address_side: Option<Uuid> = application_names::table
+	let holders: Vec<Uuid> = application_names::table
 		.filter(application_names::name.eq(name))
 		.select(application_names::application_id)
-		.first(db)
+		.union_all(
+			application_certificate_names::table
+				.filter(application_certificate_names::name.eq(name))
+				.select(application_certificate_names::application_id),
+		)
+		.load(db)
 		.await
-		.optional()?;
-	if address_side.is_some() {
-		return Ok(address_side);
-	}
-	application_certificate_names::table
-		.filter(application_certificate_names::name.eq(name))
-		.select(application_certificate_names::application_id)
-		.first(db)
-		.await
-		.optional()
-		.map_err(AppError::from)
+		.map_err(AppError::from)?;
+	Ok(holders.into_iter().next())
 }
 
 /// The operator-facing refusal for a name another application holds.

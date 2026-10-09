@@ -25,8 +25,8 @@ use commons_types::server::app_type::ApplicationType;
 use database::application_certificates::OrderState;
 use database::diesel_async::AsyncPgConnection;
 use database::{
-	ApplicationCertificate, ApplicationName, DeniedDnsName, DnsNameKind, ServerGroupDomain,
-	UndeclaredDnsName, applications::Application,
+	ApplicationCertificate, ApplicationCertificateName, ApplicationName, DeniedDnsName,
+	DnsNameKind, ServerGroupDomain, UndeclaredDnsName, applications::Application,
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -325,6 +325,12 @@ pub struct Entitlements {
 	pub domains: Vec<String>,
 	/// The names this server has registered addresses for.
 	pub registered_names: Vec<String>,
+	/// The DNS names this server declares for certificates, whether or not a
+	/// certificate has been issued for them yet. Kept apart from
+	/// `registered_names`, which are for addresses.
+	// spec: DNS#what-an-application-may-act-on
+	#[serde(default)]
+	pub certificate_names: Vec<String>,
 	/// The certificates Canopy holds for this server.
 	pub certificates: Vec<HeldCertificate>,
 	/// One entry per application on the asking machine.
@@ -359,6 +365,11 @@ pub struct ApplicationEntitlements {
 	pub domains: Vec<String>,
 	/// The names it has registered addresses for.
 	pub registered_names: Vec<String>,
+	/// The DNS names it declares for certificates, whether or not a
+	/// certificate has been issued for them yet.
+	// spec: DNS#what-an-application-may-act-on
+	#[serde(default)]
+	pub certificate_names: Vec<String>,
 	/// The certificates Canopy holds for it.
 	pub certificates: Vec<HeldCertificate>,
 }
@@ -470,6 +481,10 @@ pub async fn entitlements_for(
 			.as_ref()
 			.map(|f| f.registered_names.clone())
 			.unwrap_or_default(),
+		certificate_names: flat
+			.as_ref()
+			.map(|f| f.certificate_names.clone())
+			.unwrap_or_default(),
 		certificates: flat.map(|f| f.certificates).unwrap_or_default(),
 		applications,
 	})
@@ -499,6 +514,12 @@ async fn one_applications_entitlements(
 		.map(|row| row.name)
 		.collect();
 
+	let certificate_names = ApplicationCertificateName::for_application(conn, server.id)
+		.await?
+		.into_iter()
+		.map(|row| row.name)
+		.collect();
+
 	let certificates = ApplicationCertificate::for_server(conn, server.id)
 		.await?
 		.iter()
@@ -512,6 +533,7 @@ async fn one_applications_entitlements(
 		paused: server.name_management_paused(),
 		domains,
 		registered_names,
+		certificate_names,
 		certificates,
 	})
 }
