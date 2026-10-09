@@ -272,9 +272,15 @@ impl AcmeConfig {
 	/// - `CANOPY_ACME_CONTACT`: a contact URI (`mailto:…`) the authority can reach
 	///   an operator at, read when the account is built.
 	pub fn from_env() -> Option<Self> {
-		let key_pem = std::env::var("CANOPY_ACME_ACCOUNT_KEY").ok()?;
-		let directory = std::env::var("CANOPY_ACME_DIRECTORY")
-			.unwrap_or_else(|_| LetsEncrypt::Production.url().to_string());
+		Self::from_lookup(|name| std::env::var(name).ok())
+	}
+
+	/// [`AcmeConfig::from_env`] against any source of variables, so the defaults
+	/// are testable without touching the process environment.
+	pub fn from_lookup(var: impl Fn(&str) -> Option<String>) -> Option<Self> {
+		let key_pem = var("CANOPY_ACME_ACCOUNT_KEY")?;
+		let directory = var("CANOPY_ACME_DIRECTORY")
+			.unwrap_or_else(|| LetsEncrypt::Production.url().to_string());
 		Some(Self { key_pem, directory })
 	}
 
@@ -850,6 +856,38 @@ mod tests {
 
 	fn zone() -> ManagedZone {
 		ManagedZone::parse_list("tamanu.app=Z1", None).expect("zones")[0].clone()
+	}
+
+	fn config(vars: &[(&str, &str)]) -> Option<AcmeConfig> {
+		AcmeConfig::from_lookup(|name| {
+			vars.iter()
+				.find(|(k, _)| *k == name)
+				.map(|(_, v)| v.to_string())
+		})
+	}
+
+	#[test]
+	fn no_account_key_is_no_configuration() {
+		assert!(config(&[("CANOPY_ACME_DIRECTORY", "https://ca.example/dir")]).is_none());
+	}
+
+	#[test]
+	fn an_unset_directory_is_lets_encrypt_production() {
+		let config = config(&[("CANOPY_ACME_ACCOUNT_KEY", "key")]).expect("config");
+		assert_eq!(
+			config.directory,
+			"https://acme-v02.api.letsencrypt.org/directory"
+		);
+	}
+
+	#[test]
+	fn a_set_directory_is_used_as_given() {
+		let config = config(&[
+			("CANOPY_ACME_ACCOUNT_KEY", "key"),
+			("CANOPY_ACME_DIRECTORY", "https://ca.example/dir"),
+		])
+		.expect("config");
+		assert_eq!(config.directory, "https://ca.example/dir");
 	}
 
 	#[tokio::test]

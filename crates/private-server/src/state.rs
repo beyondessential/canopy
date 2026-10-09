@@ -116,7 +116,13 @@ async fn acme_from_env() -> (Option<Acme>, Option<String>) {
 		);
 	}
 
-	let Some(config) = AcmeConfig::from_env() else {
+	acme_from_config(AcmeConfig::from_env()).await
+}
+
+/// Build the account from configuration already read. The directory comes back
+/// whenever there is configuration, whether or not the account could be built.
+async fn acme_from_config(config: Option<AcmeConfig>) -> (Option<Acme>, Option<String>) {
+	let Some(config) = config else {
 		return (None, None);
 	};
 	match config.connect().await {
@@ -256,5 +262,31 @@ impl AppState {
 			acme: Some(Acme::fake()),
 			acme_directory: Some("https://acme.test.invalid/directory".into()),
 		})
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	// spec: CRT#presentation
+	#[tokio::test]
+	async fn an_unusable_account_still_reports_the_default_directory() {
+		let config = AcmeConfig::from_lookup(|name| {
+			(name == "CANOPY_ACME_ACCOUNT_KEY").then(|| "not a key".to_string())
+		});
+		let (acme, directory) = acme_from_config(config).await;
+		assert!(acme.is_none());
+		assert_eq!(
+			directory.as_deref(),
+			Some("https://acme-v02.api.letsencrypt.org/directory")
+		);
+	}
+
+	#[tokio::test]
+	async fn no_account_key_reports_no_directory() {
+		let (acme, directory) = acme_from_config(None).await;
+		assert!(acme.is_none());
+		assert!(directory.is_none());
 	}
 }
