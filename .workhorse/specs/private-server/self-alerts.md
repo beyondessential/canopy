@@ -16,6 +16,7 @@ The current conditions are:
 
 - Canopy's own identity for reaching backup storage is broken (escalating).
 - An operator-notification delivery has permanently failed (stays until operator-resolved).
+- The recovery escrow could not be written, or was written leaving out values Canopy could not read (see [ESC](../jobs/escrow.md), "Keeping the escrow whole"); it names what is missing, and clears on the next escrow written whole.
 - An MCP access token is within fifteen days of its expiry (see [MCP](mcp.md), "Access tokens").
 - One or more catalogued checks have gone unreported across the whole fleet for thirty days (see [CHK](../monitoring/checks.md), "Liveness and decommissioning"); it clears when no such check remains, each having been decommissioned or reported again.
 - A history has less than two weeks of future range left to write into, failing below one week (see [HST](../platform/history-storage.md), "Running short"); it clears once every history is provisioned ahead again.

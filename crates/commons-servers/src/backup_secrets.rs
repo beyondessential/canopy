@@ -225,6 +225,26 @@ impl BackupSecrets {
 		&self,
 		secret_name: &str,
 	) -> Result<Option<BTreeMap<String, SecretString>>> {
+		match self.try_read_secret_keys_partial(secret_name).await? {
+			Some((keys, skipped)) => match skipped.first() {
+				Some(key) => Err(AppError::Upstream(format!(
+					"secret {secret_name} key {key} not utf-8"
+				))),
+				None => Ok(Some(keys)),
+			},
+			None => Ok(None),
+		}
+	}
+
+	/// [`Self::try_read_secret_keys`], but a key whose value isn't UTF-8 is
+	/// skipped and named in the second half of the answer rather than failing the
+	/// read, so one bad key doesn't hide the good ones beside it. For a caller
+	/// that would rather have what can be read than nothing, such as the
+	/// recovery escrow.
+	pub async fn try_read_secret_keys_partial(
+		&self,
+		secret_name: &str,
+	) -> Result<Option<(BTreeMap<String, SecretString>, Vec<String>)>> {
 		match self {
 			Self::Kube { client, namespace } => {
 				use k8s_openapi::api::core::v1::Secret;
@@ -232,12 +252,16 @@ impl BackupSecrets {
 
 				let api: Api<Secret> = Api::namespaced(client.clone(), namespace);
 				match api.get_opt(secret_name).await {
-					Ok(Some(secret)) => decode(secret_name, secret).map(Some),
+					Ok(Some(secret)) => Ok(Some(decode(secret))),
 					Ok(None) => Ok(None),
 					Err(e) => Err(AppError::Upstream(format!("secret get failed: {e}"))),
 				}
 			}
-			Self::Memory(store) => Ok(store.lock().unwrap().get(secret_name).map(as_secrets)),
+			Self::Memory(store) => Ok(store
+				.lock()
+				.unwrap()
+				.get(secret_name)
+				.map(|keys| (as_secrets(keys), Vec::new()))),
 		}
 	}
 
@@ -392,17 +416,21 @@ impl BackupSecrets {
 	}
 }
 
+/// The keys of a Secret that are UTF-8, and the names of those that aren't.
 fn decode(
-	secret_name: &str,
 	secret: k8s_openapi::api::core::v1::Secret,
-) -> Result<BTreeMap<String, SecretString>> {
-	let mut out = BTreeMap::new();
+) -> (BTreeMap<String, SecretString>, Vec<String>) {
+	let mut keys = BTreeMap::new();
+	let mut skipped = Vec::new();
 	for (k, v) in secret.data.unwrap_or_default() {
-		let s = String::from_utf8(v.0)
-			.map_err(|_| AppError::Upstream(format!("secret {secret_name} key {k} not utf-8")))?;
-		out.insert(k, SecretString::from(s));
+		match String::from_utf8(v.0) {
+			Ok(s) => {
+				keys.insert(k, SecretString::from(s));
+			}
+			Err(_) => skipped.push(k),
+		}
 	}
-	Ok(out)
+	(keys, skipped)
 }
 
 fn as_secrets(keys: &BTreeMap<String, String>) -> BTreeMap<String, SecretString> {
@@ -440,6 +468,23 @@ fn pod_namespace(client: &kube::Client) -> String {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// One key that isn't UTF-8 is named, and the keys beside it still read.
+	#[test]
+	fn decode_skips_a_key_that_is_not_utf8() {
+		use k8s_openapi::{ByteString, api::core::v1::Secret};
+
+		let secret = Secret {
+			data: Some(BTreeMap::from([
+				("password".to_string(), ByteString(b"hunter2".to_vec())),
+				("junk".to_string(), ByteString(vec![0xff, 0xfe])),
+			])),
+			..Default::default()
+		};
+		let (keys, skipped) = decode(secret);
+		assert_eq!(keys.keys().collect::<Vec<_>>(), ["password"]);
+		assert_eq!(skipped, ["junk"]);
+	}
 
 	#[tokio::test]
 	async fn memory_create_read_delete_roundtrip() {
