@@ -16,6 +16,7 @@ import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
 import { useState } from "react";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import GroupDomainsSection from "../components/GroupDomainsSection";
+import GroupNamesSection from "../components/GroupNamesSection";
 import UndeclaredDnsNamesNotice from "../components/UndeclaredDnsNamesNotice";
 import { MaintenanceMarker } from "../components/HealthChip";
 import GroupInventorySection from "../components/GroupInventorySection";
@@ -294,6 +295,8 @@ export default function GroupDetail() {
 			/>
 
 			<GroupDomainsSection groupId={group.id} />
+			<GroupNamesSection kind="addresses" groupId={group.id} />
+			<GroupNamesSection kind="certificate" groupId={group.id} />
 
 			<MaintenanceSection
 				scope="group"

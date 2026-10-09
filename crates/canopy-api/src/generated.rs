@@ -7,7 +7,7 @@ pub const OPENAPI_VERSION: &str = "1.1.0";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "6a6733123931fab3be4dd5e97cb51180e731050d375bbb5448aeb7aeb480d1d0";
+pub const OPENAPI_BLAKE3: &str = "ec137e0f5335c4ecd5eddd6ada5ab2ac80edc394a4db38ef4fe1861ffca1c2d2";
 
 /// Error types.
 pub mod error {
@@ -59,6 +59,13 @@ pub mod error {
 ///    "type"
 ///  ],
 ///  "properties": {
+///    "certificate_names": {
+///      "description": "The DNS names it declares for certificates, whether or not a\ncertificate has been issued for them yet.",
+///      "type": "array",
+///      "items": {
+///        "type": "string"
+///      }
+///    },
 ///    "certificates": {
 ///      "description": "The certificates Canopy holds for it.",
 ///      "type": "array",
@@ -104,6 +111,11 @@ pub mod error {
 #[derive(::bon::Builder)]
 #[non_exhaustive]
 pub struct ApplicationEntitlements {
+    /**The DNS names it declares for certificates, whether or not a
+certificate has been issued for them yet.*/
+    #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+    #[builder(default)]
+    pub certificate_names: ::std::vec::Vec<::std::string::String>,
     ///The certificates Canopy holds for it.
     pub certificates: ::std::vec::Vec<HeldCertificate>,
     ///The domains its group controls.
@@ -1206,6 +1218,13 @@ Credentials last at most one hour; request a fresh set per run.*/
 ///        "$ref": "#/components/schemas/ApplicationEntitlements"
 ///      }
 ///    },
+///    "certificate_names": {
+///      "description": "The DNS names this server declares for certificates, whether or not a\ncertificate has been issued for them yet. Kept apart from\n`registered_names`, which are for addresses.",
+///      "type": "array",
+///      "items": {
+///        "type": "string"
+///      }
+///    },
 ///    "certificates": {
 ///      "description": "The certificates Canopy holds for this server.",
 ///      "type": "array",
@@ -1257,6 +1276,12 @@ list is the answer.*/
     #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
     #[builder(default)]
     pub applications: ::std::vec::Vec<ApplicationEntitlements>,
+    /**The DNS names this server declares for certificates, whether or not a
+certificate has been issued for them yet. Kept apart from
+`registered_names`, which are for addresses.*/
+    #[serde(default, skip_serializing_if = "::std::vec::Vec::is_empty")]
+    #[builder(default)]
+    pub certificate_names: ::std::vec::Vec<::std::string::String>,
     ///The certificates Canopy holds for this server.
     pub certificates: ::std::vec::Vec<HeldCertificate>,
     /**The domains this server's group controls. Any name at or beneath one of

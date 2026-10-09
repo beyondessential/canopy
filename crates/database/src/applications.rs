@@ -183,7 +183,7 @@ pub struct Application {
 	/// Set automatically when one of the server's certificates is revoked, so
 	/// revocation and re-issuance don't chase each other. Only an operator lifts
 	/// it.
-	// spec: CRT#pausing-an-application
+	// spec: DNS#pausing-an-application
 	#[serde(skip_serializing_if = "Option::is_none")]
 	#[diesel(
 		deserialize_as = jiff_diesel::NullableTimestamp,
@@ -722,7 +722,7 @@ impl Application {
 		ShortStatus::grade(last_reported_at, self.alert_when_down_for.0)
 	}
 
-	// spec: CRT#pausing-an-application
+	// spec: DNS#pausing-an-application
 	/// Whether Canopy is currently making no new changes on this server's behalf.
 	pub fn name_management_paused(&self) -> bool {
 		self.name_management_paused_at.is_some()
@@ -755,7 +755,7 @@ impl Application {
 	/// never un-pauses itself, however long the pause has stood and however much
 	/// is expiring under it. Deciding it is safe to start again is a judgement
 	/// Canopy is not in a position to make.
-	// spec: CRT#pausing-an-application
+	// spec: DNS#pausing-an-application
 	pub async fn resume_name_management(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<()> {
 		use crate::schema::applications::dsl;
 		diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))

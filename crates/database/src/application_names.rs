@@ -1,12 +1,15 @@
-//! Names a server should be reachable at, and the addresses Canopy publishes
-//! for them (CRT).
+//! DNS names an application should be reachable at, and the addresses Canopy
+//! publishes for them (ADR).
+//!
+//! This is the address side only: the names an application holds for
+//! certificates are `application_certificate_names`.
 //!
 //! A row holds two things: the addresses the server reported, and the addresses
 //! Canopy has actually published. Keeping them apart is what lets the reconcile
 //! tell whether the zone already matches the intent, and what lets Canopy
 //! confine itself to records it put there — in a shared zone, a record Canopy
 //! did not publish is none of its business.
-// spec: CRT#addresses
+// spec: ADR#registering
 
 use std::net::IpAddr;
 
@@ -19,6 +22,8 @@ use ipnet::IpNet;
 use jiff::Timestamp;
 use serde::Serialize;
 use uuid::Uuid;
+
+use crate::dns_names::{DnsNameKind, held_elsewhere, holder, lost_race};
 
 /// A name one server has registered, with what Canopy has published for it.
 #[derive(Debug, Clone, Serialize, Queryable, Selectable, utoipa::ToSchema)]
@@ -81,19 +86,20 @@ impl ApplicationName {
 		self.addresses.is_empty()
 	}
 
-	/// Declare that `application_id` serves `name`, as an operator.
+	/// Declare that `application_id` holds `name` for addresses, as an operator.
 	///
 	/// A declaration ties a name to the software answering on it, with no
-	/// addresses yet: it is what a later address registration or certificate
-	/// request from the machine is resolved against, which is how a box running
-	/// several workloads gets its requests routed to the right one.
+	/// addresses yet: it is what a later address registration from the machine
+	/// is resolved against, which is how a box running several workloads gets its
+	/// requests routed to the right one.
 	///
 	/// Declaring is idempotent for the application already holding the name.
-	/// A name another application holds is refused, and the refusal *names* the
-	/// holder — safe here, and not on the device-facing path, because an
-	/// operator already sees the whole fleet and needs to know what to release
-	/// first.
-	// spec: CRT#declared-dns-names
+	/// A name another application holds, for either kind, is refused, and the
+	/// refusal *names* the holder — safe here, and not on the device-facing path,
+	/// because an operator already sees the whole fleet and needs to know what to
+	/// release first. Declaring ends the machine's undeclared record and denial
+	/// for addresses.
+	// spec: DNS#declared-dns-names
 	pub async fn declare(
 		db: &mut AsyncPgConnection,
 		application_id: Uuid,
@@ -102,48 +108,56 @@ impl ApplicationName {
 		use crate::schema::application_names::dsl;
 
 		let name = normalize_domain(name)?;
-		if let Some(existing) = Self::for_name(db, &name).await? {
-			if existing.application_id != application_id {
-				return Err(Self::held_elsewhere(db, &name, existing.application_id).await);
-			}
-			crate::dns_name_dispositions::clear_for_declaration(db, application_id, &name).await?;
-			return Ok(existing);
+		if let Some(held_by) = holder(db, &name).await?
+			&& held_by != application_id
+		{
+			return Err(held_elsewhere(db, &name, held_by).await);
 		}
 
-		match diesel::insert_into(dsl::application_names)
-			.values((
-				dsl::application_id.eq(application_id),
-				dsl::name.eq(&name),
-				dsl::addresses.eq(Vec::<Option<IpNet>>::new()),
-			))
-			.returning(Self::as_select())
-			.get_result(db)
-			.await
-		{
-			Ok(row) => {
-				crate::dns_name_dispositions::clear_for_declaration(db, application_id, &name)
-					.await?;
-				Ok(row)
-			}
-			// Declared from elsewhere between the read and the insert.
-			Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => {
-				let holder = Self::for_name(db, &name).await?.map(|r| r.application_id);
-				Err(match holder {
-					Some(id) => Self::held_elsewhere(db, &name, id).await,
-					None => AppError::Conflict(format!("{name} was declared elsewhere just now")),
-				})
-			}
-			Err(e) => Err(AppError::from(e)),
-		}
+		let row = match Self::for_name(db, &name).await? {
+			Some(existing) if existing.application_id == application_id => existing,
+			// Declared by another application since `holder` looked.
+			Some(_) => return Err(lost_race(db, &name).await),
+			None => match diesel::insert_into(dsl::application_names)
+				.values((
+					dsl::application_id.eq(application_id),
+					dsl::name.eq(&name),
+					dsl::addresses.eq(Vec::<Option<IpNet>>::new()),
+				))
+				.returning(Self::as_select())
+				.get_result(db)
+				.await
+			{
+				Ok(row) => row,
+				// Declared from elsewhere between the read and the insert, or held
+				// for certificates by another application.
+				Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => {
+					match Self::for_name(db, &name).await? {
+						Some(row) if row.application_id == application_id => row,
+						_ => return Err(lost_race(db, &name).await),
+					}
+				}
+				Err(e) => return Err(AppError::from(e)),
+			},
+		};
+
+		crate::dns_name_dispositions::clear_for_declaration(
+			db,
+			application_id,
+			&name,
+			DnsNameKind::Addresses,
+		)
+		.await?;
+		Ok(row)
 	}
 
-	/// End an application's hold on a name, as an operator.
+	/// End an application's hold on a name for addresses, as an operator.
 	///
 	/// What is already in place stands, exactly as revoking a grant leaves it:
-	/// the records published stay published and the certificates held stay
-	/// held. What ends is Canopy treating the name as this application's, which
-	/// frees it to be declared by another.
-	// spec: CRT#declared-dns-names
+	/// the records published stay published. What ends is Canopy treating the
+	/// name as this application's for addresses, which frees it to be declared by
+	/// another once it is released for certificates too.
+	// spec: DNS#declared-dns-names
 	pub async fn release(
 		db: &mut AsyncPgConnection,
 		application_id: Uuid,
@@ -161,24 +175,10 @@ impl ApplicationName {
 		.await?;
 		if deleted == 0 {
 			return Err(AppError::NotFound(format!(
-				"{name} is not declared by this application"
+				"{name} is not declared for addresses by this application"
 			)));
 		}
 		Ok(())
-	}
-
-	/// The operator-facing refusal for a name another application holds.
-	async fn held_elsewhere(db: &mut AsyncPgConnection, name: &str, holder: Uuid) -> AppError {
-		let described = match crate::applications::Application::get_by_id(db, holder).await {
-			Ok(app) => match app.name {
-				Some(name) => format!("{name} ({holder})"),
-				None => holder.to_string(),
-			},
-			Err(_) => holder.to_string(),
-		};
-		AppError::Conflict(format!(
-			"{name} is already declared by {described}; release it there before declaring it here"
-		))
 	}
 
 	/// Register `name` for a server with the addresses it is reachable at,
@@ -227,12 +227,17 @@ impl ApplicationName {
 			.await
 		{
 			Ok(row) => {
-				crate::dns_name_dispositions::clear_for_declaration(db, application_id, &name)
-					.await?;
+				crate::dns_name_dispositions::clear_for_declaration(
+					db,
+					application_id,
+					&name,
+					DnsNameKind::Addresses,
+				)
+				.await?;
 				Ok(row)
 			}
-			// Another server registered the same name between the read and the
-			// insert.
+			// Another application registered the same name between the read and
+			// the insert, or holds it for certificates.
 			Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => {
 				Err(AppError::DnsNameUndeclared(name))
 			}
@@ -264,12 +269,28 @@ impl ApplicationName {
 			.map_err(AppError::from)
 	}
 
+	/// The names any of `application_ids` has registered, by name: one query for
+	/// a page listing several applications.
+	pub async fn for_applications(
+		db: &mut AsyncPgConnection,
+		application_ids: &[Uuid],
+	) -> Result<Vec<Self>> {
+		use crate::schema::application_names::dsl;
+		dsl::application_names
+			.select(Self::as_select())
+			.filter(dsl::application_id.eq_any(application_ids))
+			.order(dsl::name.asc())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Registrations whose published state doesn't match what was asked for —
 	/// the reconcile's work list, oldest change first so nothing starves.
 	///
 	/// Skips paused applications: while a server is paused Canopy changes no record of
 	/// its, though everything already published stays published.
-	// spec: CRT#pausing-an-application
+	// spec: DNS#pausing-an-application
 	pub async fn needing_publish(db: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Self>> {
 		use crate::schema::{application_names, applications};
 		let rows: Vec<Self> = application_names::table
@@ -298,7 +319,7 @@ impl ApplicationName {
 	/// Paused applications are excluded for the same reason they are excluded from the
 	/// reconcile — Canopy was told to stop changing their records, so nothing being
 	/// changed is the intended outcome.
-	// spec: CRT#addresses
+	// spec: ADR#registering
 	pub async fn failing_to_publish(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::schema::{application_names, applications};
 		let rows: Vec<Self> = application_names::table

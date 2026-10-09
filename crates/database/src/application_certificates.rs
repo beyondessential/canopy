@@ -8,7 +8,7 @@
 //!
 //! The submitted signing request is kept because renewal reuses it: the key has
 //! not changed, so Canopy renews without needing anything from the server.
-// spec: CRT#certificates
+// spec: CRT
 
 use commons_errors::{AppError, Result};
 use commons_types::{backoff::Backoff, dns::normalize_domain};
@@ -317,24 +317,28 @@ impl ApplicationCertificate {
 
 		let name = normalize_domain(name)?;
 
-		// An order exists only for a name the application declares, so Canopy
-		// always knows which workload a certificate is for and knows to stop
-		// renewing it once the declaration ends. Registering an address happens
-		// to declare the name; requesting a certificate has to do it explicitly,
-		// since an application may want a certificate before it is reachable.
+		// An order exists only for a name the application declares for
+		// certificates, so Canopy always knows which workload a certificate is
+		// for and knows to stop renewing it once the declaration ends. An
+		// application may want a certificate before it is reachable, so the
+		// request declares the name rather than needing an address registered.
 		//
 		// This path is device-facing, so a name another application holds is
 		// refused word for word as a name nobody declares. `declare` itself
 		// names the holder, which is right for an operator who sees the whole
 		// fleet and wrong here, where it would make the endpoint a directory of
 		// what other machines serve.
-		// spec: CRT#declared-dns-names
-		crate::application_names::ApplicationName::declare(db, application_id, &name)
-			.await
-			.map_err(|err| match err {
-				AppError::Conflict(_) => AppError::DnsNameUndeclared(name.clone()),
-				other => other,
-			})?;
+		// spec: DNS#declared-dns-names
+		crate::application_certificate_names::ApplicationCertificateName::declare(
+			db,
+			application_id,
+			&name,
+		)
+		.await
+		.map_err(|err| match err {
+			AppError::Conflict(_) => AppError::DnsNameUndeclared(name.clone()),
+			other => other,
+		})?;
 
 		// A key revoked for compromise is never certified again, whatever asks
 		// for it: the server has to generate a new one. Its own error type, not a
@@ -426,13 +430,29 @@ impl ApplicationCertificate {
 			.map_err(AppError::from)
 	}
 
+	/// Every certificate and in-flight order for any of `application_ids`, each
+	/// name's newest first: one query for a page listing several applications.
+	pub async fn for_applications(
+		db: &mut AsyncPgConnection,
+		application_ids: &[Uuid],
+	) -> Result<Vec<Self>> {
+		use crate::schema::application_certificates::dsl;
+		dsl::application_certificates
+			.select(Self::as_select())
+			.filter(dsl::application_id.eq_any(application_ids))
+			.order((dsl::name.asc(), dsl::created_at.desc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Orders due to be attempted, soonest first. Claimed with `SKIP LOCKED` so
 	/// two workers never drive the same order.
 	///
 	/// Skips paused applications: while a server is paused Canopy makes no new changes
 	/// on its behalf, so its orders sit where they are and resume when the pause
 	/// lifts.
-	// spec: CRT#pausing-an-application
+	// spec: DNS#pausing-an-application
 	pub async fn claim_due(db: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Self>> {
 		use crate::schema::{application_certificates, applications};
 
@@ -541,7 +561,7 @@ impl ApplicationCertificate {
 		let now = Timestamp::now();
 		// Paused applications are skipped: their renewals fall due again when the
 		// pause lifts.
-		// spec: CRT#pausing-an-application
+		// spec: DNS#pausing-an-application
 		let due: Vec<Uuid> = {
 			use crate::schema::{application_certificates, applications};
 			application_certificates::table
@@ -605,7 +625,7 @@ impl ApplicationCertificate {
 			// A paused server raises nothing: Canopy was told to stop acting on
 			// its behalf, so a certificate running down is the expected
 			// consequence. The pause is what gets reported instead.
-			// spec: CRT#pausing-an-application
+			// spec: DNS#pausing-an-application
 			.filter(applications::name_management_paused_at.is_null())
 			.filter(still_declared())
 			.select((
@@ -661,7 +681,7 @@ impl ApplicationCertificate {
 	/// Entitlement is filtered the same way: a name the server is no longer
 	/// entitled to raises nothing however far past expiry it is, because Canopy
 	/// stopped renewing it on purpose.
-	// spec: CRT#pausing-an-application
+	// spec: DNS#pausing-an-application
 	pub async fn lapsing_under_pause(db: &mut AsyncPgConnection) -> Result<Vec<PausedLapse>> {
 		use crate::schema::{application_certificates, applications};
 
@@ -795,7 +815,7 @@ impl ApplicationCertificate {
 			// otherwise request a replacement within minutes, and if the key leaked
 			// because the host was compromised that hands the same attacker a
 			// fresh certificate. An operator decides when to start again.
-			// spec: CRT#pausing-an-application
+			// spec: DNS#pausing-an-application
 			crate::applications::Application::pause_name_management(
 				conn,
 				cert.application_id,
@@ -865,29 +885,32 @@ pub async fn is_key_compromised(db: &mut AsyncPgConnection, key_fingerprint: &st
 /// for a name another application now serves, and alerting on it would report a
 /// deliberate act as a fault. What was already issued stays issued and
 /// collectable until it expires.
-// spec: CRT#declared-dns-names
+// spec: DNS#declared-dns-names
 type StillDeclared = diesel::dsl::exists<
 	diesel::helper_types::Filter<
 		diesel::helper_types::Filter<
-			crate::schema::application_names::table,
+			crate::schema::application_certificate_names::table,
 			diesel::dsl::Eq<
-				crate::schema::application_names::application_id,
+				crate::schema::application_certificate_names::application_id,
 				crate::schema::application_certificates::application_id,
 			>,
 		>,
 		diesel::dsl::Eq<
-			crate::schema::application_names::name,
+			crate::schema::application_certificate_names::name,
 			crate::schema::application_certificates::name,
 		>,
 	>,
 >;
 
 fn still_declared() -> StillDeclared {
-	use crate::schema::{application_certificates, application_names};
+	use crate::schema::{application_certificate_names, application_certificates};
 	diesel::dsl::exists(
-		application_names::table
-			.filter(application_names::application_id.eq(application_certificates::application_id))
-			.filter(application_names::name.eq(application_certificates::name)),
+		application_certificate_names::table
+			.filter(
+				application_certificate_names::application_id
+					.eq(application_certificates::application_id),
+			)
+			.filter(application_certificate_names::name.eq(application_certificates::name)),
 	)
 }
 

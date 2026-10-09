@@ -26,6 +26,7 @@ import { ChecksTable, HealthIndicator } from "../components/ChecksTable";
 import IncidentsLink from "../components/IncidentsLink";
 import ManualEventButton from "../components/ManualEventButton";
 import ServerCertificatesSection from "../components/ServerCertificatesSection";
+import ServerDnsNamesSection from "../components/ServerDnsNamesSection";
 import MaintenanceHeaderButton from "../components/MaintenanceHeaderButton";
 import MaintenanceSection from "../components/MaintenanceSection";
 import SilencedRefsSection from "../components/SilencedRefsSection";
@@ -72,6 +73,9 @@ export default function ServerDetail() {
 	// lockstep — otherwise resolving an issue (which can auto-close an
 	// incident) leaves a stale incidents list.
 	const [refreshTick, setRefreshTick] = useState(0);
+	// The DNS names and TLS certificates sections share the application's pause,
+	// so a change in one is read again by both.
+	const [namesTick, setNamesTick] = useState(0);
 	const bumpRefresh = () => setRefreshTick((t) => t + 1);
 	// Single source of truth for the group's open-incident state. Used to
 	// label every ManualEventButton on the page identically — a child
@@ -166,7 +170,16 @@ export default function ServerDetail() {
 					tags={data.server.tags}
 				/>
 			)}
-			<ServerCertificatesSection serverId={data.server.id} />
+			<ServerDnsNamesSection
+				serverId={data.server.id}
+				refreshKey={namesTick}
+				onChanged={() => setNamesTick((t) => t + 1)}
+			/>
+			<ServerCertificatesSection
+				serverId={data.server.id}
+				refreshKey={namesTick}
+				onChanged={() => setNamesTick((t) => t + 1)}
+			/>
 			{data.server.display_host && (
 				<Paper variant="outlined" sx={{ p: 2 }}>
 					<Typography variant="h6" component="h2" gutterBottom>

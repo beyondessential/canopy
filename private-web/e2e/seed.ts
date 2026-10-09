@@ -167,7 +167,7 @@ async function applicationTypeOf(sql: Sql, applicationId: string): Promise<strin
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, machine_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, reporting_schema_builds, reporting_schema_requests, migration_test_requests, upgrade_plans, maintenance_windows, inventory_variables, inventory_leases, version_known_issues, recovery_vault_writes, application_names, application_certificates, kubernetes_clusters, compromised_keys RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, machine_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, reporting_schema_builds, reporting_schema_requests, migration_test_requests, upgrade_plans, maintenance_windows, inventory_variables, inventory_leases, version_known_issues, recovery_vault_writes, application_names, application_certificate_names, application_certificates, kubernetes_clusters, compromised_keys RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" application with
 	// it; self-alerts attach to that row, so put it back.
@@ -2057,7 +2057,24 @@ export async function seedServerName(
 	return { id, name: opts.name };
 }
 
-/** Seed a `server_certificates` row.
+/** Seed an `application_certificate_names` row: a DNS name an application holds
+ * for certificates, with no order yet. */
+export async function seedCertificateName(
+	sql: Sql,
+	opts: { serverId: string; name: string },
+): Promise<{ id: string; name: string }> {
+	const id = randomUUID();
+	await sql.query(
+		`INSERT INTO application_certificate_names (id, application_id, name)
+		 VALUES ($1, $2, $3)
+		 ON CONFLICT (name) DO NOTHING`,
+		[id, opts.serverId, opts.name],
+	);
+	return { id, name: opts.name };
+}
+
+/** Seed a `server_certificates` row, and the declaration a certificate request
+ * makes for its name.
  *
  * `expiresInDays` and `lifetimeDays` place the certificate anywhere in its life,
  * which is what drives the risk grading — that is a fraction of each
@@ -2079,6 +2096,7 @@ export async function seedServerCertificate(
 		revocationReason?: string;
 	},
 ): Promise<{ id: string; name: string }> {
+	await seedCertificateName(sql, { serverId: opts.serverId, name: opts.name });
 	const id = randomUUID();
 	const state = opts.state ?? "issued";
 	const issued = state === "issued" || state === "revoked";
@@ -2133,26 +2151,39 @@ export async function seedUndeclaredDnsName(
 	opts: {
 		machineId: string;
 		name: string;
-		askedFor?: "addresses" | "certificate";
+		kind?: "addresses" | "certificate";
 		askedMinutesAgo?: number;
 	},
 ): Promise<void> {
 	const asked = new Date(Date.now() - (opts.askedMinutesAgo ?? 2) * 60_000);
 	await sql.query(
-		`INSERT INTO undeclared_dns_names (machine_id, dns_name, asked_for, first_asked_at, last_asked_at)
+		`INSERT INTO undeclared_dns_names (machine_id, dns_name, kind, first_asked_at, last_asked_at)
 		 VALUES ($1, $2, $3, $4, $4)`,
-		[opts.machineId, opts.name, opts.askedFor ?? "certificate", asked],
+		[opts.machineId, opts.name, opts.kind ?? "certificate", asked],
 	);
 }
 
-/** Seed a `denied_dns_names` row: a DNS name an operator denied to a machine. */
+/** Seed a `denied_dns_names` row: a DNS name an operator denied to a machine
+ * for one kind of request. */
 export async function seedDeniedDnsName(
 	sql: Sql,
-	opts: { machineId: string; name: string; deniedBy?: string; note?: string },
+	opts: {
+		machineId: string;
+		name: string;
+		kind?: "addresses" | "certificate";
+		deniedBy?: string;
+		note?: string;
+	},
 ): Promise<void> {
 	await sql.query(
-		`INSERT INTO denied_dns_names (machine_id, dns_name, denied_by, note)
-		 VALUES ($1, $2, $3, $4)`,
-		[opts.machineId, opts.name, opts.deniedBy ?? "admin@localhost", opts.note ?? null],
+		`INSERT INTO denied_dns_names (machine_id, dns_name, kind, denied_by, note)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		[
+			opts.machineId,
+			opts.name,
+			opts.kind ?? "certificate",
+			opts.deniedBy ?? "admin@localhost",
+			opts.note ?? null,
+		],
 	);
 }

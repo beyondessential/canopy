@@ -9,7 +9,7 @@
 //! clean the record up — because every step of it is one conversation with one
 //! authority about one name, and splitting it across the worker would leave a
 //! challenge record behind whenever a step in between failed.
-// spec: CRT#certificates
+// spec: CRT
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

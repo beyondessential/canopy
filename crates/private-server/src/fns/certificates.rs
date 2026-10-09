@@ -1,7 +1,11 @@
-//! Operator-facing name and certificate endpoints (private-server, admin SPA).
+//! Operator-facing certificate endpoints (private-server, admin SPA).
+//!
+//! The DNS names an application holds for addresses are the `dns_names` module's;
+//! this is the certificate side, with its own declarations, undeclared records,
+//! and denials. What the two share, such as the pause, is in `dns_names`.
 //!
 //! Reads are open to any tailnet user; anything that changes what Canopy will do
-//! on a server's behalf — the profile, the pause, a revocation — requires admin.
+//! on a server's behalf (the profile, a revocation) requires admin.
 //!
 //! Revocation is the one endpoint here that talks to the certificate authority
 //! rather than only to the database, because an operator pressing revoke needs to
@@ -16,15 +20,20 @@ use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::acme::RevokeFor;
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::Uuid;
-use commons_types::dns::{is_within, match_zone};
+use commons_types::dns::is_within;
 use database::application_certificates::{ApplicationCertificate, RevocationReason};
 use database::applications::Application;
-use database::{ApplicationName, ServerGroupDomain};
+use database::{ApplicationCertificateName, DnsNameKind, ServerGroupDomain};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::fns::applications::ServerIdArgs;
+use crate::fns::dns_names::{
+	DeclarationArgs, DeniedView, DenyArgs, DomainCertificateView, DomainHealthView, DomainNameView,
+	MachineDeclaredView, MachineDnsNameArgs, MachineNamesView, PauseView, by_domain, by_id,
+	group_domains, ids, machine_names, pause_view,
+};
 use crate::fns::server_groups::GroupIdArgs;
 use crate::state::AppState;
 
@@ -34,44 +43,12 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(read_only: for_group))
 		.routes(routes!(read_only: authority))
 		.routes(routes!(write: set_profile))
-		.routes(routes!(danger(unprotects): pause))
-		.routes(routes!(write: resume))
 		.routes(routes!(danger(fleet, invalidates): revoke))
 		.routes(routes!(write: declare))
 		.routes(routes!(write: release))
 		.routes(routes!(read_only: for_machine))
-		.routes(routes!(read_only: undeclared_notices))
 		.routes(routes!(write: deny))
 		.routes(routes!(write: lift_denial))
-}
-
-/// A name a server has registered, and how far Canopy has got with it.
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct NameView {
-	/// Unique identifier of the registration.
-	pub id: Uuid,
-	/// The name, normalised.
-	pub name: String,
-	/// The addresses the server asked to be reachable at.
-	pub addresses: Vec<String>,
-	/// The addresses Canopy has actually published. Differs from `addresses`
-	/// while a change is waiting to be reconciled.
-	pub published_addresses: Vec<String>,
-	/// Whether the zone has caught up with what the server asked for.
-	pub published: bool,
-	/// When Canopy last published this name's records.
-	#[schema(value_type = Option<String>)]
-	pub published_at: Option<Timestamp>,
-	/// Why the last publish attempt failed, if it did.
-	pub last_error: Option<String>,
-	/// Apex of the managed zone covering this name, or null where no configured
-	/// zone does — in which case Canopy can publish nothing for it.
-	pub zone: Option<String>,
-	/// Whether the name lies at or beneath a domain the application's group
-	/// controls. An operator may declare one that does not, ahead of the group
-	/// claiming its domain; nothing is published or certified for it until then.
-	// spec: CRT#presentation
-	pub within_domains: bool,
 }
 
 /// A certificate Canopy holds for a server, or an order in flight.
@@ -120,52 +97,47 @@ pub struct CertificateView {
 	pub key_fingerprint: String,
 }
 
-/// What a server's page shows about its names and certificates.
+/// A DNS name an application holds for certificates.
 #[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct ApplicationNamesView {
-	/// Whether an operator has allowed this server to manage its own DNS.
-	pub may_manage_dns: bool,
-	/// Whether an operator has allowed this server to obtain its own
+pub struct CertificateNameView {
+	/// Unique identifier of the declaration.
+	pub id: Uuid,
+	/// The DNS name, normalised.
+	pub name: String,
+	/// Whether the DNS name lies at or beneath a domain the application's group
+	/// controls. An operator may declare one that does not, ahead of the group
+	/// claiming its domain; nothing is certified for it until then.
+	// spec: DNS#on-an-application
+	pub within_domains: bool,
+}
+
+/// What an application's TLS certificates section shows.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct CertificatesView {
+	/// Whether an operator has allowed this application to obtain its own
 	/// certificates.
 	pub may_manage_tls: bool,
-	/// The profile this server's certificates are requested under. Null means
-	/// the authority's own default, which is its longest-lived.
+	/// The profile this application's certificates are requested under. Null
+	/// means the authority's own default, which is its longest-lived.
 	pub certificate_profile: Option<String>,
-	/// Whether Canopy has been told to stop doing anything new for this server.
-	pub paused: bool,
-	/// When the pause was set.
-	#[schema(value_type = Option<String>)]
-	pub paused_at: Option<Timestamp>,
-	/// Who set it.
-	pub paused_by: Option<String>,
-	/// Why it was set.
-	pub pause_reason: Option<String>,
-	/// The domains this server's group controls, so the UI can say which names
-	/// are available to it at all.
+	/// The pause on this application, if it has one.
+	pub pause: Option<PauseView>,
+	/// The domains this application's group controls, so the UI can say which
+	/// DNS names are available to it at all.
 	pub domains: Vec<String>,
-	/// The public names this server has registered, by name.
-	pub names: Vec<NameView>,
+	/// The DNS names this application holds for certificates, by name.
+	pub names: Vec<CertificateNameView>,
 	/// Every certificate Canopy holds or has an order in flight for, newest
-	/// first. A name may appear more than once — a key rotation leaves the
+	/// first. A DNS name may appear more than once: a key rotation leaves the
 	/// previous certificate behind until it expires.
 	pub certificates: Vec<CertificateView>,
 }
 
-fn name_view(
-	row: ApplicationName,
-	zones: &[commons_types::dns::ManagedZone],
-	domains: &[String],
-) -> NameView {
-	NameView {
+fn name_view(row: ApplicationCertificateName, domains: &[String]) -> CertificateNameView {
+	CertificateNameView {
 		within_domains: domains.iter().any(|domain| is_within(&row.name, domain)),
-		published: row.is_reconciled(),
-		addresses: row.wanted().iter().map(|a| a.to_string()).collect(),
-		published_addresses: row.published().iter().map(|a| a.to_string()).collect(),
-		zone: match_zone(&row.name, zones).map(|z| z.apex.clone()),
 		id: row.id,
 		name: row.name,
-		published_at: row.published_at,
-		last_error: row.last_error,
 	}
 }
 
@@ -196,11 +168,12 @@ fn certificate_view(cert: ApplicationCertificate) -> CertificateView {
 	}
 }
 
-/// Everything a server's page needs about its names and certificates.
+/// Everything an application's TLS certificates section needs.
 ///
 /// One call rather than several, because the parts are read together and a
-/// half-loaded panel would show a certificate without the pause that explains
+/// half-loaded section would show a certificate without the pause that explains
 /// why it is not renewing.
+// spec: CRT#presentation
 #[utoipa::path(
 	post,
 	path = "/for_server",
@@ -209,7 +182,7 @@ fn certificate_view(cert: ApplicationCertificate) -> CertificateView {
 	security(("tailscale-user" = [])),
 	request_body = ServerIdArgs,
 	responses(
-		(status = 200, body = ApplicationNamesView),
+		(status = 200, body = CertificatesView),
 		(status = 404, body = ProblemDetailsSchema),
 	),
 )]
@@ -217,69 +190,33 @@ pub async fn for_server(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
 	Json(args): Json<ServerIdArgs>,
-) -> Result<Json<ApplicationNamesView>> {
+) -> Result<Json<CertificatesView>> {
 	let mut conn = state.db_read.get().await?;
-	let server = Application::get_by_id(&mut conn, args.server_id).await?;
+	let application = Application::get_by_id(&mut conn, args.server_id).await?;
 
-	let domains = group_domains(&mut conn, server.group_id).await?;
-	let names = ApplicationName::for_server(&mut conn, args.server_id).await?;
+	let domains = group_domains(&mut conn, application.group_id).await?;
+	let names = ApplicationCertificateName::for_application(&mut conn, args.server_id).await?;
 	let certificates = ApplicationCertificate::for_server(&mut conn, args.server_id).await?;
 
-	Ok(Json(ApplicationNamesView {
-		may_manage_dns: server.may_manage_dns,
-		may_manage_tls: server.may_manage_tls,
-		paused: server.name_management_paused(),
-		certificate_profile: server.certificate_profile,
-		paused_at: server.name_management_paused_at,
-		paused_by: server.name_management_paused_by,
-		pause_reason: server.name_management_pause_reason,
+	Ok(Json(CertificatesView {
+		may_manage_tls: application.may_manage_tls,
+		pause: pause_view(&application),
+		certificate_profile: application.certificate_profile,
 		names: names
 			.into_iter()
-			.map(|row| name_view(row, &state.dns_zones, &domains))
+			.map(|row| name_view(row, &domains))
 			.collect(),
 		domains,
 		certificates: certificates.into_iter().map(certificate_view).collect(),
 	}))
 }
 
-/// One name in use beneath a group's domain, with whether it is covered.
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct DomainNameView {
-	/// The name.
-	pub name: String,
-	/// The server that registered it or holds its certificate.
-	pub server_id: Uuid,
-	/// That server's name, for display.
-	pub server_name: Option<String>,
-	/// Whether the address records Canopy publishes for it are up to date. Null
-	/// where the name has no registration — a certificate obtained for a name
-	/// whose addresses the server publishes itself.
-	pub published: Option<bool>,
-	/// Whether a certificate Canopy holds for it is current and collectable.
-	pub certificate: bool,
-	/// How urgently that certificate needs attention: `none`, `at_risk`, or
-	/// `critical`. Null where there is no certificate.
-	pub risk: Option<String>,
-	/// When the certificate expires.
-	#[schema(value_type = Option<String>)]
-	pub not_after: Option<Timestamp>,
-}
-
-/// The names in use beneath one of a group's domains.
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct DomainHealthView {
-	/// The claimed domain these names sit beneath.
-	pub domain: String,
-	/// The names in use beneath it, by name.
-	pub names: Vec<DomainNameView>,
-}
-
-/// The names in use under each domain a group controls, and which of them hold a
-/// current certificate.
+/// The DNS names declared for certificates under each domain a group controls,
+/// and which of them hold a current certificate.
 ///
-/// So that whether a group's names are healthy is answerable from the
+/// So that whether a group's certificates are healthy is answerable from the
 /// group's page, without visiting each of its applications.
-// spec: CRT#presentation
+// spec: DNS#on-a-group
 #[utoipa::path(
 	post,
 	path = "/for_group",
@@ -295,7 +232,6 @@ pub async fn for_group(
 	Json(args): Json<GroupIdArgs>,
 ) -> Result<Json<Vec<DomainHealthView>>> {
 	use database::application_certificates::Risk;
-	use std::collections::BTreeMap;
 
 	let mut conn = state.db_read.get().await?;
 	let claims = ServerGroupDomain::list_for_group(&mut conn, args.server_group_id).await?;
@@ -304,46 +240,32 @@ pub async fn for_group(
 	}
 
 	let applications = Application::list_live_in_group(&mut conn, args.server_group_id).await?;
-
-	// Gathered per name across both registrations and certificates: a name may
-	// have one, the other, or both, and the group's view is of names rather than
-	// of either table.
-	let mut rows: BTreeMap<String, DomainNameView> = BTreeMap::new();
-	for server in &applications {
-		for row in ApplicationName::for_server(&mut conn, server.id).await? {
-			rows.entry(row.name.clone())
-				.or_insert_with(|| DomainNameView {
-					name: row.name.clone(),
-					server_id: server.id,
-					server_name: Some(server.display_name()),
-					published: None,
-					certificate: false,
-					risk: None,
-					not_after: None,
-				})
-				.published = Some(row.is_reconciled());
-		}
-		for cert in ApplicationCertificate::for_server(&mut conn, server.id).await? {
-			let entry = rows
-				.entry(cert.name.clone())
-				.or_insert_with(|| DomainNameView {
-					name: cert.name.clone(),
-					server_id: server.id,
-					server_name: Some(server.display_name()),
-					published: None,
-					certificate: false,
-					risk: None,
-					not_after: None,
-				});
-			// The newest usable certificate wins where a name has more than one —
-			// a key rotation leaves the old row behind, and the group's view is of
-			// whether the name is covered rather than of every attempt.
-			if cert.is_collectable() && !entry.certificate {
-				entry.certificate = true;
+	let ids = ids(&applications);
+	let by_id = by_id(&applications);
+	let certificates = ApplicationCertificate::for_applications(&mut conn, &ids).await?;
+	let mut rows = Vec::new();
+	for declared in ApplicationCertificateName::for_applications(&mut conn, &ids).await? {
+		let Some(application) = by_id.get(&declared.application_id) else {
+			continue;
+		};
+		let mut summary = DomainCertificateView {
+			current: false,
+			risk: None,
+			not_after: None,
+		};
+		for cert in certificates
+			.iter()
+			.filter(|c| c.application_id == declared.application_id && c.name == declared.name)
+		{
+			// The newest usable certificate wins where a name has more than one:
+			// a key rotation leaves the old row behind, and the group's view is
+			// of whether the name is covered rather than of every attempt.
+			if cert.is_collectable() {
+				summary.current = true;
 			}
-			if entry.not_after.is_none() || cert.not_after > entry.not_after {
-				entry.not_after = cert.not_after;
-				entry.risk = Some(
+			if summary.not_after.is_none() || cert.not_after > summary.not_after {
+				summary.not_after = cert.not_after;
+				summary.risk = Some(
 					match cert.risk() {
 						Risk::None => "none",
 						Risk::AtRisk => "at_risk",
@@ -353,21 +275,16 @@ pub async fn for_group(
 				);
 			}
 		}
+		rows.push(DomainNameView {
+			name: declared.name,
+			server_id: application.id,
+			server_name: Some(application.display_name()),
+			published: None,
+			certificate: Some(summary),
+		});
 	}
 
-	Ok(Json(
-		claims
-			.into_iter()
-			.map(|claim| DomainHealthView {
-				names: rows
-					.values()
-					.filter(|row| is_within(&row.name, &claim.domain))
-					.cloned()
-					.collect(),
-				domain: claim.domain,
-			})
-			.collect(),
-	))
+	Ok(Json(by_domain(claims, rows)))
 }
 
 /// The certificate authority Canopy is configured to use, and whether it works.
@@ -391,7 +308,7 @@ pub struct AuthorityView {
 ///
 /// Presented to operators because a misconfiguration of issuance shows up here
 /// rather than on any one server.
-// spec: CRT#presentation
+// spec: CRT#issuance-authority
 #[utoipa::path(
 	post,
 	path = "/authority",
@@ -495,68 +412,6 @@ pub async fn set_profile(
 	Ok(Json(()))
 }
 
-/// Why a server is being paused.
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct PauseArgs {
-	/// The server to pause.
-	pub server_id: Uuid,
-	/// Why, recorded so whoever finds the pause later knows what it was for.
-	pub reason: String,
-}
-
-/// Pause a server: Canopy makes no new changes on its behalf.
-///
-/// Nothing already in place is withdrawn — records published stand, certificates
-/// held stay held and collectable until they expire, and the group keeps
-/// working exactly as it did. What stops is Canopy doing anything *new*.
-///
-/// A second pause leaves the first in place, so the original reason and time are
-/// not overwritten by a later one.
-// spec: CRT#pausing-an-application
-#[utoipa::path(
-	post,
-	path = "/pause",
-	operation_id = "certificates_pause",
-	tag = "certificates",
-	security(("tailscale-admin" = [])),
-	request_body = PauseArgs,
-	responses((status = 200), (status = 404, body = ProblemDetailsSchema)),
-)]
-pub async fn pause(
-	State(state): State<AppState>,
-	TailscaleAdmin(admin): TailscaleAdmin,
-	Json(args): Json<PauseArgs>,
-) -> Result<Json<()>> {
-	let mut conn = state.db.get().await?;
-	Application::pause_name_management(&mut conn, args.server_id, Some(&admin.login), &args.reason)
-		.await?;
-	Ok(Json(()))
-}
-
-/// Lift a server's pause. Work resumes where it left off.
-///
-/// Only an operator can do this: Canopy never lifts a pause itself, however long
-/// it has been in place and however much is expiring under it.
-// spec: CRT#pausing-an-application
-#[utoipa::path(
-	post,
-	path = "/resume",
-	operation_id = "certificates_resume",
-	tag = "certificates",
-	security(("tailscale-admin" = [])),
-	request_body = ServerIdArgs,
-	responses((status = 200), (status = 404, body = ProblemDetailsSchema)),
-)]
-pub async fn resume(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
-	Json(args): Json<ServerIdArgs>,
-) -> Result<Json<()>> {
-	let mut conn = state.db.get().await?;
-	Application::resume_name_management(&mut conn, args.server_id).await?;
-	Ok(Json(()))
-}
-
 /// Which certificate to revoke, and why.
 #[derive(Debug, Deserialize, ToSchema)]
 #[schema(as = CertificateRevokeArgs)]
@@ -639,26 +494,18 @@ pub async fn revoke(
 	Ok(Json(()))
 }
 
-/// An application and the name being declared for it, or released from it.
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct DeclarationArgs {
-	/// The application that serves the name.
-	pub application_id: Uuid,
-	/// The name, in any case and with or without a trailing dot.
-	pub name: String,
-}
-
-/// Declare that an application serves a name.
+/// Declare that an application holds a DNS name for certificates.
 ///
-/// A declaration is what an address registration or a certificate request from
-/// the machine is resolved against, so it is how a box running several workloads
-/// gets its requests routed to the right one. It carries no addresses; the
-/// application registers those itself.
+/// A declaration is what a certificate request from the machine is resolved
+/// against, so it is how a box running several workloads gets its requests
+/// routed to the right one, and it is what Canopy renews and alerts for. It is
+/// not an order: the application requests the certificate itself.
 ///
-/// Declaring a name the same application already holds changes nothing. A name
-/// another application holds is refused, and the refusal names the holder so an
-/// operator can see what to release first.
-// spec: CRT#declared-dns-names
+/// Declaring a DNS name the same application already holds for certificates
+/// changes nothing. A DNS name another application holds, for either kind, is
+/// refused, and the refusal names the holder so an operator can see what to
+/// release first.
+// spec: DNS#declared-dns-names
 #[utoipa::path(
 	post,
 	path = "/declare",
@@ -667,30 +514,32 @@ pub struct DeclarationArgs {
 	security(("tailscale-admin" = [])),
 	request_body = DeclarationArgs,
 	responses(
-		(status = 200, body = NameView),
+		(status = 200, body = CertificateNameView),
 		(status = 404, body = ProblemDetailsSchema),
-		(status = 409, description = "Another application already declares this name.", body = ProblemDetailsSchema),
+		(status = 409, description = "Another application already declares this DNS name.", body = ProblemDetailsSchema),
 	),
 )]
 pub async fn declare(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
 	Json(args): Json<DeclarationArgs>,
-) -> Result<Json<NameView>> {
+) -> Result<Json<CertificateNameView>> {
 	let mut conn = state.db.get().await?;
-	let row = ApplicationName::declare(&mut conn, args.application_id, &args.name).await?;
+	let row =
+		ApplicationCertificateName::declare(&mut conn, args.application_id, &args.name).await?;
 	let application = Application::get_by_id(&mut conn, args.application_id).await?;
 	let domains = group_domains(&mut conn, application.group_id).await?;
-	Ok(Json(name_view(row, &state.dns_zones, &domains)))
+	Ok(Json(name_view(row, &domains)))
 }
 
-/// End an application's hold on a name.
+/// End an application's hold on a DNS name for certificates.
 ///
-/// What is already in place stands, as revoking a grant leaves it: the records
-/// published stay published and the certificates held stay held until they
-/// expire. What ends is Canopy treating the name as this application's, which
-/// frees it to be declared elsewhere.
-// spec: CRT#declared-dns-names
+/// What is already in place stands, as revoking a grant leaves it: certificates
+/// held stay held until they expire. What ends is Canopy renewing them and
+/// raising them as running out, and the DNS name being this application's for
+/// certificates, which frees it to be declared elsewhere once it is released for
+/// addresses too.
+// spec: DNS#declared-dns-names
 #[utoipa::path(
 	post,
 	path = "/release",
@@ -706,108 +555,16 @@ pub async fn release(
 	Json(args): Json<DeclarationArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	ApplicationName::release(&mut conn, args.application_id, &args.name).await?;
+	ApplicationCertificateName::release(&mut conn, args.application_id, &args.name).await?;
 	Ok(Json(()))
 }
 
-/// The domains a group controls, or none for an application in no group.
-async fn group_domains(
-	conn: &mut database::diesel_async::AsyncPgConnection,
-	group_id: Option<Uuid>,
-) -> Result<Vec<String>> {
-	Ok(match group_id {
-		Some(group) => ServerGroupDomain::list_for_group(conn, group)
-			.await?
-			.into_iter()
-			.map(|claim| claim.domain)
-			.collect(),
-		None => Vec::new(),
-	})
-}
-
-// ── A machine's DNS names ───────────────────────────────────────────────────
-
-/// One of a machine's applications, as a choice to declare a DNS name on.
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct MachineApplicationView {
-	/// The application's identifier.
-	pub id: Uuid,
-	/// What to call it.
-	pub name: String,
-	/// Its type's slug.
-	pub r#type: String,
-}
-
-/// A DNS name declared by one of a machine's applications.
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct MachineDeclaredView {
-	/// The DNS name, normalised.
-	pub name: String,
-	/// The application declaring it.
-	pub application_id: Uuid,
-	/// The declaring application, for display.
-	pub application_name: String,
-	/// The newest certificate Canopy holds or is ordering for it, if any.
-	pub certificate: Option<CertificateView>,
-}
-
-/// A request the machine made that resolved to no single application.
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct UndeclaredView {
-	/// The DNS name asked about, normalised.
-	pub name: String,
-	/// What the latest refused request was for.
-	pub asked_for: database::AskedFor,
-	/// When the machine first asked.
-	#[schema(value_type = String)]
-	pub first_asked_at: Timestamp,
-	/// When the machine last asked. A request not repeated for a day no longer
-	/// counts.
-	#[schema(value_type = String)]
-	pub last_asked_at: Timestamp,
-}
-
-/// A DNS name an operator has denied to the machine.
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct DeniedView {
-	/// The DNS name, normalised.
-	pub name: String,
-	/// The operator who denied it.
-	pub denied_by: String,
-	/// Why, if they said.
-	pub note: Option<String>,
-	/// When it was denied.
-	#[schema(value_type = String)]
-	pub denied_at: Timestamp,
-}
-
-fn denied_view(row: database::DeniedDnsName) -> DeniedView {
-	DeniedView {
-		name: row.dns_name,
-		denied_by: row.denied_by,
-		note: row.note,
-		denied_at: row.created_at,
-	}
-}
-
-/// Everything a machine's page needs about the DNS names asked about from it.
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct MachineDnsNamesView {
-	/// The machine's applications, to declare a DNS name on.
-	pub applications: Vec<MachineApplicationView>,
-	/// The DNS names its applications declare, by name.
-	pub declared: Vec<MachineDeclaredView>,
-	/// Its requests that resolved to no single application and still count.
-	pub undeclared: Vec<UndeclaredView>,
-	/// The DNS names denied to it.
-	pub denied: Vec<DeniedView>,
-}
-
-/// What a machine's page shows about its DNS names.
+/// What a machine's TLS certificates section shows.
 ///
-/// The DNS names its applications declare, the requests it made that resolved
-/// to none of them, and the DNS names denied to it.
-// spec: CRT#presentation
+/// The DNS names its applications declare for certificates, the certificate
+/// requests it made that resolved to none of them, and the DNS names denied to
+/// it for certificates.
+// spec: DNS#on-a-machine
 #[utoipa::path(
 	post,
 	path = "/for_machine",
@@ -816,7 +573,7 @@ pub struct MachineDnsNamesView {
 	security(("tailscale-user" = [])),
 	request_body = crate::fns::machines::MachineIdArgs,
 	responses(
-		(status = 200, body = MachineDnsNamesView),
+		(status = 200, body = MachineNamesView),
 		(status = 404, body = ProblemDetailsSchema),
 	),
 )]
@@ -824,139 +581,54 @@ pub async fn for_machine(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
 	Json(args): Json<crate::fns::machines::MachineIdArgs>,
-) -> Result<Json<MachineDnsNamesView>> {
+) -> Result<Json<MachineNamesView>> {
 	let mut conn = state.db_read.get().await?;
 	let machine = database::Machine::get_by_id(&mut conn, args.machine_id).await?;
 	let applications = machine.applications(&mut conn).await?;
 
-	let mut declared = Vec::new();
-	for application in &applications {
-		let certificates = ApplicationCertificate::for_server(&mut conn, application.id).await?;
-		for row in ApplicationName::for_server(&mut conn, application.id).await? {
-			// Newest first, so the first match is the one in play.
+	let ids = ids(&applications);
+	let by_id = by_id(&applications);
+	let certificates = ApplicationCertificate::for_applications(&mut conn, &ids).await?;
+	let declared = ApplicationCertificateName::for_applications(&mut conn, &ids)
+		.await?
+		.into_iter()
+		.filter_map(|row| {
+			let application = by_id.get(&row.application_id)?;
+			// Each name's newest first, so the first match is the one in play.
 			let certificate = certificates
 				.iter()
-				.find(|cert| cert.name == row.name)
+				.find(|cert| cert.application_id == row.application_id && cert.name == row.name)
 				.cloned()
 				.map(certificate_view);
-			declared.push(MachineDeclaredView {
+			Some(MachineDeclaredView {
+				published: None,
+				certificate,
 				name: row.name,
 				application_id: application.id,
 				application_name: application.display_name(),
-				certificate,
-			});
-		}
-	}
-	declared.sort_by(|a, b| a.name.cmp(&b.name));
-
-	let undeclared = database::UndeclaredDnsName::for_machine(&mut conn, machine.id)
-		.await?
-		.into_iter()
-		.map(|row| UndeclaredView {
-			name: row.dns_name,
-			asked_for: row.asked_for,
-			first_asked_at: row.first_asked_at,
-			last_asked_at: row.last_asked_at,
+			})
 		})
 		.collect();
 
-	let denied = database::DeniedDnsName::for_machine(&mut conn, machine.id)
-		.await?
-		.into_iter()
-		.map(denied_view)
-		.collect();
-
-	Ok(Json(MachineDnsNamesView {
-		applications: applications
-			.iter()
-			.map(|a| MachineApplicationView {
-				id: a.id,
-				name: a.display_name(),
-				r#type: a.r#type.to_string(),
-			})
-			.collect(),
-		declared,
-		undeclared,
-		denied,
-	}))
-}
-
-/// Which machines have undeclared requests, optionally within one group.
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct UndeclaredNoticesArgs {
-	/// Narrow to one group's machines. Omitted for the whole fleet.
-	#[serde(default)]
-	pub server_group_id: Option<Uuid>,
-}
-
-/// How many undeclared requests one machine has.
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct UndeclaredNoticeView {
-	/// The machine with requests waiting on a declaration.
-	pub machine_id: Uuid,
-	/// The machine's name.
-	pub machine_name: String,
-	/// The machine's group. Null for a machine in none.
-	pub group_id: Option<Uuid>,
-	/// That group's name.
-	pub group_name: Option<String>,
-	/// How many of its requests are waiting.
-	pub count: i64,
-}
-
-/// The machines with requests waiting on a declaration.
-///
-/// For the notices on the group page and the Status page. Empty when there
-/// are none.
-// spec: CRT#presentation
-#[utoipa::path(
-	post,
-	path = "/undeclared_notices",
-	operation_id = "certificates_undeclared_notices",
-	tag = "certificates",
-	security(("tailscale-user" = [])),
-	request_body = UndeclaredNoticesArgs,
-	responses((status = 200, body = Vec<UndeclaredNoticeView>)),
-)]
-pub async fn undeclared_notices(
-	State(state): State<AppState>,
-	_user: TailscaleUser,
-	Json(args): Json<UndeclaredNoticesArgs>,
-) -> Result<Json<Vec<UndeclaredNoticeView>>> {
-	let mut conn = state.db_read.get().await?;
-	let rows =
-		database::UndeclaredDnsName::counts_by_machine(&mut conn, args.server_group_id).await?;
 	Ok(Json(
-		rows.into_iter()
-			.map(|row| UndeclaredNoticeView {
-				machine_id: row.machine_id,
-				machine_name: row.machine_name,
-				group_id: row.group_id,
-				group_name: row.group_name,
-				count: row.count,
-			})
-			.collect(),
+		machine_names(
+			&mut conn,
+			&machine,
+			&applications,
+			DnsNameKind::Certificate,
+			declared,
+		)
+		.await?,
 	))
 }
 
-/// A DNS name to deny to a machine.
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct DenyArgs {
-	/// The machine to deny it to.
-	pub machine_id: Uuid,
-	/// The name, in any case and with or without a trailing dot.
-	pub name: String,
-	/// Why, optionally.
-	#[serde(default)]
-	pub note: Option<String>,
-}
-
-/// Deny a DNS name to a machine.
+/// Deny a DNS name to a machine for certificates.
 ///
-/// Every address and certificate request about it from that machine is then
-/// refused as denied, and is not recorded, so it raises no notice. Refused while
-/// one of the machine's applications declares the name.
-// spec: CRT#denied-dns-names
+/// Every certificate request about it from that machine is then refused as
+/// denied, and is not recorded, so it raises no notice. Address requests about
+/// it are unaffected. Refused while one of the machine's applications declares
+/// the DNS name for certificates.
+// spec: DNS#denied-dns-names
 #[utoipa::path(
 	post,
 	path = "/deny",
@@ -967,7 +639,7 @@ pub struct DenyArgs {
 	responses(
 		(status = 200, body = DeniedView),
 		(status = 404, body = ProblemDetailsSchema),
-		(status = 409, description = "One of the machine's applications declares this name.", body = ProblemDetailsSchema),
+		(status = 409, description = "One of the machine's applications declares this DNS name for certificates.", body = ProblemDetailsSchema),
 	),
 )]
 pub async fn deny(
@@ -976,32 +648,16 @@ pub async fn deny(
 	Json(args): Json<DenyArgs>,
 ) -> Result<Json<DeniedView>> {
 	let mut conn = state.db.get().await?;
-	// A machine that does not exist is a 404 rather than a foreign-key failure.
-	database::Machine::get_by_id(&mut conn, args.machine_id).await?;
-	let row = database::DeniedDnsName::deny(
-		&mut conn,
-		args.machine_id,
-		&args.name,
-		&admin.login,
-		args.note.as_deref(),
-	)
-	.await?;
-	Ok(Json(denied_view(row)))
+	crate::fns::dns_names::deny_kind(&mut conn, DnsNameKind::Certificate, &admin.login, args)
+		.await
+		.map(Json)
 }
 
-/// A machine and one DNS name.
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct MachineDnsNameArgs {
-	/// The machine.
-	pub machine_id: Uuid,
-	/// The name, in any case and with or without a trailing dot.
-	pub name: String,
-}
-
-/// Lift a denial.
+/// Lift a denial for certificates.
 ///
-/// The machine's requests about the name then resolve as any other's do.
-// spec: CRT#denied-dns-names
+/// The machine's certificate requests about the DNS name then resolve as any
+/// other's do. A denial of addresses for it stands.
+// spec: DNS#denied-dns-names
 #[utoipa::path(
 	post,
 	path = "/lift_denial",
@@ -1017,6 +673,12 @@ pub async fn lift_denial(
 	Json(args): Json<MachineDnsNameArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	database::DeniedDnsName::lift(&mut conn, args.machine_id, &args.name).await?;
+	database::DeniedDnsName::lift(
+		&mut conn,
+		args.machine_id,
+		&args.name,
+		DnsNameKind::Certificate,
+	)
+	.await?;
 	Ok(Json(()))
 }

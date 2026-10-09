@@ -18,39 +18,57 @@ import {
 	Typography,
 } from "@mui/material";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutlineOutlined";
-import PauseCircleIcon from "@mui/icons-material/PauseCircle";
-import PlayCircleIcon from "@mui/icons-material/PlayCircle";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
-import { GradedAction } from "./GradedAction";
+import { KIND_HEADINGS } from "../dnsNames";
 import { useIsAdmin } from "../hooks/useIsAdmin";
+import type { CertificateNameView, CertificateView } from "../types";
+import CertificateStateChip from "./CertificateStateChip";
+import DeclareField from "./DeclareField";
+import { GradedAction } from "./GradedAction";
+import GrantChip from "./GrantChip";
+import { PauseBanner, PauseButton } from "./PauseControls";
 import TimeAgo from "./TimeAgo";
+import TimeLeft from "./TimeLeft";
 
-/// The DNS names an application declares and the certificates Canopy holds
-/// for it, on the application's page. Also where an operator sets the profile
-/// its certificates are issued under, pauses and unpauses Canopy's work on its
-/// behalf, and revokes a certificate.
+/// The DNS names an application declares for certificates and the certificates
+/// Canopy holds for it, on the application's page. A separate section from the
+/// application's DNS names: the two are separate features that share
+/// infrastructure, and this one shows nothing about addresses. Also where an
+/// operator sets the profile its certificates are issued under, pauses and
+/// unpauses Canopy's work on its behalf, and revokes a certificate.
 ///
 /// A pause is shown first and loudly: it suppresses the alerting that would
 /// otherwise chase a certificate running out, so it has to be the thing an
 /// operator sees before reading anything below it.
+///
+/// Absent while the application neither may obtain certificates, declares a DNS
+/// name for them, nor holds one.
 // spec: CRT#presentation
 export default function ServerCertificatesSection({
 	serverId,
+	refreshKey,
+	onChanged,
 }: {
 	serverId: string;
+	/// Changes when the other of the application's two sections changed
+	/// something they share, such as the pause.
+	refreshKey: number;
+	onChanged: () => void;
 }) {
 	const isAdmin = useIsAdmin() === true;
 	const [tick, setTick] = useState(0);
-	const reload = () => setTick((t) => t + 1);
+	const reload = () => {
+		setTick((t) => t + 1);
+		onChanged();
+	};
 
-	const detail = useApi(
-		"certificates",
-		"for_server",
-		{ server_id: serverId },
-		[serverId, tick],
-	);
+	const detail = useApi("certificates", "for_server", { server_id: serverId }, [
+		serverId,
+		tick,
+		refreshKey,
+	]);
 	const authority = useApi("certificates", "authority", {}, []);
 
 	if (detail.status === "loading" || detail.status === "idle") {
@@ -71,31 +89,33 @@ export default function ServerCertificatesSection({
 	}
 
 	const data = detail.data;
-	const anyGrant = data.may_manage_dns || data.may_manage_tls;
 
-	// Neither grant, nothing registered, nothing held: this server does not use
-	// the feature, so keep the page short rather than showing an empty box on
-	// every server in the fleet.
+	// No grant, no declaration, nothing held: this application does not use the
+	// feature, so keep the page short rather than showing an empty box on every
+	// application in the fleet. A pause is something to show, since this
+	// section is where it is seen and lifted.
 	if (
-		!anyGrant &&
+		!data.may_manage_tls &&
 		data.names.length === 0 &&
 		data.certificates.length === 0 &&
-		!data.paused
+		!data.pause
 	)
 		return null;
 
 	const profiles = authority.status === "ok" ? authority.data.profiles : [];
 
 	return (
-		<Paper variant="outlined" sx={{ p: 2 }}>
+		<Paper
+			variant="outlined"
+			sx={{ p: 2 }}
+			data-testid="application-names-certificate"
+		>
 			<SectionHeading />
 			<Stack spacing={2}>
-				{data.paused && (
+				{data.pause && (
 					<PauseBanner
 						serverId={serverId}
-						pausedAt={data.paused_at}
-						pausedBy={data.paused_by}
-						reason={data.pause_reason}
+						pause={data.pause}
 						isAdmin={isAdmin}
 						onChanged={reload}
 					/>
@@ -106,19 +126,14 @@ export default function ServerCertificatesSection({
 					spacing={1}
 					sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 1 }}
 				>
-					<GrantChip label="DNS records" granted={data.may_manage_dns} />
 					<GrantChip label="TLS certificates" granted={data.may_manage_tls} />
-					{data.domains.length > 0 ? (
-						<Typography variant="caption" color="text.secondary">
-							within {data.domains.join(", ")}
-						</Typography>
-					) : (
-						<Typography variant="caption" color="text.secondary">
-							its group controls no domain, so it is entitled to no name
-						</Typography>
-					)}
+					<Typography variant="caption" color="text.secondary">
+						{data.domains.length > 0
+							? `within ${data.domains.join(", ")}`
+							: "its group controls no domain, so it is entitled to no name"}
+					</Typography>
 					<Box sx={{ flex: 1 }} />
-					{!data.paused && isAdmin && (
+					{!data.pause && isAdmin && (
 						<PauseButton serverId={serverId} onChanged={reload} />
 					)}
 				</Stack>
@@ -140,7 +155,7 @@ export default function ServerCertificatesSection({
 					</Alert>
 				)}
 
-				<NamesTable
+				<NamesList
 					serverId={serverId}
 					names={data.names}
 					isAdmin={isAdmin}
@@ -159,185 +174,17 @@ export default function ServerCertificatesSection({
 function SectionHeading() {
 	return (
 		<Typography variant="h6" component="h2" gutterBottom>
-			Names and certificates
+			{KIND_HEADINGS.certificate}
 			<Typography
 				component="span"
 				variant="body2"
 				color="text.secondary"
 				sx={{ ml: 1 }}
 			>
-				— the DNS names this application serves, and the TLS certificates Canopy
-				holds for them.
+				— the DNS names this application obtains certificates for, and the
+				certificates Canopy holds for them.
 			</Typography>
 		</Typography>
-	);
-}
-
-function GrantChip({ label, granted }: { label: string; granted: boolean }) {
-	return (
-		<Chip
-			size="small"
-			variant="outlined"
-			color={granted ? "success" : "default"}
-			label={granted ? `may manage ${label}` : `may not manage ${label}`}
-		/>
-	);
-}
-
-function PauseBanner({
-	serverId,
-	pausedAt,
-	pausedBy,
-	reason,
-	isAdmin,
-	onChanged,
-}: {
-	serverId: string;
-	pausedAt: string | null;
-	pausedBy: string | null;
-	reason: string | null;
-	isAdmin: boolean;
-	onChanged: () => void;
-}) {
-	const resume = useApiAction("certificates", "resume");
-	const onResume = async () => {
-		if (
-			!window.confirm(
-				"Resume this server? Canopy will start ordering and renewing its certificates again, and publishing its address records.",
-			)
-		)
-			return;
-		try {
-			await resume.call({ server_id: serverId });
-			onChanged();
-		} catch {
-			/* surfaced via resume.error */
-		}
-	};
-
-	return (
-		<Alert
-			severity="warning"
-			icon={<PauseCircleIcon />}
-			action={
-				isAdmin && (
-					<GradedAction
-						calls="certificates/resume"
-						action="Resume certificate management for this server"
-					>
-						<Button
-							size="small"
-							startIcon={<PlayCircleIcon />}
-							onClick={onResume}
-							disabled={resume.pending}
-						>
-							Resume
-						</Button>
-					</GradedAction>
-				)
-			}
-		>
-			<AlertTitle>Paused</AlertTitle>
-			Canopy is making no new changes for this server: nothing is ordered,
-			renewed, or republished. What is already in place stands and keeps working.
-			<Box sx={{ mt: 0.5 }}>
-				<Typography variant="caption" color="text.secondary">
-					{pausedAt && (
-						<>
-							since <TimeAgo timestamp={pausedAt} />
-						</>
-					)}
-					{pausedBy && ` by ${pausedBy}`}
-					{reason && ` — ${reason}`}
-				</Typography>
-			</Box>
-			{resume.error && (
-				<Alert severity="error" sx={{ mt: 1 }}>
-					{resume.error.message}
-				</Alert>
-			)}
-		</Alert>
-	);
-}
-
-function PauseButton({
-	serverId,
-	onChanged,
-}: {
-	serverId: string;
-	onChanged: () => void;
-}) {
-	const [open, setOpen] = useState(false);
-	const [reason, setReason] = useState("");
-	const pause = useApiAction("certificates", "pause");
-
-	const onConfirm = async () => {
-		try {
-			await pause.call({ server_id: serverId, reason: reason.trim() });
-			setOpen(false);
-			setReason("");
-			onChanged();
-		} catch {
-			/* surfaced via pause.error */
-		}
-	};
-
-	return (
-		<>
-			<GradedAction
-				calls="certificates/pause"
-				action="Pause certificate management for this server"
-			>
-				<Button
-					size="small"
-					startIcon={<PauseCircleIcon />}
-					onClick={() => setOpen(true)}
-				>
-					Pause
-				</Button>
-			</GradedAction>
-			<Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="sm">
-				<DialogTitle>Pause this server</DialogTitle>
-				<DialogContent>
-					<DialogContentText sx={{ mb: 2 }}>
-						Canopy will stop ordering and renewing certificates for this server,
-						and stop changing its address records. Nothing already in place is
-						withdrawn — the group keeps working exactly as it does now.
-						Canopy never lifts a pause itself.
-					</DialogContentText>
-					<TextField
-						autoFocus
-						fullWidth
-						label="Reason"
-						size="small"
-						value={reason}
-						onChange={(e) => setReason(e.target.value)}
-						disabled={pause.pending}
-						helperText="Recorded on the server, so whoever finds the pause later knows what it was for."
-					/>
-					{pause.error && (
-						<Alert severity="error" sx={{ mt: 2 }}>
-							{pause.error.message}
-						</Alert>
-					)}
-				</DialogContent>
-				<DialogActions>
-					<Button onClick={() => setOpen(false)}>Cancel</Button>
-					<GradedAction
-						calls="certificates/pause"
-						action="Pause certificate management for this server"
-					>
-						<Button
-							variant="contained"
-							onClick={onConfirm}
-							disabled={pause.pending || reason.trim() === ""}
-						>
-							Pause
-						</Button>
-					</GradedAction>
-				</DialogActions>
-			</Dialog>
-		</>
 	);
 }
 
@@ -423,30 +270,18 @@ function ProfilePicker({
 	);
 }
 
-type NameRow = {
-	id: string;
-	name: string;
-	addresses: string[];
-	published_addresses: string[];
-	published: boolean;
-	published_at: string | null;
-	last_error: string | null;
-	zone: string | null;
-	within_domains: boolean;
-};
-
-/// The DNS names an application declares. A declaration is routing only: one
-/// with no addresses registered is declared, not withdrawn, and publishes
-/// nothing.
-// spec: CRT#presentation
-function NamesTable({
+/// The DNS names an application declares for certificates. A declaration is
+/// routing and ownership only: the application requests the certificate itself,
+/// and one declared with none held shows none below.
+// spec: DNS#on-an-application
+function NamesList({
 	serverId,
 	names,
 	isAdmin,
 	onChanged,
 }: {
 	serverId: string;
-	names: NameRow[];
+	names: CertificateNameView[];
 	isAdmin: boolean;
 	onChanged: () => void;
 }) {
@@ -458,13 +293,21 @@ function NamesTable({
 				sx={{ alignItems: "flex-start", mb: 1, flexWrap: "wrap", rowGap: 1 }}
 			>
 				<Typography variant="subtitle2" sx={{ pt: 1 }}>
-					DNS names
+					Declared DNS names
 				</Typography>
 				<Box sx={{ flex: 1 }} />
-				{isAdmin && <DeclareField serverId={serverId} onChanged={onChanged} />}
+				{isAdmin && (
+					<DeclareField
+						kind="certificate"
+						serverId={serverId}
+						onChanged={onChanged}
+					/>
+				)}
 			</Stack>
 			{names.length === 0 ? (
-				<Alert severity="info">This application declares no DNS names.</Alert>
+				<Alert severity="info">
+					This application declares no DNS names for certificates.
+				</Alert>
 			) : (
 				<Stack spacing={1}>
 					{names.map((row) => (
@@ -482,67 +325,6 @@ function NamesTable({
 	);
 }
 
-function DeclareField({
-	serverId,
-	onChanged,
-}: {
-	serverId: string;
-	onChanged: () => void;
-}) {
-	const [name, setName] = useState("");
-	const declare = useApiAction("certificates", "declare");
-
-	const onDeclare = async () => {
-		try {
-			await declare.call({ application_id: serverId, name: name.trim() });
-			setName("");
-			onChanged();
-		} catch {
-			/* surfaced via declare.error */
-		}
-	};
-
-	return (
-		<Box
-			component="form"
-			onSubmit={(e) => {
-				e.preventDefault();
-				onDeclare();
-			}}
-		>
-			<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-				<TextField
-					size="small"
-					placeholder="app.example.tamanu.app"
-					value={name}
-					onChange={(e) => setName(e.target.value)}
-					disabled={declare.pending}
-					slotProps={{ htmlInput: { "aria-label": "DNS name to declare" } }}
-					sx={{ minWidth: 280, "& input": { fontFamily: "monospace" } }}
-				/>
-				<GradedAction
-					calls="certificates/declare"
-					action={`Declare DNS name ${name.trim()}`}
-				>
-					<Button
-						type="submit"
-						variant="outlined"
-						size="small"
-						disabled={declare.pending || name.trim() === ""}
-					>
-						Declare
-					</Button>
-				</GradedAction>
-			</Stack>
-			{declare.error && (
-				<Alert severity="error" sx={{ mt: 1 }}>
-					{declare.error.message}
-				</Alert>
-			)}
-		</Box>
-	);
-}
-
 function NameRowView({
 	serverId,
 	row,
@@ -550,20 +332,16 @@ function NameRowView({
 	onChanged,
 }: {
 	serverId: string;
-	row: NameRow;
+	row: CertificateNameView;
 	isAdmin: boolean;
 	onChanged: () => void;
 }) {
 	const release = useApiAction("certificates", "release");
-	// Nothing wanted and nothing published: an operator's declaration, or an
-	// agent's certificate request, with no addresses ever registered.
-	const declaredOnly =
-		row.addresses.length === 0 && row.published_addresses.length === 0;
 
 	const onRelease = async () => {
 		if (
 			!confirm(
-				`Release ${row.name}? Canopy stops renewing its certificates. Records and certificates already in place stay.`,
+				`Release ${row.name} for certificates? Canopy stops renewing its certificates. Certificates already held stay.`,
 			)
 		)
 			return;
@@ -576,7 +354,7 @@ function NameRowView({
 	};
 
 	return (
-		<Box data-testid="dns-name-row">
+		<Box data-testid="declared-name-row">
 			<Stack
 				direction="row"
 				spacing={1}
@@ -585,27 +363,8 @@ function NameRowView({
 				<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
 					{row.name}
 				</Typography>
-				{declaredOnly ? (
-					<Chip size="small" label="declared" />
-				) : row.published ? (
-					<Chip
-						size="small"
-						variant="outlined"
-						color="success"
-						label="published"
-					/>
-				) : (
-					<Tooltip title="Canopy has not yet written what this server asked for into the zone. It retries every pass.">
-						<Chip
-							size="small"
-							variant="outlined"
-							color="warning"
-							label="waiting to publish"
-						/>
-					</Tooltip>
-				)}
 				{!row.within_domains && (
-					<Tooltip title="Nothing can be published or certified for it until the group controls a domain covering it.">
+					<Tooltip title="Nothing can be certified for it until the group controls a domain covering it.">
 						<Chip
 							size="small"
 							variant="outlined"
@@ -615,33 +374,11 @@ function NameRowView({
 						/>
 					</Tooltip>
 				)}
-				{!row.zone && (
-					<Tooltip title="No configured DNS zone covers this name, so Canopy can publish nothing for it.">
-						<Chip
-							size="small"
-							variant="outlined"
-							color="error"
-							icon={<WarningAmberIcon />}
-							label="no matching zone"
-						/>
-					</Tooltip>
-				)}
 				<Box sx={{ flex: 1 }} />
-				<Typography variant="caption" color="text.secondary">
-					{declaredOnly ? (
-						"no addresses registered"
-					) : row.published_at ? (
-						<>
-							published <TimeAgo timestamp={row.published_at} />
-						</>
-					) : (
-						"never published"
-					)}
-				</Typography>
 				{isAdmin && (
 					<GradedAction
 						calls="certificates/release"
-						action={`Release DNS name ${row.name}`}
+						action={`Release DNS name ${row.name} for certificates`}
 					>
 						<Button
 							size="small"
@@ -654,23 +391,6 @@ function NameRowView({
 					</GradedAction>
 				)}
 			</Stack>
-			{!declaredOnly && (
-				<Typography
-					variant="caption"
-					color="text.secondary"
-					sx={{ fontFamily: "monospace" }}
-				>
-					{row.addresses.length > 0 ? row.addresses.join(", ") : "withdrawn"}
-					{!row.published &&
-						row.published_addresses.length > 0 &&
-						` (currently ${row.published_addresses.join(", ")})`}
-				</Typography>
-			)}
-			{row.last_error && (
-				<Alert severity="error" sx={{ mt: 0.5 }} icon={<ErrorOutlineIcon />}>
-					{row.last_error}
-				</Alert>
-			)}
 			{release.error && (
 				<Alert severity="error" sx={{ mt: 0.5 }}>
 					{release.error.message}
@@ -680,55 +400,19 @@ function NameRowView({
 	);
 }
 
-type CertificateRow = {
-	id: string;
-	name: string;
-	state: string;
-	profile: string | null;
-	not_after: string | null;
-	remaining_seconds: number | null;
-	issued_at: string | null;
-	renewing: boolean;
-	collectable: boolean;
-	risk: string;
-	attempts: number;
-	last_error: string | null;
-	revoked_at: string | null;
-	revoked_by: string | null;
-	revocation_reason: string | null;
-	key_fingerprint: string;
-};
-
-/// A duration in the units an operator thinks in. Rendered from the seconds the
-/// API gives rather than recomputed from the expiry, so the relative and
-/// absolute readings can never disagree.
-function humaniseRemaining(seconds: number): string {
-	const past = seconds < 0;
-	const total = Math.abs(seconds);
-	const days = Math.floor(total / 86400);
-	const hours = Math.floor((total % 86400) / 3600);
-	const spelled =
-		days > 0
-			? `${days} day${days === 1 ? "" : "s"}`
-			: hours > 0
-				? `${hours} hour${hours === 1 ? "" : "s"}`
-				: `${Math.floor(total / 60)} minutes`;
-	return past ? `expired ${spelled} ago` : `${spelled} left`;
-}
-
 function CertificatesTable({
 	certificates,
 	isAdmin,
 	onChanged,
 }: {
-	certificates: CertificateRow[];
+	certificates: CertificateView[];
 	isAdmin: boolean;
 	onChanged: () => void;
 }) {
 	if (certificates.length === 0) {
 		return (
 			<Alert severity="info">
-				Canopy holds no certificates for this server.
+				Canopy holds no certificates for this application.
 			</Alert>
 		);
 	}
@@ -757,7 +441,7 @@ function CertificateRowView({
 	isAdmin,
 	onChanged,
 }: {
-	cert: CertificateRow;
+	cert: CertificateView;
 	isAdmin: boolean;
 	onChanged: () => void;
 }) {
@@ -771,7 +455,7 @@ function CertificateRowView({
 				<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
 					{cert.name}
 				</Typography>
-				<StateChip cert={cert} />
+				<CertificateStateChip cert={cert} />
 				{cert.profile && (
 					<Chip size="small" variant="outlined" label={cert.profile} />
 				)}
@@ -782,13 +466,7 @@ function CertificateRowView({
 				)}
 				<Box sx={{ flex: 1 }} />
 				{cert.not_after && (
-					<Tooltip title={cert.not_after}>
-						<Typography variant="caption" color="text.secondary">
-							expires <TimeAgo timestamp={cert.not_after} />
-							{cert.remaining_seconds !== null &&
-								` — ${humaniseRemaining(cert.remaining_seconds)}`}
-						</Typography>
-					</Tooltip>
+					<TimeLeft notAfter={cert.not_after} risk={cert.risk} />
 				)}
 				{isAdmin && cert.collectable && (
 					<RevokeButton
@@ -813,22 +491,6 @@ function CertificateRowView({
 				</Alert>
 			)}
 		</Box>
-	);
-}
-
-function StateChip({ cert }: { cert: CertificateRow }) {
-	if (cert.state === "revoked")
-		return <Chip size="small" color="error" label="revoked" />;
-	if (cert.state === "failed")
-		return <Chip size="small" color="error" variant="outlined" label="failed" />;
-	if (cert.state === "pending" && !cert.collectable)
-		return <Chip size="small" variant="outlined" label="pending" />;
-	if (cert.risk === "critical")
-		return <Chip size="small" color="error" label="expiring" />;
-	if (cert.risk === "at_risk")
-		return <Chip size="small" color="warning" label="due for renewal" />;
-	return (
-		<Chip size="small" color="success" variant="outlined" label="valid" />
 	);
 }
 

@@ -15,6 +15,7 @@ mod certificates;
 mod device_admin_endpoints;
 mod device_keys;
 mod devices;
+mod dns_names;
 mod domains;
 mod endpoints;
 mod enrollment_ticket;

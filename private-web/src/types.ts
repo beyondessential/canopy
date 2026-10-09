@@ -247,9 +247,13 @@ export type IncidentNoteData = Solidify<Schemas["IncidentNoteData"]>;
 export type BestoolSnippetInfo = Solidify<Schemas["BestoolSnippetInfo"]>;
 export type BestoolSnippetDetail = Solidify<Schemas["BestoolSnippetDetail"]>;
 
-export type MachineDnsNamesView = Solidify<Schemas["MachineDnsNamesView"]>;
+export type MachineNamesView = Solidify<Schemas["MachineNamesView"]>;
+export type PauseView = Solidify<Schemas["PauseView"]>;
+export type DnsNameView = Solidify<Schemas["NameView"]>;
+export type CertificateNameView = Solidify<Schemas["CertificateNameView"]>;
+export type CertificateView = Solidify<Schemas["CertificateView"]>;
+export type DomainNameView = Solidify<Schemas["DomainNameView"]>;
 export type UndeclaredView = Solidify<Schemas["UndeclaredView"]>;
-export type AskedFor = Schemas["AskedFor"];
 export type MachineApplicationView = Solidify<Schemas["MachineApplicationView"]>;
 export type UndeclaredNoticeView = Solidify<Schemas["UndeclaredNoticeView"]>;
 

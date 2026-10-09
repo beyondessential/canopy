@@ -1731,6 +1731,13 @@
           "certificates"
         ],
         "properties": {
+          "certificate_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The DNS names it declares for certificates, whether or not a\ncertificate has been issued for them yet."
+          },
           "certificates": {
             "type": "array",
             "items": {
@@ -2198,6 +2205,13 @@
               "$ref": "#/components/schemas/ApplicationEntitlements"
             },
             "description": "One entry per application on the asking machine.\n\nAn identity belongs to a machine, so an agent asks on behalf of the box\nand gets an answer for every workload on it. The flat fields above\ndescribe a single-application machine, which is every machine today;\non a machine hosting several they are left at their defaults and this\nlist is the answer."
+          },
+          "certificate_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The DNS names this server declares for certificates, whether or not a\ncertificate has been issued for them yet. Kept apart from\n`registered_names`, which are for addresses."
           },
           "certificates": {
             "type": "array",

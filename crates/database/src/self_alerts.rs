@@ -241,7 +241,7 @@ pub async fn sweep_certificate_authority(
 /// underneath the pause. Coalescing: one alert lists every server and name.
 /// Recovers when every paused server's certificates are current again — which in
 /// practice means the pause was lifted, since nothing renews under one.
-// spec: CRT#pausing-an-application
+// spec: DNS#pausing-an-application
 pub const FORGOTTEN_PAUSE_REF: &str = "name-management-pause-forgotten";
 
 pub const FORGOTTEN_PAUSE_DOC: &str = "## Description
@@ -267,7 +267,7 @@ Look at each server named in the alert. Finish whatever the pause was for — th
 /// Severity splits on whether anything has actually run out: a certificate past
 /// renewal under a pause is a nudge, and one that has expired is a fault, because
 /// only the second means something has already stopped working.
-// spec: CRT#pausing-an-application
+// spec: DNS#pausing-an-application
 pub async fn sweep_forgotten_pauses(conn: &mut AsyncPgConnection) -> Result<Option<Issue>> {
 	let lapsing =
 		crate::application_certificates::ApplicationCertificate::lapsing_under_pause(conn).await?;
