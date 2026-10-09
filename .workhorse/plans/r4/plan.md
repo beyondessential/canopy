@@ -3,7 +3,7 @@
 ## Tech notes
 
 - Today "declared" is a row in `application_names`, the address registration table. A name declared for a certificate is a row there with empty `addresses`, and `ApplicationCertificate` request handling calls `ApplicationName::declare` (`crates/database/src/application_certificates.rs`). `application_certificates` holds the orders and chains, not the declaration, so it cannot stand in for one: a declaration exists before any order and outlives release.
-- A new certificate-name declaration table (application, name) carries the TLS side. `application_names` becomes the address side only. Both declare/release paths share one check that refuses a name held by a different application in *either* table, naming the holder, so exclusivity stays fleet-wide and cross-kind (spec: "Declared DNS names"). The fleet-wide unique index on `application_names.name` stops being the exclusivity mechanism and is replaced by that cross-table check, with a database-level guarantee so two concurrent declares cannot both win.
+- A new certificate-name declaration table (application, name) carries the TLS side. `application_names` becomes the address side only. Both declare/release paths share one check that refuses a name held by a different application in *either* table, naming the holder, so exclusivity stays fleet-wide and cross-kind (spec: NAM, "Declared DNS names"). The fleet-wide unique index on `application_names.name` stops being the exclusivity mechanism and is replaced by that cross-table check, with a database-level guarantee so two concurrent declares cannot both win.
 - Resolution (`crates/public-server/src/names.rs`, the `ApplicationName::for_name` lookup) finds the holder in either table, then declares for the request's kind if the holder does not already hold it for that kind.
 - Undeclared records (`dns_name_dispositions.rs`) gain `asked_for` as part of their key, so a machine asking both ways has two rows. `UndeclaredDnsName::record`/`clear` take the kind. `clear_for_declaration` takes the kind.
 - Denials gain the kind in their key. A denial check in the request path passes the request's kind. Declaring for a kind clears only that kind's denial.
@@ -29,7 +29,7 @@ Canopy DNS is not in use yet, so every existing declaration was made for a certi
 - [ ] `private-server`: `dns_names` module, `certificates` module trimmed to its kind, undeclared notices say which kind
 - [ ] `just gen-openapi`, `just gen-api` (expect no public diff), commit generated files
 - [ ] `private-web`: kind-parameterised machine and group section components, application page split, time-left component, update `types.ts`
-- [ ] Update `// spec: CRT#...` comments that moved
+- [x] Update `// spec: CRT#...` comments that moved (done with the spec split: `NAM` and `ADR` anchors in code)
 - [ ] Rust tests: exclusivity across kinds, per-kind undeclared records and denials, resolution, migration
 - [ ] Playwright: update `certificates.spec.ts` ("79 days left" becomes the new wording), add machine and group section coverage for each kind and the urgency colour
 - [ ] `just check`, `just typecheck`, targeted `just test-package`

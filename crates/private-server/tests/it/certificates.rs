@@ -27,7 +27,7 @@ async fn two_workloads_on_a_box(conn: &mut AsyncPgConnection) -> (Uuid, Uuid) {
 	(ids[0], ids[1])
 }
 
-// spec: CRT#declared-dns-names
+// spec: NAM#declared-dns-names
 #[tokio::test(flavor = "multi_thread")]
 async fn declare_release_roundtrip() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
@@ -83,7 +83,7 @@ async fn declare_release_roundtrip() {
 	.await;
 }
 
-// spec: CRT#declared-dns-names
+// spec: NAM#declared-dns-names
 #[tokio::test(flavor = "multi_thread")]
 async fn releasing_a_name_an_application_does_not_hold_is_a_404() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
@@ -131,7 +131,7 @@ async fn record_undeclared(conn: &mut AsyncPgConnection, machine: Uuid, name: &s
 	.expect("record undeclared");
 }
 
-// spec: CRT#denied-dns-names
+// spec: NAM#denied-dns-names
 #[tokio::test(flavor = "multi_thread")]
 async fn deny_lift_roundtrip() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
@@ -179,8 +179,8 @@ async fn deny_lift_roundtrip() {
 
 /// A declaration is the answer an undeclared request waited for and the
 /// opposite of a denial, so it ends both for the declaring application's box.
-// spec: CRT#denied-dns-names
-// spec: CRT#undeclared-requests
+// spec: NAM#denied-dns-names
+// spec: NAM#undeclared-requests
 #[tokio::test(flavor = "multi_thread")]
 async fn declaring_ends_the_undeclared_record_and_the_denial() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
@@ -233,7 +233,7 @@ async fn declaring_ends_the_undeclared_record_and_the_denial() {
 }
 
 /// Denying contradicts a declaration on the same box, which has to go first.
-// spec: CRT#denied-dns-names
+// spec: NAM#denied-dns-names
 #[tokio::test(flavor = "multi_thread")]
 async fn denying_a_name_declared_on_the_machine_is_refused() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
@@ -263,8 +263,8 @@ async fn denying_a_name_declared_on_the_machine_is_refused() {
 
 /// Declaring a name outside the group's domains is allowed and flagged, since
 /// nothing can be published or certified for it until the group claims one.
-// spec: CRT#declared-dns-names
-// spec: CRT#presentation
+// spec: NAM#declared-dns-names
+// spec: NAM#on-an-application
 #[tokio::test(flavor = "multi_thread")]
 async fn a_declaration_outside_the_group_domains_is_flagged() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
@@ -291,8 +291,8 @@ async fn a_declaration_outside_the_group_domains_is_flagged() {
 
 /// Notices count each machine's requests that still count, fleet-wide or within
 /// one group; a request not repeated for a day no longer counts.
-// spec: CRT#presentation
-// spec: CRT#undeclared-requests
+// spec: NAM#notices
+// spec: NAM#undeclared-requests
 #[tokio::test(flavor = "multi_thread")]
 async fn notices_count_live_undeclared_requests() {
 	commons_tests::server::run(async move |mut conn, _public, private| {

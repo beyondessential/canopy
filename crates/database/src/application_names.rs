@@ -6,7 +6,7 @@
 //! tell whether the zone already matches the intent, and what lets Canopy
 //! confine itself to records it put there — in a shared zone, a record Canopy
 //! did not publish is none of its business.
-// spec: CRT#addresses
+// spec: ADR#registering
 
 use std::net::IpAddr;
 
@@ -93,7 +93,7 @@ impl ApplicationName {
 	/// holder — safe here, and not on the device-facing path, because an
 	/// operator already sees the whole fleet and needs to know what to release
 	/// first.
-	// spec: CRT#declared-dns-names
+	// spec: NAM#declared-dns-names
 	pub async fn declare(
 		db: &mut AsyncPgConnection,
 		application_id: Uuid,
@@ -143,7 +143,7 @@ impl ApplicationName {
 	/// the records published stay published and the certificates held stay
 	/// held. What ends is Canopy treating the name as this application's, which
 	/// frees it to be declared by another.
-	// spec: CRT#declared-dns-names
+	// spec: NAM#declared-dns-names
 	pub async fn release(
 		db: &mut AsyncPgConnection,
 		application_id: Uuid,
@@ -269,7 +269,7 @@ impl ApplicationName {
 	///
 	/// Skips paused applications: while a server is paused Canopy changes no record of
 	/// its, though everything already published stays published.
-	// spec: CRT#pausing-an-application
+	// spec: NAM#pausing-an-application
 	pub async fn needing_publish(db: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Self>> {
 		use crate::schema::{application_names, applications};
 		let rows: Vec<Self> = application_names::table
@@ -298,7 +298,7 @@ impl ApplicationName {
 	/// Paused applications are excluded for the same reason they are excluded from the
 	/// reconcile — Canopy was told to stop changing their records, so nothing being
 	/// changed is the intended outcome.
-	// spec: CRT#addresses
+	// spec: ADR#registering
 	pub async fn failing_to_publish(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::schema::{application_names, applications};
 		let rows: Vec<Self> = application_names::table

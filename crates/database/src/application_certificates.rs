@@ -8,7 +8,7 @@
 //!
 //! The submitted signing request is kept because renewal reuses it: the key has
 //! not changed, so Canopy renews without needing anything from the server.
-// spec: CRT#certificates
+// spec: CRT
 
 use commons_errors::{AppError, Result};
 use commons_types::{backoff::Backoff, dns::normalize_domain};
@@ -328,7 +328,7 @@ impl ApplicationCertificate {
 		// names the holder, which is right for an operator who sees the whole
 		// fleet and wrong here, where it would make the endpoint a directory of
 		// what other machines serve.
-		// spec: CRT#declared-dns-names
+		// spec: NAM#declared-dns-names
 		crate::application_names::ApplicationName::declare(db, application_id, &name)
 			.await
 			.map_err(|err| match err {
@@ -432,7 +432,7 @@ impl ApplicationCertificate {
 	/// Skips paused applications: while a server is paused Canopy makes no new changes
 	/// on its behalf, so its orders sit where they are and resume when the pause
 	/// lifts.
-	// spec: CRT#pausing-an-application
+	// spec: NAM#pausing-an-application
 	pub async fn claim_due(db: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Self>> {
 		use crate::schema::{application_certificates, applications};
 
@@ -541,7 +541,7 @@ impl ApplicationCertificate {
 		let now = Timestamp::now();
 		// Paused applications are skipped: their renewals fall due again when the
 		// pause lifts.
-		// spec: CRT#pausing-an-application
+		// spec: NAM#pausing-an-application
 		let due: Vec<Uuid> = {
 			use crate::schema::{application_certificates, applications};
 			application_certificates::table
@@ -605,7 +605,7 @@ impl ApplicationCertificate {
 			// A paused server raises nothing: Canopy was told to stop acting on
 			// its behalf, so a certificate running down is the expected
 			// consequence. The pause is what gets reported instead.
-			// spec: CRT#pausing-an-application
+			// spec: NAM#pausing-an-application
 			.filter(applications::name_management_paused_at.is_null())
 			.filter(still_declared())
 			.select((
@@ -661,7 +661,7 @@ impl ApplicationCertificate {
 	/// Entitlement is filtered the same way: a name the server is no longer
 	/// entitled to raises nothing however far past expiry it is, because Canopy
 	/// stopped renewing it on purpose.
-	// spec: CRT#pausing-an-application
+	// spec: NAM#pausing-an-application
 	pub async fn lapsing_under_pause(db: &mut AsyncPgConnection) -> Result<Vec<PausedLapse>> {
 		use crate::schema::{application_certificates, applications};
 
@@ -795,7 +795,7 @@ impl ApplicationCertificate {
 			// otherwise request a replacement within minutes, and if the key leaked
 			// because the host was compromised that hands the same attacker a
 			// fresh certificate. An operator decides when to start again.
-			// spec: CRT#pausing-an-application
+			// spec: NAM#pausing-an-application
 			crate::applications::Application::pause_name_management(
 				conn,
 				cert.application_id,
@@ -865,7 +865,7 @@ pub async fn is_key_compromised(db: &mut AsyncPgConnection, key_fingerprint: &st
 /// for a name another application now serves, and alerting on it would report a
 /// deliberate act as a fault. What was already issued stays issued and
 /// collectable until it expires.
-// spec: CRT#declared-dns-names
+// spec: NAM#declared-dns-names
 type StillDeclared = diesel::dsl::exists<
 	diesel::helper_types::Filter<
 		diesel::helper_types::Filter<

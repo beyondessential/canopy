@@ -4,8 +4,8 @@
 //!
 //! Both are per machine, since an identity is the box's and a request that
 //! resolves to no application is not any one application's.
-// spec: CRT#undeclared-requests
-// spec: CRT#denied-dns-names
+// spec: NAM#undeclared-requests
+// spec: NAM#denied-dns-names
 
 use commons_errors::{AppError, Result};
 use commons_types::dns::normalize_domain;
@@ -183,7 +183,7 @@ impl UndeclaredDnsName {
 	///
 	/// Reads already pass over them, so this only keeps the table to what
 	/// still counts.
-	// spec: CRT#undeclared-requests
+	// spec: NAM#undeclared-requests
 	pub async fn prune(db: &mut AsyncPgConnection) -> Result<usize> {
 		use crate::schema::undeclared_dns_names::dsl;
 		diesel::delete(
@@ -226,7 +226,7 @@ impl UndeclaredDnsName {
 	///
 	/// Only machines with at least one that still counts appear. `group_id`
 	/// narrows to one group's machines.
-	// spec: CRT#presentation
+	// spec: NAM#presentation
 	pub async fn counts_by_machine(
 		db: &mut AsyncPgConnection,
 		group_id: Option<Uuid>,
@@ -378,7 +378,7 @@ impl DeniedDnsName {
 /// A declaration is the opposite decision to a denial and the answer an
 /// undeclared request was waiting for, so neither survives it. An application
 /// with no machine (one hosted by a cluster) has neither to end.
-// spec: CRT#denied-dns-names
+// spec: NAM#denied-dns-names
 pub async fn clear_for_declaration(
 	db: &mut AsyncPgConnection,
 	application_id: Uuid,

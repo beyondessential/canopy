@@ -39,7 +39,7 @@ export default function GroupDomainsSection({ groupId }: { groupId: string }) {
 	const zones = useApi("domains", "zones", {}, []);
 	// The names in use beneath each claim, so whether the group's names are
 	// covered is answerable here rather than server by server.
-	// spec: CRT#presentation
+	// spec: NAM#on-a-group
 	const health = useApi(
 		"certificates",
 		"for_group",

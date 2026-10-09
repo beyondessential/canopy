@@ -436,7 +436,7 @@ async fn the_status_push_carries_the_same_entitlements() {
 /// Which application a request concerns is resolved from the name it asks
 /// about, not from the credential it presents. A box hosting two workloads
 /// resolves each name to the one that declares it.
-// spec: CRT#identity-and-authorisation
+// spec: NAM#identity-and-authorisation
 #[tokio::test(flavor = "multi_thread")]
 async fn a_name_resolves_to_the_application_declaring_it() {
 	configure_zones("tamanu.app=Z1");
@@ -521,7 +521,7 @@ async fn a_name_resolves_to_the_application_declaring_it() {
 /// A machine asking about a name none of its applications declares is refused
 /// the same way whether another application holds it or nobody does — so the
 /// endpoint is not a directory of what other machines serve.
-// spec: CRT#identity-and-authorisation
+// spec: NAM#identity-and-authorisation
 #[tokio::test(flavor = "multi_thread")]
 async fn a_name_held_elsewhere_is_refused_exactly_as_an_unheld_one() {
 	configure_zones("tamanu.app=Z1");
@@ -600,7 +600,7 @@ async fn a_name_held_elsewhere_is_refused_exactly_as_an_unheld_one() {
 
 /// An agent holds a machine identity, so it asks on behalf of the box and gets
 /// an answer for every workload on it.
-// spec: CRT#what-an-application-may-act-on
+// spec: NAM#what-an-application-may-act-on
 #[tokio::test(flavor = "multi_thread")]
 async fn entitlements_carry_one_entry_per_application_on_the_machine() {
 	configure_zones("tamanu.app=Z1");
@@ -669,7 +669,7 @@ async fn entitlements_carry_one_entry_per_application_on_the_machine() {
 /// The push response is not a summary of the entitlements answer, it is the
 /// answer: an agent that only ever pushes status learns of a new domain or a
 /// withdrawn grant without asking a second question.
-// spec: CRT#what-an-application-may-act-on
+// spec: NAM#what-an-application-may-act-on
 // spec: STA
 #[tokio::test(flavor = "multi_thread")]
 async fn the_push_response_carries_the_whole_entitlements_answer() {
@@ -779,8 +779,8 @@ async fn declared_by(conn: &mut AsyncPgConnection, name: &str) -> Option<Uuid> {
 
 /// Two workloads with the same grants under the same domains cannot be told
 /// apart, so the request is refused as undeclared and recorded for an operator.
-// spec: CRT#resolving-the-application
-// spec: CRT#undeclared-requests
+// spec: NAM#resolving-the-application
+// spec: NAM#undeclared-requests
 #[tokio::test(flavor = "multi_thread")]
 async fn an_ambiguous_request_is_refused_as_undeclared_and_recorded() {
 	configure_zones("tamanu.app=Z1");
@@ -825,7 +825,7 @@ async fn an_ambiguous_request_is_refused_as_undeclared_and_recorded() {
 
 /// Naming the application type tells two workloads apart, and the request
 /// declares the name for the one it named, ending the undeclared record.
-// spec: CRT#resolving-the-application
+// spec: NAM#resolving-the-application
 #[tokio::test(flavor = "multi_thread")]
 async fn a_named_type_resolves_and_declares() {
 	configure_zones("tamanu.app=Z1");
@@ -878,7 +878,7 @@ async fn a_named_type_resolves_and_declares() {
 
 /// Where only one workload on the box holds the grant the request needs and
 /// covers the name, that is the one, with no type and no operator.
-// spec: CRT#resolving-the-application
+// spec: NAM#resolving-the-application
 #[tokio::test(flavor = "multi_thread")]
 async fn the_grants_resolve_when_only_one_application_could_act() {
 	configure_zones("tamanu.app=Z1");
@@ -906,7 +906,7 @@ async fn the_grants_resolve_when_only_one_application_could_act() {
 
 /// A type contradicting the declaration on the same machine is refused, naming
 /// the declaring application's type, rather than quietly following either.
-// spec: CRT#resolving-the-application
+// spec: NAM#resolving-the-application
 #[tokio::test(flavor = "multi_thread")]
 async fn a_type_contradicting_the_declaration_is_refused_naming_it() {
 	configure_zones("tamanu.app=Z1");
@@ -948,7 +948,7 @@ async fn a_type_contradicting_the_declaration_is_refused_naming_it() {
 
 /// A single-application machine asking for a name another machine's
 /// application holds is refused as undeclared, as on any machine.
-// spec: CRT#resolving-the-application
+// spec: NAM#resolving-the-application
 #[tokio::test(flavor = "multi_thread")]
 async fn a_name_held_elsewhere_is_undeclared_on_a_single_application_machine() {
 	configure_zones("tamanu.app=Z1");
@@ -985,7 +985,7 @@ async fn a_name_held_elsewhere_is_undeclared_on_a_single_application_machine() {
 /// On a single-application machine, a name another machine's application
 /// holds meets the same checks as one nobody holds, so outside the group's
 /// domains both are refused as unentitled and nothing tells them apart.
-// spec: CRT#resolving-the-application
+// spec: NAM#resolving-the-application
 #[tokio::test(flavor = "multi_thread")]
 async fn a_name_held_elsewhere_outside_the_domains_is_unentitled_as_an_unheld_one() {
 	configure_zones("tamanu.app=Z1");
@@ -1024,7 +1024,7 @@ async fn a_name_held_elsewhere_outside_the_domains_is_unentitled_as_an_unheld_on
 
 /// A single-application machine naming a type other than its one
 /// application's is refused, naming the type it hosts, and declares nothing.
-// spec: CRT#resolving-the-application
+// spec: NAM#resolving-the-application
 #[tokio::test(flavor = "multi_thread")]
 async fn a_type_the_machine_does_not_host_is_refused_naming_what_it_does() {
 	configure_zones("tamanu.app=Z1");
@@ -1065,7 +1065,7 @@ async fn a_type_the_machine_does_not_host_is_refused_naming_what_it_does() {
 
 /// A denied name is refused as denied, whatever would otherwise resolve it,
 /// and is not recorded, so asking again raises nothing.
-// spec: CRT#denied-dns-names
+// spec: NAM#denied-dns-names
 #[tokio::test(flavor = "multi_thread")]
 async fn a_denied_name_is_refused_as_denied_and_not_recorded() {
 	configure_zones("tamanu.app=Z1");
@@ -1107,7 +1107,7 @@ async fn a_denied_name_is_refused_as_denied_and_not_recorded() {
 
 /// An address registration resolves by a named type as a certificate request
 /// does, and declares the name for the application it named.
-// spec: CRT#resolving-the-application
+// spec: NAM#resolving-the-application
 #[tokio::test(flavor = "multi_thread")]
 async fn an_address_registration_resolves_by_a_named_type() {
 	configure_zones("tamanu.app=Z1");
@@ -1138,7 +1138,7 @@ async fn an_address_registration_resolves_by_a_named_type() {
 
 /// A denial records a decision rather than an observation, so it stands long
 /// after the machine stopped asking.
-// spec: CRT#denied-dns-names
+// spec: NAM#denied-dns-names
 #[tokio::test(flavor = "multi_thread")]
 async fn a_denial_outlasts_a_day_without_asking() {
 	configure_zones("tamanu.app=Z1");

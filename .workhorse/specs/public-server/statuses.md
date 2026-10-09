@@ -128,4 +128,4 @@ The response to a push carries only what the pushing source needs; a source is s
 - Whether a backup should start now is returned only to the source that runs backups (`alertd`).
 - The effective tags of the machine and of each application described are returned to every source, so an agent can read the classification Canopy holds for what it reports on.
   A source is answered about each target under the same key it named that target by, so it can tell which answer is about what.
-- The DNS names each application on the machine is entitled to act on are likewise returned to every source, so an agent learns of a new domain or a newly granted permission from a push it was making anyway (see [CRT](certificates.md), "What an application may act on").
+- The DNS names each application on the machine is entitled to act on are likewise returned to every source, so an agent learns of a new domain or a newly granted permission from a push it was making anyway (see [NAM](names.md), "What an application may act on").
