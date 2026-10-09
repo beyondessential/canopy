@@ -2000,7 +2000,7 @@ pub async fn regrade_instanced_states(
 	r#ref: &str,
 ) -> Result<Vec<Issue>> {
 	let mut states = instanced_states_covered_by(conn, scope, source, namespace, r#ref).await?;
-	regrade_states(conn, &mut states, source, namespace, r#ref).await?;
+	regrade_states(conn, &mut states, source, namespace, r#ref, None).await?;
 	Ok(states)
 }
 
@@ -2026,12 +2026,16 @@ pub fn settle_order(effective: CheckResult) -> u8 {
 /// Without this a state stays graded under the old policy until its check next
 /// reports, which for a check filed rarely is long after the operator's
 /// decision, and an incident the change leaves with no failure stays open.
+///
+/// `by` is the operator who changed the policy, to whom an incident the change
+/// closes is attributed.
 // spec: CHK#policy
 pub async fn regrade_check_states(
 	conn: &mut AsyncPgConnection,
 	source: &str,
 	namespace: &Namespace,
 	check_name: &str,
+	by: &str,
 ) -> Result<()> {
 	use crate::schema::issues;
 
@@ -2045,7 +2049,7 @@ pub async fn regrade_check_states(
 		.filter(issues::resolved_at.is_null())
 		.load(conn)
 		.await?;
-	regrade_states(conn, &mut states, source, namespace, check_name).await
+	regrade_states(conn, &mut states, source, namespace, check_name, Some(by)).await
 }
 
 /// Grade `states`, each one check's state at one target, again through the
@@ -2063,25 +2067,23 @@ pub async fn regrade_check_states(
 /// keeps them. A state never graded (no observed result) is left alone.
 ///
 /// A re-grade is written back without counting as an observation: its
-/// stability record and when it was last reported are untouched. A reported
-/// check is worded as a report graded the same way would word it
-/// ([`ReportWording`]). Canopy's own checks keep their message, which
-/// describes what was observed, except an instanced one, which takes the
-/// generic message from its re-graded instances ([`GradedCheck::message`])
-/// until its next sweep restores its own; a state brought back into trouble
-/// presents the title its last filing gave it.
+/// stability record and when it was last reported are untouched. It is worded
+/// by [`ReportWording::regraded`].
 ///
 /// States are settled in [`settle_order`], as a push files them, so an
 /// incident one failure swaps for another in is not closed and reopened.
 /// `states` is updated in place to what each now is.
 ///
-/// `fallback_check` names the check for a state that does not record it.
+/// `fallback_check` names the check for a state that does not record it. `by`
+/// is the operator whose action this is, where it is known, to whom an
+/// incident it closes is attributed.
 async fn regrade_states(
 	conn: &mut AsyncPgConnection,
 	states: &mut [Issue],
 	source: &str,
 	namespace: &Namespace,
 	fallback_check: &str,
+	by: Option<&str>,
 ) -> Result<()> {
 	use crate::check_policies::{CheckPolicy, ScopedCheckPolicy, VarKind};
 	use crate::schema::issues;
@@ -2102,37 +2104,14 @@ async fn regrade_states(
 			.unwrap_or_else(|| fallback_check.to_string())
 	};
 
-	// What each state's report observed, and what its rules read beyond it:
-	// `None` for a plain state filed before those inputs were kept.
-	let mut regradable: Vec<(usize, CheckOutcome, Option<GradingInputs>)> = Vec::new();
-	for (at, state) in states.iter().enumerate() {
-		let Some(observed) = state.observed_result else {
-			continue;
-		};
-		// An unreadable stored value is logged by its reader and the state left
-		// as it is rather than graded from half of what it was filed with.
-		let held = match &state.instances {
-			Some(_) => match state.stored_instances() {
-				Some(held) => Some(held),
-				None => continue,
-			},
-			None => None,
-		};
-		let inputs = match (&state.grading_context, &held) {
-			(Some(_), _) => match state.grading_inputs() {
-				Some(inputs) => Some(inputs),
-				None => continue,
-			},
-			(None, Some(_)) => continue,
-			(None, None) => None,
-		};
-		let outcome = match (observed, held) {
-			(CheckResult::Broken, _) => CheckOutcome::Broken,
-			(_, Some(held)) => CheckOutcome::Instances(held.observed_instances()),
-			(observed, None) => CheckOutcome::Instances(vec![CheckInstance::plain(observed, None)]),
-		};
-		regradable.push((at, outcome, inputs));
-	}
+	let regradable: Vec<(usize, CheckOutcome, Option<GradingInputs>)> = states
+		.iter()
+		.enumerate()
+		.filter_map(|(at, state)| {
+			let (outcome, inputs) = last_observed(state)?;
+			Some((at, outcome, inputs))
+		})
+		.collect();
 	if regradable.is_empty() {
 		return Ok(());
 	}
@@ -2258,25 +2237,11 @@ async fn regrade_states(
 			graded.effective,
 			CheckResult::Failed | CheckResult::Warning | CheckResult::Broken
 		);
-		let (description, title, message) = if commons_types::namespace::is_reserved(source) {
-			let message = if graded.is_plain() {
-				state.message.clone()
-			} else {
-				graded.message(&check)
-			};
-			(
-				active.then(|| state.title.clone()).flatten(),
-				state.title.clone(),
-				message,
-			)
-		} else {
-			let wording = ReportWording::of(&check, &graded, state.active);
-			(
-				wording.description,
-				wording.title.or_else(|| state.title.clone()),
-				wording.message,
-			)
-		};
+		let ReportWording {
+			description,
+			title,
+			message,
+		} = ReportWording::regraded(source, &check, &graded, state);
 		let streak = DegradedStreak::after(
 			state.degraded_since,
 			state.last_degraded_at,
@@ -2309,7 +2274,7 @@ async fn regrade_states(
 				target,
 				monitored,
 				Timestamp::now(),
-				None,
+				by,
 				Some(Regraded { became_escalating }),
 			)
 			.await?;
@@ -2317,6 +2282,32 @@ async fn regrade_states(
 		states[at] = regraded;
 	}
 	Ok(())
+}
+
+/// What `state`'s most recent report observed, to re-grade it from, and what
+/// its rules read beyond it: `None` for a plain state filed before those
+/// inputs were kept. `None` altogether for a state that cannot be re-graded:
+/// one never graded, or one whose stored instances or inputs are unreadable,
+/// which their readers log and which is left as it is rather than graded from
+/// half of what it was filed with.
+fn last_observed(state: &Issue) -> Option<(CheckOutcome, Option<GradingInputs>)> {
+	let observed = state.observed_result?;
+	let held = match &state.instances {
+		Some(_) => Some(state.stored_instances()?),
+		None => None,
+	};
+	let inputs = match (&state.grading_context, &held) {
+		(Some(_), _) => Some(state.grading_inputs()?),
+		// Instances are always kept with the inputs that graded them.
+		(None, Some(_)) => return None,
+		(None, None) => None,
+	};
+	let outcome = match (observed, held) {
+		(CheckResult::Broken, _) => CheckOutcome::Broken,
+		(_, Some(held)) => CheckOutcome::Instances(held.observed_instances()),
+		(observed, None) => CheckOutcome::Instances(vec![CheckInstance::plain(observed, None)]),
+	};
+	Some((outcome, inputs))
 }
 
 /// One rollup input row: `(application_id, source, check_name, effective_result)`.

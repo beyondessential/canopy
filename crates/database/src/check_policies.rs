@@ -952,7 +952,7 @@ impl CheckPolicy {
 			.returning(Self::as_select())
 			.get_result(conn)
 			.await?;
-			crate::issues::regrade_check_states(conn, source, namespace, check_name).await?;
+			crate::issues::regrade_check_states(conn, source, namespace, check_name, by).await?;
 			Ok(row)
 		})
 		.await
@@ -1083,7 +1083,7 @@ impl CheckPolicy {
 			.returning(Self::as_select())
 			.get_result(conn)
 			.await?;
-			crate::issues::regrade_check_states(conn, source, namespace, check_name).await?;
+			crate::issues::regrade_check_states(conn, source, namespace, check_name, by).await?;
 			Ok(row)
 		})
 		.await

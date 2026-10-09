@@ -7,6 +7,8 @@
 - [x] A rule change re-grades a plain check from the report fields its last report carried (verifies spec: CHK)
 - [x] Reviewing a pending check whose observed failure was capped at warning opens an incident (verifies spec: CHK, INC)
 - [x] A policy change re-grades every target's state of one of Canopy's own checks, keeping Canopy's message (verifies spec: CHK)
+- [x] One of Canopy's own checks graded out of trouble is worded as recovered, not with the failure it observed (verifies spec: CHK)
+- [x] An incident a policy change closes is credited to the operator who saved it (verifies spec: INC)
 - [x] Raising a ceiling back to failed grades the failures back in and opens a fresh incident (verifies spec: INC)
 - [x] Saving a policy that changes no grade leaves the states as they were
 - [x] A policy change on one application type's check leaves another type's same-named check alone (verifies spec: CHK)

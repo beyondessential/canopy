@@ -387,3 +387,45 @@ async fn a_policy_change_leaves_another_types_check_alone() {
 	})
 	.await
 }
+
+/// A policy change that closes an incident is credited to the operator who
+/// made it, and one of Canopy's own checks graded out of trouble no longer
+/// reads as the failure it observed.
+// spec: CHK#policy, INC#membership
+#[tokio::test(flavor = "multi_thread")]
+async fn a_policy_change_closing_an_incident_is_credited_to_its_operator() {
+	TestDb::run(async |mut conn, _| {
+		let s = seed(&mut conn).await;
+		let filed = file(&mut conn, s.applications[0], CheckResult::Failed).await;
+		let incident = &incidents(&mut conn, s.group).await[0];
+		// Ship the open, so the close posts a resolve rather than cancelling it.
+		conn.batch_execute(&format!(
+			"UPDATE slack_outbox SET delivered_at = NOW() \
+			 WHERE incident_id = '{}' AND kind = 'incident_open'",
+			incident.id
+		))
+		.await
+		.expect("deliver the open");
+
+		save_ceiling(&mut conn, CheckResult::Passed).await;
+
+		let state = reload(&mut conn, filed.id).await;
+		assert_eq!(state.effective_result, Some(CheckResult::Passed));
+		assert!(!state.active);
+		assert_eq!(state.message, format!("Health check '{CHECK}' recovered"));
+		assert!(state.description.is_none());
+		assert_eq!(state.title.as_deref(), Some("Backups are stale"));
+
+		use database::schema::slack_outbox::dsl;
+		let by: Vec<serde_json::Value> = dsl::slack_outbox
+			.select(dsl::payload)
+			.filter(dsl::incident_id.eq(incident.id))
+			.filter(dsl::kind.eq("incident_resolve"))
+			.load(&mut conn)
+			.await
+			.expect("resolve rows");
+		assert_eq!(by.len(), 1);
+		assert_eq!(by[0]["by"].as_str(), Some("ops"));
+	})
+	.await
+}

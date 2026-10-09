@@ -11,7 +11,9 @@ States filed before that lands fall back to an empty `status.*` and the target's
 
 A device-reported check's headline and message are worded from its grade in the public server.
 That wording moves into the database crate so a re-grade words the state as a report with the same grade would.
-Canopy's own checks keep their filer's message, which describes the observation and so is still accurate; instanced ones take the generic instance message, as an instance silence's re-grade already does.
+Canopy's own checks keep their filer's message while still in trouble, since it describes the observation and so is still accurate; graded out of trouble a plain one is worded as a reported check would be, and instanced ones take the generic instance message, as an instance silence's re-grade already does. The choice lives in `ReportWording::regraded`.
+
+A policy change's re-grade carries the saving operator through to membership, so an incident it closes is credited to them; an instance silence's re-grade stays unattributed, as whole-check silences are.
 
 Membership gets two fixes independent of policy:
 a member whose failure ends without leaving (failed to warning) now lets the incident close or linger once no effective failure is left, and a re-grade that makes a live member's failure escalating escalates the incident once.

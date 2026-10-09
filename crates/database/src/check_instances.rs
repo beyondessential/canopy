@@ -535,6 +535,45 @@ impl ReportWording {
 	}
 }
 
+impl ReportWording {
+	/// The wording for `state`, one of `source`'s `check` states, re-graded
+	/// without a new report (a policy change or an instance silence).
+	///
+	/// A reported check is worded as a report graded the same way would word
+	/// it ([`Self::of`]), keeping the title it has. Canopy's own checks are
+	/// worded by their filer, so the re-grade keeps what the filer said where
+	/// it still holds: a plain check still in trouble keeps its message, which
+	/// describes what was observed, and an instanced one takes the generic
+	/// message from its re-graded instances ([`GradedCheck::message`]) until
+	/// its next sweep restores its own. A plain check graded out of trouble is
+	/// worded as a reported one would be, since the observation no longer
+	/// describes the state. Either way a state brought back into trouble
+	/// presents the title its last filing gave it.
+	pub fn regraded(source: &str, check: &str, graded: &GradedCheck, state: &Issue) -> Self {
+		let reported = Self::of(check, graded, state.active);
+		if !commons_types::namespace::is_reserved(source) {
+			return Self {
+				title: reported.title.or_else(|| state.title.clone()),
+				..reported
+			};
+		}
+		let active = matches!(
+			graded.effective,
+			CheckResult::Warning | CheckResult::Failed | CheckResult::Broken
+		);
+		let message = match (graded.is_plain(), active) {
+			(true, true) => state.message.clone(),
+			(true, false) => reported.message,
+			(false, _) => graded.message(check),
+		};
+		Self {
+			description: active.then(|| state.title.clone()).flatten(),
+			title: state.title.clone(),
+			message,
+		}
+	}
+}
+
 /// A degraded check's message: its fields, one per line.
 fn per_check_description(detail: &Map<String, Value>) -> Option<String> {
 	let mut lines = Vec::new();
