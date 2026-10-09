@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use axum::extract::FromRef;
 use bestool_postgres::pool::PgPool;
 use commons_errors::Result;
-use commons_servers::acme::Acme;
+use commons_servers::acme::{Acme, AcmeConfig};
 use commons_servers::artifact_store::ArtifactStore;
 use commons_servers::recovery_vault::Recipients;
 use commons_servers::tailnet_directory::{TailnetDirectory, TailnetDirectoryConfig};
@@ -81,9 +81,10 @@ pub struct AppState {
 	// spec: CRT#revocation
 	#[from_ref(skip)]
 	pub acme: Option<Acme>,
-	/// The authority's directory URL as configured, kept even when the account
-	/// could not be built: an operator looking at a broken authority wants to see
-	/// which one Canopy was trying to use.
+	/// The authority's directory URL in effect, default applied, kept even when
+	/// the account could not be built: an operator looking at a broken authority
+	/// wants to see which one Canopy was trying to use. `None` only where no
+	/// account key is configured.
 	#[from_ref(skip)]
 	pub acme_directory: Option<String>,
 }
@@ -94,7 +95,7 @@ pub const FAKE_ACME_ENV: &str = "CANOPY_FAKE_ACME";
 
 /// Build Canopy's ACME account, logging (not failing) a configuration that does
 /// not work: the admin server should still come up, and the settings panel
-/// surfaces the problem. Returns the configured directory URL either way.
+/// surfaces the problem. Returns the directory URL in effect either way.
 async fn acme_from_env() -> (Option<Acme>, Option<String>) {
 	if std::env::var_os(FAKE_ACME_ENV).is_some() {
 		// Debug-only. The fake authority signs with a throwaway root, so a
@@ -115,12 +116,20 @@ async fn acme_from_env() -> (Option<Acme>, Option<String>) {
 		);
 	}
 
-	let directory = std::env::var("CANOPY_ACME_DIRECTORY").ok();
-	match Acme::from_env().await {
-		Ok(acme) => (acme, directory),
+	acme_from_config(AcmeConfig::from_env()).await
+}
+
+/// Build the account from configuration already read. The directory comes back
+/// whenever there is configuration, whether or not the account could be built.
+async fn acme_from_config(config: Option<AcmeConfig>) -> (Option<Acme>, Option<String>) {
+	let Some(config) = config else {
+		return (None, None);
+	};
+	match config.connect().await {
+		Ok(acme) => (Some(acme), Some(config.directory)),
 		Err(err) => {
 			tracing::warn!("Canopy's certificate authority account is unusable: {err}");
-			(None, directory)
+			(None, Some(config.directory))
 		}
 	}
 }
@@ -253,5 +262,31 @@ impl AppState {
 			acme: Some(Acme::fake()),
 			acme_directory: Some("https://acme.test.invalid/directory".into()),
 		})
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	// spec: CRT#presentation
+	#[tokio::test]
+	async fn an_unusable_account_still_reports_the_default_directory() {
+		let config = AcmeConfig::from_lookup(|name| {
+			(name == "CANOPY_ACME_ACCOUNT_KEY").then(|| "not a key".to_string())
+		});
+		let (acme, directory) = acme_from_config(config).await;
+		assert!(acme.is_none());
+		assert_eq!(
+			directory.as_deref(),
+			Some("https://acme-v02.api.letsencrypt.org/directory")
+		);
+	}
+
+	#[tokio::test]
+	async fn no_account_key_reports_no_directory() {
+		let (acme, directory) = acme_from_config(None).await;
+		assert!(acme.is_none());
+		assert!(directory.is_none());
 	}
 }
