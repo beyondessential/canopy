@@ -2028,6 +2028,10 @@ pub async fn instanced_states_covered_by_each(
 /// A state holding no instances is a check without them, which an instance
 /// silence never reaches, and is left alone.
 ///
+/// The re-grade is one transaction, holding the covered states' rows from
+/// when they are read until they are written back, so a report filing one of
+/// them meanwhile is not overwritten with a grade from before it.
+///
 /// Returns every state the silence covers ([`instanced_states_covered_by`]) as
 /// it now stands, so a caller presenting the silence reads them without asking
 /// again.
@@ -2039,9 +2043,28 @@ pub async fn regrade_instanced_states(
 	namespace: &Namespace,
 	r#ref: &str,
 ) -> Result<Vec<Issue>> {
-	let mut states = instanced_states_covered_by(conn, scope, source, namespace, r#ref).await?;
-	regrade_states(conn, &mut states, source, namespace, r#ref, None).await?;
-	Ok(states)
+	use crate::schema::issues;
+
+	conn.transaction::<_, AppError, _>(async |conn| {
+		let covered: Vec<Uuid> = instanced_states_covered_by(conn, scope, source, namespace, r#ref)
+			.await?
+			.into_iter()
+			.map(|state| state.id)
+			.collect();
+		// Locked and read again, in id order and before any target, as a
+		// policy change's re-grade takes them (see `regrade_check_states`).
+		let mut states: Vec<Issue> = issues::table
+			.select(Issue::as_select())
+			.filter(issues::id.eq_any(&covered))
+			.filter(issues::instances.is_not_null())
+			.order(issues::id)
+			.for_update()
+			.load(conn)
+			.await?;
+		regrade_states(conn, &mut states, source, namespace, r#ref, None).await?;
+		Ok(states)
+	})
+	.await
 }
 
 /// Where a check state whose effective result is now `effective` comes when

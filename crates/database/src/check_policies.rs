@@ -1652,7 +1652,7 @@ pub struct EvaluationContext<'a> {
 /// ignored when grading, so they read nothing.
 fn rules_read(rules: Option<&JsonValue>, kind: VarKind) -> bool {
 	rules
-		.and_then(|rules| serde_json::from_value::<IfLadder>(rules.clone()).ok())
+		.and_then(|rules| IfLadder::deserialize(rules).ok())
 		.is_some_and(|ladder| ladder.reads(kind))
 }
 
