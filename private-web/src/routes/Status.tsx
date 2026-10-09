@@ -18,6 +18,7 @@ import PersonIcon from "@mui/icons-material/Person";
 import { useMemo } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import MachineEnclosure, {
+	ENCLOSED_DOT,
 	waveWhileHolding,
 } from "../components/MachineEnclosure";
 import StatusDot from "../components/StatusDot";
@@ -613,12 +614,10 @@ const markedRankLabel = (theme: Theme) =>
 
 /// The dot is sized to its cell, since a flex item wider than the cell holding
 /// it is squeezed on one axis only and draws as an oval.
-const DOT_SIZE = "0.9em";
-
 const dotCellSx = {
 	display: "inline-flex",
-	width: DOT_SIZE,
-	height: DOT_SIZE,
+	width: ENCLOSED_DOT,
+	height: ENCLOSED_DOT,
 	alignItems: "center",
 	justifyContent: "center",
 	flex: "none",
@@ -783,7 +782,7 @@ export function RankedDotStrip({
 											settling={m.maintenance_settling}
 											suspended={m.maintained && !box.lead.machine_maintained}
 											quiet
-											size={DOT_SIZE}
+											size={ENCLOSED_DOT}
 										/>
 									</Box>
 								))}

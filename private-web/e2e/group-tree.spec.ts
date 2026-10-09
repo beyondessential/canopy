@@ -265,6 +265,7 @@ test.describe("the group's tree on the detail pages", () => {
 		});
 		expect(drawn.fill).toBe("rgb(46, 125, 50)");
 		expect(drawn.edge).not.toBe(drawn.fill);
+		expect(drawn.radius).toBe("50%");
 		expect(drawn.width).toBe(drawn.height);
 		expect(drawn.width).toBeCloseTo(22.8, 0);
 	});

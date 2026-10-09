@@ -21,16 +21,30 @@ const STATES = {
 	fine: { border: "divider", fill: "transparent" },
 	degraded: { border: "warning.main", fill: "rgba(237, 108, 2, 0.10)" },
 	down: { border: "error.main", fill: "rgba(211, 47, 47, 0.12)" },
-	// A box that has never reported is drawn empty: the surface it sits on,
-	// edged with a dotted line, so it reads as not yet filled in rather than
-	// faded, which is how a target a window reaches is drawn.
-	never: {
-		border: "text.primary",
-		fill: "background.paper",
-		borderWidth: "2px",
-		borderStyle: "dotted",
-	},
 } as const;
+
+/// A box that has never reported is drawn empty, in either of its marks: the
+/// surface it sits on, edged with a dotted line, so it reads as not yet filled
+/// in rather than faded, which is how a target a window reaches is drawn.
+// spec: CHK#presentation
+export const NEVER_REPORTED = {
+	bgcolor: "background.paper",
+	border: "2px dotted",
+	borderColor: "text.primary",
+} as const;
+
+/// The size of each dot inside an enclosure.
+export const ENCLOSED_DOT = "0.9em";
+
+/// The band between the enclosure's edge and the dots inside it, which keeps
+/// its proportion to the dot so the ring reads as the same ring at any size.
+const PADDING = "0.2em";
+
+/// An enclosure holding one dot, edge to edge: the dot, the padding and a
+/// one-pixel border either side. The machine's standalone mark is this size,
+/// so a row is no shorter for drawing it in place of the enclosure.
+// spec: CHK#presentation
+export const ONE_DOT_ENCLOSURE = `calc(${ENCLOSED_DOT} + 2 * ${PADDING} + 2px)`;
 
 /// A skeleton wave passing over a mark whose window still holds. Work under
 /// way moves and a target serving out the settle period is still, so movement
@@ -56,10 +70,19 @@ export const MUTED = 0.55;
 /// it resolves. It pulses the whole mark instead, on the wave's timing, from
 /// the muted weight a suspended box already carries.
 // spec: MNT#presentation
-export const PILL_PULSE = keyframes`
+const PILL_PULSE = keyframes`
 	0%, 100% { opacity: ${MUTED}; }
 	50% { opacity: ${MUTED - 0.2}; }
 `;
+
+/// Pulses a box's mark while a window declared over it holds.
+// spec: MNT#presentation
+export function pulseWhileHolding(holding: boolean) {
+	return {
+		animation: holding ? `${PILL_PULSE} 2s ease-in-out 0.5s infinite` : "none",
+		"@media (prefers-reduced-motion: reduce)": { animation: "none" },
+	};
+}
 
 export function waveWhileHolding(
 	holding: boolean,
@@ -98,7 +121,7 @@ export function ownWindowStripes(theme: Theme, settling: boolean): string {
 	return `repeating-linear-gradient(45deg, ${ink} 0 1px, transparent 1px 3px, ${ink} 3px 4px)`;
 }
 
-export type MachineState = keyof typeof STATES;
+export type MachineState = keyof typeof STATES | "never";
 
 /// The box's own state, which both of its marks are coloured by.
 export function machineState(up: ShortStatus, health: HealthState): MachineState {
@@ -185,7 +208,7 @@ export default function MachineEnclosure({
 	/** The dots for the applications on this machine. */
 	children: ReactNode;
 }) {
-	const state = STATES[machineState(up, health)];
+	const state = machineState(up, health);
 	const box = machineTitle({
 		name,
 		up,
@@ -221,23 +244,17 @@ export default function MachineEnclosure({
 					fontSize: "1rem",
 					lineHeight: 1,
 					gap: "0.35em",
-					border: 1,
-					borderColor: state.border,
-					...("borderWidth" in state
-						? { borderWidth: state.borderWidth, borderStyle: state.borderStyle }
-						: {}),
-					bgcolor: state.fill,
+					...(state === "never"
+						? NEVER_REPORTED
+						: {
+								border: 1,
+								borderColor: STATES[state].border,
+								bgcolor: STATES[state].fill,
+							}),
 					backgroundImage: (theme) =>
 						ownWindow ? ownWindowStripes(theme, settling) : "none",
 					backgroundClip: "padding-box",
-					...(ownWindow && !settling
-						? {
-								animation: `${PILL_PULSE} 2s ease-in-out 0.5s infinite`,
-								"@media (prefers-reduced-motion: reduce)": {
-									animation: "none",
-								},
-							}
-						: {}),
+					...pulseWhileHolding(ownWindow && !settling),
 					// Every suspended box is muted, whether the window is its own
 					// or reaches it through its environment or its group: all of
 					// them are out of play, so a failing one does not read as one
@@ -247,11 +264,9 @@ export default function MachineEnclosure({
 					opacity: maintained ? MUTED : 1,
 
 					borderRadius: "999px",
-					// The band keeps its old proportion to the dot inside it: both
-					// grew together, so the ring reads as the same ring.
 					// The never-reported edge is a pixel thicker, so the padding
 					// gives one back and the pill stays the size of its neighbours.
-					p: "borderWidth" in state ? "calc(0.2em - 1px)" : "0.2em",
+					p: state === "never" ? `calc(${PADDING} - 1px)` : PADDING,
 					// The dots carry their own right margin, which the pill's own
 					// gap replaces.
 					"& span": { marginRight: 0 },

@@ -5,8 +5,10 @@ import {
 	MUTED,
 	machineState,
 	machineTitle,
+	NEVER_REPORTED,
+	ONE_DOT_ENCLOSURE,
 	ownWindowStripes,
-	PILL_PULSE,
+	pulseWhileHolding,
 } from "./MachineEnclosure";
 
 // The box's mark where the applications on it are listed beneath, as in the
@@ -14,9 +16,6 @@ import {
 // drawn alone: a solid dot in its state's colour, edged a shade darker. With
 // nothing inside it there is no wash to stay quieter than, so a fine box is
 // green here.
-//
-// It is the size of an enclosure holding one dot (a 0.9em dot, 0.2em of
-// padding and a border either side), so a row is no shorter for the swap.
 // spec: CHK#presentation
 const PALETTE = {
 	fine: "success",
@@ -70,13 +69,12 @@ export default function MachineMark({
 					ownWindow ? (settling ? "settling" : "holding") : undefined
 				}
 				sx={(theme) => {
-					const size = "calc(1.3em + 2px)";
 					const base = {
 						display: "inline-block",
 						flex: "none",
 						fontSize: "1rem",
-						width: size,
-						height: size,
+						width: ONE_DOT_ENCLOSURE,
+						height: ONE_DOT_ENCLOSURE,
 						borderRadius: "50%",
 						boxSizing: "border-box",
 						backgroundClip: "padding-box",
@@ -84,23 +82,10 @@ export default function MachineMark({
 							? ownWindowStripes(theme, settling)
 							: "none",
 						opacity: maintained ? MUTED : 1,
-						...(ownWindow && !settling
-							? {
-									animation: `${PILL_PULSE} 2s ease-in-out 0.5s infinite`,
-									"@media (prefers-reduced-motion: reduce)": {
-										animation: "none",
-									},
-								}
-							: {}),
+						...pulseWhileHolding(ownWindow && !settling),
 					};
-					if (state === "never") {
-						return {
-							...base,
-							bgcolor: "background.paper",
-							border: "2px dotted",
-							borderColor: "text.primary",
-						};
-					}
+					if (state === "never")
+						return { ...base, ...NEVER_REPORTED };
 					const fill = theme.palette[PALETTE[state]].main;
 					return {
 						...base,
