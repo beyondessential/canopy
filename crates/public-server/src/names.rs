@@ -25,8 +25,8 @@ use commons_types::server::app_type::ApplicationType;
 use database::application_certificates::OrderState;
 use database::diesel_async::AsyncPgConnection;
 use database::{
-	ApplicationCertificate, ApplicationName, AskedFor, DeniedDnsName, ServerGroupDomain,
-	UndeclaredDnsName, applications::Application,
+	ApplicationCertificate, ApplicationCertificateName, ApplicationName, DeniedDnsName,
+	DnsNameKind, ServerGroupDomain, UndeclaredDnsName, applications::Application,
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -61,10 +61,10 @@ impl Grant {
 		}
 	}
 
-	fn asked_for(self) -> AskedFor {
+	fn kind(self) -> DnsNameKind {
 		match self {
-			Self::Dns => AskedFor::Addresses,
-			Self::Tls => AskedFor::Certificate,
+			Self::Dns => DnsNameKind::Addresses,
+			Self::Tls => DnsNameKind::Certificate,
 		}
 	}
 
@@ -80,7 +80,7 @@ impl Grant {
 ///
 /// An identity is the box's, not the software's, so the credential says which
 /// machine is asking and nothing about which workload the request concerns.
-// spec: CRT#identity-and-authorisation
+// spec: DNS#identity-and-authorisation
 async fn asking_machine(
 	conn: &mut AsyncPgConnection,
 	device_id: Uuid,
@@ -97,7 +97,7 @@ async fn asking_machine(
 /// The order is the one CRT fixes, and each step has its own problem type so a
 /// misconfiguration is diagnosable from the refusal alone rather than by reading
 /// the message. `name` is already normalised.
-// spec: CRT#identity-and-authorisation
+// spec: DNS#identity-and-authorisation
 async fn authorise(
 	conn: &mut AsyncPgConnection,
 	machine: &database::machines::Machine,
@@ -106,11 +106,15 @@ async fn authorise(
 	grant: Grant,
 	zones: &[ManagedZone],
 ) -> Result<Application> {
-	// A denial is an operator's decision about this box and this DNS name, so it
-	// holds however the request would otherwise resolve. The note is for
-	// operators and stays in Canopy.
-	// spec: CRT#denied-dns-names
-	if DeniedDnsName::get(conn, machine.id, name).await?.is_some() {
+	// A denial is an operator's decision about this box, this DNS name and this
+	// kind of request, so it holds however the request would otherwise resolve.
+	// The other kind is unaffected. The note is for operators and stays in
+	// Canopy.
+	// spec: DNS#denied-dns-names
+	if DeniedDnsName::get(conn, machine.id, name, grant.kind())
+		.await?
+		.is_some()
+	{
 		return Err(AppError::DnsNameDenied(name.to_owned()));
 	}
 
@@ -166,7 +170,8 @@ async fn authorise(
 	Ok(server)
 }
 
-/// Keep the machine's undeclared record in step with how its request ended.
+/// Keep the machine's undeclared record of this kind in step with how its
+/// request ended; the other kind's record is not the request's business.
 ///
 /// Settled on the request's final outcome rather than inside [`authorise`],
 /// because declaring the DNS name, which comes after, is itself what refuses a
@@ -176,7 +181,7 @@ async fn authorise(
 /// The record is for operators, not part of the answer, so failing to keep it
 /// is logged and the request's own outcome stands: an undeclared refusal stays
 /// distinguishable, and a request already carried out is not reported failed.
-// spec: CRT#undeclared-requests
+// spec: DNS#undeclared-requests
 async fn settle_undeclared<T>(
 	conn: &mut AsyncPgConnection,
 	machine_id: Uuid,
@@ -185,9 +190,9 @@ async fn settle_undeclared<T>(
 	outcome: &Result<T>,
 ) {
 	let kept = match outcome {
-		Ok(_) => UndeclaredDnsName::clear(conn, machine_id, name).await,
+		Ok(_) => UndeclaredDnsName::clear(conn, machine_id, name, grant.kind()).await,
 		Err(AppError::DnsNameUndeclared(_)) => {
-			UndeclaredDnsName::record(conn, machine_id, name, grant.asked_for()).await
+			UndeclaredDnsName::record(conn, machine_id, name, grant.kind()).await
 		}
 		Err(_) => Ok(()),
 	};
@@ -209,12 +214,12 @@ async fn settle_undeclared<T>(
 /// refused as what they are.
 ///
 /// TRAP: a name declared by an application on another machine must narrow
-/// exactly as a name nobody declares does. The fleet-wide unique index makes
+/// exactly as a name nobody declares does. The fleet-wide single holder makes
 /// the former cheap to detect, which is exactly the temptation; acting on it
 /// here would let an agent tell the two apart by which refusal it gets, making
 /// this endpoint a directory of what other machines serve. Declaring the name
 /// is what refuses it, as undeclared, and only once every earlier check passed.
-// spec: CRT#resolving-the-application
+// spec: DNS#resolving-the-application
 async fn resolve(
 	conn: &mut AsyncPgConnection,
 	machine: &database::machines::Machine,
@@ -224,10 +229,10 @@ async fn resolve(
 ) -> Result<Option<Application>> {
 	let mut candidates = machine.applications(conn).await?;
 
-	let declaring = match ApplicationName::for_name(conn, name).await? {
-		Some(declared) => candidates
-			.iter()
-			.position(|a| a.id == declared.application_id),
+	// Held for either kind: a name held for certificates alone still resolves an
+	// address request to its holder, which then declares it for addresses too.
+	let declaring = match database::dns_names::holder(conn, name).await? {
+		Some(holder) => candidates.iter().position(|a| a.id == holder),
 		None => None,
 	};
 
@@ -320,6 +325,12 @@ pub struct Entitlements {
 	pub domains: Vec<String>,
 	/// The names this server has registered addresses for.
 	pub registered_names: Vec<String>,
+	/// The DNS names this server declares for certificates, whether or not a
+	/// certificate has been issued for them yet. Kept apart from
+	/// `registered_names`, which are for addresses.
+	// spec: DNS#what-an-application-may-act-on
+	#[serde(default)]
+	pub certificate_names: Vec<String>,
 	/// The certificates Canopy holds for this server.
 	pub certificates: Vec<HeldCertificate>,
 	/// One entry per application on the asking machine.
@@ -329,7 +340,7 @@ pub struct Entitlements {
 	/// describe a single-application machine, which is every machine today;
 	/// on a machine hosting several they are left at their defaults and this
 	/// list is the answer.
-	// spec: CRT#what-an-application-may-act-on
+	// spec: DNS#what-an-application-may-act-on
 	#[serde(default)]
 	pub applications: Vec<ApplicationEntitlements>,
 }
@@ -354,6 +365,11 @@ pub struct ApplicationEntitlements {
 	pub domains: Vec<String>,
 	/// The names it has registered addresses for.
 	pub registered_names: Vec<String>,
+	/// The DNS names it declares for certificates, whether or not a
+	/// certificate has been issued for them yet.
+	// spec: DNS#what-an-application-may-act-on
+	#[serde(default)]
+	pub certificate_names: Vec<String>,
 	/// The certificates Canopy holds for it.
 	pub certificates: Vec<HeldCertificate>,
 }
@@ -438,7 +454,7 @@ pub async fn entitlements(
 /// status learns of a new domain without asking. The answer carries an entry
 /// per application on the box; the flat fields describe `server` itself, which
 /// on a single-application machine is the whole answer.
-// spec: CRT#what-an-application-may-act-on
+// spec: DNS#what-an-application-may-act-on
 pub async fn entitlements_for(
 	conn: &mut AsyncPgConnection,
 	machine: &database::machines::Machine,
@@ -464,6 +480,10 @@ pub async fn entitlements_for(
 		registered_names: flat
 			.as_ref()
 			.map(|f| f.registered_names.clone())
+			.unwrap_or_default(),
+		certificate_names: flat
+			.as_ref()
+			.map(|f| f.certificate_names.clone())
 			.unwrap_or_default(),
 		certificates: flat.map(|f| f.certificates).unwrap_or_default(),
 		applications,
@@ -494,6 +514,12 @@ async fn one_applications_entitlements(
 		.map(|row| row.name)
 		.collect();
 
+	let certificate_names = ApplicationCertificateName::for_application(conn, server.id)
+		.await?
+		.into_iter()
+		.map(|row| row.name)
+		.collect();
+
 	let certificates = ApplicationCertificate::for_server(conn, server.id)
 		.await?
 		.iter()
@@ -507,6 +533,7 @@ async fn one_applications_entitlements(
 		paused: server.name_management_paused(),
 		domains,
 		registered_names,
+		certificate_names,
 		certificates,
 	})
 }
@@ -527,7 +554,7 @@ pub struct RegisterNameArgs {
 	/// The type of the application on this machine the name is for, where the
 	/// machine hosts several and the agent knows which serves it. Unneeded once
 	/// the name is declared, and on a machine hosting one application.
-	// spec: CRT#resolving-the-application
+	// spec: DNS#resolving-the-application
 	#[serde(default)]
 	pub application_type: Option<ApplicationType>,
 }
@@ -621,7 +648,7 @@ pub struct RequestCertificateArgs {
 	/// The type of the application on this machine the name is for, where the
 	/// machine hosts several and the agent knows which serves it. Unneeded once
 	/// the name is declared, and on a machine hosting one application.
-	// spec: CRT#resolving-the-application
+	// spec: DNS#resolving-the-application
 	#[serde(default)]
 	pub application_type: Option<ApplicationType>,
 }

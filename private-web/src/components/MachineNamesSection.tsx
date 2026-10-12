@@ -20,41 +20,51 @@ import {
 } from "@mui/material";
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
+import {
+	type DnsNameKind,
+	KIND_HEADINGS,
+	KIND_MODULES,
+	KIND_NOUNS,
+} from "../dnsNames";
 import type {
-	AskedFor,
-	MachineApplicationView as MachineApplication,
-	MachineDnsNamesView as View,
+	MachineNamesView as View,
 	UndeclaredView as Undeclared,
 } from "../types";
+import CertificateStateChip from "./CertificateStateChip";
 import { GradedAction } from "./GradedAction";
 import TimeAgo from "./TimeAgo";
+import TimeLeft from "./TimeLeft";
 
-const ASKED_FOR_LABELS: Record<AskedFor, string> = {
-	addresses: "Addresses",
-	certificate: "Certificate",
-};
+type MachineApplication = View["applications"][number];
+type Declared = View["declared"][number];
 
-/// The DNS names asked about from a machine: the requests that resolved to none
-/// of its applications, waiting on an operator to declare or deny each, the
-/// DNS names denied to it, and, on a box hosting several applications, which of
-/// them declares what.
+/// The DNS names of one kind asked about from a machine: the requests that
+/// resolved to none of its applications, waiting on an operator to declare or
+/// deny each, the DNS names denied to it, and, on a box hosting several
+/// applications, which of them declares what.
 ///
-/// Absent altogether on a machine with nothing to show, so a box that never
-/// asks about a DNS name carries no empty section.
-// spec: CRT#presentation
-export default function MachineDnsNamesSection({
+/// One component for both kinds, fed from the endpoint of the kind it is given,
+/// so the "DNS names" and "TLS certificates" sections read alike. Absent
+/// altogether on a machine with nothing to show for its kind, so a box that
+/// never asks about one carries no empty section.
+// spec: DNS#on-a-machine
+export default function MachineNamesSection({
+	kind,
 	machineId,
 	isAdmin,
 	refreshKey,
 	onChanged,
 }: {
+	kind: DnsNameKind;
 	machineId: string;
 	isAdmin: boolean;
 	refreshKey: number;
 	onChanged: () => void;
 }) {
-	const view = useApi("certificates", "for_machine", { machine_id: machineId }, [
+	const module = KIND_MODULES[kind];
+	const view = useApi(module, "for_machine", { machine_id: machineId }, [
 		machineId,
+		kind,
 		refreshKey,
 	]);
 
@@ -65,9 +75,13 @@ export default function MachineDnsNamesSection({
 		return null;
 
 	return (
-		<Paper variant="outlined" sx={{ p: 2 }} data-testid="machine-dns-names">
+		<Paper
+			variant="outlined"
+			sx={{ p: 2 }}
+			data-testid={`machine-names-${kind}`}
+		>
 			<Typography variant="h6" component="h2" gutterBottom>
-				DNS names
+				{KIND_HEADINGS[kind]}
 			</Typography>
 			<Stack spacing={2}>
 				{data.undeclared.length > 0 && (
@@ -91,6 +105,7 @@ export default function MachineDnsNamesSection({
 								{data.undeclared.map((row) => (
 									<UndeclaredRow
 										key={row.name}
+										kind={kind}
 										machineId={machineId}
 										row={row}
 										applications={data.applications}
@@ -113,34 +128,20 @@ export default function MachineDnsNamesSection({
 								<TableRow>
 									<TableCell>DNS name</TableCell>
 									<TableCell>Application</TableCell>
-									<TableCell>Certificate</TableCell>
+									<TableCell>
+										{kind === "addresses" ? "Records" : "Certificate"}
+									</TableCell>
 								</TableRow>
 							</TableHead>
 							<TableBody>
 								{data.declared.map((row) => (
 									<TableRow key={row.name}>
-										<TableCell sx={{ fontFamily: "monospace" }}>{row.name}</TableCell>
+										<TableCell sx={{ fontFamily: "monospace" }}>
+											{row.name}
+										</TableCell>
 										<TableCell>{row.application_name}</TableCell>
 										<TableCell>
-											{row.certificate ? (
-												<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-													<Chip
-														size="small"
-														variant="outlined"
-														color={row.certificate.collectable ? "success" : "default"}
-														label={row.certificate.state}
-													/>
-													{row.certificate.not_after && (
-														<Typography variant="caption" color="text.secondary">
-															expires <TimeAgo timestamp={row.certificate.not_after} />
-														</Typography>
-													)}
-												</Stack>
-											) : (
-												<Typography variant="caption" color="text.secondary">
-													none
-												</Typography>
-											)}
+											<DeclaredState kind={kind} row={row} />
 										</TableCell>
 									</TableRow>
 								))}
@@ -166,6 +167,7 @@ export default function MachineDnsNamesSection({
 								{data.denied.map((row) => (
 									<DeniedRow
 										key={row.name}
+										kind={kind}
 										machineId={machineId}
 										name={row.name}
 										deniedBy={row.denied_by}
@@ -184,22 +186,61 @@ export default function MachineDnsNamesSection({
 	);
 }
 
+/// What a declared DNS name shows for its kind: whether its records are
+/// published, or the state of its certificate and how long is left.
+function DeclaredState({ kind, row }: { kind: DnsNameKind; row: Declared }) {
+	if (kind === "addresses") {
+		if (row.published === null) return <Chip size="small" label="declared" />;
+		return row.published ? (
+			<Chip size="small" variant="outlined" color="success" label="published" />
+		) : (
+			<Chip
+				size="small"
+				variant="outlined"
+				color="warning"
+				label="waiting to publish"
+			/>
+		);
+	}
+	if (!row.certificate) {
+		return (
+			<Typography variant="caption" color="text.secondary">
+				none
+			</Typography>
+		);
+	}
+	return (
+		<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+			<CertificateStateChip cert={row.certificate} />
+			{row.certificate.not_after && (
+				<TimeLeft
+					notAfter={row.certificate.not_after}
+					risk={row.certificate.risk}
+				/>
+			)}
+		</Stack>
+	);
+}
+
 function UndeclaredRow({
+	kind,
 	machineId,
 	row,
 	applications,
 	isAdmin,
 	onChanged,
 }: {
+	kind: DnsNameKind;
 	machineId: string;
 	row: Undeclared;
 	applications: MachineApplication[];
 	isAdmin: boolean;
 	onChanged: () => void;
 }) {
+	const module = KIND_MODULES[kind];
 	const [applicationId, setApplicationId] = useState(applications[0]?.id ?? "");
 	const [denying, setDenying] = useState(false);
-	const declare = useApiAction("certificates", "declare");
+	const declare = useApiAction(module, "declare");
 
 	const onDeclare = async () => {
 		try {
@@ -215,7 +256,7 @@ function UndeclaredRow({
 			<TableCell sx={{ fontFamily: "monospace" }}>{row.name}</TableCell>
 			<TableCell>
 				<Typography variant="caption" color="text.secondary">
-					{ASKED_FOR_LABELS[row.asked_for]}, <TimeAgo timestamp={row.last_asked_at} />
+					<TimeAgo timestamp={row.last_asked_at} />
 				</Typography>
 			</TableCell>
 			<TableCell align="right">
@@ -228,7 +269,9 @@ function UndeclaredRow({
 								value={applicationId}
 								onChange={(e) => setApplicationId(e.target.value)}
 								disabled={declare.pending}
-								slotProps={{ htmlInput: { "aria-label": "Application to declare it on" } }}
+								slotProps={{
+									htmlInput: { "aria-label": "Application to declare it on" },
+								}}
 								sx={{ minWidth: 180 }}
 							>
 								{applications.map((application) => (
@@ -238,8 +281,8 @@ function UndeclaredRow({
 								))}
 							</TextField>
 							<GradedAction
-								calls="certificates/declare"
-								action={`Declare DNS name ${row.name}`}
+								calls={`${module}/declare`}
+								action={`Declare DNS name ${row.name} for ${KIND_NOUNS[kind]}`}
 							>
 								<Button
 									variant="contained"
@@ -251,19 +294,26 @@ function UndeclaredRow({
 								</Button>
 							</GradedAction>
 							<GradedAction
-								calls="certificates/deny"
-								action={`Deny DNS name ${row.name}`}
+								calls={`${module}/deny`}
+								action={`Deny DNS name ${row.name} for ${KIND_NOUNS[kind]}`}
 							>
-								<Button size="small" color="error" onClick={() => setDenying(true)}>
+								<Button
+									size="small"
+									color="error"
+									onClick={() => setDenying(true)}
+								>
 									Deny
 								</Button>
 							</GradedAction>
 						</Stack>
-						{declare.error && <Alert severity="error">{declare.error.message}</Alert>}
+						{declare.error && (
+							<Alert severity="error">{declare.error.message}</Alert>
+						)}
 					</Stack>
 				)}
 				<DenyDialog
 					open={denying}
+					kind={kind}
 					machineId={machineId}
 					name={row.name}
 					onClose={() => setDenying(false)}
@@ -279,19 +329,22 @@ function UndeclaredRow({
 
 function DenyDialog({
 	open,
+	kind,
 	machineId,
 	name,
 	onClose,
 	onDenied,
 }: {
 	open: boolean;
+	kind: DnsNameKind;
 	machineId: string;
 	name: string;
 	onClose: () => void;
 	onDenied: () => void;
 }) {
+	const module = KIND_MODULES[kind];
 	const [note, setNote] = useState("");
-	const deny = useApiAction("certificates", "deny");
+	const deny = useApiAction(module, "deny");
 
 	const onConfirm = async () => {
 		try {
@@ -312,7 +365,8 @@ function DenyDialog({
 			<DialogTitle>Deny {name}</DialogTitle>
 			<DialogContent>
 				<Typography variant="body2" sx={{ mb: 2 }}>
-					This machine's requests for it are refused until the denial is lifted.
+					This machine's requests for {KIND_NOUNS[kind]} for it are refused
+					until the denial is lifted.
 				</Typography>
 				<TextField
 					autoFocus
@@ -332,8 +386,8 @@ function DenyDialog({
 			<DialogActions>
 				<Button onClick={onClose}>Cancel</Button>
 				<GradedAction
-					calls="certificates/deny"
-					action={`Deny DNS name ${name}`}
+					calls={`${module}/deny`}
+					action={`Deny DNS name ${name} for ${KIND_NOUNS[kind]}`}
 				>
 					<Button
 						variant="contained"
@@ -350,6 +404,7 @@ function DenyDialog({
 }
 
 function DeniedRow({
+	kind,
 	machineId,
 	name,
 	deniedBy,
@@ -358,6 +413,7 @@ function DeniedRow({
 	isAdmin,
 	onChanged,
 }: {
+	kind: DnsNameKind;
 	machineId: string;
 	name: string;
 	deniedBy: string;
@@ -366,7 +422,8 @@ function DeniedRow({
 	isAdmin: boolean;
 	onChanged: () => void;
 }) {
-	const lift = useApiAction("certificates", "lift_denial");
+	const module = KIND_MODULES[kind];
+	const lift = useApiAction(module, "lift_denial");
 
 	const onLift = async () => {
 		try {
@@ -389,8 +446,8 @@ function DeniedRow({
 			<TableCell align="right">
 				{isAdmin && (
 					<GradedAction
-						calls="certificates/lift_denial"
-						action={`Lift denial of DNS name ${name}`}
+						calls={`${module}/lift_denial`}
+						action={`Lift denial of DNS name ${name} for ${KIND_NOUNS[kind]}`}
 					>
 						<Button size="small" onClick={onLift} disabled={lift.pending}>
 							Lift

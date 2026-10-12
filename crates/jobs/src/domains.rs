@@ -87,7 +87,7 @@ pub async fn reconcile_addresses(
 }
 
 /// Bring one registration's records into line with what the server asked for.
-// spec: CRT#addresses
+// spec: ADR#registering
 async fn publish_addresses(
 	db: &mut database::diesel_async::AsyncPgConnection,
 	dns: &DnsProvider,

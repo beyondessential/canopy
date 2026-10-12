@@ -26,6 +26,7 @@ mod chrome_releases;
 mod cluster_checks;
 mod consolidated_checks;
 mod core_split_migration;
+mod dns_names;
 mod event_validation;
 mod fleet_check_detail;
 mod health_rollup;

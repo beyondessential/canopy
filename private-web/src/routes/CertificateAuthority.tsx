@@ -17,7 +17,7 @@ import { useApi } from "../api";
 /// of issuance actually shows up: nothing in the fleet can obtain a certificate
 /// when the account is wrong, so blaming any one group would send an
 /// operator to the wrong place.
-// spec: CRT#presentation
+// spec: CRT#issuance-authority
 export default function CertificateAuthority() {
 	const authority = useApi("certificates", "authority", {}, []);
 

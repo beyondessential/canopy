@@ -10,6 +10,7 @@ use jiff::SignedDuration;
 use tokio::time::{Instant, timeout};
 
 pub mod admins;
+pub mod application_certificate_names;
 pub mod application_certificates;
 pub mod application_names;
 pub mod applications;
@@ -23,6 +24,7 @@ pub mod check_policies;
 pub mod chrome_releases;
 pub mod devices;
 pub mod dns_name_dispositions;
+pub mod dns_names;
 pub mod inventory_leases;
 pub mod inventory_variables;
 pub mod issues;
@@ -59,6 +61,7 @@ pub mod version_known_issues;
 pub mod versions;
 pub mod views;
 
+pub use application_certificate_names::ApplicationCertificateName;
 pub use application_certificates::{ApplicationCertificate, OrderState, RevocationReason, Risk};
 pub use application_names::ApplicationName;
 pub use backups::{
@@ -75,7 +78,8 @@ pub use commons_types::backup::{
 	RunOutcome,
 };
 pub use devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
-pub use dns_name_dispositions::{AskedFor, DeniedDnsName, UndeclaredDnsName};
+pub use dns_name_dispositions::{DeniedDnsName, UndeclaredDnsName};
+pub use dns_names::DnsNameKind;
 pub use kubernetes_clusters::KubernetesCluster;
 pub use machines::{Machine, MachineUpdate, NewMachine};
 pub use operator_sessions::OperatorSession;

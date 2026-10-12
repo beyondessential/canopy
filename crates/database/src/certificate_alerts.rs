@@ -274,7 +274,7 @@ pub async fn sweep_stuck_issuance(db: &mut AsyncPgConnection) -> Result<usize> {
 }
 
 /// File (or close) the per-server address-records check.
-// spec: CRT#addresses
+// spec: ADR#registering
 pub async fn sweep_address_records(db: &mut AsyncPgConnection) -> Result<usize> {
 	let failing = ApplicationName::failing_to_publish(db).await?;
 	let previously = Issue::active_server_ids_by_source_ref(db, CANOPY_SOURCE, ADDRESS_REF).await?;

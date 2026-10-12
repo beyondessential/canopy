@@ -8,6 +8,15 @@ diesel::table! {
 }
 
 diesel::table! {
+	application_certificate_names (id) {
+		id -> Uuid,
+		application_id -> Uuid,
+		name -> Text,
+		created_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	application_certificates (id) {
 		id -> Uuid,
 		application_id -> Uuid,
@@ -385,6 +394,7 @@ diesel::table! {
 		denied_by -> Text,
 		note -> Nullable<Text>,
 		created_at -> Timestamptz,
+		kind -> Text,
 	}
 }
 
@@ -947,7 +957,7 @@ diesel::table! {
 		id -> Uuid,
 		machine_id -> Uuid,
 		dns_name -> Text,
-		asked_for -> Text,
+		kind -> Text,
 		first_asked_at -> Timestamptz,
 		last_asked_at -> Timestamptz,
 	}
@@ -1008,6 +1018,7 @@ diesel::table! {
 	}
 }
 
+diesel::joinable!(application_certificate_names -> applications (application_id));
 diesel::joinable!(application_certificates -> applications (application_id));
 diesel::joinable!(application_names -> applications (application_id));
 diesel::joinable!(application_reported_detail -> applications (application_id));
@@ -1109,6 +1120,7 @@ diesel::joinable!(versions -> devices (device_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
 	admins,
+	application_certificate_names,
 	application_certificates,
 	application_names,
 	application_reported_detail,

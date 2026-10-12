@@ -17,7 +17,7 @@ import ActiveIncidentCard from "../components/ActiveIncidentCard";
 import { ChecksTable, HealthIndicator } from "../components/ChecksTable";
 import IncidentsLink from "../components/IncidentsLink";
 import MachineBackupSection from "../components/MachineBackupSection";
-import MachineDnsNamesSection from "../components/MachineDnsNamesSection";
+import MachineNamesSection from "../components/MachineNamesSection";
 import MachineIdentitySection from "../components/MachineIdentitySection";
 import MachineSetupInstructions from "../components/MachineSetupInstructions";
 import MaintenanceHeaderButton from "../components/MaintenanceHeaderButton";
@@ -269,12 +269,16 @@ export default function MachineDetail() {
 				})}
 			/>
 
-			<MachineDnsNamesSection
-				machineId={data.machine.id}
-				isAdmin={isAdmin}
-				refreshKey={refreshTick}
-				onChanged={bumpRefresh}
-			/>
+			{(["addresses", "certificate"] as const).map((kind) => (
+				<MachineNamesSection
+					key={kind}
+					kind={kind}
+					machineId={data.machine.id}
+					isAdmin={isAdmin}
+					refreshKey={refreshTick}
+					onChanged={bumpRefresh}
+				/>
+			))}
 
 			<MachineBackupSection
 				machineId={data.machine.id}

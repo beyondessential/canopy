@@ -9,6 +9,7 @@ pub mod certificates;
 pub mod clusters;
 pub mod commons;
 pub mod devices;
+pub mod dns_names;
 pub mod domains;
 pub mod healthchecks;
 pub mod incidents;
@@ -143,6 +144,7 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 			.nest("/certificates", certificates::routes())
 			.nest("/commons", commons::routes())
 			.nest("/devices", devices::routes())
+			.nest("/dns_names", dns_names::routes())
 			.nest("/domains", domains::routes())
 			.nest("/healthchecks", healthchecks::routes())
 			.nest("/incidents", incidents::routes())

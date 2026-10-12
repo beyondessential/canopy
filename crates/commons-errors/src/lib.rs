@@ -165,7 +165,7 @@ pub enum AppError {
 	/// from *not you* — a withheld grant is permanent until an operator grants it,
 	/// where a pause is expected to lift — and back off instead of hammering.
 	/// Maps to 409.
-	// spec: CRT#pausing-an-application
+	// spec: DNS#pausing-an-application
 	#[error("name management is paused for this server: {0}")]
 	NameManagementPaused(String),
 
@@ -173,7 +173,7 @@ pub enum AppError {
 	/// Reported the same whether the name is unclaimed or held by another group,
 	/// so the endpoint is not a directory of other groups' names. Its own
 	/// problem type so an agent can tell it from a withheld grant. Maps to 403.
-	// spec: CRT#identity-and-authorisation
+	// spec: DNS#identity-and-authorisation
 	#[error("not entitled to this name: {0}")]
 	NameNotEntitled(String),
 
@@ -184,14 +184,14 @@ pub enum AppError {
 	/// because the remedy is an operator declaring the DNS name, or the agent
 	/// naming its application, so an agent waits rather than reporting a fault.
 	/// Maps to 403.
-	// spec: CRT#resolving-the-application
+	// spec: DNS#resolving-the-application
 	#[error("no application on this machine declares this DNS name: {0}")]
 	DnsNameUndeclared(String),
 
 	/// An operator has denied the DNS name to the asking machine. Its own problem
 	/// type so an agent can tell a decision against the DNS name from a
 	/// declaration it is waiting on. Maps to 403.
-	// spec: CRT#denied-dns-names
+	// spec: DNS#denied-dns-names
 	#[error("this DNS name is denied to this machine: {0}")]
 	DnsNameDenied(String),
 
@@ -200,7 +200,7 @@ pub enum AppError {
 	/// of its applications is of that type. Its own problem type because the
 	/// remedy is correcting the agent's configuration or registering the
 	/// application, neither of which waiting fixes. Maps to 409.
-	// spec: CRT#resolving-the-application
+	// spec: DNS#resolving-the-application
 	#[error("this machine contradicts the application type named: {0}")]
 	DnsNameTypeMismatch(String),
 

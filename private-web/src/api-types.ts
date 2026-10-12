@@ -989,15 +989,16 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Declare that an application serves a name.
-         * @description A declaration is what an address registration or a certificate request from
-         *     the machine is resolved against, so it is how a box running several workloads
-         *     gets its requests routed to the right one. It carries no addresses; the
-         *     application registers those itself.
+         * Declare that an application holds a DNS name for certificates.
+         * @description A declaration is what a certificate request from the machine is resolved
+         *     against, so it is how a box running several workloads gets its requests
+         *     routed to the right one, and it is what Canopy renews and alerts for. It is
+         *     not an order: the application requests the certificate itself.
          *
-         *     Declaring a name the same application already holds changes nothing. A name
-         *     another application holds is refused, and the refusal names the holder so an
-         *     operator can see what to release first.
+         *     Declaring a DNS name the same application already holds for certificates
+         *     changes nothing. A DNS name another application holds, for either kind, is
+         *     refused, and the refusal names the holder so an operator can see what to
+         *     release first.
          */
         post: operations["certificates_declare"];
         delete?: never;
@@ -1016,10 +1017,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Deny a DNS name to a machine.
-         * @description Every address and certificate request about it from that machine is then
-         *     refused as denied, and is not recorded, so it raises no notice. Refused while
-         *     one of the machine's applications declares the name.
+         * Deny a DNS name to a machine for certificates.
+         * @description Every certificate request about it from that machine is then refused as
+         *     denied, and is not recorded, so it raises no notice. Address requests about
+         *     it are unaffected. Refused while one of the machine's applications declares
+         *     the DNS name for certificates.
          */
         post: operations["certificates_deny"];
         delete?: never;
@@ -1038,9 +1040,9 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * The names in use under each domain a group controls, and which of them hold a
-         *     current certificate.
-         * @description So that whether a group's names are healthy is answerable from the
+         * The DNS names declared for certificates under each domain a group controls,
+         *     and which of them hold a current certificate.
+         * @description So that whether a group's certificates are healthy is answerable from the
          *     group's page, without visiting each of its applications.
          */
         post: operations["certificates_for_group"];
@@ -1060,9 +1062,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * What a machine's page shows about its DNS names.
-         * @description The DNS names its applications declare, the requests it made that resolved
-         *     to none of them, and the DNS names denied to it.
+         * What a machine's TLS certificates section shows.
+         * @description The DNS names its applications declare for certificates, the certificate
+         *     requests it made that resolved to none of them, and the DNS names denied to
+         *     it for certificates.
          */
         post: operations["certificates_for_machine"];
         delete?: never;
@@ -1081,9 +1084,9 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Everything a server's page needs about its names and certificates.
+         * Everything an application's TLS certificates section needs.
          * @description One call rather than several, because the parts are read together and a
-         *     half-loaded panel would show a certificate without the pause that explains
+         *     half-loaded section would show a certificate without the pause that explains
          *     why it is not renewing.
          */
         post: operations["certificates_for_server"];
@@ -1103,35 +1106,11 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Lift a denial.
-         * @description The machine's requests about the name then resolve as any other's do.
+         * Lift a denial for certificates.
+         * @description The machine's certificate requests about the DNS name then resolve as any
+         *     other's do. A denial of addresses for it stands.
          */
         post: operations["certificates_lift_denial"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/certificates/pause": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Pause a server: Canopy makes no new changes on its behalf.
-         * @description Nothing already in place is withdrawn — records published stand, certificates
-         *     held stay held and collectable until they expire, and the group keeps
-         *     working exactly as it did. What stops is Canopy doing anything *new*.
-         *
-         *     A second pause leaves the first in place, so the original reason and time are
-         *     not overwritten by a later one.
-         */
-        post: operations["certificates_pause"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1148,34 +1127,14 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * End an application's hold on a name.
-         * @description What is already in place stands, as revoking a grant leaves it: the records
-         *     published stay published and the certificates held stay held until they
-         *     expire. What ends is Canopy treating the name as this application's, which
-         *     frees it to be declared elsewhere.
+         * End an application's hold on a DNS name for certificates.
+         * @description What is already in place stands, as revoking a grant leaves it: certificates
+         *     held stay held until they expire. What ends is Canopy renewing them and
+         *     raising them as running out, and the DNS name being this application's for
+         *     certificates, which frees it to be declared elsewhere once it is released for
+         *     addresses too.
          */
         post: operations["certificates_release"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/certificates/resume": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Lift a server's pause. Work resumes where it left off.
-         * @description Only an operator can do this: Canopy never lifts a pause itself, however long
-         *     it has been in place and however much is expiring under it.
-         */
-        post: operations["certificates_resume"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1235,27 +1194,6 @@ export interface paths {
          *     Responds 409 for a profile the authority does not advertise.
          */
         post: operations["certificates_set_profile"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/certificates/undeclared_notices": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * The machines with requests waiting on a declaration.
-         * @description For the notices on the group page and the Status page. Empty when there
-         *     are none.
-         */
-        post: operations["certificates_undeclared_notices"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1747,6 +1685,235 @@ export interface paths {
          * @description Immediately changes what the device is permitted to do system-wide.
          */
         post: operations["update_role"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/dns_names/declare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Declare that an application holds a DNS name for addresses.
+         * @description A declaration is what an address registration from the machine is resolved
+         *     against, so it is how a box running several workloads gets its requests
+         *     routed to the right one. It carries no addresses; the application registers
+         *     those itself.
+         *
+         *     Declaring a DNS name the same application already holds for addresses
+         *     changes nothing. A DNS name another application holds, for either kind, is
+         *     refused, and the refusal names the holder so an operator can see what to
+         *     release first.
+         */
+        post: operations["dns_names_declare"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/dns_names/deny": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deny a DNS name to a machine for addresses.
+         * @description Every address request about it from that machine is then refused as denied,
+         *     and is not recorded, so it raises no notice. Certificate requests about it
+         *     are unaffected. Refused while one of the machine's applications declares the
+         *     DNS name for addresses.
+         */
+        post: operations["dns_names_deny"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/dns_names/for_group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The DNS names declared for addresses under each domain a group controls, and
+         *     whether their records are published.
+         * @description So that whether a group's DNS names are healthy is answerable from the
+         *     group's page, without visiting each of its applications.
+         */
+        post: operations["dns_names_for_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/dns_names/for_machine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What a machine's DNS names section shows.
+         * @description The DNS names its applications declare for addresses, the address requests it
+         *     made that resolved to none of them, and the DNS names denied to it for
+         *     addresses.
+         */
+        post: operations["dns_names_for_machine"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/dns_names/for_server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Everything an application's DNS names section needs.
+         * @description One call rather than several, because the parts are read together and a
+         *     half-loaded section would show a name without the pause that explains why it
+         *     is not being published.
+         */
+        post: operations["dns_names_for_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/dns_names/lift_denial": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Lift a denial for addresses.
+         * @description The machine's address requests about the DNS name then resolve as any
+         *     other's do. A denial of certificates for it stands.
+         */
+        post: operations["dns_names_lift_denial"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/dns_names/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause an application: Canopy makes no new changes on its behalf.
+         * @description Nothing already in place is withdrawn: records published stand, certificates
+         *     held stay held and collectable until they expire, and the group keeps
+         *     working exactly as it did. What stops is Canopy doing anything *new*, for
+         *     either kind.
+         *
+         *     A second pause leaves the first in place, so the original reason and time are
+         *     not overwritten by a later one.
+         */
+        post: operations["dns_names_pause"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/dns_names/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End an application's hold on a DNS name for addresses.
+         * @description What is already in place stands, as revoking a grant leaves it: the records
+         *     published stay published. What ends is Canopy treating the DNS name as this
+         *     application's for addresses, which frees it to be declared elsewhere once it
+         *     is released for certificates too.
+         */
+        post: operations["dns_names_release"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/dns_names/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Lift an application's pause. Work resumes where it left off.
+         * @description Only an operator can do this: Canopy never lifts a pause itself, however long
+         *     it has been in place and however much is expiring under it.
+         */
+        post: operations["dns_names_resume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/dns_names/undeclared_notices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The machines with requests waiting on a declaration, of either kind.
+         * @description For the notices on the group page and the Status page. Empty when there
+         *     are none.
+         */
+        post: operations["dns_names_undeclared_notices"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5258,42 +5425,6 @@ export interface components {
              */
             type: components["schemas"]["ApplicationType"];
         };
-        /** @description What a server's page shows about its names and certificates. */
-        ApplicationNamesView: {
-            /**
-             * @description The profile this server's certificates are requested under. Null means
-             *     the authority's own default, which is its longest-lived.
-             */
-            certificate_profile?: string | null;
-            /**
-             * @description Every certificate Canopy holds or has an order in flight for, newest
-             *     first. A name may appear more than once — a key rotation leaves the
-             *     previous certificate behind until it expires.
-             */
-            certificates: components["schemas"]["CertificateView"][];
-            /**
-             * @description The domains this server's group controls, so the UI can say which names
-             *     are available to it at all.
-             */
-            domains: string[];
-            /** @description Whether an operator has allowed this server to manage its own DNS. */
-            may_manage_dns: boolean;
-            /**
-             * @description Whether an operator has allowed this server to obtain its own
-             *     certificates.
-             */
-            may_manage_tls: boolean;
-            /** @description The public names this server has registered, by name. */
-            names: components["schemas"]["NameView"][];
-            /** @description Why it was set. */
-            pause_reason?: string | null;
-            /** @description Whether Canopy has been told to stop doing anything new for this server. */
-            paused: boolean;
-            /** @description When the pause was set. */
-            paused_at?: string | null;
-            /** @description Who set it. */
-            paused_by?: string | null;
-        };
         /**
          * @description What an application is: the software and the role it plays, as a slug. The set is open — a report carrying a type Canopy does not know creates an application of that type, which simply carries no per-type capabilities.
          * @example tamanu-central
@@ -5382,11 +5513,6 @@ export interface components {
              */
             artifact_id: string;
         };
-        /**
-         * @description What a refused request was for.
-         * @enum {string}
-         */
-        AskedFor: "addresses" | "certificate";
         /** @description Request to attach a device to a Tailscale network node. */
         AttachTailscaleArgs: {
             /**
@@ -5799,6 +5925,22 @@ export interface components {
             /** @description How this type's application version is treated. */
             version_tracking: components["schemas"]["VersionTracking"];
         };
+        /** @description A DNS name an application holds for certificates. */
+        CertificateNameView: {
+            /**
+             * Format: uuid
+             * @description Unique identifier of the declaration.
+             */
+            id: string;
+            /** @description The DNS name, normalised. */
+            name: string;
+            /**
+             * @description Whether the DNS name lies at or beneath a domain the application's group
+             *     controls. An operator may declare one that does not, ahead of the group
+             *     claiming its domain; nothing is certified for it until then.
+             */
+            within_domains: boolean;
+        };
         /** @description Which certificate to revoke, and why. */
         CertificateRevokeArgs: {
             /**
@@ -5869,6 +6011,33 @@ export interface components {
             risk: string;
             /** @description `pending`, `issued`, `failed`, or `revoked`. */
             state: string;
+        };
+        /** @description What an application's TLS certificates section shows. */
+        CertificatesView: {
+            /**
+             * @description The profile this application's certificates are requested under. Null
+             *     means the authority's own default, which is its longest-lived.
+             */
+            certificate_profile?: string | null;
+            /**
+             * @description Every certificate Canopy holds or has an order in flight for, newest
+             *     first. A DNS name may appear more than once: a key rotation leaves the
+             *     previous certificate behind until it expires.
+             */
+            certificates: components["schemas"]["CertificateView"][];
+            /**
+             * @description The domains this application's group controls, so the UI can say which
+             *     DNS names are available to it at all.
+             */
+            domains: string[];
+            /**
+             * @description Whether an operator has allowed this application to obtain its own
+             *     certificates.
+             */
+            may_manage_tls: boolean;
+            /** @description The DNS names this application holds for certificates, by name. */
+            names: components["schemas"]["CertificateNameView"][];
+            pause?: null | components["schemas"]["PauseView"];
         };
         /** @description Request body for [`check_detail`]. */
         CheckDetailArgs: {
@@ -6593,14 +6762,14 @@ export interface components {
              */
             server_group_id: string;
         };
-        /** @description An application and the name being declared for it, or released from it. */
+        /** @description An application and the DNS name being declared for it, or released from it. */
         DeclarationArgs: {
             /**
              * Format: uuid
-             * @description The application that serves the name.
+             * @description The application that serves the DNS name.
              */
             application_id: string;
-            /** @description The name, in any case and with or without a trailing dot. */
+            /** @description The DNS name, in any case and with or without a trailing dot. */
             name: string;
         };
         /** @description Declare a window over a target, or amend the one it already has. */
@@ -6639,7 +6808,7 @@ export interface components {
             /** @description The email address to remove from the admin allow-list. */
             email: string;
         };
-        /** @description A DNS name an operator has denied to the machine. */
+        /** @description A DNS name an operator has denied to the machine for the section's kind. */
         DeniedView: {
             /** @description When it was denied. */
             denied_at: string;
@@ -6657,7 +6826,7 @@ export interface components {
              * @description The machine to deny it to.
              */
             machine_id: string;
-            /** @description The name, in any case and with or without a trailing dot. */
+            /** @description The DNS name, in any case and with or without a trailing dot. */
             name: string;
             /** @description Why, optionally. */
             note?: string | null;
@@ -6782,6 +6951,32 @@ export interface components {
              */
             query: string;
         };
+        /** @description What an application's DNS names section shows. */
+        DnsNamesView: {
+            /**
+             * @description The domains this application's group controls, so the UI can say which
+             *     names are available to it at all.
+             */
+            domains: string[];
+            /** @description Whether an operator has allowed this application to manage its own DNS. */
+            may_manage_dns: boolean;
+            /** @description The DNS names this application holds for addresses, by name. */
+            names: components["schemas"]["NameView"][];
+            pause?: null | components["schemas"]["PauseView"];
+        };
+        /** @description Whether a DNS name declared for certificates holds a current certificate. */
+        DomainCertificateView: {
+            /** @description Whether a certificate Canopy holds for it is current and collectable. */
+            current: boolean;
+            /** @description When that certificate expires. */
+            not_after?: string | null;
+            /**
+             * @description How urgently the certificate expiring last needs attention: `none`,
+             *     `at_risk`, or `critical`, judged against its own lifetime. Null where
+             *     there is no certificate.
+             */
+            risk?: string | null;
+        };
         /** @description Fields needed to claim a domain for a group. */
         DomainClaimArgs: {
             /**
@@ -6796,11 +6991,11 @@ export interface components {
              */
             server_group_id: string;
         };
-        /** @description The names in use beneath one of a group's domains. */
+        /** @description The DNS names in use under one of a group's domains. */
         DomainHealthView: {
-            /** @description The claimed domain these names sit beneath. */
+            /** @description The claimed domain these DNS names sit beneath. */
             domain: string;
-            /** @description The names in use beneath it, by name. */
+            /** @description The DNS names in use beneath it, by name. */
             names: components["schemas"]["DomainNameView"][];
         };
         /** @description Identifies a claim. */
@@ -6811,31 +7006,28 @@ export interface components {
              */
             id: string;
         };
-        /** @description One name in use beneath a group's domain, with whether it is covered. */
+        /**
+         * @description One DNS name in use beneath a group's domain, for either kind.
+         *
+         *     Exactly one of `published` and `certificate` is present: the DNS names
+         *     section carries the first and the TLS certificates section the second.
+         */
         DomainNameView: {
-            /** @description Whether a certificate Canopy holds for it is current and collectable. */
-            certificate: boolean;
-            /** @description The name. */
+            certificate?: null | components["schemas"]["DomainCertificateView"];
+            /** @description The DNS name. */
             name: string;
-            /** @description When the certificate expires. */
-            not_after?: string | null;
             /**
-             * @description Whether the address records Canopy publishes for it are up to date. Null
-             *     where the name has no registration — a certificate obtained for a name
-             *     whose addresses the server publishes itself.
+             * @description For addresses: whether the address records Canopy publishes for it are up
+             *     to date, or null where it is declared with no addresses registered. Null
+             *     as well in the certificates section, which carries no addresses.
              */
             published?: boolean | null;
             /**
-             * @description How urgently that certificate needs attention: `none`, `at_risk`, or
-             *     `critical`. Null where there is no certificate.
-             */
-            risk?: string | null;
-            /**
              * Format: uuid
-             * @description The server that registered it or holds its certificate.
+             * @description The application that declares it.
              */
             server_id: string;
-            /** @description That server's name, for display. */
+            /** @description That application's name, for display. */
             server_name?: string | null;
         };
         /** @description One hour-of-week bucket of the degradation profile. */
@@ -8754,7 +8946,10 @@ export interface components {
              */
             tailscale_identifier?: string | null;
         };
-        /** @description A DNS name declared by one of a machine's applications. */
+        /**
+         * @description A DNS name declared by one of a machine's applications, for the kind of the
+         *     section it is in.
+         */
         MachineDeclaredView: {
             /**
              * Format: uuid
@@ -8766,6 +8961,12 @@ export interface components {
             certificate?: null | components["schemas"]["CertificateView"];
             /** @description The DNS name, normalised. */
             name: string;
+            /**
+             * @description In the DNS names section: whether its address records are published, or
+             *     null where it is declared with no addresses registered. Null as well in
+             *     the TLS certificates section, which carries no addresses.
+             */
+            published?: boolean | null;
         };
         /** @description A machine together with the applications running on it. */
         MachineDetail: components["schemas"]["Machine"] & {
@@ -8874,19 +9075,8 @@ export interface components {
              * @description The machine.
              */
             machine_id: string;
-            /** @description The name, in any case and with or without a trailing dot. */
+            /** @description The DNS name, in any case and with or without a trailing dot. */
             name: string;
-        };
-        /** @description Everything a machine's page needs about the DNS names asked about from it. */
-        MachineDnsNamesView: {
-            /** @description The machine's applications, to declare a DNS name on. */
-            applications: components["schemas"]["MachineApplicationView"][];
-            /** @description The DNS names its applications declare, by name. */
-            declared: components["schemas"]["MachineDeclaredView"][];
-            /** @description The DNS names denied to it. */
-            denied: components["schemas"]["DeniedView"][];
-            /** @description Its requests that resolved to no single application and still count. */
-            undeclared: components["schemas"]["UndeclaredView"][];
         };
         /** @description Identifies one machine. */
         MachineIdArgs: {
@@ -8895,6 +9085,23 @@ export interface components {
              * @description The machine to operate on.
              */
             machine_id: string;
+        };
+        /**
+         * @description Everything a machine's section of one kind needs: the same shape for both
+         *     kinds, so one component serves them.
+         */
+        MachineNamesView: {
+            /** @description The machine's applications, to declare a DNS name on. */
+            applications: components["schemas"]["MachineApplicationView"][];
+            /** @description The DNS names its applications declare for the kind, by name. */
+            declared: components["schemas"]["MachineDeclaredView"][];
+            /** @description The DNS names denied to it for the kind. */
+            denied: components["schemas"]["DeniedView"][];
+            /**
+             * @description Its requests of the kind that resolved to no single application and still
+             *     count.
+             */
+            undeclared: components["schemas"]["UndeclaredView"][];
         };
         /** @description Request body identifying a machine to look up silences for. */
         MachineScopeArgs: {
@@ -9306,9 +9513,12 @@ export interface components {
             /** @description Metadata about the newly minted token. */
             token: components["schemas"]["McpTokenView"];
         };
-        /** @description A name a server has registered, and how far Canopy has got with it. */
+        /**
+         * @description A DNS name an application holds for addresses, and how far Canopy has got
+         *     with it.
+         */
         NameView: {
-            /** @description The addresses the server asked to be reachable at. */
+            /** @description The addresses the application asked to be reachable at. */
             addresses: string[];
             /**
              * Format: uuid
@@ -9319,7 +9529,7 @@ export interface components {
             last_error?: string | null;
             /** @description The name, normalised. */
             name: string;
-            /** @description Whether the zone has caught up with what the server asked for. */
+            /** @description Whether the zone has caught up with what the application asked for. */
             published: boolean;
             /**
              * @description The addresses Canopy has actually published. Differs from `addresses`
@@ -9331,12 +9541,12 @@ export interface components {
             /**
              * @description Whether the name lies at or beneath a domain the application's group
              *     controls. An operator may declare one that does not, ahead of the group
-             *     claiming its domain; nothing is published or certified for it until then.
+             *     claiming its domain; nothing is published for it until then.
              */
             within_domains: boolean;
             /**
              * @description Apex of the managed zone covering this name, or null where no configured
-             *     zone does — in which case Canopy can publish nothing for it.
+             *     zone does, in which case Canopy can publish nothing for it.
              */
             zone?: string | null;
         };
@@ -9701,15 +9911,24 @@ export interface components {
             /** @description Where the plan was going, as semver. */
             target_version: string;
         };
-        /** @description Why a server is being paused. */
+        /** @description Why an application is being paused. */
         PauseArgs: {
             /** @description Why, recorded so whoever finds the pause later knows what it was for. */
             reason: string;
             /**
              * Format: uuid
-             * @description The server to pause.
+             * @description The application to pause.
              */
             server_id: string;
+        };
+        /** @description That an application is paused, and who paused it and why. */
+        PauseView: {
+            /** @description When the pause was set. */
+            paused_at?: string | null;
+            /** @description Who set it. */
+            paused_by?: string | null;
+            /** @description Why it was set. */
+            reason?: string | null;
         };
         /** @description A pending one-off backup or restore request. */
         PendingRequestRow: {
@@ -12468,13 +12687,18 @@ export interface components {
             /** @description Backup type these defaults apply to. */
             type: string;
         };
-        /** @description How many undeclared requests one machine has. */
+        /** @description How many undeclared requests one machine has, of each kind. */
         UndeclaredNoticeView: {
             /**
              * Format: int64
-             * @description How many of its requests are waiting.
+             * @description How many of its address requests are waiting.
              */
-            count: number;
+            addresses: number;
+            /**
+             * Format: int64
+             * @description How many of its certificate requests are waiting.
+             */
+            certificates: number;
             /**
              * Format: uuid
              * @description The machine's group. Null for a machine in none.
@@ -12498,10 +12722,11 @@ export interface components {
              */
             server_group_id?: string | null;
         };
-        /** @description A request the machine made that resolved to no single application. */
+        /**
+         * @description A request of the section's kind that the machine made and that resolved to no
+         *     single application.
+         */
         UndeclaredView: {
-            /** @description What the latest refused request was for. */
-            asked_for: components["schemas"]["AskedFor"];
             /** @description When the machine first asked. */
             first_asked_at: string;
             /**
@@ -14249,7 +14474,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["NameView"];
+                    "application/json": components["schemas"]["CertificateNameView"];
                 };
             };
             404: {
@@ -14260,7 +14485,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
-            /** @description Another application already declares this name. */
+            /** @description Another application already declares this DNS name. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -14300,7 +14525,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
-            /** @description One of the machine's applications declares this name. */
+            /** @description One of the machine's applications declares this DNS name for certificates. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -14352,7 +14577,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MachineDnsNamesView"];
+                    "application/json": components["schemas"]["MachineNamesView"];
                 };
             };
             404: {
@@ -14383,7 +14608,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ApplicationNamesView"];
+                    "application/json": components["schemas"]["CertificatesView"];
                 };
             };
             404: {
@@ -14425,35 +14650,6 @@ export interface operations {
             };
         };
     };
-    certificates_pause: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PauseArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
     certificates_release: {
         parameters: {
             query?: never;
@@ -14464,35 +14660,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["DeclarationArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    certificates_resume: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ServerIdArgs"];
             };
         };
         responses: {
@@ -14593,29 +14760,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    certificates_undeclared_notices: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UndeclaredNoticesArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["UndeclaredNoticeView"][];
                 };
             };
         };
@@ -15239,6 +15383,310 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    dns_names_declare: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeclarationArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NameView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description Another application already declares this DNS name. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    dns_names_deny: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DenyArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeniedView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description One of the machine's applications declares this DNS name for addresses. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    dns_names_for_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DomainHealthView"][];
+                };
+            };
+        };
+    };
+    dns_names_for_machine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineNamesView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    dns_names_for_server: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DnsNamesView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    dns_names_lift_denial: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineDnsNameArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    dns_names_pause: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PauseArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    dns_names_release: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeclarationArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    dns_names_resume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    dns_names_undeclared_notices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UndeclaredNoticesArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UndeclaredNoticeView"][];
                 };
             };
         };
