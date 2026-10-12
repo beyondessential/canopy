@@ -1,17 +1,24 @@
 import {
 	Alert,
 	Box,
+	Button,
 	Chip,
+	Dialog,
+	DialogActions,
+	DialogContent,
+	DialogContentText,
+	DialogTitle,
 	LinearProgress,
 	Paper,
 	Stack,
 	Typography,
 } from "@mui/material";
+import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
 import EditIcon from "@mui/icons-material/Edit";
 import InsightsIcon from "@mui/icons-material/Insights";
 import { useEffect, useState } from "react";
-import { useLocation, useParams } from "react-router-dom";
-import { useApi } from "../api";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useApi, useApiAction } from "../api";
 import ActionButton from "../components/ActionButton";
 import ActiveIncidentCard from "../components/ActiveIncidentCard";
 import { ChecksTable, HealthIndicator } from "../components/ChecksTable";
@@ -187,6 +194,13 @@ export default function MachineDetail() {
 								label="Edit"
 							/>
 						</GradedAction>
+					)}
+					{isAdmin && data.machine.deleted_at == null && (
+						<ArchiveMachineButton
+							machineId={data.machine.id}
+							machineName={data.machine.name}
+							groupId={data.group?.id ?? null}
+						/>
 					)}
 				</Stack>
 			</Stack>
@@ -368,6 +382,82 @@ export default function MachineDetail() {
 				</Box>
 			)}
 		</Stack>
+	);
+}
+
+/// Inline admin action: archive the machine, and with it the applications on
+/// it, behind a confirm dialog, then navigate back to its group (if it had one)
+/// or the fleet.
+/// spec: FLT#archival
+function ArchiveMachineButton({
+	machineId,
+	machineName,
+	groupId,
+}: {
+	machineId: string;
+	machineName: string;
+	groupId: string | null;
+}) {
+	const navigate = useNavigate();
+	const action = useApiAction("fleet/machines", "archive");
+	const [open, setOpen] = useState(false);
+
+	const onConfirm = async () => {
+		try {
+			await action.call({ machine_id: machineId });
+			setOpen(false);
+			navigate(groupId ? `/fleet/groups/${groupId}` : "/fleet");
+		} catch {
+			/* surfaced via action.error */
+		}
+	};
+
+	return (
+		<>
+			<GradedAction
+				opens="fleet/machines/archive"
+				action={`Archive machine ${machineName}`}
+			>
+				<ActionButton
+					icon={<ArchiveIcon />}
+					label="Archive"
+					onClick={() => setOpen(true)}
+				/>
+			</GradedAction>
+			<Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
+				<DialogTitle>Archive machine?</DialogTitle>
+				<DialogContent>
+					<DialogContentText>
+						Archive <strong>{machineName}</strong>? This also archives the
+						applications on it, releases its identity, and stops it being
+						monitored. Its history is kept, but bringing the machine back
+						means enrolling it again.
+					</DialogContentText>
+					{action.error && (
+						<Alert severity="error" sx={{ mt: 2 }}>
+							{action.error.message}
+						</Alert>
+					)}
+				</DialogContent>
+				<DialogActions>
+					<Button onClick={() => setOpen(false)} disabled={action.pending}>
+						Cancel
+					</Button>
+					<GradedAction
+						calls="fleet/machines/archive"
+						action={`Archive machine ${machineName}`}
+					>
+						<Button
+							variant="contained"
+							onClick={onConfirm}
+							disabled={action.pending}
+						>
+							{action.pending ? "Archiving…" : "Archive"}
+						</Button>
+					</GradedAction>
+				</DialogActions>
+			</Dialog>
+		</>
 	);
 }
 
