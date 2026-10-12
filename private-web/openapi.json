@@ -18171,6 +18171,47 @@
         "x-canopy-safety-mode": "read-only"
       }
     },
+    "/api/fleet/machines/list_archived": {
+      "post": {
+        "description": "Every machine that has been archived, ordered by name, for the Archived\nview. The request body is ignored; send an empty JSON object.",
+        "operationId": "machines_list_archived",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Machine"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "List archived machines.",
+        "tags": [
+          "machines"
+        ],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
     "/api/fleet/machines/mint_enrollment": {
       "post": {
         "description": "Creates a fresh enrollment token and returns it wrapped in a\npassphrase-encrypted ticket the operator runs through bestool on the\nenrolling machine, plus the 4-word passphrase that decrypts it. The\nplaintext token lives only inside the encrypted ticket; reissuing\ninvalidates any prior token. Fails if the server is archived.",
@@ -18220,6 +18261,64 @@
           "issues"
         ],
         "x-canopy-safety-mode": "danger"
+      }
+    },
+    "/api/fleet/machines/restore": {
+      "post": {
+        "description": "Brings an archived machine back into the live fleet at the rank it kept.\nArchival released its identity, so it must be enrolled again. The\napplications archived with it stay archived and are restored one at a\ntime. Restoring a machine that isn't archived has no effect.",
+        "operationId": "machines_restore",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "default": null
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "Un-archive a machine.",
+        "tags": [
+          "machines"
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/fleet/machines/revoke_enrollment": {

@@ -246,6 +246,68 @@ async fn machines_are_listed_by_group_and_exclude_archived() {
 	.await;
 }
 
+/// A restored box returns to the live fleet and the archived list, leaving the
+/// applications archived with it to be restored one at a time.
+// spec: FLT#archival
+#[tokio::test(flavor = "multi_thread")]
+async fn restoring_a_machine_returns_it_without_its_applications() {
+	TestDb::run(async |mut conn, _url| {
+		let machine = Machine::create(&mut conn, NewMachine::named("box"))
+			.await
+			.expect("create machine");
+		let app = insert_application_on(&mut conn, machine.id).await;
+		Machine::archive(&mut conn, machine.id)
+			.await
+			.expect("archive");
+
+		let archived = Machine::list_archived(&mut conn).await.expect("archived");
+		assert_eq!(archived.len(), 1);
+		assert_eq!(archived[0].id, machine.id);
+		assert!(
+			Machine::list_live(&mut conn)
+				.await
+				.expect("live")
+				.iter()
+				.all(|m| m.id != machine.id)
+		);
+
+		Machine::restore(&mut conn, machine.id)
+			.await
+			.expect("restore");
+		// Restoring one that is not archived has no effect.
+		Machine::restore(&mut conn, machine.id)
+			.await
+			.expect("restore again");
+
+		let restored = Machine::get_by_id(&mut conn, machine.id)
+			.await
+			.expect("machine readable");
+		assert!(restored.deleted_at.is_none(), "the machine is live again");
+		assert!(
+			restored.registered_at.is_none(),
+			"it comes back unenrolled, to be enrolled again"
+		);
+		assert!(
+			Machine::list_archived(&mut conn)
+				.await
+				.expect("archived")
+				.is_empty()
+		);
+
+		let still_archived: i64 = sql_query(
+			"SELECT count(*) AS count FROM applications \
+			 WHERE id = $1 AND deleted_at IS NOT NULL",
+		)
+		.bind::<sql_types::Uuid, _>(app)
+		.get_result::<Count>(&mut conn)
+		.await
+		.expect("count")
+		.count;
+		assert_eq!(still_archived, 1, "its applications stay archived");
+	})
+	.await;
+}
+
 /// Every application sits on exactly one machine. The backfill gave each
 /// pre-split server a machine of its own, and the legacy operator path keeps
 /// that 1:1 until reports create applications against a named machine.

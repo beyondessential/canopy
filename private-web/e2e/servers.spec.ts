@@ -377,6 +377,28 @@ test.describe("archived view", () => {
 		await expect(page.getByText(/arch-server/)).toBeVisible();
 	});
 
+	test("lists archived machines and restores them", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "arch-box-group" });
+		const machine = await seedMachine(sql, {
+			name: "arch-box",
+			groupId: group.id,
+		});
+		await sql.query("UPDATE machines SET deleted_at = now() WHERE id = $1", [
+			machine.id,
+		]);
+
+		await page.goto("/fleet/archived");
+		await expect(
+			page.getByRole("link", { name: "arch-box-group / arch-box" }),
+		).toBeVisible();
+
+		await page.getByRole("button", { name: "Restore" }).click();
+		await expect(page.getByText("Nothing archived.")).toBeVisible();
+
+		await page.goto(`/fleet/machines/${machine.id}`);
+		await expect(page.getByText("This machine is archived.")).toHaveCount(0);
+	});
+
 	test("an empty group can be archived from its detail page", async ({
 		page,
 		sql,

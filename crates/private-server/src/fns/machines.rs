@@ -45,6 +45,8 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(write: create))
 		.routes(routes!(write: update))
 		.routes(routes!(danger(invalidates): archive))
+		.routes(routes!(read_only: list_archived))
+		.routes(routes!(write: restore))
 		.routes(routes!(danger(issues): attach_tailscale_device))
 		.routes(routes!(danger(issues): mint_enrollment))
 		.routes(routes!(danger(invalidates): revoke_enrollment))
@@ -573,6 +575,55 @@ pub async fn archive(
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
 	Machine::archive(&mut conn, args.machine_id).await?;
+	Ok(Json(()))
+}
+
+/// List archived machines.
+///
+/// Every machine that has been archived, ordered by name, for the Archived
+/// view. The request body is ignored; send an empty JSON object.
+#[utoipa::path(
+	post,
+	path = "/list_archived",
+	operation_id = "machines_list_archived",
+	tag = "machines",
+	security(("tailscale-user" = [])),
+	responses(
+		(status = 200, body = Vec<Machine>),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn list_archived(State(state): State<AppState>) -> Result<Json<Vec<Machine>>> {
+	let mut conn = state.db_read.get().await?;
+	Ok(Json(Machine::list_archived(&mut conn).await?))
+}
+
+/// Un-archive a machine.
+///
+/// Brings an archived machine back into the live fleet at the rank it kept.
+/// Archival released its identity, so it must be enrolled again. The
+/// applications archived with it stay archived and are restored one at a
+/// time. Restoring a machine that isn't archived has no effect.
+#[utoipa::path(
+	post,
+	path = "/restore",
+	operation_id = "machines_restore",
+	tag = "machines",
+	security(("tailscale-user" = [])),
+	request_body = MachineIdArgs,
+	responses(
+		(status = 200, body = ()),
+		(status = 404, body = ProblemDetailsSchema),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn restore(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<MachineIdArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	Machine::restore(&mut conn, args.machine_id).await?;
 	Ok(Json(()))
 }
 

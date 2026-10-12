@@ -18,17 +18,23 @@ import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { compareServersByRankThenType } from "../types";
 
-/// Archived (soft-deleted) servers and groups, with Restore. The only place to
+/// Archived (soft-deleted) groups, machines and applications, with Restore. The only place to
 /// find them — every other listing filters archived rows out.
 export default function ArchivedList() {
 	usePageTitle("Archived");
 	const admin = useIsAdmin() === true;
 	const groups = useApi("fleet/groups", "list_archived", {}, []);
 	const servers = useApi("fleet/applications", "list_archived", {}, []);
+	const machines = useApi("fleet/machines", "list_archived", {}, []);
+	const liveGroups = useApi("fleet/groups", "list", {}, []);
 
 	if (
 		groups.status === "loading" ||
 		groups.status === "idle" ||
+		machines.status === "loading" ||
+		machines.status === "idle" ||
+		liveGroups.status === "loading" ||
+		liveGroups.status === "idle" ||
 		servers.status === "loading" ||
 		servers.status === "idle"
 	) {
@@ -38,11 +44,23 @@ export default function ArchivedList() {
 		return <Alert severity="error">{groups.error.message}</Alert>;
 	if (servers.status === "error")
 		return <Alert severity="error">{servers.error.message}</Alert>;
+	if (machines.status === "error")
+		return <Alert severity="error">{machines.error.message}</Alert>;
+	if (liveGroups.status === "error")
+		return <Alert severity="error">{liveGroups.error.message}</Alert>;
 
 	const archivedGroups = groups.data;
 	const archivedServers = [...servers.data].sort(compareServersByRankThenType);
+	const archivedMachines = machines.data;
+	const groupNames = new Map(
+		[...liveGroups.data, ...archivedGroups].map((g) => [g.id, g.name]),
+	);
 
-	if (archivedGroups.length === 0 && archivedServers.length === 0) {
+	if (
+		archivedGroups.length === 0 &&
+		archivedMachines.length === 0 &&
+		archivedServers.length === 0
+	) {
 		return <Alert severity="success">Nothing archived.</Alert>;
 	}
 
@@ -58,6 +76,21 @@ export default function ArchivedList() {
 							name={g.name}
 							admin={admin}
 							onRestored={groups.reload}
+						/>
+					))}
+				</Stack>
+			)}
+			{archivedMachines.length > 0 && (
+				<Stack spacing={1}>
+					<Typography variant="subtitle1">Archived machines</Typography>
+					{archivedMachines.map((m) => (
+						<ArchivedMachineRow
+							key={m.id}
+							id={m.id}
+							name={m.name}
+							groupName={m.group_id ? groupNames.get(m.group_id) : undefined}
+							admin={admin}
+							onRestored={machines.reload}
 						/>
 					))}
 				</Stack>
@@ -144,6 +177,61 @@ function ArchivedGroupRow({
 					<GradedAction
 						calls="fleet/groups/restore"
 						action={`Restore group ${name}`}
+					>
+						<RestoreButton pending={action.pending} onClick={onRestore} />
+					</GradedAction>
+				)}
+			</Box>
+			{action.error && (
+				<Typography color="error" variant="caption">
+					{action.error.message}
+				</Typography>
+			)}
+		</Paper>
+	);
+}
+
+function ArchivedMachineRow({
+	id,
+	name,
+	groupName,
+	admin,
+	onRestored,
+}: {
+	id: string;
+	name: string;
+	groupName: string | undefined;
+	admin: boolean;
+	onRestored: () => void;
+}) {
+	const action = useApiAction("fleet/machines", "restore");
+	const onRestore = async () => {
+		try {
+			await action.call({ machine_id: id });
+			onRestored();
+		} catch {
+			/* surfaced via action.error */
+		}
+	};
+	return (
+		<Paper
+			variant="outlined"
+			sx={{ p: 1.5, display: "flex", alignItems: "center", gap: 2 }}
+		>
+			<MuiLink
+				component={RouterLink}
+				to={`/fleet/machines/${id}`}
+				underline="hover"
+				color="text.primary"
+				sx={{ fontWeight: 500 }}
+			>
+				{groupName ? `${groupName} / ${name}` : name}
+			</MuiLink>
+			<Box sx={{ ml: "auto" }}>
+				{admin && (
+					<GradedAction
+						calls="fleet/machines/restore"
+						action={`Restore machine ${name}`}
 					>
 						<RestoreButton pending={action.pending} onClick={onRestore} />
 					</GradedAction>

@@ -401,6 +401,18 @@ impl Machine {
 			.map_err(AppError::from)
 	}
 
+	/// Every archived machine, for the Archived view.
+	pub async fn list_archived(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		use crate::schema::machines::dsl;
+		dsl::machines
+			.select(Self::as_select())
+			.filter(dsl::deleted_at.is_not_null())
+			.order((dsl::name.asc(), dsl::created_at.desc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// The live machines in a group.
 	pub async fn list_for_group(db: &mut AsyncPgConnection, group: Uuid) -> Result<Vec<Self>> {
 		use crate::schema::machines::dsl;
@@ -767,6 +779,36 @@ impl Machine {
 			.await?;
 		// The group's own checks follow its headline environment, which may have
 		// been this box's.
+		crate::issues::reevaluate_after_headline_change(db, group_id, headline).await
+	}
+
+	/// Bring an archived machine back into the live fleet.
+	///
+	/// The box comes back as it was archived, at the rank it kept, but not
+	/// enrolled: archival released its identity, so it has to be enrolled
+	/// again. The applications archived with it stay archived and are restored
+	/// one at a time, each coming back at the box's rank. Idempotent.
+	// spec: FLT#archival
+	pub async fn restore(db: &mut AsyncPgConnection, machine_id: Uuid) -> Result<()> {
+		use diesel_async::AsyncConnection;
+
+		let (group_id, headline) = db
+			.transaction::<_, AppError, _>(async |conn| {
+				let machine = Self::get_by_id_for_update(conn, machine_id).await?;
+				let headline =
+					crate::server_groups::ServerGroup::headline_rank(conn, machine.group_id)
+						.await?;
+				if machine.deleted_at.is_some() {
+					diesel::update(crate::schema::machines::table)
+						.filter(crate::schema::machines::id.eq(machine_id))
+						.set(crate::schema::machines::deleted_at.eq(None::<jiff_diesel::Timestamp>))
+						.execute(conn)
+						.await?;
+				}
+				Ok((machine.group_id, headline))
+			})
+			.await?;
+		// A box serving an environment again can change the group's headline.
 		crate::issues::reevaluate_after_headline_change(db, group_id, headline).await
 	}
 }
