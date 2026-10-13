@@ -13,7 +13,10 @@ use axum::extract::State;
 use base64::Engine;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::{backup_jobs::BillingLabels, tailscale_auth::TailscaleAdmin};
+use commons_servers::{
+	backup_jobs::BillingLabels,
+	tailscale_auth::{TailscaleAdmin, TailscaleUser},
+};
 use commons_types::{
 	Uuid,
 	device::DeviceRole,
@@ -580,8 +583,9 @@ pub async fn archive(
 
 /// List archived machines.
 ///
-/// Every machine that has been archived, ordered by name, for the Archived
-/// view. The request body is ignored; send an empty JSON object.
+/// Every machine that has been archived, ordered by name, each with its
+/// group's name, for the Archived view. The request body is ignored; send an
+/// empty JSON object.
 #[utoipa::path(
 	post,
 	path = "/list_archived",
@@ -589,13 +593,37 @@ pub async fn archive(
 	tag = "machines",
 	security(("tailscale-user" = [])),
 	responses(
-		(status = 200, body = Vec<Machine>),
+		(status = 200, body = Vec<ArchivedMachine>),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
-pub async fn list_archived(State(state): State<AppState>) -> Result<Json<Vec<Machine>>> {
+pub async fn list_archived(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+) -> Result<Json<Vec<ArchivedMachine>>> {
 	let mut conn = state.db_read.get().await?;
-	Ok(Json(Machine::list_archived(&mut conn).await?))
+	let machines = Machine::list_archived(&mut conn).await?;
+	let group_ids: Vec<Uuid> = machines.iter().filter_map(|m| m.group_id).collect();
+	let names = ServerGroup::names_by_ids(&mut conn, &group_ids).await?;
+	Ok(Json(
+		machines
+			.into_iter()
+			.map(|machine| ArchivedMachine {
+				group_name: machine.group_id.and_then(|id| names.get(&id).cloned()),
+				machine,
+			})
+			.collect(),
+	))
+}
+
+/// An archived machine, with the name of the group it sits in.
+#[derive(Serialize, ToSchema)]
+pub struct ArchivedMachine {
+	#[serde(flatten)]
+	pub machine: Machine,
+	/// The name of the machine's group, archived or not.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub group_name: Option<String>,
 }
 
 /// Un-archive a machine.
@@ -603,7 +631,8 @@ pub async fn list_archived(State(state): State<AppState>) -> Result<Json<Vec<Mac
 /// Brings an archived machine back into the live fleet at the rank it kept.
 /// Archival released its identity, so it must be enrolled again. The
 /// applications archived with it stay archived and are restored one at a
-/// time. Restoring a machine that isn't archived has no effect.
+/// time. Refused with a 409 while the machine's group is archived. Restoring a
+/// machine that isn't archived has no effect.
 #[utoipa::path(
 	post,
 	path = "/restore",
@@ -614,6 +643,7 @@ pub async fn list_archived(State(state): State<AppState>) -> Result<Json<Vec<Mac
 	responses(
 		(status = 200, body = ()),
 		(status = 404, body = ProblemDetailsSchema),
+		(status = 409, body = ProblemDetailsSchema),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]

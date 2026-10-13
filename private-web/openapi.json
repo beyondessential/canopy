@@ -373,6 +373,26 @@
         ],
         "type": "object"
       },
+      "ArchivedMachine": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Machine"
+          },
+          {
+            "properties": {
+              "group_name": {
+                "description": "The name of the machine's group, archived or not.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          }
+        ],
+        "description": "An archived machine, with the name of the group it sits in."
+      },
       "ArtifactData": {
         "description": "A downloadable artifact (for example an installer) associated with a\nversion, either tied to that exact version or matched via a version\nrange pattern.",
         "properties": {
@@ -18173,7 +18193,7 @@
     },
     "/api/fleet/machines/list_archived": {
       "post": {
-        "description": "Every machine that has been archived, ordered by name, for the Archived\nview. The request body is ignored; send an empty JSON object.",
+        "description": "Every machine that has been archived, ordered by name, each with its\ngroup's name, for the Archived view. The request body is ignored; send an\nempty JSON object.",
         "operationId": "machines_list_archived",
         "responses": {
           "200": {
@@ -18181,7 +18201,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/Machine"
+                    "$ref": "#/components/schemas/ArchivedMachine"
                   },
                   "type": "array"
                 }
@@ -18265,7 +18285,7 @@
     },
     "/api/fleet/machines/restore": {
       "post": {
-        "description": "Brings an archived machine back into the live fleet at the rank it kept.\nArchival released its identity, so it must be enrolled again. The\napplications archived with it stay archived and are restored one at a\ntime. Restoring a machine that isn't archived has no effect.",
+        "description": "Brings an archived machine back into the live fleet at the rank it kept.\nArchival released its identity, so it must be enrolled again. The\napplications archived with it stay archived and are restored one at a\ntime. Refused with a 409 while the machine's group is archived. Restoring a\nmachine that isn't archived has no effect.",
         "operationId": "machines_restore",
         "requestBody": {
           "content": {
@@ -18289,6 +18309,16 @@
             "description": ""
           },
           "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
             "content": {
               "application/json": {
                 "schema": {

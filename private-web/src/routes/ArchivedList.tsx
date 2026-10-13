@@ -26,15 +26,12 @@ export default function ArchivedList() {
 	const groups = useApi("fleet/groups", "list_archived", {}, []);
 	const servers = useApi("fleet/applications", "list_archived", {}, []);
 	const machines = useApi("fleet/machines", "list_archived", {}, []);
-	const liveGroups = useApi("fleet/groups", "list", {}, []);
 
 	if (
 		groups.status === "loading" ||
 		groups.status === "idle" ||
 		machines.status === "loading" ||
 		machines.status === "idle" ||
-		liveGroups.status === "loading" ||
-		liveGroups.status === "idle" ||
 		servers.status === "loading" ||
 		servers.status === "idle"
 	) {
@@ -46,15 +43,10 @@ export default function ArchivedList() {
 		return <Alert severity="error">{servers.error.message}</Alert>;
 	if (machines.status === "error")
 		return <Alert severity="error">{machines.error.message}</Alert>;
-	if (liveGroups.status === "error")
-		return <Alert severity="error">{liveGroups.error.message}</Alert>;
 
 	const archivedGroups = groups.data;
 	const archivedServers = [...servers.data].sort(compareServersByRankThenType);
 	const archivedMachines = machines.data;
-	const groupNames = new Map(
-		[...liveGroups.data, ...archivedGroups].map((g) => [g.id, g.name]),
-	);
 
 	if (
 		archivedGroups.length === 0 &&
@@ -88,7 +80,7 @@ export default function ArchivedList() {
 							key={m.id}
 							id={m.id}
 							name={m.name}
-							groupName={m.group_id ? groupNames.get(m.group_id) : undefined}
+							groupName={m.group_name ?? undefined}
 							admin={admin}
 							onRestored={machines.reload}
 						/>

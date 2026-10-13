@@ -308,6 +308,44 @@ async fn restoring_a_machine_returns_it_without_its_applications() {
 	.await;
 }
 
+/// A box in an archived group would rejoin the fleet in a group hidden from
+/// every live listing, so the group is restored first.
+// spec: FLT#archival
+#[tokio::test(flavor = "multi_thread")]
+async fn a_machine_in_an_archived_group_is_not_restored() {
+	TestDb::run(async |mut conn, _url| {
+		let group = insert_group(&mut conn, "held-group").await;
+		let machine = Machine::create(
+			&mut conn,
+			NewMachine {
+				group_id: Some(group),
+				..NewMachine::named("held")
+			},
+		)
+		.await
+		.expect("create");
+		Machine::archive(&mut conn, machine.id)
+			.await
+			.expect("archive");
+		database::server_groups::ServerGroup::soft_delete(&mut conn, group)
+			.await
+			.expect("archive group");
+
+		let err = Machine::restore(&mut conn, machine.id)
+			.await
+			.expect_err("refused while the group is archived");
+		assert!(matches!(err, commons_errors::AppError::Conflict(_)));
+
+		database::server_groups::ServerGroup::restore(&mut conn, group)
+			.await
+			.expect("restore group");
+		Machine::restore(&mut conn, machine.id)
+			.await
+			.expect("restore once the group is back");
+	})
+	.await;
+}
+
 /// Every application sits on exactly one machine. The backfill gave each
 /// pre-split server a machine of its own, and the legacy operator path keeps
 /// that 1:1 until reports create applications against a named machine.

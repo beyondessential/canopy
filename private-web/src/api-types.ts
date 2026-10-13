@@ -2623,8 +2623,9 @@ export interface paths {
         put?: never;
         /**
          * List archived machines.
-         * @description Every machine that has been archived, ordered by name, for the Archived
-         *     view. The request body is ignored; send an empty JSON object.
+         * @description Every machine that has been archived, ordered by name, each with its
+         *     group's name, for the Archived view. The request body is ignored; send an
+         *     empty JSON object.
          */
         post: operations["machines_list_archived"];
         delete?: never;
@@ -2671,7 +2672,8 @@ export interface paths {
          * @description Brings an archived machine back into the live fleet at the rank it kept.
          *     Archival released its identity, so it must be enrolled again. The
          *     applications archived with it stay archived and are restored one at a
-         *     time. Restoring a machine that isn't archived has no effect.
+         *     time. Refused with a 409 while the machine's group is archived. Restoring a
+         *     machine that isn't archived has no effect.
          */
         post: operations["machines_restore"];
         delete?: never;
@@ -5490,6 +5492,11 @@ export interface components {
         ApplicationsScopeArgs: {
             /** @description The applications to read. An empty list reads nothing. */
             application_ids: string[];
+        };
+        /** @description An archived machine, with the name of the group it sits in. */
+        ArchivedMachine: components["schemas"]["Machine"] & {
+            /** @description The name of the machine's group, archived or not. */
+            group_name?: string | null;
         };
         /**
          * @description A downloadable artifact (for example an installer) associated with a
@@ -16695,7 +16702,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Machine"][];
+                    "application/json": components["schemas"]["ArchivedMachine"][];
                 };
             };
             500: {
@@ -16761,6 +16768,14 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

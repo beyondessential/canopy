@@ -787,7 +787,8 @@ impl Machine {
 	/// The box comes back as it was archived, at the rank it kept, but not
 	/// enrolled: archival released its identity, so it has to be enrolled
 	/// again. The applications archived with it stay archived and are restored
-	/// one at a time, each coming back at the box's rank. Idempotent.
+	/// one at a time, each coming back at the box's rank. A box in an archived
+	/// group is refused: the group is restored first. Idempotent.
 	// spec: FLT#archival
 	pub async fn restore(db: &mut AsyncPgConnection, machine_id: Uuid) -> Result<()> {
 		use diesel_async::AsyncConnection;
@@ -795,6 +796,18 @@ impl Machine {
 		let (group_id, headline) = db
 			.transaction::<_, AppError, _>(async |conn| {
 				let machine = Self::get_by_id_for_update(conn, machine_id).await?;
+				if machine.deleted_at.is_some()
+					&& let Some(group_id) = machine.group_id
+				{
+					let group =
+						crate::server_groups::ServerGroup::get_by_id(conn, group_id).await?;
+					if group.deleted_at.is_some() {
+						return Err(AppError::Conflict(format!(
+							"group \"{}\" is archived; restore it before its machines",
+							group.name
+						)));
+					}
+				}
 				let headline =
 					crate::server_groups::ServerGroup::headline_rank(conn, machine.group_id)
 						.await?;
