@@ -376,6 +376,49 @@ test.describe("machine detail", () => {
 		await expect(rank).toHaveAttribute("aria-disabled", "true");
 	});
 
+	/// Archiving the box takes the applications on it with it, and the operator
+	/// lands back on the group.
+	///
+	/// spec: FLT#archival
+	test("a box can be archived from its page, taking its applications", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "archive-box-group" });
+		const machine = await seedMachine(sql, {
+			name: "archive-box",
+			groupId: group.id,
+		});
+		await sql.query(
+			`INSERT INTO applications (id, name, host, type, rank, group_id, machine_id)
+			 VALUES (gen_random_uuid(), 'archive-box-app', 'https://a.e2e.invalid',
+			         'tamanu-central', 'production', $1, $2)`,
+			[group.id, machine.id],
+		);
+
+		await page.goto(`/fleet/machines/${machine.id}`);
+		await page.getByRole("button", { name: "Archive", exact: true }).click();
+		const dialog = page.getByRole("dialog");
+		await expect(dialog).toBeVisible();
+		await dialog.getByRole("button", { name: "Archive", exact: true }).click();
+		await expect(page).toHaveURL(new RegExp(`/fleet/groups/${group.id}$`));
+
+		const [archived] = await sql.query(
+			`SELECT m.deleted_at IS NOT NULL AS machine_archived,
+			        (SELECT bool_and(a.deleted_at IS NOT NULL)
+			           FROM applications a WHERE a.machine_id = m.id) AS apps_archived
+			   FROM machines m WHERE m.id = $1`,
+			[machine.id],
+		);
+		expect(archived).toEqual({ machine_archived: true, apps_archived: true });
+
+		await page.goto(`/fleet/machines/${machine.id}`);
+		await expect(page.getByText("This machine is archived.")).toBeVisible();
+		await expect(
+			page.getByRole("button", { name: "Archive", exact: true }),
+		).toHaveCount(0);
+	});
+
 	/// A box an operator has just added carries nothing yet, and is ranked all
 	/// the same, so what arrives on it is never pending.
 	///
