@@ -36,7 +36,7 @@ Decided direction: something in Kubernetes if possible (Canopy runs there), AWS 
 
 ### Kubernetes workloads
 
-Decided: A now, B later. Split out to its own card in the breakdown.
+Decided: A now, B later. A and B are each split out to their own card in the breakdown.
 
 Pods have no Canopy identity; only the cluster relay is enrolled. Options:
 
@@ -45,7 +45,7 @@ Pods have no Canopy identity; only the cluster relay is enrolled. Options:
 
 ### Delivery to a box
 
-Decided: bestool exposes a local HTTP endpoint the workload calls, and bestool calls Canopy with the device key. Each call yields a fresh token, so `jti` reuse does not arise and the workload never holds the key. Split out to its own card in the breakdown. What Canopy owes it is the device endpoint above.
+Decided: bestool exposes a local HTTP endpoint the workload calls, and bestool calls Canopy with the device key. Each call yields a fresh token, so `jti` reuse does not arise and the workload never holds the key. Stays in this card's design. What Canopy owes it is the device endpoint above.
 
 ## Open questions
 
