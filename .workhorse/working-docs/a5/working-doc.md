@@ -29,10 +29,14 @@ Sketch only.
 
 ### Signing key custody
 
-Decided direction: something in Kubernetes if possible (Canopy runs there), AWS KMS otherwise.
+Decided: AWS KMS asymmetric keys (ECC_NIST_P256, ES256), non-exportable; Canopy only calls `Sign` and `GetPublicKey`.
 
-- Kubernetes Secret holding a keyset (active key plus published-only next key). No new dependency; key is extractable from the process and by anyone who can read the Secret.
-- AWS KMS asymmetric key (ECC_NIST_P256). Non-exportable; Canopy only calls Sign. Needs KMS reachable from the public server.
+Open: who owns the keys. Operational comparison:
+
+- Common to both: one KMS `Sign` per token, so a KMS outage stops new issuance and workloads lose access once their current Anthropic token expires. CloudTrail records every `Sign`. A disabled or deleted key is an issuance outage (deletion has a cancellable 7-30 day pending window). Each Canopy instance has its own key and issuer; tests and dev use an in-process key.
+- Relying parties using discovery or a JWKS URL follow rotation on their own; inline-JWKS registrations need re-pushing on every rotation. Tokens are minted on demand and exchanged at once, so a JWT only needs to verify for seconds and retiring an old key is low-risk.
+- **Provisioning owns the keys.** Infra creates the key and grants `Sign`/`GetPublicKey`; Canopy reads the configured keys at startup, as with managed zones, and builds the JWKS from `GetPublicKey`. Canopy switches signing to the newest key once it has been published for a minimum interval (beyond Anthropic's 15-minute guidance), so no human timing can cause signature errors. Rotation is two ops changes and two restarts: add the new key, later remove the old one. Canopy can never destroy its own keys. No scheduled rotation: the material cannot leak, and a leaked `kms:Sign` permission is fixed in IAM, not by a new key.
+- **Canopy owns the keys.** Canopy holds tag-conditioned `kms:CreateKey` and `ScheduleKeyDeletion`, bootstraps its first key and rotates on a schedule or from an admin action, with no deploy. A Canopy bug or compromise can delete its own signing keys, and the keys drift outside infrastructure state. Earns its cost only with frequent rotation or inline-JWKS relying parties.
 
 ### Kubernetes workloads
 
@@ -70,14 +74,17 @@ A machine grant does not cover the applications on the box, and an application g
 Like the DNS and TLS permissions, grants are withheld by default and a missing one is refused as a missing permission, not as a silence.
 Storage follows the one-nullable-FK-per-grain pattern (`machine_id`, `application_id`, exactly one set) so deletion cascades, but with its own two-variant target type rather than `Scope`.
 
+Naming the application by type is unambiguous: the data model nominally admits two applications of one type on a box, but nothing in Canopy produces that.
+An archived application or machine keeps its grants, but is excluded from authentication, so it obtains nothing; un-archiving restores what it had.
+Reachability plays no part in issuance.
+
 Whatever the grant shape, audiences are a registry of relying parties an operator adds (name, audience string, token lifetime), and grants reference an entry rather than free text. That avoids typos silently granting nothing, and lets the interface say "may obtain tokens for Anthropic".
 
 Claims carry Canopy's facts regardless (group, rank, application type, machine), so a relying party can still route further, for example production to one Anthropic workspace and test to another. Claims come only from Canopy-derived facts, never from operator-set tags, so editing a tag can never widen what a relying party accepts.
 
 ## Open questions
 
-- [ ] A box carrying two applications of one type: is naming the type ambiguous, and does the request then name the application's report key instead?
-- [ ] Does an archived or unreachable application keep its grant (and can it still get tokens while unreachable)?
+- [ ] KMS key ownership: provisioning-owned (configured) or Canopy-created?
 - [ ] Issuer name: final hostname.
 
 ## Trade-offs
