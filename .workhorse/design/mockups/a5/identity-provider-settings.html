@@ -1,0 +1,207 @@
+<!-- working-doc: .workhorse/working-docs/a5/working-doc.md -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Identity provider settings mid-rotation</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #fff;
+    color: rgba(0, 0, 0, 0.87);
+    font-family: Roboto, Helvetica, Arial, sans-serif;
+    font-size: 1rem;
+    line-height: 1.5;
+    letter-spacing: 0.00938em;
+  }
+  svg.icon { width: 1em; height: 1em; fill: currentColor; flex-shrink: 0; }
+
+  .appbar {
+    background: #f5f5f5;
+    box-shadow: 0 2px 1px -1px rgba(0,0,0,0.2), 0 1px 1px 0 rgba(0,0,0,0.14), 0 1px 3px 0 rgba(0,0,0,0.12);
+  }
+  .toolbar { display: flex; align-items: center; gap: 16px; min-height: 48px; padding: 0 24px; }
+  .brand { display: flex; align-items: center; gap: 8px; margin-right: 16px; color: #388e3c; text-decoration: none; }
+  .brand span { font-size: 1.25rem; font-weight: 500; line-height: 1.6; letter-spacing: 0.0075em; }
+  .nav { text-decoration: none; color: rgba(0,0,0,0.6); font-weight: 500; }
+  .nav.active { color: #32669a; }
+  .spacer { flex: 1; }
+  .ext { display: inline-flex; align-items: center; gap: 4px; }
+
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+  .stack-3 > * + * { margin-top: 24px; }
+  .stack-2 > * + * { margin-top: 16px; }
+
+  .tabs { display: flex; border-bottom: 0; margin-bottom: 16px; overflow-x: auto; }
+  .tab { min-height: 48px; padding: 12px 16px; font-size: 0.875rem; font-weight: 500; line-height: 1.25; letter-spacing: 0.02857em; text-transform: uppercase; color: rgba(0,0,0,0.6); white-space: nowrap; display: flex; align-items: center; border-bottom: 2px solid transparent; }
+  .tab.active { color: #388e3c; border-bottom-color: #388e3c; }
+
+  h2 { font-size: 1.25rem; font-weight: 500; line-height: 1.6; letter-spacing: 0.0075em; margin: 0 0 0.35em; }
+  .subtitle2 { font-size: 0.875rem; font-weight: 500; line-height: 1.57; letter-spacing: 0.00714em; margin: 0; }
+  .body2 { font-size: 0.875rem; line-height: 1.43; letter-spacing: 0.01071em; margin: 0; }
+  .secondary { color: rgba(0,0,0,0.6); }
+  .caption { display: block; font-size: 0.75rem; line-height: 1.66; letter-spacing: 0.03333em; color: rgba(0,0,0,0.6); margin: 8px 0 0; }
+  .mono { font-family: monospace; word-break: break-all; }
+
+  .paper { border: 1px solid rgba(0,0,0,0.12); border-radius: 4px; padding: 16px; background: #fff; }
+
+  .alert { display: flex; gap: 12px; padding: 6px 16px; border-radius: 4px; font-size: 0.875rem; line-height: 1.43; letter-spacing: 0.01071em; }
+  .alert .ic { font-size: 22px; padding: 7px 0; display: flex; opacity: 0.9; }
+  .alert .msg { padding: 8px 0; }
+  .alert.success { background: rgb(237,247,237); color: rgb(30,70,32); }
+  .alert.success .ic { color: #2e7d32; }
+  .alert.info { background: rgb(229,246,253); color: rgb(1,67,97); }
+  .alert.info .ic { color: #0288d1; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.875rem; line-height: 1.43; letter-spacing: 0.01071em; }
+  th, td { text-align: left; padding: 6px 16px; border-bottom: 1px solid rgb(224,224,224); vertical-align: middle; }
+  th { font-weight: 500; line-height: 1.5rem; }
+  td.right, th.right { text-align: right; }
+
+  .chip { display: inline-flex; align-items: center; height: 24px; border-radius: 16px; padding: 0 8px; font-size: 0.8125rem; white-space: nowrap; }
+  .chip.success { background: #2e7d32; color: #fff; }
+  .chip.default { background: rgba(0,0,0,0.08); }
+  .chip.info { background: #0288d1; color: #fff; }
+
+  .field { position: relative; border: 1px solid rgba(0,0,0,0.23); border-radius: 4px; height: 40px; display: flex; align-items: center; padding: 0 14px; font-size: 1rem; }
+  .field > label { position: absolute; top: -9px; left: 10px; padding: 0 4px; background: #fff; font-size: 0.75rem; color: rgba(0,0,0,0.6); }
+  .field .placeholder { color: rgba(0,0,0,0.38); }
+  .row { display: flex; gap: 8px; align-items: flex-start; }
+
+  .btn { font-family: inherit; font-size: 0.875rem; font-weight: 500; line-height: 1.75; letter-spacing: 0.02857em; text-transform: uppercase; border-radius: 4px; padding: 6px 16px; border: none; white-space: nowrap; }
+  .btn.contained { background: #388e3c; color: #fff; box-shadow: 0 3px 1px -2px rgba(0,0,0,0.2), 0 2px 2px 0 rgba(0,0,0,0.14), 0 1px 5px 0 rgba(0,0,0,0.12); }
+  .iconbtn { display: inline-flex; padding: 5px; border-radius: 50%; color: rgba(0,0,0,0.54); font-size: 20px; }
+</style>
+</head>
+<body>
+
+<header class="appbar">
+  <div class="toolbar">
+    <a class="brand" href="#">
+      <svg width="24" height="24" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="10" fill="#32669A"/><circle cx="50" cy="50" r="36" fill="#fff"/><rect x="42" y="26" width="16" height="48" fill="#388E3C"/><rect x="26" y="42" width="48" height="16" fill="#388E3C"/></svg>
+      <span>Canopy</span>
+    </a>
+    <a class="nav" href="#">Status</a>
+    <a class="nav" href="#">Incidents</a>
+    <a class="nav" href="#">Fleet</a>
+    <a class="nav" href="#">Versions</a>
+    <a class="nav" href="#">Upgrades</a>
+    <a class="nav" href="#">Maintenance</a>
+    <a class="nav" href="#">Devices</a>
+    <a class="nav" href="#">Bestool</a>
+    <a class="nav active" href="#">Settings</a>
+    <div class="spacer"></div>
+    <a class="nav ext" href="#">Public <svg class="icon" viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg></a>
+  </div>
+</header>
+
+<main class="container">
+  <nav class="tabs">
+    <span class="tab">Admins</span>
+    <span class="tab">Healthchecks</span>
+    <span class="tab">Backup defaults</span>
+    <span class="tab">Recovery vault</span>
+    <span class="tab">Restore consumers</span>
+    <span class="tab">Clusters</span>
+    <span class="tab">MCP access</span>
+    <span class="tab">Certificate authority</span>
+    <span class="tab active">Identity provider</span>
+  </nav>
+
+  <div class="stack-3">
+    <section class="paper">
+      <h2>Issuer</h2>
+      <div class="stack-2">
+        <div>
+          <p class="subtitle2">Issuer</p>
+          <p class="body2 mono">https://idp.canopy.bes.au</p>
+        </div>
+        <div>
+          <p class="subtitle2">Discovery</p>
+          <p class="body2 mono">https://api.canopy.bes.au/oidc/.well-known/openid-configuration</p>
+          <span class="caption">Give relying parties this as the discovery base when they cannot reach the issuer name itself.</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="paper">
+      <h2>Signing keys</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Key</th>
+            <th>Status</th>
+            <th>Published</th>
+            <th>Last signed</th>
+            <th class="right">Tokens, 30 days</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="mono">7c1e…94ab</span><br><span class="secondary" style="font-size:0.75rem">alias/canopy-idp-2026-10</span></td>
+            <td><span class="chip success">signing</span></td>
+            <td>16 Oct 2026, 12:05</td>
+            <td>just now</td>
+            <td class="right">1,204</td>
+          </tr>
+          <tr>
+            <td><span class="mono">a3f0…12d6</span><br><span class="secondary" style="font-size:0.75rem">alias/canopy-idp-2026-03</span></td>
+            <td><span class="chip default">removable</span></td>
+            <td>2 Mar 2026, 09:14</td>
+            <td>16 Oct 2026, 12:40</td>
+            <td class="right">48,377</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="alert success" style="margin-top:16px">
+        <span class="ic"><svg class="icon" viewBox="0 0 24 24"><path d="M20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4C12.76,4 13.5,4.11 14.2,4.31L15.77,2.74C14.61,2.26 13.34,2 12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12M7.91,10.08L6.5,11.5L11,16L21,6L19.59,4.58L11,13.17L7.91,10.08Z"/></svg></span>
+        <span class="msg">Every token signed by a3f0…12d6 has expired. It can be removed from the infrastructure configuration.</span>
+      </div>
+      <span class="caption">Keys are set by the infrastructure that provisions Canopy. A newly added key is published straight away and takes over signing once relying parties have had time to fetch it.</span>
+    </section>
+
+    <section class="paper">
+      <h2>Relying parties</h2>
+      <div class="row">
+        <div class="field" style="flex:1"><label>Name</label><span class="placeholder">e.g. Anthropic</span></div>
+        <div class="field" style="flex:2"><label>Audience</label><span class="placeholder">e.g. https://api.anthropic.com</span></div>
+        <div class="field" style="width:160px"><label>Token lifetime</label><span>5 minutes</span></div>
+        <button class="btn contained">Add</button>
+      </div>
+      <table style="margin-top:16px">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Audience</th>
+            <th>Token lifetime</th>
+            <th>Granted to</th>
+            <th>Last issued</th>
+            <th class="right"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Anthropic</td>
+            <td class="mono">https://api.anthropic.com</td>
+            <td>5 minutes</td>
+            <td>14 applications</td>
+            <td>just now</td>
+            <td class="right"><span class="iconbtn" title="Remove"><svg class="icon" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></span></td>
+          </tr>
+          <tr>
+            <td>AWS</td>
+            <td class="mono">sts.amazonaws.com</td>
+            <td>15 minutes</td>
+            <td>2 machines</td>
+            <td>never</td>
+            <td class="right"><span class="iconbtn" title="Remove"><svg class="icon" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></span></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </div>
+</main>
+
+</body>
+</html>
