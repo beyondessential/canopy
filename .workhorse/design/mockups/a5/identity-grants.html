@@ -1,0 +1,200 @@
+<!-- working-doc: .workhorse/working-docs/a5/working-doc.md -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Machine edit with identity token grants</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #fff;
+    color: rgba(0, 0, 0, 0.87);
+    font-family: Roboto, Helvetica, Arial, sans-serif;
+    font-size: 1rem;
+    line-height: 1.5;
+    letter-spacing: 0.00938em;
+  }
+  svg.icon { width: 1em; height: 1em; fill: currentColor; flex-shrink: 0; }
+
+  .appbar {
+    background: #f5f5f5;
+    box-shadow: 0 2px 1px -1px rgba(0,0,0,0.2), 0 1px 1px 0 rgba(0,0,0,0.14), 0 1px 3px 0 rgba(0,0,0,0.12);
+  }
+  .toolbar { display: flex; align-items: center; gap: 16px; min-height: 48px; padding: 0 24px; }
+  .brand { display: flex; align-items: center; gap: 8px; margin-right: 16px; color: #388e3c; text-decoration: none; }
+  .brand span { font-size: 1.25rem; font-weight: 500; line-height: 1.6; letter-spacing: 0.0075em; }
+  .nav { text-decoration: none; color: rgba(0,0,0,0.6); font-weight: 500; }
+  .nav.active { color: #32669a; }
+  .spacer { flex: 1; }
+  .ext { display: inline-flex; align-items: center; gap: 4px; }
+
+  .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+  .stack-3 > * + * { margin-top: 24px; }
+  .stack-2 > * + * { margin-top: 16px; }
+  .stack-1 > * + * { margin-top: 8px; }
+
+  h1 { font-size: 1.5rem; font-weight: 400; line-height: 1.334; margin: 0; }
+  h2 { font-size: 1.25rem; font-weight: 500; line-height: 1.6; letter-spacing: 0.0075em; margin: 0; }
+  .subtitle1 { font-size: 1rem; line-height: 1.75; letter-spacing: 0.00938em; margin: 0; }
+  .caption { display: block; font-size: 0.75rem; line-height: 1.66; letter-spacing: 0.03333em; color: rgba(0,0,0,0.6); margin: 0; }
+  .body2 { font-size: 0.875rem; line-height: 1.43; letter-spacing: 0.01071em; }
+  .mono { font-family: monospace; }
+
+  .paper { border: 1px solid rgba(0,0,0,0.12); border-radius: 4px; padding: 24px; background: #fff; }
+
+  .field { position: relative; border: 1px solid rgba(0,0,0,0.23); border-radius: 4px; min-height: 56px; display: flex; align-items: center; padding: 0 14px; }
+  .field > label { position: absolute; top: -9px; left: 10px; padding: 0 4px; background: #fff; font-size: 0.75rem; line-height: 1.4375em; color: rgba(0,0,0,0.6); }
+  .field .value { padding: 16.5px 0; flex: 1; }
+  .field .placeholder { color: rgba(0,0,0,0.38); }
+  .field .end { color: rgba(0,0,0,0.54); font-size: 24px; display: flex; }
+  .helper { font-size: 0.75rem; line-height: 1.66; letter-spacing: 0.03333em; color: rgba(0,0,0,0.6); margin: 3px 14px 0; }
+  .row { display: flex; gap: 16px; align-items: center; }
+  .row-1 { display: flex; gap: 8px; align-items: flex-start; }
+
+  .check { display: flex; align-items: center; margin-left: -11px; }
+  .check .box { padding: 9px; font-size: 24px; display: flex; color: rgba(0,0,0,0.6); }
+  .check .box.on { color: #388e3c; }
+
+  .chip { display: inline-flex; align-items: center; height: 24px; border-radius: 16px; padding: 0 7px; font-size: 0.8125rem; }
+  .chip.outlined-success { border: 1px solid rgba(46,125,50,0.7); color: #2e7d32; }
+
+  .iconbtn { display: inline-flex; padding: 8px; border-radius: 50%; color: rgba(0,0,0,0.54); font-size: 24px; }
+  .iconbtn.small { padding: 5px; font-size: 20px; }
+  .iconbtn.boxed { border: 1px solid rgba(0,0,0,0.12); border-radius: 4px; }
+
+  .btn { font-family: inherit; font-size: 0.875rem; font-weight: 500; line-height: 1.75; letter-spacing: 0.02857em; text-transform: uppercase; border-radius: 4px; padding: 6px 16px; border: none; }
+  .btn.contained { background: #388e3c; color: #fff; box-shadow: 0 3px 1px -2px rgba(0,0,0,0.2), 0 2px 2px 0 rgba(0,0,0,0.14), 0 1px 5px 0 rgba(0,0,0,0.12); }
+  .btn.outlined-error { background: none; color: #d32f2f; border: 1px solid rgba(211,47,47,0.5); padding: 5px 15px; }
+
+  .subject { display: flex; align-items: center; gap: 4px; background: rgba(0,0,0,0.04); border-radius: 4px; padding: 2px 2px 2px 10px; }
+  .subject code { font-size: 0.8125rem; word-break: break-all; flex: 1; }
+
+  .new { outline: 2px dashed #c2410c; outline-offset: 6px; border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<header class="appbar">
+  <div class="toolbar">
+    <a class="brand" href="#">
+      <svg width="24" height="24" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="10" fill="#32669A"/><circle cx="50" cy="50" r="36" fill="#fff"/><rect x="42" y="26" width="16" height="48" fill="#388E3C"/><rect x="26" y="42" width="48" height="16" fill="#388E3C"/></svg>
+      <span>Canopy</span>
+    </a>
+    <a class="nav" href="#">Status</a>
+    <a class="nav" href="#">Incidents</a>
+    <a class="nav active" href="#">Fleet</a>
+    <a class="nav" href="#">Versions</a>
+    <a class="nav" href="#">Upgrades</a>
+    <a class="nav" href="#">Maintenance</a>
+    <a class="nav" href="#">Devices</a>
+    <a class="nav" href="#">Bestool</a>
+    <a class="nav" href="#">Settings</a>
+    <div class="spacer"></div>
+    <a class="nav ext" href="#">Public <svg class="icon" viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg></a>
+  </div>
+</header>
+
+<main class="container stack-3">
+  <h1>Edit example-prod-1</h1>
+
+  <section class="paper stack-2">
+    <h2>Machine</h2>
+    <div class="field"><label>Name *</label><div class="value">example-prod-1</div></div>
+    <div class="field"><label>Group *</label><div class="value">Example Site</div><span class="end"><svg class="icon" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg></span></div>
+    <p class="caption">The applications on this machine take its group, so moving the box moves them with it.</p>
+    <div class="field"><label>Rank</label><div class="value">production</div><span class="end"><svg class="icon" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg></span></div>
+    <p class="caption">Every application on this machine shares its rank.</p>
+    <div class="row">
+      <div class="field" style="min-width:180px"><label>Location</label><div class="value">cloud</div><span class="end"><svg class="icon" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg></span></div>
+      <div class="field" style="flex:1"><label>Latitude</label><div class="value"></div></div>
+      <div class="field" style="flex:1"><label>Longitude</label><div class="value"></div></div>
+    </div>
+
+    <div class="check"><span class="box on"><svg class="icon" viewBox="0 0 24 24"><path d="M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></span>Monitor this machine</div>
+    <p class="caption">When off, no check on this machine alerts: its checks are still determined and shown, and its health and reachability are marked as unmonitored wherever they appear, but nothing triggers or joins an incident. The applications on it are unaffected.</p>
+    <div class="check"><span class="box on"><svg class="icon" viewBox="0 0 24 24"><path d="M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></span>Alert when this machine is unreachable</div>
+    <p class="caption">When off, every other check on this box alerts as normal and only the box going away is quiet. This quiets it for every application on the machine.</p>
+    <div class="row">
+      <span class="body2">File an issue when this machine is unreachable for</span>
+      <div class="field" style="width:140px"><label>minutes</label><div class="value">10</div></div>
+    </div>
+
+    <div class="stack-1 new">
+      <p class="subtitle1">Identity tokens</p>
+      <div class="check"><span class="box"><svg class="icon" viewBox="0 0 24 24"><path d="M19 5v14H5V5h14m0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg></span>May obtain tokens for Anthropic</div>
+      <div class="check"><span class="box"><svg class="icon" viewBox="0 0 24 24"><path d="M19 5v14H5V5h14m0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg></span>May obtain tokens for AWS</div>
+      <p class="caption">Tokens that name this machine itself. Applications on it hold their own grants below.</p>
+    </div>
+
+    <div class="field" style="min-height:96px;align-items:flex-start"><label>Notes</label><div class="value"></div></div>
+    <p class="helper" style="margin-top:-13px">Operator notes shown on the machine's page. Plain text.</p>
+
+    <div class="stack-1">
+      <p class="subtitle1">Tags</p>
+      <div class="row-1">
+        <div class="field" style="flex:1"><label>Key</label><div class="value">owner</div></div>
+        <div class="field" style="flex:2"><label>Value</label><div class="value">ops</div></div>
+        <span class="iconbtn"><svg class="icon" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></span>
+      </div>
+      <div><span class="iconbtn small boxed"><svg class="icon" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></span></div>
+    </div>
+  </section>
+
+  <section class="paper stack-2">
+    <div class="row" style="gap:8px">
+      <h2>Tamanu central</h2>
+      <span class="chip outlined-success">Tamanu central</span>
+    </div>
+    <div class="field"><label>Name</label><div class="value"></div></div>
+    <div>
+      <div class="field"><label>URL</label><div class="value"></div></div>
+      <p class="helper">Where an operator reaches it. Empty falls back to the box's tailnet name.</p>
+    </div>
+    <div>
+      <div class="field"><label>Name in Tamanu Mobile app</label><div class="value"></div></div>
+      <p class="helper">Leave empty to hide this application from the public mobile-app list.</p>
+    </div>
+    <div class="check"><span class="box on"><svg class="icon" viewBox="0 0 24 24"><path d="M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></span>Monitor this application</div>
+    <div class="check"><span class="box on"><svg class="icon" viewBox="0 0 24 24"><path d="M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></span>Alert when this application is unreachable</div>
+    <div class="row">
+      <span class="body2">File an issue when this application is unreachable for</span>
+      <div class="field" style="width:140px"><label>minutes</label><div class="value">10</div></div>
+    </div>
+
+    <div class="stack-1">
+      <p class="subtitle1">Name management</p>
+      <div class="check"><span class="box on"><svg class="icon" viewBox="0 0 24 24"><path d="M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></span>May manage its own DNS records</div>
+      <div class="check"><span class="box on"><svg class="icon" viewBox="0 0 24 24"><path d="M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></span>May obtain its own TLS certificates</div>
+      <p class="caption">Both apply only to names under example-site.bes.au, the domain this server's group controls, and are off until granted: a server without the grant it needs is refused. Revoking stops further changes and leaves records and certificates already in place.</p>
+    </div>
+
+    <div class="stack-1 new">
+      <p class="subtitle1">Identity tokens</p>
+      <div class="check"><span class="box on"><svg class="icon" viewBox="0 0 24 24"><path d="M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></span>May obtain tokens for Anthropic</div>
+      <div class="check"><span class="box"><svg class="icon" viewBox="0 0 24 24"><path d="M19 5v14H5V5h14m0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg></span>May obtain tokens for AWS</div>
+      <p class="caption">Its tokens carry this subject. Revoking refuses the next request; tokens already issued run out on their own.</p>
+      <div class="subject">
+        <code>group:3f2a9c4e-6b1d-4e8a-9f07-2c5d8e1b4a6f:rank:production:application:tamanu-central:8d41e7b2-0c39-4f5a-a6e1-97b3c2d0f845</code>
+        <span class="iconbtn small" title="Copy"><svg class="icon" viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></span>
+      </div>
+    </div>
+
+    <div class="field" style="min-height:96px;align-items:flex-start"><label>Notes</label><div class="value"></div></div>
+    <p class="helper" style="margin-top:-13px">Operator notes shown on the application's page. Plain text.</p>
+
+    <div class="stack-1">
+      <p class="subtitle1">Tags</p>
+      <div class="body2" style="color:rgba(0,0,0,0.6)">No tags.</div>
+      <div><span class="iconbtn small boxed"><svg class="icon" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></span></div>
+    </div>
+  </section>
+
+  <div class="row" style="gap:8px">
+    <button class="btn contained">Save</button>
+    <button class="btn outlined-error">Cancel</button>
+  </div>
+</main>
+
+</body>
+</html>
