@@ -40,6 +40,22 @@ Operational comparison that led there:
 - **Provisioning owns the keys.** Infra creates the key and grants `Sign`/`GetPublicKey`; Canopy reads the configured keys at startup, as with managed zones, and builds the JWKS from `GetPublicKey`. Canopy switches signing to the newest key once it has been published for a minimum interval (beyond Anthropic's 15-minute guidance), so no human timing can cause signature errors. Rotation is two ops changes and two restarts: add the new key, later remove the old one. Canopy can never destroy its own keys. No scheduled rotation: the material cannot leak, and a leaked `kms:Sign` permission is fixed in IAM, not by a new key.
 - **Canopy owns the keys.** Canopy holds tag-conditioned `kms:CreateKey` and `ScheduleKeyDeletion`, bootstraps its first key and rotates on a schedule or from an admin action, with no deploy. A Canopy bug or compromise can delete its own signing keys, and the keys drift outside infrastructure state. Earns its cost only with frequent rotation or inline-JWKS relying parties.
 
+Key usage is tracked: every issuance records the `kid` that signed it, so for each configured key Canopy knows when it was first published, when it first and last signed, and how many tokens it signed. A key that has stopped signing is safe to remove once its last signature plus the maximum token lifetime has passed, and Canopy presents that moment, so the removing Pulumi run follows Canopy's word and not a guess.
+
+### Claim set
+
+Relying parties differ in what they can match on.
+Anthropic matches a `sub` prefix, exact top-level string claims, or CEL over everything.
+AWS IAM, for a generic OIDC provider, only exposes `aud`, `sub`, `amr`, `oaud` and `email` as trust-policy conditions (provider-specific claims exist for GitHub, Google and a few others, not custom issuers). That is why GitHub Actions encodes repo, environment and ref into `sub`.
+
+Fixed claims: `iss`, `aud` (the registry entry's audience), `iat`, `nbf`, `exp`, a fresh `jti` per token (Anthropic rejects reuse), and `kid` in the header.
+
+Option S1, opaque `sub`: `machine:<id>` or `application:<id>`, stable for the subject's life. Fleet facts go in flat top-level claims (`canopy_group_id`, `canopy_rank`, `canopy_application_type`, `canopy_machine_id`, ...). Works fully for Anthropic; an AWS role can only pin individual subjects.
+
+Option S2, structured `sub`, GitHub-style: e.g. `group:<id>:rank:production:application:tamanu-central:<id>`, plus the same flat claims. AWS `StringLike` and Anthropic prefixes can both select "every production Tamanu central in group X". `sub` changes when a subject moves group or rank, which is what policy wants: a box leaving production stops matching production rules. Rules quote IDs, so Canopy should show the pattern to paste.
+
+Flat claim names use underscores so CEL can reach them as `claims.canopy_rank`. Matchable values are IDs and enum values; names ride along for readability only, since a rename must not silently break a rule.
+
 ### Kubernetes workloads
 
 Decided: A now, B later. A and B are each split out to their own card in the breakdown.
@@ -87,6 +103,8 @@ Claims carry Canopy's facts regardless (group, rank, application type, machine),
 ## Open questions
 
 - [ ] Issuer name: final hostname.
+- [ ] `sub` shape: opaque (S1) or structured (S2)?
+- [ ] Pending (unranked) or ungrouped subjects: refuse issuance, or issue without those facts?
 
 ## Trade-offs
 
