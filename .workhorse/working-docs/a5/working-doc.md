@@ -31,7 +31,9 @@ Sketch only.
 
 Decided: AWS KMS asymmetric keys (ECC_NIST_P256, ES256), non-exportable; Canopy only calls `Sign` and `GetPublicKey`.
 
-Open: who owns the keys. Operational comparison:
+Decided: provisioning owns the keys, set in Pulumi, so adding or removing one is a `pulumi up` that also rolls Canopy onto the new configuration. Rotation is two runs: add the new key (Canopy publishes it and switches to signing with it once matured), then remove the old one at leisure.
+
+Operational comparison that led there:
 
 - Common to both: one KMS `Sign` per token, so a KMS outage stops new issuance and workloads lose access once their current Anthropic token expires. CloudTrail records every `Sign`. A disabled or deleted key is an issuance outage (deletion has a cancellable 7-30 day pending window). Each Canopy instance has its own key and issuer; tests and dev use an in-process key.
 - Relying parties using discovery or a JWKS URL follow rotation on their own; inline-JWKS registrations need re-pushing on every rotation. Tokens are minted on demand and exchanged at once, so a JWT only needs to verify for seconds and retiring an old key is low-risk.
@@ -84,7 +86,6 @@ Claims carry Canopy's facts regardless (group, rank, application type, machine),
 
 ## Open questions
 
-- [ ] KMS key ownership: provisioning-owned (configured) or Canopy-created?
 - [ ] Issuer name: final hostname.
 
 ## Trade-offs
