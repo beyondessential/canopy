@@ -96,12 +96,12 @@
   "nbf": 1792130400,
   "exp": 1792130700,
   "jti": "0b7e5c1a-94f2-4d3e-b8a6-71c0e2f9d455",
-  "canopy_group_id": "3f2a9c4e-6b1d-4e8a-9f07-2c5d8e1b4a6f",
-  "canopy_group_name": "Example Site",
-  "canopy_rank": "production",
-  "canopy_machine_id": "51c8a0f3-2e7d-4b96-8a1c-e4f09b6d7c23",
-  "canopy_application_id": "8d41e7b2-0c39-4f5a-a6e1-97b3c2d0f845",
-  "canopy_application_type": "tamanu-central"
+  "group_id": "3f2a9c4e-6b1d-4e8a-9f07-2c5d8e1b4a6f",
+  "group_name": "Example Site",
+  "rank": "production",
+  "machine_id": "51c8a0f3-2e7d-4b96-8a1c-e4f09b6d7c23",
+  "application_id": "8d41e7b2-0c39-4f5a-a6e1-97b3c2d0f845",
+  "application_type": "tamanu-central"
 }</code></pre>
     <p class="muted" style="margin-top:12px">Never changes for the life of the application. A machine token reads <code>machine:51c8a0f3-…</code> and omits the application claims.</p>
   </div>
@@ -119,12 +119,12 @@
   "nbf": 1792130400,
   "exp": 1792130700,
   "jti": "0b7e5c1a-94f2-4d3e-b8a6-71c0e2f9d455",
-  "canopy_group_id": "3f2a9c4e-6b1d-4e8a-9f07-2c5d8e1b4a6f",
-  "canopy_group_name": "Example Site",
-  "canopy_rank": "production",
-  "canopy_machine_id": "51c8a0f3-2e7d-4b96-8a1c-e4f09b6d7c23",
-  "canopy_application_id": "8d41e7b2-0c39-4f5a-a6e1-97b3c2d0f845",
-  "canopy_application_type": "tamanu-central"
+  "group_id": "3f2a9c4e-6b1d-4e8a-9f07-2c5d8e1b4a6f",
+  "group_name": "Example Site",
+  "rank": "production",
+  "machine_id": "51c8a0f3-2e7d-4b96-8a1c-e4f09b6d7c23",
+  "application_id": "8d41e7b2-0c39-4f5a-a6e1-97b3c2d0f845",
+  "application_type": "tamanu-central"
 }</code></pre>
     <p class="muted" style="margin-top:12px">Broken across lines for reading; it is one string. A machine token reads <code>group:3f2a…:rank:production:machine:51c8a0f3-…</code>.</p>
   </div>
@@ -140,9 +140,9 @@
 <pre><code>"match": {
   "subject_prefix": "application:*",
   "claims": {
-    "canopy_group_id": "3f2a9c4e-…",
-    "canopy_rank": "production",
-    "canopy_application_type": "tamanu-central"
+    "group_id": "3f2a9c4e-…",
+    "rank": "production",
+    "application_type": "tamanu-central"
   }
 }</code></pre>
     <span class="label" style="margin-top:16px">S1 · AWS</span>
@@ -173,7 +173,7 @@
 <div class="cols">
   <div class="card">
     <span class="label">S1</span>
-    <p>Anthropic: drop <code>canopy_group_id</code> from the claims. AWS: not expressible beyond a hand-kept list of the whole fleet.</p>
+    <p>Anthropic: drop <code>group_id</code> from the claims. AWS: not expressible beyond a hand-kept list of the whole fleet.</p>
   </div>
   <div class="card">
     <span class="label">S2</span>
@@ -189,7 +189,7 @@
   </div>
   <div class="card">
     <span class="label">S2</span>
-    <p>A pattern ending in the application's ID: <code>group:*:application:*:8d41e7b2-…</code> on AWS, <code>canopy_application_id</code> on Anthropic. Exact <code>sub</code> works too, but stops matching on a move.</p>
+    <p>A pattern ending in the application's ID: <code>group:*:application:*:8d41e7b2-…</code> on AWS, <code>application_id</code> on Anthropic. Exact <code>sub</code> works too, but stops matching on a move.</p>
   </div>
 </div>
 
