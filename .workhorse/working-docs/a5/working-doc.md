@@ -72,6 +72,18 @@ Option S2, structured `sub`, GitHub-style: e.g. `group:<id>:rank:production:appl
 
 Claim names are unprefixed: `iss` already scopes them to Canopy and rules are written per issuer (GitHub Actions does the same with `repository`, `ref`). They stay clear of registered or commonly interpreted names (`groups`, `roles`, `name`, `email`, `scope`), stay flat so Anthropic's `claims` matcher sees them, and use underscores so CEL reaches them as `claims.rank`. Matchable values are IDs and enum values; names ride along for readability only, since a rename must not silently break a rule.
 
+### Issuance records and audit
+
+Decided: grant changes and issuance records go in the general audit log (card U2), and work on this card does not start until that log exists. The requirements are on U2 as a comment:
+
+- a device actor as well as an admin one;
+- time-ranged storage with retention of at least 30 days, at tens of thousands of entries a day;
+- the entry written as a condition of issuance, so a token is never handed out unrecorded;
+- refusals recorded with their reason;
+- lookup by detail fields (`jti`, `kid`, subject, relying party) and counts per `kid` over a window, which the key usage figures derive from;
+- identifiers only, never the token;
+- grants and revocations as entries, so grants carry no who/when columns of their own.
+
 ### Kubernetes workloads
 
 Decided: A now, B later. A and B are each split out to their own card in the breakdown.
