@@ -97,6 +97,11 @@ It need not be routable for Anthropic: with `jwks.discovery_base` (or `explicit_
 Other relying parties (AWS IAM OIDC providers, for one) fetch discovery from the issuer URL itself, so being generic means the name eventually resolves and serves just the discovery document and JWKS.
 Either way the domain must be one we hold, so nobody else can ever serve discovery for it.
 
+Where things are served:
+
+- Discovery and JWKS are served by the public server from the start, for relying parties given a `discovery_base` (Anthropic). Once the issuer name is routable, it serves the same two documents at `<issuer>/.well-known/openid-configuration`, which strict relying parties need because they check the document's `issuer` against where they fetched it. The ingress for the issuer name routes only those two paths. The public server's copy stays, so earlier `discovery_base` registrations keep working.
+- Issuance stays on the device API, authenticated as every device call is (client certificate or tailnet identity). The issuer name carries no device authentication and exposes nothing but the two documents.
+
 ### Grant model
 
 Generic from the start: a grant names an audience, not Anthropic specifically.
