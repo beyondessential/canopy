@@ -19,7 +19,7 @@ Exploration of whether Canopy can act as an OIDC identity provider so canopy-aut
 ## Mockups
 
 - `design/mockups/a5/claim-shapes.html`: S1 and S2 worked through rules for Anthropic and AWS, and what happens on re-rank, rename, pending.
-- `design/mockups/a5/identity-grants.html`: grants on the machine edit page, beside name management.
+- `design/mockups/a5/identity-grants.html`: grants on the machine edit page, beside name management, as one searchable multi-select of relying parties per machine and per application, so the control stays compact however many relying parties are registered.
 - `design/mockups/a5/identity-provider-settings.html`: issuer, signing keys with usage and removal readiness, relying-party registry.
 
 ## Behaviour

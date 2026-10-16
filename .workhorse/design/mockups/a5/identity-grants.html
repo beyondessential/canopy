@@ -70,6 +70,17 @@
   .subject { display: flex; align-items: center; gap: 4px; background: rgba(0,0,0,0.04); border-radius: 4px; padding: 2px 2px 2px 10px; }
   .subject code { font-size: 0.8125rem; word-break: break-all; flex: 1; }
 
+  .ac { padding: 0 9px 0 9px; }
+  .ac .value { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; padding: 9px 0; min-height: 54px; }
+  .ac.focused { border: 2px solid #388e3c; padding: 0 8px; }
+  .ac.focused > label { color: #388e3c; left: 9px; top: -10px; }
+  .ac .caret { display: inline-block; width: 1px; height: 1.1em; background: rgba(0,0,0,0.87); margin-left: 1px; vertical-align: middle; }
+  .tag { display: inline-flex; align-items: center; gap: 4px; height: 32px; border-radius: 16px; padding: 0 5px 0 12px; background: rgba(0,0,0,0.08); font-size: 0.8125rem; }
+  .tag svg { font-size: 22px; color: rgba(0,0,0,0.26); }
+  .ac-wrap { position: relative; }
+  .popup { position: absolute; left: 0; right: 0; top: calc(100% + 2px); z-index: 2; background: #fff; border-radius: 4px; padding: 8px 0; box-shadow: 0 5px 5px -3px rgba(0,0,0,0.2), 0 8px 10px 1px rgba(0,0,0,0.14), 0 3px 14px 2px rgba(0,0,0,0.12); }
+  .opt { padding: 6px 16px; min-height: 36px; display: flex; align-items: center; }
+  .opt.focus { background: rgba(0,0,0,0.04); }
   .new { outline: 2px dashed #c2410c; outline-offset: 6px; border-radius: 2px; }
 </style>
 </head>
@@ -122,8 +133,13 @@
 
     <div class="stack-1 new">
       <p class="subtitle1">Identity tokens</p>
-      <div class="check"><span class="box"><svg class="icon" viewBox="0 0 24 24"><path d="M19 5v14H5V5h14m0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg></span>May obtain tokens for Anthropic</div>
-      <div class="check"><span class="box"><svg class="icon" viewBox="0 0 24 24"><path d="M19 5v14H5V5h14m0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg></span>May obtain tokens for AWS</div>
+      <div class="ac-wrap">
+        <div class="field ac focused"><label>May obtain tokens for</label><div class="value">aw<span class="caret"></span></div><span class="end"><svg class="icon" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg></span></div>
+        <div class="popup">
+          <div class="opt focus">AWS</div>
+          <div class="opt">AWS billing</div>
+        </div>
+      </div>
       <p class="caption">Tokens that name this machine itself. Applications on it hold their own grants below.</p>
     </div>
 
@@ -171,8 +187,7 @@
 
     <div class="stack-1 new">
       <p class="subtitle1">Identity tokens</p>
-      <div class="check"><span class="box on"><svg class="icon" viewBox="0 0 24 24"><path d="M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.11 0 2-.9 2-2V5c0-1.1-.89-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></span>May obtain tokens for Anthropic</div>
-      <div class="check"><span class="box"><svg class="icon" viewBox="0 0 24 24"><path d="M19 5v14H5V5h14m0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg></span>May obtain tokens for AWS</div>
+      <div class="field ac"><label>May obtain tokens for</label><div class="value"><span class="tag">Anthropic <svg class="icon" viewBox="0 0 24 24"><path d="M12 2C6.47 2 2 6.47 2 12s4.47 10 10 10 10-4.47 10-10S17.53 2 12 2zm5 13.59L15.59 17 12 13.41 8.41 17 7 15.59 10.59 12 7 8.41 8.41 7 12 10.59 15.59 7 17 8.41 13.41 12 17 15.59z"/></svg></span></div><span class="end"><svg class="icon" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg></span></div>
       <p class="caption">Its tokens carry this subject. Revoking refuses the next request; tokens already issued run out on their own.</p>
       <div class="subject">
         <code>group:3f2a9c4e-6b1d-4e8a-9f07-2c5d8e1b4a6f:rank:production:application:tamanu-central:8d41e7b2-0c39-4f5a-a6e1-97b3c2d0f845:</code>
