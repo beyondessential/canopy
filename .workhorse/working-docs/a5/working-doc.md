@@ -26,7 +26,7 @@ Exploration of whether Canopy can act as an OIDC identity provider so canopy-aut
 
 Sketch only.
 
-- Public, unauthenticated discovery document and JWKS on the public server.
+- The discovery document and JWKS are served at the issuer name itself by a dedicated discovery server (see "Discovery server").
 - An authenticated device endpoint (working name `POST /machines/self/identity-token {audience}`) returning a short-lived JWT. The device is resolved from its certificate, as for backup credentials.
 - Issuance is gated by an operator grant of audience to a machine, application or group, and is refused without one. Issuance is recorded before the token is returned.
 - Claims carry the machine, group, rank and application types so a relying party can scope its own rules.
@@ -93,14 +93,17 @@ A Canopy instance with no issuer or no signing key configured issues nothing: th
 
 The issuer is a dedicated name of our own (working example `https://idp.canopy.bes.au`, name to be workshopped), independent of the public server's device-facing host, since `iss` can never change without re-registering every relying party.
 
-It need not be routable for Anthropic: with `jwks.discovery_base` (or `explicit_url`) set, Anthropic compares `iss` as a string and fetches discovery and JWKS from the public server instead.
-Other relying parties (AWS IAM OIDC providers, for one) fetch discovery from the issuer URL itself, so being generic means the name eventually resolves and serves just the discovery document and JWKS.
-Either way the domain must be one we hold, so nobody else can ever serve discovery for it.
+Decided: the issuer name is routable from the start. Relying parties register in plain discovery mode, with no `discovery_base` or `explicit_url` workarounds, and strict relying parties that check the discovery document's `issuer` against where they fetched it work as they are.
+The domain is one we hold, so nobody else can ever serve discovery for it.
 
-Where things are served:
+### Discovery server
 
-- Discovery and JWKS are served by the public server from the start, for relying parties given a `discovery_base` (Anthropic). Once the issuer name is routable, it serves the same two documents at `<issuer>/.well-known/openid-configuration`, which strict relying parties need because they check the document's `issuer` against where they fetched it. The ingress for the issuer name routes only those two paths. The public server's copy stays, so earlier `discovery_base` registrations keep working.
-- Issuance stays on the device API, authenticated as every device call is (client certificate or tailnet identity). The issuer name carries no device authentication and exposes nothing but the two documents.
+A separate binary and image (working name `oidc-disco-server`) serves exactly two unauthenticated documents at the issuer name: `/.well-known/openid-configuration` and the JWKS it points to. The ingress routes the issuer name to it and to nothing else.
+
+- It reads the issuer and the configured KMS keys from the same Canopy instance configuration (Pulumi), and builds the JWKS from `kms:GetPublicKey`. It holds no database credentials, no `kms:Sign`, and no device authentication, so the only internet-facing piece of the identity provider is stateless and holds nothing secret.
+- It is stateless and scales horizontally. If it is down, relying parties keep their cached JWKS briefly (about a minute at Anthropic) and then new exchanges fail, so it is run like any other serving component.
+- Issuance stays on the public server's device API, authenticated as every device call is (client certificate or tailnet identity).
+- The public server and the discovery server roll from the same configuration but separately, so the issuing side must not trust its own view of what is published. Canopy fetches the live JWKS from the issuer name and records when each key first appears there; that observed time is what the signing switch waits on. A key that is configured but not served, or served but not configured, is a Canopy self-alert (see SELF), as is the issuer documents being unreachable.
 
 ### Grant model
 
