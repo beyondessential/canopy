@@ -56,11 +56,11 @@ AWS IAM, for a generic OIDC provider, only exposes `aud`, `sub`, `amr`, `oaud` a
 
 Fixed claims: `iss`, `aud` (the registry entry's audience), `iat`, `nbf`, `exp`, a fresh `jti` per token (Anthropic rejects reuse), and `kid` in the header.
 
-Option S1, opaque `sub`: `machine:<id>` or `application:<id>`, stable for the subject's life. Fleet facts go in flat top-level claims (`canopy_group_id`, `canopy_rank`, `canopy_application_type`, `canopy_machine_id`, ...). Works fully for Anthropic; an AWS role can only pin individual subjects.
+Option S1, opaque `sub`: `machine:<id>` or `application:<id>`, stable for the subject's life. Fleet facts go in flat top-level claims (`group_id`, `rank`, `application_type`, `machine_id`, ...). Works fully for Anthropic; an AWS role can only pin individual subjects.
 
 Option S2, structured `sub`, GitHub-style: e.g. `group:<id>:rank:production:application:tamanu-central:<id>`, plus the same flat claims. AWS `StringLike` and Anthropic prefixes can both select "every production Tamanu central in group X". `sub` changes when a subject moves group or rank, which is what policy wants: a box leaving production stops matching production rules. Rules quote IDs, so Canopy should show the pattern to paste.
 
-Flat claim names use underscores so CEL can reach them as `claims.canopy_rank`. Matchable values are IDs and enum values; names ride along for readability only, since a rename must not silently break a rule.
+Claim names are unprefixed: `iss` already scopes them to Canopy and rules are written per issuer (GitHub Actions does the same with `repository`, `ref`). They stay clear of registered or commonly interpreted names (`groups`, `roles`, `name`, `email`, `scope`), stay flat so Anthropic's `claims` matcher sees them, and use underscores so CEL reaches them as `claims.rank`. Matchable values are IDs and enum values; names ride along for readability only, since a rename must not silently break a rule.
 
 ### Kubernetes workloads
 
