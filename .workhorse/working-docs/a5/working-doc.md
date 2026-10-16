@@ -87,6 +87,10 @@ Decided: bestool exposes a local HTTP endpoint the workload calls, and bestool c
 
 ### Issuer hostname
 
+Decided: the issuer is part of the Canopy instance's configuration, set in Pulumi beside the signing keys, so the production and staging Canopy instances each have their own (working example `https://idp.canopy.bes.au`). The final names are a deployment choice, not a design one.
+
+A Canopy instance with no issuer or no signing key configured issues nothing: the identity provider settings say so, as the certificate authority page does when no authority is configured, and grant controls stay hidden. Changing a configured issuer invalidates every relying party's registration, so it is a deliberate re-registration, not a tweak.
+
 The issuer is a dedicated name of our own (working example `https://idp.canopy.bes.au`, name to be workshopped), independent of the public server's device-facing host, since `iss` can never change without re-registering every relying party.
 
 It need not be routable for Anthropic: with `jwks.discovery_base` (or `explicit_url`) set, Anthropic compares `iss` as a string and fetches discovery and JWKS from the public server instead.
@@ -118,7 +122,6 @@ Claims carry Canopy's facts regardless (group, rank, application type, machine),
 
 ## Open questions
 
-- [ ] Issuer name: final hostname.
 
 ## Trade-offs
 
