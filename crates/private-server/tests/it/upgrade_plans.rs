@@ -200,6 +200,24 @@ async fn a_plan_nothing_will_test_says_so() {
 			.json();
 		let row = fleet.iter().find(|r| r["group_id"] == GROUP).unwrap();
 		assert_eq!(row["testing"], "on_request");
+		assert!(
+			row["attempt"].is_null(),
+			"on request with nothing asked, the group's restores are not a test"
+		);
+
+		conn.batch_execute(
+			"INSERT INTO migration_test_requests (machine_id, plan_id, requested_at)
+			 SELECT 'cccccccc-0000-0000-0000-0000000000a1', id, NOW() FROM upgrade_plans",
+		)
+		.await
+		.unwrap();
+		let fleet: Vec<Value> = private
+			.post("/api/upgrade_plans/fleet")
+			.json(&json!({}))
+			.await
+			.json();
+		let row = fleet.iter().find(|r| r["group_id"] == GROUP).unwrap();
+		assert_eq!(row["attempt"], "in_flight", "once asked, it may be the test");
 	})
 	.await;
 }

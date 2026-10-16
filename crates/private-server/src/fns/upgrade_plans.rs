@@ -299,8 +299,13 @@ pub async fn fleet(
 		// Issuances carry no intent, so another intent's restore traffic would
 		// read as a test under way. They carry no rank either, so an attempt is
 		// the group's.
+		let dispatchable = match testing {
+			Some(database::restore::Testing::Scheduled) => true,
+			Some(database::restore::Testing::OnRequest) => test_request.is_some(),
+			None => false,
+		};
 		let attempt = match testable {
-			Some(true) => match attempts.get(&env.group_id) {
+			Some(true) if dispatchable => match attempts.get(&env.group_id) {
 				Some(attempt) => *attempt,
 				None => {
 					let attempt =
