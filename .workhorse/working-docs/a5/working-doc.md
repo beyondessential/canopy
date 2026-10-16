@@ -84,6 +84,31 @@ Decided: grant changes and issuance records go in the general audit log (card U2
 - identifiers only, never the token;
 - grants and revocations as entries, so grants carry no who/when columns of their own.
 
+### Device endpoint
+
+Proposal, following `/backup-credentials` and the name endpoints.
+
+`POST /identity-tokens`, device-authenticated (client certificate or tailnet identity), machine role.
+
+- Request: `audience` (required, the registered audience string, which the workload's configuration already carries; the registry's display name is mutable) and `application_type` (optional; absent means a machine token, present names the application of that type on the calling box, as the DNS endpoints do).
+- Response: `token`, `expires_at`, and `subject` (the `sub`, so a client can log it without decoding).
+- Every call mints a fresh token and `jti`; nothing is cached on either side. The existing per-device rate limiter applies.
+- Refusals keep the *not you* (403) and *not now* (409) split:
+  - 403 Identity token not granted: no grant for subject and audience.
+  - 404 Identity audience unknown: no relying party with that audience, kept apart from "not granted" so a configuration typo reads as one.
+  - 404 Identity subject not found: `application_type` names nothing live on the box (archived applications excluded).
+  - 409 Identity subject not placed: pending or ungrouped; clears when an operator ranks or groups it.
+  - 412 Device has no server, 429 Rate limited, 502 Upstream (KMS failure, or no issuer or key configured), all existing.
+- New problem types go in `ERRORS.md`. The path is additive to the public API.
+
+### bestool local endpoint
+
+Implemented in bestool, designed here. `GET /identity-token?audience=…&application_type=…` returns the JWT as `text/plain`, so the SDK hook is one line (`identityTokenProvider: async () => (await fetch(url)).text()`). Canopy's refusals pass through with their problem type.
+
+### Token lifetime
+
+Anthropic caps its minted token at twice the JWT's remaining life and rejects JWTs living over an hour by default. JWTs are exchanged within seconds, so lifetime mainly bounds a leaked token's usefulness and, at Anthropic, how often the workload re-exchanges. Proposal: per relying party, default 5 minutes, capped at an hour.
+
 ### Kubernetes workloads
 
 Decided: A now, B later. A and B are each split out to their own card in the breakdown.
@@ -142,6 +167,8 @@ Claims carry Canopy's facts regardless (group, rank, application type, machine),
 
 ## Open questions
 
+- [ ] Token lifetime per relying party, or one fixed value?
+- [ ] bestool local endpoint access: loopback HTTP (any local process) or a Unix socket restricted to the workload's user?
 
 ## Trade-offs
 
