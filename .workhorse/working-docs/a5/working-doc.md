@@ -58,9 +58,11 @@ Fixed claims: `iss`, `aud` (the registry entry's audience), `iat`, `nbf`, `exp`,
 
 Decided: S2, structured `sub`.
 
-`sub` holds exactly four things in a fixed order: group, rank, subject kind (with the application type for an application), and the subject's ID: `group:<id>:rank:<rank>:application:<type>:<id>` or `group:<id>:rank:<rank>:machine:<id>`. Names, tags and an application's machine go only in the flat claims, so `sub` changes only when policy should notice.
+`sub` holds exactly four things in a fixed order: group, rank, subject kind (with the application type for an application), and the subject's ID: `group:<id>:rank:<rank>:application:<type>:<id>:` or `group:<id>:rank:<rank>:machine:<id>:`. The trailing `:` terminates every segment, the last included, so no pattern can end mid-value whichever segment it stops at; an exact match written without it matches nothing, which fails closed. Names, tags and an application's machine go only in the flat claims, so `sub` changes only when policy should notice.
 
 Separator safety: every segment value comes from an alphabet without `:` (UUIDs, the rank set, application types, which are slugs by spec), and issuance refuses rather than escapes a value outside it. That alone makes a label word appearing as a value harmless: positions are fixed, so a pattern like `:rank:production:` can only match where it belongs. A value containing `:` would let an AWS `StringLike` `*` span segments. Patterns Canopy offers always end at a separator (`…:tamanu-central:*`), so a type sharing a prefix with another cannot match.
+
+Issuance is refused for a subject without a rank (pending) or without a group, naming what is missing, as a missing DNS grant is refused. Ungrouped subjects should no longer arise, but the refusal stands as a rule, so no token ever carries a placeholder segment.
 
 Options as considered:
 
@@ -117,7 +119,6 @@ Claims carry Canopy's facts regardless (group, rank, application type, machine),
 ## Open questions
 
 - [ ] Issuer name: final hostname.
-- [ ] Pending (unranked) or ungrouped subjects: refuse issuance, or issue without those facts?
 
 ## Trade-offs
 

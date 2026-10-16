@@ -113,7 +113,7 @@
   <span class="hl">"sub": "group:3f2a9c4e-6b1d-4e8a-9f07-2c5d8e1b4a6f
           :rank:production
           :application:tamanu-central
-          :8d41e7b2-0c39-4f5a-a6e1-97b3c2d0f845"</span>,
+          :8d41e7b2-0c39-4f5a-a6e1-97b3c2d0f845:"</span>,
   "aud": "https://api.anthropic.com",
   "iat": 1792130400,
   "nbf": 1792130400,
@@ -126,7 +126,7 @@
   "application_id": "8d41e7b2-0c39-4f5a-a6e1-97b3c2d0f845",
   "application_type": "tamanu-central"
 }</code></pre>
-    <p class="muted" style="margin-top:12px">Broken across lines for reading; it is one string. A machine token reads <code>group:3f2a…:rank:production:machine:51c8a0f3-…</code>.</p>
+    <p class="muted" style="margin-top:12px">Broken across lines for reading; it is one string, ending in <code>:</code> so every segment is terminated. A machine token reads <code>group:3f2a…:rank:production:machine:51c8a0f3-…:</code>.</p>
   </div>
 </div>
 
@@ -189,7 +189,7 @@
   </div>
   <div class="card">
     <span class="label">S2</span>
-    <p>A pattern ending in the application's ID: <code>group:*:application:*:8d41e7b2-…</code> on AWS, <code>application_id</code> on Anthropic. Exact <code>sub</code> works too, but stops matching on a move.</p>
+    <p>A pattern ending in the application's ID: <code>group:*:application:*:8d41e7b2-…:</code> on AWS, <code>application_id</code> on Anthropic. Exact <code>sub</code> works too, but stops matching on a move.</p>
   </div>
 </div>
 
@@ -233,14 +233,14 @@
 <p>A pending machine has no rank yet; an ungrouped one has no group. Under S2 those segments have nothing to say, and under S1 the claims would be missing.</p>
 <div class="cols">
   <div class="card">
-    <span class="label">Refuse</span>
+    <span class="label">Refuse · decided</span>
     <p>Canopy refuses issuance until the subject has a group and a rank, and says which is missing, the way a missing DNS grant is refused. Every token then carries both, and a rule never meets a subject outside an environment.</p>
 <pre><code>409  This machine is pending. Give it a rank first.</code></pre>
   </div>
   <div class="card">
     <span class="label">Issue with a placeholder</span>
     <p>The token carries <code>rank:pending</code> or <code>group:none</code>. A rule written as "anything in Example Site" (<code>group:3f2a…:*</code>) then admits a box nobody has yet placed in an environment.</p>
-<pre><code>"sub": "group:3f2a9c4e-…:rank:pending:application:tamanu-central:8d41…"</code></pre>
+<pre><code>"sub": "group:3f2a9c4e-…:rank:pending:application:tamanu-central:8d41…:"</code></pre>
   </div>
 </div>
 
