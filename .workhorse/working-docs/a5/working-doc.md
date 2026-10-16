@@ -56,6 +56,14 @@ AWS IAM, for a generic OIDC provider, only exposes `aud`, `sub`, `amr`, `oaud` a
 
 Fixed claims: `iss`, `aud` (the registry entry's audience), `iat`, `nbf`, `exp`, a fresh `jti` per token (Anthropic rejects reuse), and `kid` in the header.
 
+Decided: S2, structured `sub`.
+
+`sub` holds exactly four things in a fixed order: group, rank, subject kind (with the application type for an application), and the subject's ID: `group:<id>:rank:<rank>:application:<type>:<id>` or `group:<id>:rank:<rank>:machine:<id>`. Names, tags and an application's machine go only in the flat claims, so `sub` changes only when policy should notice.
+
+Separator safety: every segment value comes from an alphabet without `:` (UUIDs, the rank set, application types, which are slugs by spec), and issuance refuses rather than escapes a value outside it. That alone makes a label word appearing as a value harmless: positions are fixed, so a pattern like `:rank:production:` can only match where it belongs. A value containing `:` would let an AWS `StringLike` `*` span segments. Patterns Canopy offers always end at a separator (`…:tamanu-central:*`), so a type sharing a prefix with another cannot match.
+
+Options as considered:
+
 Option S1, opaque `sub`: `machine:<id>` or `application:<id>`, stable for the subject's life. Fleet facts go in flat top-level claims (`group_id`, `rank`, `application_type`, `machine_id`, ...). Works fully for Anthropic; an AWS role can only pin individual subjects.
 
 Option S2, structured `sub`, GitHub-style: e.g. `group:<id>:rank:production:application:tamanu-central:<id>`, plus the same flat claims. AWS `StringLike` and Anthropic prefixes can both select "every production Tamanu central in group X". `sub` changes when a subject moves group or rank, which is what policy wants: a box leaving production stops matching production rules. Rules quote IDs, so Canopy should show the pattern to paste.
@@ -109,7 +117,6 @@ Claims carry Canopy's facts regardless (group, rank, application type, machine),
 ## Open questions
 
 - [ ] Issuer name: final hostname.
-- [ ] `sub` shape: opaque (S1) or structured (S2)?
 - [ ] Pending (unranked) or ungrouped subjects: refuse issuance, or issue without those facts?
 
 ## Trade-offs
