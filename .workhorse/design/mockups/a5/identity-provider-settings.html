@@ -119,12 +119,13 @@
         </div>
         <div>
           <p class="subtitle2">Discovery</p>
-          <p class="body2 mono">https://api.canopy.bes.au/oidc/.well-known/openid-configuration</p>
-          <span class="caption">Give relying parties this as the discovery base when they cannot reach the issuer name itself.</span>
+          <p class="body2 mono">https://idp.canopy.bes.au/.well-known/openid-configuration</p>
         </div>
-        <div>
-          <span class="caption" style="margin-top:0">Set by the infrastructure that provisions Canopy. Changing it means registering Canopy again with every relying party.</span>
+        <div class="alert success">
+          <span class="ic"><svg class="icon" viewBox="0 0 24 24"><path d="M20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4C12.76,4 13.5,4.11 14.2,4.31L15.77,2.74C14.61,2.26 13.34,2 12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12M7.91,10.08L6.5,11.5L11,16L21,6L19.59,4.58L11,13.17L7.91,10.08Z"/></svg></span>
+          <span class="msg">Served and matching the configured keys, checked 2 minutes ago.</span>
         </div>
+        <span class="caption" style="margin-top:0">Set by the infrastructure that provisions Canopy. Changing it means registering Canopy again with every relying party.</span>
       </div>
     </section>
 
@@ -161,7 +162,7 @@
         <span class="ic"><svg class="icon" viewBox="0 0 24 24"><path d="M20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4C12.76,4 13.5,4.11 14.2,4.31L15.77,2.74C14.61,2.26 13.34,2 12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12M7.91,10.08L6.5,11.5L11,16L21,6L19.59,4.58L11,13.17L7.91,10.08Z"/></svg></span>
         <span class="msg">Every token signed by a3f0…12d6 has expired. It can be removed from the infrastructure configuration.</span>
       </div>
-      <span class="caption">Keys are set by the infrastructure that provisions Canopy. A newly added key is published straight away and takes over signing once relying parties have had time to fetch it.</span>
+      <span class="caption">Keys are set by the infrastructure that provisions Canopy. A newly added key takes over signing once it has been served for long enough for relying parties to fetch it.</span>
     </section>
 
     <section class="paper">
