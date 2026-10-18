@@ -21,7 +21,7 @@ Reasoning and rejected options: `.workhorse/working-docs/a5/working-doc.md`.
 - The signing key is the newest configured key first seen served at least 30 minutes ago (comfortably beyond Anthropic's 15-minute guidance). The first key ever configured is mature from the outset. Signing never moves to an older key than one already used, so persist the newest key signed with and never select below it.
 - `first_served_at` is written once per `kid` and never updated.
 - The same fetch drives the self-alert (working name `idp-discovery`, `canopy` source): unreachable, wrong issuer, or JWKS differing from configuration, with the differing `kid`s in the detail.
-- Removable: not the signing key, and last signed (from U2's log) plus the longest relying-party lifetime is in the past.
+- Key state: unserved (no observation), waiting (newer than the signing key), signing, retired or removable (older than the signing key; removable once the latest recorded expiry of its tokens has passed, or at once if it signed none). The UI collapses unserved, waiting and retired to "published".
 
 ### Discovery server
 

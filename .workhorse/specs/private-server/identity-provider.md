@@ -38,8 +38,19 @@ Signing only moves forward: once Canopy has signed with a key, it never signs wi
 Canopy judges maturity from the key set as actually served at the issuer, which it fetches and observes, rather than from its own configuration, because the discovery component and the device API take up a configuration change separately.
 The moment Canopy first observes a key served is recorded once and stands.
 
-A key that no longer signs can be removed once every token it signed has expired, and Canopy presents that moment for each key, so removing a key from the configuration follows Canopy's record rather than an estimate.
-Each key is presented with whether it is signing, published and waiting to sign, or removable, when it was first served, when it last signed, and how many tokens it signed in the last thirty days.
+Each configured key is in one of five states:
+
+- not yet served, while Canopy has not observed it served at the issuer;
+- waiting to sign, while it is served and newer than the key signing, but has not matured;
+- signing;
+- retired, while it is older than the key signing and a token it signed has not yet expired;
+- removable, once it is older than the key signing and every token it signed has expired, which a key that never signed is from the moment a newer key signs.
+
+A key older than the key signing never signs again, so a removable key can be taken out of the configuration without affecting any token, and removing one follows Canopy's record rather than an estimate.
+
+Each key is presented as signing, published, or removable, a key in any of the other states being presented as published.
+A key not yet served is a fault, raised by the self-alert below, and a key stays retired for no longer than a token lifetime, so neither needs a presentation of its own.
+Each key is also presented with when it was first served, when it last signed, and how many tokens it signed in the last thirty days.
 Those figures are derived from the audit log's record of issuance (see [IDT](../public-server/identity-tokens.md), "Recording").
 
 When the documents served at the issuer cannot be fetched, name a different issuer, or carry a key set that differs from the configured keys, Canopy raises a self-alert (see [SELF](self-alerts.md)).

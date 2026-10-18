@@ -55,6 +55,8 @@
 - [ ] A served key that is not configured raises the self-alert naming it (verifies spec: SELF)
 - [ ] An unreachable issuer, or a discovery document naming a different issuer, raises the self-alert; it clears when served documents match the configuration again (verifies spec: SELF)
 - [ ] A key that stopped signing shows as removable only once its last token has expired (verifies spec: IDP)
+- [ ] A key older than the signing key that never signed is removable as soon as the newer key signs (verifies spec: IDP)
+- [ ] A key not yet served, waiting to sign, or retired is presented as published (verifies spec: IDP)
 
 ## Operator interface
 
