@@ -103,11 +103,12 @@ Proposal, following `/backup-credentials` and the name endpoints.
 
 ### bestool local endpoint
 
-Implemented in bestool, designed here. `GET /identity-token?audience=…&application_type=…` returns Canopy's response unchanged (`token`, `expires_at`, `subject`, as JSON), and Canopy's refusals pass through with their problem type, so success and failure are both JSON. The SDK hook stays one line: `identityTokenProvider: async () => (await (await fetch(url)).json()).token`.
+Implemented in bestool, designed here. `GET /identity-token?audience=…&application_type=…` returns Canopy's response unchanged (`token`, `expires_at`, `subject`, as JSON), and Canopy's refusals pass through with their problem type, so success and failure are both JSON.
+It stays loopback HTTP, restricted to the workload with the same mechanism bestool already uses to restrict Caddy's calls to its local endpoint, so there is no Unix socket and no new access-control scheme. The SDK hook stays one line: `identityTokenProvider: async () => (await (await fetch(url)).json()).token`.
 
 ### Token lifetime
 
-Anthropic caps its minted token at twice the JWT's remaining life and rejects JWTs living over an hour by default. JWTs are exchanged within seconds, so lifetime mainly bounds a leaked token's usefulness and, at Anthropic, how often the workload re-exchanges. Proposal: per relying party, default 5 minutes, capped at an hour.
+Anthropic caps its minted token at twice the JWT's remaining life and rejects JWTs living over an hour by default. JWTs are exchanged within seconds, so lifetime mainly bounds a leaked token's usefulness and, at Anthropic, how often the workload re-exchanges. Decided: per relying party, default 5 minutes, capped at an hour.
 
 ### Kubernetes workloads
 
@@ -167,8 +168,6 @@ Claims carry Canopy's facts regardless (group, rank, application type, machine),
 
 ## Open questions
 
-- [ ] Token lifetime per relying party, or one fixed value?
-- [ ] bestool local endpoint access: loopback HTTP (any local process) or a Unix socket restricted to the workload's user?
 
 ## Trade-offs
 
