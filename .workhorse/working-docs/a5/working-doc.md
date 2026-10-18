@@ -103,7 +103,7 @@ Proposal, following `/backup-credentials` and the name endpoints.
 
 ### bestool local endpoint
 
-Implemented in bestool, designed here. `GET /identity-token?audience=…&application_type=…` returns the JWT as `text/plain`, so the SDK hook is one line (`identityTokenProvider: async () => (await fetch(url)).text()`). Canopy's refusals pass through with their problem type.
+Implemented in bestool, designed here. `GET /identity-token?audience=…&application_type=…` returns Canopy's response unchanged (`token`, `expires_at`, `subject`, as JSON), and Canopy's refusals pass through with their problem type, so success and failure are both JSON. The SDK hook stays one line: `identityTokenProvider: async () => (await (await fetch(url)).json()).token`.
 
 ### Token lifetime
 
