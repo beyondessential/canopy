@@ -39,7 +39,8 @@
 ## Recording
 
 - [ ] Each issuance is in the audit log with subject, calling identity, relying party, `jti`, `kid` and expiry, and never the token (verifies spec: IDT)
-- [ ] Each refusal is in the audit log with its reason (verifies spec: IDT)
+- [ ] Each refusal as not granted is in the audit log with the subject, calling identity and relying party (verifies spec: IDT)
+- [ ] Refusals other than not granted leave nothing in the audit log (verifies spec: IDT)
 - [ ] When the audit record cannot be written, no token is returned (verifies spec: IDT)
 - [ ] Granting and revoking are in the audit log with who acted and when (verifies spec: IDP)
 

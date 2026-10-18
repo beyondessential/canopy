@@ -3,7 +3,7 @@
 Specs: [IDT](../../specs/public-server/identity-tokens.md), [IDP](../../specs/private-server/identity-provider.md), and the identity provider condition in [SELF](../../specs/private-server/self-alerts.md).
 Reasoning and rejected options: `.workhorse/working-docs/a5/working-doc.md`.
 
-**Blocked on U2** (general audit log). Grants history, issuance and refusal records, and the key usage figures all live in it. Requirements are on U2 as a comment.
+**Blocked on U2** (general audit log). Grants history, issuance and not-granted refusal records, and the key usage figures all live in it. Requirements are on U2 as a comment.
 
 ## Tech design notes
 

@@ -84,6 +84,7 @@ A client exchanges a token with its relying party as soon as it obtains one, so 
 
 ## Recording
 
-Every issuance and every refusal is recorded in Canopy's audit log: the subject, the identity of the calling machine, the relying party, and either the token's identifier, signing key and expiry, or the reason for the refusal.
+Every issuance, and every refusal as not granted, is recorded in Canopy's audit log: the subject, the identity of the calling machine, the relying party, and for an issuance the token's identifier, signing key and expiry.
+A refusal as not granted is a workload asking for access no operator has given it, which an operator may need to look into; every other refusal is a mistake or a passing condition the client reports for itself, and is not recorded.
 The record is written before the response is returned, and a token whose record cannot be written is not issued, so Canopy can account for every token it has issued.
 The token itself is never recorded.

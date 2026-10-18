@@ -74,7 +74,7 @@ Decided: grant changes and issuance records go in the general audit log (card U2
 - a device actor as well as an admin one;
 - time-ranged storage with retention of at least 30 days, at tens of thousands of entries a day;
 - the entry written as a condition of issuance, so a token is never handed out unrecorded;
-- refusals recorded with their reason;
+- not-granted refusals recorded (no other refusal is);
 - lookup by detail fields (`jti`, `kid`, subject, relying party) and counts per `kid` over a window, which the key usage figures derive from;
 - identifiers only, never the token;
 - grants and revocations as entries, so grants carry no who/when columns of their own.
