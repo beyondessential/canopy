@@ -31,10 +31,10 @@ Reasoning and rejected options: `.workhorse/working-docs/a5/working-doc.md`.
 
 ### Storage
 
-- `relying_parties`: name, audience (unique), token lifetime (default 5 minutes, check 60 s to 3600 s).
+- `relying_parties`: name, audience (unique), audience immutable, name editable, token lifetime in whole minutes (default 5, check 1 to 60).
 - `identity_grants`: `relying_party_id`, `machine_id`, `application_id`, exactly one of the two subject columns set (`num_nonnulls` CHECK), FKs `ON DELETE CASCADE`, unique per subject and relying party. Current grants only; history is U2's. Its own two-variant target type in Rust, not `Scope`.
 - `identity_key_observations`: `kid`, `first_served_at`.
-- Removing a relying party cascades its grants; the removal and each revoked grant are logged.
+- Removing a relying party cascades its grants; the removal and each revoked grant are logged, as are registration and edits.
 
 ### Public API
 
@@ -45,7 +45,7 @@ Reasoning and rejected options: `.workhorse/working-docs/a5/working-doc.md`.
 
 ### Private API and UI
 
-- `fns/identity`: issuer and keys status, relying parties list/add/remove, grants get/set per machine and per application.
+- `fns/identity`: issuer and keys status, relying parties list/add/edit/remove (remove confirmation shows the grant count), grants get/set per machine and per application.
 - Settings tab "Identity provider" (`identity-provider-settings.html` mockup), after Certificate authority.
 - `MachineEdit`: multi-select `Autocomplete` of relying parties for the machine and each application (`identity-grants.html` mockup), hidden when none are registered and none held, mirroring `NameManagementGrants`. The application block shows its `sub` with a copy button.
 

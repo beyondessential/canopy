@@ -62,7 +62,11 @@
 ## Operator interface
 
 - [ ] Adding a relying party with an audience already registered is refused (verifies spec: IDP)
-- [ ] A relying party's lifetime defaults to five minutes and cannot exceed an hour (verifies spec: IDP)
+- [ ] A relying party's lifetime defaults to five minutes, is whole minutes, and is refused below one minute or above an hour (verifies spec: IDP)
+- [ ] Editing a relying party's name and lifetime takes effect; a changed lifetime applies to the next token and not to ones already issued (verifies spec: IDP)
+- [ ] A relying party's audience cannot be changed after registration (verifies spec: IDP)
+- [ ] Removing a relying party asks for confirmation stating how many grants it revokes (verifies spec: IDP)
+- [ ] Registering, editing and removing a relying party are in the audit log, and a removal records each grant it revokes (verifies spec: IDP)
 - [ ] The register shows each relying party's audience, lifetime, grant count and last issuance (verifies spec: IDP)
 - [ ] The machine edit page offers a searchable choice of relying parties for the machine and for each application, and saving grants and revokes accordingly (verifies spec: IDP)
 - [ ] The application's choice shows its `sub`, copyable (verifies spec: IDP)

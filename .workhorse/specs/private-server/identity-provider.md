@@ -59,11 +59,18 @@ When the documents served at the issuer cannot be fetched, name a different issu
 
 An operator registers each relying party with a name, its audience, and the lifetime of the tokens issued for it.
 The name is what operators see; the audience is what a token carries and what a machine names when it asks for one, so two relying parties never share an audience.
-A token lifetime defaults to five minutes and is at most an hour.
+A token lifetime is a whole number of minutes, from one minute to an hour, defaulting to five minutes.
+
+A relying party's name and token lifetime can be edited.
+A changed lifetime applies to tokens issued from then on, and tokens already issued keep the expiry they were issued with.
+The audience is fixed once registered, since every workload asking for tokens for the relying party names it.
 
 The register presents each relying party with its audience, its token lifetime, how many machines and applications hold a grant for it, and when a token was last issued for it.
 
 Removing a relying party revokes every grant for it, and a request naming its audience is then refused as unknown.
+Removal is confirmed first, the confirmation saying how many grants it revokes.
+
+Registering, editing and removing a relying party are administrative actions recorded in the audit log, with who acted and when, and each grant a removal revokes is recorded as a revocation.
 
 ## Grants
 
@@ -80,7 +87,7 @@ Granting and revoking are administrative actions recorded in the audit log, with
 
 ## Presentation
 
-The identity provider has its own page among Canopy's settings, presenting the issuer, the discovery document's address, the signing keys, and the register of relying parties, where relying parties are added and removed.
+The identity provider has its own page among Canopy's settings, presenting the issuer, the discovery document's address, the signing keys, and the register of relying parties, where relying parties are added, edited and removed.
 
 A machine's edit page offers, for the machine and for each of its applications, a searchable choice of the registered relying parties it may obtain tokens for, beside the other permissions an operator holds over it.
 An application's choice also shows the subject its tokens carry, ready to copy into a relying party's rule.
