@@ -4,11 +4,11 @@ status: draft
 
 # Audit log of administrative actions
 
-A systematic record of who did what in Canopy, captured at the middleware or extractor level for every administrative action, with write and danger entries replicated to the backups as an append-only offsite copy.
+A systematic record of who did what in Canopy, captured at the middleware or extractor level for every administrative action, archived offsite in non-overlapping periods once it ages out of the working set.
 
 ## Context
 
-- The safety-mode gate (T2, spec SAFE) is shipped. Every handler on the administrative surface declares a grade (read-only, write, danger, plus danger reasons) as an OpenAPI extension, and one middleware (`crate::safety::enforce`) reads the grade back by matched method and path and decides each request against the caller's session. That middleware already knows the actor, the session, the session's mode, the operation and its grade, so it is the natural capture point.
+- The safety-mode gate (T2, spec SAFE) is shipped. Every handler on the administrative surface declares a grade (read-only, write, danger, plus danger reasons) as an OpenAPI extension, and one middleware (`crate::safety::enforce`) reads the grade back by matched method and path and decides each request against the caller's session. That layer already resolves the actor and the matched operation, so it is a candidate capture point. Only the place is shared: nothing about grades or modes goes into the log.
 - Per-feature provenance exists as roughly twenty `*_by` columns (`revoked_by`, `changed_by`, `resolved_by`, `held_by`, `restore_allowed_by`, …), plus the cached tailnet user table for avatars. Backup schedule layers keep their own change history (BKO).
 - An events table existed and was dropped (`2026-07-08…_drop_events`).
 - A5 (Canopy as an OIDC identity provider) waits on this card and wants its grant changes and token issuance to live here rather than in tables of its own. Its needs, from the comment on this card:
@@ -25,31 +25,78 @@ A systematic record of who did what in Canopy, captured at the middleware or ext
 
 ### What is logged
 
-- Every request on the administrative surface graded write or danger produces an entry.
-- Read-only requests produce one only where the handler is marked as a sensitive read (the SQL playground is the obvious first; the full list is open).
+- Whether a request produces an entry is the handler's own audit declaration, and nothing else. Every handler makes one, either audited (with its recorded arguments) or audit-silent, and a handler that declares neither fails the build, so being silent is a deliberate choice. It is orthogonal to the handler's safety grade: a read can be audited (the SQL playground, say) and a write can be audit-silent.
+- Safety modes are a guard on the operator's client against mistakes, not an audit concept, so an entry carries no grade, mode, or session.
 - Actors are operators (tailnet users), devices (a machine acting for itself or one of its applications), fleet-query access tokens, and Canopy itself (background work that changes things on its own).
-- Device requests produce an entry when they issue a credential or trust material (tokens, backup and restore credentials, certificates) or change Canopy's records beyond reporting status (enrolment, for instance). Status pushes and reads do not.
+- On the public server, the handlers that issue a credential or trust material (tokens, backup and restore credentials, certificates) or change Canopy's records beyond reporting status (enrolment, for instance) declare themselves audited. Status pushes and reads do not.
 - Canopy's own background work produces an entry only where a job opts in.
-- Fleet-query tool calls follow the same rule as the administrative surface: all its tools are read-only, so only those marked as sensitive reads are logged, with the access token as the actor.
+- Fleet-query tools declare themselves audited or not in the same way, and an audited call is logged with the access token as the actor.
 - Authorisation refusals are logged: a caller who is not an administrator reaching an administrative handler, and a device refused something it asked for (A5's refused token requests, with the reason).
-- Safety-mode refusals and actions that were permitted but errored are not logged.
+- Actions that were permitted but errored are not logged.
 
 ### What an entry holds
 
 - The actor, when, and the operation.
-- Of the request's arguments, only those the handler declares as recorded. Nothing is recorded by default, so a secret reaches the log only by someone declaring it. The declaration sits beside the handler's grade, the same place and the same way.
+- Of the request's arguments, only those the handler declares as recorded. Nothing is recorded by default, so a secret reaches the log only by someone declaring it. This is the same declaration that makes the handler audited.
 - Canopy's routes are mostly `POST /api/<module>/<fn>` with a JSON body, so the target of an action (which machine, which configuration) lives in the arguments too. The declared summary is what makes an entry say what it acted on.
 
 ### Writing as a condition of the action
 
-- An action whose entry cannot be written is not carried out. This holds for every logged action, not only danger, and matches what A5 needs for token issuance.
+- An action whose entry cannot be written is not carried out. This holds for every audited action, and matches what A5 needs for token issuance.
+
+### Archive
+
+- The offsite store is the log's archive, not a copy of it. Postgres holds the working set; once an entry is safely in the archive it can be removed from Postgres.
+- The archive is written in non-overlapping periods: each archived object covers one closed span of time, spans abut, and every entry is in exactly one of them. No entry is archived twice, so there are never N copies to reconcile.
+- Every entry is archived, whoever the actor.
+- A period is safe once its object has been written, read back and checked against what was sent, and is under object lock. Only then may its entries leave Postgres.
+- The archive lives in the recovery escrow's storage (ESC), which is already versioned and object-locked, under its own prefix. Archived entries are not encrypted to the escrow recipients, since Canopy reads them back.
+- The working set keeps 90 days. An entry leaves Postgres only once it is both archived and older than that. This covers A5's floor of 30 days for its per-key counts and lookups.
+- Some entry types, low in volume and high in importance, stay in the working set for longer. The handler's audit declaration says so.
+- Archived periods are kept forever. Object lock covers the escrow storage's required retention, and the objects stay after it expires.
+- An operator can ask for entries older than the working set, and Canopy fetches the archived periods covering them.
+- To be raised as an entry in this card's breakdown.
+
+### Self-alerts
+
+- The log's ranges are provisioned ahead like the other histories (HST), with the same self-alert as they run short: warning below two weeks of future range, failure below one. Running out stops every audited action, since writing is a condition of the action.
+- Archiving falling behind raises a self-alert (SELF): a warning when a closed period has gone unarchived past a delay, and a failure when the working set has grown past what it is meant to hold.
+
+### Reading the log
+
+- Any administrator can read every entry.
+- A log page lists entries newest first, filterable by actor, operation, time and target. Reaching past the working set fetches from the archive (above).
+- The fleet query interface can read entries too, limited to the working set.
+
+### Existing provenance
+
+- The per-feature who columns (`revoked_by`, `held_by`, `resolved_by`, …) are replaced: features read who from the log, and the columns are dropped. The when columns stay, as part of the record's own state. To be raised as an entry in this card's breakdown.
+- A page shows who did something only while the entry is in the working set. Past that it shows when, and the log page (reaching into the archive) answers who.
 
 ## Implementation options
 
+- History storage already keeps high-volume tables in weekly ranges (HST). Storing the log the same way lines archive periods up with Postgres ranges: archive a whole closed week as one object, confirm it landed, then drop that week's range. The period boundary is the range boundary, so non-overlap falls out of the storage rather than needing tracking per entry, and removing a week is a cheap drop rather than a bulk delete.
+  - Longer-lived entry types break the whole-range drop, since a week's range holds both kinds. Either keep them in a separate table, which can have its own ranges or none at all given the low volume, or move them out of a range before it is dropped.
+
 ## Open questions
+
 
 - [ ] Fail-closed with generic capture. The middleware sits outside the handler's transaction, so "no entry, no action" cannot come from sharing a transaction without touching handlers. Candidates: write the entry ahead of the handler and refuse if that fails, then settle it once the handler returns (which leaves an entry of unknown outcome if Canopy dies mid-request, arguably correct); or hand handlers a transaction-scoped recorder through an extractor (which edits handlers, the thing the card wants to avoid). Write-ahead also produces entries for actions that then error, which the decision above says are not logged, so they would be removed or settled as not carried out.
 
 ## Trade-offs
 
 ## Testing notes
+
+- A handler with no audit declaration fails the build; one declared silent produces no entry whatever its grade.
+- An audited read (SQL playground) produces an entry; an audit-silent write produces none.
+- An entry holds only the declared arguments; an undeclared secret argument never appears in it.
+- An entry carries no grade, mode or session.
+- An audited action whose entry cannot be written is refused and changes nothing.
+- An audited action that errors leaves no entry.
+- A non-administrator reaching an audited administrative handler produces a refusal entry; a safety-mode refusal produces none.
+- A device credential issuance produces an entry with the device as actor; a status push does not.
+- A closed period is archived as one object, read back, checked and locked, and only then leaves Postgres, and only once past 90 days.
+- Archived periods never overlap: re-running the archiver over an archived period writes nothing new.
+- The log page reaches past the working set into the archive; the fleet query interface does not.
+- A page shows who did something within the working window, and only when after it.
+- Running short of ranges, and archiving falling behind, each raise their self-alert and clear once fixed.
