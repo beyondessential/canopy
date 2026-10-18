@@ -1,5 +1,5 @@
 ---
-status: draft
+status: complete
 ---
 
 # Canopy as OIDC IdP for workload identity
@@ -24,12 +24,7 @@ Exploration of whether Canopy can act as an OIDC identity provider so canopy-aut
 
 ## Behaviour
 
-Sketch only.
-
-- The discovery document and JWKS are served at the issuer name itself by a dedicated discovery server (see "Discovery server").
-- An authenticated device endpoint (working name `POST /machines/self/identity-token {audience}`) returning a short-lived JWT. The device is resolved from its certificate, as for backup credentials.
-- Issuance is gated by an operator grant of audience to a machine, application or group, and is refused without one. Issuance is recorded before the token is returned.
-- Claims carry the machine, group, rank and application types so a relying party can scope its own rules.
+Split into the identity tokens spec (IDT, `specs/public-server/identity-tokens.md`) and the identity provider spec (IDP, `specs/private-server/identity-provider.md`), with a condition added to the self-alerts spec (SELF).
 
 ## Implementation options
 
@@ -92,7 +87,7 @@ Proposal, following `/backup-credentials` and the name endpoints.
 
 - Request: `audience` (required, the registered audience string, which the workload's configuration already carries; the registry's display name is mutable) and `application_type` (optional; absent means a machine token, present names the application of that type on the calling box, as the DNS endpoints do).
 - Response: `token`, `expires_at`, and `subject` (the `sub`, so a client can log it without decoding).
-- Every call mints a fresh token and `jti`; nothing is cached on either side. The existing per-device rate limiter applies.
+- Every call mints a fresh token and `jti`; nothing is cached on either side. Requests are rate limited per machine (the public server's limiter covers only enrolment and backup progress today, so this endpoint gets its own limit).
 - Refusals keep the *not you* (403) and *not now* (409) split:
   - 403 Identity token not granted: no grant for subject and audience.
   - 404 Identity audience unknown: no relying party with that audience, kept apart from "not granted" so a configuration typo reads as one.
@@ -129,7 +124,7 @@ Decided: the issuer is part of the Canopy instance's configuration, set in Pulum
 
 A Canopy instance with no issuer or no signing key configured issues nothing: the identity provider settings say so, as the certificate authority page does when no authority is configured, and grant controls stay hidden. Changing a configured issuer invalidates every relying party's registration, so it is a deliberate re-registration, not a tweak.
 
-The issuer is a dedicated name of our own (working example `https://idp.canopy.bes.au`, name to be workshopped), independent of the public server's device-facing host, since `iss` can never change without re-registering every relying party.
+The issuer is a dedicated name of our own, independent of the public server's device-facing host, since `iss` can never change without re-registering every relying party.
 
 Decided: the issuer name is routable from the start. Relying parties register in plain discovery mode, with no `discovery_base` or `explicit_url` workarounds, and strict relying parties that check the discovery document's `issuer` against where they fetched it work as they are.
 The domain is one we hold, so nobody else can ever serve discovery for it.
