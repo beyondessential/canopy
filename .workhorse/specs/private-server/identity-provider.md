@@ -90,5 +90,5 @@ Granting and revoking are administrative actions recorded in the audit log, with
 The identity provider has its own page among Canopy's settings, presenting the issuer, the discovery document's address, the signing keys, and the register of relying parties, where relying parties are added, edited and removed.
 
 A machine's edit page offers, for the machine and for each of its applications, a searchable choice of the registered relying parties it may obtain tokens for, beside the other permissions an operator holds over it.
-An application's choice also shows the subject its tokens carry, ready to copy into a relying party's rule.
-The choice is not offered while no relying party is registered or the Canopy instance issues no tokens, unless the machine or application already holds a grant, so a held grant can always be withdrawn.
+Each choice also shows the subject its tokens carry, ready to copy into a relying party's rule.
+The choice is not offered while no relying party is registered, the Canopy instance issues no tokens, or the machine is pending or belongs to no group, unless the machine or application already holds a grant, so a held grant can always be withdrawn.

@@ -47,7 +47,7 @@ Reasoning and rejected options: `.workhorse/working-docs/a5/working-doc.md`.
 
 - `fns/identity`: issuer and keys status, relying parties list/add/edit/remove (remove confirmation shows the grant count), grants get/set per machine and per application.
 - Settings tab "Identity provider" (`identity-provider-settings.html` mockup), after Certificate authority.
-- `MachineEdit`: multi-select `Autocomplete` of relying parties for the machine and each application (`identity-grants.html` mockup), hidden when none are registered and none held, mirroring `NameManagementGrants`. The application block shows its `sub` with a copy button.
+- `MachineEdit`: multi-select `Autocomplete` of relying parties for the machine and each application (`identity-grants.html` mockup), hidden when none are registered and none held, mirroring `NameManagementGrants`. The machine block and each application block show their `sub` with a copy button. Hidden as well for a pending or ungrouped machine, unless a grant is held.
 
 ### Outside this repo
 

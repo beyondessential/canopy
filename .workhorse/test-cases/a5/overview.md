@@ -69,7 +69,8 @@
 - [ ] Registering, editing and removing a relying party are in the audit log, and a removal records each grant it revokes (verifies spec: IDP)
 - [ ] The register shows each relying party's audience, lifetime, grant count and last issuance (verifies spec: IDP)
 - [ ] The machine edit page offers a searchable choice of relying parties for the machine and for each application, and saving grants and revokes accordingly (verifies spec: IDP)
-- [ ] The application's choice shows its `sub`, copyable (verifies spec: IDP)
+- [ ] The machine's choice and each application's choice show their `sub`, copyable (verifies spec: IDP)
+- [ ] A pending or ungrouped machine's edit page offers no identity token choice, for the machine or its applications (verifies spec: IDP)
 - [ ] With no relying party registered the choice is hidden, unless the subject already holds a grant (verifies spec: IDP)
 - [ ] The settings page shows each key's status, first served, last signed and thirty-day count (verifies spec: IDP)
 - [ ] Interoperability: a token from a staging instance is accepted by an Anthropic federation rule using the documented `sub` pattern, and the minted Anthropic token calls the Messages API
