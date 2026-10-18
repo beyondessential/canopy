@@ -32,8 +32,11 @@ The only internet-facing part of the identity provider therefore holds nothing s
 Signing keys are P-256 keys held by a managed key service that signs on Canopy's behalf and never releases the private key, so no copy of a signing key exists anywhere for Canopy to lose.
 
 Every configured key is published in the key set.
-Canopy signs with the most recently added key once that key has been served at the issuer for long enough that relying parties' cached key sets include it, and with the key before it until then.
-Canopy judges that from the key set as actually served at the issuer, which it fetches and observes, rather than from its own configuration, because the discovery component and the device API take up a configuration change separately.
+Canopy signs with the newest configured key that has matured, a key maturing once it has been served at the issuer for long enough that relying parties' cached key sets include it.
+The first key a Canopy instance is configured with is mature from the outset, there being no earlier key for relying parties to rely on meanwhile.
+Signing only moves forward: once Canopy has signed with a key, it never signs with an older one.
+Canopy judges maturity from the key set as actually served at the issuer, which it fetches and observes, rather than from its own configuration, because the discovery component and the device API take up a configuration change separately.
+The moment Canopy first observes a key served is recorded once and stands.
 
 A key that no longer signs can be removed once every token it signed has expired, and Canopy presents that moment for each key, so removing a key from the configuration follows Canopy's record rather than an estimate.
 Each key is presented with whether it is signing, published and waiting to sign, or removable, when it was first served, when it last signed, and how many tokens it signed in the last thirty days.

@@ -20,6 +20,9 @@
 - [ ] A machine exceeding the request limit is refused, 429 (verifies spec: IDT)
 - [ ] With no issuer or no signing key configured, a request fails with 502 (verifies spec: IDT, IDP)
 - [ ] Revoking a grant refuses the next request (verifies spec: IDP)
+- [ ] A pending machine with no grant is refused as not granted, not as not placed (verifies spec: IDT)
+- [ ] An unknown audience with a nonexistent application type is refused as unknown audience (verifies spec: IDT)
+- [ ] A rate-limited caller not bound to a live machine is refused as rate limited (verifies spec: IDT)
 - [ ] An archived machine keeps its grants, obtains nothing while archived, and obtains tokens again once restored (verifies spec: IDP)
 - [ ] Removing a relying party revokes its grants and later requests naming its audience are refused as unknown (verifies spec: IDP)
 
@@ -44,6 +47,8 @@
 - [ ] The discovery server serves the discovery document at `<issuer>/.well-known/openid-configuration` with the configured issuer, and the JWKS it names (verifies spec: IDP)
 - [ ] The discovery server answers nothing on any other path (verifies spec: IDP)
 - [ ] A newly configured key is published but not used for signing until it has been observed served long enough; the previous key signs meanwhile (verifies spec: IDP)
+- [ ] On a fresh instance, the first configured key signs immediately, before any maturation interval has passed (verifies spec: IDP)
+- [ ] Once a key has signed, an older configured key is never selected for signing again (verifies spec: IDP)
 - [ ] A configured key never observed served raises the self-alert naming it, while signing stays on the previous key (verifies spec: SELF, IDP)
 - [ ] A served key that is not configured raises the self-alert naming it (verifies spec: SELF)
 - [ ] An unreachable issuer, or a discovery document naming a different issuer, raises the self-alert; it clears when served documents match the configuration again (verifies spec: SELF)

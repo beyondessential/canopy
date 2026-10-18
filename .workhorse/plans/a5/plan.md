@@ -18,7 +18,8 @@ Reasoning and rejected options: `.workhorse/working-docs/a5/working-doc.md`.
 ### Key maturation
 
 - The jobs process fetches `<issuer>/.well-known/openid-configuration` and the JWKS on a short cadence and records, per `kid`, when it was first seen served.
-- The signing key is the newest configured key first seen served at least 30 minutes ago (comfortably beyond Anthropic's 15-minute guidance); otherwise the newest one that qualifies. With none qualifying (first deployment), sign with the newest configured key served at all, and refuse with 502 if none is served.
+- The signing key is the newest configured key first seen served at least 30 minutes ago (comfortably beyond Anthropic's 15-minute guidance). The first key ever configured is mature from the outset. Signing never moves to an older key than one already used, so persist the newest key signed with and never select below it.
+- `first_served_at` is written once per `kid` and never updated.
 - The same fetch drives the self-alert (working name `idp-discovery`, `canopy` source): unreachable, wrong issuer, or JWKS differing from configuration, with the differing `kid`s in the detail.
 - Removable: not the signing key, and last signed (from U2's log) plus the longest relying-party lifetime is in the past.
 
@@ -39,7 +40,7 @@ Reasoning and rejected options: `.workhorse/working-docs/a5/working-doc.md`.
 
 - `POST /identity-tokens`, `ServerDevice` extractor (machine role). Args: `audience`, optional `application_type`. Response: `token`, `expires_at`, `subject`.
 - New `AppError` variants and `ERRORS.md` headings: Identity token not granted (403), Identity audience unknown (404), Identity subject not found (404), Identity subject not placed (409). Existing: Device has no server (412), Rate limited (429), Upstream (502).
-- Per-machine limit through the existing `RateLimiter` (it covers only enrolment and backup progress today).
+- Per-caller limit through the existing `RateLimiter` (it covers only enrolment and backup progress today), applied first, before the live-machine check. Then audience, subject, grant, placement, signer, in that order (IDT, "Refusals").
 - Additive; run `just gen-openapi && just gen-api` and commit the document and client.
 
 ### Private API and UI

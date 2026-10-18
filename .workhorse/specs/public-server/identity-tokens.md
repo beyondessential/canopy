@@ -19,7 +19,7 @@ With one, the subject is the application of that type on the calling machine, na
 
 Each request mints a new token with an identifier of its own, and Canopy caches nothing between requests.
 A relying party that accepts each token only once is therefore always given one it has not seen, and a client asks again whenever it needs a token rather than keeping one.
-Requests are limited per machine, so a client stuck in a loop cannot flood the audit log or the key service.
+Requests are limited per caller, so a client stuck in a loop cannot flood the audit log or the key service.
 
 The response carries the token, when it expires, and the subject it names, so a client can log what it was given without decoding the token.
 
@@ -27,13 +27,18 @@ The response carries the token, when it expires, and the subject it names, so a 
 
 A refusal tells the client whether waiting can help: a decision only an operator can change is told apart from a condition expected to clear.
 
-A subject that holds no grant for the relying party is refused as not granted (403).
-An audience that matches no registered relying party is refused as unknown (404), apart from not granted, so a mistyped audience in a workload's configuration reads as a typo rather than as a missing grant.
-An application type that names no live application on the calling machine is refused as no such subject (404); an archived application is not live.
-A subject whose machine is pending or belongs to no group is refused as not placed (409), naming what is missing, and the refusal clears once an operator ranks or groups the machine (see [GRP](../servers/groups.md), "Environments").
-A caller that is not bound to a live machine is refused as on every machine endpoint (412).
-A machine asking faster than Canopy accepts is refused as rate limited (429).
-When Canopy cannot sign, because its key service is unavailable or because the Canopy instance has no issuer or signing key configured, the request fails as an upstream failure (502).
+Every request is checked in the same order, stopping at the first refusal, so the refusal a client sees is the same however many conditions hold:
+
+1. A caller asking faster than Canopy accepts is refused as rate limited (429).
+2. A caller that is not bound to a live machine is refused as on every machine endpoint (412).
+3. An audience that matches no registered relying party is refused as unknown (404), apart from not granted, so a mistyped audience in a workload's configuration reads as a typo rather than as a missing grant.
+4. An application type that names no live application on the calling machine is refused as no such subject (404); an archived application is not live.
+5. A subject that holds no grant for the relying party is refused as not granted (403).
+6. A subject whose machine is pending or belongs to no group is refused as not placed (409), naming what is missing, and the refusal clears once an operator ranks or groups the machine (see [GRP](../servers/groups.md), "Environments").
+7. When Canopy cannot sign, because its key service is unavailable or because the Canopy instance has no issuer or signing key configured, the request fails as an upstream failure (502).
+
+The rate limit comes first so a client stuck in a loop is held back whatever it asks for.
+The grant comes before placement so a subject missing both learns first of the one waiting cannot clear.
 
 ## The token
 
