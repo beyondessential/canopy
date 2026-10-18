@@ -80,20 +80,16 @@ A systematic record of who did what in Canopy, captured at the middleware or ext
 - History storage already keeps high-volume tables in weekly ranges (HST). Storing the log the same way lines archive periods up with Postgres ranges: archive a whole closed week as one object, confirm it landed, then drop that week's range. The period boundary is the range boundary, so non-overlap falls out of the storage rather than needing tracking per entry, and removing a week is a cheap drop rather than a bulk delete.
   - Longer-lived entry types break the whole-range drop, since a week's range holds both kinds. Either keep them in a separate table, which can have its own ranges or none at all given the low volume, or move them out of a range before it is dropped.
 
-- Temporal tables for the state side. The log records events (who did what, when); a temporal table records state over time (what held, during which span). The two divide the work the who columns and history tables do today:
-  - What Postgres actually offers: application-time periods only. PG18 shipped `WITHOUT OVERLAPS` primary and unique keys and `PERIOD` foreign keys over range columns. PG19 adds only a temporal-tables documentation section and `range_minus_multi()`; `UPDATE`/`DELETE … FOR PORTION OF` was in the 19 betas but reverted on 15 September 2026, from 19 and from the development branch alike, over a silent lost-update anomaly at READ COMMITTED. No system-versioned (`SYSTEM_TIME`) tables in either. So what is usable needs PG18, and splitting a period stays a manual shorten-and-insert, done under a lock.
-  - Fits: backup schedule layers (each version valid over a span, never two at once for a layer), A5's grants (a relying party granted on a machine or application over a span, revocation closing it), restore windows, maintenance windows, inventory leases. A `WITHOUT OVERLAPS` key makes "never two at once" a constraint rather than handler logic.
-  - Effect on the fold: schedule history held as a temporal table keeps what and when for as long as the record exists, with the log adding who within its window. That would make it a temporal table rather than log entries.
-  - The deployed Postgres version is not established here; CI uses the runner's preinstalled one.
-
 ## Open questions
 
-- [ ] Temporal tables: adopt them for state history (schedule layers, A5 grants, windows), with the log carrying only who? This would change the decision to fold backup schedule history into the log. Gated on the deployed Postgres being 18 or later, not 19.
 
 
 - [ ] Fail-closed with generic capture. The middleware sits outside the handler's transaction, so "no entry, no action" cannot come from sharing a transaction without touching handlers. Candidates: write the entry ahead of the handler and refuse if that fails, then settle it once the handler returns (which leaves an entry of unknown outcome if Canopy dies mid-request, arguably correct); or hand handlers a transaction-scoped recorder through an extractor (which edits handlers, the thing the card wants to avoid). Write-ahead also produces entries for actions that then error, which the decision above says are not logged, so they would be removed or settled as not carried out.
 
 ## Trade-offs
+
+- Temporal tables for state history, rejected. With the deployment on PG18, `WITHOUT OVERLAPS` keys could hold schedule layers, A5's grants and the various windows as state over time, leaving the log to say only who. But the log is not a store for history: it is the record of what was done, written as a condition of doing it and archived offsite under lock. Moving the changes themselves into temporal tables would take them out of that record. Schedule history folds into the log as decided.
+  - For reference: Postgres offers application-time periods only. PG18 has `WITHOUT OVERLAPS` keys and `PERIOD` foreign keys; PG19 adds a documentation section and `range_minus_multi()`; `UPDATE`/`DELETE … FOR PORTION OF` was reverted from 19 and the development branch on 15 September 2026. Neither has system-versioned tables. A feature that wants "never two at once" as a constraint can still use `WITHOUT OVERLAPS` on its own state; that is separate from auditing.
 
 ## Testing notes
 
