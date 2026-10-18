@@ -46,6 +46,7 @@ Reasoning and rejected options: `.workhorse/working-docs/a5/working-doc.md`.
 ### Private API and UI
 
 - `fns/identity`: issuer and keys status, relying parties list/add/edit/remove (remove confirmation shows the grant count), grants get/set per machine and per application.
+- Safety-mode grades, by SAFE's rules: reads are read-only; granting is write (an already-trusted machine obtaining credentials); revoking, registering and editing a relying party are write; removing a relying party is danger, declaring "cannot be undone" since its grants go with it.
 - Settings tab "Identity provider" (`identity-provider-settings.html` mockup), after Certificate authority.
 - `MachineEdit`: multi-select `Autocomplete` of relying parties for the machine and each application (`identity-grants.html` mockup), hidden when none are registered and none held, mirroring `NameManagementGrants`. The machine block and each application block show their `sub` with a copy button. Hidden as well for a pending or ungrouped machine, unless a grant is held.
 
@@ -71,3 +72,4 @@ Reasoning and rejected options: `.workhorse/working-docs/a5/working-doc.md`.
 - [ ] Settings tab and machine edit grants UI, with Playwright coverage
 - [ ] ops changes (separate repo)
 - [ ] bestool local endpoint (separate repo)
+- [ ] Link IDT's and IDP's audit-log references to U2's spec once it exists
