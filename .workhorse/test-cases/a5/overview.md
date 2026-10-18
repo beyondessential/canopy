@@ -23,7 +23,8 @@
 - [ ] A pending machine with no grant is refused as not granted, not as not placed (verifies spec: IDT)
 - [ ] An unknown audience with a nonexistent application type is refused as unknown audience (verifies spec: IDT)
 - [ ] A rate-limited caller not bound to a live machine is refused as rate limited (verifies spec: IDT)
-- [ ] An archived machine keeps its grants, obtains nothing while archived, and obtains tokens again once restored (verifies spec: IDP)
+- [ ] An archived machine keeps its grants, obtains nothing while archived, and obtains tokens again once restored and re-enrolled (verifies spec: IDP)
+- [ ] With no issuer or signing key configured, grant choices are hidden except where a grant is already held (verifies spec: IDP)
 - [ ] Removing a relying party revokes its grants and later requests naming its audience are refused as unknown (verifies spec: IDP)
 
 ## Token shape

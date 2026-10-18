@@ -16,7 +16,7 @@ The issuer is a name of its own, apart from the device API's, because it is fixe
 Canopy reads the configuration when it starts, so a change takes effect once Canopy restarts.
 
 A Canopy instance with no issuer or no signing key configured issues no tokens.
-Its identity provider settings present that, and the grant controls are not offered.
+Its identity provider settings present that, and the grant choices are withheld (see "Presentation").
 
 ## Discovery
 
@@ -63,7 +63,8 @@ A machine's grant covers tokens naming the machine itself, and an application's 
 Neither covers the other, because a relying party sees them as different principals, and a machine carrying several workloads must not let one stand in for another.
 
 Revoking a grant refuses the subject's next request; tokens already issued run until they expire.
-An archived machine or application keeps its grants but obtains nothing while archived, since an archived machine cannot authenticate and an archived application is not live, and restoring it returns what it held.
+An archived machine or application keeps its grants but obtains nothing while archived, since an archived machine cannot authenticate and an archived application is not live, and restoring it returns its grants.
+A restored machine obtains tokens again once it is enrolled again, its identity having been released when it was archived (see [FLT](../servers/overview.md), "Archival").
 Granting and revoking are administrative actions recorded in the audit log, with who acted and when.
 
 ## Presentation
@@ -72,4 +73,4 @@ The identity provider has its own page among Canopy's settings, presenting the i
 
 A machine's edit page offers, for the machine and for each of its applications, a searchable choice of the registered relying parties it may obtain tokens for, beside the other permissions an operator holds over it.
 An application's choice also shows the subject its tokens carry, ready to copy into a relying party's rule.
-The choice is not offered while no relying party is registered, unless the machine or application already holds a grant, so a held grant can always be withdrawn.
+The choice is not offered while no relying party is registered or the Canopy instance issues no tokens, unless the machine or application already holds a grant, so a held grant can always be withdrawn.

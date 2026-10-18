@@ -65,10 +65,11 @@ An application's subject is `group:<group id>:rank:<rank>:application:<applicati
 The subject carries what a relying party able to match only on the subject needs to select a set of subjects by pattern: every production Tamanu central in one group, or every production Tamanu central in the fleet.
 Its segments run broadest first, so a prefix selects a group, then an environment within it, then a kind of application within that.
 Because the subject encodes group and rank, it changes when its machine moves group or rank, and a rule written for one environment stops matching a machine that leaves it.
-An application's machine, names and tags are carried in claims and never in the subject, so the subject changes only when something a rule selects on changes.
+The machine an application runs on and its group's name are carried in claims and never in the subject, so the subject changes only when something a rule selects on changes.
 
 Every segment value is drawn from lowercase letters, digits and hyphens: identifiers, rank names, and application types, which are slugs (see [APP](../servers/application-types.md)).
-So no value contains the separator, a wildcard in a pattern cannot span from one segment into the next, and a label appearing as a value cannot be mistaken for the label.
+So no value contains the separator, and a label appearing as a value cannot be mistaken for the label.
+Each label appears once, in a fixed position, so a pattern's text between separators matches only the segment it was written for, even where a wildcard before it takes in several segments.
 Canopy issues no token whose subject would carry a value outside that alphabet.
 
 The trailing separator terminates every segment, the last included.
@@ -84,5 +85,5 @@ A client exchanges a token with its relying party as soon as it obtains one, so 
 ## Recording
 
 Every issuance and every refusal is recorded in Canopy's audit log: the subject, the identity of the calling machine, the relying party, and either the token's identifier, signing key and expiry, or the reason for the refusal.
-The record is written before the response is returned, and a token whose record cannot be written is not issued, so Canopy can account for every token it has signed.
+The record is written before the response is returned, and a token whose record cannot be written is not issued, so Canopy can account for every token it has issued.
 The token itself is never recorded.
