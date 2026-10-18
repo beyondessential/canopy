@@ -19,7 +19,8 @@ A systematic record of who did what in Canopy, captured at the middleware or ext
   - lookup by fields in an entry's detail, and counts per field over a window (key rotation counts uses per signing key)
   - identifiers only, never the credential
   - grants and revocations logged with who and when, so the feature carries no who/when columns
-- The card branch is well behind main (the SAFE spec and the grading middleware are on main only). Rebase before implementing.
+- Several specs already say actions "are audited", ahead of any log existing: maintenance windows, Kubernetes sleep and wake, inventory leases and variables (with inventory reads logged with their intent), upgrade plans, restore-replica declarations and issuances, reporting-schema declarations, and the escrow recovery ceremony. Each is a handler that declares itself audited once this lands.
+- Feature-specific audit tables exist alongside the who columns: `backup_credential_issuances` (every STS issuance to a device) and `backup_schedule_history` (shown in the schedule editor, BKO). `sql_playground_history` is an operator convenience rather than an audit record.
 
 ## Behaviour
 
@@ -71,6 +72,7 @@ A systematic record of who did what in Canopy, captured at the middleware or ext
 ### Existing provenance
 
 - The per-feature who columns (`revoked_by`, `held_by`, `resolved_by`, …) are replaced: features read who from the log, and the columns are dropped. The when columns stay, as part of the record's own state. To be raised as an entry in this card's breakdown.
+- The feature-specific audit tables fold in the same way: backup credential issuances and backup schedule history become log entries and the tables are dropped. The schedule editor shows history from the log, so within the working window plus any entry type kept longer. Part of the same breakdown entry.
 - A page shows who did something only while the entry is in the working set. Past that it shows when, and the log page (reaching into the archive) answers who.
 
 ## Implementation options
