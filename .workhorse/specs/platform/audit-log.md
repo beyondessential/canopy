@@ -9,20 +9,32 @@ The log is written as a condition of the action it records, and is archived offs
 
 ## What is recorded
 
+The log records actions: what was done, by whom, to what.
+It is not a log of requests, so an entry says what happened rather than what a caller sent.
+
 Every handler on the operator surface, the device API, and the fleet query interface declares whether it is audited or audit-silent, and a handler that declares neither fails the build.
 Being silent is therefore a deliberate choice rather than something a new handler slips into.
-An audited handler produces an entry each time it acts; a silent one never does.
+An audited handler declares the actions it takes, and records an entry for each action it takes.
+One request can take several actions, as a bulk change does, and then records an entry for each.
+An audited handler that completes without recording an action, or records one it did not declare, fails, and what it changed is rolled back.
+A silent handler never records an entry.
 
 Whether a handler is audited is independent of its safety grade (see [SAFE](../private-server/safety-modes.md)).
 A read can be audited, as running a query in the SQL playground is, and a change can be silent.
-An entry carries nothing of safety modes: no grade, no mode, and no session.
 
 On the device API, the handlers that issue a credential or trust material, or that change Canopy's records beyond reporting status, are audited.
 Reporting status and reading are silent.
 
-Canopy's own background work produces an entry where a job declares the change it makes worth recording.
+Canopy's own background work records an entry where a job declares the change it makes worth recording.
 
 An action that errors is rolled back and leaves no entry, with one exception: an action with an outside effect (see "Writing as a condition of the action").
+
+## Actions
+
+Every entry names its action from Canopy's catalogue of actions, such as revoking a certificate, declaring a maintenance window, or issuing restore credentials.
+An action names a kind of thing done, never one instance of it: what varies between instances is in the entry's detail.
+An action's name is stable, and does not change when the operator interface or an API is reorganised, so a search by action reaches the whole log, the archive included.
+An action is recorded the same way whichever surface it is taken through.
 
 ## Actors
 
@@ -35,20 +47,22 @@ Every entry names its actor, which is one of:
 
 ## Refusals
 
-A caller refused for authorisation produces a refusal entry, naming the caller as far as it was identified, the operation it asked for, and the reason it was refused.
+A caller refused for authorisation produces a refusal entry, naming the caller as far as it was identified, the action it asked for, and the reason it was refused.
+A caller refused before the handler has run is recorded as asking for the actions that handler declares.
 This covers a caller who is not an administrator reaching an audited operator handler, and a device refused something it asked for, such as a credential it holds no grant for.
 A request refused for its safety mode produces no entry.
 
 ## What an entry holds
 
-An entry holds when it happened, its actor, the operation, and those of the request's arguments the handler declares as recorded.
-Nothing else from the request is recorded, so an argument reaches the log only by being declared.
-The declared arguments are what make an entry say what it acted on: the machine, the group, the configuration.
+An entry holds when it happened, its actor, its action, the records it acted on, and the action's detail.
+The records acted on are the machines, groups, applications, configurations, credentials and the like that the action concerned, and an action that creates a record names the record it created.
+The detail is what the action defines as worth knowing about it: the reason given for a revocation, the intent a lease was taken with, what the action produced.
+Nothing reaches an entry that its action does not define.
 
 An entry holds identifiers, never a secret.
-A credential issued is recorded by its identifier, and a secret argument is never declared as recorded.
+A credential issued is recorded by its identifier, and no action holds a secret in its detail.
 
-Entries can be looked up by the values of their recorded arguments, and counted by those values over a window of time.
+Canopy can look entries up by the records they acted on and by values in their detail, and count them by those values over a window of time.
 
 ## Writing as a condition of the action
 
@@ -63,7 +77,7 @@ A pending entry that is never confirmed stands, and is presented as unconfirmed,
 
 Canopy's database holds the recent log, stored in weekly ranges provisioned ahead like the other histories (see [HST](history-storage.md)).
 An entry stays there for ninety days.
-A handler's declaration can keep its entries for a year instead, for entries that are few and matter long after the fact.
+An action can be kept for a year instead, where its entries are few and matter long after the fact.
 An entry leaves the database only once its retention has passed and its week has been archived; an unarchived week is never removed, however old.
 
 ## Archive
@@ -86,7 +100,7 @@ Object lock protects each one for the escrow storage's required retention, and t
 ## Reading the log
 
 Any administrator can read the whole log from the operator interface.
-The log page lists entries newest first, and can be filtered by actor, operation, time, and the thing acted on.
+The log page lists entries newest first, and can be filtered by actor, action, time, and the records acted on.
 A time range reaching back past what the database holds is answered from the archive, fetching the weeks it covers.
 
 The fleet query interface offers the log to any caller it serves, over what the database holds.

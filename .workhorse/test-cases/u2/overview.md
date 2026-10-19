@@ -7,13 +7,17 @@ Covers this card's part of [AUD](../../specs/platform/audit-log.md). Archive and
 - [ ] A route with no audit clause fails to compile (verifies spec: AUD#what-is-recorded)
 - [ ] An audited route whose handler does not take the audit extractor fails to compile
 - [ ] An audit-silent write produces no entry; an audited read (SQL playground) produces one (verifies spec: AUD#what-is-recorded)
+- [ ] An audited handler that succeeds without recording an action fails and its change is rolled back (verifies spec: AUD#what-is-recorded)
+- [ ] An audited handler recording an action its route does not declare fails and its change is rolled back (verifies spec: AUD#what-is-recorded)
+- [ ] A bulk change records one entry per action (verifies spec: AUD#what-is-recorded)
 
 ## Entries
 
-- [ ] An entry holds when, actor, operation and the declared fields only; an undeclared argument, including a secret, never appears (verifies spec: AUD#what-an-entry-holds)
-- [ ] An entry carries no grade, mode or session (verifies spec: AUD#what-is-recorded)
-- [ ] A field renamed for serde is recorded under the name the request uses
-- [ ] Entries are found by a recorded value and counted by it over a window (verifies spec: AUD#what-an-entry-holds)
+- [ ] An entry holds when, actor, action, the records acted on and the action's detail; a secret sent in the request never appears (verifies spec: AUD#what-an-entry-holds)
+- [ ] An action that creates a record names the record it created (verifies spec: AUD#what-an-entry-holds)
+- [ ] A credential issuance records the issued credential's identifier (verifies spec: AUD#what-an-entry-holds)
+- [ ] An action's name is unaffected by renaming the route that takes it (verifies spec: AUD#actions)
+- [ ] Entries are found by a record acted on and by a detail value, and counted by a detail value over a window (verifies spec: AUD#what-an-entry-holds)
 
 ## Actors
 
@@ -32,12 +36,12 @@ Covers this card's part of [AUD](../../specs/platform/audit-log.md). Archive and
 
 ## Refusals
 
-- [ ] A non-administrator reaching an audited operator handler leaves a refusal entry with the reason (verifies spec: AUD#refusals)
+- [ ] A non-administrator reaching an audited operator handler leaves a refusal entry with the reason, naming the handler's declared actions (verifies spec: AUD#refusals)
 - [ ] A safety-mode refusal leaves no entry (verifies spec: AUD#refusals)
 
 ## Reading
 
-- [ ] The log page lists entries newest first and filters by actor, operation, time, and the thing acted on (verifies spec: AUD#reading-the-log)
+- [ ] The log page lists entries newest first and filters by actor, action, time, and the records acted on (verifies spec: AUD#reading-the-log)
 - [ ] A non-administrator cannot reach the log page (verifies spec: AUD#reading-the-log)
 - [ ] "Find audit entries" returns entries with the same filters to any caller of the fleet query interface (verifies spec: MCP#audit-log)
 
