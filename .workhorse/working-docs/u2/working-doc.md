@@ -1,5 +1,5 @@
 ---
-status: draft
+status: complete
 ---
 
 # Audit log of administrative actions

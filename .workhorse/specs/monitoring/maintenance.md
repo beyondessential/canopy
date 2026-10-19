@@ -20,7 +20,7 @@ Turning a machine's monitoring off is unbounded, and a switch with nothing to tu
 
 An operator declares a window over one application, one machine, one group, or one of a group's environments, giving the time it is expected to end and, optionally, a note saying what is being done.
 Canopy records who declared it and when, alongside the expected end and the note.
-Declaring, amending, and lifting are administrative actions and are audited (see [ADM](../private-server/admin-access.md)).
+Declaring, amending, and lifting are administrative actions and are audited (see [AUD](../platform/audit-log.md)).
 
 A window over a machine covers the machine's own checks and those of every application running on it.
 Taking a box down to patch it stops everything on it, so that is one declaration however many workloads, and an operator patching a host never has to name what it runs.

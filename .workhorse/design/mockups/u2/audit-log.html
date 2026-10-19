@@ -1,0 +1,573 @@
+<!-- spec: platform/audit-log.md -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Audit log</title>
+<style>
+	/* MUI v6 light theme defaults, with Canopy's palette from theme.ts:
+	   primary #388e3c (leaf), secondary #32669a (sky). */
+	:root {
+		--primary: #388e3c;
+		--secondary: #32669a;
+		--error: #d32f2f;
+		--warning: #ed6c02;
+		--text: rgba(0, 0, 0, 0.87);
+		--text-2: rgba(0, 0, 0, 0.6);
+		--divider: rgba(0, 0, 0, 0.12);
+		--input-border: rgba(0, 0, 0, 0.23);
+		--hover: rgba(0, 0, 0, 0.04);
+		--font: "Roboto", "Helvetica", "Arial", sans-serif;
+	}
+	* { box-sizing: border-box; }
+	body {
+		margin: 0;
+		background: #fff;
+		color: var(--text);
+		font-family: var(--font);
+		font-size: 1rem;
+		line-height: 1.5;
+		letter-spacing: 0.00938em;
+		-webkit-font-smoothing: antialiased;
+	}
+	a { color: inherit; }
+	svg.icon { width: 1em; height: 1em; fill: currentColor; flex: none; }
+
+	/* AppBar position="static" color="default" elevation={1} */
+	.appbar {
+		background: #f5f5f5;
+		color: var(--text);
+		box-shadow: 0px 2px 1px -1px rgba(0,0,0,0.2), 0px 1px 1px 0px rgba(0,0,0,0.14), 0px 1px 3px 0px rgba(0,0,0,0.12);
+	}
+	.toolbar {
+		display: flex;
+		align-items: center;
+		gap: 16px;
+		min-height: 48px;
+		padding: 0 24px;
+	}
+	.brand {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-right: 16px;
+		color: var(--primary);
+		text-decoration: none;
+	}
+	.brand svg { width: 24px; height: 24px; }
+	.brand span {
+		font-size: 1.25rem;
+		font-weight: 500;
+		line-height: 1.6;
+		letter-spacing: 0.0075em;
+	}
+	.nav {
+		text-decoration: none;
+		color: var(--text-2);
+		font-weight: 500;
+	}
+	.nav.active { color: var(--secondary); }
+	.badge-wrap { position: relative; display: inline-flex; }
+	.badge {
+		position: absolute;
+		top: 0;
+		right: 0;
+		transform: translate(50%, -50%);
+		min-width: 20px;
+		height: 20px;
+		padding: 0 6px;
+		border-radius: 10px;
+		background: var(--error);
+		color: #fff;
+		font-size: 0.75rem;
+		font-weight: 500;
+		line-height: 20px;
+		text-align: center;
+	}
+	.spacer { flex: 1; }
+	.mode {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		padding: 4px 10px;
+		border: 1px solid var(--divider);
+		border-radius: 16px;
+		background: #fff;
+		color: var(--text-2);
+		font: 500 0.8125rem/1.75 var(--font);
+		letter-spacing: 0.02857em;
+	}
+	.mode::before {
+		content: "";
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: currentColor;
+	}
+	.external { display: inline-flex; align-items: center; gap: 4px; }
+
+	/* Container maxWidth="lg" sx={{ py: 3 }} */
+	.container {
+		max-width: 1200px;
+		margin: 0 auto;
+		padding: 24px;
+	}
+
+	/* Settings tabs */
+	.tabs {
+		display: flex;
+		border-bottom: 0;
+		margin-bottom: 16px;
+		overflow-x: auto;
+		scrollbar-width: none;
+	}
+	.tab {
+		flex: none;
+		min-width: 90px;
+		max-width: 360px;
+		min-height: 48px;
+		padding: 12px 16px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 0.875rem;
+		font-weight: 500;
+		line-height: 1.25;
+		letter-spacing: 0.02857em;
+		text-transform: uppercase;
+		color: var(--text-2);
+		text-decoration: none;
+		position: relative;
+	}
+	.tab.selected { color: var(--primary); }
+	.tab.selected::after {
+		content: "";
+		position: absolute;
+		left: 0;
+		right: 0;
+		bottom: 0;
+		height: 2px;
+		background: var(--primary);
+	}
+
+	.stack { display: flex; flex-direction: column; gap: 24px; }
+	.paper {
+		background: #fff;
+		border: 1px solid var(--divider);
+		border-radius: 4px;
+	}
+
+	/* Filter bar, as on Incidents */
+	.filters {
+		padding: 16px;
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 16px;
+	}
+	.field {
+		position: relative;
+		min-width: 200px;
+		height: 40px;
+		border: 1px solid var(--input-border);
+		border-radius: 4px;
+		display: flex;
+		align-items: center;
+		padding: 0 14px;
+		font-size: 1rem;
+		color: var(--text);
+		background: #fff;
+	}
+	.field.select { padding-right: 32px; }
+	.field label {
+		position: absolute;
+		top: -9px;
+		left: 9px;
+		padding: 0 5px;
+		background: #fff;
+		font-size: 0.75rem;
+		line-height: 1.4375em;
+		color: var(--text-2);
+	}
+	.field.empty label {
+		top: 8px;
+		left: 14px;
+		padding: 0;
+		font-size: 1rem;
+		background: none;
+	}
+	.field .arrow {
+		position: absolute;
+		right: 7px;
+		top: calc(50% - 12px);
+		width: 24px;
+		height: 24px;
+		fill: rgba(0, 0, 0, 0.54);
+	}
+	.refresh {
+		margin-left: auto;
+		width: 30px;
+		height: 30px;
+		border: 0;
+		border-radius: 50%;
+		background: none;
+		color: rgba(0, 0, 0, 0.54);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 20px;
+		cursor: pointer;
+	}
+	.refresh:hover { background: var(--hover); }
+
+	/* Table size="small" */
+	table { width: 100%; border-collapse: collapse; }
+	th, td {
+		padding: 6px 16px;
+		font-size: 0.875rem;
+		line-height: 1.43;
+		letter-spacing: 0.01071em;
+		text-align: left;
+		vertical-align: middle;
+		border-bottom: 1px solid rgb(224, 224, 224);
+	}
+	th {
+		font-weight: 500;
+		line-height: 1.5rem;
+		color: var(--text);
+	}
+	tbody tr:not(.archive):hover { background: var(--hover); }
+	td.when { white-space: nowrap; }
+	td.when span { cursor: default; }
+
+	.actor {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		white-space: nowrap;
+	}
+	.avatar {
+		width: 24px;
+		height: 24px;
+		border-radius: 50%;
+		background: #bdbdbd;
+		color: #fff;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 13.2px;
+		flex: none;
+		overflow: hidden;
+	}
+	.avatar svg { width: 15px; height: 15px; fill: #fff; }
+	.avatar.canopy svg { width: 24px; height: 24px; }
+	.caption {
+		font-size: 0.75rem;
+		line-height: 1.66;
+		letter-spacing: 0.03333em;
+		color: var(--text-2);
+	}
+	.mono { font-family: monospace; }
+
+	/* MuiLink underline="hover", as in TargetName */
+	.link {
+		color: var(--primary);
+		text-decoration: none;
+	}
+	.link:hover { text-decoration: underline; }
+	.trail { color: var(--text-2); }
+
+	.args {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		column-gap: 16px;
+		row-gap: 2px;
+	}
+	.arg { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+	.arg .k { color: var(--text-2); font-size: 0.75rem; letter-spacing: 0.03333em; }
+	.arg .v.mono {
+		max-width: 34ch;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	/* Chip size="small" variant="outlined" */
+	.chip {
+		display: inline-flex;
+		align-items: center;
+		height: 24px;
+		padding: 0 7px;
+		border: 1px solid #bdbdbd;
+		border-radius: 16px;
+		font-size: 0.8125rem;
+		line-height: 1;
+		color: var(--text);
+		white-space: nowrap;
+		text-transform: capitalize;
+	}
+	.chip.error { color: var(--error); border-color: rgba(211, 47, 47, 0.7); }
+	.chip.warning { color: var(--warning); border-color: rgba(237, 108, 2, 0.7); }
+	td.kind { white-space: nowrap; }
+	td.kind .caption { margin-top: 2px; }
+
+	/* The part of the range older than what Postgres holds */
+	tr.archive td {
+		border-bottom: 0;
+		padding-top: 12px;
+		padding-bottom: 12px;
+	}
+	.progress {
+		position: relative;
+		height: 4px;
+		margin-top: 6px;
+		overflow: hidden;
+		background: rgb(178, 214, 179);
+	}
+	.progress::before {
+		content: "";
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: -35%;
+		width: 35%;
+		background: var(--primary);
+		animation: indeterminate 2.1s cubic-bezier(0.65, 0.815, 0.735, 0.395) infinite;
+	}
+	@keyframes indeterminate {
+		0% { left: -35%; right: 100%; }
+		60% { left: 100%; }
+		100% { left: 100%; }
+	}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute">
+	<symbol id="i-dns" viewBox="0 0 24 24"><path d="M19 13H5c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h14c.55 0 1-.45 1-1v-6c0-.55-.45-1-1-1M7 19c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2M19 3H5c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h14c.55 0 1-.45 1-1V4c0-.55-.45-1-1-1M7 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2"/></symbol>
+	<symbol id="i-key" viewBox="0 0 24 24"><path d="M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2"/></symbol>
+	<symbol id="i-canopy" viewBox="0 0 100 100"><rect width="100" height="100" fill="#32669A"/><circle cx="50" cy="50" r="36" fill="white"/><rect x="42" y="26" width="16" height="48" fill="#388E3C"/><rect x="26" y="42" width="48" height="16" fill="#388E3C"/></symbol>
+	<symbol id="i-drop" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></symbol>
+</svg>
+
+<header class="appbar">
+	<nav class="toolbar">
+		<a class="brand" href="#">
+			<svg viewBox="0 0 100 100" aria-hidden="true"><rect x="0" y="0" width="100" height="100" rx="10" ry="10" fill="#32669A"/><circle cx="50" cy="50" r="36" fill="white"/><rect x="42" y="26" width="16" height="48" fill="#388E3C"/><rect x="26" y="42" width="48" height="16" fill="#388E3C"/></svg>
+			<span>Canopy</span>
+		</a>
+		<a class="nav" href="#">Status</a>
+		<span class="badge-wrap"><a class="nav" href="#">Incidents</a><span class="badge">2</span></span>
+		<a class="nav" href="#">Fleet</a>
+		<a class="nav" href="#">Versions</a>
+		<a class="nav" href="#">Upgrades</a>
+		<a class="nav" href="#">Maintenance</a>
+		<a class="nav" href="#">Devices</a>
+		<a class="nav" href="#">Bestool</a>
+		<a class="nav active" href="#">Settings</a>
+		<a class="nav" href="#">SQL</a>
+		<span class="spacer"></span>
+		<span class="mode">Read-only</span>
+		<a class="nav external" href="#">Public<svg class="icon" viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3z"/></svg></a>
+	</nav>
+</header>
+
+<main class="container">
+	<div class="tabs" role="tablist">
+		<a class="tab" href="#">Admins</a>
+		<a class="tab" href="#">Healthchecks</a>
+		<a class="tab" href="#">Backup defaults</a>
+		<a class="tab" href="#">Recovery vault</a>
+		<a class="tab" href="#">Restore consumers</a>
+		<a class="tab" href="#">Clusters</a>
+		<a class="tab" href="#">MCP access</a>
+		<a class="tab" href="#">Certificate authority</a>
+		<a class="tab selected" href="#" aria-selected="true">Audit log</a>
+	</div>
+
+	<div class="stack">
+		<div class="paper filters">
+			<div class="field select"><label>Actor</label>Anyone<svg class="arrow"><use href="#i-drop"/></svg></div>
+			<div class="field select"><label>Operation</label>All<svg class="arrow"><use href="#i-drop"/></svg></div>
+			<div class="field select"><label>Time range</label>Last 6 months<svg class="arrow"><use href="#i-drop"/></svg></div>
+			<div class="field empty"><label>Target</label></div>
+			<button class="refresh" aria-label="Refresh"><svg class="icon" viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z"/></svg></button>
+		</div>
+
+		<div class="paper">
+			<table>
+				<thead>
+					<tr>
+						<th>When</th>
+						<th>Actor</th>
+						<th>Operation</th>
+						<th>Arguments</th>
+						<th>Kind</th>
+					</tr>
+				</thead>
+				<tbody>
+					<tr>
+						<td class="when"><span title="19/10/2026, 2:08:11 pm">4m ago</span></td>
+						<td><div class="actor"><span class="avatar" title="Alice Ng">A</span>alice@example.org</div></td>
+						<td>Revoke certificate</td>
+						<td><div class="args">
+							<span class="arg"><span class="k">machine</span><a class="link" href="#">host-3</a></span>
+							<span class="arg"><span class="k">serial</span><span class="v mono">4f:2a:91:0c:7e</span></span>
+						</div></td>
+						<td class="kind"><span class="chip">action</span></td>
+					</tr>
+					<tr>
+						<td class="when"><span title="19/10/2026, 2:00:47 pm">12m ago</span></td>
+						<td>
+							<div class="actor"><span class="avatar"><svg><use href="#i-dns"/></svg></span><a class="link" href="#">host-3</a></div>
+							<div class="caption" style="padding-left: 32px">for <span class="trail">Central ·</span> Tamanu Facility</div>
+						</td>
+						<td>Issue backup credentials</td>
+						<td><div class="args">
+							<span class="arg"><span class="k">group</span><a class="link" href="#">Central</a></span>
+							<span class="arg"><span class="k">configuration</span><span class="v mono">nightly-full</span></span>
+						</div></td>
+						<td class="kind"><span class="chip">action</span></td>
+					</tr>
+					<tr>
+						<td class="when"><span title="19/10/2026, 1:34:02 pm">38m ago</span></td>
+						<td><div class="actor"><span class="avatar"><svg><use href="#i-key"/></svg></span><span class="mono">reporting-dash</span></div></td>
+						<td>Run SQL query</td>
+						<td><div class="args">
+							<span class="arg"><span class="k">query</span><span class="v mono">select * from backup_credentials</span></span>
+						</div></td>
+						<td class="kind"><span class="chip error">refused</span><div class="caption">No grant</div></td>
+					</tr>
+					<tr>
+						<td class="when"><span title="19/10/2026, 1:09:55 pm">1h ago</span></td>
+						<td><div class="actor"><span class="avatar canopy"><svg><use href="#i-canopy"/></svg></span>Canopy</div></td>
+						<td>Create DNS record</td>
+						<td><div class="args">
+							<span class="arg"><span class="k">application</span><a class="link" href="#"><span class="trail">Coastal ·</span> Tamanu Central</a></span>
+							<span class="arg"><span class="k">name</span><span class="v mono">central.coastal.example.org</span></span>
+						</div></td>
+						<td class="kind"><span class="chip warning">unconfirmed</span></td>
+					</tr>
+					<tr>
+						<td class="when"><span title="19/10/2026, 12:20:13 pm">2h ago</span></td>
+						<td><div class="actor"><span class="avatar" title="Bob Tane">B</span>bob@example.org</div></td>
+						<td>Run SQL query</td>
+						<td><div class="args">
+							<span class="arg"><span class="k">query</span><span class="v mono" title="select name, last_seen from machines where archived_at is null">select name, last_seen from machines where archived_at is null</span></span>
+						</div></td>
+						<td class="kind"><span class="chip">action</span></td>
+					</tr>
+					<tr>
+						<td class="when"><span title="19/10/2026, 11:05:40 am">3h ago</span></td>
+						<td><div class="actor"><span class="avatar" title="Carol Fifita">C</span>carol@example.org</div></td>
+						<td>Add admin</td>
+						<td><div class="args">
+							<span class="arg"><span class="k">email</span><span class="v">dan@example.org</span></span>
+						</div></td>
+						<td class="kind"><span class="chip error">refused</span><div class="caption">Not an administrator</div></td>
+					</tr>
+					<tr>
+						<td class="when"><span title="19/10/2026, 9:14:22 am">5h ago</span></td>
+						<td><div class="actor"><span class="avatar"><svg><use href="#i-dns"/></svg></span><a class="link" href="#">host-7</a></div></td>
+						<td>Request certificate</td>
+						<td><div class="args">
+							<span class="arg"><span class="k">machine</span><a class="link" href="#">host-7</a></span>
+							<span class="arg"><span class="k">name</span><span class="v mono">host-7.example.org</span></span>
+						</div></td>
+						<td class="kind"><span class="chip">action</span></td>
+					</tr>
+					<tr>
+						<td class="when"><span title="19/10/2026, 5:00:00 am">9h ago</span></td>
+						<td><div class="actor"><span class="avatar canopy"><svg><use href="#i-canopy"/></svg></span>Canopy</div></td>
+						<td>Archive machine</td>
+						<td><div class="args">
+							<span class="arg"><span class="k">machine</span><a class="link" href="#"><span class="trail">Northern ·</span> host-12</a></span>
+						</div></td>
+						<td class="kind"><span class="chip">action</span></td>
+					</tr>
+					<tr>
+						<td class="when"><span title="18/10/2026, 3:41:09 pm">23h ago</span></td>
+						<td><div class="actor"><span class="avatar" title="Alice Ng">A</span>alice@example.org</div></td>
+						<td>Declare maintenance</td>
+						<td><div class="args">
+							<span class="arg"><span class="k">group</span><a class="link" href="#">Coastal</a></span>
+							<span class="arg"><span class="k">ends</span><span class="v">21/10/2026, 6:00 pm</span></span>
+						</div></td>
+						<td class="kind"><span class="chip">action</span></td>
+					</tr>
+					<tr>
+						<td class="when"><span title="17/10/2026, 10:02:31 am">2d ago</span></td>
+						<td><div class="actor"><span class="avatar"><svg><use href="#i-key"/></svg></span><span class="mono">ops-assistant</span></div></td>
+						<td>Query fleet</td>
+						<td><div class="args">
+							<span class="arg"><span class="k">group</span><a class="link" href="#">Central</a></span>
+							<span class="arg"><span class="k">query</span><span class="v mono">machines-without-backups</span></span>
+						</div></td>
+						<td class="kind"><span class="chip">action</span></td>
+					</tr>
+					<tr>
+						<td class="when"><span title="13/10/2026, 4:55:18 pm">6d ago</span></td>
+						<td><div class="actor"><span class="avatar" title="Bob Tane">B</span>bob@example.org</div></td>
+						<td>Lift maintenance</td>
+						<td><div class="args">
+							<span class="arg"><span class="k">application</span><a class="link" href="#"><span class="trail">Central ·</span> Tamanu Facility</a></span>
+						</div></td>
+						<td class="kind"><span class="chip">action</span></td>
+					</tr>
+					<tr>
+						<td class="when"><span title="1/10/2026, 3:00:00 am">18d ago</span></td>
+						<td><div class="actor"><span class="avatar canopy"><svg><use href="#i-canopy"/></svg></span>Canopy</div></td>
+						<td>Create backup bucket</td>
+						<td><div class="args">
+							<span class="arg"><span class="k">group</span><a class="link" href="#">Northern</a></span>
+							<span class="arg"><span class="k">configuration</span><span class="v mono">weekly-offsite</span></span>
+						</div></td>
+						<td class="kind"><span class="chip warning">unconfirmed</span></td>
+					</tr>
+					<tr>
+						<td class="when"><span title="8/09/2026, 11:47:36 pm">41d ago</span></td>
+						<td>
+							<div class="actor"><span class="avatar"><svg><use href="#i-dns"/></svg></span><a class="link" href="#">host-9</a></div>
+							<div class="caption" style="padding-left: 32px">for <span class="trail">Northern ·</span> Tamanu Central</div>
+						</td>
+						<td>Issue backup credentials</td>
+						<td><div class="args">
+							<span class="arg"><span class="k">group</span><a class="link" href="#">Coastal</a></span>
+							<span class="arg"><span class="k">configuration</span><span class="v mono">nightly-full</span></span>
+						</div></td>
+						<td class="kind"><span class="chip error">refused</span><div class="caption">No grant</div></td>
+					</tr>
+					<tr>
+						<td class="when"><span title="7/08/2026, 9:30:12 am">73d ago</span></td>
+						<td><div class="actor"><span class="avatar" title="Carol Fifita">C</span>carol@example.org</div></td>
+						<td>Mint access token</td>
+						<td><div class="args">
+							<span class="arg"><span class="k">name</span><span class="v mono">ops-assistant</span></span>
+						</div></td>
+						<td class="kind"><span class="chip">action</span></td>
+					</tr>
+					<tr>
+						<td class="when"><span title="23/07/2026, 2:16:44 pm">88d ago</span></td>
+						<td><div class="actor"><span class="avatar" title="Alice Ng">A</span>alice@example.org</div></td>
+						<td>Set rank</td>
+						<td><div class="args">
+							<span class="arg"><span class="k">machine</span><a class="link" href="#"><span class="trail">Central ·</span> host-5</a></span>
+							<span class="arg"><span class="k">rank</span><span class="chip error">production</span></span>
+						</div></td>
+						<td class="kind"><span class="chip">action</span></td>
+					</tr>
+					<tr class="archive">
+						<td colspan="5">
+							<div class="caption">Before 21/07/2026 · fetching from archive</div>
+							<div class="progress" role="progressbar" aria-label="Fetching from archive"></div>
+						</td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+	</div>
+</main>
+
+</body>
+</html>

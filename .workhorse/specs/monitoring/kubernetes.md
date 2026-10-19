@@ -65,7 +65,7 @@ An environment is a namespace, so the action covers every application in it toge
 
 An environment that has no scheduled expiry cannot be put to sleep, and its relay is what refuses the request, so the restriction holds where the expiry is known rather than resting on Canopy asking correctly.
 Canopy gates the action by what the environment is, as it gates any action against production.
-Sleeping and waking are available to admins and are audited.
+Sleeping and waking are available to admins and are audited (see [AUD](../platform/audit-log.md)).
 
 Whether an environment is asleep is a fact Canopy presents on the environment rather than a check, an environment asleep on purpose being nothing to grade.
 Each of its applications already carries it as the reason that application's checks are skipped (see "Checks that cannot run there").

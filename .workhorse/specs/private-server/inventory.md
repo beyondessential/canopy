@@ -86,7 +86,7 @@ A refusal must name its reason in such a way that an operator can understand how
 ## Audit
 
 Each inventory read is logged with the identity that asked for it and the intent its lease declared.
-Taking, extending, taking over, and releasing a lease is audited, as is setting or removing a variable.
+Taking, extending, taking over, and releasing a lease is audited, as is setting or removing a variable (see [AUD](../platform/audit-log.md)).
 A secret's value never appears in a log.
 
 ## Presentation

@@ -4,8 +4,8 @@ id: HST
 
 # History storage
 
-Canopy keeps two high-volume histories: every ingested status push (see [STA](../public-server/statuses.md)), and every authenticated device connection.
-Both are stored in weekly ranges, so a read bounded to a recent window touches only the weeks that window covers.
+Canopy keeps three high-volume histories: every ingested status push (see [STA](../public-server/statuses.md)), every authenticated device connection, and the audit log (see [AUD](audit-log.md)).
+All three are stored in weekly ranges, so a read bounded to a recent window touches only the weeks that window covers.
 
 ## Provisioning ahead
 
@@ -13,7 +13,7 @@ A history write succeeds only while a range covering its timestamp exists, so Ca
 Canopy keeps at least four weeks of future ranges provisioned for each history, and maintains them for as long as it is running rather than on an external schedule.
 
 Provisioning is idempotent: applied over ranges that already exist it changes nothing, so it can be run at any time and by more than one component at once.
-Provisioning a range does not block reads or writes of the history it extends — a status push or a connection record is never delayed by it, and a long-running reader never delays it.
+Provisioning a range does not block reads or writes of the history it extends — a status push, a connection record, or an audit entry is never delayed by it, and a long-running reader never delays it.
 
 ## Running short
 
