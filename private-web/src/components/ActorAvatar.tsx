@@ -16,7 +16,14 @@ export default function ActorAvatar({
 	const sx = { width: size, height: size };
 	switch (actor.kind) {
 		case "operator":
-			return <UserAvatar login={actor.login} name={actor.name} size={size} />;
+			return (
+				<UserAvatar
+					login={actor.login}
+					name={actor.name}
+					profilePic={actor.profile_pic}
+					size={size}
+				/>
+			);
 		case "device":
 			return (
 				<Avatar sx={sx}>

@@ -70,7 +70,11 @@ async fn declaring_amending_and_lifting_maintenance_are_recorded_with_what_they_
 		let actions: Vec<&str> = entries.iter().rev().map(|e| e.action.as_str()).collect();
 		assert_eq!(
 			actions,
-			["maintenance_declared", "maintenance_amended", "maintenance_lifted"]
+			[
+				"maintenance_declared",
+				"maintenance_amended",
+				"maintenance_lifted"
+			]
 		);
 
 		let declared = entries.last().unwrap();
@@ -84,7 +88,12 @@ async fn declaring_amending_and_lifting_maintenance_are_recorded_with_what_they_
 			"the target is named: {:?}",
 			declared.records
 		);
-		assert!(declared.records.iter().any(|r| r.id == window["id"].as_str().unwrap()));
+		assert!(
+			declared
+				.records
+				.iter()
+				.any(|r| r.id == window["id"].as_str().unwrap())
+		);
 	})
 	.await
 }
@@ -155,15 +164,25 @@ async fn taking_over_and_reading_an_inventory_are_recorded_and_the_read_is_routi
 		let actions: Vec<&str> = important.iter().rev().map(|e| e.action.as_str()).collect();
 		assert_eq!(
 			actions,
-			["inventory_lease_taken", "inventory_variable_set", "inventory_lease_released"],
+			[
+				"inventory_lease_taken",
+				"inventory_variable_set",
+				"inventory_lease_released"
+			],
 			"a read is routine and left out by default"
 		);
-		let variable = important.iter().find(|e| e.action == "inventory_variable_set").unwrap();
+		let variable = important
+			.iter()
+			.find(|e| e.action == "inventory_variable_set")
+			.unwrap();
 		assert!(!variable.detail.to_string().contains("ntp.example.org"));
 
 		let everything = log(
 			&mut conn,
-			Filter { include_routine: true, ..Default::default() },
+			Filter {
+				include_routine: true,
+				..Default::default()
+			},
 		)
 		.await;
 		let read = everything
@@ -175,7 +194,10 @@ async fn taking_over_and_reading_an_inventory_are_recorded_and_the_read_is_routi
 
 		let named = log(
 			&mut conn,
-			Filter { action: Some("inventory_read".into()), ..Default::default() },
+			Filter {
+				action: Some("inventory_read".into()),
+				..Default::default()
+			},
 		)
 		.await;
 		assert_eq!(named.len(), 1, "naming a routine action shows it");
@@ -203,7 +225,11 @@ async fn a_secret_variable_is_recorded_ahead_of_the_store_and_settled_without_it
 		assert_eq!(entries[0].action, "inventory_variable_set");
 		assert_eq!(entries[0].status, Status::Done);
 		assert_eq!(entries[0].detail["secret"], true);
-		assert!(!serde_json::to_string(&entries[0]).unwrap().contains("hunter2"));
+		assert!(
+			!serde_json::to_string(&entries[0])
+				.unwrap()
+				.contains("hunter2")
+		);
 	})
 	.await
 }
@@ -220,8 +246,18 @@ async fn issuing_a_device_credential_records_its_identifier_and_never_the_key() 
 		let entries = log(&mut conn, Filter::default()).await;
 		assert_eq!(entries.len(), 1);
 		assert_eq!(entries[0].action, "device_credential_provisioned");
-		assert!(entries[0].records.iter().any(|r| r.id == issued["key_id"].as_str().unwrap()));
-		assert!(entries[0].records.iter().any(|r| r.id == issued["device_id"].as_str().unwrap()));
+		assert!(
+			entries[0]
+				.records
+				.iter()
+				.any(|r| r.id == issued["key_id"].as_str().unwrap())
+		);
+		assert!(
+			entries[0]
+				.records
+				.iter()
+				.any(|r| r.id == issued["device_id"].as_str().unwrap())
+		);
 		let everything = serde_json::to_string(&entries[0]).unwrap();
 		for secret in ["passphrase", "key_age_base64"] {
 			assert!(!everything.contains(issued[secret].as_str().unwrap()));
@@ -261,17 +297,34 @@ async fn the_log_page_lists_newest_first_and_filters_and_the_tool_reads_the_same
 		assert_eq!(all[0]["action"], "maintenance_lifted", "newest first");
 		assert_eq!(all[0]["action_label"], "Lift maintenance");
 
-		assert_eq!(list(json!({ "action": "maintenance_amended" })).await.len(), 1);
-		assert_eq!(list(json!({ "actor_id": "admin@localhost" })).await.len(), 3);
+		assert_eq!(
+			list(json!({ "action": "maintenance_amended" })).await.len(),
+			1
+		);
+		assert_eq!(
+			list(json!({ "actor_id": "admin@localhost" })).await.len(),
+			3
+		);
 		assert_eq!(list(json!({ "actor_id": "someone@else" })).await.len(), 0);
 		assert_eq!(list(json!({ "record": BOX })).await.len(), 3);
-		assert_eq!(list(json!({ "record": "box" })).await.len(), 3, "by name too");
+		assert_eq!(
+			list(json!({ "record": "box" })).await.len(),
+			3,
+			"by name too"
+		);
 		assert_eq!(list(json!({ "record": "nothing like it" })).await.len(), 0);
 
-		let filters: Value = private.post("/api/audit/filters").json(&json!({})).await.json();
+		let filters: Value = private
+			.post("/api/audit/filters")
+			.json(&json!({}))
+			.await
+			.json();
 		assert!(
-			filters["actions"].as_array().unwrap().iter().any(|a| a["name"] == "maintenance_lifted"
-				&& a["label"] == "Lift maintenance")
+			filters["actions"]
+				.as_array()
+				.unwrap()
+				.iter()
+				.any(|a| a["name"] == "maintenance_lifted" && a["label"] == "Lift maintenance")
 		);
 		assert_eq!(filters["actors"][0]["login"], "admin@localhost");
 	})
@@ -304,7 +357,10 @@ async fn nothing_beyond_ninety_days_is_read_from_the_database_by_the_page_or_the
 			.json(&json!({ "since": "2000-01-01T00:00:00Z" }))
 			.await
 			.json();
-		assert!(entries.is_empty(), "a year-kept entry past ninety days is not read: {entries:?}");
+		assert!(
+			entries.is_empty(),
+			"a year-kept entry past ninety days is not read: {entries:?}"
+		);
 
 		let found = private
 			.post("/api/mcp")
@@ -329,7 +385,10 @@ async fn nothing_beyond_ninety_days_is_read_from_the_database_by_the_page_or_the
 			}))
 			.await
 			.text();
-		assert!(refused.contains("at most 90"), "a longer window is refused, naming the limit: {refused}");
+		assert!(
+			refused.contains("at most 90"),
+			"a longer window is refused, naming the limit: {refused}"
+		);
 	})
 	.await
 }
@@ -340,7 +399,9 @@ async fn only_an_administrator_reads_the_log() {
 	unsafe { std::env::set_var("CANOPY_TRUST_TAILSCALE_HEADERS", "1") };
 
 	commons_tests::server::run(async |mut conn, _, private| {
-		database::admins::Admin::add(&mut conn, "boss@example.com").await.unwrap();
+		database::admins::Admin::add(&mut conn, "boss@example.com")
+			.await
+			.unwrap();
 
 		private
 			.post("/api/audit/list")
@@ -356,6 +417,96 @@ async fn only_an_administrator_reads_the_log() {
 			.json(&json!({}))
 			.await
 			.assert_status_ok();
+	})
+	.await
+}
+
+/// Every operation on the operator surface and the device API carries an audit
+/// declaration, and every action one names is in the catalogue.
+#[test]
+fn every_route_declares_whether_it_is_audited_and_names_real_actions() {
+	use canopy_utoipa_axum::router::OpenApiRouter;
+	use commons_servers::audit::AuditMap;
+	use utoipa::OpenApi;
+
+	let (_, private) = OpenApiRouter::with_openapi(private_server::openapi::ApiDoc::openapi())
+		.merge(private_server::fns::routes())
+		.split_for_parts();
+	let (_, public) = OpenApiRouter::with_openapi(public_server::openapi::ApiDoc::openapi())
+		.merge(public_server::routes())
+		.split_for_parts();
+
+	for (surface, spec) in [("operator", &private), ("device", &public)] {
+		let operations: usize = spec
+			.paths
+			.paths
+			.values()
+			.map(|item| {
+				[&item.get, &item.put, &item.post, &item.delete, &item.patch]
+					.iter()
+					.filter(|operation| operation.is_some())
+					.count()
+			})
+			.sum();
+		let map = AuditMap::from_openapi(spec);
+		assert_eq!(
+			map.len(),
+			operations,
+			"every {surface} operation declares whether it is audited"
+		);
+		assert!(map.audited() > 0, "the {surface} surface audits something");
+		for name in map.action_names() {
+			assert!(
+				database::audit::CATALOGUE.contains(&name),
+				"{surface} names {name}, which is not an action"
+			);
+		}
+	}
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_tool_leaves_routine_actions_out_unless_asked_for() {
+	use database::audit::{Action, Actor, Record, RecordKind};
+
+	commons_tests::server::run(async |mut conn, _, private| {
+		audit::record(
+			&mut conn,
+			&Actor::canopy("test"),
+			&Action::BackupCredentialsIssued {
+				group: Record::new(RecordKind::Group, uuid::Uuid::new_v4(), "routine-group"),
+				machine: Record::new(RecordKind::Machine, uuid::Uuid::new_v4(), "box"),
+				backup_type: "tamanu-postgres".into(),
+				purpose: "backup".into(),
+				run_id: None,
+			},
+		)
+		.await
+		.unwrap();
+
+		let call = async |arguments: Value| -> String {
+			private
+				.post("/api/mcp")
+				.add_header("accept", "application/json, text/event-stream")
+				.add_header("mcp-protocol-version", "2025-06-18")
+				.json(&json!({
+					"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+					"params": { "name": "find_audit_entries", "arguments": arguments }
+				}))
+				.await
+				.text()
+		};
+		assert!(!call(json!({})).await.contains("routine-group"));
+		assert!(
+			call(json!({ "include_routine": true }))
+				.await
+				.contains("routine-group")
+		);
+		assert!(
+			call(json!({ "action": "backup_credentials_issued" }))
+				.await
+				.contains("routine-group"),
+			"naming the action shows it"
+		);
 	})
 	.await
 }

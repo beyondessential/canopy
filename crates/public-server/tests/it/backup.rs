@@ -693,7 +693,12 @@ async fn credentials_backup_happy_path_200_and_audit() {
 		));
 		assert_eq!(entry.detail["access_key_id"], "AKIATESTKEY");
 		assert_eq!(entry.detail["purpose"], "backup");
-		assert!(entry.records.iter().any(|record| record.name == "backup-test-group"));
+		assert!(
+			entry
+				.records
+				.iter()
+				.any(|record| record.name == "backup-test-group")
+		);
 		let serialised = entry.detail.to_string();
 		assert!(!serialised.contains("test-secret-key"));
 		assert!(!serialised.contains("test-session-token"));
@@ -739,7 +744,11 @@ async fn credentials_an_issuer_that_refuses_settles_the_entry_failed() {
 			.assert_status(axum::http::StatusCode::BAD_GATEWAY);
 
 		let log = audit_entries(&mut conn).await;
-		assert_eq!(log.len(), 1, "the attempt is recorded though nothing was issued");
+		assert_eq!(
+			log.len(),
+			1,
+			"the attempt is recorded though nothing was issued"
+		);
 		assert_eq!(log[0].status, database::audit::Status::Failed);
 		assert!(log[0].detail.get("access_key_id").is_none());
 	})

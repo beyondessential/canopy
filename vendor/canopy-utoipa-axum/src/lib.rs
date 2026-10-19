@@ -177,7 +177,11 @@ pub const AUDIT_OPTIONAL_EXTENSION: &str = "x-canopy-audit-optional";
 /// Record a handler's audit declaration on its OpenAPI operation. Called by the
 /// [`routes`] macro; not meant to be called directly.
 #[doc(hidden)]
-pub fn __set_audit(operation: &mut utoipa::openapi::path::Operation, actions: &[&str], optional: bool) {
+pub fn __set_audit(
+    operation: &mut utoipa::openapi::path::Operation,
+    actions: &[&str],
+    optional: bool,
+) {
     use utoipa::openapi::extensions::Extensions;
     let mut incoming = Extensions::from_iter([(AUDIT_EXTENSION, actions.to_vec())]);
     if optional {
@@ -226,7 +230,7 @@ macro_rules! takes_audit {
     };
 }
 
-takes_audit!([] [A1]);
+takes_audit!([][A1]);
 takes_audit!([] [A1 A2]);
 takes_audit!([] [A1 A2 A3]);
 takes_audit!([] [A1 A2 A3 A4]);
@@ -241,6 +245,28 @@ takes_audit!([] [A1 A2 A3 A4 A5 A6 A7 A8 A9 A10 A11 A12]);
 
 /// Fail compilation unless the handler takes the audit extractor. Called by the
 /// [`routes`] macro for an audited handler; not meant to be called directly.
+///
+/// A handler that takes it, wherever among its arguments:
+///
+/// ```
+/// use canopy_utoipa_axum::{AuditExtractor, __assert_audited};
+/// struct Audit;
+/// impl AuditExtractor for Audit {}
+/// async fn first(_: Audit, _: String) {}
+/// async fn middle(_: u8, _: Audit, _: String) {}
+/// async fn only(_: Audit) {}
+/// __assert_audited(&first);
+/// __assert_audited(&middle);
+/// __assert_audited(&only);
+/// ```
+///
+/// One that does not does not build:
+///
+/// ```compile_fail
+/// use canopy_utoipa_axum::__assert_audited;
+/// async fn does_not(_: u8, _: String) {}
+/// __assert_audited(&does_not);
+/// ```
 #[doc(hidden)]
 pub fn __assert_audited<F, M>(_: &F)
 where
@@ -281,6 +307,28 @@ pub use paste::paste;
 /// Since the _`axum`_ does not support method filter for `CONNECT` requests, using this macro with
 /// handler having request method type `CONNECT` `#[utoipa::path(connect, path = "")]` will panic at
 /// runtime.
+///
+/// A route that declares no safety mode and no audit declaration does not build:
+///
+/// ```compile_fail
+/// # use canopy_utoipa_axum::routes;
+/// # use utoipa::path;
+///  #[utoipa::path(get, path = "")]
+///  async fn get_user() {}
+///
+///  let _ = routes!(get_user);
+/// ```
+///
+/// Nor does one that declares a mode and no audit declaration:
+///
+/// ```compile_fail
+/// # use canopy_utoipa_axum::routes;
+/// # use utoipa::path;
+///  #[utoipa::path(get, path = "")]
+///  async fn get_user() {}
+///
+///  let _ = routes!(read_only: get_user);
+/// ```
 ///
 /// # Examples
 ///

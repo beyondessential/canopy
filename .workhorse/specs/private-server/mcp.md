@@ -128,7 +128,7 @@ This is the raw material for analysing whether a check's noise is a flap, a load
 
 ### Audit log
 
-**Find audit entries** takes a look-back window of up to ninety days and optional filters for actor, action, and a record acted on, and returns matching entries of the audit log newest first, as a bounded list (see [AUD](../platform/audit-log.md)).
+**Find audit entries** takes a look-back window of up to ninety days and optional filters for actor, action, and a record acted on, and an option to include routine actions, which are left out unless asked for or named; it returns matching entries of the audit log newest first, as a bounded list (see [AUD](../platform/audit-log.md)).
 Each entry carries when it happened, its actor, its action, the records it acted on, its detail, and, for an entry committed ahead of its action, whether it was done, failed, or is unconfirmed.
 It reaches back ninety days and no further, even for entries Canopy keeps longer, and its description says so; older entries are read from the operator interface, which reaches into the archive.
 A longer window is refused, naming the limit.

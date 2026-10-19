@@ -6,12 +6,10 @@
 
 use std::sync::Arc;
 
-use axum::{Json, Router, middleware};
+use axum::{Json, middleware};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, Result};
-use commons_servers::audit::{
-	ActorSource, Audit, AuditMap, AuditState, Undeclared, enforce,
-};
+use commons_servers::audit::{ActorSource, Audit, AuditMap, AuditState, Undeclared, enforce};
 use commons_tests::{axum_test::TestServer, db::TestDb};
 use database::{
 	Db,
@@ -146,6 +144,23 @@ async fn device(audit: Audit) -> Result<Json<()>> {
 	Ok(Json(()))
 }
 
+/// Declared as recording only for what it creates, and creating nothing.
+#[utoipa::path(post, path = "/optional_none", responses((status = 200)))]
+async fn optional_none(audit: Audit) -> Result<Json<()>> {
+	let mut tx = audit.begin().await?;
+	Admin::add(&mut tx, "optional@example.com").await?;
+	Ok(Json(()))
+}
+
+/// Declared likewise, and recording what it did not declare.
+#[utoipa::path(post, path = "/optional_undeclared", responses((status = 200)))]
+async fn optional_undeclared(audit: Audit) -> Result<Json<()>> {
+	let mut tx = audit.begin().await?;
+	Admin::add(&mut tx, "optional-undeclared@example.com").await?;
+	tx.record(lifted("undeclared")).await?;
+	Ok(Json(()))
+}
+
 fn app(db: Db, actor: ActorSource) -> TestServer {
 	let (router, spec) = OpenApiRouter::new()
 		.routes(routes!(write, silent: silent))
@@ -160,6 +175,8 @@ fn app(db: Db, actor: ActorSource) -> TestServer {
 		.routes(routes!(write, audit(MaintenanceLifted): read))
 		.routes(routes!(write, audit(MaintenanceLifted): read_errors))
 		.routes(routes!(write, audit(MaintenanceLifted): device))
+		.routes(routes!(write, audit_optional(MaintenanceDeclared): optional_none))
+		.routes(routes!(write, audit_optional(MaintenanceDeclared): optional_undeclared))
 		.split_for_parts();
 	let state = AuditState {
 		db,
@@ -168,7 +185,7 @@ fn app(db: Db, actor: ActorSource) -> TestServer {
 		undeclared: Undeclared::Refuse,
 		mount: "",
 	};
-	TestServer::new(Router::from(router).layer(middleware::from_fn_with_state(state, enforce)))
+	TestServer::new(router.layer(middleware::from_fn_with_state(state, enforce)))
 }
 
 async fn entries(conn: &mut database::diesel_async::AsyncPgConnection) -> Vec<audit::Entry> {
@@ -199,7 +216,11 @@ async fn an_audited_route_commits_its_change_with_its_entry_naming_the_operator(
 		let server = app(database::init_to(&url), ActorSource::Operator);
 		server.post("/records").await.assert_status_ok();
 
-		assert!(Admin::check_email(&mut conn, "kept@example.com").await.unwrap());
+		assert!(
+			Admin::check_email(&mut conn, "kept@example.com")
+				.await
+				.unwrap()
+		);
 		let log = entries(&mut conn).await;
 		assert_eq!(log.len(), 1);
 		assert_eq!(log[0].action, "maintenance_lifted");
@@ -323,7 +344,11 @@ async fn settling_done_commits_with_the_work_and_adds_what_the_action_learned() 
 		let server = app(database::init_to(&url), ActorSource::Operator);
 		server.post("/ahead_then_done").await.assert_status_ok();
 
-		assert!(Admin::check_email(&mut conn, "effect@example.com").await.unwrap());
+		assert!(
+			Admin::check_email(&mut conn, "effect@example.com")
+				.await
+				.unwrap()
+		);
 		let log = entries(&mut conn).await;
 		assert_eq!(log.len(), 1);
 		assert_eq!(log[0].status, Status::Done);
@@ -448,6 +473,32 @@ async fn an_entry_that_cannot_be_written_refuses_the_action() {
 				.unwrap()
 				.is_some(),
 			"the runway self-alert is raised"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_handler_declared_to_record_only_what_it_creates_may_record_nothing() {
+	TestDb::run(async |mut conn, url| {
+		let server = app(database::init_to(&url), ActorSource::Operator);
+		server.post("/optional_none").await.assert_status_ok();
+		assert!(
+			Admin::check_email(&mut conn, "optional@example.com")
+				.await
+				.unwrap()
+		);
+		assert!(entries(&mut conn).await.is_empty());
+
+		// It is still held to the actions it declares.
+		server
+			.post("/optional_undeclared")
+			.await
+			.assert_status(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+		assert!(
+			!Admin::check_email(&mut conn, "optional-undeclared@example.com")
+				.await
+				.unwrap()
 		);
 	})
 	.await

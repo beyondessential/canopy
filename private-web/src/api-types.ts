@@ -5292,6 +5292,7 @@ export interface components {
             kind: "operator";
             login: string;
             name?: string | null;
+            profile_pic?: string | null;
         } | {
             /** Format: uuid */
             application?: string | null;

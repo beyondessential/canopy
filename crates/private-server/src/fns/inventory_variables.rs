@@ -201,9 +201,8 @@ pub async fn set(
 			return Err(error);
 		}
 
-		let set =
-			InventoryVariable::set(&mut conn, scope, &args.name, None, Some(&admin.0.login))
-				.await?;
+		let set = InventoryVariable::set(&mut conn, scope, &args.name, None, Some(&admin.0.login))
+			.await?;
 		conn.settle_done(&pending, None).await?;
 		set
 	} else {

@@ -47,8 +47,14 @@ fn routes_on_one_router_panics_on_conflict() {
 #[should_panic(expected = "schema name collision")]
 fn nest_panics_on_conflict() {
     let _: OpenApiRouter = OpenApiRouter::new()
-        .nest("/a", OpenApiRouter::new().routes(routes!(read_only, silent: alpha)))
-        .nest("/b", OpenApiRouter::new().routes(routes!(read_only, silent: beta)));
+        .nest(
+            "/a",
+            OpenApiRouter::new().routes(routes!(read_only, silent: alpha)),
+        )
+        .nest(
+            "/b",
+            OpenApiRouter::new().routes(routes!(read_only, silent: beta)),
+        );
 }
 
 #[test]
@@ -62,8 +68,10 @@ fn merge_panics_on_conflict() {
 #[test]
 fn identical_schema_under_same_name_is_fine() {
     // Same type registered twice: same name, same definition — no panic.
-    let _: OpenApiRouter = OpenApiRouter::new().routes(routes!(read_only, silent: alpha)).nest(
-        "/again",
-        OpenApiRouter::new().routes(routes!(read_only, silent: alpha2)),
-    );
+    let _: OpenApiRouter = OpenApiRouter::new()
+        .routes(routes!(read_only, silent: alpha))
+        .nest(
+            "/again",
+            OpenApiRouter::new().routes(routes!(read_only, silent: alpha2)),
+        );
 }

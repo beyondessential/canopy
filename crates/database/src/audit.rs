@@ -208,8 +208,15 @@ impl Records for Vec<Record> {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Actor {
-	/// An operator, by their tailnet login.
-	Operator { login: String, name: Option<String> },
+	/// An operator, by their tailnet login. The profile picture is not stored
+	/// with the entry: it is filled in when entries are read, from the cache of
+	/// what Tailscale last said.
+	Operator {
+		login: String,
+		name: Option<String>,
+		#[serde(default, skip_serializing_if = "Option::is_none")]
+		profile_pic: Option<String>,
+	},
 	/// A device, by its role, and the application it acted for where it acted
 	/// for one.
 	Device {
@@ -229,6 +236,7 @@ impl Actor {
 		Self::Operator {
 			login: login.into(),
 			name,
+			profile_pic: None,
 		}
 	}
 
@@ -284,7 +292,11 @@ impl Actor {
 		application: Option<Uuid>,
 	) -> Self {
 		match kind {
-			"operator" => Self::Operator { login: id, name },
+			"operator" => Self::Operator {
+				login: id,
+				name,
+				profile_pic: None,
+			},
 			"device" => Self::Device {
 				// A device identifier that is not a UUID is not something this
 				// module writes, so it is shown rather than guessed at.
@@ -842,7 +854,7 @@ pub async fn settle(
 		.and(dsl::retention.eq(pending.retention.as_str()));
 
 	let locked: Option<Uuid> = dsl::audit_entries
-		.filter(key.clone())
+		.filter(key)
 		.filter(dsl::outcome.eq("pending"))
 		.select(dsl::id)
 		.for_update()
@@ -918,9 +930,11 @@ pub async fn find(conn: &mut AsyncPgConnection, filter: &Filter) -> Result<Vec<E
 	query = query.filter(
 		dsl::outcome
 			.is_distinct_from("pending")
-			.or(dsl::recorded_at.le(diesel::dsl::sql::<sql_types::Timestamptz>(
-				"now() - interval '1 hour'",
-			))),
+			.or(
+				dsl::recorded_at.le(diesel::dsl::sql::<sql_types::Timestamptz>(
+					"now() - interval '1 hour'",
+				)),
+			),
 	);
 	if let Some(kind) = &filter.actor_kind {
 		query = query.filter(dsl::actor_kind.eq(kind));
@@ -964,7 +978,37 @@ pub async fn find(conn: &mut AsyncPgConnection, filter: &Filter) -> Result<Vec<E
 		.await
 		.map_err(AppError::from)?;
 	let now = Timestamp::now();
-	Ok(rows.into_iter().map(|row| row.into_entry(now)).collect())
+	let mut entries: Vec<Entry> = rows.into_iter().map(|row| row.into_entry(now)).collect();
+	with_pictures(conn, entries.iter_mut().map(|entry| &mut entry.actor)).await?;
+	Ok(entries)
+}
+
+/// Fill in each operator's profile picture from the cache of what Tailscale last
+/// said, where it has one.
+async fn with_pictures<'a>(
+	conn: &mut AsyncPgConnection,
+	actors: impl Iterator<Item = &'a mut Actor>,
+) -> Result<()> {
+	let mut actors: Vec<&mut Actor> = actors.collect();
+	let logins: Vec<&str> = actors
+		.iter()
+		.filter_map(|actor| match &**actor {
+			Actor::Operator { login, .. } => Some(login.as_str()),
+			_ => None,
+		})
+		.collect();
+	let known = crate::tailscale_users::TailscaleUser::by_logins(conn, &logins).await?;
+	for actor in actors.iter_mut() {
+		if let Actor::Operator {
+			login, profile_pic, ..
+		} = &mut **actor
+		{
+			*profile_pic = known
+				.get(login.as_str())
+				.and_then(|user| user.profile_pic.clone());
+		}
+	}
+	Ok(())
 }
 
 /// How many entries of an action carry each value of one key of their detail,
@@ -1000,7 +1044,10 @@ pub async fn count_by_detail(
 	.load(conn)
 	.await
 	.map_err(AppError::from)?;
-	Ok(rows.into_iter().map(|row| (row.value, row.entries)).collect())
+	Ok(rows
+		.into_iter()
+		.map(|row| (row.value, row.entries))
+		.collect())
 }
 
 /// Who has acted in a window, each actor once, as they last appeared: what an
@@ -1008,13 +1055,7 @@ pub async fn count_by_detail(
 pub async fn actors(conn: &mut AsyncPgConnection, since: Timestamp) -> Result<Vec<Actor>> {
 	use crate::schema::audit_entries::dsl;
 
-	type Row = (
-		String,
-		String,
-		Option<String>,
-		Option<String>,
-		Option<Uuid>,
-	);
+	type Row = (String, String, Option<String>, Option<String>, Option<Uuid>);
 	let rows: Vec<Row> = dsl::audit_entries
 		.filter(dsl::recorded_at.ge(jiff_diesel::Timestamp::from(since)))
 		.select((
@@ -1029,12 +1070,14 @@ pub async fn actors(conn: &mut AsyncPgConnection, since: Timestamp) -> Result<Ve
 		.load(conn)
 		.await
 		.map_err(AppError::from)?;
-	Ok(rows
+	let mut actors: Vec<Actor> = rows
 		.into_iter()
 		.map(|(kind, id, name, role, application)| {
 			Actor::from_columns(&kind, id, name, role, application)
 		})
-		.collect())
+		.collect();
+	with_pictures(conn, actors.iter_mut()).await?;
+	Ok(actors)
 }
 
 /// Every action in the catalogue with what it is called to an operator, and

@@ -27,9 +27,9 @@ use commons_types::{
 	},
 	units,
 };
+use database::audit::{Action, Record, RecordKind};
 use database::diesel_async::AsyncPgConnection;
 use database::pg_duration::PgDuration;
-use database::audit::{Action, Record, RecordKind};
 use database::restore::{self, RedactionGapReason};
 use database::{
 	BackupRestoreCheck, NewRestoreReplica, RestoreConsumerCapability, RestoreReplica,

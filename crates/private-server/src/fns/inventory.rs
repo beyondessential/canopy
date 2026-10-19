@@ -29,8 +29,8 @@ use commons_types::{
 };
 use database::{
 	Device,
-	audit::{Action, Record, RecordKind},
 	applications::Application,
+	audit::{Action, Record, RecordKind},
 	inventory_leases::{InventoryLease, RunIntent},
 	inventory_variables::{InventoryVariable, VariableScope},
 	machines::Machine,
@@ -402,7 +402,11 @@ pub async fn take_lease(
 	})?;
 
 	let (group_record, lease_record) = lease_records(group, &taken);
-	let (intent, note, expires_at) = (args.intent.to_string(), taken.note.clone(), taken.expires_at);
+	let (intent, note, expires_at) = (
+		args.intent.to_string(),
+		taken.note.clone(),
+		taken.expires_at,
+	);
 	conn.record(match previous_holder {
 		Some(previous_holder) => Action::InventoryLeaseTakenOver {
 			group: group_record,

@@ -5,7 +5,7 @@
         "description": "Who took an action.",
         "oneOf": [
           {
-            "description": "An operator, by their tailnet login.",
+            "description": "An operator, by their tailnet login. The profile picture is not stored\nwith the entry: it is filled in when entries are read, from the cache of\nwhat Tailscale last said.",
             "properties": {
               "kind": {
                 "enum": [
@@ -17,6 +17,12 @@
                 "type": "string"
               },
               "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "profile_pic": {
                 "type": [
                   "string",
                   "null"

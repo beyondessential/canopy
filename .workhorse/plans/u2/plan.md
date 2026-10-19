@@ -55,19 +55,29 @@ Until the archive lands, nothing leaves the database, which AUD already requires
 - Temporal tables for state history. The deployment runs PG18, so `WITHOUT OVERLAPS` is usable, but moving changes into temporal tables would take them out of the record the log is. Postgres 19 adds nothing here: `FOR PORTION OF` was reverted before release.
 - Write-ahead entries settled after the handler, and a request-scoped transaction through `Db::get()`. The first leaves entries for actions that errored; the second hides the transaction from handlers that hold two connections or spawn tasks.
 
+## Built differently from the above
+
+- Actions carry a tier, important or routine, and the log page and "Find audit entries" read the important ones unless asked for routine too or given the action by name. Credential issuance, inventory reads and lease extension are routine.
+- A third clause, `audit_optional(…)`, is for a handler that records only for what it creates: the status push. It is still held to what it declares.
+- Settling only adds keys to the detail, so a field a settle will fill in (an access key id) is not in the action's own detail.
+- Operators' profile pictures are filled in when entries are read, from the cache of what Tailscale last said, and are not stored with the entry.
+- The public routes `register_name` and `request_certificate` stay silent for the review card: auditing them puts the request in one transaction, and the undeclared-name notices they persist on a refused request would roll back with it.
+- Sleeping and waking an environment have no operator handler yet (only the relay protocol knows them), so there is nothing of them to audit until one lands.
+- A week's freeze is not needed: lapse is the only rule, and the archiver reads a week once its end is an hour past.
+
 ## Build
 
-- [ ] `Action` enum with stable names, typed records acted on, and retention per action
-- [ ] Audit clause in `routes!`: `audit(Action, …)`, `silent`, compile error when missing
-- [ ] Compile-time check that an audited handler takes the extractor
-- [ ] Layer check: a successful audited response recorded at least one action, all declared
-- [ ] Audit map read from the OpenAPI document at startup
-- [ ] Migration: partitioned entries table with retention sub-partitions, GIN index; registered with partition runway
-- [ ] Database model: write entry, commit an entry ahead, settle it, freeze a week, query with filters, count by detail value over a window
-- [ ] Audit layer and extractor on the private server
-- [ ] Audit the handlers of the specs already naming audited actions (MNT, K8S, INV, UPG, RST, RPT) and the SQL playground; declare every other private-server handler silent, for the follow-up review card to revisit
-- [ ] Device API: audit issuance and record-changing handlers, silence status and reads; a status push records each application arrival and each check registration
-- [ ] Fleet query interface: declare each tool silent, add "Find audit entries"
-- [ ] Recorder for jobs
-- [ ] Log page in `private-web/`, with Playwright coverage
-- [ ] `just gen-openapi`, and `just gen-api` if the public API's schema changes
+- [x] `Action` enum with stable names, typed records acted on, and retention per action
+- [x] Audit clause in `routes!`: `audit(Action, …)`, `silent`, compile error when missing
+- [x] Compile-time check that an audited handler takes the extractor
+- [x] Layer check: a successful audited response recorded at least one action, all declared
+- [x] Audit map read from the OpenAPI document at startup
+- [x] Migration: partitioned entries table with retention sub-partitions, GIN index; registered with partition runway
+- [x] Database model: write entry, commit an entry ahead, settle it, query with filters, count by detail value over a window
+- [x] Audit layer and extractor on the private server
+- [x] Audit the handlers of the specs already naming audited actions (MNT, INV, UPG, RST) and the SQL playground; declare every other private-server handler silent, for the follow-up review card to revisit (K8S has no handler yet)
+- [x] Device API: audit issuance and record-changing handlers, silence status and reads; a status push records each application arrival and each check registration
+- [x] Fleet query interface: declare each tool silent, add "Find audit entries"
+- [x] Recorder for jobs
+- [x] Log page in `private-web/`, with Playwright coverage
+- [x] `just gen-openapi`, and `just gen-api` if the public API's schema changes

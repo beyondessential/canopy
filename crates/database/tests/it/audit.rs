@@ -51,8 +51,12 @@ async fn an_action_marked_for_a_year_lands_in_the_year_part_of_its_week() {
 			part: String,
 		}
 
-		audit::record(&mut conn, &operator(), &withdrawn()).await.unwrap();
-		audit::record(&mut conn, &operator(), &lifted()).await.unwrap();
+		audit::record(&mut conn, &operator(), &withdrawn())
+			.await
+			.unwrap();
+		audit::record(&mut conn, &operator(), &lifted())
+			.await
+			.unwrap();
 
 		let parts: Vec<Part> =
 			sql_query("SELECT tableoid::regclass::text AS part FROM audit_entries ORDER BY action")
@@ -71,11 +75,19 @@ async fn a_pending_entry_is_settled_once_and_only_adds_to_its_detail() {
 		let pending = audit::commit_ahead(&mut conn, &operator(), &lifted())
 			.await
 			.unwrap();
-		assert!(find(&mut conn).await.is_empty(), "hidden while it can be settled");
+		assert!(
+			find(&mut conn).await.is_empty(),
+			"hidden while it can be settled"
+		);
 
-		audit::settle(&mut conn, &pending, Outcome::Done, Some(json!({ "learned": 1 })))
-			.await
-			.unwrap();
+		audit::settle(
+			&mut conn,
+			&pending,
+			Outcome::Done,
+			Some(json!({ "learned": 1 })),
+		)
+		.await
+		.unwrap();
 		let entries = find(&mut conn).await;
 		assert_eq!(entries.len(), 1);
 		assert_eq!(entries[0].status, Status::Done);
@@ -106,7 +118,7 @@ async fn a_lapsed_entry_cannot_be_settled_and_reads_as_unconfirmed() {
 		let entries = find(&mut conn).await;
 		// Within an hour of the week's start the row cannot be made old enough
 		// without leaving the week provisioned; it is then still settleable.
-		if let Some(entry) = entries.iter().next() {
+		if let [entry, ..] = entries.as_slice() {
 			assert_eq!(entry.status, Status::Unconfirmed);
 			let pending = audit::Pending {
 				id: entry.id,
@@ -126,7 +138,9 @@ async fn a_lapsed_entry_cannot_be_settled_and_reads_as_unconfirmed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_table_refuses_deletes_and_changes_to_anything_but_settling() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		audit::record(&mut conn, &operator(), &lifted()).await.unwrap();
+		audit::record(&mut conn, &operator(), &lifted())
+			.await
+			.unwrap();
 		let pending = audit::commit_ahead(&mut conn, &operator(), &lifted())
 			.await
 			.unwrap();
@@ -155,7 +169,11 @@ async fn the_table_refuses_deletes_and_changes_to_anything_but_settling() {
 async fn entries_are_found_by_record_and_detail_and_counted_by_a_detail_value() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let window = Uuid::new_v4();
-		for (note, window) in [(Some("alpha"), window), (Some("alpha"), Uuid::new_v4()), (Some("beta"), Uuid::new_v4())] {
+		for (note, window) in [
+			(Some("alpha"), window),
+			(Some("alpha"), Uuid::new_v4()),
+			(Some("beta"), Uuid::new_v4()),
+		] {
 			audit::record(
 				&mut conn,
 				&operator(),
@@ -233,4 +251,52 @@ async fn every_action_in_the_catalogue_is_unique_and_labelled() {
 	for (name, label, _) in audit::catalogue() {
 		assert!(!label.is_empty() && !label.contains('—'), "{name}");
 	}
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn every_kind_of_actor_is_presented_as_what_it_is() {
+	use commons_types::device::DeviceRole;
+
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let application = Uuid::new_v4();
+		let device = |role| Actor::Device {
+			id: Uuid::new_v4(),
+			name: None,
+			role,
+			application: Some(application),
+		};
+		let token = Actor::Token {
+			id: Uuid::new_v4(),
+			name: "ops-assistant".into(),
+		};
+		for actor in [
+			device(DeviceRole::Relay),
+			device(DeviceRole::BackupRestore),
+			token.clone(),
+		] {
+			audit::record(&mut conn, &actor, &lifted()).await.unwrap();
+		}
+
+		let entries = find(&mut conn).await;
+		let roles: Vec<DeviceRole> = entries
+			.iter()
+			.filter_map(|entry| match &entry.actor {
+				Actor::Device {
+					role,
+					application: found,
+					..
+				} => {
+					assert_eq!(*found, Some(application), "the application it acted for");
+					Some(*role)
+				}
+				_ => None,
+			})
+			.collect();
+		assert!(roles.contains(&DeviceRole::Relay));
+		assert!(roles.contains(&DeviceRole::BackupRestore));
+		assert!(entries.iter().any(
+			|entry| matches!(&entry.actor, Actor::Token { name, .. } if name == "ops-assistant")
+		));
+	})
+	.await
 }

@@ -38,7 +38,9 @@ use database::{
 	Db, PooledConnection,
 	audit::{self, Action, Actor, Outcome, Pending},
 };
-use diesel_async::{AnsiTransactionManager, AsyncConnection, AsyncPgConnection, TransactionManager};
+use diesel_async::{
+	AnsiTransactionManager, AsyncConnection, AsyncPgConnection, TransactionManager,
+};
 use serde_json::Value;
 
 use crate::tailscale_auth::TailscaleUser;
@@ -246,7 +248,10 @@ impl AuditSession {
 	/// What the handler recorded that the route did not declare, and whether it
 	/// recorded anything at all.
 	fn check(&self) -> Result<()> {
-		let recorded = self.recorded.lock().unwrap_or_else(|held| held.into_inner());
+		let recorded = self
+			.recorded
+			.lock()
+			.unwrap_or_else(|held| held.into_inner());
 		if recorded.is_empty() && !self.optional {
 			return Err(AppError::custom(
 				"this audited handler completed without recording an action",
@@ -297,7 +302,9 @@ where
 			.cloned()
 			.map(Self)
 			.ok_or_else(|| {
-				AppError::custom("this handler takes the audit extractor but is not declared audited")
+				AppError::custom(
+					"this handler takes the audit extractor but is not declared audited",
+				)
 			})
 	}
 }
@@ -306,11 +313,7 @@ impl Audit {
 	/// Name the actor, on a surface where the handler is what authenticates
 	/// them, such as a device.
 	pub fn acting_as(&self, actor: Actor) {
-		*self
-			.0
-			.actor
-			.lock()
-			.unwrap_or_else(|held| held.into_inner()) = Some(actor);
+		*self.0.actor.lock().unwrap_or_else(|held| held.into_inner()) = Some(actor);
 	}
 
 	/// The transaction the handler works in. Its changes and the entries it

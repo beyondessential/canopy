@@ -77,3 +77,46 @@ async fn execution_time_measures_the_query_not_the_endpoint() {
 	})
 	.await
 }
+
+/// A query is recorded before it runs, so one that fails is recorded as failed
+/// and one that works is recorded done, each holding the query text.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_query_is_recorded_whether_it_works_or_fails() {
+	TestDb::run(async |mut conn, url| {
+		let private = private_with_ro_pool(&url).await;
+
+		private
+			.post("/api/sql/execute_query")
+			.json(&serde_json::json!({ "query": { "query": "SELECT 1 AS n" } }))
+			.await
+			.assert_status_ok();
+		private
+			.post("/api/sql/execute_query")
+			.json(&serde_json::json!({ "query": { "query": "SELEKT 1" } }))
+			.await
+			.assert_status_not_ok();
+
+		let entries = database::audit::find(
+			&mut conn,
+			&database::audit::Filter {
+				action: Some("sql_query_run".into()),
+				limit: 10,
+				..Default::default()
+			},
+		)
+		.await
+		.unwrap();
+		assert_eq!(entries.len(), 2);
+		let failed = entries
+			.iter()
+			.find(|e| e.detail["query"] == "SELEKT 1")
+			.unwrap();
+		let worked = entries
+			.iter()
+			.find(|e| e.detail["query"] == "SELECT 1 AS n")
+			.unwrap();
+		assert_eq!(failed.status, database::audit::Status::Failed);
+		assert_eq!(worked.status, database::audit::Status::Done);
+	})
+	.await
+}

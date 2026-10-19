@@ -654,93 +654,94 @@ async fn create(
 				// reachability, the last-seen sample behind a check, and a
 				// group's quiet members all ask what a given target last said.
 				// spec: STA#push
-				let registered = db.transaction::<_, AppError, _>(async |conn| {
-					let mut registered = Vec::new();
-					let status = NewStatus {
-						machine_id: machine.id,
-						server_id: None,
-						device_id: Some(id),
-						// The version Canopy tracks is an application's, so a
-						// machine row carries none.
-						version: None,
-						extra: machine_report.detail,
-						healthy,
-						health: machine_report.health,
-						source: source.clone(),
-					}
-					.save(conn)
-					.await?;
-					database::reported_detail::MachineReportedDetail::record(
-						conn,
-						machine.id,
-						&status.source,
-						&status.extra,
-					)
-					.await?;
-					let machine_grading_tags = json_tags(&machine_tags);
-					registered.extend(
-						file_health_events(
-							conn,
-							None,
-							&machine,
-							Some(id),
-							&status,
-							GrainTags {
-								application: &machine_grading_tags,
-								machine: &machine_grading_tags,
-							},
-							SubjectSplit::AsGiven,
-						)
-						.await?,
-					);
-
-					for (_, application, report, tags) in &apps {
-						// Each application's own version, from its own detail.
-						// The `X-Version` header names one application and a
-						// split push may describe several, so it has no
-						// meaning here and is not consulted.
-						let version = resolve_version(&report.detail, None);
+				let registered = db
+					.transaction::<_, AppError, _>(async |conn| {
+						let mut registered = Vec::new();
 						let status = NewStatus {
 							machine_id: machine.id,
-							server_id: Some(application.id),
+							server_id: None,
 							device_id: Some(id),
-							version,
-							extra: report.detail.clone(),
+							// The version Canopy tracks is an application's, so a
+							// machine row carries none.
+							version: None,
+							extra: machine_report.detail,
 							healthy,
-							health: report.health.clone(),
+							health: machine_report.health,
 							source: source.clone(),
 						}
 						.save(conn)
 						.await?;
-						database::reported_detail::ReportedDetail::record_for_application(
+						database::reported_detail::MachineReportedDetail::record(
 							conn,
-							application.id,
+							machine.id,
 							&status.source,
 							&status.extra,
-							status.version.as_ref(),
 						)
 						.await?;
-						let application_tags = json_tags(tags);
+						let machine_grading_tags = json_tags(&machine_tags);
 						registered.extend(
 							file_health_events(
 								conn,
-								Some(application),
+								None,
 								&machine,
 								Some(id),
 								&status,
 								GrainTags {
-									application: &application_tags,
-									machine: &application_tags,
+									application: &machine_grading_tags,
+									machine: &machine_grading_tags,
 								},
 								SubjectSplit::AsGiven,
 							)
 							.await?,
 						);
-					}
 
-					Ok(registered)
-				})
-				.await?;
+						for (_, application, report, tags) in &apps {
+							// Each application's own version, from its own detail.
+							// The `X-Version` header names one application and a
+							// split push may describe several, so it has no
+							// meaning here and is not consulted.
+							let version = resolve_version(&report.detail, None);
+							let status = NewStatus {
+								machine_id: machine.id,
+								server_id: Some(application.id),
+								device_id: Some(id),
+								version,
+								extra: report.detail.clone(),
+								healthy,
+								health: report.health.clone(),
+								source: source.clone(),
+							}
+							.save(conn)
+							.await?;
+							database::reported_detail::ReportedDetail::record_for_application(
+								conn,
+								application.id,
+								&status.source,
+								&status.extra,
+								status.version.as_ref(),
+							)
+							.await?;
+							let application_tags = json_tags(tags);
+							registered.extend(
+								file_health_events(
+									conn,
+									Some(application),
+									&machine,
+									Some(id),
+									&status,
+									GrainTags {
+										application: &application_tags,
+										machine: &application_tags,
+									},
+									SubjectSplit::AsGiven,
+								)
+								.await?,
+							);
+						}
+
+						Ok(registered)
+					})
+					.await?;
 				record_registrations(&mut db, registered).await?;
 			}
 
@@ -806,49 +807,50 @@ async fn create(
 			// else — backup instructions, tags, severities computed below — is
 			// returned regardless, so an ignored reporter keeps working.
 			if record {
-				let registered = db.transaction::<_, AppError, _>(async |conn| {
-					let status = NewStatus {
-						machine_id: machine.id,
-						server_id,
-						device_id: Some(id),
-						version,
-						extra,
-						healthy,
-						health,
-						source: source.clone(),
-					}
-					.save(conn)
-					.await?;
+				let registered = db
+					.transaction::<_, AppError, _>(async |conn| {
+						let status = NewStatus {
+							machine_id: machine.id,
+							server_id,
+							device_id: Some(id),
+							version,
+							extra,
+							healthy,
+							health,
+							source: source.clone(),
+						}
+						.save(conn)
+						.await?;
 
-					// This source's current server-wide detail, replacing what
-					// it last reported. The push is the source's whole truth,
-					// the same rule its checks follow just below.
-					// spec: FIG#sourcing
-					database::reported_detail::ReportedDetail::record(
-						conn,
-						server_id,
-						machine.id,
-						&status.source,
-						&status.extra,
-						status.version.as_ref(),
-					)
-					.await?;
+						// This source's current server-wide detail, replacing what
+						// it last reported. The push is the source's whole truth,
+						// the same rule its checks follow just below.
+						// spec: FIG#sourcing
+						database::reported_detail::ReportedDetail::record(
+							conn,
+							server_id,
+							machine.id,
+							&status.source,
+							&status.extra,
+							status.version.as_ref(),
+						)
+						.await?;
 
-					file_health_events(
-						conn,
-						application.as_ref(),
-						&machine,
-						Some(id),
-						&status,
-						GrainTags {
-							application: &tags,
-							machine: &machine_grading_tags,
-						},
-						SubjectSplit::BySubject,
-					)
-					.await
-				})
-				.await?;
+						file_health_events(
+							conn,
+							application.as_ref(),
+							&machine,
+							Some(id),
+							&status,
+							GrainTags {
+								application: &tags,
+								machine: &machine_grading_tags,
+							},
+							SubjectSplit::BySubject,
+						)
+						.await
+					})
+					.await?;
 				record_registrations(&mut db, registered).await?;
 			}
 

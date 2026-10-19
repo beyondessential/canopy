@@ -19,6 +19,8 @@ An audited handler declares the actions it takes, and records an entry for each 
 One request can take several actions, as a bulk change does, and then records an entry for each.
 An audited handler that completes without recording an action, or records one it did not declare, fails, and what it changed is rolled back.
 A silent handler never records an entry.
+A handler that records only for what it creates, as a status report does for an application or a check it brings, declares its actions as ones it may record, and completes without an entry when it creates nothing.
+It is still held to the actions it declares.
 
 Whether a handler is audited is independent of its safety grade (see [SAFE](../private-server/safety-modes.md)).
 A read can be audited, as running a query in the SQL playground is, and a change can be silent.
@@ -36,6 +38,8 @@ Every entry names its action from Canopy's catalogue of actions, such as revokin
 An action names a kind of thing done, never one instance of it: what varies between instances is in the entry's detail.
 An action's name is stable, and does not change when the operator interface or an API is reorganised, so a search by action reaches the whole log, the archive included.
 An action is recorded the same way whichever surface it is taken through.
+An action is important or routine.
+A routine action is one taken at high volume that is not what a reader of the log is looking for by default, such as issuing credentials to a backup run or reading an inventory.
 
 ## Actors
 
@@ -114,10 +118,11 @@ Each is under object lock for the same retention as the escrow's own versions, a
 
 Any administrator can read the whole log from the operator interface.
 The log page lists the last ninety days newest first, from the database alone, and can be filtered by actor, action, time within those ninety days, and the records acted on.
+It lists important actions unless the reader asks for routine ones too, or names a routine action, which is then listed whatever its tier.
 Older entries come from the archive, and are loaded only when the operator asks for them, so consulting the log puts no load on the archive by itself.
 Each such request loads further back, within the filters in force.
 
-The fleet query interface offers the last ninety days of the log to any caller it serves.
+The fleet query interface offers the last ninety days of the log to any caller it serves, on the same terms for routine actions.
 
 ## Self-alerts
 

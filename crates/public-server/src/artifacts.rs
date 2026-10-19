@@ -13,11 +13,11 @@ use commons_types::{
 	version::{VersionStatus, VersionStr},
 };
 use database::{
-	audit::{Action, Record, RecordKind},
 	artifacts::{
 		Artifact as ArtifactRow, MAX_HELD_ARTIFACT_BYTES, NewArtifact, Scope, digest_of, location,
 		parse_sri_opt, sri,
 	},
+	audit::{Action, Record, RecordKind},
 	machines::Machine,
 	restore::RestoreReplica,
 	versions::{NewVersion, Version},
@@ -114,11 +114,13 @@ const REPORTING_SCHEMA_TYPE: &str = "reporting-schema";
 const SCHEMA_PLATFORM: &str = "any";
 
 pub fn routes() -> OpenApiRouter<AppState> {
-	OpenApiRouter::new().routes(routes!(public, audit(ArtifactRegistered): create)).merge(
-		OpenApiRouter::new()
-			.routes(routes!(public, audit(ArtifactRegistered): register_for_group))
-			.layer(DefaultBodyLimit::max(MAX_UPLOAD_BODY_BYTES)),
-	)
+	OpenApiRouter::new()
+		.routes(routes!(public, audit(ArtifactRegistered): create))
+		.merge(
+			OpenApiRouter::new()
+				.routes(routes!(public, audit(ArtifactRegistered): register_for_group))
+				.layer(DefaultBodyLimit::max(MAX_UPLOAD_BODY_BYTES)),
+		)
 }
 
 /// Register a downloadable artifact for a version or version range.
@@ -245,14 +247,9 @@ async fn create(
 	)
 	.await?;
 
-	let version_record = match row.version_id {
-		Some(id) => Some(Record::new(
-			RecordKind::Version,
-			id,
-			version.clone(),
-		)),
-		None => None,
-	};
+	let version_record = row
+		.version_id
+		.map(|id| Record::new(RecordKind::Version, id, version.clone()));
 	db.record(Action::ArtifactRegistered {
 		artifact: Record::new(
 			RecordKind::Artifact,
@@ -429,12 +426,19 @@ async fn register_for_group(
 			artifact: Record::new(
 				RecordKind::Artifact,
 				artifact_id,
-				format!("{artifact_type} {platform}", artifact_type = input.artifact_type, platform = input.platform),
+				format!(
+					"{artifact_type} {platform}",
+					artifact_type = input.artifact_type,
+					platform = input.platform
+				),
 			),
 			version: Some(Record::new(
 				RecordKind::Version,
 				version_row.id,
-				format!("{}.{}.{}", version_row.major, version_row.minor, version_row.patch),
+				format!(
+					"{}.{}.{}",
+					version_row.major, version_row.minor, version_row.patch
+				),
 			)),
 			group: Some(Record::group(&mut db, group).await?),
 			device: Record::device(device_id),

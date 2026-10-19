@@ -89,8 +89,8 @@ impl CanopyMcp {
 
 		let mut conn = self.conn().await?;
 		let oldest = Timestamp::now() - READ_WINDOW;
-		let since = (Timestamp::now() - SignedDuration::from_hours(24 * window_days as i64))
-			.max(oldest);
+		let since =
+			(Timestamp::now() - SignedDuration::from_hours(24 * window_days as i64)).max(oldest);
 		let record = args.record.filter(|record| !record.trim().is_empty());
 		let mut entries = audit::find(
 			&mut conn,

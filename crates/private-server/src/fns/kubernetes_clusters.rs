@@ -186,7 +186,11 @@ pub async fn register(
 	let cluster = KubernetesCluster::create_draft(&mut conn, name, credential.device_id).await?;
 	conn.record(Action::DeviceCredentialProvisioned {
 		device: Record::device(credential.device_id),
-		key: Record::new(RecordKind::Credential, credential.key_id, format!("{name} relay")),
+		key: Record::new(
+			RecordKind::Credential,
+			credential.key_id,
+			format!("{name} relay"),
+		),
 		role: DeviceRole::Relay.to_string(),
 	})
 	.await?;
