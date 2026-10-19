@@ -156,6 +156,26 @@ fn store_for(database: &str) -> ArtifactStore {
 		.clone()
 }
 
+/// The issuer the test public server signs identity tokens as.
+pub const IDENTITY_ISSUER: &str = "https://identity.canopy.test";
+
+/// The key the test public server signs identity tokens with, fixed so a test
+/// can verify what it is issued.
+pub fn identity_key() -> oidc::SigningKey {
+	oidc::SigningKey::local_from_pkcs8(
+		"test-identity-key",
+		include_bytes!("fixtures/identity-key.p8"),
+	)
+	.expect("the test identity key reads")
+}
+
+fn identity_issuer() -> oidc::Issuer {
+	oidc::Issuer {
+		issuer: IDENTITY_ISSUER.into(),
+		keyring: oidc::Keyring::local(vec![identity_key()]),
+	}
+}
+
 /// [`run`] against an explicitly chosen client-certificate header.
 pub async fn run_on<F, T, Fut>(cert_header: ClientCertHeader, test: F) -> T
 where
@@ -186,6 +206,7 @@ where
 			// From the environment, so a test can configure zones before building
 			// the server the way the real edge does.
 			dns_zones: commons_types::dns::ManagedZone::list_from_env().unwrap_or_default(),
+			identity: Some(identity_issuer()),
 		};
 		let public_router = router(
 			public_server::audited(public_server::routes(), public_state.db.clone())
@@ -369,6 +390,7 @@ where
 			// From the environment, so a test can configure zones before building
 			// the server the way the real edge does.
 			dns_zones: commons_types::dns::ManagedZone::list_from_env().unwrap_or_default(),
+			identity: Some(identity_issuer()),
 		};
 		let public_router = router(
 			public_server::audited(public_server::routes(), public_state.db.clone())
@@ -399,6 +421,8 @@ where
 				dns_zones: Vec::new(),
 				acme: None,
 				acme_directory: None,
+				identity_config: Default::default(),
+				identity: None,
 			})
 			.unwrap(),
 			ClientIpSource::RightmostForwarded,

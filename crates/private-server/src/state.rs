@@ -87,6 +87,25 @@ pub struct AppState {
 	/// account key is configured.
 	#[from_ref(skip)]
 	pub acme_directory: Option<String>,
+	/// The identity provider's configuration, as read at startup, which its
+	/// settings present.
+	// spec: IDP#configuration
+	#[from_ref(skip)]
+	pub identity_config: oidc::IdentityConfig,
+	/// The issuer and keys the nested `/public` mount issues identity tokens
+	/// with, as the standalone public server does. `None` when not configured.
+	#[from_ref(skip)]
+	pub identity: Option<oidc::Issuer>,
+}
+
+/// Read the identity provider's configuration, logging (not failing) one that
+/// does not parse: the admin server should still come up, and the settings
+/// present the Canopy instance as issuing no tokens.
+fn identity_config_from_env() -> oidc::IdentityConfig {
+	oidc::IdentityConfig::from_env().unwrap_or_else(|err| {
+		tracing::warn!("ignoring the identity provider configuration: {err}");
+		oidc::IdentityConfig::default()
+	})
 }
 
 /// Environment variable that swaps in the in-process fake certificate authority,
@@ -224,6 +243,8 @@ impl AppState {
 			dns_zones: dns_zones_from_env(),
 			acme,
 			acme_directory,
+			identity_config: identity_config_from_env(),
+			identity: oidc::Issuer::from_env().await,
 		})
 	}
 
@@ -261,6 +282,10 @@ impl AppState {
 			// network.
 			acme: Some(Acme::fake()),
 			acme_directory: Some("https://acme.test.invalid/directory".into()),
+			// Read from env so the e2e fixture can present a configured issuer.
+			// Nothing signs here: the nested mount's issuance isn't exercised.
+			identity_config: identity_config_from_env(),
+			identity: None,
 		})
 	}
 }

@@ -84,6 +84,7 @@ pub enum RecordKind {
 	Artifact,
 	Name,
 	Certificate,
+	RelyingParty,
 }
 
 /// A record an action acted on: its identifier, and its name as it was when the
@@ -600,6 +601,58 @@ actions! {
 	VersionRemoved = "version_removed", "Remove version" {
 		records { version: Record, device: Record }
 		detail { }
+	}
+
+	/// An identity token was issued, or refused as not granted, in which case
+	/// it is settled failed with the reason. Workloads ask for tokens throughout
+	/// the day, so routine.
+	// spec: IDT#recording
+	IdentityTokenIssued = "identity_token_issued", "Issue identity token", tier = Routine {
+		records { subject: Record, relying_party: Record }
+		detail {
+			sub: Option<String>, jti: Option<String>, kid: Option<String>,
+			expires_at: Option<Timestamp>,
+		}
+	}
+
+	/// A machine or an application was granted identity tokens for a relying
+	/// party.
+	// spec: IDP#grants
+	IdentityGranted = "identity_granted", "Grant identity tokens", retention = Year {
+		records { subject: Record, relying_party: Record }
+		detail { }
+	}
+
+	/// A grant of identity tokens was revoked, directly or by removing its
+	/// relying party.
+	// spec: IDP#grants
+	IdentityGrantRevoked = "identity_grant_revoked", "Revoke identity token grant", retention = Year {
+		records { subject: Record, relying_party: Record }
+		detail { }
+	}
+
+	/// A relying party was registered.
+	// spec: IDP#relying-parties
+	RelyingPartyRegistered = "relying_party_registered", "Register relying party", retention = Year {
+		records { relying_party: Record }
+		detail { audience: String, token_lifetime_minutes: i32 }
+	}
+
+	/// A relying party's name or token lifetime was changed.
+	// spec: IDP#relying-parties
+	RelyingPartyEdited = "relying_party_edited", "Edit relying party", retention = Year {
+		records { relying_party: Record }
+		detail {
+			name_from: String, name_to: String,
+			token_lifetime_minutes_from: i32, token_lifetime_minutes_to: i32,
+		}
+	}
+
+	/// A relying party was removed, revoking every grant for it.
+	// spec: IDP#relying-parties
+	RelyingPartyRemoved = "relying_party_removed", "Remove relying party", retention = Year {
+		records { relying_party: Record }
+		detail { audience: String, grants_revoked: usize }
 	}
 
 	/// An artifact was registered against a version.

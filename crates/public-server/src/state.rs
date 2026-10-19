@@ -58,6 +58,11 @@ pub struct AppState {
 	/// be acted on — read once at startup, so a change takes effect on restart.
 	// spec: CRT
 	pub dns_zones: Vec<commons_types::dns::ManagedZone>,
+	/// The issuer and signing keys identity tokens are issued with. `None` when
+	/// the Canopy instance has no issuer or keys configured, in which case
+	/// `POST /identity-tokens` answers 502.
+	// spec: IDP#configuration
+	pub identity: Option<oidc::Issuer>,
 }
 
 /// Read the managed DNS zones from the environment, logging (not failing) a
@@ -108,6 +113,7 @@ impl AppState {
 		state.sts = Some(Self::init_sts().await);
 		state.kube = Self::init_kube().await;
 		state.artifacts = commons_servers::artifact_store::ArtifactStore::try_default().await;
+		state.identity = oidc::Issuer::from_env().await;
 		Ok(state)
 	}
 
@@ -150,6 +156,7 @@ impl AppState {
 			kube: None,
 			artifacts: None,
 			dns_zones: dns_zones_from_env(),
+			identity: None,
 		})
 	}
 
@@ -165,12 +172,14 @@ impl AppState {
 		sts: Option<aws_sdk_sts::Client>,
 		kube: Option<BackupSecrets>,
 		artifacts: Option<commons_servers::artifact_store::ArtifactStore>,
+		identity: Option<oidc::Issuer>,
 	) -> Result<Self> {
 		Ok(Self {
 			client_cert_header: commons_servers::device_auth::mtls::ClientCertHeader::from_env(),
 			sts,
 			kube,
 			artifacts,
+			identity,
 			..Self::from_db_with_directory(db, tailnet_directory)?
 		})
 	}

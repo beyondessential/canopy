@@ -10,12 +10,14 @@
 mod config;
 mod der;
 mod discovery;
+mod issuer;
 mod jwk;
 mod jwt;
 mod keyring;
 
 pub use config::{ISSUER_ENV, IdentityConfig, KEYS_ENV};
 pub use discovery::{DISCOVERY_PATH, JWKS_PATH, discovery_document, jwks_uri};
+pub use issuer::Issuer;
 pub use jwk::{Jwks, PublicJwk};
 pub use jwt::encode;
 pub use keyring::{Keyring, SigningKey};

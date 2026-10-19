@@ -207,6 +207,36 @@ Distinct from an undeclared DNS name because waiting does not fix it:
 either the client is configured with the wrong type, or the
 application it means is not registered on the machine in Canopy.
 
+## Identity audience unknown
+
+Issued when a machine asks for an identity token for an audience that
+no registered relying party has. The audience is what the workload's
+own configuration names, so this is usually a typo there, or a relying
+party not yet registered in Canopy. Told apart from not granted so the
+two are fixed in the right place.
+
+## Identity subject not found
+
+Issued when a machine asks for an identity token naming an application
+type that no live application on the machine has. Either the client is
+configured with the wrong type, or the application it means is not on
+this machine in Canopy, or is archived.
+
+## Identity token not granted
+
+Issued when the machine or application asking for an identity token
+holds no grant for the relying party. Grants are given by an operator
+on the machine's edit page; waiting does not help. The refusal is
+recorded in the audit log.
+
+## Identity subject not placed
+
+Issued when the machine asking for an identity token, or the machine
+its application runs on, is pending or belongs to no group. A token's
+subject carries the group and rank, so none is issued until an operator
+ranks and groups the machine. This clears without any change on the
+client's side.
+
 ## Auth: tailnet identity missing
 
 Issued on the private-server's `/public/...` mount when the

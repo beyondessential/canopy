@@ -193,3 +193,18 @@ async fn resolve(entry: &Entry) -> Result<SigningKey> {
 		inner: Inner::Kms(client.clone()),
 	})
 }
+
+impl SigningKey {
+	/// An in-process key from its PKCS#8 encoding, for tests that need to know
+	/// the key they will be issued tokens by.
+	pub fn local_from_pkcs8(key_ref: impl Into<String>, pkcs8: &[u8]) -> Result<Self> {
+		let pair = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8, &SystemRandom::new())
+			.map_err(|err| Error::Config(format!("not a P-256 PKCS#8 key: {err}")))?;
+		let jwk = PublicJwk::from_point(pair.public_key().as_ref())?;
+		Ok(Self {
+			key_ref: key_ref.into(),
+			jwk,
+			inner: Inner::Local(Arc::new(pair)),
+		})
+	}
+}

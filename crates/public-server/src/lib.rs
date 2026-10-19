@@ -10,6 +10,7 @@ pub mod backup;
 pub mod bestool;
 pub mod calendar;
 pub mod enrollment;
+pub mod identity;
 pub mod machines;
 pub mod mcp;
 pub mod names;
@@ -68,6 +69,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.merge(backup::routes())
 		.merge(restore::routes())
+		.merge(identity::routes())
 		.nest("/artifacts", artifacts::routes())
 		.nest("/bestool", bestool::routes())
 		.nest("/certificates", names::certificate_routes())
