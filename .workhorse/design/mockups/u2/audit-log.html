@@ -115,12 +115,28 @@
 	}
 
 	/* Settings tabs */
+	/* A ninth tab no longer fits, so the bar becomes variant="scrollable":
+	   the selected tab is scrolled into view, with MUI's scroll button. */
 	.tabs {
 		display: flex;
-		border-bottom: 0;
+		min-height: 48px;
 		margin-bottom: 16px;
-		overflow-x: auto;
-		scrollbar-width: none;
+	}
+	.tabs-scroll {
+		width: 40px;
+		flex: none;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		color: rgba(0, 0, 0, 0.87);
+		opacity: 0.8;
+		font-size: 20px;
+	}
+	.tabs-scroller {
+		flex: 1;
+		display: flex;
+		justify-content: flex-end;
+		overflow: hidden;
 	}
 	.tab {
 		flex: none;
@@ -238,7 +254,7 @@
 		color: var(--text);
 	}
 	tbody tr:not(.archive):hover { background: var(--hover); }
-	td.when { white-space: nowrap; }
+	td.when, td.op { white-space: nowrap; }
 	td.when span { cursor: default; }
 
 	.actor {
@@ -374,7 +390,9 @@
 </header>
 
 <main class="container">
-	<div class="tabs" role="tablist">
+	<div class="tabs">
+		<span class="tabs-scroll" aria-hidden="true"><svg class="icon" viewBox="0 0 24 24"><path d="M15.41 16.09l-4.58-4.59 4.58-4.59L14 5.5l-6 6 6 6z"/></svg></span>
+		<div class="tabs-scroller" role="tablist">
 		<a class="tab" href="#">Admins</a>
 		<a class="tab" href="#">Healthchecks</a>
 		<a class="tab" href="#">Backup defaults</a>
@@ -384,6 +402,7 @@
 		<a class="tab" href="#">MCP access</a>
 		<a class="tab" href="#">Certificate authority</a>
 		<a class="tab selected" href="#" aria-selected="true">Audit log</a>
+		</div>
 	</div>
 
 	<div class="stack">
@@ -410,7 +429,7 @@
 					<tr>
 						<td class="when"><span title="19/10/2026, 2:08:11 pm">4m ago</span></td>
 						<td><div class="actor"><span class="avatar" title="Alice Ng">A</span>alice@example.org</div></td>
-						<td>Revoke certificate</td>
+						<td class="op">Revoke certificate</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">machine</span><a class="link" href="#">host-3</a></span>
 							<span class="arg"><span class="k">serial</span><span class="v mono">4f:2a:91:0c:7e</span></span>
@@ -421,9 +440,9 @@
 						<td class="when"><span title="19/10/2026, 2:00:47 pm">12m ago</span></td>
 						<td>
 							<div class="actor"><span class="avatar"><svg><use href="#i-dns"/></svg></span><a class="link" href="#">host-3</a></div>
-							<div class="caption" style="padding-left: 32px">for <span class="trail">Central ·</span> Tamanu Facility</div>
+							<div class="caption" style="padding-left: 32px; white-space: nowrap">for <span class="trail">Central ·</span> Tamanu Facility</div>
 						</td>
-						<td>Issue backup credentials</td>
+						<td class="op">Issue backup credentials</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">group</span><a class="link" href="#">Central</a></span>
 							<span class="arg"><span class="k">configuration</span><span class="v mono">nightly-full</span></span>
@@ -433,7 +452,7 @@
 					<tr>
 						<td class="when"><span title="19/10/2026, 1:34:02 pm">38m ago</span></td>
 						<td><div class="actor"><span class="avatar"><svg><use href="#i-key"/></svg></span><span class="mono">reporting-dash</span></div></td>
-						<td>Run SQL query</td>
+						<td class="op">Run SQL query</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">query</span><span class="v mono">select * from backup_credentials</span></span>
 						</div></td>
@@ -442,7 +461,7 @@
 					<tr>
 						<td class="when"><span title="19/10/2026, 1:09:55 pm">1h ago</span></td>
 						<td><div class="actor"><span class="avatar canopy"><svg><use href="#i-canopy"/></svg></span>Canopy</div></td>
-						<td>Create DNS record</td>
+						<td class="op">Create DNS record</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">application</span><a class="link" href="#"><span class="trail">Coastal ·</span> Tamanu Central</a></span>
 							<span class="arg"><span class="k">name</span><span class="v mono">central.coastal.example.org</span></span>
@@ -452,7 +471,7 @@
 					<tr>
 						<td class="when"><span title="19/10/2026, 12:20:13 pm">2h ago</span></td>
 						<td><div class="actor"><span class="avatar" title="Bob Tane">B</span>bob@example.org</div></td>
-						<td>Run SQL query</td>
+						<td class="op">Run SQL query</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">query</span><span class="v mono" title="select name, last_seen from machines where archived_at is null">select name, last_seen from machines where archived_at is null</span></span>
 						</div></td>
@@ -461,7 +480,7 @@
 					<tr>
 						<td class="when"><span title="19/10/2026, 11:05:40 am">3h ago</span></td>
 						<td><div class="actor"><span class="avatar" title="Carol Fifita">C</span>carol@example.org</div></td>
-						<td>Add admin</td>
+						<td class="op">Add admin</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">email</span><span class="v">dan@example.org</span></span>
 						</div></td>
@@ -470,7 +489,7 @@
 					<tr>
 						<td class="when"><span title="19/10/2026, 9:14:22 am">5h ago</span></td>
 						<td><div class="actor"><span class="avatar"><svg><use href="#i-dns"/></svg></span><a class="link" href="#">host-7</a></div></td>
-						<td>Request certificate</td>
+						<td class="op">Request certificate</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">machine</span><a class="link" href="#">host-7</a></span>
 							<span class="arg"><span class="k">name</span><span class="v mono">host-7.example.org</span></span>
@@ -480,7 +499,7 @@
 					<tr>
 						<td class="when"><span title="19/10/2026, 5:00:00 am">9h ago</span></td>
 						<td><div class="actor"><span class="avatar canopy"><svg><use href="#i-canopy"/></svg></span>Canopy</div></td>
-						<td>Archive machine</td>
+						<td class="op">Archive machine</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">machine</span><a class="link" href="#"><span class="trail">Northern ·</span> host-12</a></span>
 						</div></td>
@@ -489,7 +508,7 @@
 					<tr>
 						<td class="when"><span title="18/10/2026, 3:41:09 pm">23h ago</span></td>
 						<td><div class="actor"><span class="avatar" title="Alice Ng">A</span>alice@example.org</div></td>
-						<td>Declare maintenance</td>
+						<td class="op">Declare maintenance</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">group</span><a class="link" href="#">Coastal</a></span>
 							<span class="arg"><span class="k">ends</span><span class="v">21/10/2026, 6:00 pm</span></span>
@@ -499,7 +518,7 @@
 					<tr>
 						<td class="when"><span title="17/10/2026, 10:02:31 am">2d ago</span></td>
 						<td><div class="actor"><span class="avatar"><svg><use href="#i-key"/></svg></span><span class="mono">ops-assistant</span></div></td>
-						<td>Query fleet</td>
+						<td class="op">Query fleet</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">group</span><a class="link" href="#">Central</a></span>
 							<span class="arg"><span class="k">query</span><span class="v mono">machines-without-backups</span></span>
@@ -509,7 +528,7 @@
 					<tr>
 						<td class="when"><span title="13/10/2026, 4:55:18 pm">6d ago</span></td>
 						<td><div class="actor"><span class="avatar" title="Bob Tane">B</span>bob@example.org</div></td>
-						<td>Lift maintenance</td>
+						<td class="op">Lift maintenance</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">application</span><a class="link" href="#"><span class="trail">Central ·</span> Tamanu Facility</a></span>
 						</div></td>
@@ -518,7 +537,7 @@
 					<tr>
 						<td class="when"><span title="1/10/2026, 3:00:00 am">18d ago</span></td>
 						<td><div class="actor"><span class="avatar canopy"><svg><use href="#i-canopy"/></svg></span>Canopy</div></td>
-						<td>Create backup bucket</td>
+						<td class="op">Create backup bucket</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">group</span><a class="link" href="#">Northern</a></span>
 							<span class="arg"><span class="k">configuration</span><span class="v mono">weekly-offsite</span></span>
@@ -529,9 +548,9 @@
 						<td class="when"><span title="8/09/2026, 11:47:36 pm">41d ago</span></td>
 						<td>
 							<div class="actor"><span class="avatar"><svg><use href="#i-dns"/></svg></span><a class="link" href="#">host-9</a></div>
-							<div class="caption" style="padding-left: 32px">for <span class="trail">Northern ·</span> Tamanu Central</div>
+							<div class="caption" style="padding-left: 32px; white-space: nowrap">for <span class="trail">Northern ·</span> Tamanu Central</div>
 						</td>
-						<td>Issue backup credentials</td>
+						<td class="op">Issue backup credentials</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">group</span><a class="link" href="#">Coastal</a></span>
 							<span class="arg"><span class="k">configuration</span><span class="v mono">nightly-full</span></span>
@@ -541,7 +560,7 @@
 					<tr>
 						<td class="when"><span title="7/08/2026, 9:30:12 am">73d ago</span></td>
 						<td><div class="actor"><span class="avatar" title="Carol Fifita">C</span>carol@example.org</div></td>
-						<td>Mint access token</td>
+						<td class="op">Mint access token</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">name</span><span class="v mono">ops-assistant</span></span>
 						</div></td>
@@ -550,7 +569,7 @@
 					<tr>
 						<td class="when"><span title="23/07/2026, 2:16:44 pm">88d ago</span></td>
 						<td><div class="actor"><span class="avatar" title="Alice Ng">A</span>alice@example.org</div></td>
-						<td>Set rank</td>
+						<td class="op">Set rank</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">machine</span><a class="link" href="#"><span class="trail">Central ·</span> host-5</a></span>
 							<span class="arg"><span class="k">rank</span><span class="chip error">production</span></span>
