@@ -134,24 +134,6 @@
 	}
 	.page { flex: 1; min-width: 0; }
 
-	@media (max-width: 899px) {
-		.settings { flex-direction: column; gap: 16px; }
-		.sidebar {
-			position: static;
-			flex: none;
-			width: 100%;
-			display: flex;
-			gap: 8px;
-			overflow-x: auto;
-			border-bottom: 1px solid rgba(0, 0, 0, 0.12);
-			padding-bottom: 8px;
-		}
-		.sidebar h3 { display: none; }
-		.sidebar ul { display: flex; gap: 4px; }
-		.sidebar li + li a { margin-top: 0; }
-		.sidebar a { white-space: nowrap; padding: 6px 12px; }
-	}
-
 	/* Admins page, unchanged. */
 	.stack > * + * { margin-top: 24px; }
 	.paper {
