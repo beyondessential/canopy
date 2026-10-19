@@ -66,19 +66,24 @@ An audited action is not carried out unless its entry is written.
 The entry and the change it records are committed together, so either both stand or neither does.
 
 A handler can commit an entry ahead of the rest of its action, so that the entry stands whatever becomes of the action.
-This is how a feature records a decision it wants kept even when the action does not go ahead, such as a refusal with its reason, where that feature's spec calls for one.
-An audited read records its entry this way, before reading, so a read is recorded whether or not it succeeds.
+An entry committed ahead is pending until the action settles it, once, as done or failed.
+Settling it done commits together with the rest of the action's work; settling it failed commits on its own, since that work is rolled back.
+An action settles its entry failed only when it knows its effect did not take place.
+Settling can add to the entry's detail what the action has learned since, such as the identifier of a credential an outside service issued.
+A pending entry that is never settled is presented as unconfirmed, because what it records may have taken place even though the action did not complete.
+Once its week is archived an entry can no longer be settled, and one still pending is archived as unconfirmed.
 
-An action with an effect outside Canopy's own records, such as issuing cloud credentials or changing something on a cluster, records its entry as pending before the outside effect, and confirms it once the effect has taken place.
-The confirmation is a record of its own, pointing at the pending entry, so the log is only ever appended to.
-A pending entry that is never confirmed stands, and is presented as unconfirmed, because its outside effect may have taken place even though the action did not complete.
+Committing ahead is how:
+
+- an action with an effect outside Canopy's own records, such as issuing cloud credentials or changing something on a cluster, is recorded before the effect;
+- an audited read is recorded before it reads, so a read that fails is recorded as failed;
+- a feature records a decision it wants kept when the action does not go ahead, such as a refusal with its reason, where that feature's spec calls for one.
 
 ## Keeping entries
 
 Canopy's database holds the recent log, stored in weekly ranges provisioned ahead like the other histories (see [HST](history-storage.md)).
 An entry stays there for ninety days.
 An action can be kept for a year instead, where its entries are few and matter long after the fact.
-A confirmation is kept as long as the entry it confirms.
 An entry leaves the database only once its retention has passed and its week has been archived; an unarchived week is never removed, however old.
 
 ## Archive

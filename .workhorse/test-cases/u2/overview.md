@@ -7,7 +7,7 @@ Covers this card's part of [AUD](../../specs/platform/audit-log.md). Archive and
 - [ ] A route with no audit clause fails to compile (verifies spec: AUD#what-is-recorded)
 - [ ] An audited route whose handler does not take the audit extractor fails to compile
 - [ ] An audit-silent write produces no entry; an audited read (SQL playground) produces one (verifies spec: AUD#what-is-recorded)
-- [ ] A SQL playground query that errors still leaves its entry (verifies spec: AUD#writing-as-a-condition-of-the-action)
+- [ ] A SQL playground query that errors leaves its entry, settled failed (verifies spec: AUD#writing-as-a-condition-of-the-action)
 - [ ] An audited handler that succeeds without recording an action fails and its change is rolled back (verifies spec: AUD#what-is-recorded)
 - [ ] An audited handler recording an action its route does not declare fails and its change is rolled back (verifies spec: AUD#what-is-recorded)
 - [ ] A bulk change records one entry per action (verifies spec: AUD#what-is-recorded)
@@ -33,9 +33,13 @@ Covers this card's part of [AUD](../../specs/platform/audit-log.md). Archive and
 
 - [ ] An audited action whose entry cannot be written is refused and changes nothing (verifies spec: AUD#writing-as-a-condition-of-the-action)
 - [ ] An audited action that errors leaves no entry and no change (verifies spec: AUD#writing-as-a-condition-of-the-action)
-- [ ] An action with an outside effect leaves a pending entry before the effect and a confirmation after it (verifies spec: AUD#writing-as-a-condition-of-the-action)
+- [ ] An action with an outside effect leaves a pending entry before the effect, settled done with the rest of its work (verifies spec: AUD#writing-as-a-condition-of-the-action)
+- [ ] Settling adds what the action learned to the entry's detail, such as an issued credential's identifier (verifies spec: AUD#writing-as-a-condition-of-the-action)
+- [ ] An outside effect known not to have taken place settles its entry failed, and the failure stands though the action rolls back (verifies spec: AUD#writing-as-a-condition-of-the-action)
+- [ ] An entry already settled cannot be settled again (verifies spec: AUD#writing-as-a-condition-of-the-action)
+- [ ] An entry in an archived week cannot be settled, and a pending one is archived as unconfirmed (verifies spec: AUD#writing-as-a-condition-of-the-action)
 - [ ] An entry committed ahead stands when the handler then errors and its other changes roll back (verifies spec: AUD#writing-as-a-condition-of-the-action)
-- [ ] An outside-effect action that fails after the effect leaves its pending entry, shown as unconfirmed (verifies spec: AUD#writing-as-a-condition-of-the-action)
+- [ ] An outside-effect action that fails after the effect without settling leaves its entry pending, shown as unconfirmed (verifies spec: AUD#writing-as-a-condition-of-the-action)
 - [ ] With no range to write into, audited actions are refused and the runway self-alert is active (verifies spec: AUD#self-alerts)
 
 
@@ -48,4 +52,4 @@ Covers this card's part of [AUD](../../specs/platform/audit-log.md). Archive and
 ## Keeping entries
 
 - [ ] Nothing is removed from an unarchived week, however old (verifies spec: AUD#keeping-entries)
-- [ ] An action marked for a year is kept a year, and so is the confirmation of a pending one (verifies spec: AUD#keeping-entries)
+- [ ] An action marked for a year is kept a year (verifies spec: AUD#keeping-entries)

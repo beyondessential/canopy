@@ -10,7 +10,7 @@ Until the archive lands, nothing leaves the database, which AUD already requires
 ## Actions
 
 - One `database::audit::Action` enum is the catalogue: a variant per action, each carrying its typed detail and the records it acted on (typed references, not free ids). Its serde tag is the stable action name, independent of route paths, so renaming a handler or its route leaves the name alone.
-- Retention is a method on the action, ninety days by default and a year for the few marked. A confirmation takes the retention class of the pending entry it confirms.
+- Retention is a method on the action, ninety days by default and a year for the few marked.
 - A variant has no field for a secret, so keeping secrets out is a property of the type, not of what someone remembered to mark.
 - Jobs, device API handlers and operator handlers record the same variants.
 
@@ -25,8 +25,8 @@ Until the archive lands, nothing leaves the database, which AUD already requires
 - An audit layer, a sibling of `safety::enforce` rather than part of it, resolves the actor and leaves it in the request's extensions. It reads no body.
 - The extractor checks out a primary connection, begins a transaction, and hands the handler the connection and a recorder. The handler records `Action` values on it inside that transaction. The layer holds the same transaction and commits on a successful response, rolling back otherwise. Audited handlers that change something replace `state.db.get()` with it.
 - On a successful response the layer checks that at least one action was recorded and that every recorded action is one the route declares. Otherwise it rolls back and returns an error, so a forgotten record fails the request and any test of the route.
-- The recorder can commit an entry ahead of the handler's transaction, on its own connection, so it stands whatever the handler's transaction does. A handler with an outside effect uses it to record its action as pending before the effect, then appends the confirmation in its own transaction afterwards. A feature that records refusals (A5) uses it to record the refusal before returning the error.
-- An audited read commits its entry ahead, then reads as it otherwise would (`db_read`, or the playground's rolled-back transaction), so a read that errors is still recorded. The layer's at-least-one-action check counts the entry committed ahead.
+- The recorder can commit an entry ahead of the handler's transaction, on its own connection, as pending. A later transaction settles it with `SELECT … FOR UPDATE` on the row: done in the handler's own transaction, with its other changes, or failed in a transaction of its own, since the handler's rolls back. Settling may merge outcome fields into the detail, such as an STS access key id. Outside effects, audited reads and A5's refusals all use this.
+- An audited read commits its entry ahead, then reads as it otherwise would (`db_read`, or the playground's rolled-back transaction), and settles it done or failed. The layer settles it failed when the handler errors, which is safe for a read since it has no effect. For anything with an outside effect only the handler may settle it failed. The layer's at-least-one-action check counts the entry committed ahead.
 - Device API handlers take the same extractor with the device as actor. Jobs record through the same recorder inside their own transaction with Canopy as actor.
 - Cost, accepted: an audited request is one transaction held across everything its handler does, and a handler cannot commit part of its work before failing.
 
@@ -34,7 +34,9 @@ Until the archive lands, nothing leaves the database, which AUD already requires
 
 - One table, partitioned by week through `database::partitions` and provisioned ahead with the other histories, so the HST runway alert covers it with no new code beyond registering the table.
 - Each week is sub-partitioned by retention class, so the archive card's removals are partition drops: the ninety-day part once the week is archived and old enough, the rest at a year.
-- Row: timestamp, actor kind and identifier, action name, entry kind (action, pending, confirmation), the records acted on, and a `jsonb` detail holding the action's fields, or the pending entry a confirmation points at. The records acted on are indexed for the subject filter; a GIN index on the detail serves lookups and per-value counts.
+- Row: timestamp, actor kind and identifier, action name, the records acted on, a `jsonb` detail, and for an entry committed ahead an outcome (pending, done, failed) and when it settled. The records acted on are indexed for the subject filter; a GIN index on the detail serves lookups and per-value counts.
+- A trigger refuses every update except settling: outcome from pending to done or failed, once, with detail only added to. Deletes are refused; entries leave by partition drop alone.
+- Archiving and settling serialise on a per-week row: the archiver freezes the week (`FOR UPDATE`, committed) before reading it, and settling checks the week is not frozen under `FOR SHARE` in its own transaction. A pending entry in a frozen week stays pending for good.
 
 ## Reading
 
@@ -61,7 +63,7 @@ Until the archive lands, nothing leaves the database, which AUD already requires
 - [ ] Layer check: a successful audited response recorded at least one action, all declared
 - [ ] Audit map read from the OpenAPI document at startup
 - [ ] Migration: partitioned entries table with retention sub-partitions, GIN index; registered with partition runway
-- [ ] Database model: write entry, commit an entry ahead, write pending and confirmation, query with filters, count by detail value over a window
+- [ ] Database model: write entry, commit an entry ahead, settle it, freeze a week, query with filters, count by detail value over a window
 - [ ] Audit layer and extractor on the private server
 - [ ] Declare every private-server handler audited, with its actions, or silent; the specs already naming audited actions (MNT, K8S, INV, UPG, RST, RPT) are audited
 - [ ] Device API: audit issuance and record-changing handlers, silence status and reads
