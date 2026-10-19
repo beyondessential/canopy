@@ -23,9 +23,10 @@ Until the archive lands, nothing leaves the database, which AUD already requires
 ## Capture
 
 - An audit layer, a sibling of `safety::enforce` rather than part of it, resolves the actor and leaves it in the request's extensions. It reads no body.
-- The extractor checks out a primary connection, begins a transaction, and hands the handler the connection and a recorder. The handler records `Action` values on it inside that transaction. The layer holds the same transaction and commits on a successful response, rolling back otherwise. Audited handlers replace `state.db.get()` with it; audited reads use it in place of `db_read`, since the entry is a write.
+- The extractor checks out a primary connection, begins a transaction, and hands the handler the connection and a recorder. The handler records `Action` values on it inside that transaction. The layer holds the same transaction and commits on a successful response, rolling back otherwise. Audited handlers that change something replace `state.db.get()` with it.
 - On a successful response the layer checks that at least one action was recorded and that every recorded action is one the route declares. Otherwise it rolls back and returns an error, so a forgotten record fails the request and any test of the route.
 - The recorder can commit an entry ahead of the handler's transaction, on its own connection, so it stands whatever the handler's transaction does. A handler with an outside effect uses it to record its action as pending before the effect, then appends the confirmation in its own transaction afterwards. A feature that records refusals (A5) uses it to record the refusal before returning the error.
+- An audited read commits its entry ahead, then reads as it otherwise would (`db_read`, or the playground's rolled-back transaction), so a read that errors is still recorded. The layer's at-least-one-action check counts the entry committed ahead.
 - Device API handlers take the same extractor with the device as actor. Jobs record through the same recorder inside their own transaction with Canopy as actor.
 - Cost, accepted: an audited request is one transaction held across everything its handler does, and a handler cannot commit part of its work before failing.
 

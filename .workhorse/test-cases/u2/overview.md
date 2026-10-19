@@ -7,6 +7,7 @@ Covers this card's part of [AUD](../../specs/platform/audit-log.md). Archive and
 - [ ] A route with no audit clause fails to compile (verifies spec: AUD#what-is-recorded)
 - [ ] An audited route whose handler does not take the audit extractor fails to compile
 - [ ] An audit-silent write produces no entry; an audited read (SQL playground) produces one (verifies spec: AUD#what-is-recorded)
+- [ ] A SQL playground query that errors still leaves its entry (verifies spec: AUD#writing-as-a-condition-of-the-action)
 - [ ] An audited handler that succeeds without recording an action fails and its change is rolled back (verifies spec: AUD#what-is-recorded)
 - [ ] An audited handler recording an action its route does not declare fails and its change is rolled back (verifies spec: AUD#what-is-recorded)
 - [ ] A bulk change records one entry per action (verifies spec: AUD#what-is-recorded)

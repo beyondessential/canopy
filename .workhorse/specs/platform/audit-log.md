@@ -67,6 +67,7 @@ The entry and the change it records are committed together, so either both stand
 
 A handler can commit an entry ahead of the rest of its action, so that the entry stands whatever becomes of the action.
 This is how a feature records a decision it wants kept even when the action does not go ahead, such as a refusal with its reason, where that feature's spec calls for one.
+An audited read records its entry this way, before reading, so a read is recorded whether or not it succeeds.
 
 An action with an effect outside Canopy's own records, such as issuing cloud credentials or changing something on a cluster, records its entry as pending before the outside effect, and confirms it once the effect has taken place.
 The confirmation is a record of its own, pointing at the pending entry, so the log is only ever appended to.
