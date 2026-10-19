@@ -38,7 +38,7 @@
 
 ## Recording
 
-- [ ] Each issuance is an entry acting on the subject and relying party, its actor the machine device (with the application for an application subject), its detail `jti`, `kid`, expiry and `sub`, and never the token (verifies spec: IDT)
+- [ ] Each issuance is a routine entry acting on the subject and relying party, its actor the machine device (with the application for an application subject), its detail `jti`, `kid`, expiry and `sub`, and never the token (verifies spec: IDT)
 - [ ] Each refusal as not granted is an issuance entry settled failed with reason not granted, on the subject and relying party, and is presented at once rather than as pending (verifies spec: IDT)
 - [ ] Refusals other than not granted leave nothing in the audit log (verifies spec: IDT)
 - [ ] When the audit entry cannot be written, no token is returned (verifies spec: IDT)

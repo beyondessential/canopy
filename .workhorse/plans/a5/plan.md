@@ -3,7 +3,7 @@
 Specs: [IDT](../../specs/public-server/identity-tokens.md), [IDP](../../specs/private-server/identity-provider.md), and the identity provider condition in [SELF](../../specs/private-server/self-alerts.md).
 Reasoning and rejected options: `.workhorse/working-docs/a5/working-doc.md`.
 
-**Blocked on U2** (general audit log, [AUD](../../specs/platform/audit-log.md)). Grants history, issuance and not-granted refusal records, and the key usage figures all live in it.
+Grants history, issuance and not-granted refusal records, and the key usage figures all live in the audit log ([AUD](../../specs/platform/audit-log.md)).
 
 ## Tech design notes
 
@@ -25,14 +25,14 @@ Reasoning and rejected options: `.workhorse/working-docs/a5/working-doc.md`.
 
 ### Audit
 
-- Actions in U2's `database::audit::Action` enum: issue identity token, grant identity, revoke identity grant, register / edit / remove relying party. Grant, revoke and relying-party actions are kept for a year; issuance takes the default ninety days.
-- Issuance: records acted on are the subject (machine or application) and the relying party; detail is `jti`, `kid`, `exp`, `sub`. The actor is the machine device, with the application it acted for set by the handler once `application_type` resolves, so U2's recorder must let the handler name it.
-- A successful issuance records in the handler's transaction, not ahead: the token has no effect until it reaches the client, and the layer commits before responding. Depends on U2's layer committing before the response is sent and turning a failed commit into an error.
-- Not granted: commit an issuance entry ahead and settle it failed at once with reason `not_granted`, since the 403 rolls back the handler's transaction. No other refusal records anything, so nothing is committed ahead on the other paths.
-- No-op saves use AUD's explicit no-change outcome (decided for U2, see the comment there): a grants save or relying-party edit that changes nothing declares so rather than recording an entry.
+- Actions added to the `actions!` catalogue in `database::audit`: `identity_token_issued` (tier Routine, as backup credentials are), `identity_granted`, `identity_grant_revoked`, `relying_party_registered`, `relying_party_edited`, `relying_party_removed` (all `retention = Year`). Add `RecordKind::RelyingParty`.
+- Issuance: records are the subject (machine or application) and the relying party; detail is `jti`, `kid`, `expires_at`, `sub`. The handler calls `audit.acting_as(device_actor(&device, application))` once `application_type` resolves.
+- Issuance follows the backup handler's connection pattern: resolve and check on a plain `db.get()` connection, sign with KMS holding no transaction, then `audit.begin()` and `tx.record(...)`. The layer commits before the response is returned and turns a failed commit into an error, so no token leaves unrecorded, and no transaction is held across the KMS call.
+- Not granted: `audit.commit_ahead(IdentityTokenIssued { … })` then `audit.settle_failed(&pending, Some(json!({"reason": "not_granted"})))`, then return the 403. No other path commits ahead.
+- Key "last signed" and thirty-day counts use `audit::count_by_detail(conn, "identity_token_issued", "kid", …)`, which skips refusals since they carry no `kid`. Relying party "last issued" uses `audit::find` with the relying party as the record acted on, `include_routine`. The removable state reads the latest issuance per `kid`, always recent since a retired key's last token was issued within a lifetime of retirement.
+- No-op saves call `audit.unchanged()`: a grants save or relying-party edit that changes nothing.
 - `MachineEdit`: add a grants call to the save plan only for a subject whose set changed, as the silence calls are, so an unchanged save sends nothing for grants.
-- Route declarations: `POST /identity-tokens` is `audit(IssueIdentityToken)`; settings reads and grants reads are `silent`; each write declares its actions (remove declares both remove and revoke).
-- Key "last signed" and thirty-day count, relying party "last issued": AUD's lookup and count by detail value over a window. The removable state reads the latest issuance per `kid`, always recent since a retired key's last token was issued within a lifetime of retirement.
+- Route declarations: `routes!(public, audit(IdentityTokenIssued): identity_tokens)`; settings and grants reads `silent`; each write declares its actions (remove declares both `RelyingPartyRemoved` and `IdentityGrantRevoked`).
 
 ### Discovery server
 
@@ -43,7 +43,7 @@ Reasoning and rejected options: `.workhorse/working-docs/a5/working-doc.md`.
 ### Storage
 
 - `relying_parties`: name, audience (unique), audience immutable, name editable, token lifetime in whole minutes (default 5, check 1 to 60).
-- `identity_grants`: `relying_party_id`, `machine_id`, `application_id`, exactly one of the two subject columns set (`num_nonnulls` CHECK), FKs `ON DELETE CASCADE`, unique per subject and relying party. Current grants only; history is U2's. Its own two-variant target type in Rust, not `Scope`.
+- `identity_grants`: `relying_party_id`, `machine_id`, `application_id`, exactly one of the two subject columns set (`num_nonnulls` CHECK), FKs `ON DELETE CASCADE`, unique per subject and relying party. Current grants only; history is the audit log's. Its own two-variant target type in Rust, not `Scope`.
 - `identity_key_observations`: `kid`, `first_served_at`.
 - Removing a relying party cascades its grants; the removal and each revoked grant are logged, as are registration and edits.
 
@@ -69,8 +69,7 @@ Reasoning and rejected options: `.workhorse/working-docs/a5/working-doc.md`.
 
 ## Build steps
 
-- [ ] U2 audit log available: device actor with handler-set application, explicit no-change outcome, commit before response
-- [ ] Identity actions in the `Action` enum, with retention
+- [ ] Identity actions in the audit catalogue, with tier and retention, and `RecordKind::RelyingParty`
 - [ ] Signer trait with KMS and in-process implementations; `kid` derivation; DER to JOSE signature conversion
 - [ ] Instance configuration for issuer and keys
 - [ ] Migrations: relying parties, identity grants, key observations (`just migration`)

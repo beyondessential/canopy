@@ -84,7 +84,7 @@ A client exchanges a token with its relying party as soon as it obtains one, so 
 
 ## Recording
 
-Issuing an identity token is an audited action (see [AUD](../platform/audit-log.md)).
+Issuing an identity token is an audited action (see [AUD](../platform/audit-log.md)), and a routine one, since workloads ask for tokens throughout the day.
 Its actor is the calling machine's device, acting for the application when the subject is one.
 It acted on the subject and the relying party.
 Its detail is the token's identifier, the signing key, the expiry, and the subject as issued, since the subject changes with its machine's group and rank and is what a relying party's own records show.
