@@ -1,28 +1,44 @@
-import { Box, Button, ListItemText, Menu, MenuItem } from "@mui/material";
-import { useState } from "react";
+import {
+	Box,
+	ButtonBase,
+	ClickAwayListener,
+	Collapse,
+	ListItemText,
+	Menu,
+	MenuItem,
+	MenuList,
+} from "@mui/material";
+import ExpandLessIcon from "@mui/icons-material/ExpandLess";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import { type RefObject, useRef, useState } from "react";
 import type { Theme } from "@mui/material/styles";
 import { useRemainingMs, useSafetyMode } from "../hooks/useSafetyMode";
 import { LADDER, type SafetyMode, modeLabel } from "../safety";
-import { modePalette, modeStripe, mutedStripe } from "./GradedAction";
+import {
+	modePalette,
+	modeStripe,
+	mutedStripe,
+	returnFocus,
+} from "./GradedAction";
 
 /**
- * The mode control's face. Read-only is deliberately unremarkable; a raised
- * mode is filled in its colour and wears its stripe, the same stripe its
- * blocked controls carry, drawn strongly enough to read against the fill.
+ * The mode control's face. Read-only is deliberately unremarkable, the chrome
+ * it sits in showing through; a raised mode is filled in its colour and wears
+ * its stripe, the same stripe its blocked controls carry, drawn strongly enough
+ * to read against the fill.
  */
 function faceSx(mode: SafetyMode) {
 	return (theme: Theme) => {
 		if (mode === "read-only") {
 			return {
-				border: 1,
 				borderColor: "divider",
 				color: "text.secondary",
-				backgroundColor: "background.paper",
+				backgroundColor: "transparent",
+				"&:hover": { backgroundColor: theme.palette.action.hover },
 			};
 		}
 		const palette = theme.palette[modePalette(mode)];
 		return {
-			border: 1,
 			borderColor: palette.main,
 			color: palette.contrastText,
 			backgroundColor: palette.main,
@@ -30,6 +46,24 @@ function faceSx(mode: SafetyMode) {
 			"&:hover": { backgroundColor: palette.dark },
 		};
 	};
+}
+
+/**
+ * The control as a square band filling the edge of the chrome it sits on,
+ * divided from the rest of that chrome along `edge`.
+ */
+function bandSx(mode: SafetyMode, edge: "borderTop" | "borderLeft") {
+	return (theme: Theme) => ({
+		...faceSx(mode)(theme),
+		minHeight: 48,
+		justifyContent: "flex-start",
+		gap: 1,
+		border: 0,
+		[edge]: 1,
+		borderRadius: 0,
+		...theme.typography.button,
+		textTransform: "none" as const,
+	});
 }
 
 /** What each option in the menu says beneath its name. */
@@ -53,99 +87,203 @@ function remaining(ms: number): string {
 	return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
+function ModeDot() {
+	return (
+		<Box
+			sx={{
+				flexShrink: 0,
+				width: 8,
+				height: 8,
+				borderRadius: "50%",
+				backgroundColor: "currentColor",
+			}}
+		/>
+	);
+}
+
 /**
- * The operator's mode, and how they change it.
+ * The mode's name and the time left on a raise, as the control shows them.
+ * Spread, the name takes the room between them.
+ */
+function ModeFace({ mode, spread }: { mode: SafetyMode; spread?: boolean }) {
+	const remainingMs = useRemainingMs();
+	return (
+		<>
+			<ModeDot />
+			{spread ? (
+				<Box component="span" sx={{ flex: 1, textAlign: "left" }}>
+					{modeLabel(mode)}
+				</Box>
+			) : (
+				modeLabel(mode)
+			)}
+			{remainingMs !== null && (
+				<Box
+					component="span"
+					sx={{ fontVariantNumeric: "tabular-nums", opacity: 0.75 }}
+				>
+					{remaining(remainingMs)}
+				</Box>
+			)}
+		</>
+	);
+}
+
+/**
+ * One item per mode, for whichever list the control opens. Choosing closes the
+ * list either way: left open behind the danger confirmation it keeps the rest
+ * of the page from the accessibility tree, and from the pointer.
+ *
+ * Returned as elements rather than rendered as a component, so the items are
+ * the list's own children and it can focus the current one on opening.
+ */
+function useModeOptions(
+	onClose: () => void,
+	trigger: RefObject<HTMLElement | null>,
+	inset?: number,
+) {
+	const { mode, raise, lower, requestRaise } = useSafetyMode();
+	return LADDER.map((option) => (
+		<MenuItem
+			key={option}
+			selected={option === mode}
+			aria-current={option === mode ? "true" : undefined}
+			onClick={() => {
+				onClose();
+				if (option === mode) return;
+				if (option === "danger") {
+					// The confirmation leaves returning focus to whoever asked.
+					void requestRaise({ mode: "danger" }).then(() => {
+						if (trigger.current) returnFocus(trigger.current);
+					});
+				} else if (option === "write") raise("write");
+				else lower();
+			}}
+			// Each raised mode wears the stripe its blocked controls
+			// carry, so the menu is where the operator learns it.
+			sx={(theme) => ({
+				gap: 1,
+				...(inset !== undefined && { pl: inset }),
+				...(option === "read-only"
+					? { color: "text.secondary" }
+					: {
+							color: `${modePalette(option)}.main`,
+							...mutedStripe(theme, option),
+						}),
+			})}
+		>
+			<ModeDot />
+			<ListItemText
+				primary={modeLabel(option)}
+				secondary={optionHint(option, mode)}
+			/>
+		</MenuItem>
+	));
+}
+
+/** How wide the top bar's control is, and the menu it drops. */
+const BAR_WIDTH = 240;
+
+/**
+ * The operator's mode, and how they change it, as a block at the end of a top
+ * bar, dropping its options at its own width.
  *
  * Always visible, so the mode is never something to go and check.
  */
 export function SafetyModeControl() {
-	const { mode, raise, lower, requestRaise, busy } = useSafetyMode();
-	const remainingMs = useRemainingMs();
+	const { mode, busy } = useSafetyMode();
 	const [anchor, setAnchor] = useState<null | HTMLElement>(null);
+	const trigger = useRef<HTMLButtonElement>(null);
+	const options = useModeOptions(() => setAnchor(null), trigger, 2);
 
 	return (
 		<>
-			<Button
-				size="small"
+			<ButtonBase
+				ref={trigger}
 				onClick={(event) => setAnchor(event.currentTarget)}
 				disabled={busy}
+				aria-haspopup="menu"
+				aria-expanded={anchor !== null}
 				sx={[
-					faceSx(mode),
-					{
-						borderRadius: 4,
-						textTransform: "none",
-						fontWeight: 500,
-						gap: 1,
-						px: 1.25,
-					},
+					bandSx(mode, "borderLeft"),
+					{ alignSelf: "stretch", width: BAR_WIDTH, pl: 2, pr: 1.5 },
 				]}
 			>
-				<Box
-					sx={{
-						width: 8,
-						height: 8,
-						borderRadius: "50%",
-						backgroundColor: "currentColor",
-					}}
-				/>
-				{modeLabel(mode)}
-				{remainingMs !== null && (
-					<Box
-						component="span"
-						sx={{ fontVariantNumeric: "tabular-nums", opacity: 0.75 }}
-					>
-						{remaining(remainingMs)}
-					</Box>
+				<ModeFace mode={mode} spread />
+				{anchor ? (
+					<ExpandLessIcon fontSize="small" />
+				) : (
+					<ExpandMoreIcon fontSize="small" />
 				)}
-			</Button>
+			</ButtonBase>
 
 			<Menu
 				anchorEl={anchor}
 				open={anchor !== null}
 				onClose={() => setAnchor(null)}
+				marginThreshold={0}
+				anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+				transformOrigin={{ vertical: "top", horizontal: "right" }}
+				slotProps={{
+					paper: { square: true, sx: { width: BAR_WIDTH } },
+					list: { disablePadding: true },
+				}}
 			>
-				{LADDER.map((option) => (
-					<MenuItem
-						key={option}
-						selected={option === mode}
-						aria-current={option === mode ? "true" : undefined}
-						onClick={() => {
-							// The menu closes either way: left open behind the
-							// confirmation it keeps the rest of the page from the
-							// accessibility tree, and from the pointer.
-							setAnchor(null);
-							if (option === mode) return;
-							if (option === "danger") requestRaise({ mode: "danger" });
-							else if (option === "write") raise("write");
-							else lower();
-						}}
-						// Each raised mode wears the stripe its blocked controls
-						// carry, so the menu is where the operator learns it.
-						sx={(theme) => ({
-							gap: 1,
-							...(option === "read-only"
-								? { color: "text.secondary" }
-								: {
-										color: `${modePalette(option)}.main`,
-										...mutedStripe(theme, option),
-									}),
-						})}
-					>
-						<Box
-							sx={{
-								width: 8,
-								height: 8,
-								borderRadius: "50%",
-								backgroundColor: "currentColor",
-							}}
-						/>
-						<ListItemText
-							primary={modeLabel(option)}
-							secondary={optionHint(option, mode)}
-						/>
-					</MenuItem>
-				))}
+				{options}
 			</Menu>
 		</>
+	);
+}
+
+/**
+ * The operator's mode as a band across the foot of the sidebar. Its options
+ * open in place above it rather than over the page, the list above giving up
+ * the room.
+ */
+export function SafetyModeBand() {
+	const { mode, busy } = useSafetyMode();
+	const [open, setOpen] = useState(false);
+	const trigger = useRef<HTMLButtonElement>(null);
+	// Closing unmounts the list, so focus inside it goes back to the trigger
+	// rather than to nothing.
+	const closeToTrigger = () => {
+		setOpen(false);
+		trigger.current?.focus();
+	};
+	const options = useModeOptions(closeToTrigger, trigger, 3);
+
+	return (
+		<ClickAwayListener onClickAway={() => setOpen(false)}>
+			<Box
+				sx={{ flexShrink: 0 }}
+				onKeyDown={(event) => {
+					if (event.key === "Escape" && open) closeToTrigger();
+				}}
+			>
+				<Collapse in={open} unmountOnExit>
+					<MenuList
+						autoFocusItem={open}
+						disablePadding
+						sx={{ borderTop: 1, borderColor: "divider" }}
+					>
+						{options}
+					</MenuList>
+				</Collapse>
+				<ButtonBase
+					ref={trigger}
+					onClick={() => setOpen((was) => !was)}
+					disabled={busy}
+					aria-haspopup="menu"
+					aria-expanded={open}
+					sx={[
+						bandSx(mode, "borderTop"),
+						{ width: "100%", pl: 3, pr: 2 },
+					]}
+				>
+					<ModeFace mode={mode} spread />
+					{open ? <ExpandMoreIcon fontSize="small" /> : <ExpandLessIcon fontSize="small" />}
+				</ButtonBase>
+			</Box>
+		</ClickAwayListener>
 	);
 }

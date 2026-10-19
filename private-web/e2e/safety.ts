@@ -10,7 +10,8 @@
 
 import { type Page, expect } from "@playwright/test";
 
-/** The mode pill in the app bar, which also reports the current mode. */
+/** The mode control, at the foot of the sidebar or in the narrow top bar,
+ * which also reports the current mode. */
 export function modeControl(page: Page) {
 	return page.getByRole("button", { name: /read-only|write|danger/i }).first();
 }

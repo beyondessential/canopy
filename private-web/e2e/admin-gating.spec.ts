@@ -1,5 +1,6 @@
 import { expect, test } from "./test-fixtures";
 import { resetSeededTables, seedServerGroup } from "./seed";
+import { sidebarLink } from "./nav";
 
 const PROBE = "**/api/commons/is_current_user_admin";
 
@@ -38,10 +39,10 @@ test.describe("admin gating", () => {
 		const onLoad = probes;
 
 		// Client-side navigation, so the provider stays mounted throughout.
-		await page.getByRole("tab", { name: "Archived" }).click();
+		await sidebarLink(page, "Archived").click();
 		await expect(page.getByText("Nothing archived.")).toBeVisible();
 
-		await page.getByRole("tab", { name: "Groups" }).click();
+		await sidebarLink(page, "Groups").click();
 		await page.getByRole("link", { name: new RegExp(group.name) }).click();
 		await expect(
 			page.getByRole("heading", { name: group.name, level: 1 }),

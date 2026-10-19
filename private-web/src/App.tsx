@@ -1,16 +1,24 @@
 import {
 	AppBar,
-	Badge,
 	Box,
 	Container,
-	Link as MuiLink,
+	Drawer,
+	IconButton,
 	Toolbar,
-	Typography,
+	useMediaQuery,
 } from "@mui/material";
-import OpenInNewIcon from "@mui/icons-material/OpenInNew";
+import { useTheme } from "@mui/material/styles";
+import MenuIcon from "@mui/icons-material/Menu";
+import { useState } from "react";
 import { NavLink, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { useApi } from "./api";
 import AdminProbeBanner from "./components/AdminProbeBanner";
+import {
+	AppSidebar,
+	Brand,
+	IncidentCount,
+	navSections,
+} from "./components/AppSidebar";
 import { AdminProvider } from "./hooks/useIsAdmin";
 import { SafetyModeProvider } from "./hooks/useSafetyMode";
 import { SafetyModeControl } from "./components/SafetyModeControl";
@@ -32,7 +40,6 @@ import Bestool from "./routes/Bestool";
 import BestoolSnippetDetail from "./routes/BestoolSnippetDetail";
 import BestoolSnippets from "./routes/BestoolSnippets";
 import DeviceDetail from "./routes/DeviceDetail";
-import Devices from "./routes/Devices";
 import DevicesList from "./routes/DevicesList";
 import DevicesSearch from "./routes/DevicesSearch";
 import GroupDetail from "./routes/GroupDetail";
@@ -57,16 +64,10 @@ import ServerEdit from "./routes/ServerEdit";
 import ArchivedList from "./routes/ArchivedList";
 import FleetFigures from "./routes/FleetFigures";
 import Servers from "./routes/Servers";
-import Settings from "./routes/Settings";
 import Sql from "./routes/Sql";
 import VersionDetail from "./routes/VersionDetail";
 import Upgrades from "./routes/Upgrades";
 import Versions from "./routes/Versions";
-
-interface NavItem {
-	label: string;
-	to: string;
-}
 
 /// Send an address from before the fleet was namespaced to where it lives now.
 ///
@@ -82,17 +83,7 @@ function Moved({ to }: { to: (id: string) => string }) {
 	return <Navigate to={to(id)} replace />;
 }
 
-const BASE_NAV: NavItem[] = [
-	{ label: "Status", to: "/status" },
-	{ label: "Incidents", to: "/incidents" },
-	{ label: "Fleet", to: "/fleet" },
-	{ label: "Versions", to: "/versions" },
-	{ label: "Upgrades", to: "/upgrades" },
-	{ label: "Maintenance", to: "/maintenance" },
-	{ label: "Devices", to: "/devices" },
-	{ label: "Bestool", to: "/bestool" },
-	{ label: "Settings", to: "/settings" },
-];
+const SIDEBAR_WIDTH = 240;
 
 export default function App() {
 	const sqlAvailable = useApi("sql", "is_sql_available");
@@ -110,12 +101,17 @@ export default function App() {
 	);
 	const openIncidentsCount =
 		openIncidents.status === "ok" ? openIncidents.data.length : 0;
-	const navItems: NavItem[] = [
-		...BASE_NAV,
-		...(sqlAvailable.status === "ok" && sqlAvailable.data
-			? [{ label: "SQL", to: "/sql" }]
-			: []),
-	];
+	const sections = navSections(
+		sqlAvailable.status === "ok" && !!sqlAvailable.data,
+	);
+	const theme = useTheme();
+	const wide = useMediaQuery(theme.breakpoints.up("md"), { noSsr: true });
+	const [drawerOpen, setDrawerOpen] = useState(false);
+	// The app bar's own grey, so the sidebar reads as the same chrome.
+	const chrome =
+		theme.palette.mode === "light"
+			? theme.palette.grey[100]
+			: theme.palette.grey[900];
 
 	const externalLinks: Array<{ label: string; href: string }> = [
 		...(publicUrl.status === "ok" && publicUrl.data
@@ -125,95 +121,98 @@ export default function App() {
 			? [{ label: "Server Versions", href: serverVersionsUrl.data }]
 			: []),
 	];
+	const sidebar = {
+		sections,
+		externalLinks,
+		openIncidents: openIncidentsCount,
+	};
 
 	return (
 		<AdminProvider>
 		<SafetyModeProvider>
 		<ApplicationTypesProvider>
-		<Box>
-			<AppBar position="static" color="default" elevation={1}>
-				<Toolbar variant="dense" sx={{ gap: 2 }}>
-					<Box
-						component={NavLink}
-						to="/"
-						sx={{
-							display: "flex",
-							alignItems: "center",
-							gap: 1,
-							mr: 2,
-							color: "primary.main",
-							textDecoration: "none",
-						}}
+		<Box sx={{ display: "flex" }}>
+			{wide ? (
+				<Drawer
+					variant="permanent"
+					sx={{
+						width: SIDEBAR_WIDTH,
+						flexShrink: 0,
+						"& .MuiDrawer-paper": {
+							width: SIDEBAR_WIDTH,
+							boxSizing: "border-box",
+							backgroundColor: chrome,
+						},
+					}}
+				>
+					<AppSidebar
+						{...sidebar}
+						showModeBand
+					/>
+				</Drawer>
+			) : (
+				<Drawer
+					variant="temporary"
+					open={drawerOpen}
+					onClose={() => setDrawerOpen(false)}
+					sx={{
+						"& .MuiDrawer-paper": {
+							width: 256,
+							boxSizing: "border-box",
+							backgroundColor: chrome,
+						},
+					}}
+				>
+					<AppSidebar
+						{...sidebar}
+						showModeBand={false}
+						onNavigate={() => setDrawerOpen(false)}
+					/>
+				</Drawer>
+			)}
+			<Box sx={{ flex: 1, minWidth: 0 }}>
+			{!wide && (
+				<AppBar position="static" color="default" elevation={1}>
+					<Toolbar
+						variant="dense"
+						sx={{ gap: 1, pl: { xs: 1 }, pr: { xs: 0 } }}
 					>
-						<Box
-							component="img"
-							src="/favicon.svg"
-							alt=""
-							aria-hidden
-							sx={{ height: 24, width: 24 }}
-						/>
-						<Typography variant="h6" component="span">
-							Canopy
-						</Typography>
-					</Box>
-					{navItems.map(({ label, to }) => {
-						const showBadge = to === "/incidents" && openIncidentsCount > 0;
-						const inner = (
-							<Typography
-								key={to}
-								component={NavLink}
-								to={to}
-								sx={({ palette }) => ({
-									textDecoration: "none",
-									color: palette.text.secondary,
-									fontWeight: 500,
-									"&.active": { color: palette.secondary.main },
-								})}
-							>
-								{label}
-							</Typography>
-						);
-						if (showBadge) {
-							return (
-								<Badge
-									key={to}
-									badgeContent={openIncidentsCount}
-									color="error"
-									overlap="rectangular"
-								>
-									{inner}
-								</Badge>
-							);
-						}
-						return inner;
-					})}
-					<Box sx={{ flex: 1 }} />
-					<SafetyModeControl />
-					{externalLinks.map(({ label, href }) => (
-						<Typography
-							key={label}
-							component={MuiLink}
-							href={href}
-							target="_blank"
-							rel="noopener"
-							sx={({ palette }) => ({
-								textDecoration: "none",
-								color: palette.text.secondary,
-								fontWeight: 500,
-								display: "inline-flex",
-								alignItems: "center",
-								gap: 0.5,
-							})}
+						<IconButton
+							aria-label="Open navigation"
+							onClick={() => setDrawerOpen(true)}
 						>
-							{label}
-							<OpenInNewIcon sx={{ fontSize: "1em" }} />
-						</Typography>
-					))}
-				</Toolbar>
-			</AppBar>
+							<MenuIcon />
+						</IconButton>
+						<Brand />
+						<Box sx={{ flex: 1 }} />
+						{/* Kept out of the drawer, so an open incident is never
+						    hidden behind the menu button. */}
+						<Box
+							component={NavLink}
+							to="/incidents"
+							sx={{
+								display: "flex",
+								alignItems: "center",
+								gap: 1,
+								mr: 2,
+								color: "text.secondary",
+								fontWeight: 500,
+								textDecoration: "none",
+								"&.active": { color: "secondary.main" },
+							}}
+						>
+							Incidents
+							{openIncidentsCount > 0 && (
+								<IncidentCount count={openIncidentsCount} />
+							)}
+						</Box>
+						<SafetyModeControl />
+					</Toolbar>
+				</AppBar>
+			)}
 			<AdminProbeBanner />
 			<SelfAlertsBanner reloadTick={reloadTick} />
-			<Container maxWidth="lg" sx={{ py: 3 }}>
+			<Container component="main" maxWidth="lg" sx={{ py: 3 }}>
 				<Routes>
 					<Route path="/" element={<Navigate to="/status" replace />} />
 					<Route path="/status" element={<Status />} />
@@ -347,7 +346,7 @@ export default function App() {
 							<Moved to={(id) => `/fleet/groups/${id}/backups/config`} />
 						}
 					/>
-					<Route path="/settings" element={<Settings />}>
+					<Route path="/settings">
 						<Route
 							index
 							element={<Navigate to="/settings/admins" replace />}
@@ -377,7 +376,7 @@ export default function App() {
 							element={<CertificateAuthority />}
 						/>
 					</Route>
-					<Route path="/devices" element={<Devices />}>
+					<Route path="/devices">
 						<Route index element={<DevicesSearch />} />
 						<Route path="all" element={<DevicesList />} />
 					</Route>
@@ -396,6 +395,7 @@ export default function App() {
 					<Route path="/sql" element={<Sql />} />
 				</Routes>
 			</Container>
+			</Box>
 		</Box>
 		</ApplicationTypesProvider>
 		</SafetyModeProvider>
