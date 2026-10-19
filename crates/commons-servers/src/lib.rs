@@ -20,6 +20,7 @@ pub mod backup_secrets;
 pub mod csr;
 pub mod device_auth;
 pub mod dns_provider;
+pub mod effect;
 pub mod headers;
 pub mod health;
 pub mod recovery_vault;

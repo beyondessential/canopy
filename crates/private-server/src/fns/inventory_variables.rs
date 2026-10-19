@@ -9,8 +9,9 @@ use axum::{Json, extract::State};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::{
-	audit::{Audit, EffectFailed},
+	audit::Audit,
 	backup_secrets::BackupSecrets,
+	effect::EffectFailed,
 	tailscale_auth::{TailscaleAdmin, TailscaleUser},
 };
 use commons_types::{Uuid, server::rank::ServerRank};

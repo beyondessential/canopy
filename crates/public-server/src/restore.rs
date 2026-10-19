@@ -17,8 +17,11 @@ use aws_sdk_sts::operation::RequestId as _;
 use axum::{Json, extract::State, http::StatusCode};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::audit::{Audit, EffectFailed, device_actor};
 use commons_servers::device_auth::BackupRestoreDevice;
+use commons_servers::{
+	audit::{Audit, device_actor},
+	effect::EffectFailed,
+};
 use commons_types::backup::{
 	BackupPurpose, BackupType, IntentDescriptor, ParamValues, RedactionOutcome, RestoreIntent,
 	RunOutcome, redaction_params, resolve_params, semantics,
@@ -679,11 +682,16 @@ async fn credentials(
 
 	let session_name = format!("canopy-restore-{consumer_device_id}");
 
+	let group = database::audit::Record::group(&mut conn, args.group).await?;
+	// Not held across the issuer's round trip: the issuance is recorded in the
+	// audited transaction.
+	drop(conn);
+
 	// The issue is an effect outside Canopy's records, so its entry stands before
 	// it, and is settled by whether the issuer answered.
 	let pending = audit
 		.commit_ahead(database::audit::Action::RestoreCredentialsIssued {
-			group: database::audit::Record::group(&mut conn, args.group).await?,
+			group,
 			device: database::audit::Record::device(consumer_device_id),
 			backup_type: args.r#type.to_string(),
 		})

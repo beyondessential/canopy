@@ -547,12 +547,7 @@ async fn create(
 			// What the box held before this push, so what it did not is what the
 			// push brought.
 			let held: std::collections::HashSet<Uuid> = if record {
-				machine
-					.applications(conn)
-					.await?
-					.into_iter()
-					.map(|application| application.id)
-					.collect()
+				machine.application_ids(conn).await?.into_iter().collect()
 			} else {
 				Default::default()
 			};

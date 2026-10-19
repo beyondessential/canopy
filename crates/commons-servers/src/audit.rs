@@ -43,7 +43,7 @@ use diesel_async::{
 };
 use serde_json::Value;
 
-use crate::tailscale_auth::TailscaleUser;
+use crate::{effect::EffectFailed, tailscale_auth::TailscaleUser};
 
 /// The actions each handler declares, keyed by the method and routed path the
 /// request matched. A handler that is silent declares none.
@@ -284,40 +284,6 @@ impl AuditSession {
 			.filter(|read| !read.settled)
 			.map(|read| read.pending.clone())
 			.collect()
-	}
-}
-
-/// An effect outside Canopy's records that did not take, such as a write to a
-/// secret store or an object store.
-#[derive(Debug)]
-pub struct EffectFailed {
-	/// Whether it is known that nothing was done: the outside service answered
-	/// and refused. An effect that got no answer may have taken place.
-	pub nothing_done: bool,
-	pub error: AppError,
-}
-
-impl EffectFailed {
-	/// An effect refused, or never attempted, so known not to have taken place.
-	pub fn nothing_done(error: AppError) -> Self {
-		Self {
-			nothing_done: true,
-			error,
-		}
-	}
-
-	/// An effect whose outcome is unknown.
-	pub fn unknown(error: AppError) -> Self {
-		Self {
-			nothing_done: false,
-			error,
-		}
-	}
-}
-
-impl From<EffectFailed> for AppError {
-	fn from(failed: EffectFailed) -> Self {
-		failed.error
 	}
 }
 

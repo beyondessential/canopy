@@ -31,8 +31,9 @@ use axum::{Json, extract::State, http::StatusCode};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::{
-	audit::{Audit, EffectFailed, device_actor},
+	audit::{Audit, device_actor},
 	device_auth::ServerDevice,
+	effect::EffectFailed,
 };
 use commons_types::backup::{BackupConfigStatus, BackupPurpose, BackupType, RunOutcome};
 use database::{
@@ -439,11 +440,16 @@ async fn credentials(
 
 	let session_name = format!("canopy-{purpose}-{device_id}", purpose = args.purpose);
 
+	let group = Record::group(&mut conn, group_id).await?;
+	// Not held across the issuer's round trip: the issuance is recorded in the
+	// audited transaction.
+	drop(conn);
+
 	// The issue is an effect outside Canopy's records, so its entry stands before
 	// it, and is settled by whether the issuer answered.
 	let pending = audit
 		.commit_ahead(Action::BackupCredentialsIssued {
-			group: Record::group(&mut conn, group_id).await?,
+			group,
 			machine: Record::new(RecordKind::Machine, machine.id, machine.name.clone()),
 			backup_type: args.r#type.to_string(),
 			purpose: args.purpose.to_string(),

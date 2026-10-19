@@ -18,7 +18,7 @@ pub use age::secrecy::{ExposeSecret, SecretString};
 
 use commons_errors::{AppError, Result};
 
-use crate::audit::EffectFailed;
+use crate::effect::EffectFailed;
 
 /// Env var that forces the in-memory secret store (no cluster needed). Set by the
 /// e2e fixture so onboarding works against the real binary; tests use

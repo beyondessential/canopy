@@ -17,7 +17,7 @@ use std::{
 use commons_errors::{AppError, Result};
 use jiff::Timestamp;
 
-use crate::audit::EffectFailed;
+use crate::effect::EffectFailed;
 use uuid::Uuid;
 
 /// Bucket the artifacts Canopy holds are kept in. Unset ⇒ no store is
