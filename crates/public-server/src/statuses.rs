@@ -342,8 +342,8 @@ pub struct TargetResponse {
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(public: create))
-		.routes(routes!(public: check_severities))
+		.routes(routes!(public, audit_optional(ApplicationArrived, CheckRegistered): create))
+		.routes(routes!(public, silent: check_severities))
 }
 
 /// The application type a unified push names, if it names one.
@@ -455,13 +455,17 @@ async fn resolve_unified_application(
 )]
 async fn create(
 	Path(machine_id): Path<Uuid>,
-	State(db): State<Db>,
+	audit: commons_servers::audit::Audit,
 	State(dns_zones): State<Vec<commons_types::dns::ManagedZone>>,
 	device: ServerDevice,
 	current_version: Option<VersionHeader>,
 	body: Option<Json<serde_json::Value>>,
 ) -> Result<Json<StatusResponse>> {
-	let mut db = db.get().await?;
+	audit.acting_as(commons_servers::audit::device_actor(&device.0.0, None));
+	// A push is audited only for the records it creates, so what it does
+	// otherwise is the same work in the same transaction, which it holds for the
+	// request.
+	let mut db = audit.begin().await?;
 	let Device { role, id, .. } = device.0.0;
 
 	// The id on the wire is the machine's: an agent identifies the box it runs
@@ -529,7 +533,7 @@ async fn create(
 	// see nothing and each create. An ignored source records nowhere, so it
 	// reads without creating.
 	// spec: FLT#applications-come-from-reports
-	let resolved = db
+	let (resolved, arrived) = db
 		.transaction::<_, AppError, _>(async |conn| {
 			// What is adopted takes the box's rank as the locked row holds it,
 			// so a rank change landing since the box was read above is not
@@ -540,7 +544,14 @@ async fn create(
 				None
 			};
 			let machine = locked.as_ref().unwrap_or(&machine);
-			match ingest {
+			// What the box held before this push, so what it did not is what the
+			// push brought.
+			let held: std::collections::HashSet<Uuid> = if record {
+				machine.application_ids(conn).await?.into_iter().collect()
+			} else {
+				Default::default()
+			};
+			let resolved = match ingest {
 				Ingest::Split {
 					machine: machine_report,
 					applications,
@@ -563,19 +574,64 @@ async fn create(
 						};
 						resolved.push((key, application, reported.report));
 					}
-					Ok(ResolvedPush::Split {
+					ResolvedPush::Split {
 						machine: machine_report,
 						applications: resolved,
-					})
+					}
 				}
-				Ingest::Unified { health, extra } => Ok(ResolvedPush::Unified {
+				Ingest::Unified { health, extra } => ResolvedPush::Unified {
 					application: resolve_unified_application(conn, machine, &extra, record).await?,
 					health,
 					extra,
-				}),
-			}
+				},
+			};
+			// An ignored source creates nothing, so whatever it resolves was
+			// already held, though `held` is not read for it.
+			let arrived: Vec<Application> = match &resolved {
+				_ if !record => Vec::new(),
+				ResolvedPush::Split { applications, .. } => applications
+					.iter()
+					.map(|(_, application, _)| application)
+					.filter(|application| !held.contains(&application.id))
+					.cloned()
+					.collect(),
+				ResolvedPush::Unified { application, .. } => application
+					.iter()
+					.filter(|application| !held.contains(&application.id))
+					.cloned()
+					.collect(),
+			};
+			Ok((resolved, arrived))
 		})
 		.await?;
+	// A unified push speaks for the one application it resolved, so what it
+	// records names that application as the one the device acted for.
+	if let ResolvedPush::Unified {
+		application: Some(application),
+		..
+	} = &resolved
+	{
+		audit.acting_as(commons_servers::audit::device_actor(
+			&device.0.0,
+			Some(application.id),
+		));
+	}
+	for application in arrived {
+		db.record(database::audit::Action::ApplicationArrived {
+			application: database::audit::Record::new(
+				database::audit::RecordKind::Application,
+				application.id,
+				application.display_name(),
+			),
+			machine: database::audit::Record::new(
+				database::audit::RecordKind::Machine,
+				machine.id,
+				machine.name.clone(),
+			),
+			application_type: application.r#type.to_string(),
+		})
+		.await?;
+	}
 
 	// The effective tags of each target the push describes: stored tags
 	// overlaid on the group's, plus the synthetic `canopy:*` tags and, for an
@@ -608,88 +664,95 @@ async fn create(
 				// reachability, the last-seen sample behind a check, and a
 				// group's quiet members all ask what a given target last said.
 				// spec: STA#push
-				db.transaction::<_, AppError, _>(async |conn| {
-					let status = NewStatus {
-						machine_id: machine.id,
-						server_id: None,
-						device_id: Some(id),
-						// The version Canopy tracks is an application's, so a
-						// machine row carries none.
-						version: None,
-						extra: machine_report.detail,
-						healthy,
-						health: machine_report.health,
-						source: source.clone(),
-					}
-					.save(conn)
-					.await?;
-					database::reported_detail::MachineReportedDetail::record(
-						conn,
-						machine.id,
-						&status.source,
-						&status.extra,
-					)
-					.await?;
-					let machine_grading_tags = json_tags(&machine_tags);
-					file_health_events(
-						conn,
-						None,
-						&machine,
-						Some(id),
-						&status,
-						GrainTags {
-							application: &machine_grading_tags,
-							machine: &machine_grading_tags,
-						},
-						SubjectSplit::AsGiven,
-					)
-					.await?;
-
-					for (_, application, report, tags) in &apps {
-						// Each application's own version, from its own detail.
-						// The `X-Version` header names one application and a
-						// split push may describe several, so it has no
-						// meaning here and is not consulted.
-						let version = resolve_version(&report.detail, None);
+				let registered = db
+					.transaction::<_, AppError, _>(async |conn| {
+						let mut registered = Vec::new();
 						let status = NewStatus {
 							machine_id: machine.id,
-							server_id: Some(application.id),
+							server_id: None,
 							device_id: Some(id),
-							version,
-							extra: report.detail.clone(),
+							// The version Canopy tracks is an application's, so a
+							// machine row carries none.
+							version: None,
+							extra: machine_report.detail,
 							healthy,
-							health: report.health.clone(),
+							health: machine_report.health,
 							source: source.clone(),
 						}
 						.save(conn)
 						.await?;
-						database::reported_detail::ReportedDetail::record_for_application(
+						database::reported_detail::MachineReportedDetail::record(
 							conn,
-							application.id,
+							machine.id,
 							&status.source,
 							&status.extra,
-							status.version.as_ref(),
 						)
 						.await?;
-						let application_tags = json_tags(tags);
-						file_health_events(
-							conn,
-							Some(application),
-							&machine,
-							Some(id),
-							&status,
-							GrainTags {
-								application: &application_tags,
-								machine: &application_tags,
-							},
-							SubjectSplit::AsGiven,
-						)
-						.await?;
-					}
+						let machine_grading_tags = json_tags(&machine_tags);
+						registered.extend(
+							file_health_events(
+								conn,
+								None,
+								&machine,
+								Some(id),
+								&status,
+								GrainTags {
+									application: &machine_grading_tags,
+									machine: &machine_grading_tags,
+								},
+								SubjectSplit::AsGiven,
+							)
+							.await?,
+						);
 
-					Ok(())
-				})
-				.await?;
+						for (_, application, report, tags) in &apps {
+							// Each application's own version, from its own detail.
+							// The `X-Version` header names one application and a
+							// split push may describe several, so it has no
+							// meaning here and is not consulted.
+							let version = resolve_version(&report.detail, None);
+							let status = NewStatus {
+								machine_id: machine.id,
+								server_id: Some(application.id),
+								device_id: Some(id),
+								version,
+								extra: report.detail.clone(),
+								healthy,
+								health: report.health.clone(),
+								source: source.clone(),
+							}
+							.save(conn)
+							.await?;
+							database::reported_detail::ReportedDetail::record_for_application(
+								conn,
+								application.id,
+								&status.source,
+								&status.extra,
+								status.version.as_ref(),
+							)
+							.await?;
+							let application_tags = json_tags(tags);
+							registered.extend(
+								file_health_events(
+									conn,
+									Some(application),
+									&machine,
+									Some(id),
+									&status,
+									GrainTags {
+										application: &application_tags,
+										machine: &application_tags,
+									},
+									SubjectSplit::AsGiven,
+								)
+								.await?,
+							);
+						}
+
+						Ok(registered)
+					})
+					.await?;
+				record_registrations(&mut db, registered).await?;
 			}
 
 			// Computed after the transaction so checks first seen on this very
@@ -754,51 +817,51 @@ async fn create(
 			// else — backup instructions, tags, severities computed below — is
 			// returned regardless, so an ignored reporter keeps working.
 			if record {
-				db.transaction::<_, AppError, _>(async |conn| {
-					let status = NewStatus {
-						machine_id: machine.id,
-						server_id,
-						device_id: Some(id),
-						version,
-						extra,
-						healthy,
-						health,
-						source: source.clone(),
-					}
-					.save(conn)
-					.await?;
+				let registered = db
+					.transaction::<_, AppError, _>(async |conn| {
+						let status = NewStatus {
+							machine_id: machine.id,
+							server_id,
+							device_id: Some(id),
+							version,
+							extra,
+							healthy,
+							health,
+							source: source.clone(),
+						}
+						.save(conn)
+						.await?;
 
-					// This source's current server-wide detail, replacing what
-					// it last reported. The push is the source's whole truth,
-					// the same rule its checks follow just below.
-					// spec: FIG#sourcing
-					database::reported_detail::ReportedDetail::record(
-						conn,
-						server_id,
-						machine.id,
-						&status.source,
-						&status.extra,
-						status.version.as_ref(),
-					)
-					.await?;
+						// This source's current server-wide detail, replacing what
+						// it last reported. The push is the source's whole truth,
+						// the same rule its checks follow just below.
+						// spec: FIG#sourcing
+						database::reported_detail::ReportedDetail::record(
+							conn,
+							server_id,
+							machine.id,
+							&status.source,
+							&status.extra,
+							status.version.as_ref(),
+						)
+						.await?;
 
-					file_health_events(
-						conn,
-						application.as_ref(),
-						&machine,
-						Some(id),
-						&status,
-						GrainTags {
-							application: &tags,
-							machine: &machine_grading_tags,
-						},
-						SubjectSplit::BySubject,
-					)
+						file_health_events(
+							conn,
+							application.as_ref(),
+							&machine,
+							Some(id),
+							&status,
+							GrainTags {
+								application: &tags,
+								machine: &machine_grading_tags,
+							},
+							SubjectSplit::BySubject,
+						)
+						.await
+					})
 					.await?;
-
-					Ok(())
-				})
-				.await?;
+				record_registrations(&mut db, registered).await?;
 			}
 
 			let check_severities =
@@ -1071,7 +1134,7 @@ async fn file_health_events(
 	status: &Status,
 	tags: GrainTags<'_>,
 	subject: SubjectSplit,
-) -> Result<()> {
+) -> Result<Vec<RegisteredCheck>> {
 	let reported = ReportedCheck::all_in(&status.health);
 	let occurred_at = Some(status.created_at);
 
@@ -1123,9 +1186,23 @@ async fn file_health_events(
 	// page. A name resolves to the namespace of the grain it files at,
 	// so a machine check on a Tamanu push is the box's entry and not one
 	// Tamanu owns.
+	let mut registered = Vec::new();
 	for check_name in reported.keys() {
 		let namespace = namespace_of(check_name);
-		CheckPolicy::upsert_default(conn, &status.source, &namespace, check_name).await?;
+		if let Some(id) =
+			CheckPolicy::upsert_default(conn, &status.source, &namespace, check_name).await?
+		{
+			registered.push(RegisteredCheck {
+				id,
+				name: check_name.to_string(),
+				source: status.source.clone(),
+				namespace: match &namespace {
+					Namespace::Flat => "flat".to_owned(),
+					Namespace::Machine => "machine".to_owned(),
+					Namespace::Application(r#type) => format!("application {type}"),
+				},
+			});
+		}
 	}
 
 	// Status-level extras are shared across every per-check evaluation, and
@@ -1390,6 +1467,34 @@ async fn file_health_events(
 		database::issues::enqueue_incident_reeval(conn, application.id).await?;
 	}
 
+	Ok(registered)
+}
+
+/// A check a push brought into the catalogue.
+struct RegisteredCheck {
+	id: Uuid,
+	name: String,
+	source: String,
+	namespace: String,
+}
+
+/// Record each check a push registered, in the transaction that carries the push.
+async fn record_registrations(
+	db: &mut commons_servers::audit::AuditTx<'_>,
+	registered: Vec<RegisteredCheck>,
+) -> Result<()> {
+	for check in registered {
+		db.record(database::audit::Action::CheckRegistered {
+			check: database::audit::Record::new(
+				database::audit::RecordKind::Check,
+				check.id,
+				check.name,
+			),
+			source: check.source,
+			namespace: check.namespace,
+		})
+		.await?;
+	}
 	Ok(())
 }
 

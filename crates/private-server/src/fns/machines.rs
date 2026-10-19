@@ -42,18 +42,18 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: list))
-		.routes(routes!(read_only: get))
-		.routes(routes!(read_only: get_detail))
-		.routes(routes!(write: create))
-		.routes(routes!(write: update))
-		.routes(routes!(danger(invalidates): archive))
-		.routes(routes!(read_only: list_archived))
-		.routes(routes!(write: restore))
-		.routes(routes!(danger(issues): attach_tailscale_device))
-		.routes(routes!(danger(issues): mint_enrollment))
-		.routes(routes!(danger(invalidates): revoke_enrollment))
-		.routes(routes!(read_only: enrollment_status))
+		.routes(routes!(read_only, silent: list))
+		.routes(routes!(read_only, silent: get))
+		.routes(routes!(read_only, silent: get_detail))
+		.routes(routes!(write, silent: create))
+		.routes(routes!(write, silent: update))
+		.routes(routes!(danger(invalidates), silent: archive))
+		.routes(routes!(read_only, silent: list_archived))
+		.routes(routes!(write, silent: restore))
+		.routes(routes!(danger(issues), silent: attach_tailscale_device))
+		.routes(routes!(danger(issues), silent: mint_enrollment))
+		.routes(routes!(danger(invalidates), silent: revoke_enrollment))
+		.routes(routes!(read_only, silent: enrollment_status))
 }
 
 /// Identifies one machine.

@@ -150,7 +150,7 @@ The declaration must still exist and belong to the reporting consumer; a report 
 A declaration scoped to a whole group expands to one replica per current machine in that group.
 Machines joining or leaving a group change what the consumer is asked to maintain, with no per-machine operator action.
 
-Declarations are managed through the operator interface (create, edit, enable/disable, delete) and are audited.
+Declarations are managed through the operator interface (create, edit, enable/disable, delete) and are audited (see [AUD](../platform/audit-log.md)).
 Deleting a declaration stops the consumer being asked to maintain that replica and revokes its authorization for that `(group, type)` if no other declaration covers it; recorded restore-health history is retained.
 The reports it collected survive the deletion, keeping the group, machine, type, and intent they concern but no longer naming a declaration, so a declaration that has been reported on is no harder to retire than one that never was.
 

@@ -40,11 +40,11 @@ pub struct BestoolSnippetDetail {
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: list_snippets))
-		.routes(routes!(write: save_snippet))
-		.routes(routes!(read_only: get_snippet))
-		.routes(routes!(read_only: get_latest_snippet_id))
-		.routes(routes!(write: delete_snippet))
+		.routes(routes!(read_only, silent: list_snippets))
+		.routes(routes!(write, silent: save_snippet))
+		.routes(routes!(read_only, silent: get_snippet))
+		.routes(routes!(read_only, silent: get_latest_snippet_id))
+		.routes(routes!(write, silent: delete_snippet))
 }
 
 /// Pagination parameters for listing the snippet library.

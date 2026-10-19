@@ -67,6 +67,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/audit/filters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * What the log can be filtered by.
+         * @description Requires admin access.
+         */
+        post: operations["audit_filters"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/audit/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List the audit log, newest first.
+         * @description Reads the database alone, so only the last ninety days. A pending entry is
+         *     left out while it can still be settled.
+         *     Requires admin access.
+         */
+        post: operations["audit_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backups/allow_restore": {
         parameters: {
             query?: never;
@@ -3299,8 +3341,8 @@ export interface paths {
         put?: never;
         /**
          * Forget a variable, value and all.
-         * @description The row goes first, so a value the secret store will not let go of leaves
-         *     nothing behind that would refuse every later read of the inventory.
+         * @description The row and its stored value go together: when the secret store refuses,
+         *     both stay, and when it does not answer the row stays for a retry to remove.
          */
         post: operations["inventory_variables_remove"];
         delete?: never;
@@ -5244,6 +5286,33 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Who took an action. */
+        Actor: {
+            /** @enum {string} */
+            kind: "operator";
+            login: string;
+            name?: string | null;
+            profile_pic?: string | null;
+        } | {
+            /** Format: uuid */
+            application?: string | null;
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "device";
+            name?: string | null;
+            role: components["schemas"]["DeviceRole"];
+        } | {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "token";
+            name: string;
+        } | {
+            job: string;
+            /** @enum {string} */
+            kind: "canopy";
+        };
         /** @description Request body for granting admin access to an email address. */
         AddArgs: {
             /** @description The email address to add to the admin allow-list. */
@@ -5600,6 +5669,71 @@ export interface components {
          * @enum {string}
          */
         AttemptState: "in_flight" | "ended_without_report";
+        /** @description One action a log can be filtered by. */
+        AuditActionOption: {
+            /** @description What it is called to an operator. */
+            label: string;
+            /** @description The action's stable name. */
+            name: string;
+            /** @description Whether the log leaves it out by default. */
+            tier: components["schemas"]["Tier"];
+        };
+        /** @description Where a page of the log ended. */
+        AuditCursor: {
+            /**
+             * Format: uuid
+             * @description The last entry's identifier.
+             */
+            id: string;
+            /**
+             * Format: date-time
+             * @description When the last entry of the page was recorded.
+             */
+            recorded_at: string;
+        };
+        /** @description What the log's filters offer. */
+        AuditFilters: {
+            /** @description Every action in the catalogue. */
+            actions: components["schemas"]["AuditActionOption"][];
+            /** @description Everyone who acted in the last ninety days. */
+            actors: components["schemas"]["Actor"][];
+        };
+        /**
+         * @description Which entries to list. Everything is optional; the log page reads the last
+         *     ninety days of everything, newest first.
+         */
+        AuditListArgs: {
+            /**
+             * @description Entries of this action, by its stable name. Asking for an action by name
+             *     shows it whether or not it is routine.
+             */
+            action?: string | null;
+            /** @description Entries by this actor: a login, a device or token identifier, or a job. */
+            actor_id?: string | null;
+            /** @description Entries by this kind of actor: `operator`, `device`, `token` or `canopy`. */
+            actor_kind?: string | null;
+            after?: null | components["schemas"]["AuditCursor"];
+            /**
+             * @description Include routine actions: those taken at high volume, which are left out
+             *     of the log by default.
+             */
+            include_routine?: boolean;
+            /**
+             * Format: int64
+             * @description How many entries to return, at most five hundred.
+             */
+            limit?: number | null;
+            /**
+             * @description Entries that acted on a record with this identifier, or whose record's
+             *     name contains this.
+             */
+            record?: string | null;
+            /**
+             * Format: date-time
+             * @description Entries from this time on. Never reaches back further than ninety days.
+             */
+            since?: string | null;
+        };
         /** @description The certificate authority Canopy is configured to use, and whether it works. */
         AuthorityView: {
             /**
@@ -7163,6 +7297,38 @@ export interface components {
              *     it is safe to copy around on its own.
              */
             ticket: string;
+        };
+        /** @description One entry as the log presents it. */
+        Entry: {
+            /** @description The action's stable name. */
+            action: string;
+            /** @description What the action is called to an operator. */
+            action_label: string;
+            /** @description Who took the action. */
+            actor: components["schemas"]["Actor"];
+            /** @description What the action defines as worth knowing about it. */
+            detail: Record<string, never>;
+            /**
+             * Format: uuid
+             * @description The entry's identifier.
+             */
+            id: string;
+            /**
+             * Format: date-time
+             * @description When the entry was recorded.
+             */
+            recorded_at: string;
+            /** @description The records the action acted on. */
+            records: components["schemas"]["Record"][];
+            /** @description How long the entry stays in the database. */
+            retention: components["schemas"]["Retention"];
+            /**
+             * Format: date-time
+             * @description When the entry was settled, for one committed ahead of its action.
+             */
+            settled_at?: string | null;
+            /** @description Whether the action was done, failed, or is unconfirmed. */
+            status: components["schemas"]["Status"];
         };
         /**
          * @description Which environment to act on: exactly one of the group's identifier or its
@@ -10376,6 +10542,20 @@ export interface components {
             /** @description The backup type that ran. */
             type: string;
         };
+        /**
+         * @description A record an action acted on: its identifier, and its name as it was when the
+         *     action was taken, so the entry still reads once the record is renamed or
+         *     gone. Held without a foreign key, so an entry never stops a record being
+         *     deleted.
+         */
+        Record: {
+            /** @description Its identifier. */
+            id: string;
+            /** @description What kind of record it is. */
+            kind: components["schemas"]["RecordKind"];
+            /** @description Its name when the action was taken. */
+            name: string;
+        };
         /** @description Request body for recording where a group is going. */
         RecordArgs: {
             /**
@@ -10410,6 +10590,11 @@ export interface components {
              */
             target_version_id: string;
         };
+        /**
+         * @description The kinds of record an action can act on.
+         * @enum {string}
+         */
+        RecordKind: "machine" | "group" | "application" | "device" | "maintenance_window" | "upgrade_plan" | "restore_replica" | "reporting_schema" | "check" | "cluster" | "credential" | "variable" | "lease" | "version" | "artifact" | "name" | "certificate";
         /** @description A freshly issued recovery-verification challenge. */
         RecoveryChallengeResponse: {
             /**
@@ -11063,6 +11248,11 @@ export interface components {
              */
             allowed_until?: string | null;
         };
+        /**
+         * @description How long an entry stays in the database before it can leave it.
+         * @enum {string}
+         */
+        Retention: "standard" | "year";
         /**
          * @description How many backups to keep at each retention tier once older snapshots are
          *     pruned. The organization enforces minimum floors (at least 7 daily, 4
@@ -12459,6 +12649,11 @@ export interface components {
             typical_healthy_gap_secs?: number | null;
         };
         /**
+         * @description How an entry stands.
+         * @enum {string}
+         */
+        Status: "done" | "failed" | "unconfirmed";
+        /**
          * @description A single status push from a server, as of a point in time, with derived
          *     health and version information.
          */
@@ -12700,6 +12895,15 @@ export interface components {
          * @enum {string}
          */
         Testing: "on_request" | "scheduled";
+        /**
+         * @description How much an action is expected to be wanted when reading the log.
+         *
+         *     The log is read as the important entries unless the reader asks for more, so
+         *     an action that is taken at high volume and is not what anyone is looking for
+         *     by default is routine, and stays out of the way until asked for.
+         * @enum {string}
+         */
+        Tier: "important" | "routine";
         /**
          * @description One healthy↔degraded transition: the state became (or was first
          *     observed) `degraded`/healthy at `at`.
@@ -13251,6 +13455,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    audit_filters: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditFilters"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    audit_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuditListArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Entry"][];
                 };
             };
             403: {

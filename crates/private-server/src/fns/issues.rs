@@ -346,17 +346,17 @@ pub(crate) async fn enrich_issue(
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: list))
-		.routes(routes!(read_only: list_for_device))
-		.routes(routes!(read_only: list_for_server))
-		.routes(routes!(write: submit_manual_event))
-		.routes(routes!(write: resolve))
-		.routes(routes!(write: unresolve))
-		.routes(routes!(write: snooze))
-		.routes(routes!(write: unsnooze))
-		.routes(routes!(write: add_note))
-		.routes(routes!(read_only: list_notes))
-		.routes(routes!(write: delete_note))
+		.routes(routes!(read_only, silent: list))
+		.routes(routes!(read_only, silent: list_for_device))
+		.routes(routes!(read_only, silent: list_for_server))
+		.routes(routes!(write, silent: submit_manual_event))
+		.routes(routes!(write, silent: resolve))
+		.routes(routes!(write, silent: unresolve))
+		.routes(routes!(write, silent: snooze))
+		.routes(routes!(write, silent: unsnooze))
+		.routes(routes!(write, silent: add_note))
+		.routes(routes!(read_only, silent: list_notes))
+		.routes(routes!(write, silent: delete_note))
 }
 
 fn filter_from(active_only: Option<bool>) -> IssueFilter {

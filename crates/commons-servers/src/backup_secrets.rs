@@ -18,12 +18,23 @@ pub use age::secrecy::{ExposeSecret, SecretString};
 
 use commons_errors::{AppError, Result};
 
+use crate::effect::EffectFailed;
+
 /// Env var that forces the in-memory secret store (no cluster needed). Set by the
 /// e2e fixture so onboarding works against the real binary; tests use
 /// [`BackupSecrets::memory`] directly.
 const MEMORY_ENV: &str = "CANOPY_BACKUP_SECRETS_MEMORY";
 
 type MemoryStore = Arc<Mutex<BTreeMap<String, BTreeMap<String, String>>>>;
+
+/// A write to the store that did not take: known to have written nothing when
+/// the API answered refusing it.
+fn write_failed(what: &str, error: kube::Error) -> EffectFailed {
+	EffectFailed {
+		nothing_done: matches!(error, kube::Error::Api(_)),
+		error: AppError::Upstream(format!("{what} failed: {error}")),
+	}
+}
 
 /// Reader/writer for the per-group repo-password Secrets. `Kube` is a namespaced
 /// [`kube::Client`]; `Memory` is an in-process map for tests + the e2e binary.
@@ -274,7 +285,7 @@ impl BackupSecrets {
 		secret_name: &str,
 		key: &str,
 		value: &SecretString,
-	) -> Result<()> {
+	) -> std::result::Result<(), EffectFailed> {
 		match self {
 			Self::Kube { client, namespace } => {
 				use k8s_openapi::api::core::v1::Secret;
@@ -302,15 +313,14 @@ impl BackupSecrets {
 							Ok(_) => Ok(()),
 							// Someone else created it in between, so the key
 							// still has to be merged into what they wrote.
-							Err(kube::Error::Api(e)) if e.code == 409 => {
-								merge().await.map(drop).map_err(|e| {
-									AppError::Upstream(format!("secret patch failed: {e}"))
-								})
-							}
-							Err(e) => Err(AppError::Upstream(format!("secret create failed: {e}"))),
+							Err(kube::Error::Api(e)) if e.code == 409 => merge()
+								.await
+								.map(drop)
+								.map_err(|e| write_failed("secret patch", e)),
+							Err(e) => Err(write_failed("secret create", e)),
 						}
 					}
-					Err(e) => Err(AppError::Upstream(format!("secret patch failed: {e}"))),
+					Err(e) => Err(write_failed("secret patch", e)),
 				}
 			}
 			Self::Memory(store) => {
@@ -327,7 +337,11 @@ impl BackupSecrets {
 
 	/// Drop one key from the named Secret, leaving every other key as it is.
 	/// A Secret that is not there holds nothing to drop.
-	pub async fn forget_secret_key(&self, secret_name: &str, key: &str) -> Result<()> {
+	pub async fn forget_secret_key(
+		&self,
+		secret_name: &str,
+		key: &str,
+	) -> std::result::Result<(), EffectFailed> {
 		match self {
 			Self::Kube { client, namespace } => {
 				use k8s_openapi::api::core::v1::Secret;
@@ -344,7 +358,7 @@ impl BackupSecrets {
 				{
 					Ok(_) => Ok(()),
 					Err(kube::Error::Api(e)) if e.code == 404 => Ok(()),
-					Err(e) => Err(AppError::Upstream(format!("secret patch failed: {e}"))),
+					Err(e) => Err(write_failed("secret patch", e)),
 				}
 			}
 			Self::Memory(store) => {

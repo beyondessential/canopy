@@ -16,9 +16,12 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::TailscaleAdmin;
+use commons_servers::{audit::Audit, tailscale_auth::TailscaleAdmin};
 use commons_types::{Uuid, device::DeviceRole};
-use database::KubernetesCluster;
+use database::{
+	KubernetesCluster,
+	audit::{Action, Record, RecordKind},
+};
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -35,11 +38,11 @@ const REGISTRATION_FRESHNESS: SignedDuration = SignedDuration::from_secs(90);
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: list))
-		.routes(routes!(danger(issues): register))
-		.routes(routes!(write: confirm))
-		.routes(routes!(danger(issues, invalidates): reissue))
-		.routes(routes!(danger(irreversible, invalidates): remove))
+		.routes(routes!(read_only, silent: list))
+		.routes(routes!(danger(issues), audit(DeviceCredentialProvisioned): register))
+		.routes(routes!(write, silent: confirm))
+		.routes(routes!(danger(issues, invalidates), audit(DeviceCredentialProvisioned): reissue))
+		.routes(routes!(danger(irreversible, invalidates), silent: remove))
 }
 
 /// A cluster in the registry, as an operator sees it.
@@ -157,7 +160,7 @@ pub struct RegistrationStarted {
 	),
 )]
 pub async fn register(
-	State(state): State<AppState>,
+	audit: Audit,
 	_admin: TailscaleAdmin,
 	Json(args): Json<RegisterArgs>,
 ) -> Result<Json<RegistrationStarted>> {
@@ -167,7 +170,7 @@ pub async fn register(
 			"a cluster needs a name".into(),
 		));
 	}
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
 
 	// Mint the relay's identity first, then record the draft that accounts for
 	// it: the draft carries the relay's identity, so the minted relay is never
@@ -181,6 +184,16 @@ pub async fn register(
 	)
 	.await?;
 	let cluster = KubernetesCluster::create_draft(&mut conn, name, credential.device_id).await?;
+	conn.record(Action::DeviceCredentialProvisioned {
+		device: Record::device(credential.device_id),
+		key: Record::new(
+			RecordKind::Credential,
+			credential.key_id,
+			format!("{name} relay"),
+		),
+		role: DeviceRole::Relay.to_string(),
+	})
+	.await?;
 
 	Ok(Json(RegistrationStarted {
 		cluster: ClusterView::of(cluster, Timestamp::now()),
@@ -251,11 +264,11 @@ pub async fn confirm(
 	),
 )]
 pub async fn reissue(
-	State(state): State<AppState>,
+	audit: Audit,
 	_admin: TailscaleAdmin,
 	Json(args): Json<ClusterIdArgs>,
 ) -> Result<Json<ProvisionedCredential>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
 	let cluster = KubernetesCluster::get_by_id(&mut conn, args.id).await?;
 	let credential = mint_provisioned_credential(
 		&mut conn,
@@ -264,6 +277,16 @@ pub async fn reissue(
 		&format!("{} relay", cluster.name),
 		true,
 	)
+	.await?;
+	conn.record(Action::DeviceCredentialProvisioned {
+		device: Record::device(credential.device_id),
+		key: Record::new(
+			RecordKind::Credential,
+			credential.key_id,
+			format!("{} relay", cluster.name),
+		),
+		role: DeviceRole::Relay.to_string(),
+	})
 	.await?;
 	Ok(Json(credential))
 }

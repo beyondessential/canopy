@@ -11,11 +11,11 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: public_url))
-		.routes(routes!(read_only: server_versions_url))
-		.routes(routes!(read_only: calendar_url))
-		.routes(routes!(read_only: is_current_user_admin))
-		.routes(routes!(read_only: products))
+		.routes(routes!(read_only, silent: public_url))
+		.routes(routes!(read_only, silent: server_versions_url))
+		.routes(routes!(read_only, silent: calendar_url))
+		.routes(routes!(read_only, silent: is_current_user_admin))
+		.routes(routes!(read_only, silent: products))
 }
 
 /// One product canopy monitors, with what canopy does for its applications and the

@@ -23,7 +23,8 @@ use database::{
 	versions::{NewVersion, Version, ViewVersion},
 };
 use diesel::{
-	BoolExpressionMethods as _, ExpressionMethods as _, QueryDsl as _, SelectableHelper as _,
+	BoolExpressionMethods as _, ExpressionMethods as _, OptionalExtension as _, QueryDsl as _,
+	SelectableHelper as _,
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl as _};
 use futures::AsyncReadExt;
@@ -109,26 +110,30 @@ async fn version_named(conn: &mut AsyncPgConnection, named: &str) -> Result<Vers
 }
 
 pub fn routes() -> OpenApiRouter<AppState> {
-	let api = OpenApiRouter::new()
-		.routes(routes!(public: list))
-		.routes(routes!(public: update_for))
-		.routes(routes!(public: create, remove))
-		.routes(routes!(public: list_artifacts));
+	OpenApiRouter::new()
+		.routes(routes!(public, silent: list))
+		.routes(routes!(public, silent: update_for))
+		.routes(routes!(public, audit(VersionPublished): create))
+		.routes(routes!(public, audit(VersionRemoved): remove))
+		.routes(routes!(public, silent: list_artifacts))
+}
 
+/// The routes beside the versions API that are not part of its document.
+pub fn pages() -> Router<AppState> {
 	// Streaming download proxy doesn't have a JSON wire shape; mount as a
 	// plain route so it stays out of the OpenAPI spec.
-	let extras: Router<AppState> = Router::new().route(
+	let pages: Router<AppState> = Router::new().route(
 		"/{version}/artifacts/{artifact_id}/download",
 		get(download_artifact),
 	);
 
 	#[cfg(feature = "ui")]
-	let extras = extras
+	let pages = pages
 		.route("/rss", get(releases_rss))
 		.route("/{version}", get(view_artifacts))
 		.route("/{version}/mobile", get(view_mobile_install));
 
-	api.merge(OpenApiRouter::from(extras))
+	pages
 }
 
 #[cfg(feature = "ui")]
@@ -301,12 +306,13 @@ async fn releases_rss(
 async fn create(
 	device: ReleaserDevice,
 	Path(version): Path<String>,
-	State(db): State<Db>,
+	audit: commons_servers::audit::Audit,
 	data: Bytes,
 ) -> Result<Json<Version>> {
 	use commons_types::version::VersionStatus;
 
-	let mut db = db.get().await?;
+	let mut db = audit.begin().await?;
+	audit.acting_as(commons_servers::audit::device_actor(&device.0.0, None));
 	const CHANGELOG_LIMIT: usize = 1024 * 1024; // a MiB, as documented
 
 	let mut stream = data.take(CHANGELOG_LIMIT as u64);
@@ -356,7 +362,21 @@ async fn create(
 		}
 	};
 
+	db.record(database::audit::Action::VersionPublished {
+		version: version_record(&version),
+		device: database::audit::Record::device(device_id),
+	})
+	.await?;
+
 	Ok(Json(version))
+}
+
+fn version_record(version: &Version) -> database::audit::Record {
+	database::audit::Record::new(
+		database::audit::RecordKind::Version,
+		version.id,
+		format!("{}.{}.{}", version.major, version.minor, version.patch),
+	)
 }
 
 /// Yank a version.
@@ -378,20 +398,36 @@ async fn create(
 	),
 )]
 async fn remove(
-	_device: AdminDevice,
+	device: AdminDevice,
 	Path(version): Path<String>,
-	State(db): State<Db>,
+	audit: commons_servers::audit::Audit,
 ) -> Result<()> {
 	use commons_types::version::VersionStatus;
 	use database::schema::versions::dsl::*;
 
-	let mut db = db.get().await?;
+	let mut db = audit.begin().await?;
+	audit.acting_as(commons_servers::audit::device_actor(&device.0.0, None));
 	let version = VersionStr::from_str(&version)?;
-	diesel::update(versions)
+	let yanked: Option<Version> = diesel::update(versions)
 		.filter(database::versions::predicate_version!(version.0))
+		.filter(status.ne(VersionStatus::Yanked))
 		.set(status.eq(VersionStatus::Yanked))
-		.execute(&mut db)
-		.await?;
+		.returning(Version::as_select())
+		.get_result(&mut db)
+		.await
+		.optional()?;
+	// Yanking a version that is unknown or already yanked succeeds and changes
+	// nothing, so a release script that yanks twice does not fail.
+	match yanked {
+		Some(yanked) => {
+			db.record(database::audit::Action::VersionRemoved {
+				version: version_record(&yanked),
+				device: database::audit::Record::device(device.0.0.id),
+			})
+			.await?
+		}
+		None => audit.unchanged(),
+	}
 
 	Ok(())
 }

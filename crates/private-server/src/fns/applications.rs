@@ -525,14 +525,14 @@ fn server_to_info_with_group(
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: list_some))
-		.routes(routes!(read_only: list_archived))
-		.routes(routes!(read_only: get_name))
-		.routes(routes!(read_only: get_info))
-		.routes(routes!(read_only: get_detail))
-		.routes(routes!(write: update))
-		.routes(routes!(write: delete))
-		.routes(routes!(write: restore))
+		.routes(routes!(read_only, silent: list_some))
+		.routes(routes!(read_only, silent: list_archived))
+		.routes(routes!(read_only, silent: get_name))
+		.routes(routes!(read_only, silent: get_info))
+		.routes(routes!(read_only, silent: get_detail))
+		.routes(routes!(write, silent: update))
+		.routes(routes!(write, silent: delete))
+		.routes(routes!(write, silent: restore))
 }
 
 /// Filter and pagination parameters for listing applications.

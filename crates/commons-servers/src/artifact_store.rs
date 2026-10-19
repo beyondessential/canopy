@@ -16,6 +16,8 @@ use std::{
 
 use commons_errors::{AppError, Result};
 use jiff::Timestamp;
+
+use crate::effect::EffectFailed;
 use uuid::Uuid;
 
 /// Bucket the artifacts Canopy holds are kept in. Unset ⇒ no store is
@@ -157,7 +159,11 @@ impl ArtifactStore {
 	}
 
 	/// Store an artifact's bytes, replacing whatever was under its id.
-	pub async fn put(&self, artifact: Uuid, bytes: Vec<u8>) -> Result<()> {
+	pub async fn put(
+		&self,
+		artifact: Uuid,
+		bytes: Vec<u8>,
+	) -> std::result::Result<(), EffectFailed> {
 		let key = self.key(artifact);
 		match self {
 			Self::S3 { client, bucket, .. } => {
@@ -168,8 +174,11 @@ impl ArtifactStore {
 					.body(bytes.into())
 					.send()
 					.await
-					.map_err(|err| {
-						AppError::custom(format!("storing the artifact failed: {err}"))
+					.map_err(|err| EffectFailed {
+						// The store answering with an error is knowing nothing
+						// was stored; no answer at all is not.
+						nothing_done: err.as_service_error().is_some(),
+						error: AppError::custom(format!("storing the artifact failed: {err}")),
 					})?;
 			}
 			Self::Memory(store) => {

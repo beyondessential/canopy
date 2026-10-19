@@ -22,11 +22,11 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: zones))
-		.routes(routes!(read_only: for_group))
-		.routes(routes!(read_only: grant_availability))
-		.routes(routes!(write: claim))
-		.routes(routes!(danger(unprotects): release))
+		.routes(routes!(read_only, silent: zones))
+		.routes(routes!(read_only, silent: for_group))
+		.routes(routes!(read_only, silent: grant_availability))
+		.routes(routes!(write, silent: claim))
+		.routes(routes!(danger(unprotects), silent: release))
 }
 
 /// A DNS zone Canopy can write records in.

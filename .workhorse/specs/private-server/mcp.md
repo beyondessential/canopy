@@ -126,6 +126,13 @@ A client investigating an issue consults this before deriving a check's meaning 
 **Get check stability** takes a set of (source, check) pairs — optionally narrowed to one machine, one application, or one group — and returns each matching state's full stability record (see [CHK](../monitoring/checks.md), "Stability"): the observation counts, the transition ring, and the hour-of-week degradation profile, together with the derived flap statistics (recent flap counts, typical degraded-run and healthy-gap durations).
 This is the raw material for analysing whether a check's noise is a flap, a load-dependent pattern, or a real change in behaviour.
 
+### Audit log
+
+**Find audit entries** takes a look-back window of up to ninety days and optional filters for actor, action, and a record acted on, and an option to include routine actions, which are left out unless asked for or named; it returns matching entries of the audit log newest first, as a bounded list (see [AUD](../platform/audit-log.md)).
+Each entry carries when it happened, its actor, its action, the records it acted on, its detail, and, for an entry committed ahead of its action, whether it was done, failed, or is unconfirmed.
+It reaches back ninety days and no further, even for entries Canopy keeps longer, and its description says so; older entries are read from the operator interface, which reaches into the archive.
+A longer window is refused, naming the limit.
+
 ## Result semantics
 
 A machine's or an application's reported status reflects reports received within that target's own down threshold; one silent beyond it reads as unreachable rather than as a stale "up" (see [CHK](../monitoring/checks.md), "Reachability").

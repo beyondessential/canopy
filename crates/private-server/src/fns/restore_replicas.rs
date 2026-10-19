@@ -13,7 +13,10 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
+use commons_servers::{
+	audit::Audit,
+	tailscale_auth::{TailscaleAdmin, TailscaleUser},
+};
 use commons_types::device::DeviceRole;
 use commons_types::{
 	Uuid,
@@ -24,6 +27,7 @@ use commons_types::{
 	},
 	units,
 };
+use database::audit::{Action, Record, RecordKind};
 use database::diesel_async::AsyncPgConnection;
 use database::pg_duration::PgDuration;
 use database::restore::{self, RedactionGapReason};
@@ -40,12 +44,12 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: for_group))
-		.routes(routes!(read_only: consumers))
-		.routes(routes!(read_only: checks))
-		.routes(routes!(write: create))
-		.routes(routes!(write: update))
-		.routes(routes!(danger(invalidates): delete))
+		.routes(routes!(read_only, silent: for_group))
+		.routes(routes!(read_only, silent: consumers))
+		.routes(routes!(read_only, silent: checks))
+		.routes(routes!(write, audit(RestoreReplicaDeclared): create))
+		.routes(routes!(write, audit(RestoreReplicaUpdated): update))
+		.routes(routes!(danger(invalidates), audit(RestoreReplicaDeleted): delete))
 }
 
 // ── Wire types ──────────────────────────────────────────────────────────────
@@ -810,11 +814,11 @@ pub async fn checks(
 	),
 )]
 pub async fn create(
-	State(state): State<AppState>,
+	audit: Audit,
 	TailscaleAdmin(admin): TailscaleAdmin,
 	Json(args): Json<RestoreReplicasCreateArgs>,
 ) -> Result<Json<RestoreReplicaView>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
 	let params = normalized_params_for_intent(
 		&mut conn,
 		args.consumer_device_id,
@@ -842,6 +846,19 @@ pub async fn create(
 			created_by: Some(admin.login),
 		},
 	)
+	.await?;
+	let (replica_record, group, machine, consumer) = replica_records(&mut conn, &replica).await?;
+	conn.record(Action::RestoreReplicaDeclared {
+		replica: replica_record,
+		group,
+		machine,
+		consumer,
+		backup_type: replica.r#type.to_string(),
+		intent: replica.intent.to_string(),
+		enabled: replica.enabled,
+		redacts: replica.redacts,
+		publishes_schemas: replica.publishes_schemas,
+	})
 	.await?;
 	let views = to_views(&mut conn, vec![replica]).await?;
 	Ok(Json(views.into_iter().next().expect("one view")))
@@ -880,11 +897,11 @@ pub async fn create(
 	),
 )]
 pub async fn update(
-	State(state): State<AppState>,
+	audit: Audit,
 	_admin: TailscaleAdmin,
 	Json(args): Json<RestoreReplicasUpdateArgs>,
 ) -> Result<Json<RestoreReplicaView>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
 	let params = normalized_params_for_intent(
 		&mut conn,
 		args.consumer_device_id,
@@ -914,6 +931,19 @@ pub async fn update(
 		},
 	)
 	.await?;
+	let (replica_record, group, machine, consumer) = replica_records(&mut conn, &replica).await?;
+	conn.record(Action::RestoreReplicaUpdated {
+		replica: replica_record,
+		group,
+		machine,
+		consumer,
+		backup_type: replica.r#type.to_string(),
+		intent: replica.intent.to_string(),
+		enabled: replica.enabled,
+		redacts: replica.redacts,
+		publishes_schemas: replica.publishes_schemas,
+	})
+	.await?;
 	let views = to_views(&mut conn, vec![replica]).await?;
 	Ok(Json(views.into_iter().next().expect("one view")))
 }
@@ -937,11 +967,41 @@ pub async fn update(
 	responses((status = 200), (status = 404, body = ProblemDetailsSchema)),
 )]
 pub async fn delete(
-	State(state): State<AppState>,
+	audit: Audit,
 	_admin: TailscaleAdmin,
 	Json(args): Json<IdArgs>,
 ) -> Result<Json<()>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
+	let replica = RestoreReplica::get(&mut conn, args.id).await?;
+	let (replica_record, group, _, consumer) = replica_records(&mut conn, &replica).await?;
 	RestoreReplica::delete(&mut conn, args.id).await?;
+	conn.record(Action::RestoreReplicaDeleted {
+		replica: replica_record,
+		group,
+		consumer,
+		backup_type: replica.r#type.to_string(),
+		intent: replica.intent.to_string(),
+	})
+	.await?;
 	Ok(Json(()))
+}
+
+/// A declaration and what it names, as the records an entry holds: the
+/// declaration, its group, its machine where it covers one, and the consumer
+/// responsible for it.
+async fn replica_records(
+	conn: &mut AsyncPgConnection,
+	replica: &RestoreReplica,
+) -> Result<(Record, Record, Option<Record>, Record)> {
+	let group = Record::group(conn, replica.group_id).await?;
+	let machine = match replica.machine_id {
+		Some(machine_id) => Some(Record::machine(conn, machine_id).await?),
+		None => None,
+	};
+	Ok((
+		Record::new(RecordKind::RestoreReplica, replica.id, replica.name.clone()),
+		group,
+		machine,
+		Record::device(replica.consumer_device_id),
+	))
 }

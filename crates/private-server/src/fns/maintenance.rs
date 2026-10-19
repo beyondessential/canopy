@@ -2,8 +2,13 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
+use commons_servers::{
+	audit::Audit,
+	tailscale_auth::{TailscaleAdmin, TailscaleUser},
+};
 use commons_types::{Uuid, server::rank::ServerRank};
+use database::audit::{Action, Record, RecordKind};
+use database::diesel_async::AsyncPgConnection;
 use database::issues::{Incident, Scope};
 use database::maintenance_windows::{
 	Amendment, Grain, HeldInPlace, MaintenanceWindow, TargetWindow, line_of_descent, target_labels,
@@ -17,14 +22,37 @@ use crate::state::AppState;
 /// How many of a target's ended windows its history returns.
 const HISTORY_LIMIT: i64 = 20;
 
+/// A window and what it covers, as the records an entry names. The window is
+/// named by its target as it reads to an operator, since a window has no name
+/// of its own.
+async fn window_records(
+	conn: &mut AsyncPgConnection,
+	window: &MaintenanceWindow,
+) -> Result<(Record, Record)> {
+	let label = match window.grain() {
+		Some(grain) => target_labels(conn, &[grain])
+			.await?
+			.remove(&grain)
+			.unwrap_or_default(),
+		None => String::new(),
+	};
+	let target = Record::scope(conn, window.scope())
+		.await?
+		.ok_or_else(|| AppError::custom("a maintenance window covers a target"))?;
+	Ok((
+		Record::new(RecordKind::MaintenanceWindow, window.id, label),
+		target,
+	))
+}
+
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: list_open))
-		.routes(routes!(read_only: for_target))
-		.routes(routes!(read_only: targets))
-		.routes(routes!(write: declare))
-		.routes(routes!(write: amend))
-		.routes(routes!(write: lift))
+		.routes(routes!(read_only, silent: list_open))
+		.routes(routes!(read_only, silent: for_target))
+		.routes(routes!(read_only, silent: targets))
+		.routes(routes!(write, audit(MaintenanceDeclared, MaintenanceAmended): declare))
+		.routes(routes!(write, audit(MaintenanceAmended): amend))
+		.routes(routes!(write, audit(MaintenanceLifted): lift))
 }
 
 /// A target a window can cover, named the way a declaration names it: exactly
@@ -261,11 +289,11 @@ pub async fn for_target(
 	),
 )]
 pub async fn declare(
-	State(state): State<AppState>,
+	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<DeclareArgs>,
 ) -> Result<Json<MaintenanceWindow>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
 	let grain = args.target.grain()?;
 	let (scope, rank) = (grain.scope(), grain.rank());
 	let window = match args.upgrade_plan_id {
@@ -293,6 +321,36 @@ pub async fn declare(
 			.await?
 		}
 	};
+	let (record, target) = window_records(&mut conn, &window).await?;
+	// Declaring over a target that has a window amends it rather than opening a
+	// second, and only an amended window carries an amendment.
+	let action = if window.amended_at.is_some() {
+		Action::MaintenanceAmended {
+			window: record,
+			target,
+			moved_from: None,
+			rank: window.rank,
+			expected_end: window.expected_end,
+			note: window.note.clone(),
+		}
+	} else {
+		let upgrade_plan = match args.upgrade_plan_id {
+			Some(plan) => {
+				let plan = database::upgrade_plans::UpgradePlan::get_open(&mut conn, plan).await?;
+				Some(Record::upgrade_plan(&mut conn, &plan).await?)
+			}
+			None => None,
+		};
+		Action::MaintenanceDeclared {
+			window: record,
+			target,
+			upgrade_plan,
+			rank: window.rank,
+			expected_end: window.expected_end,
+			note: window.note.clone(),
+		}
+	};
+	conn.record(action).await?;
 	Ok(Json(window))
 }
 
@@ -319,11 +377,12 @@ pub async fn declare(
 	),
 )]
 pub async fn amend(
-	State(state): State<AppState>,
+	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<AmendWindowArgs>,
 ) -> Result<Json<MaintenanceWindow>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
+	let before = MaintenanceWindow::get(&mut conn, args.id).await?;
 	let window = MaintenanceWindow::amend(
 		&mut conn,
 		args.id,
@@ -336,6 +395,21 @@ pub async fn amend(
 		},
 		Some(&admin.0.login),
 	)
+	.await?;
+	let (record, target) = window_records(&mut conn, &window).await?;
+	let moved_from = if window.grain() != before.grain() {
+		Some(window_records(&mut conn, &before).await?.1)
+	} else {
+		None
+	};
+	conn.record(Action::MaintenanceAmended {
+		window: record,
+		target,
+		moved_from,
+		rank: window.rank,
+		expected_end: window.expected_end,
+		note: window.note.clone(),
+	})
 	.await?;
 	Ok(Json(window))
 }
@@ -453,11 +527,23 @@ pub async fn targets(
 	),
 )]
 pub async fn lift(
-	State(state): State<AppState>,
+	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<LiftArgs>,
 ) -> Result<Json<MaintenanceWindow>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
+	let already_ended = MaintenanceWindow::get(&mut conn, args.id)
+		.await?
+		.ended_at
+		.is_some();
 	let window = MaintenanceWindow::lift(&mut conn, args.id, Some(&admin.0.login)).await?;
+	let (record, target) = window_records(&mut conn, &window).await?;
+	conn.record(Action::MaintenanceLifted {
+		window: record,
+		target,
+		rank: window.rank,
+		already_ended,
+	})
+	.await?;
 	Ok(Json(window))
 }

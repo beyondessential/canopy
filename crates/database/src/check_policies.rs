@@ -568,13 +568,15 @@ impl CheckPolicy {
 	/// (ceiling = warning) if and only if no row exists yet. Idempotent:
 	/// safe to call on every status push for every check seen, including
 	/// healthy ones. Concurrent pushes are serialised by Postgres via
-	/// `ON CONFLICT DO NOTHING`.
+	/// `ON CONFLICT DO NOTHING`. Returns the identifier of the row where this
+	/// call registered the check, which exactly one of any number of concurrent
+	/// calls does.
 	pub async fn upsert_default(
 		db: &mut AsyncPgConnection,
 		source: &str,
 		namespace: &Namespace,
 		check_name: &str,
-	) -> Result<()> {
+	) -> Result<Option<Uuid>> {
 		use crate::schema::check_policies::dsl;
 		let (subject, application_type) = namespace.to_columns();
 		diesel::insert_into(dsl::check_policies)
@@ -591,10 +593,11 @@ impl CheckPolicy {
 				dsl::check_name,
 			))
 			.do_nothing()
-			.execute(db)
+			.returning(dsl::id)
+			.get_result(db)
 			.await
-			.map_err(AppError::from)?;
-		Ok(())
+			.optional()
+			.map_err(AppError::from)
 	}
 
 	/// Insert a row for the catalogued check with the given policy —

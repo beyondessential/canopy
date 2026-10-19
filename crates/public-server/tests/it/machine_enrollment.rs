@@ -408,6 +408,56 @@ async fn enrollment_bad_signature_is_opaque_and_keeps_token() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_refused_proof_spends_the_challenge() {
+	run(async |mut conn, public, _private| {
+		let (spki, cert, signing_key) = make_signing_certificate();
+		let machine_id = machine(&mut conn).await;
+		let (_t, token) =
+			MachineEnrollmentToken::mint(&mut conn, machine_id, SignedDuration::from_hours(1))
+				.await
+				.unwrap();
+
+		let resp = public
+			.post("/servers/register/begin")
+			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+			.json(&json!({"server_id": machine_id, "token": token}))
+			.await;
+		resp.assert_status_ok();
+		let nonce_b64 = resp.json::<Value>()["nonce"].as_str().unwrap().to_string();
+
+		public
+			.post("/servers/register/complete")
+			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+			.json(&json!({
+				"server_id": machine_id,
+				"nonce": nonce_b64,
+				"signature": b64().encode([0u8; 72]),
+			}))
+			.await
+			.assert_status_forbidden();
+
+		// A good signature over the same nonce is too late: the challenge was
+		// spent by the refused attempt.
+		let mut transcript = b64().decode(&nonce_b64).unwrap();
+		transcript.extend_from_slice(machine_id.as_bytes());
+		transcript.extend_from_slice(&spki);
+		let rng = ring::rand::SystemRandom::new();
+		let sig = signing_key.sign(&rng, &transcript).unwrap();
+		public
+			.post("/servers/register/complete")
+			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+			.json(&json!({
+				"server_id": machine_id,
+				"nonce": nonce_b64,
+				"signature": b64().encode(sig.as_ref()),
+			}))
+			.await
+			.assert_status_forbidden();
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn enrollment_rate_limited_per_machine() {
 	run(async |_conn, public, _private| {
 		let machine_id = Uuid::new_v4();

@@ -36,16 +36,16 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: for_server))
-		.routes(routes!(read_only: for_group))
-		.routes(routes!(read_only: for_machine))
-		.routes(routes!(write: declare))
-		.routes(routes!(write: release))
-		.routes(routes!(write: deny))
-		.routes(routes!(write: lift_denial))
-		.routes(routes!(read_only: undeclared_notices))
-		.routes(routes!(danger(unprotects): pause))
-		.routes(routes!(write: resume))
+		.routes(routes!(read_only, silent: for_server))
+		.routes(routes!(read_only, silent: for_group))
+		.routes(routes!(read_only, silent: for_machine))
+		.routes(routes!(write, silent: declare))
+		.routes(routes!(write, silent: release))
+		.routes(routes!(write, silent: deny))
+		.routes(routes!(write, silent: lift_denial))
+		.routes(routes!(read_only, silent: undeclared_notices))
+		.routes(routes!(danger(unprotects), silent: pause))
+		.routes(routes!(write, silent: resume))
 }
 
 /// A DNS name an application holds for addresses, and how far Canopy has got

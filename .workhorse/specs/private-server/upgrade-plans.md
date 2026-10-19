@@ -57,7 +57,7 @@ A corrected date or a reworded note is the same plan better described, so it sta
 Changing the target is not an amendment: where an environment is going is what the history exists to record, so a new target replaces the plan as any other second plan would.
 A plan that has been met or replaced is history and is no longer amendable.
 
-Plans are managed through the operator interface and are audited.
+Plans are managed through the operator interface and are audited (see [AUD](../platform/audit-log.md)).
 Withdrawing a plan says the environment is no longer going there; it does not say the upgrade happened.
 A withdrawn plan is retained and records who withdrew it and when: an environment that was going somewhere and stopped is part of the same history as one that arrived, and it frees the environment to be planned somewhere else.
 

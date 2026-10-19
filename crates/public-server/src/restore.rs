@@ -18,6 +18,10 @@ use axum::{Json, extract::State, http::StatusCode};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::device_auth::BackupRestoreDevice;
+use commons_servers::{
+	audit::{Audit, device_actor},
+	effect::EffectFailed,
+};
 use commons_types::backup::{
 	BackupPurpose, BackupType, IntentDescriptor, ParamValues, RedactionOutcome, RestoreIntent,
 	RunOutcome, redaction_params, resolve_params, semantics,
@@ -51,10 +55,10 @@ use crate::{
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(public: capabilities))
-		.routes(routes!(public: worklist))
-		.routes(routes!(public: credentials))
-		.routes(routes!(public: verification))
+		.routes(routes!(public, silent: capabilities))
+		.routes(routes!(public, silent: worklist))
+		.routes(routes!(public, audit(RestoreCredentialsIssued): credentials))
+		.routes(routes!(public, silent: verification))
 }
 
 // ---------------------------------------------------------------------------
@@ -636,11 +640,13 @@ async fn credentials(
 	State(db): State<Db>,
 	State(sts): State<Option<aws_sdk_sts::Client>>,
 	State(kube): State<Option<BackupSecrets>>,
+	audit: Audit,
 	device: BackupRestoreDevice,
 	Json(args): Json<RestoreCredentialsArgs>,
 ) -> Result<Json<RestoreCredentials>> {
 	let mut conn = db.get().await?;
 	let consumer_device_id = device.0.0.id;
+	audit.acting_as(device_actor(&device.0.0, None));
 
 	// Authorization is the declared replica: a consumer may read exactly the
 	// (group, type) pairs its enabled declarations cover.
@@ -669,8 +675,29 @@ async fn credentials(
 		));
 	};
 
+	let Some(kube) = kube else {
+		tracing::error!(group = %args.group, "restore-credentials: kube client not configured");
+		return Err(AppError::Upstream("secret store not configured".into()));
+	};
+
 	let session_name = format!("canopy-restore-{consumer_device_id}");
-	let resp = sts
+
+	let group = database::audit::Record::group(&mut conn, args.group).await?;
+	// Not held across the issuer's round trip: the issuance is recorded in the
+	// audited transaction.
+	drop(conn);
+
+	// The issue is an effect outside Canopy's records, so its entry stands before
+	// it, and is settled by whether the issuer answered.
+	let pending = audit
+		.commit_ahead(database::audit::Action::RestoreCredentialsIssued {
+			group,
+			device: database::audit::Record::device(consumer_device_id),
+			backup_type: args.r#type.to_string(),
+		})
+		.await?;
+
+	let resp = match sts
 		.assume_role()
 		.role_arn(&cfg.target_role_arn)
 		.role_session_name(session_name)
@@ -678,7 +705,9 @@ async fn credentials(
 		.duration_seconds(3600)
 		.send()
 		.await
-		.map_err(|err| {
+	{
+		Ok(resp) => resp,
+		Err(err) => {
 			let request_id = err.request_id().unwrap_or("<none>");
 			tracing::error!(
 				group = %args.group,
@@ -687,14 +716,30 @@ async fn credentials(
 				error = ?err,
 				"restore-credentials: AssumeRole failed",
 			);
-			AppError::Upstream("credential issuance failed".into())
-		})?;
+			// An answer that refuses is knowing nothing was issued; no answer at
+			// all is not, and leaves the entry to read as unconfirmed.
+			let error = AppError::Upstream("credential issuance failed".into());
+			let failed = if err.as_service_error().is_some() {
+				EffectFailed::nothing_done(error)
+			} else {
+				EffectFailed::unknown(error)
+			};
+			return Err(audit.effect_failed(&pending, failed).await);
+		}
+	};
 
 	let sts_request_id = resp.request_id().map(str::to_owned);
-	let creds = resp.credentials().ok_or_else(|| {
+	let Some(creds) = resp.credentials() else {
 		tracing::error!(group = %args.group, "restore-credentials: AssumeRole returned no credentials");
-		AppError::Upstream("credential issuance returned no credentials".into())
-	})?;
+		return Err(audit
+			.effect_failed(
+				&pending,
+				EffectFailed::nothing_done(AppError::Upstream(
+					"credential issuance returned no credentials".into(),
+				)),
+			)
+			.await);
+	};
 
 	let expiry_secs = creds.expiration().secs();
 	let expires_at = Timestamp::from_second(expiry_secs).map_err(|err| {
@@ -703,10 +748,6 @@ async fn credentials(
 	})?;
 	let access_key_id = creds.access_key_id().to_owned();
 
-	let Some(kube) = kube else {
-		tracing::error!(group = %args.group, "restore-credentials: kube client not configured");
-		return Err(AppError::Upstream("secret store not configured".into()));
-	};
 	let repo_password = kube
 		.read_password(&cfg.repo_password_ref, REPO_PASSWORD_SECRET_KEY)
 		.await
@@ -721,8 +762,9 @@ async fn credentials(
 		})?;
 
 	// Audit BEFORE returning — never hand out creds we didn't record.
+	let mut tx = audit.begin().await?;
 	database::backups::BackupCredentialIssuance::record(
-		&mut conn,
+		&mut tx,
 		NewBackupCredentialIssuance {
 			device_id: consumer_device_id,
 			group_id: args.group,
@@ -736,6 +778,14 @@ async fn credentials(
 			prefix: cfg.prefix.clone(),
 			run_id: args.run_id,
 		},
+	)
+	.await?;
+	tx.settle_done(
+		&pending,
+		Some(serde_json::json!({
+			"access_key_id": access_key_id,
+			"expires_at": expires_at,
+		})),
 	)
 	.await?;
 

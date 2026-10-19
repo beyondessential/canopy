@@ -50,8 +50,8 @@ const CHALLENGE_TTL: jiff::SignedDuration = jiff::SignedDuration::from_mins(5);
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(public: register_begin))
-		.routes(routes!(public: register_complete))
+		.routes(routes!(public, silent: register_begin))
+		.routes(routes!(public, audit(MachineEnrolled): register_complete))
 }
 
 /// Request to start device enrollment against a machine.
@@ -271,16 +271,16 @@ pub struct CompleteResponse {
 	),
 )]
 pub async fn register_complete(
-	State(db): State<Db>,
 	State(rl): State<RateLimiter>,
 	State(directory): State<Option<TailnetDirectory>>,
 	State(cert_header): State<mtls::ClientCertHeader>,
+	State(pool): State<Db>,
 	ClientIp(ip): ClientIp,
+	audit: commons_servers::audit::Audit,
 	headers: HeaderMap,
 	Json(args): Json<CompleteArgs>,
 ) -> Result<Json<CompleteResponse>> {
 	enforce_rate_limit(&rl, ip, args.server_id)?;
-	let mut db = db.get().await?;
 	let tailnet = directory.is_some();
 	let spki = resolve_spki(&headers, args.spki.as_deref(), tailnet, cert_header)?;
 
@@ -292,8 +292,11 @@ pub async fn register_complete(
 		.map_err(|_| AppError::EnrollmentFailed)?;
 
 	// Single-use take: also confirms the key matches the one used at `begin`.
+	// Taken on a connection of its own, outside the audited transaction, so the
+	// challenge is spent even when the proof that follows is refused.
 	let challenge =
-		MachineEnrollmentChallenge::take(&mut db, args.server_id, &nonce, &spki).await?;
+		MachineEnrollmentChallenge::take(&mut *pool.get().await?, args.server_id, &nonce, &spki)
+			.await?;
 
 	// Build the transcript and verify proof-of-possession.
 	let mut transcript = nonce.clone();
@@ -321,9 +324,10 @@ pub async fn register_complete(
 		return Err(e);
 	}
 
-	// Bind + promote + burn the token, atomically. The challenge is already
-	// spent; a failure here strands the token (operator reissues) but never
-	// double-binds.
+	// Bind + promote + burn the token, atomically, with the enrolment's entry.
+	// The challenge is already spent; a failure here strands the token
+	// (operator reissues) but never double-binds.
+	let mut db = audit.begin().await?;
 	let device_id = db
 		.transaction::<_, AppError, _>(async |conn| {
 			// Lock the machine row so a concurrent archival can't slip in
@@ -397,6 +401,24 @@ pub async fn register_complete(
 			Ok(device_id)
 		})
 		.await?;
+
+	// The actor is the device this enrolment created, which is not known until
+	// it has.
+	audit.acting_as(database::audit::Actor::Device {
+		id: device_id,
+		name: None,
+		role: commons_types::device::DeviceRole::Machine,
+		application: None,
+	});
+	let machine = Machine::get_by_id(&mut db, args.server_id).await?;
+	db.record(database::audit::Action::MachineEnrolled {
+		machine: database::audit::Record::new(
+			database::audit::RecordKind::Machine,
+			machine.id,
+			machine.name,
+		),
+	})
+	.await?;
 
 	Ok(Json(CompleteResponse {
 		server_id: args.server_id,

@@ -9,11 +9,14 @@ use axum::{Json, extract::State};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::{
+	audit::Audit,
 	backup_secrets::BackupSecrets,
+	effect::EffectFailed,
 	tailscale_auth::{TailscaleAdmin, TailscaleUser},
 };
 use commons_types::{Uuid, server::rank::ServerRank};
 use database::{
+	audit::{Action, Pending, Record, RecordKind},
 	inventory_variables::{InventoryVariable, VariableScope},
 	machines::Machine,
 	server_groups::ServerGroup,
@@ -26,9 +29,9 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: for_group))
-		.routes(routes!(write: set))
-		.routes(routes!(write: remove))
+		.routes(routes!(read_only, silent: for_group))
+		.routes(routes!(write, audit(InventoryVariableSet): set))
+		.routes(routes!(write, audit(InventoryVariableRemoved): remove))
 }
 
 /// Which scope a request addresses: a group, one of its environments, or one
@@ -123,6 +126,30 @@ pub async fn for_group(
 	))
 }
 
+/// The variable, named by where it is set and what it is called, and where it
+/// is set, as the records an entry names. A variable has the same name before
+/// and after it is set, so one that is not there yet can be named ahead of the
+/// secret store being written.
+async fn variable_records(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	scope: VariableScope,
+	name: &str,
+) -> Result<(Record, Record, Option<ServerRank>)> {
+	let (scope_record, rank) = match scope {
+		VariableScope::Group { group_id } => (Record::group(conn, group_id).await?, None),
+		VariableScope::Environment { group_id, rank } => {
+			(Record::group(conn, group_id).await?, Some(rank))
+		}
+		VariableScope::Machine { machine_id } => (Record::machine(conn, machine_id).await?, None),
+	};
+	let variable = Record::new(
+		RecordKind::Variable,
+		format!("{}:{name}", scope.secret_name()),
+		name,
+	);
+	Ok((variable, scope_record, rank))
+}
+
 /// Set or replace a variable.
 ///
 /// A secret's value goes to the secret store keyed by name, and the row holds
@@ -144,6 +171,7 @@ pub async fn for_group(
 )]
 pub async fn set(
 	State(state): State<AppState>,
+	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<SetArgs>,
 ) -> Result<Json<InventoryVariable>> {
@@ -151,15 +179,32 @@ pub async fn set(
 	check_name(&args.name)?;
 	check_ansible_host(scope, &args.name, &args.value)?;
 
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
 	check_scope(&mut conn, scope).await?;
+	let (variable, scope_record, rank) = variable_records(&mut conn, scope, &args.name).await?;
+	let action = |secret| Action::InventoryVariableSet {
+		variable: variable.clone(),
+		scope: scope_record.clone(),
+		rank,
+		secret,
+	};
 
 	let set = if args.secret {
-		secret_store(&state)?
+		let store = secret_store(&state)?;
+		// The secret store is outside Canopy's records, so the entry stands
+		// before it is written, and is settled by whether it took.
+		let pending = audit.commit_ahead(action(true)).await?;
+		if let Err(failed) = store
 			.put_secret_key(&scope.secret_name(), &args.name, &stored(&args.value))
-			.await?;
+			.await
+		{
+			return Err(audit.effect_failed(&pending, failed).await);
+		}
 
-		InventoryVariable::set(&mut conn, scope, &args.name, None, Some(&admin.0.login)).await?
+		let set = InventoryVariable::set(&mut conn, scope, &args.name, None, Some(&admin.0.login))
+			.await?;
+		conn.settle_done(&pending, None).await?;
+		set
 	} else {
 		let was_secret = InventoryVariable::at(&mut conn, scope, &args.name)
 			.await?
@@ -173,7 +218,13 @@ pub async fn set(
 		)
 		.await?;
 		if was_secret {
-			forget_secret_value(&state, scope, &args.name).await?;
+			// Forgetting the value it held as a secret is outside Canopy's
+			// records, as writing one is.
+			let pending = audit.commit_ahead(action(false)).await?;
+			forget_secret_value(&audit, &pending, &state, scope, &args.name).await?;
+			conn.settle_done(&pending, None).await?;
+		} else {
+			conn.record(action(false)).await?;
 		}
 		set
 	};
@@ -190,8 +241,8 @@ pub async fn set(
 
 /// Forget a variable, value and all.
 ///
-/// The row goes first, so a value the secret store will not let go of leaves
-/// nothing behind that would refuse every later read of the inventory.
+/// The row and its stored value go together: when the secret store refuses,
+/// both stay, and when it does not answer the row stays for a retry to remove.
 #[utoipa::path(
 	post,
 	path = "/remove",
@@ -208,11 +259,12 @@ pub async fn set(
 )]
 pub async fn remove(
 	State(state): State<AppState>,
+	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<RemoveArgs>,
 ) -> Result<Json<()>> {
 	let scope = VariableScope::try_from(args.scope)?;
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
 
 	let Some(removed) = InventoryVariable::remove(&mut conn, scope, &args.name).await? else {
 		return Err(AppError::NotFound(format!(
@@ -220,9 +272,22 @@ pub async fn remove(
 			args.name
 		)));
 	};
+	let (variable, scope_record, rank) = variable_records(&mut conn, scope, &args.name).await?;
+	let action = Action::InventoryVariableRemoved {
+		variable,
+		scope: scope_record,
+		rank,
+		secret: removed.is_secret,
+	};
 
 	if removed.is_secret {
-		forget_secret_value(&state, scope, &args.name).await?;
+		// Forgetting the stored value is outside Canopy's records, so the entry
+		// stands before it, and is settled by whether it took.
+		let pending = audit.commit_ahead(action).await?;
+		forget_secret_value(&audit, &pending, &state, scope, &args.name).await?;
+		conn.settle_done(&pending, None).await?;
+	} else {
+		conn.record(action).await?;
 	}
 
 	tracing::info!(
@@ -241,13 +306,27 @@ fn stored(value: &Value) -> SecretString {
 	SecretString::from(value.to_string())
 }
 
-/// The value behind a name the secret store may be holding. Called where a
-/// name is removed, and where it stops being a secret, so a later switch back
+/// Forget the value behind a name the secret store may be holding. Called where
+/// a name is removed, and where it stops being a secret, so a later switch back
 /// never resurrects a stale value.
-async fn forget_secret_value(state: &AppState, scope: VariableScope, name: &str) -> Result<()> {
-	secret_store(state)?
-		.forget_secret_key(&scope.secret_name(), name)
-		.await
+///
+/// The action's entry is committed ahead of it, and settled failed here where
+/// the store is known to have written nothing. The caller settles it done.
+async fn forget_secret_value(
+	audit: &Audit,
+	pending: &Pending,
+	state: &AppState,
+	scope: VariableScope,
+	name: &str,
+) -> Result<()> {
+	let forgot = match secret_store(state) {
+		Ok(store) => store.forget_secret_key(&scope.secret_name(), name).await,
+		Err(error) => Err(EffectFailed::nothing_done(error)),
+	};
+	match forgot {
+		Ok(()) => Ok(()),
+		Err(failed) => Err(audit.effect_failed(pending, failed).await),
+	}
 }
 
 pub(super) fn secret_store(state: &AppState) -> Result<&BackupSecrets> {

@@ -29,10 +29,28 @@ pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::rou
 		touched: Default::default(),
 	};
 	tracing::debug!(graded = safety.grades.len(), "safety-mode grades loaded");
-	let api_router = api_router.layer(middleware::from_fn_with_state(
-		safety,
-		crate::safety::enforce,
-	));
+	// Inside it, every audited handler is held to the actions it declares (see
+	// the AUD spec), read from the same document.
+	let audit = commons_servers::audit::AuditState {
+		db: state.db.clone(),
+		map: std::sync::Arc::new(commons_servers::audit::AuditMap::from_openapi(&api_spec)),
+		actor: commons_servers::audit::ActorSource::Operator,
+		mount: "",
+	};
+	tracing::debug!(
+		declared = audit.map.len(),
+		audited = audit.map.audited(),
+		"audit declarations loaded"
+	);
+	let api_router = api_router
+		.layer(middleware::from_fn_with_state(
+			audit,
+			commons_servers::audit::enforce,
+		))
+		.layer(middleware::from_fn_with_state(
+			safety,
+			crate::safety::enforce,
+		));
 
 	// `/public/...` accepts tagged-device callers via the dual-auth
 	// device extractor. Everything else (admin API, Swagger, SPA) is
@@ -58,22 +76,21 @@ pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::rou
 			commons_servers::tailnet_guard::reject_tagged_devices,
 		));
 
+	// Wire the backup-credential clients (STS + kube Secret store) so the nested
+	// public API can issue backup credentials and serve the repo target/password,
+	// not just the DB-only endpoints.
+	let public_state = public_server::state::AppState::for_nested_mount(
+		state.db.clone(),
+		state.tailnet_directory.clone(),
+		state.sts.clone(),
+		state.kube.clone(),
+		state.artifacts.clone(),
+	)?;
+	let (public_router, _) =
+		public_server::audited_under(public_server::routes(), public_state.db.clone(), "/public");
+
 	Ok(Router::new()
-		.nest(
-			"/public",
-			Router::from(public_server::routes().with_state(
-				// Wire the backup-credential clients (STS + kube Secret store) so the
-				// nested public API can issue backup credentials and serve the repo
-				// target/password, not just the DB-only endpoints.
-				public_server::state::AppState::for_nested_mount(
-					state.db.clone(),
-					state.tailnet_directory.clone(),
-					state.sts.clone(),
-					state.kube.clone(),
-					state.artifacts.clone(),
-				)?,
-			)),
-		)
+		.nest("/public", public_router.with_state(public_state))
 		.merge(non_public)
 		.with_state(state))
 }

@@ -30,10 +30,15 @@ use aws_sdk_sts::operation::RequestId as _;
 use axum::{Json, extract::State, http::StatusCode};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::device_auth::ServerDevice;
+use commons_servers::{
+	audit::{Audit, device_actor},
+	device_auth::ServerDevice,
+	effect::EffectFailed,
+};
 use commons_types::backup::{BackupConfigStatus, BackupPurpose, BackupType, RunOutcome};
 use database::{
 	Db,
+	audit::{Action, Record, RecordKind},
 	backups::BackupTypeDefault,
 	backups::{
 		BackupRequest, MachineBackupCapability, NewBackupCredentialIssuance, NewBackupRun,
@@ -64,11 +69,11 @@ pub(crate) fn instance_default_region() -> String {
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(public: capabilities))
-		.routes(routes!(public: credentials))
-		.routes(routes!(public: target))
-		.routes(routes!(public: progress))
-		.routes(routes!(public: report))
+		.routes(routes!(public, silent: capabilities))
+		.routes(routes!(public, audit(BackupCredentialsIssued): credentials))
+		.routes(routes!(public, silent: target))
+		.routes(routes!(public, silent: progress))
+		.routes(routes!(public, silent: report))
 }
 
 // ---------------------------------------------------------------------------
@@ -400,11 +405,13 @@ pub fn backup_session_policy(bucket: &str, prefix: &str) -> String {
 async fn credentials(
 	State(db): State<Db>,
 	State(sts): State<Option<aws_sdk_sts::Client>>,
+	audit: Audit,
 	device: ServerDevice,
 	Json(args): Json<BackupCredentialsArgs>,
 ) -> Result<Json<CredentialProcessOutput>> {
 	let mut conn = db.get().await?;
 	let device_id = device.0.0.id;
+	audit.acting_as(device_actor(&device.0.0, None));
 
 	let machine = resolve_machine(&mut conn, device_id).await?;
 	let group_id = require_group(&machine)?;
@@ -433,7 +440,24 @@ async fn credentials(
 
 	let session_name = format!("canopy-{purpose}-{device_id}", purpose = args.purpose);
 
-	let resp = sts
+	let group = Record::group(&mut conn, group_id).await?;
+	// Not held across the issuer's round trip: the issuance is recorded in the
+	// audited transaction.
+	drop(conn);
+
+	// The issue is an effect outside Canopy's records, so its entry stands before
+	// it, and is settled by whether the issuer answered.
+	let pending = audit
+		.commit_ahead(Action::BackupCredentialsIssued {
+			group,
+			machine: Record::new(RecordKind::Machine, machine.id, machine.name.clone()),
+			backup_type: args.r#type.to_string(),
+			purpose: args.purpose.to_string(),
+			run_id: args.run_id.map(|run| run.to_string()),
+		})
+		.await?;
+
+	let resp = match sts
 		.assume_role()
 		.role_arn(&cfg.target_role_arn)
 		.role_session_name(session_name)
@@ -442,7 +466,9 @@ async fn credentials(
 		.duration_seconds(3600)
 		.send()
 		.await
-		.map_err(|err| {
+	{
+		Ok(resp) => resp,
+		Err(err) => {
 			let request_id = err.request_id().unwrap_or("<none>");
 			tracing::error!(
 				group = %group_id,
@@ -451,15 +477,31 @@ async fn credentials(
 				error = ?err,
 				"backup-credentials: AssumeRole failed",
 			);
-			AppError::Upstream("credential issuance failed".into())
-		})?;
+			// An answer that refuses is knowing nothing was issued; no answer at
+			// all is not, and leaves the entry to read as unconfirmed.
+			let error = AppError::Upstream("credential issuance failed".into());
+			let failed = if err.as_service_error().is_some() {
+				EffectFailed::nothing_done(error)
+			} else {
+				EffectFailed::unknown(error)
+			};
+			return Err(audit.effect_failed(&pending, failed).await);
+		}
+	};
 
 	let sts_request_id = resp.request_id().map(str::to_owned);
 
-	let creds = resp.credentials().ok_or_else(|| {
+	let Some(creds) = resp.credentials() else {
 		tracing::error!(group = %group_id, "backup-credentials: AssumeRole returned no credentials");
-		AppError::Upstream("credential issuance returned no credentials".into())
-	})?;
+		return Err(audit
+			.effect_failed(
+				&pending,
+				EffectFailed::nothing_done(AppError::Upstream(
+					"credential issuance returned no credentials".into(),
+				)),
+			)
+			.await);
+	};
 
 	// STS `Expiration` is a smithy DateTime → convert to a jiff Timestamp for
 	// the audit row, and emit RFC3339 `Z` for the credential_process output.
@@ -472,8 +514,9 @@ async fn credentials(
 	let access_key_id = creds.access_key_id().to_owned();
 
 	// Audit insert BEFORE returning — never hand out creds we didn't record.
+	let mut tx = audit.begin().await?;
 	database::backups::BackupCredentialIssuance::record(
-		&mut conn,
+		&mut tx,
 		NewBackupCredentialIssuance {
 			device_id,
 			group_id,
@@ -487,6 +530,14 @@ async fn credentials(
 			prefix: cfg.prefix.clone(),
 			run_id: args.run_id,
 		},
+	)
+	.await?;
+	tx.settle_done(
+		&pending,
+		Some(serde_json::json!({
+			"access_key_id": access_key_id,
+			"expires_at": expires_at,
+		})),
 	)
 	.await?;
 

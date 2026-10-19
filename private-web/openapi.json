@@ -1,6 +1,122 @@
 {
   "components": {
     "schemas": {
+      "Actor": {
+        "description": "Who took an action.",
+        "oneOf": [
+          {
+            "description": "An operator, by their tailnet login. The profile picture is not stored\nwith the entry: it is filled in when entries are read, from the cache of\nwhat Tailscale last said.",
+            "properties": {
+              "kind": {
+                "enum": [
+                  "operator"
+                ],
+                "type": "string"
+              },
+              "login": {
+                "type": "string"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "profile_pic": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "login",
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A device, by its role, and the application it acted for where it acted\nfor one.",
+            "properties": {
+              "application": {
+                "format": "uuid",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "device"
+                ],
+                "type": "string"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "role": {
+                "$ref": "#/components/schemas/DeviceRole"
+              }
+            },
+            "required": [
+              "id",
+              "role",
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A fleet query access token.",
+            "properties": {
+              "id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "token"
+                ],
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Canopy itself, by the job that acted.",
+            "properties": {
+              "job": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "canopy"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "job",
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "AddArgs": {
         "description": "Request body for granting admin access to an email address.",
         "properties": {
@@ -532,6 +648,138 @@
           "ended_without_report"
         ],
         "type": "string"
+      },
+      "AuditActionOption": {
+        "description": "One action a log can be filtered by.",
+        "properties": {
+          "label": {
+            "description": "What it is called to an operator.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The action's stable name.",
+            "type": "string"
+          },
+          "tier": {
+            "$ref": "#/components/schemas/Tier",
+            "description": "Whether the log leaves it out by default."
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "tier"
+        ],
+        "type": "object"
+      },
+      "AuditCursor": {
+        "description": "Where a page of the log ended.",
+        "properties": {
+          "id": {
+            "description": "The last entry's identifier.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "recorded_at": {
+            "description": "When the last entry of the page was recorded.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "recorded_at",
+          "id"
+        ],
+        "type": "object"
+      },
+      "AuditFilters": {
+        "description": "What the log's filters offer.",
+        "properties": {
+          "actions": {
+            "description": "Every action in the catalogue.",
+            "items": {
+              "$ref": "#/components/schemas/AuditActionOption"
+            },
+            "type": "array"
+          },
+          "actors": {
+            "description": "Everyone who acted in the last ninety days.",
+            "items": {
+              "$ref": "#/components/schemas/Actor"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "actions",
+          "actors"
+        ],
+        "type": "object"
+      },
+      "AuditListArgs": {
+        "description": "Which entries to list. Everything is optional; the log page reads the last\nninety days of everything, newest first.",
+        "properties": {
+          "action": {
+            "description": "Entries of this action, by its stable name. Asking for an action by name\nshows it whether or not it is routine.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "actor_id": {
+            "description": "Entries by this actor: a login, a device or token identifier, or a job.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "actor_kind": {
+            "description": "Entries by this kind of actor: `operator`, `device`, `token` or `canopy`.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "after": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AuditCursor",
+                "description": "The last entry of the page before, to read the next: its time and its\nidentifier, both of which place an entry in the log's order."
+              }
+            ]
+          },
+          "include_routine": {
+            "description": "Include routine actions: those taken at high volume, which are left out\nof the log by default.",
+            "type": "boolean"
+          },
+          "limit": {
+            "description": "How many entries to return, at most five hundred.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "record": {
+            "description": "Entries that acted on a record with this identifier, or whose record's\nname contains this.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "since": {
+            "description": "Entries from this time on. Never reaches back further than ninety days.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "type": "object"
       },
       "AuthorityView": {
         "description": "The certificate authority Canopy is configured to use, and whether it works.",
@@ -3027,6 +3275,72 @@
           "ticket",
           "passphrase",
           "expires_at"
+        ],
+        "type": "object"
+      },
+      "Entry": {
+        "description": "One entry as the log presents it.",
+        "properties": {
+          "action": {
+            "description": "The action's stable name.",
+            "type": "string"
+          },
+          "action_label": {
+            "description": "What the action is called to an operator.",
+            "type": "string"
+          },
+          "actor": {
+            "$ref": "#/components/schemas/Actor",
+            "description": "Who took the action."
+          },
+          "detail": {
+            "description": "What the action defines as worth knowing about it.",
+            "type": "object"
+          },
+          "id": {
+            "description": "The entry's identifier.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "recorded_at": {
+            "description": "When the entry was recorded.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "records": {
+            "description": "The records the action acted on.",
+            "items": {
+              "$ref": "#/components/schemas/Record"
+            },
+            "type": "array"
+          },
+          "retention": {
+            "$ref": "#/components/schemas/Retention",
+            "description": "How long the entry stays in the database."
+          },
+          "settled_at": {
+            "description": "When the entry was settled, for one committed ahead of its action.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/Status",
+            "description": "Whether the action was done, failed, or is unconfirmed."
+          }
+        },
+        "required": [
+          "id",
+          "recorded_at",
+          "retention",
+          "actor",
+          "action",
+          "action_label",
+          "records",
+          "detail",
+          "status"
         ],
         "type": "object"
       },
@@ -8364,6 +8678,29 @@
         ],
         "type": "object"
       },
+      "Record": {
+        "description": "A record an action acted on: its identifier, and its name as it was when the\naction was taken, so the entry still reads once the record is renamed or\ngone. Held without a foreign key, so an entry never stops a record being\ndeleted.",
+        "properties": {
+          "id": {
+            "description": "Its identifier.",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RecordKind",
+            "description": "What kind of record it is."
+          },
+          "name": {
+            "description": "Its name when the action was taken.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
       "RecordArgs": {
         "description": "Request body for recording where a group is going.",
         "properties": {
@@ -8423,6 +8760,29 @@
           "target_version_id"
         ],
         "type": "object"
+      },
+      "RecordKind": {
+        "description": "The kinds of record an action can act on.",
+        "enum": [
+          "machine",
+          "group",
+          "application",
+          "device",
+          "maintenance_window",
+          "upgrade_plan",
+          "restore_replica",
+          "reporting_schema",
+          "check",
+          "cluster",
+          "credential",
+          "variable",
+          "lease",
+          "version",
+          "artifact",
+          "name",
+          "certificate"
+        ],
+        "type": "string"
       },
       "RecoveryChallengeResponse": {
         "description": "A freshly issued recovery-verification challenge.",
@@ -9368,6 +9728,14 @@
           }
         },
         "type": "object"
+      },
+      "Retention": {
+        "description": "How long an entry stays in the database before it can leave it.",
+        "enum": [
+          "standard",
+          "year"
+        ],
+        "type": "string"
       },
       "RetentionPolicy": {
         "description": "How many backups to keep at each retention tier once older snapshots are\npruned. The organization enforces minimum floors (at least 7 daily, 4\nweekly, and 6 monthly) on write, unless the containing schedule or default\nexplicitly opts out via its `allow_below_floor` flag.",
@@ -11650,6 +12018,15 @@
         ],
         "type": "object"
       },
+      "Status": {
+        "description": "How an entry stands.",
+        "enum": [
+          "done",
+          "failed",
+          "unconfirmed"
+        ],
+        "type": "string"
+      },
       "StatusSnapshotData": {
         "description": "A single status push from a server, as of a point in time, with derived\nhealth and version information.",
         "properties": {
@@ -12072,6 +12449,14 @@
         "enum": [
           "on_request",
           "scheduled"
+        ],
+        "type": "string"
+      },
+      "Tier": {
+        "description": "How much an action is expected to be wanted when reading the log.\n\nThe log is read as the important entries unless the reader asks for more, so\nan action that is taken at high volume and is not what anyone is looking for\nby default is routine, and stays out of the way until asked for.",
+        "enum": [
+          "important",
+          "routine"
         ],
         "type": "string"
       },
@@ -12893,6 +13278,7 @@
         "tags": [
           "admins"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "issues"
         ],
@@ -12947,6 +13333,7 @@
         "tags": [
           "admins"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "invalidates"
         ],
@@ -13001,6 +13388,106 @@
         "tags": [
           "admins"
         ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/audit/filters": {
+      "post": {
+        "description": "Requires admin access.",
+        "operationId": "audit_filters",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditFilters"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "What the log can be filtered by.",
+        "tags": [
+          "audit"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/audit/list": {
+      "post": {
+        "description": "Reads the database alone, so only the last ninety days. A pending entry is\nleft out while it can still be settled.\nRequires admin access.",
+        "operationId": "audit_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuditListArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Entry"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "List the audit log, newest first.",
+        "tags": [
+          "audit"
+        ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -13049,6 +13536,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -13097,6 +13585,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -13128,6 +13617,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -13169,6 +13659,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -13210,6 +13701,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -13258,6 +13750,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "unprotects"
         ],
@@ -13309,6 +13802,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -13377,6 +13871,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -13435,6 +13930,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -13503,6 +13999,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -13544,6 +14041,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "irreversible",
           "invalidates"
@@ -13579,6 +14077,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "unprotects"
         ],
@@ -13637,6 +14136,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -13678,6 +14178,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -13717,6 +14218,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -13755,6 +14257,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -13801,6 +14304,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -13837,6 +14341,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -13895,6 +14400,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -13953,6 +14459,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -13994,6 +14501,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "fleet"
         ],
@@ -14045,6 +14553,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -14086,6 +14595,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -14137,6 +14647,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -14175,6 +14686,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -14216,6 +14728,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "unprotects"
         ],
@@ -14270,6 +14783,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -14328,6 +14842,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -14386,6 +14901,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -14427,6 +14943,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -14475,6 +14992,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -14514,6 +15032,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -14562,6 +15081,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -14640,6 +15160,7 @@
         "tags": [
           "backups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "issues",
           "unprotects"
@@ -14680,6 +15201,7 @@
         "tags": [
           "bestool"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -14724,6 +15246,7 @@
         "tags": [
           "bestool"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -14777,6 +15300,7 @@
         "tags": [
           "bestool"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -14820,6 +15344,7 @@
         "tags": [
           "bestool"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -14868,6 +15393,7 @@
         "tags": [
           "bestool"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -14896,6 +15422,7 @@
         "tags": [
           "certificates"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -14954,6 +15481,7 @@
         "tags": [
           "certificates"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -15012,6 +15540,7 @@
         "tags": [
           "certificates"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -15053,6 +15582,7 @@
         "tags": [
           "certificates"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -15101,6 +15631,7 @@
         "tags": [
           "certificates"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -15149,6 +15680,7 @@
         "tags": [
           "certificates"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -15190,6 +15722,7 @@
         "tags": [
           "certificates"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -15231,6 +15764,7 @@
         "tags": [
           "certificates"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -15292,6 +15826,7 @@
         "tags": [
           "certificates"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "fleet",
           "invalidates"
@@ -15347,6 +15882,7 @@
         "tags": [
           "certificates"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -15383,6 +15919,7 @@
         "tags": [
           "commons"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -15416,6 +15953,7 @@
         "tags": [
           "commons"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -15452,6 +15990,7 @@
         "tags": [
           "commons"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -15488,6 +16027,7 @@
         "tags": [
           "commons"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -15524,6 +16064,7 @@
         "tags": [
           "commons"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -15581,6 +16122,9 @@
         "summary": "Register an externally-generated public key as an active key on a device.",
         "tags": [
           "devices"
+        ],
+        "x-canopy-audit": [
+          "device_key_added"
         ],
         "x-canopy-danger-reasons": [
           "issues"
@@ -15653,6 +16197,7 @@
         "tags": [
           "devices"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "issues"
         ],
@@ -15696,6 +16241,7 @@
         "tags": [
           "devices"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -15737,6 +16283,7 @@
         "tags": [
           "devices"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -15768,6 +16315,7 @@
         "tags": [
           "devices"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "invalidates"
         ],
@@ -15819,6 +16367,7 @@
         "tags": [
           "devices"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "invalidates"
         ],
@@ -15853,6 +16402,7 @@
         "tags": [
           "devices"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "invalidates"
         ],
@@ -15904,6 +16454,7 @@
         "tags": [
           "devices"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -15945,6 +16496,7 @@
         "tags": [
           "devices"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -15983,6 +16535,7 @@
         "tags": [
           "devices"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -16041,6 +16594,7 @@
         "tags": [
           "devices"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "irreversible"
         ],
@@ -16092,6 +16646,9 @@
         "tags": [
           "devices"
         ],
+        "x-canopy-audit": [
+          "device_credential_provisioned"
+        ],
         "x-canopy-danger-reasons": [
           "issues"
         ],
@@ -16126,6 +16683,7 @@
         "tags": [
           "devices"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "issues"
         ],
@@ -16177,6 +16735,7 @@
         "tags": [
           "devices"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -16218,6 +16777,7 @@
         "tags": [
           "devices"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -16249,6 +16809,7 @@
         "tags": [
           "devices"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -16290,6 +16851,7 @@
         "tags": [
           "devices"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "issues",
           "invalidates"
@@ -16352,6 +16914,7 @@
         "tags": [
           "dns_names"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -16410,6 +16973,7 @@
         "tags": [
           "dns_names"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -16451,6 +17015,7 @@
         "tags": [
           "dns_names"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -16499,6 +17064,7 @@
         "tags": [
           "dns_names"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -16547,6 +17113,7 @@
         "tags": [
           "dns_names"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -16588,6 +17155,7 @@
         "tags": [
           "dns_names"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -16629,6 +17197,7 @@
         "tags": [
           "dns_names"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "unprotects"
         ],
@@ -16673,6 +17242,7 @@
         "tags": [
           "dns_names"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -16714,6 +17284,7 @@
         "tags": [
           "dns_names"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -16755,6 +17326,7 @@
         "tags": [
           "dns_names"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -16813,6 +17385,7 @@
         "tags": [
           "domains"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -16854,6 +17427,7 @@
         "tags": [
           "domains"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -16892,6 +17466,7 @@
         "tags": [
           "domains"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -16933,6 +17508,7 @@
         "tags": [
           "domains"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "unprotects"
         ],
@@ -16967,6 +17543,7 @@
         "tags": [
           "domains"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -17008,6 +17585,7 @@
         "tags": [
           "applications"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -17051,6 +17629,7 @@
         "tags": [
           "applications"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -17094,6 +17673,7 @@
         "tags": [
           "applications"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -17137,6 +17717,7 @@
         "tags": [
           "applications"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -17176,6 +17757,7 @@
         "tags": [
           "applications"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -17209,6 +17791,7 @@
         "tags": [
           "applications"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -17250,6 +17833,7 @@
         "tags": [
           "applications"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -17291,6 +17875,7 @@
         "tags": [
           "applications"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -17339,6 +17924,7 @@
         "tags": [
           "clusters"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -17397,6 +17983,7 @@
         "tags": [
           "clusters"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -17445,6 +18032,7 @@
         "tags": [
           "server_groups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -17486,6 +18074,7 @@
         "tags": [
           "server_groups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -17534,6 +18123,7 @@
         "tags": [
           "server_groups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -17573,6 +18163,7 @@
         "tags": [
           "server_groups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -17612,6 +18203,7 @@
         "tags": [
           "server_groups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -17653,6 +18245,7 @@
         "tags": [
           "server_groups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -17694,6 +18287,7 @@
         "tags": [
           "server_groups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -17733,6 +18327,7 @@
         "tags": [
           "server_groups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -17791,6 +18386,7 @@
         "tags": [
           "server_groups"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -17849,6 +18445,7 @@
         "tags": [
           "machines"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "invalidates"
         ],
@@ -17921,6 +18518,7 @@
         "tags": [
           "machines"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "issues"
         ],
@@ -17983,6 +18581,7 @@
         "tags": [
           "machines"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -18031,6 +18630,7 @@
         "tags": [
           "machines"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -18089,6 +18689,7 @@
         "tags": [
           "machines"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -18147,6 +18748,7 @@
         "tags": [
           "machines"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -18188,6 +18790,7 @@
         "tags": [
           "machines"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -18229,6 +18832,7 @@
         "tags": [
           "machines"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -18277,6 +18881,7 @@
         "tags": [
           "machines"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "issues"
         ],
@@ -18348,6 +18953,7 @@
         "tags": [
           "machines"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -18389,6 +18995,7 @@
         "tags": [
           "machines"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "invalidates"
         ],
@@ -18460,6 +19067,7 @@
         "tags": [
           "machines"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -18511,6 +19119,7 @@
         "tags": [
           "healthchecks"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "unprotects"
         ],
@@ -18565,6 +19174,7 @@
         "tags": [
           "healthchecks"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -18623,6 +19233,7 @@
         "tags": [
           "healthchecks"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -18684,6 +19295,7 @@
         "tags": [
           "healthchecks"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "unprotects"
         ],
@@ -18748,6 +19360,7 @@
         "tags": [
           "healthchecks"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -18799,6 +19412,7 @@
         "tags": [
           "healthchecks"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -18850,6 +19464,7 @@
         "tags": [
           "healthchecks"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -18908,6 +19523,7 @@
         "tags": [
           "healthchecks"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -18966,6 +19582,7 @@
         "tags": [
           "healthchecks"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -19034,6 +19651,7 @@
         "tags": [
           "healthchecks"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -19082,6 +19700,7 @@
         "tags": [
           "incidents"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -19113,6 +19732,7 @@
         "tags": [
           "incidents"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -19161,6 +19781,7 @@
         "tags": [
           "incidents"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -19202,6 +19823,7 @@
         "tags": [
           "incidents"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -19243,6 +19865,7 @@
         "tags": [
           "incidents"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -19284,6 +19907,7 @@
         "tags": [
           "incidents"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -19325,6 +19949,7 @@
         "tags": [
           "incidents"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -19363,6 +19988,7 @@
         "tags": [
           "incidents"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -19401,6 +20027,7 @@
         "tags": [
           "incidents"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -19458,6 +20085,9 @@
         "summary": "Push a held lease's expiry out, so a run still going keeps the environment.",
         "tags": [
           "inventory"
+        ],
+        "x-canopy-audit": [
+          "inventory_lease_extended"
         ],
         "x-canopy-safety-mode": "write"
       }
@@ -19527,6 +20157,9 @@
         "tags": [
           "inventory"
         ],
+        "x-canopy-audit": [
+          "inventory_read"
+        ],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -19574,6 +20207,9 @@
         "summary": "Give the environment back when the run ends.",
         "tags": [
           "inventory"
+        ],
+        "x-canopy-audit": [
+          "inventory_lease_released"
         ],
         "x-canopy-safety-mode": "write"
       }
@@ -19633,6 +20269,7 @@
         "tags": [
           "inventory"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -19701,6 +20338,10 @@
         "tags": [
           "inventory"
         ],
+        "x-canopy-audit": [
+          "inventory_lease_taken",
+          "inventory_lease_taken_over"
+        ],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -19752,12 +20393,13 @@
         "tags": [
           "inventory"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/inventory_variables/remove": {
       "post": {
-        "description": "The row goes first, so a value the secret store will not let go of leaves\nnothing behind that would refuse every later read of the inventory.",
+        "description": "The row and its stored value go together: when the secret store refuses,\nboth stay, and when it does not answer the row stays for a retry to remove.",
         "operationId": "inventory_variables_remove",
         "requestBody": {
           "content": {
@@ -19819,6 +20461,9 @@
         "summary": "Forget a variable, value and all.",
         "tags": [
           "inventory"
+        ],
+        "x-canopy-audit": [
+          "inventory_variable_removed"
         ],
         "x-canopy-safety-mode": "write"
       }
@@ -19888,6 +20533,9 @@
         "tags": [
           "inventory"
         ],
+        "x-canopy-audit": [
+          "inventory_variable_set"
+        ],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -19936,6 +20584,7 @@
         "tags": [
           "issues"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -19967,6 +20616,7 @@
         "tags": [
           "issues"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -20008,6 +20658,7 @@
         "tags": [
           "issues"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -20049,6 +20700,7 @@
         "tags": [
           "issues"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -20090,6 +20742,7 @@
         "tags": [
           "issues"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -20131,6 +20784,7 @@
         "tags": [
           "issues"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -20169,6 +20823,7 @@
         "tags": [
           "issues"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -20207,6 +20862,7 @@
         "tags": [
           "issues"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -20255,6 +20911,7 @@
         "tags": [
           "issues"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -20293,6 +20950,7 @@
         "tags": [
           "issues"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -20331,6 +20989,7 @@
         "tags": [
           "issues"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -20379,6 +21038,7 @@
         "tags": [
           "kubernetes_clusters"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -20407,6 +21067,7 @@
         "tags": [
           "kubernetes_clusters"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -20454,6 +21115,9 @@
         "summary": "Name a cluster and mint its relay's credential, leaving a draft.",
         "tags": [
           "kubernetes_clusters"
+        ],
+        "x-canopy-audit": [
+          "device_credential_provisioned"
         ],
         "x-canopy-danger-reasons": [
           "issues"
@@ -20505,6 +21169,9 @@
         "summary": "Re-issue a cluster's relay credential, retiring the one before it.",
         "tags": [
           "kubernetes_clusters"
+        ],
+        "x-canopy-audit": [
+          "device_credential_provisioned"
         ],
         "x-canopy-danger-reasons": [
           "issues",
@@ -20558,6 +21225,7 @@
         "tags": [
           "kubernetes_clusters"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "irreversible",
           "invalidates"
@@ -20630,6 +21298,9 @@
         "tags": [
           "maintenance"
         ],
+        "x-canopy-audit": [
+          "maintenance_amended"
+        ],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -20677,6 +21348,10 @@
         "summary": "Declare that an application, a machine, a group, or one of a group's\nenvironments is being worked on.",
         "tags": [
           "maintenance"
+        ],
+        "x-canopy-audit": [
+          "maintenance_declared",
+          "maintenance_amended"
         ],
         "x-canopy-safety-mode": "write"
       }
@@ -20729,6 +21404,7 @@
         "tags": [
           "maintenance"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -20777,6 +21453,9 @@
         "tags": [
           "maintenance"
         ],
+        "x-canopy-audit": [
+          "maintenance_lifted"
+        ],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -20816,6 +21495,7 @@
         "tags": [
           "maintenance"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -20864,6 +21544,7 @@
         "tags": [
           "maintenance"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -20915,6 +21596,7 @@
         "tags": [
           "mcp_tokens"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -20983,6 +21665,7 @@
         "tags": [
           "mcp_tokens"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "issues"
         ],
@@ -21047,6 +21730,7 @@
         "tags": [
           "mcp_tokens"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "irreversible",
           "invalidates"
@@ -21112,6 +21796,7 @@
         "tags": [
           "migration_tests"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -21173,6 +21858,7 @@
         "tags": [
           "migration_tests"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -21234,6 +21920,7 @@
         "tags": [
           "reporting_schemas"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -21295,6 +21982,7 @@
         "tags": [
           "reporting_schemas"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -21336,6 +22024,7 @@
         "tags": [
           "restore_replicas"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -21367,6 +22056,7 @@
         "tags": [
           "restore_replicas"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -21415,6 +22105,9 @@
         "tags": [
           "restore_replicas"
         ],
+        "x-canopy-audit": [
+          "restore_replica_declared"
+        ],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -21455,6 +22148,9 @@
         "summary": "Delete a restore replica declaration.",
         "tags": [
           "restore_replicas"
+        ],
+        "x-canopy-audit": [
+          "restore_replica_deleted"
         ],
         "x-canopy-danger-reasons": [
           "invalidates"
@@ -21500,6 +22196,7 @@
         "tags": [
           "restore_replicas"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -21558,6 +22255,9 @@
         "tags": [
           "restore_replicas"
         ],
+        "x-canopy-audit": [
+          "restore_replica_updated"
+        ],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -21606,6 +22306,7 @@
         "tags": [
           "safety"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -21664,6 +22365,7 @@
         "tags": [
           "safety"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -21712,6 +22414,7 @@
         "tags": [
           "safety"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -21753,6 +22456,7 @@
         "tags": [
           "self_alerts"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -21794,6 +22498,7 @@
         "tags": [
           "self_alerts"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -21855,6 +22560,7 @@
         "tags": [
           "self_alerts"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -21896,6 +22602,7 @@
         "tags": [
           "silenced_refs"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -21937,6 +22644,7 @@
         "tags": [
           "silenced_refs"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -21978,6 +22686,7 @@
         "tags": [
           "silenced_refs"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -22019,6 +22728,7 @@
         "tags": [
           "silenced_refs"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -22060,6 +22770,7 @@
         "tags": [
           "silenced_refs"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -22108,6 +22819,7 @@
         "tags": [
           "silenced_refs"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "unprotects"
         ],
@@ -22159,6 +22871,7 @@
         "tags": [
           "silenced_refs"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "unprotects"
         ],
@@ -22210,6 +22923,7 @@
         "tags": [
           "silenced_refs"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "unprotects"
         ],
@@ -22261,6 +22975,7 @@
         "tags": [
           "silenced_refs"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "unprotects"
         ],
@@ -22305,6 +23020,7 @@
         "tags": [
           "silenced_refs"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -22336,6 +23052,7 @@
         "tags": [
           "silenced_refs"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -22377,6 +23094,7 @@
         "tags": [
           "silenced_refs"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -22408,6 +23126,7 @@
         "tags": [
           "silenced_refs"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -22456,6 +23175,9 @@
         "tags": [
           "sql"
         ],
+        "x-canopy-audit": [
+          "sql_query_run"
+        ],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -22497,6 +23219,7 @@
         "tags": [
           "sql"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -22540,6 +23263,7 @@
         "tags": [
           "sql"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -22563,6 +23287,7 @@
         "tags": [
           "sql"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -22606,6 +23331,7 @@
         "tags": [
           "statuses"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -22644,6 +23370,7 @@
         "tags": [
           "statuses"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -22697,6 +23424,7 @@
         "tags": [
           "statuses"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -22734,6 +23462,7 @@
         "tags": [
           "statuses"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -22789,6 +23518,7 @@
         "tags": [
           "statuses"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -22822,6 +23552,7 @@
         "tags": [
           "statuses"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -22890,6 +23621,9 @@
         "tags": [
           "upgrade_plans"
         ],
+        "x-canopy-audit": [
+          "upgrade_plan_amended"
+        ],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -22941,6 +23675,7 @@
         "tags": [
           "upgrade_plans"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -23002,6 +23737,7 @@
         "tags": [
           "upgrade_plans"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -23053,6 +23789,7 @@
         "tags": [
           "upgrade_plans"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -23121,6 +23858,9 @@
         "tags": [
           "upgrade_plans"
         ],
+        "x-canopy-audit": [
+          "upgrade_plan_recorded"
+        ],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -23182,6 +23922,7 @@
         "tags": [
           "upgrade_plans"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -23233,6 +23974,9 @@
         "tags": [
           "upgrade_plans"
         ],
+        "x-canopy-audit": [
+          "upgrade_plan_withdrawn"
+        ],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -23281,6 +24025,7 @@
         "tags": [
           "versions"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -23329,6 +24074,7 @@
         "tags": [
           "versions"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -23360,6 +24106,7 @@
         "tags": [
           "versions"
         ],
+        "x-canopy-audit": [],
         "x-canopy-danger-reasons": [
           "irreversible"
         ],
@@ -23399,6 +24146,7 @@
         "tags": [
           "versions"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -23450,6 +24198,7 @@
         "tags": [
           "versions"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -23493,6 +24242,7 @@
         "tags": [
           "versions"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -23544,6 +24294,7 @@
         "tags": [
           "versions"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
       }
     },
@@ -23602,6 +24353,7 @@
         "tags": [
           "versions"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -23633,6 +24385,7 @@
         "tags": [
           "versions"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -23664,6 +24417,7 @@
         "tags": [
           "versions"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -23705,6 +24459,7 @@
         "tags": [
           "versions"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     },
@@ -23817,6 +24572,7 @@
         "tags": [
           "versions"
         ],
+        "x-canopy-audit": [],
         "x-canopy-safety-mode": "write"
       }
     }
@@ -23825,6 +24581,10 @@
     {
       "description": "Admin email allow-list management.",
       "name": "admins"
+    },
+    {
+      "description": "The audit log of administrative actions.",
+      "name": "audit"
     },
     {
       "description": "Group backup-repo onboarding, scheduling, and stats.",

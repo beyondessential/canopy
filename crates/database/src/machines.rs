@@ -586,6 +586,18 @@ impl Machine {
 			.map_err(AppError::from)
 	}
 
+	/// The identifiers of the live applications on the machine.
+	pub async fn application_ids(&self, db: &mut AsyncPgConnection) -> Result<Vec<Uuid>> {
+		use crate::schema::applications::dsl;
+		dsl::applications
+			.select(dsl::id)
+			.filter(dsl::machine_id.eq(self.id))
+			.filter(dsl::deleted_at.is_null())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Rank the machine, and every live application on it with it: a box
 	/// serves one environment and its applications share the rank. The
 	/// applications take it from the machine's row by trigger, the same one

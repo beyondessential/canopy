@@ -37,6 +37,7 @@ An operator never enters an application, its type, or its version, and there is 
 
 Canopy adopts what it is told without ceremony: an application it has not seen before on a machine that reports it is created and monitored from that moment.
 It takes its machine's rank, or is pending where the machine has none (see [GRP](groups.md), "Environments").
+Each application's arrival is audited, its actor being the machine that reported it (see [AUD](../platform/audit-log.md)).
 
 A report never removes an application.
 An application that stops appearing in its machine's reports becomes unreachable and stays, however long it stays away, and only an operator archives it (see [CHK](../monitoring/checks.md), "Reachability").

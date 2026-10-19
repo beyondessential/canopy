@@ -4,11 +4,13 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
+use commons_servers::audit::Audit;
 use commons_servers::device_auth::keygen;
 use commons_servers::tailnet_directory::DirectoryEntry;
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::{Uuid, device::DeviceRole};
 use database::applications::Application;
+use database::audit::{Action, Record, RecordKind};
 use database::devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo, TailscaleIdentity};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -215,23 +217,23 @@ fn format_key_as_pem(key_data: &[u8]) -> String {
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: get_device_by_id))
-		.routes(routes!(read_only: get_servers_for_device))
-		.routes(routes!(read_only: connection_history))
-		.routes(routes!(read_only: connection_count))
-		.routes(routes!(read_only: list_trusted))
-		.routes(routes!(danger(invalidates): disable_all_keys))
-		.routes(routes!(danger(issues, invalidates): update_role))
-		.routes(routes!(danger(issues): provision_credential))
-		.routes(routes!(danger(issues): add_key))
-		.routes(routes!(danger(invalidates): deactivate_key))
-		.routes(routes!(danger(issues): reactivate_key))
-		.routes(routes!(read_only: search))
-		.routes(routes!(write: update_key_name))
-		.routes(routes!(danger(issues): attach_tailscale))
-		.routes(routes!(danger(invalidates): detach_tailscale))
-		.routes(routes!(danger(irreversible): merge_into))
-		.routes(routes!(read_only: resolve_tailnet_identifier))
+		.routes(routes!(read_only, silent: get_device_by_id))
+		.routes(routes!(read_only, silent: get_servers_for_device))
+		.routes(routes!(read_only, silent: connection_history))
+		.routes(routes!(read_only, silent: connection_count))
+		.routes(routes!(read_only, silent: list_trusted))
+		.routes(routes!(danger(invalidates), silent: disable_all_keys))
+		.routes(routes!(danger(issues, invalidates), silent: update_role))
+		.routes(routes!(danger(issues), audit(DeviceCredentialProvisioned): provision_credential))
+		.routes(routes!(danger(issues), audit(DeviceKeyAdded): add_key))
+		.routes(routes!(danger(invalidates), silent: deactivate_key))
+		.routes(routes!(danger(issues), silent: reactivate_key))
+		.routes(routes!(read_only, silent: search))
+		.routes(routes!(write, silent: update_key_name))
+		.routes(routes!(danger(issues), silent: attach_tailscale))
+		.routes(routes!(danger(invalidates), silent: detach_tailscale))
+		.routes(routes!(danger(irreversible), silent: merge_into))
+		.routes(routes!(read_only, silent: resolve_tailnet_identifier))
 }
 
 /// Identifies a single device by id.
@@ -546,17 +548,23 @@ pub struct ProvisionedCredential {
 	),
 )]
 pub async fn provision_credential(
-	State(state): State<AppState>,
+	audit: Audit,
 	_admin: TailscaleAdmin,
 	Json(args): Json<ProvisionArgs>,
 ) -> Result<Json<ProvisionedCredential>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
 	let key_name = args
 		.key_name
 		.filter(|n| !n.trim().is_empty())
 		.unwrap_or_else(|| "Provisioned key".to_string());
 	let credential =
 		mint_provisioned_credential(&mut conn, args.role, args.device_id, &key_name, false).await?;
+	conn.record(Action::DeviceCredentialProvisioned {
+		device: Record::device(credential.device_id),
+		key: Record::new(RecordKind::Credential, credential.key_id, key_name),
+		role: args.role.to_string(),
+	})
+	.await?;
 	Ok(Json(credential))
 }
 
@@ -680,6 +688,7 @@ pub struct AddKeyArgs {
 )]
 pub async fn add_key(
 	State(state): State<AppState>,
+	audit: Audit,
 	_admin: TailscaleAdmin,
 	Json(args): Json<AddKeyArgs>,
 ) -> Result<Json<DeviceInfo>> {
@@ -702,10 +711,15 @@ pub async fn add_key(
 		.filter(|n| !n.trim().is_empty())
 		.unwrap_or_else(|| "Added key".to_string());
 
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
 	// 404s if the device doesn't exist.
 	Device::get_with_info(&mut conn, args.device_id).await?;
-	DeviceKey::create(&mut conn, args.device_id, der, Some(name)).await?;
+	DeviceKey::create(&mut conn, args.device_id, der, Some(name.clone())).await?;
+	conn.record(Action::DeviceKeyAdded {
+		device: Record::device(args.device_id),
+		key_name: Some(name),
+	})
+	.await?;
 
 	let info = Device::get_with_info(&mut conn, args.device_id).await?;
 	Ok(Json(DeviceInfo::from_db(info, &state).await))

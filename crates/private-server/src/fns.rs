@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod admins;
 pub mod applications;
+pub mod audit;
 pub mod backups;
 pub mod bestool;
 pub mod certificates;
@@ -139,6 +140,7 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 					.nest("/clusters", clusters::routes())
 					.nest("/groups", server_groups::routes()),
 			)
+			.nest("/audit", audit::routes())
 			.nest("/backups", backups::routes())
 			.nest("/bestool", bestool::routes())
 			.nest("/certificates", certificates::routes())

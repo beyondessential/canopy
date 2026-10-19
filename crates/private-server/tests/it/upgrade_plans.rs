@@ -542,6 +542,12 @@ async fn the_history_view_shows_a_withdrawn_plan_beside_a_replaced_one() {
 			.json(&json!({ "id": withdrawn["id"] }))
 			.await
 			.assert_status_ok();
+		// Withdrawing it again changes nothing, and is no error.
+		private
+			.post("/api/upgrade_plans/withdraw")
+			.json(&json!({ "id": withdrawn["id"] }))
+			.await
+			.assert_status_ok();
 
 		let history: Vec<Value> = private
 			.post("/api/upgrade_plans/history")

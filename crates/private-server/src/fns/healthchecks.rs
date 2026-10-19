@@ -26,16 +26,16 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: list))
-		.routes(routes!(read_only: sources))
-		.routes(routes!(write: set_source_reachability))
-		.routes(routes!(danger(unprotects): set_source_ingest))
-		.routes(routes!(write: update))
-		.routes(routes!(danger(unprotects): decommission))
-		.routes(routes!(write: update_rules))
-		.routes(routes!(write: update_documentation))
-		.routes(routes!(read_only: sample))
-		.routes(routes!(read_only: tag_keys))
+		.routes(routes!(read_only, silent: list))
+		.routes(routes!(read_only, silent: sources))
+		.routes(routes!(write, silent: set_source_reachability))
+		.routes(routes!(danger(unprotects), silent: set_source_ingest))
+		.routes(routes!(write, silent: update))
+		.routes(routes!(danger(unprotects), silent: decommission))
+		.routes(routes!(write, silent: update_rules))
+		.routes(routes!(write, silent: update_documentation))
+		.routes(routes!(read_only, silent: sample))
+		.routes(routes!(read_only, silent: tag_keys))
 }
 
 /// One (source, check)'s policy: the ceiling capping its effective

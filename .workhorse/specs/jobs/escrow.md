@@ -24,6 +24,9 @@ A recipient set is identified by its public keys, which is what a reader compare
 The escrow is written to versioned, object-locked storage, so a past version stays undeletable until its retention expires.
 Canopy writes the current state on a cadence to one object rather than accumulating objects; the storage's own versioning is the history.
 
+The same storage holds the audit log's archive, under a prefix of its own (see [AUD](../platform/audit-log.md)).
+That archive is not escrow: it is not encrypted to the recipients, and Canopy reads it back.
+
 ## What a recovery needs
 
 One recipient's private key decrypts the escrow, so recovery needs no quorum and no other recipient's cooperation.

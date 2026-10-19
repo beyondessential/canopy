@@ -39,16 +39,16 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: for_server))
-		.routes(routes!(read_only: for_group))
-		.routes(routes!(read_only: authority))
-		.routes(routes!(write: set_profile))
-		.routes(routes!(danger(fleet, invalidates): revoke))
-		.routes(routes!(write: declare))
-		.routes(routes!(write: release))
-		.routes(routes!(read_only: for_machine))
-		.routes(routes!(write: deny))
-		.routes(routes!(write: lift_denial))
+		.routes(routes!(read_only, silent: for_server))
+		.routes(routes!(read_only, silent: for_group))
+		.routes(routes!(read_only, silent: authority))
+		.routes(routes!(write, silent: set_profile))
+		.routes(routes!(danger(fleet, invalidates), silent: revoke))
+		.routes(routes!(write, silent: declare))
+		.routes(routes!(write, silent: release))
+		.routes(routes!(read_only, silent: for_machine))
+		.routes(routes!(write, silent: deny))
+		.routes(routes!(write, silent: lift_denial))
 }
 
 /// A certificate Canopy holds for a server, or an order in flight.

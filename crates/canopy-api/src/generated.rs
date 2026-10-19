@@ -7,7 +7,7 @@ pub const OPENAPI_VERSION: &str = "1.1.1";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "5673130c5832c71a8e6b00a30fa9ae9a64cc6ffd5f8efce2ebf75cd5c7fb4f52";
+pub const OPENAPI_BLAKE3: &str = "7421ca07a8c978d5740cb8d34745849bdf13e4b7b67d9f6e44689b8f049b0553";
 
 /// Error types.
 pub mod error {

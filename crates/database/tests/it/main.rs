@@ -10,6 +10,7 @@ mod application_empty_update;
 mod application_reported_key;
 mod application_types;
 mod artifact_scopes;
+mod audit;
 mod backfill_registered_at_migration;
 mod backup_detection;
 mod backup_schedules;

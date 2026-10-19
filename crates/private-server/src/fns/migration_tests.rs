@@ -13,8 +13,8 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: for_group))
-		.routes(routes!(write: request))
+		.routes(routes!(read_only, silent: for_group))
+		.routes(routes!(write, silent: request))
 }
 
 /// Request body for asking for an environment's data to be migration-tested.

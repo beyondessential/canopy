@@ -15,6 +15,7 @@ pub mod application_certificates;
 pub mod application_names;
 pub mod applications;
 pub mod artifacts;
+pub mod audit;
 pub mod backup;
 pub mod backups;
 pub mod bestool_snippets;
