@@ -31,13 +31,10 @@ Covers this card's part of [AUD](../../specs/platform/audit-log.md). Archive and
 - [ ] An audited action whose entry cannot be written is refused and changes nothing (verifies spec: AUD#writing-as-a-condition-of-the-action)
 - [ ] An audited action that errors leaves no entry and no change (verifies spec: AUD#writing-as-a-condition-of-the-action)
 - [ ] An action with an outside effect leaves a pending entry before the effect and a confirmation after it (verifies spec: AUD#writing-as-a-condition-of-the-action)
+- [ ] An entry committed ahead stands when the handler then errors and its other changes roll back (verifies spec: AUD#writing-as-a-condition-of-the-action)
 - [ ] An outside-effect action that fails after the effect leaves its pending entry, shown as unconfirmed (verifies spec: AUD#writing-as-a-condition-of-the-action)
 - [ ] With no range to write into, audited actions are refused and the runway self-alert is active (verifies spec: AUD#self-alerts)
 
-## Refusals
-
-- [ ] A non-administrator reaching an audited operator handler leaves a refusal entry with the reason, naming the handler's declared actions (verifies spec: AUD#refusals)
-- [ ] A safety-mode refusal leaves no entry (verifies spec: AUD#refusals)
 
 ## Reading
 

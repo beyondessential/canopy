@@ -3,7 +3,7 @@
 Implements [AUD](../../specs/platform/audit-log.md).
 The reasoning behind these choices is in the working doc (`.workhorse/working-docs/u2/working-doc.md`).
 
-This card builds the log itself: declarations, capture, storage, refusals, the log page, the fleet query tool, and the range self-alert.
+This card builds the log itself: declarations, capture, storage, the log page, the fleet query tool, and the range self-alert.
 Two pieces are split into their own cards (see the breakdown): the offsite archive, and replacing per-feature provenance with the log.
 Until the archive lands, nothing leaves the database, which AUD already requires of an unarchived week.
 
@@ -17,7 +17,7 @@ Until the archive lands, nothing leaves the database, which AUD already requires
 ## Declaring
 
 - `routes!` (vendored `canopy-utoipa-axum`) gains an audit clause beside the grade: `audit(ActionA, ActionB)` naming the action variants the handler may record, or `silent`. A route with no audit clause fails to compile, as a missing grade does.
-- The clause is recorded as its own OpenAPI operation extension and read back at startup into an audit map, the way `safety::GradeMap` reads grades. A refusal before the handler runs records the route's declared actions from this map.
+- The clause is recorded as its own OpenAPI operation extension and read back at startup into an audit map, the way `safety::GradeMap` reads grades.
 - The audit clause asserts at compile time that the handler takes the audit extractor, through a trait implemented across extractor-tuple positions the way axum's `all_the_tuples!` implements `Handler`.
 
 ## Capture
@@ -25,8 +25,7 @@ Until the archive lands, nothing leaves the database, which AUD already requires
 - An audit layer, a sibling of `safety::enforce` rather than part of it, resolves the actor and leaves it in the request's extensions. It reads no body.
 - The extractor checks out a primary connection, begins a transaction, and hands the handler the connection and a recorder. The handler records `Action` values on it inside that transaction. The layer holds the same transaction and commits on a successful response, rolling back otherwise. Audited handlers replace `state.db.get()` with it; audited reads use it in place of `db_read`, since the entry is a write.
 - On a successful response the layer checks that at least one action was recorded and that every recorded action is one the route declares. Otherwise it rolls back and returns an error, so a forgotten record fails the request and any test of the route.
-- A handler with an outside effect records its action as pending and commits it through the extractor before the effect, then appends the confirmation in its own transaction afterwards.
-- Refusals happen in `TailscaleAdmin` and device auth, before any handler transaction, so the layer writes the refusal entry on its own connection.
+- The recorder can commit an entry ahead of the handler's transaction, on its own connection, so it stands whatever the handler's transaction does. A handler with an outside effect uses it to record its action as pending before the effect, then appends the confirmation in its own transaction afterwards. A feature that records refusals (A5) uses it to record the refusal before returning the error.
 - Device API handlers take the same extractor with the device as actor. Jobs record through the same recorder inside their own transaction with Canopy as actor.
 - Cost, accepted: an audited request is one transaction held across everything its handler does, and a handler cannot commit part of its work before failing.
 
@@ -34,7 +33,7 @@ Until the archive lands, nothing leaves the database, which AUD already requires
 
 - One table, partitioned by week through `database::partitions` and provisioned ahead with the other histories, so the HST runway alert covers it with no new code beyond registering the table.
 - Each week is sub-partitioned by retention class, so the archive card's removals are partition drops: the ninety-day part once the week is archived and old enough, the rest at a year.
-- Row: timestamp, actor kind and identifier, action name, entry kind (action, refusal, confirmation), the records acted on, and a `jsonb` detail holding the action's fields, a refusal's reason, or the pending entry a confirmation points at. The records acted on are indexed for the subject filter; a GIN index on the detail serves lookups and per-value counts.
+- Row: timestamp, actor kind and identifier, action name, entry kind (action, pending, confirmation), the records acted on, and a `jsonb` detail holding the action's fields, or the pending entry a confirmation points at. The records acted on are indexed for the subject filter; a GIN index on the detail serves lookups and per-value counts.
 
 ## Reading
 
@@ -60,9 +59,8 @@ Until the archive lands, nothing leaves the database, which AUD already requires
 - [ ] Layer check: a successful audited response recorded at least one action, all declared
 - [ ] Audit map read from the OpenAPI document at startup
 - [ ] Migration: partitioned entries table with retention sub-partitions, GIN index; registered with partition runway
-- [ ] Database model: write entry, write pending and confirmation, write refusal, query with filters, count by detail value over a window
+- [ ] Database model: write entry, commit an entry ahead, write pending and confirmation, query with filters, count by detail value over a window
 - [ ] Audit layer and extractor on the private server
-- [ ] Refusal entries from `TailscaleAdmin` and device auth
 - [ ] Declare every private-server handler audited, with its actions, or silent; the specs already naming audited actions (MNT, K8S, INV, UPG, RST, RPT) are audited
 - [ ] Device API: audit issuance and record-changing handlers, silence status and reads
 - [ ] Fleet query interface: declare each tool, add "Find audit entries"

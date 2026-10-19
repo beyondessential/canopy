@@ -11,6 +11,7 @@ The log is written as a condition of the action it records, and is archived offs
 
 The log records actions: what was done, by whom, to what.
 It is not a log of requests, so an entry says what happened rather than what a caller sent.
+This spec covers what holds for every entry; which actions a feature records, and what each holds, is that feature's to say.
 
 Every handler on the operator surface, the device API, and the fleet query interface declares whether it is audited or audit-silent, and a handler that declares neither fails the build.
 Being silent is therefore a deliberate choice rather than something a new handler slips into.
@@ -27,7 +28,7 @@ Reporting status and reading are silent.
 
 Canopy's own background work records an entry where a job declares the change it makes worth recording.
 
-An action that errors is rolled back and leaves no entry, with one exception: an action with an outside effect (see "Writing as a condition of the action").
+An action that errors is rolled back and leaves no entry, unless it committed an entry ahead of the rest of its work (see "Writing as a condition of the action").
 
 ## Actions
 
@@ -45,13 +46,6 @@ Every entry names its actor, which is one of:
 - a fleet query access token, by the token (see [MCP](../private-server/mcp.md));
 - Canopy itself, by the job that acted.
 
-## Refusals
-
-A caller refused for authorisation produces a refusal entry, naming the caller as far as it was identified, the action it asked for, and the reason it was refused.
-A caller refused before the handler has run is recorded as asking for the actions that handler declares.
-This covers a caller who is not an administrator reaching an audited operator handler, and a device refused something it asked for, such as a credential it holds no grant for.
-A request refused for its safety mode produces no entry.
-
 ## What an entry holds
 
 An entry holds when it happened, its actor, its action, the records it acted on, and the action's detail.
@@ -68,6 +62,9 @@ Canopy can look entries up by the records they acted on and by values in their d
 
 An audited action is not carried out unless its entry is written.
 The entry and the change it records are committed together, so either both stand or neither does.
+
+A handler can commit an entry ahead of the rest of its action, so that the entry stands whatever becomes of the action.
+This is how a feature records a decision it wants kept even when the action does not go ahead, such as a refusal with its reason, where that feature's spec calls for one.
 
 An action with an effect outside Canopy's own records, such as issuing cloud credentials or changing something on a cluster, records its entry as pending before the outside effect, and confirms it once the effect has taken place.
 The confirmation is a record of its own, pointing at the pending entry, so the log is only ever appended to.

@@ -129,7 +129,7 @@ This is the raw material for analysing whether a check's noise is a flap, a load
 ### Audit log
 
 **Find audit entries** takes a look-back window and optional filters for actor, action, and a record acted on, and returns matching entries of the audit log newest first, as a bounded list (see [AUD](../platform/audit-log.md)).
-Each entry carries when it happened, its actor, its action, the records it acted on, its detail, and whether it is an action, a refusal with its reason, or an action still unconfirmed.
+Each entry carries when it happened, its actor, its action, the records it acted on, its detail, and whether it is still unconfirmed.
 It answers over what Canopy's database holds; older entries are read from the operator interface, which reaches into the archive.
 
 ## Result semantics
