@@ -38,6 +38,7 @@ Until the archive lands, nothing leaves the database, which AUD already requires
 ## Reading
 
 - The log page is a new route on the operator UI, readable by any administrator, filtering by actor, action, time, and record acted on. Reaching past ninety days calls into the archive once the archive card lands; until then the database is all there is.
+- Actor icons follow the org-wide convention for action logs: humans in colour, everything else greyscale. An operator shows their profile picture, or an initial on a colour derived from their login where there is none (`UserAvatar` currently falls back to neutral grey). Devices, access tokens and Canopy itself get greyscale icons, Canopy's logo desaturated.
 - The fleet query interface gains a "Find audit entries" tool over the database only, open to every caller of the interface.
 
 ## Dependencies outside the repo

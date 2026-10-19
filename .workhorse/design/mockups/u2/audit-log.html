@@ -277,7 +277,10 @@
 		overflow: hidden;
 	}
 	.avatar svg { width: 15px; height: 15px; fill: #fff; }
-	.avatar.canopy svg { width: 24px; height: 24px; }
+	.avatar.canopy svg { width: 24px; height: 24px; filter: grayscale(1); }
+	.avatar.human-1 { background: #1976d2; }
+	.avatar.human-2 { background: #00897b; }
+	.avatar.human-3 { background: #c2410c; } /* accent */
 	.caption {
 		font-size: 0.75rem;
 		line-height: 1.66;
@@ -428,7 +431,7 @@
 				<tbody>
 					<tr>
 						<td class="when"><span title="19/10/2026, 2:08:11 pm">4m ago</span></td>
-						<td><div class="actor"><span class="avatar" title="Alice Ng">A</span>alice@example.org</div></td>
+						<td><div class="actor"><span class="avatar human-1" title="Alice Ng">A</span>alice@example.org</div></td>
 						<td class="op">Revoke certificate</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">machine</span><a class="link" href="#">host-3</a></span>
@@ -470,7 +473,7 @@
 					</tr>
 					<tr>
 						<td class="when"><span title="19/10/2026, 12:20:13 pm">2h ago</span></td>
-						<td><div class="actor"><span class="avatar" title="Bob Tane">B</span>bob@example.org</div></td>
+						<td><div class="actor"><span class="avatar human-2" title="Bob Tane">B</span>bob@example.org</div></td>
 						<td class="op">Run SQL query</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">query</span><span class="v mono" title="select name, last_seen from machines where archived_at is null">select name, last_seen from machines where archived_at is null</span></span>
@@ -479,7 +482,7 @@
 					</tr>
 					<tr>
 						<td class="when"><span title="19/10/2026, 11:05:40 am">3h ago</span></td>
-						<td><div class="actor"><span class="avatar" title="Carol Fifita">C</span>carol@example.org</div></td>
+						<td><div class="actor"><span class="avatar human-3" title="Carol Fifita">C</span>carol@example.org</div></td>
 						<td class="op">Add admin</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">email</span><span class="v">dan@example.org</span></span>
@@ -507,7 +510,7 @@
 					</tr>
 					<tr>
 						<td class="when"><span title="18/10/2026, 3:41:09 pm">23h ago</span></td>
-						<td><div class="actor"><span class="avatar" title="Alice Ng">A</span>alice@example.org</div></td>
+						<td><div class="actor"><span class="avatar human-1" title="Alice Ng">A</span>alice@example.org</div></td>
 						<td class="op">Declare maintenance</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">group</span><a class="link" href="#">Coastal</a></span>
@@ -527,7 +530,7 @@
 					</tr>
 					<tr>
 						<td class="when"><span title="13/10/2026, 4:55:18 pm">6d ago</span></td>
-						<td><div class="actor"><span class="avatar" title="Bob Tane">B</span>bob@example.org</div></td>
+						<td><div class="actor"><span class="avatar human-2" title="Bob Tane">B</span>bob@example.org</div></td>
 						<td class="op">Lift maintenance</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">application</span><a class="link" href="#"><span class="trail">Central ·</span> Tamanu Facility</a></span>
@@ -559,7 +562,7 @@
 					</tr>
 					<tr>
 						<td class="when"><span title="7/08/2026, 9:30:12 am">73d ago</span></td>
-						<td><div class="actor"><span class="avatar" title="Carol Fifita">C</span>carol@example.org</div></td>
+						<td><div class="actor"><span class="avatar human-3" title="Carol Fifita">C</span>carol@example.org</div></td>
 						<td class="op">Mint access token</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">name</span><span class="v mono">ops-assistant</span></span>
@@ -568,7 +571,7 @@
 					</tr>
 					<tr>
 						<td class="when"><span title="23/07/2026, 2:16:44 pm">88d ago</span></td>
-						<td><div class="actor"><span class="avatar" title="Alice Ng">A</span>alice@example.org</div></td>
+						<td><div class="actor"><span class="avatar human-1" title="Alice Ng">A</span>alice@example.org</div></td>
 						<td class="op">Set rank</td>
 						<td><div class="args">
 							<span class="arg"><span class="k">machine</span><a class="link" href="#"><span class="trail">Central ·</span> host-5</a></span>
