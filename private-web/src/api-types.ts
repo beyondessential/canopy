@@ -3341,8 +3341,8 @@ export interface paths {
         put?: never;
         /**
          * Forget a variable, value and all.
-         * @description The row goes first, so a value the secret store will not let go of leaves
-         *     nothing behind that would refuse every later read of the inventory.
+         * @description The row and its stored value go together: when the secret store refuses,
+         *     both stay, and when it does not answer the row stays for a retry to remove.
          */
         post: operations["inventory_variables_remove"];
         delete?: never;
@@ -5678,6 +5678,19 @@ export interface components {
             /** @description Whether the log leaves it out by default. */
             tier: components["schemas"]["Tier"];
         };
+        /** @description Where a page of the log ended. */
+        AuditCursor: {
+            /**
+             * Format: uuid
+             * @description The last entry's identifier.
+             */
+            id: string;
+            /**
+             * Format: date-time
+             * @description When the last entry of the page was recorded.
+             */
+            recorded_at: string;
+        };
         /** @description What the log's filters offer. */
         AuditFilters: {
             /** @description Every action in the catalogue. */
@@ -5699,11 +5712,7 @@ export interface components {
             actor_id?: string | null;
             /** @description Entries by this kind of actor: `operator`, `device`, `token` or `canopy`. */
             actor_kind?: string | null;
-            /**
-             * Format: date-time
-             * @description Entries strictly before this time, to read the next page.
-             */
-            before?: string | null;
+            after?: null | components["schemas"]["AuditCursor"];
             /**
              * @description Include routine actions: those taken at high volume, which are left out
              *     of the log by default.
