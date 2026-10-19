@@ -144,8 +144,7 @@ jobs:
       - name: Checkout ops repo
         uses: actions/checkout@v7.0.1
         with:
-          repository: beyondessential/ops
-          ssh-key: ${{ secrets.OPS_SSH }}
+          repository: beyondessential/infra
           ref: ${{ vars.OPS_REF }}
           path: ops
 
