@@ -303,3 +303,82 @@ async fn every_kind_of_actor_is_presented_as_what_it_is() {
 	})
 	.await
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_record_is_found_by_part_of_its_name_through_the_names_index() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		for (window, machine) in [
+			("Kamaka central", "kamaka-1"),
+			("Fiji 50%_off", "suva-2"),
+			("Tonga", "nuku\nalofa"),
+		] {
+			audit::record(
+				&mut conn,
+				&operator(),
+				&Action::MaintenanceLifted {
+					window: Record::new(RecordKind::MaintenanceWindow, Uuid::new_v4(), window),
+					target: Record::new(RecordKind::Machine, Uuid::new_v4(), machine),
+					rank: None,
+					already_ended: false,
+				},
+			)
+			.await
+			.unwrap();
+		}
+
+		let by_name = async |conn: &mut AsyncPgConnection, name: &str| {
+			audit::find(
+				conn,
+				&Filter {
+					acted_on: Some(name.to_owned()),
+					limit: 10,
+					..Default::default()
+				},
+			)
+			.await
+			.unwrap()
+			.len()
+		};
+		assert_eq!(
+			by_name(&mut conn, "KAMAKA").await,
+			1,
+			"case does not matter"
+		);
+		assert_eq!(
+			by_name(&mut conn, "suva").await,
+			1,
+			"any of an entry's records"
+		);
+		assert_eq!(by_name(&mut conn, "50%_").await, 1, "taken literally");
+		assert_eq!(by_name(&mut conn, "0%_x").await, 0);
+		assert_eq!(
+			by_name(&mut conn, "central\nkamaka").await,
+			0,
+			"a search never spans two names"
+		);
+
+		#[derive(QueryableByName)]
+		struct Plan {
+			#[diesel(sql_type = sql_types::Text, column_name = "QUERY PLAN")]
+			line: String,
+		}
+		conn.batch_execute("SET enable_seqscan = off")
+			.await
+			.unwrap();
+		let plan: Vec<Plan> = sql_query(
+			"EXPLAIN SELECT id FROM audit_entries WHERE audit_record_names(records) ILIKE '%kamaka%'",
+		)
+		.load(&mut conn)
+		.await
+		.unwrap();
+		assert!(
+			plan.iter().any(|row| row.line.contains("record_names")),
+			"{}",
+			plan.iter()
+				.map(|row| row.line.as_str())
+				.collect::<Vec<_>>()
+				.join("\n")
+		);
+	})
+	.await
+}

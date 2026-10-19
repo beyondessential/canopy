@@ -918,14 +918,14 @@ fn contains_pattern(name: &str) -> String {
 	)
 }
 
-/// Whether one of an entry's records has a name containing this.
+/// Whether one of an entry's records has a name containing this. The names are
+/// read as one text, a name to a line, which the trigram index on it serves, so
+/// a search spanning a line break would match across two names: it has its line
+/// breaks taken out.
 macro_rules! name_matches {
 	($name:expr) => {
-		diesel::dsl::sql::<sql_types::Bool>(
-			"EXISTS (SELECT 1 FROM jsonb_array_elements(records) AS acted WHERE acted ->> 'name' ILIKE ",
-		)
-		.bind::<sql_types::Text, _>(contains_pattern($name))
-		.sql(")")
+		diesel::dsl::sql::<sql_types::Bool>("audit_record_names(records) ILIKE ")
+			.bind::<sql_types::Text, _>(contains_pattern(&$name.replace(['\n', '\r'], " ")))
 	};
 }
 

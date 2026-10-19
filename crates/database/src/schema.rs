@@ -719,15 +719,6 @@ diesel::table! {
 }
 
 diesel::table! {
-	migration_test_requests (machine_id, plan_id) {
-		machine_id -> Uuid,
-		plan_id -> Uuid,
-		requested_at -> Timestamptz,
-		requested_by -> Nullable<Text>,
-	}
-}
-
-diesel::table! {
 	migration_tests (check_id) {
 		check_id -> Int8,
 		target_version_id -> Uuid,
@@ -1101,8 +1092,6 @@ diesel::joinable!(maintenance_windows -> applications (application_id));
 diesel::joinable!(maintenance_windows -> machines (machine_id));
 diesel::joinable!(maintenance_windows -> server_groups (server_group_id));
 diesel::joinable!(maintenance_windows -> upgrade_plans (upgrade_plan_id));
-diesel::joinable!(migration_test_requests -> machines (machine_id));
-diesel::joinable!(migration_test_requests -> upgrade_plans (plan_id));
 diesel::joinable!(migration_tests -> applications (application_id));
 diesel::joinable!(migration_tests -> backup_restore_checks (check_id));
 diesel::joinable!(migration_tests -> versions (target_version_id));
@@ -1185,7 +1174,6 @@ diesel::allow_tables_to_appear_in_same_query!(
 	maintenance_window_moves,
 	maintenance_windows,
 	mcp_tokens,
-	migration_test_requests,
 	migration_tests,
 	migration_timings,
 	operator_sessions,

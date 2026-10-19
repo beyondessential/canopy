@@ -184,6 +184,23 @@ CREATE INDEX audit_entries_actor_idx ON audit_entries (actor_kind, actor_id, rec
 CREATE INDEX audit_entries_records_idx ON audit_entries USING gin (records jsonb_path_ops);
 CREATE INDEX audit_entries_detail_idx ON audit_entries USING gin (detail jsonb_path_ops);
 
+-- Searching by part of a record's name, as the log page and the fleet query
+-- interface do, reads the names of an entry's records as one text, a name to a
+-- line, under a trigram index.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+CREATE FUNCTION audit_record_names(records jsonb) RETURNS text
+LANGUAGE sql
+IMMUTABLE
+PARALLEL SAFE
+RETURN (
+    SELECT coalesce(string_agg(acted ->> 'name', E'\n'), '')
+    FROM jsonb_array_elements(records) AS acted
+);
+
+CREATE INDEX audit_entries_record_names_idx ON audit_entries
+    USING gin (audit_record_names(records) gin_trgm_ops);
+
 -- The only change an entry ever takes is being settled: a pending entry becomes
 -- done or failed, once, within an hour of being committed by the database's own
 -- clock, with its detail only added to. The hour is read off the clock as the

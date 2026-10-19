@@ -1,5 +1,7 @@
 DROP TABLE audit_entries;
 DROP FUNCTION audit_entries_guard();
+DROP FUNCTION audit_record_names(jsonb);
+DROP EXTENSION IF EXISTS pg_trgm;
 
 CREATE OR REPLACE FUNCTION ensure_weekly_partitions(
     parent TEXT,
