@@ -101,13 +101,13 @@ Until then, none of its entries leave the database.
 Each week's object records the hash of the previous week's object, so a missing or substituted week breaks the chain and shows.
 
 Archived weeks are kept indefinitely.
-Object lock protects each one for the escrow storage's required retention, and the object remains after the lock expires.
+Each is under object lock for the same retention as the escrow's own versions, and remains after the lock expires.
 
 ## Reading the log
 
 Any administrator can read the whole log from the operator interface.
 The log page lists entries newest first, and can be filtered by actor, action, time, and the records acted on.
-A time range reaching back past what the database holds is answered from the archive, fetching the weeks it covers.
+A time range reaching back more than ninety days is answered from the archive for the weeks beyond that, since the database holds only some of their entries.
 
 The fleet query interface offers the last ninety days of the log to any caller it serves.
 
@@ -117,5 +117,5 @@ The log's weekly ranges are provisioned ahead and alerted on as they run short, 
 Running out matters more here than for the other histories, because without a range to write into no audited action can be carried out.
 
 Canopy raises a self-alert (see [SELF](../private-server/self-alerts.md)) when archiving falls behind.
-It warns when a closed week has gone a day without being archived, and fails when an unarchived week reaches the end of the ninety days, since from then on the database is holding entries it would otherwise have let go.
+It warns when a closed week has gone a day without being archived, and fails once an unarchived week's earliest entries are ninety days old, since from then on the database is holding entries it would otherwise have let go.
 It names the weeks outstanding, and clears once every closed week is archived.

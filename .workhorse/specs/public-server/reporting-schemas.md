@@ -31,7 +31,7 @@ Canopy owns which pairs exist, the replica a build is given, the artifact that r
 
 A reporting schema is unique per pair of group and Tamanu version, and Canopy holds zero or one per pair.
 The pairs are, for each group covered by an enabled declaration marked as publishing its schema, each version a Tamanu application of the group reports running and the version its open plan moves it to (see [UPG](../private-server/upgrade-plans.md)).
-That declaration is what covers a group: it names the group, is enabled or disabled, carries the operator's mark, and is audited (see [RST](restore-replicas.md)).
+That declaration is what covers a group: it names the group, is enabled or disabled, carries the operator's mark, and is audited (see [RST](restore-replicas.md) and [AUD](../platform/audit-log.md)).
 Only a published version is in a pair, since a version's migrations reach a builder as its published artifacts (see [ART](../platform/artifacts.md)) and an unpublished one has none.
 
 A pair with no schema is built, and a pair with one is settled.
