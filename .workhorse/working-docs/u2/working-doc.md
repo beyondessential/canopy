@@ -4,6 +4,9 @@ status: complete
 
 # Audit log of administrative actions
 
+> [!WARNING]
+> Superseded. This doc predates the design as built and disagrees with it in places. The audit log spec (`.workhorse/specs/platform/audit-log.md`), the plan, the test cases and the breakdown are authoritative; read this only as history.
+
 A systematic record of who did what in Canopy, captured at the middleware or extractor level for every administrative action, archived offsite in non-overlapping periods once it ages out of the working set.
 
 ## Context

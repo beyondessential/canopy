@@ -1,7 +1,6 @@
 # Audit log: plan
 
 Implements [AUD](../../specs/platform/audit-log.md).
-The reasoning behind these choices is in the working doc (`.workhorse/working-docs/u2/working-doc.md`).
 
 This card builds the log itself: declarations, capture, storage, the log page, the fleet query tool, and the range self-alert.
 Three pieces are split into their own cards (see the breakdown): the offsite archive, reviewing the rest of the surface for what to audit, and replacing per-feature provenance with the log.
@@ -51,7 +50,7 @@ Until the archive lands, nothing leaves the database, which AUD already requires
 
 ## Rejected
 
-- Recording the request as the entry, with declared argument fields as its detail. Routes are renamed while the archive is kept forever, one request can be several actions or none, and the request holds neither what the handler produced (issued credential ids, created records) nor what it read (a lease's intent). The working doc's reasoning predates this and still describes it.
+- Recording the request as the entry, with declared argument fields as its detail. Routes are renamed while the archive is kept forever, one request can be several actions or none, and the request holds neither what the handler produced (issued credential ids, created records) nor what it read (a lease's intent).
 
 - Temporal tables for state history. The deployment runs PG18, so `WITHOUT OVERLAPS` is usable, but moving changes into temporal tables would take them out of the record the log is. Postgres 19 adds nothing here: `FOR PORTION OF` was reverted before release.
 - Write-ahead entries settled after the handler, and a request-scoped transaction through `Db::get()`. The first leaves entries for actions that errored; the second hides the transaction from handlers that hold two connections or spawn tasks.
