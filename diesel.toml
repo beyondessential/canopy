@@ -4,11 +4,13 @@
 [print_schema]
 file = "crates/database/src/schema.rs"
 custom_type_derives = ["diesel::query_builder::QueryId"]
+# Each is matched anywhere in a table's name unless anchored, so each is
+# anchored: an unanchored `test_.+` also leaves out `migration_test_requests`.
 filter.except_tables = [
-	"audit_entries_\\d+w\\d+(_standard|_year)?",
-	"device_connections_\\d+w\\d+",
-	"statuses_\\d+w\\d+",
-	"test_.+",
+	"^audit_entries_\\d+w\\d+(_standard|_year)?$",
+	"^device_connections_\\d+w\\d+$",
+	"^statuses_\\d+w\\d+$",
+	"^test_.+",
 ]
 
 [migrations_directory]
