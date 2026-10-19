@@ -42,9 +42,11 @@ An action is recorded the same way whichever surface it is taken through.
 Every entry names its actor, which is one of:
 
 - an operator, by their tailnet login;
-- a device, by its machine, and the application it acted for where it acted for one;
+- a device, presented by its role as a machine device, a relay device and so on (see [DTR](../private-server/device-trust.md)), and the application it acted for where it acted for one;
 - a fleet query access token, by the token (see [MCP](../private-server/mcp.md));
 - Canopy itself, by the job that acted.
+
+A device's enrolment is its own action, its actor being the device the enrolment creates.
 
 ## What an entry holds
 

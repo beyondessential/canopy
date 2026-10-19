@@ -23,6 +23,8 @@ Covers this card's part of [AUD](../../specs/platform/audit-log.md). Archive and
 
 - [ ] An operator action records the tailnet login (verifies spec: AUD#actors)
 - [ ] A device credential issuance records the device, and the application where it acted for one; a status push records nothing (verifies spec: AUD#actors)
+- [ ] A device of a role other than machine (relay, backup-restore) is recorded and presented as a device of its role (verifies spec: AUD#actors)
+- [ ] A machine enrolment records the enrolled device as its actor (verifies spec: AUD#actors)
 - [ ] An audited fleet query tool records the access token (verifies spec: AUD#actors)
 - [ ] A job using the recorder records Canopy and the job (verifies spec: AUD#actors)
 
