@@ -161,6 +161,22 @@ async fn optional_undeclared(audit: Audit) -> Result<Json<()>> {
 	Ok(Json(()))
 }
 
+/// An audited save that sent what was already held.
+#[utoipa::path(post, path = "/unchanged", responses((status = 200)))]
+async fn unchanged(audit: Audit) -> Result<Json<()>> {
+	audit.unchanged();
+	Ok(Json(()))
+}
+
+/// Says it changed nothing and records something anyway.
+#[utoipa::path(post, path = "/unchanged_but_records", responses((status = 200)))]
+async fn unchanged_but_records(audit: Audit) -> Result<Json<()>> {
+	audit.unchanged();
+	let mut tx = audit.begin().await?;
+	tx.record(lifted("contradiction")).await?;
+	Ok(Json(()))
+}
+
 fn app(db: Db, actor: ActorSource) -> TestServer {
 	let (router, spec) = OpenApiRouter::new()
 		.routes(routes!(write, silent: silent))
@@ -175,6 +191,8 @@ fn app(db: Db, actor: ActorSource) -> TestServer {
 		.routes(routes!(write, audit(MaintenanceLifted): read))
 		.routes(routes!(write, audit(MaintenanceLifted): read_errors))
 		.routes(routes!(write, audit(MaintenanceLifted): device))
+		.routes(routes!(write, audit(MaintenanceLifted): unchanged))
+		.routes(routes!(write, audit(MaintenanceLifted): unchanged_but_records))
 		.routes(routes!(write, audit_optional(MaintenanceDeclared): optional_none))
 		.routes(routes!(write, audit_optional(MaintenanceDeclared): optional_undeclared))
 		.split_for_parts();
@@ -500,6 +518,22 @@ async fn a_handler_declared_to_record_only_what_it_creates_may_record_nothing() 
 				.await
 				.unwrap()
 		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_handler_can_declare_that_it_changed_nothing_but_not_while_recording() {
+	TestDb::run(async |mut conn, url| {
+		let server = app(database::init_to(&url), ActorSource::Operator);
+		server.post("/unchanged").await.assert_status_ok();
+		assert!(entries(&mut conn).await.is_empty());
+
+		server
+			.post("/unchanged_but_records")
+			.await
+			.assert_status(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+		assert!(entries(&mut conn).await.is_empty());
 	})
 	.await
 }

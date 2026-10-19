@@ -9,6 +9,7 @@ Covers this card's part of [AUD](../../specs/platform/audit-log.md). Archive and
 - [x] An audit-silent write produces no entry; an audited read (SQL playground) produces one (verifies spec: AUD#what-is-recorded)
 - [x] A SQL playground query that errors leaves its entry, settled failed (verifies spec: AUD#writing-as-a-condition-of-the-action)
 - [x] An audited handler that succeeds without recording an action fails and its change is rolled back (verifies spec: AUD#what-is-recorded)
+- [x] An audited handler that declares the request changed nothing completes with no entry, and fails if it also records an action (verifies spec: AUD#what-is-recorded)
 - [x] An audited handler recording an action its route does not declare fails and its change is rolled back (verifies spec: AUD#what-is-recorded)
 - [x] A bulk change records one entry per action (verifies spec: AUD#what-is-recorded)
 

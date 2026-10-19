@@ -200,6 +200,7 @@ pub struct AuditSession {
 	optional: bool,
 	actor: Mutex<Option<Actor>>,
 	recorded: Mutex<Vec<&'static str>>,
+	unchanged: std::sync::atomic::AtomicBool,
 	reads: Mutex<Vec<ReadEntry>>,
 	conn: tokio::sync::Mutex<Option<PooledConnection>>,
 }
@@ -212,6 +213,7 @@ impl AuditSession {
 			optional: declared.optional,
 			actor: Mutex::new(actor),
 			recorded: Mutex::default(),
+			unchanged: Default::default(),
 			reads: Mutex::default(),
 			conn: tokio::sync::Mutex::new(None),
 		}
@@ -252,7 +254,13 @@ impl AuditSession {
 			.recorded
 			.lock()
 			.unwrap_or_else(|held| held.into_inner());
-		if recorded.is_empty() && !self.optional {
+		let unchanged = self.unchanged.load(std::sync::atomic::Ordering::Relaxed);
+		if unchanged && !recorded.is_empty() {
+			return Err(AppError::custom(
+				"this handler declared that it changed nothing, and recorded an action",
+			));
+		}
+		if recorded.is_empty() && !self.optional && !unchanged {
 			return Err(AppError::custom(
 				"this audited handler completed without recording an action",
 			));
@@ -314,6 +322,16 @@ impl Audit {
 	/// them, such as a device.
 	pub fn acting_as(&self, actor: Actor) {
 		*self.0.actor.lock().unwrap_or_else(|held| held.into_inner()) = Some(actor);
+	}
+
+	/// Declare that the request changed nothing, which is a valid outcome of an
+	/// audited handler with no entry, such as a save that sends what is already
+	/// held. A handler that records nothing and does not say so fails, and one
+	/// that says so and records an action fails too.
+	pub fn unchanged(&self) {
+		self.0
+			.unchanged
+			.store(true, std::sync::atomic::Ordering::Relaxed);
 	}
 
 	/// The transaction the handler works in. Its changes and the entries it

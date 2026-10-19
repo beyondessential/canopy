@@ -18,6 +18,8 @@ Being silent is therefore a deliberate choice rather than something a new handle
 An audited handler declares the actions it takes, and records an entry for each action it takes.
 One request can take several actions, as a bulk change does, and then records an entry for each.
 An audited handler that completes without recording an action, or records one it did not declare, fails, and what it changed is rolled back.
+A handler can instead declare that the request changed nothing, such as a save that sends what is already held, which is a valid outcome with no entry.
+A handler that declares no change and records an action fails.
 A silent handler never records an entry.
 A handler that records only for what it creates, as a status report does for an application or a check it brings, declares its actions as ones it may record, and completes without an entry when it creates nothing.
 It is still held to the actions it declares.
