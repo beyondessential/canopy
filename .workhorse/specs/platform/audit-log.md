@@ -105,9 +105,6 @@ A time range reaching back past what the database holds is answered from the arc
 
 The fleet query interface offers the log to any caller it serves, over what the database holds.
 
-A page that shows who did something to a record reads it from the log, and shows it for as long as the entry is held in the database.
-After that, the page shows when it happened, and the log page answers who.
-
 ## Self-alerts
 
 The log's weekly ranges are provisioned ahead and alerted on as they run short, as for every history (see [HST](history-storage.md), "Running short").
