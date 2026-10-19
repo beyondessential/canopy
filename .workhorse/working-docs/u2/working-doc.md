@@ -53,7 +53,7 @@ A systematic record of who did what in Canopy, captured at the middleware or ext
 - A period is safe once its object has been written, read back and checked against what was sent, and is under object lock. Only then may its entries leave Postgres.
 - The archive lives in the recovery escrow's storage (ESC), which is already versioned and object-locked, under its own prefix. Archived entries are not encrypted to the escrow recipients, since Canopy reads them back.
 - The working set keeps 90 days. An entry leaves Postgres only once it is both archived and older than that. This covers A5's floor of 30 days for its per-key counts and lookups.
-- Some entry types, low in volume and high in importance, stay in the working set for longer. The handler's audit declaration says so.
+- Some entry types, low in volume and high in importance, stay in the working set for a year. The handler's audit declaration says so.
 - Archived periods are kept forever. Object lock covers the escrow storage's required retention, and the objects stay after it expires.
 - An operator can ask for entries older than the working set, and Canopy fetches the archived periods covering them.
 - To be raised as an entry in this card's breakdown.
@@ -84,14 +84,30 @@ A systematic record of who did what in Canopy, captured at the middleware or ext
 
 Decided: the entry is written inside the handler's own transaction, handed to it by an extractor. The entry and the change commit together, and an action that errors rolls back and leaves no entry, which is what "errored actions are not logged" asks for without any settling or deleting.
 
-- The `routes!` declaration (`audit(...)` or `silent`) is recorded as an OpenAPI extension and read back at startup into an audit map, as grades are.
+- The `routes!` declaration (`audit(ArgsType)` or `silent`) is recorded as an OpenAPI extension and read back at startup into an audit map, as grades are.
+- Recorded fields are declared on the handler's argument type: a derive, with `#[audit]` on each field to record. The `routes!` clause names that type, so a renamed or removed field is a compile error, and the recorded names are the ones serde reads, renames included. A handler with no arguments, or nothing worth recording, names no type and records only the operation.
 - An audit layer, a sibling of `safety::enforce`, buffers the request body, picks the declared fields out of it, and leaves the actor, operation and recorded fields in the request's extensions. The extractor is `FromRequestParts`, so it cannot read the body itself while `Json<Args>` consumes it; the layer does that part.
 - The extractor checks out a primary connection, begins a transaction, writes the entry, and hands the handler the connection. The layer keeps a handle to the same transaction and commits it on a successful response, rolling it back otherwise.
 - Audited handlers swap `state.db.get()` for the extractor. Mechanical, explicit at the call site, and the handler can see it is inside the audit transaction.
 - An audited read takes the extractor too, so the entry goes to the primary even where the read would otherwise use `db_read`.
 - Public-server handlers (device issuance, A5) take the same extractor with the device as actor. Jobs that opt in call the recorder directly inside their own transaction with Canopy as actor.
 - Authorisation refusals happen in `TailscaleAdmin` (or device auth) before the handler, so no transaction exists; the layer writes the refusal entry on its own.
+- The `routes!` audit clause asserts at compile time that the handler takes the audit extractor, through a trait implemented across extractor-tuple positions the way axum's `all_the_tuples!` does for `Handler`. An audited route whose handler forgets it fails the build, like a missing declaration.
+- A handler that acts outside Postgres (S3, Kubernetes, STS) commits its entry through the extractor before the outside effect, as pending. Once the effect is confirmed, the handler's transaction records the confirmation along with its own changes. An entry that never confirms stays pending, and the log page shows it as unconfirmed, because the outside effect may have happened even though the request failed. This is the one case where an action that errors leaves an entry.
+- A confirmation is appended as its own record pointing at the pending entry, rather than an update to it, so the log stays append-only and an archived period never needs rewriting. A pending entry and its confirmation can fall in different periods.
 - Cost: an audited request is one transaction, held across whatever the handler does, and a handler cannot commit part of its work before failing.
+
+### Storage
+
+- One table, partitioned by week like the other histories, and provisioned ahead through `database::partitions`. Each week is sub-partitioned by retention class, so both removals are a partition drop rather than a bulk delete. At 90 days, once the week is archived, the short-lived sub-partition is dropped. At a year, the rest of the week goes too.
+- An entry row holds when it happened, the actor (a kind, being operator, device, fleet-query token or Canopy, plus its identifier), the operation, a kind (action, refusal, or confirmation of a pending action), and a `jsonb` detail with the recorded fields, a refusal's reason, or the pending entry a confirmation points at. A GIN index over the detail serves A5's lookups by token id, signing key, subject and relying party, and its per-key counts over a window.
+
+### Archive
+
+- One Parquet object per closed week, with every retention class in it. Columnar, so a read back for the log page skips the columns and row groups it does not need.
+- Periods are hash-chained to each other in the archive: each object records the hash of the previous period's object, so a missing or replaced period shows up as a break. Entries in the working set are not chained. Writes interleave freely there instead of being forced into a single order, and a chain in Postgres would not stop anyone able to write to Postgres anyway, since they could rewrite the chain too.
+- The archiver runs in the backups pod, which already holds the escrow role. The private server fetches archived weeks for the log page under a separate role that can only read the audit prefix. Both roles are granted on the ops side, in the escrow bucket's account.
+- The archiver writes a week's object, reads it back and checks it against what it sent, and confirms the object lock before marking the week archived. Only then can a drop touch that week.
 
 ### Anchors in the code
 
@@ -103,8 +119,6 @@ Decided: the entry is written inside the handler's own transaction, handed to it
 
 ## Open questions
 
-- [ ] An audited route whose handler does not take the extractor writes no entry and still acts. Catch it at compile time (the `routes!` audit clause asserts the handler's extractor tuple contains the audit extractor, through a trait implemented across tuple positions the way axum's `all_the_tuples!` does), or at run time (the layer refuses the response when no entry was written, which is after the fact)?
-- [ ] Outside effects inside the transaction. A handler that calls S3, Kubernetes or STS has acted on the world before its transaction commits; if the commit then fails, the effect stands with no entry. Fail-closed for those needs the entry committed before the effect, which brings back an entry for an action that may then error.
 
 
 
