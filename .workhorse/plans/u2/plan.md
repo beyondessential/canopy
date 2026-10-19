@@ -10,7 +10,7 @@ Until the archive lands, nothing leaves the database, which AUD already requires
 ## Actions
 
 - One `database::audit::Action` enum is the catalogue: a variant per action, each carrying its typed detail and the records it acted on (typed references, not free ids). Its serde tag is the stable action name, independent of route paths, so renaming a handler or its route leaves the name alone.
-- Retention is a method on the action, ninety days by default and a year for the few marked.
+- Retention is a method on the action, ninety days by default and a year for the few marked. A confirmation takes the retention class of the pending entry it confirms.
 - A variant has no field for a secret, so keeping secrets out is a property of the type, not of what someone remembered to mark.
 - Jobs, device API handlers and operator handlers record the same variants.
 

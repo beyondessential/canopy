@@ -77,6 +77,7 @@ A pending entry that is never confirmed stands, and is presented as unconfirmed,
 Canopy's database holds the recent log, stored in weekly ranges provisioned ahead like the other histories (see [HST](history-storage.md)).
 An entry stays there for ninety days.
 An action can be kept for a year instead, where its entries are few and matter long after the fact.
+A confirmation is kept as long as the entry it confirms.
 An entry leaves the database only once its retention has passed and its week has been archived; an unarchived week is never removed, however old.
 
 ## Archive

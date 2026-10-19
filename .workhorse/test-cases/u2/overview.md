@@ -47,3 +47,4 @@ Covers this card's part of [AUD](../../specs/platform/audit-log.md). Archive and
 ## Keeping entries
 
 - [ ] Nothing is removed from an unarchived week, however old (verifies spec: AUD#keeping-entries)
+- [ ] An action marked for a year is kept a year, and so is the confirmation of a pending one (verifies spec: AUD#keeping-entries)
