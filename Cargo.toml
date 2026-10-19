@@ -9,6 +9,7 @@ members = [
 	"crates/commons-types",
 	"crates/database",
 	"crates/jobs",
+	"crates/oidc",
 	"crates/private-server",
 	"crates/public-server",
 	"crates/relay",

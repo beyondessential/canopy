@@ -1,0 +1,26 @@
+[package]
+publish = false
+name = "oidc"
+version = "1.0.0"
+edition = "2024"
+resolver = "3"
+license = "GPL-3.0-or-later"
+authors = [
+	"Félix Saparelli <felix@passcod.name>",
+	"BES Developers <contact@bes.au>",
+]
+
+[dependencies]
+aws-config.workspace = true
+aws-sdk-kms = "1.123.0"
+base64 = "0.22"
+jiff = { workspace = true, features = ["serde"] }
+ring = "0.17.14"
+serde = { workspace = true, features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.18"
+tokio = { workspace = true, features = ["sync"] }
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
