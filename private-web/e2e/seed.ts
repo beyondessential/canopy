@@ -2187,3 +2187,68 @@ export async function seedDeniedDnsName(
 		],
 	);
 }
+
+export interface AuditRecordRef {
+	kind: string;
+	id: string;
+	name: string;
+}
+
+/** An audit log entry. `minutesAgo` places it: the table is partitioned by
+ * week, so entries are seeded minutes old, never days. `outcome` is null for an
+ * entry written with its action; a `pending` one under an hour old is hidden by
+ * the API and an older one reads as unconfirmed. */
+export async function seedAuditEntry(
+	sql: Sql,
+	opts: {
+		action: string;
+		minutesAgo?: number;
+		actor?:
+			| { kind: "operator"; login: string; name?: string }
+			| { kind: "device"; id: string; name?: string; role?: string }
+			| { kind: "token"; id: string; name: string }
+			| { kind: "canopy"; job: string };
+		records?: AuditRecordRef[];
+		detail?: Record<string, unknown>;
+		outcome?: "pending" | "done" | "failed" | null;
+		retention?: "standard" | "year";
+	},
+): Promise<{ id: string }> {
+	const actor = opts.actor ?? { kind: "operator", login: "seed@bes.au" };
+	const actorId =
+		actor.kind === "operator"
+			? actor.login
+			: actor.kind === "canopy"
+				? actor.job
+				: actor.id;
+	const outcome = opts.outcome ?? null;
+	const settled = outcome === "done" || outcome === "failed";
+	const rows = await sql.query<{ id: string }>(
+		`INSERT INTO audit_entries
+		   (recorded_at, retention, actor_kind, actor_id, actor_name, actor_role,
+		    action, records, detail, outcome, settled_at)
+		 VALUES (NOW() - make_interval(mins => $1), $2, $3, $4, $5, $6, $7, $8, $9, $10,
+		         CASE WHEN $11 THEN NOW() - make_interval(mins => $1) + interval '1 second' END)
+		 RETURNING id`,
+		[
+			opts.minutesAgo ?? 1,
+			opts.retention ?? "standard",
+			actor.kind,
+			actorId,
+			"name" in actor ? (actor.name ?? null) : null,
+			actor.kind === "device" ? (actor.role ?? "machine") : null,
+			opts.action,
+			JSON.stringify(opts.records ?? []),
+			JSON.stringify(opts.detail ?? {}),
+			outcome,
+			settled,
+		],
+	);
+	return { id: rows[0]!.id };
+}
+
+/** Empty the audit log. Handlers the specs drive write entries of their own,
+ * so a spec about the log starts from nothing. */
+export async function resetAuditLog(sql: Sql): Promise<void> {
+	await sql.query("TRUNCATE audit_entries");
+}

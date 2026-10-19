@@ -36,6 +36,7 @@ pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::rou
 		map: std::sync::Arc::new(commons_servers::audit::AuditMap::from_openapi(&api_spec)),
 		actor: commons_servers::audit::ActorSource::Operator,
 		undeclared: commons_servers::audit::Undeclared::Refuse,
+		mount: "",
 	};
 	tracing::debug!(
 		declared = audit.map.len(),
@@ -86,8 +87,12 @@ pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::rou
 		state.kube.clone(),
 		state.artifacts.clone(),
 	)?;
-	let (public_router, _) =
-		public_server::audited(public_server::routes(), public_state.db.clone());
+	let (public_router, _) = public_server::audited_under(
+		public_server::routes(),
+		public_state.db.clone(),
+		"/public",
+		commons_servers::audit::Undeclared::Refuse,
+	);
 
 	Ok(Router::new()
 		.nest("/public", public_router.with_state(public_state))

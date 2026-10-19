@@ -45,7 +45,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-audit": []
       }
     },
     "/applications/self": {
@@ -102,7 +103,8 @@
           {
             "server-device": []
           }
-        ]
+        ],
+        "x-canopy-audit": []
       }
     },
     "/artifacts/groups/{group}/{version}/{artifact_type}/{platform}": {
@@ -223,6 +225,9 @@
           {
             "backup-restore-device": []
           }
+        ],
+        "x-canopy-audit": [
+          "artifact_registered"
         ]
       }
     },
@@ -337,6 +342,9 @@
           {
             "releaser-device": []
           }
+        ],
+        "x-canopy-audit": [
+          "artifact_registered"
         ]
       }
     },
@@ -387,7 +395,8 @@
           {
             "server-device": []
           }
-        ]
+        ],
+        "x-canopy-audit": []
       }
     },
     "/backup-credentials": {
@@ -454,6 +463,9 @@
           {
             "server-device": []
           }
+        ],
+        "x-canopy-audit": [
+          "backup_credentials_issued"
         ]
       }
     },
@@ -514,7 +526,8 @@
           {
             "server-device": []
           }
-        ]
+        ],
+        "x-canopy-audit": []
       }
     },
     "/backup-report": {
@@ -564,7 +577,8 @@
           {
             "server-device": []
           }
-        ]
+        ],
+        "x-canopy-audit": []
       }
     },
     "/backup-target": {
@@ -621,7 +635,8 @@
           {
             "server-device": []
           }
-        ]
+        ],
+        "x-canopy-audit": []
       }
     },
     "/bestool/snippets": {
@@ -659,7 +674,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-audit": []
       }
     },
     "/certificates/request": {
@@ -736,7 +752,8 @@
           {
             "mtls-certificate": []
           }
-        ]
+        ],
+        "x-canopy-audit": []
       }
     },
     "/machines/self": {
@@ -783,7 +800,8 @@
           {
             "server-device": []
           }
-        ]
+        ],
+        "x-canopy-audit": []
       }
     },
     "/names/entitlements": {
@@ -820,7 +838,8 @@
           {
             "mtls-certificate": []
           }
-        ]
+        ],
+        "x-canopy-audit": []
       }
     },
     "/names/register": {
@@ -887,7 +906,8 @@
           {
             "mtls-certificate": []
           }
-        ]
+        ],
+        "x-canopy-audit": []
       }
     },
     "/restore-capabilities": {
@@ -917,7 +937,8 @@
           {
             "backup-restore-device": []
           }
-        ]
+        ],
+        "x-canopy-audit": []
       }
     },
     "/restore-credentials": {
@@ -984,6 +1005,9 @@
           {
             "backup-restore-device": []
           }
+        ],
+        "x-canopy-audit": [
+          "restore_credentials_issued"
         ]
       }
     },
@@ -1034,7 +1058,8 @@
           {
             "backup-restore-device": []
           }
-        ]
+        ],
+        "x-canopy-audit": []
       }
     },
     "/restore-worklist": {
@@ -1064,7 +1089,8 @@
           {
             "backup-restore-device": []
           }
-        ]
+        ],
+        "x-canopy-audit": []
       }
     },
     "/servers": {
@@ -1099,7 +1125,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-audit": []
       }
     },
     "/servers/register/begin": {
@@ -1141,7 +1168,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-audit": []
       }
     },
     "/servers/register/complete": {
@@ -1183,7 +1211,10 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-audit": [
+          "machine_enrolled"
+        ]
       }
     },
     "/servers/self": {
@@ -1240,7 +1271,8 @@
           {
             "server-device": []
           }
-        ]
+        ],
+        "x-canopy-audit": []
       }
     },
     "/status/{server_id}": {
@@ -1319,6 +1351,11 @@
           {
             "server-device": []
           }
+        ],
+        "x-canopy-audit-optional": true,
+        "x-canopy-audit": [
+          "application_arrived",
+          "check_registered"
         ]
       }
     },
@@ -1393,7 +1430,8 @@
           {
             "server-device": []
           }
-        ]
+        ],
+        "x-canopy-audit": []
       }
     },
     "/tags": {
@@ -1450,7 +1488,8 @@
           {
             "server-device": []
           }
-        ]
+        ],
+        "x-canopy-audit": []
       }
     },
     "/versions": {
@@ -1475,7 +1514,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-audit": []
       }
     },
     "/versions/update-for/{version}": {
@@ -1521,7 +1561,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-audit": []
       }
     },
     "/versions/{version}": {
@@ -1599,6 +1640,9 @@
           {
             "releaser-device": []
           }
+        ],
+        "x-canopy-audit": [
+          "version_published"
         ]
       },
       "delete": {
@@ -1657,6 +1701,9 @@
           {
             "admin-device": []
           }
+        ],
+        "x-canopy-audit": [
+          "version_removed"
         ]
       }
     },
@@ -1712,7 +1759,8 @@
               }
             }
           }
-        }
+        },
+        "x-canopy-audit": []
       }
     }
   },

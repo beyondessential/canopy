@@ -419,17 +419,26 @@ async fn existing_declarations_denials_and_records_migrate() {
 				.await
 				.expect("second connection");
 			let mut harness = AsyncMigrationHarness::new(second);
-			let latest = harness
-				.applied_migrations()
-				.expect("applied")
-				.iter()
-				.map(ToString::to_string)
-				.max()
-				.expect("some migration");
-			assert_eq!(latest, THIS_MIGRATION, "this is the newest migration");
-			harness
-				.revert_last_migration(commons_tests::db::MIGRATIONS)
-				.expect("revert");
+			// This migration and whatever has been applied after it.
+			loop {
+				let latest = harness
+					.applied_migrations()
+					.expect("applied")
+					.iter()
+					.map(ToString::to_string)
+					.max()
+					.expect("some migration");
+				assert!(
+					latest.as_str() >= THIS_MIGRATION,
+					"this migration was reverted"
+				);
+				harness
+					.revert_last_migration(commons_tests::db::MIGRATIONS)
+					.expect("revert");
+				if latest == THIS_MIGRATION {
+					break;
+				}
+			}
 		}
 
 		conn.batch_execute(&format!(

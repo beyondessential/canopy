@@ -72,7 +72,7 @@ pub struct SqlHistoryEntry {
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(read_only, silent: is_sql_available))
-		.routes(routes!(read_only, silent: execute_query))
+		.routes(routes!(read_only, audit(SqlQueryRun): execute_query))
 		.routes(routes!(read_only, silent: get_last_user_query))
 		.routes(routes!(read_only, silent: get_query_history))
 }
@@ -127,6 +127,7 @@ pub struct ExecuteArgs {
 )]
 pub async fn execute_query(
 	State(state): State<AppState>,
+	audit: commons_servers::audit::Audit,
 	user: TailscaleUser,
 	Json(args): Json<ExecuteArgs>,
 ) -> Result<Json<SqlResult>> {
@@ -137,6 +138,14 @@ pub async fn execute_query(
 	};
 
 	let query = args.query;
+
+	// Recorded before the query runs, so one that fails is recorded as failed:
+	// the layer settles the entry by how the handler ends.
+	audit
+		.read(database::audit::Action::SqlQueryRun {
+			query: query.query.clone(),
+		})
+		.await?;
 
 	let mut conn = state.db.get().await?;
 	SqlPlaygroundHistory::create(&mut conn, query.query.clone(), user.login.clone())

@@ -192,6 +192,17 @@ export type ServerGroupSilencedRef = Solidify<Schemas["ServerGroupSilencedRef"]>
 export type MachineSilencedRef = Solidify<Schemas["MachineSilencedRef"]>;
 export type ClusterSilencedRef = Solidify<Schemas["ClusterSilencedRef"]>;
 
+/** Who took an audited action. */
+export type AuditActor = Solidify<Schemas["Actor"]>;
+export type AuditRecord = Solidify<Schemas["Record"]>;
+export type AuditActionOption = Solidify<Schemas["AuditActionOption"]>;
+export type AuditFilters = Solidify<Schemas["AuditFilters"]>;
+export type AuditStatus = Solidify<Schemas["Status"]>;
+/** The generated schema types `detail` as an empty record; it is any JSON object. */
+export type AuditEntry = Omit<Solidify<Schemas["Entry"]>, "detail"> & {
+	detail: Record<string, unknown>;
+};
+
 export type EnrollmentTicket = Solidify<Schemas["EnrollmentTicket"]>;
 export type EnrollmentStatus = Solidify<Schemas["EnrollmentStatus"]>;
 

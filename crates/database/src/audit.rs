@@ -48,6 +48,21 @@ impl Retention {
 	}
 }
 
+/// How much an action is expected to be wanted when reading the log.
+///
+/// The log is read as the important entries unless the reader asks for more, so
+/// an action that is taken at high volume and is not what anyone is looking for
+/// by default is routine, and stays out of the way until asked for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Tier {
+	/// Read by default.
+	Important,
+	/// Frequent, and left out unless the reader asks for routine actions or for
+	/// the action by name.
+	Routine,
+}
+
 /// The kinds of record an action can act on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -77,8 +92,11 @@ pub enum RecordKind {
 /// deleted.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Record {
+	/// What kind of record it is.
 	pub kind: RecordKind,
+	/// Its identifier.
 	pub id: String,
+	/// Its name when the action was taken.
 	pub name: String,
 }
 
@@ -125,6 +143,24 @@ impl Record {
 	/// identifier.
 	pub fn device(id: Uuid) -> Self {
 		Self::new(RecordKind::Device, id, id.to_string()[..8].to_owned())
+	}
+
+	/// An upgrade plan, named by the environment it moves and the version it
+	/// moves to.
+	pub async fn upgrade_plan(
+		conn: &mut AsyncPgConnection,
+		plan: &crate::upgrade_plans::UpgradePlan,
+	) -> Result<Self> {
+		let group = crate::server_groups::ServerGroup::get_by_id(conn, plan.group_id).await?;
+		let version = crate::versions::Version::get_by_id(conn, plan.target_version_id).await?;
+		Ok(Self::new(
+			RecordKind::UpgradePlan,
+			plan.id,
+			format!(
+				"{} {} to {}.{}.{}",
+				group.name, plan.rank, version.major, version.minor, version.patch
+			),
+		))
 	}
 
 	/// What a scope is, as a record: the application, machine, group or cluster
@@ -271,7 +307,7 @@ impl Actor {
 macro_rules! actions {
 	($(
 		$(#[$meta:meta])*
-		$variant:ident = $name:literal $(, retention = $retention:ident)? {
+		$variant:ident = $name:literal, $label:literal $(, retention = $retention:ident)? $(, tier = $tier:ident)? {
 			records { $($rf:ident : $rt:ty),* $(,)? }
 			detail { $($df:ident : $dt:ty),* $(,)? }
 		}
@@ -302,10 +338,22 @@ macro_rules! actions {
 			pub fn retention(&self) -> Retention {
 				match self {
 					$(Self::$variant { .. } => {
-						#[allow(unused_mut)]
+						#[allow(unused_mut, unused_assignments)]
 						let mut retention = Retention::Standard;
 						$(retention = Retention::$retention;)?
 						retention
+					})*
+				}
+			}
+
+			/// Whether this action is read by default.
+			pub fn tier(&self) -> Tier {
+				match self {
+					$(Self::$variant { .. } => {
+						#[allow(unused_mut, unused_assignments)]
+						let mut tier = Tier::Important;
+						$(tier = Tier::$tier;)?
+						tier
 					})*
 				}
 			}
@@ -338,6 +386,15 @@ macro_rules! actions {
 			}
 		}
 
+		/// What each action is called to an operator, and whether it is
+		/// routine, by stable name.
+		const LABELS: &[(&str, &str, Tier)] = &[$(($name, $label, {
+			#[allow(unused_mut, unused_assignments)]
+			let mut tier = Tier::Important;
+			$(tier = Tier::$tier;)?
+			tier
+		})),*];
+
 		/// The stable name of each action, by variant, for a route to declare
 		/// the actions it takes.
 		#[allow(non_upper_case_globals)]
@@ -352,23 +409,217 @@ macro_rules! actions {
 
 actions! {
 	/// A maintenance window was declared over a target.
-	MaintenanceDeclared = "maintenance_declared" {
+	MaintenanceDeclared = "maintenance_declared", "Declare maintenance" {
 		records { window: Record, target: Record, upgrade_plan: Option<Record> }
 		detail { rank: Option<ServerRank>, expected_end: Timestamp, note: Option<String> }
 	}
 
 	/// An open maintenance window was changed: its end, its note, or what it
 	/// covers. Declaring over a target that already has a window amends it.
-	MaintenanceAmended = "maintenance_amended" {
+	MaintenanceAmended = "maintenance_amended", "Amend maintenance" {
 		records { window: Record, target: Record, moved_from: Option<Record> }
 		detail { rank: Option<ServerRank>, expected_end: Timestamp, note: Option<String> }
 	}
 
 	/// An open maintenance window was lifted before its expected end.
-	MaintenanceLifted = "maintenance_lifted" {
+	MaintenanceLifted = "maintenance_lifted", "Lift maintenance" {
 		records { window: Record, target: Record }
 		detail { rank: Option<ServerRank>, already_ended: bool }
 	}
+
+	/// An inventory was read under a lease. Taken at the rate runs read, so it
+	/// is routine.
+	InventoryRead = "inventory_read", "Read inventory", tier = Routine {
+		records { group: Record, lease: Record }
+		detail { rank: ServerRank, intent: String }
+	}
+
+	/// A run lease on an environment was taken.
+	InventoryLeaseTaken = "inventory_lease_taken", "Take inventory lease" {
+		records { group: Record, lease: Record }
+		detail { rank: ServerRank, intent: String, note: Option<String>, expires_at: Timestamp }
+	}
+
+	/// A run lease another operator held was taken over.
+	InventoryLeaseTakenOver = "inventory_lease_taken_over", "Take over inventory lease" {
+		records { group: Record, lease: Record }
+		detail {
+			rank: ServerRank, intent: String, note: Option<String>, expires_at: Timestamp,
+			previous_holder: Option<String>,
+		}
+	}
+
+	/// A held lease's expiry was pushed out. A run does it every few minutes,
+	/// so it is routine.
+	InventoryLeaseExtended = "inventory_lease_extended", "Extend inventory lease", tier = Routine {
+		records { group: Record, lease: Record }
+		detail { rank: ServerRank, expires_at: Timestamp }
+	}
+
+	/// A lease was released, by its holder or by someone taking the work over.
+	InventoryLeaseReleased = "inventory_lease_released", "Release inventory lease" {
+		records { group: Record, lease: Record }
+		detail { rank: ServerRank, held_by: Option<String> }
+	}
+
+	/// An inventory variable was set. The value is not recorded.
+	InventoryVariableSet = "inventory_variable_set", "Set inventory variable" {
+		records { variable: Record, scope: Record }
+		detail { rank: Option<ServerRank>, secret: bool }
+	}
+
+	/// An inventory variable was removed.
+	InventoryVariableRemoved = "inventory_variable_removed", "Remove inventory variable" {
+		records { variable: Record, scope: Record }
+		detail { rank: Option<ServerRank>, secret: bool }
+	}
+
+	/// An upgrade plan was recorded for an environment.
+	UpgradePlanRecorded = "upgrade_plan_recorded", "Record upgrade plan" {
+		records { plan: Record, group: Record }
+		detail {
+			rank: ServerRank, planned_for: Option<String>, planned_time: Option<String>,
+			note: Option<String>,
+		}
+	}
+
+	/// An open upgrade plan's date or note was amended.
+	UpgradePlanAmended = "upgrade_plan_amended", "Amend upgrade plan" {
+		records { plan: Record, group: Record }
+		detail {
+			rank: ServerRank, planned_for: Option<String>, planned_time: Option<String>,
+			note: Option<String>,
+		}
+	}
+
+	/// An upgrade plan was withdrawn: the group is no longer going there. Kept
+	/// a year, since who withdrew a plan matters long after.
+	UpgradePlanWithdrawn = "upgrade_plan_withdrawn", "Withdraw upgrade plan", retention = Year {
+		records { plan: Record, group: Record }
+		detail { rank: ServerRank }
+	}
+
+	/// A restore replica declaration was created.
+	RestoreReplicaDeclared = "restore_replica_declared", "Declare restore replica" {
+		records { replica: Record, group: Record, machine: Option<Record>, consumer: Record }
+		detail {
+			backup_type: String, intent: String, enabled: bool, redacts: bool,
+			publishes_schemas: bool,
+		}
+	}
+
+	/// A restore replica declaration was changed, enabling and disabling it
+	/// among the rest.
+	RestoreReplicaUpdated = "restore_replica_updated", "Update restore replica" {
+		records { replica: Record, group: Record, machine: Option<Record>, consumer: Record }
+		detail {
+			backup_type: String, intent: String, enabled: bool, redacts: bool,
+			publishes_schemas: bool,
+		}
+	}
+
+	/// A restore replica declaration was deleted.
+	RestoreReplicaDeleted = "restore_replica_deleted", "Delete restore replica" {
+		records { replica: Record, group: Record, consumer: Record }
+		detail { backup_type: String, intent: String }
+	}
+
+	/// A query was run in the SQL playground. A read, recorded before it runs.
+	SqlQueryRun = "sql_query_run", "Run SQL query" {
+		records { }
+		detail { query: String }
+	}
+
+	/// An operator minted a device credential.
+	DeviceCredentialProvisioned = "device_credential_provisioned", "Provision device credential" {
+		records { device: Record, key: Record }
+		detail { role: String }
+	}
+
+	/// An operator added a key to a device.
+	DeviceKeyAdded = "device_key_added", "Add device key" {
+		records { device: Record }
+		detail { key_name: Option<String> }
+	}
+
+	/// A machine enrolled. The device the enrolment created is the actor.
+	MachineEnrolled = "machine_enrolled", "Enrol machine" {
+		records { machine: Record }
+		detail { }
+	}
+
+	/// A machine reported an application Canopy held no record of, and Canopy
+	/// created it.
+	ApplicationArrived = "application_arrived", "Application arrived" {
+		records { application: Record, machine: Record }
+		detail { application_type: String }
+	}
+
+	/// A check was reported that the catalogue did not hold, and registered.
+	CheckRegistered = "check_registered", "Register check" {
+		records { check: Record }
+		detail { source: String, namespace: String }
+	}
+
+	/// Short-lived storage credentials were issued for a backup run. Issued per
+	/// run across the fleet, so routine. Committed ahead of the issue and settled
+	/// with the access key and expiry it produced, which are added to the detail
+	/// when it is settled.
+	BackupCredentialsIssued = "backup_credentials_issued", "Issue backup credentials", tier = Routine {
+		records { group: Record, machine: Record }
+		detail { backup_type: String, purpose: String, run_id: Option<String> }
+	}
+
+	/// Short-lived read-only credentials were issued for a restore. Settled with
+	/// the access key and expiry it produced, as backup credentials are.
+	RestoreCredentialsIssued = "restore_credentials_issued", "Issue restore credentials", tier = Routine {
+		records { group: Record, device: Record }
+		detail { backup_type: String }
+	}
+
+	/// A release version was published, or its record created, by a releaser.
+	VersionPublished = "version_published", "Publish version" {
+		records { version: Record, device: Record }
+		detail { }
+	}
+
+	/// A release version was removed by a releaser.
+	VersionRemoved = "version_removed", "Remove version" {
+		records { version: Record, device: Record }
+		detail { }
+	}
+
+	/// An artifact was registered against a version.
+	ArtifactRegistered = "artifact_registered", "Register artifact" {
+		records { artifact: Record, version: Option<Record>, group: Option<Record>, device: Record }
+		detail { artifact_type: String, platform: String }
+	}
+}
+
+/// What an action is called to an operator, from its stable name. An action
+/// the catalogue no longer has, read back from an older entry, is its name
+/// spelt out.
+pub fn label(name: &str) -> String {
+	LABELS
+		.iter()
+		.find(|(known, ..)| *known == name)
+		.map(|(_, label, _)| (*label).to_owned())
+		.unwrap_or_else(|| {
+			let mut label = name.replace('_', " ");
+			if let Some(first) = label.get_mut(0..1) {
+				first.make_ascii_uppercase();
+			}
+			label
+		})
+}
+
+/// The names of the actions that are routine, for leaving them out.
+pub fn routine() -> Vec<&'static str> {
+	LABELS
+		.iter()
+		.filter(|(_, _, tier)| *tier == Tier::Routine)
+		.map(|(name, ..)| *name)
+		.collect()
 }
 
 /// How an entry stands.
@@ -408,15 +659,25 @@ struct EntryRow {
 /// One entry as the log presents it.
 #[derive(Clone, Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Entry {
+	/// The entry's identifier.
 	pub id: Uuid,
+	/// When the entry was recorded.
 	#[schema(value_type = String, format = DateTime)]
 	pub recorded_at: Timestamp,
+	/// How long the entry stays in the database.
 	pub retention: Retention,
+	/// Who took the action.
 	pub actor: Actor,
+	/// The action's stable name.
 	pub action: String,
+	/// What the action is called to an operator.
+	pub action_label: String,
+	/// The records the action acted on.
 	pub records: Vec<Record>,
+	/// What the action defines as worth knowing about it.
 	#[schema(value_type = Object)]
 	pub detail: Value,
+	/// Whether the action was done, failed, or is unconfirmed.
 	pub status: Status,
 	/// When the entry was settled, for one committed ahead of its action.
 	#[schema(value_type = Option<String>, format = DateTime)]
@@ -451,6 +712,7 @@ impl EntryRow {
 				self.actor_role,
 				self.actor_application_id,
 			),
+			action_label: label(&self.action),
 			action: self.action,
 			records: serde_json::from_value(self.records).unwrap_or_default(),
 			detail: self.detail,
@@ -614,11 +876,38 @@ pub struct Filter {
 	pub action: Option<String>,
 	/// A record acted on, by identifier.
 	pub record: Option<String>,
+	/// A record acted on, by part of the name it had.
+	pub record_name: Option<String>,
 	/// Entries whose detail contains this.
 	pub detail: Option<Value>,
+	/// Include routine actions. Without it they are left out, unless one is
+	/// asked for by name with [`Self::action`].
+	pub include_routine: bool,
 	pub since: Option<Timestamp>,
 	pub until: Option<Timestamp>,
 	pub limit: i64,
+}
+
+/// The pattern matching a name that contains `name`, with the characters
+/// `ILIKE` reads specially taken literally.
+fn contains_pattern(name: &str) -> String {
+	format!(
+		"%{}%",
+		name.replace('\\', "\\\\")
+			.replace('%', "\\%")
+			.replace('_', "\\_")
+	)
+}
+
+/// Whether one of an entry's records has a name containing this.
+macro_rules! name_matches {
+	($name:expr) => {
+		diesel::dsl::sql::<sql_types::Bool>(
+			"EXISTS (SELECT 1 FROM jsonb_array_elements(records) AS acted WHERE acted ->> 'name' ILIKE ",
+		)
+		.bind::<sql_types::Text, _>(contains_pattern($name))
+		.sql(")")
+	};
 }
 
 /// Entries matching a filter, newest first.
@@ -641,9 +930,21 @@ pub async fn find(conn: &mut AsyncPgConnection, filter: &Filter) -> Result<Vec<E
 	}
 	if let Some(action) = &filter.action {
 		query = query.filter(dsl::action.eq(action));
+	} else if !filter.include_routine {
+		query = query.filter(dsl::action.ne_all(routine()));
 	}
-	if let Some(record) = &filter.record {
-		query = query.filter(dsl::records.contains(json!([{ "id": record }])));
+	match (&filter.record, &filter.record_name) {
+		(Some(id), Some(name)) => {
+			// One box offers both, so an entry matches by either.
+			query = query.filter(
+				dsl::records
+					.contains(json!([{ "id": id }]))
+					.or(name_matches!(name)),
+			);
+		}
+		(Some(id), None) => query = query.filter(dsl::records.contains(json!([{ "id": id }]))),
+		(None, Some(name)) => query = query.filter(name_matches!(name)),
+		(None, None) => {}
 	}
 	if let Some(detail) = &filter.detail {
 		query = query.filter(dsl::detail.contains(detail.clone()));
@@ -700,4 +1001,47 @@ pub async fn count_by_detail(
 	.await
 	.map_err(AppError::from)?;
 	Ok(rows.into_iter().map(|row| (row.value, row.entries)).collect())
+}
+
+/// Who has acted in a window, each actor once, as they last appeared: what an
+/// actor filter offers.
+pub async fn actors(conn: &mut AsyncPgConnection, since: Timestamp) -> Result<Vec<Actor>> {
+	use crate::schema::audit_entries::dsl;
+
+	type Row = (
+		String,
+		String,
+		Option<String>,
+		Option<String>,
+		Option<Uuid>,
+	);
+	let rows: Vec<Row> = dsl::audit_entries
+		.filter(dsl::recorded_at.ge(jiff_diesel::Timestamp::from(since)))
+		.select((
+			dsl::actor_kind,
+			dsl::actor_id,
+			dsl::actor_name,
+			dsl::actor_role,
+			dsl::actor_application_id,
+		))
+		.distinct_on((dsl::actor_kind, dsl::actor_id))
+		.order((dsl::actor_kind, dsl::actor_id, dsl::recorded_at.desc()))
+		.load(conn)
+		.await
+		.map_err(AppError::from)?;
+	Ok(rows
+		.into_iter()
+		.map(|(kind, id, name, role, application)| {
+			Actor::from_columns(&kind, id, name, role, application)
+		})
+		.collect())
+}
+
+/// Every action in the catalogue with what it is called to an operator, and
+/// whether it is routine.
+pub fn catalogue() -> Vec<(&'static str, String, Tier)> {
+	LABELS
+		.iter()
+		.map(|(name, label, tier)| (*name, (*label).to_owned(), *tier))
+		.collect()
 }

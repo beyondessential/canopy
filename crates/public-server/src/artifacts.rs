@@ -4,13 +4,16 @@ use axum::{
 };
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::device_auth::{AuthDevice, ReleaserDevice};
+use commons_servers::{
+	audit::{Audit, device_actor},
+	device_auth::{AuthDevice, ReleaserDevice},
+};
 use commons_types::{
 	device::DeviceRole,
 	version::{VersionStatus, VersionStr},
 };
 use database::{
-	Db,
+	audit::{Action, Record, RecordKind},
 	artifacts::{
 		Artifact as ArtifactRow, MAX_HELD_ARTIFACT_BYTES, NewArtifact, Scope, digest_of, location,
 		parse_sri_opt, sri,
@@ -111,9 +114,9 @@ const REPORTING_SCHEMA_TYPE: &str = "reporting-schema";
 const SCHEMA_PLATFORM: &str = "any";
 
 pub fn routes() -> OpenApiRouter<AppState> {
-	OpenApiRouter::new().routes(routes!(public, silent: create)).merge(
+	OpenApiRouter::new().routes(routes!(public, audit(ArtifactRegistered): create)).merge(
 		OpenApiRouter::new()
-			.routes(routes!(public, silent: register_for_group))
+			.routes(routes!(public, audit(ArtifactRegistered): register_for_group))
 			.layer(DefaultBodyLimit::max(MAX_UPLOAD_BODY_BYTES)),
 	)
 }
@@ -160,7 +163,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 #[axum::debug_handler]
 async fn create(
 	device: ReleaserDevice,
-	State(db): State<Db>,
+	audit: Audit,
 	Path((version, artifact_type, platform)): Path<(String, String, String)>,
 	Query(named): Query<RegisterQuery>,
 	headers: axum::http::HeaderMap,
@@ -186,8 +189,9 @@ async fn create(
 		AppError::BadRequest("an artifact needs a download URL or a group".into())
 	})?;
 
-	let mut db = db.get().await?;
+	let mut db = audit.begin().await?;
 	let device_id = device.0.0.id;
+	audit.acting_as(device_actor(&device.0.0, None));
 
 	let (version_id, version_range_pattern) = if let Ok(semver) = SemverVersion::parse(&version) {
 		let version_str = VersionStr(semver);
@@ -241,6 +245,28 @@ async fn create(
 	)
 	.await?;
 
+	let version_record = match row.version_id {
+		Some(id) => Some(Record::new(
+			RecordKind::Version,
+			id,
+			version.clone(),
+		)),
+		None => None,
+	};
+	db.record(Action::ArtifactRegistered {
+		artifact: Record::new(
+			RecordKind::Artifact,
+			row.id,
+			format!("{} {}", row.artifact_type, row.platform),
+		),
+		version: version_record,
+		group: None,
+		device: Record::device(device_id),
+		artifact_type: row.artifact_type.clone(),
+		platform: row.platform.clone(),
+	})
+	.await?;
+
 	let base = crate::versions::public_base_url(&headers);
 	Ok(Json(Artifact::offered(row, &base, &version)))
 }
@@ -284,6 +310,7 @@ async fn create(
 async fn register_for_group(
 	device: AuthDevice,
 	State(state): State<AppState>,
+	audit: Audit,
 	Path((group, version, artifact_type, platform)): Path<(Uuid, String, String, String)>,
 	Query(named): Query<GroupRegisterQuery>,
 	headers: axum::http::HeaderMap,
@@ -293,6 +320,7 @@ async fn register_for_group(
 
 	let mut db = state.db.get().await?;
 	let device_id = device.0.id;
+	audit.acting_as(device_actor(&device.0, None));
 
 	// What a schema builder is authorised for is the artifact its declaration
 	// names. Any other type or platform registered under it would displace the
@@ -393,10 +421,35 @@ async fn register_for_group(
 	// spec: ART#where-an-artifact-rests
 	let existing = ArtifactRow::id_for_identity(&mut db, &input).await?;
 	let artifact_id = existing.unwrap_or_else(Uuid::new_v4);
-	store.put(artifact_id, Vec::from(body)).await?;
 
+	// The store is outside Canopy's records, so the entry stands before the
+	// bytes go into it, and is settled by whether the registration took.
+	let pending = audit
+		.commit_ahead(Action::ArtifactRegistered {
+			artifact: Record::new(
+				RecordKind::Artifact,
+				artifact_id,
+				format!("{artifact_type} {platform}", artifact_type = input.artifact_type, platform = input.platform),
+			),
+			version: Some(Record::new(
+				RecordKind::Version,
+				version_row.id,
+				format!("{}.{}.{}", version_row.major, version_row.minor, version_row.patch),
+			)),
+			group: Some(Record::group(&mut db, group).await?),
+			device: Record::device(device_id),
+			artifact_type: input.artifact_type.clone(),
+			platform: input.platform.clone(),
+		})
+		.await?;
+	if let Err(error) = store.put(artifact_id, Vec::from(body)).await {
+		audit.settle_failed(&pending, None).await?;
+		return Err(error);
+	}
+
+	let mut tx = audit.begin().await?;
 	let row = match ArtifactRow::register(
-		&mut db,
+		&mut tx,
 		NewArtifact {
 			id: Some(artifact_id),
 			..input
@@ -406,6 +459,7 @@ async fn register_for_group(
 	{
 		Ok(row) => row,
 		Err(refusal) => {
+			audit.settle_failed(&pending, None).await?;
 			// Only bytes put under an id minted here are dropped: under one
 			// already registered they are the live artifact's.
 			if existing.is_none()
@@ -416,6 +470,7 @@ async fn register_for_group(
 			return Err(refusal);
 		}
 	};
+	tx.settle_done(&pending, None).await?;
 
 	let base = crate::versions::public_base_url(&headers);
 	Ok(Json(Artifact::offered(row, &base, &version)))

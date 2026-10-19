@@ -17,6 +17,7 @@ use utoipa::{
 	modifiers(&SecuritySchemes, &RequestCompression, &DangerReasons),
 	tags(
 		(name = "admins", description = "Admin email allow-list management."),
+		(name = "audit", description = "The audit log of administrative actions."),
 		(name = "backups", description = "Group backup-repo onboarding, scheduling, and stats."),
 		(name = "bestool", description = "Bestool SQL snippet library."),
 		(name = "certificates", description = "TLS certificates: the DNS names each application holds them for, what it holds, the profile that governs them, and revocation."),

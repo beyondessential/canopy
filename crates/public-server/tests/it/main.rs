@@ -5,6 +5,7 @@
 
 mod application_aliases;
 mod artifact_scopes;
+mod audit;
 mod auth_requirements;
 mod backup;
 mod backup_secrets;

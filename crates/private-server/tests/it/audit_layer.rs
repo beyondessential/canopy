@@ -166,6 +166,7 @@ fn app(db: Db, actor: ActorSource) -> TestServer {
 		map: Arc::new(AuditMap::from_openapi(&spec)),
 		actor,
 		undeclared: Undeclared::Refuse,
+		mount: "",
 	};
 	TestServer::new(Router::from(router).layer(middleware::from_fn_with_state(state, enforce)))
 }

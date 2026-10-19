@@ -51,7 +51,7 @@ const CHALLENGE_TTL: jiff::SignedDuration = jiff::SignedDuration::from_mins(5);
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(public, silent: register_begin))
-		.routes(routes!(public, silent: register_complete))
+		.routes(routes!(public, audit(MachineEnrolled): register_complete))
 }
 
 /// Request to start device enrollment against a machine.
@@ -271,16 +271,16 @@ pub struct CompleteResponse {
 	),
 )]
 pub async fn register_complete(
-	State(db): State<Db>,
 	State(rl): State<RateLimiter>,
 	State(directory): State<Option<TailnetDirectory>>,
 	State(cert_header): State<mtls::ClientCertHeader>,
 	ClientIp(ip): ClientIp,
+	audit: commons_servers::audit::Audit,
 	headers: HeaderMap,
 	Json(args): Json<CompleteArgs>,
 ) -> Result<Json<CompleteResponse>> {
 	enforce_rate_limit(&rl, ip, args.server_id)?;
-	let mut db = db.get().await?;
+	let mut db = audit.begin().await?;
 	let tailnet = directory.is_some();
 	let spki = resolve_spki(&headers, args.spki.as_deref(), tailnet, cert_header)?;
 
@@ -397,6 +397,24 @@ pub async fn register_complete(
 			Ok(device_id)
 		})
 		.await?;
+
+	// The actor is the device this enrolment created, which is not known until
+	// it has.
+	audit.acting_as(database::audit::Actor::Device {
+		id: device_id,
+		name: None,
+		role: commons_types::device::DeviceRole::Machine,
+		application: None,
+	});
+	let machine = Machine::get_by_id(&mut db, args.server_id).await?;
+	db.record(database::audit::Action::MachineEnrolled {
+		machine: database::audit::Record::new(
+			database::audit::RecordKind::Machine,
+			machine.id,
+			machine.name,
+		),
+	})
+	.await?;
 
 	Ok(Json(CompleteResponse {
 		server_id: args.server_id,

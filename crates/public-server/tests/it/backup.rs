@@ -579,7 +579,9 @@ fn public_server_with_sts(url: &str, sts: aws_sdk_sts::Client) -> TestServer {
 		dns_zones: Vec::new(),
 	};
 	let app = router(
-		axum::Router::from(public_server::routes().with_state(state)),
+		public_server::audited(public_server::routes(), state.db.clone())
+			.0
+			.with_state(state),
 		ClientIpSource::RightmostForwarded,
 	);
 	let mut server = TestServer::new(app);
@@ -676,6 +678,70 @@ async fn credentials_backup_happy_path_200_and_audit() {
 		assert_eq!(iss.access_key_id.as_deref(), Some("AKIATESTKEY"));
 		assert_eq!(iss.sts_assumed_role, "arn:aws:iam::123456789012:role/grp");
 		assert_eq!(iss.bucket, "grp-bucket");
+
+		// The audit log holds the issue too: written ahead, settled with the
+		// credential's identifier, and never the secret itself.
+		let log = audit_entries(&mut conn).await;
+		assert_eq!(log.len(), 1);
+		let entry = &log[0];
+		assert_eq!(entry.action, "backup_credentials_issued");
+		assert_eq!(entry.status, database::audit::Status::Done);
+		assert!(matches!(
+			&entry.actor,
+			database::audit::Actor::Device { id, role, .. }
+				if *id == device_id && *role == commons_types::device::DeviceRole::Machine
+		));
+		assert_eq!(entry.detail["access_key_id"], "AKIATESTKEY");
+		assert_eq!(entry.detail["purpose"], "backup");
+		assert!(entry.records.iter().any(|record| record.name == "backup-test-group"));
+		let serialised = entry.detail.to_string();
+		assert!(!serialised.contains("test-secret-key"));
+		assert!(!serialised.contains("test-session-token"));
+	})
+	.await;
+}
+
+async fn audit_entries(conn: &mut AsyncPgConnection) -> Vec<database::audit::Entry> {
+	database::audit::find(
+		conn,
+		&database::audit::Filter {
+			include_routine: true,
+			limit: 100,
+			..Default::default()
+		},
+	)
+	.await
+	.expect("read the audit log")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn credentials_an_issuer_that_refuses_settles_the_entry_failed() {
+	commons_tests::db::TestDb::run(async |mut conn, url| {
+		let (device_id, cert) = seed_device(&mut conn, "server").await;
+		let group = make_group(&mut conn).await;
+		let server = make_server(&mut conn, device_id, Some(group)).await;
+		make_config(&mut conn, group, "ready").await;
+		enable_capability(&mut conn, server, "tamanu-postgres").await;
+
+		let refuses = mock!(aws_sdk_sts::Client::assume_role).then_error(|| {
+			aws_sdk_sts::operation::assume_role::AssumeRoleError::ExpiredTokenException(
+				aws_sdk_sts::types::error::ExpiredTokenException::builder().build(),
+			)
+		});
+		let sts = aws_smithy_mocks::mock_client!(aws_sdk_sts, RuleMode::MatchAny, [&refuses]);
+		let public = public_server_with_sts(&url, sts);
+
+		public
+			.post("/backup-credentials")
+			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+			.json(&serde_json::json!({ "type": "tamanu-postgres", "purpose": "backup" }))
+			.await
+			.assert_status(axum::http::StatusCode::BAD_GATEWAY);
+
+		let log = audit_entries(&mut conn).await;
+		assert_eq!(log.len(), 1, "the attempt is recorded though nothing was issued");
+		assert_eq!(log[0].status, database::audit::Status::Failed);
+		assert!(log[0].detail.get("access_key_id").is_none());
 	})
 	.await;
 }

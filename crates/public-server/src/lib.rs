@@ -37,14 +37,27 @@ pub fn audited(
 	router: OpenApiRouter<AppState>,
 	db: database::Db,
 ) -> (axum::Router<AppState>, utoipa::openapi::OpenApi) {
-	use commons_servers::audit::{ActorSource, AuditMap, AuditState, Undeclared, enforce};
+	audited_under(router, db, "", commons_servers::audit::Undeclared::Pass)
+}
+
+/// As [`audited`], for routes mounted beneath `mount` on another server, which
+/// has no pages of its own beside them: a route that declares nothing is then a
+/// fault rather than a page.
+pub fn audited_under(
+	router: OpenApiRouter<AppState>,
+	db: database::Db,
+	mount: &'static str,
+	undeclared: commons_servers::audit::Undeclared,
+) -> (axum::Router<AppState>, utoipa::openapi::OpenApi) {
+	use commons_servers::audit::{ActorSource, AuditMap, AuditState, enforce};
 
 	let (router, spec) = router.split_for_parts();
 	let state = AuditState {
 		db,
 		map: std::sync::Arc::new(AuditMap::from_openapi(&spec)),
 		actor: ActorSource::Handler,
-		undeclared: Undeclared::Pass,
+		undeclared,
+		mount,
 	};
 	(
 		router.layer(axum::middleware::from_fn_with_state(state, enforce)),

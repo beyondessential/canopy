@@ -19,13 +19,17 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
+use commons_servers::{
+	audit::Audit,
+	tailscale_auth::{TailscaleAdmin, TailscaleUser},
+};
 use commons_types::{
 	Uuid,
 	server::{app_type::ApplicationType, rank::ServerRank},
 };
 use database::{
 	Device,
+	audit::{Action, Record, RecordKind},
 	applications::Application,
 	inventory_leases::{InventoryLease, RunIntent},
 	inventory_variables::{InventoryVariable, VariableScope},
@@ -53,10 +57,10 @@ pub(super) const ANSIBLE_HOST: &str = "ansible_host";
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only, silent: for_group))
-		.routes(routes!(write, silent: take_lease))
-		.routes(routes!(write, silent: extend_lease))
-		.routes(routes!(write, silent: release_lease))
+		.routes(routes!(read_only, audit(InventoryRead): for_group))
+		.routes(routes!(write, audit(InventoryLeaseTaken, InventoryLeaseTakenOver): take_lease))
+		.routes(routes!(write, audit(InventoryLeaseExtended): extend_lease))
+		.routes(routes!(write, audit(InventoryLeaseReleased): release_lease))
 		.routes(routes!(read_only, silent: run_state))
 }
 
@@ -303,6 +307,19 @@ async fn resolve_environment(
 	})
 }
 
+/// The group and lease an entry about a lease names. The lease is named by the
+/// environment it holds.
+fn lease_records(group: &ServerGroup, lease: &InventoryLease) -> (Record, Record) {
+	(
+		Record::new(RecordKind::Group, group.id, group.name.clone()),
+		Record::new(
+			RecordKind::Lease,
+			lease.id,
+			format!("{} {}", group.name, lease.rank),
+		),
+	)
+}
+
 /// Take the environment's run lease.
 ///
 /// Refuses a group canopy does not have, one that has been archived, one
@@ -326,23 +343,27 @@ async fn resolve_environment(
 	),
 )]
 pub async fn take_lease(
-	State(state): State<AppState>,
+	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<TakeLeaseArgs>,
 ) -> Result<Json<InventoryLease>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
 	let environment = resolve_environment(&mut conn, &args.environment).await?;
 	let group = &environment.group;
 	let rank = environment.rank;
 	let login = admin.0.login.as_str();
 	let now = Timestamp::now();
 
-	if let Some(held) = InventoryLease::open_for(&mut conn, group.id, rank).await?
-		&& held.holds_for_another(Some(login), now)
+	let held = InventoryLease::open_for(&mut conn, group.id, rank).await?;
+	let taking_over = held
+		.as_ref()
+		.filter(|held| held.holds_for_another(Some(login), now));
+	if let Some(held) = taking_over
 		&& !args.take_over
 	{
 		return Err(AppError::Conflict(held.held_by_another()));
 	}
+	let previous_holder = taking_over.map(|held| held.held_by.clone());
 
 	if args.intent == RunIntent::Upgrade
 		&& rank == ServerRank::Production
@@ -380,6 +401,29 @@ pub async fn take_lease(
 		AppError::Conflict(under_maintenance(group, &environment.machines, &window))
 	})?;
 
+	let (group_record, lease_record) = lease_records(group, &taken);
+	let (intent, note, expires_at) = (args.intent.to_string(), taken.note.clone(), taken.expires_at);
+	conn.record(match previous_holder {
+		Some(previous_holder) => Action::InventoryLeaseTakenOver {
+			group: group_record,
+			lease: lease_record,
+			rank,
+			intent,
+			note,
+			expires_at,
+			previous_holder,
+		},
+		None => Action::InventoryLeaseTaken {
+			group: group_record,
+			lease: lease_record,
+			rank,
+			intent,
+			note,
+			expires_at,
+		},
+	})
+	.await?;
+
 	tracing::info!(
 		login = %admin.0.login,
 		group = %group.name,
@@ -410,17 +454,26 @@ pub async fn take_lease(
 	),
 )]
 pub async fn extend_lease(
-	State(state): State<AppState>,
+	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<LeaseArgs>,
 ) -> Result<Json<InventoryLease>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
 	let lease = InventoryLease::get(&mut conn, args.lease_id).await?;
 	held_by_caller(&lease, &admin.0.login)?;
 	if !lease.holds_at(Timestamp::now()) {
 		return Err(AppError::Conflict(no_longer_held(&lease, &admin.0.login)));
 	}
 	let extended = InventoryLease::extend(&mut conn, lease.id).await?;
+	let group = ServerGroup::get_by_id(&mut conn, extended.server_group_id).await?;
+	let (group_record, lease_record) = lease_records(&group, &extended);
+	conn.record(Action::InventoryLeaseExtended {
+		group: group_record,
+		lease: lease_record,
+		rank: extended.rank,
+		expires_at: extended.expires_at,
+	})
+	.await?;
 	tracing::info!(login = %admin.0.login, lease = %lease.id, "inventory lease extended");
 	Ok(Json(extended))
 }
@@ -442,15 +495,24 @@ pub async fn extend_lease(
 	),
 )]
 pub async fn release_lease(
-	State(state): State<AppState>,
+	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<LeaseArgs>,
 ) -> Result<Json<()>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
 	let lease = InventoryLease::get(&mut conn, args.lease_id).await?;
 	if !InventoryLease::release(&mut conn, lease.id, Some(&admin.0.login)).await? {
 		return Err(AppError::NotFound("that lease is no longer held".into()));
 	}
+	let group = ServerGroup::get_by_id(&mut conn, lease.server_group_id).await?;
+	let (group_record, lease_record) = lease_records(&group, &lease);
+	conn.record(Action::InventoryLeaseReleased {
+		group: group_record,
+		lease: lease_record,
+		rank: lease.rank,
+		held_by: lease.held_by.clone(),
+	})
+	.await?;
 	tracing::info!(
 		login = %admin.0.login,
 		lease = %lease.id,
@@ -537,6 +599,7 @@ pub async fn run_state(
 )]
 pub async fn for_group(
 	State(state): State<AppState>,
+	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<InventoryArgs>,
 ) -> Result<Json<InventoryView>> {
@@ -545,6 +608,20 @@ pub async fn for_group(
 	held_by_caller(&lease, &admin.0.login)?;
 	if !lease.holds_at(Timestamp::now()) {
 		return Err(AppError::Conflict(no_longer_held(&lease, &admin.0.login)));
+	}
+	// Recorded before the read, so a read that fails is recorded as failed: the
+	// layer settles it by how the handler ends.
+	{
+		let group = ServerGroup::get_by_id(&mut conn, lease.server_group_id).await?;
+		let (group_record, lease_record) = lease_records(&group, &lease);
+		audit
+			.read(Action::InventoryRead {
+				group: group_record,
+				lease: lease_record,
+				rank: lease.rank,
+				intent: lease.intent.to_string(),
+			})
+			.await?;
 	}
 
 	let environment = resolve_environment(

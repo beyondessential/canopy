@@ -168,12 +168,21 @@ pub fn __set_danger_reasons(operation: &mut utoipa::openapi::path::Operation, re
 /// Its value is an array of action names, empty for a handler that is silent.
 pub const AUDIT_EXTENSION: &str = "x-canopy-audit";
 
+/// The OpenAPI operation-extension key marking a handler whose declared actions
+/// are ones it may record, rather than ones it must: it records none on a
+/// request that takes no action, as a status report does unless it creates a
+/// record. Present and `true` for such a handler.
+pub const AUDIT_OPTIONAL_EXTENSION: &str = "x-canopy-audit-optional";
+
 /// Record a handler's audit declaration on its OpenAPI operation. Called by the
 /// [`routes`] macro; not meant to be called directly.
 #[doc(hidden)]
-pub fn __set_audit(operation: &mut utoipa::openapi::path::Operation, actions: &[&str]) {
+pub fn __set_audit(operation: &mut utoipa::openapi::path::Operation, actions: &[&str], optional: bool) {
     use utoipa::openapi::extensions::Extensions;
-    let incoming = Extensions::from_iter([(AUDIT_EXTENSION, actions.to_vec())]);
+    let mut incoming = Extensions::from_iter([(AUDIT_EXTENSION, actions.to_vec())]);
+    if optional {
+        incoming.merge(Extensions::from_iter([(AUDIT_OPTIONAL_EXTENSION, true)]));
+    }
     operation
         .extensions
         .get_or_insert_with(Extensions::default)
@@ -296,24 +305,19 @@ macro_rules! routes {
     // operation extension and read back by the server to enforce it. The audit
     // clause beside it says whether the handler is audited or silent (see the
     // AUD spec), and which actions an audited one takes.
-    ( read_only, silent : $handler:path $(,)? ) => { $crate::routes!( @graded "read-only" [] silent : $handler ) };
-    ( read_only, audit( $( $action:ident ),+ $(,)? ) : $handler:path $(,)? ) => {
-        $crate::routes!( @graded "read-only" [] audit [ $( $crate::routes!( @action $action ) ),+ ] : $handler )
+    ( read_only, $clause:ident $( ( $( $action:ident ),+ $(,)? ) )? : $handler:path $(,)? ) => {
+        $crate::routes!( @graded "read-only" [] $clause $( [ $( $crate::routes!( @action $action ) ),+ ] )? : $handler )
     };
-    ( write, silent : $handler:path $(,)? ) => { $crate::routes!( @graded "write" [] silent : $handler ) };
-    ( write, audit( $( $action:ident ),+ $(,)? ) : $handler:path $(,)? ) => {
-        $crate::routes!( @graded "write" [] audit [ $( $crate::routes!( @action $action ) ),+ ] : $handler )
+    ( write, $clause:ident $( ( $( $action:ident ),+ $(,)? ) )? : $handler:path $(,)? ) => {
+        $crate::routes!( @graded "write" [] $clause $( [ $( $crate::routes!( @action $action ) ),+ ] )? : $handler )
     };
     // A danger handler also says why, as one or more reasons from
     // `DANGER_REASONS`: `routes!(danger(fleet, invalidates), silent: revoke)`. The
     // operator is told these when a blocked control asks to raise.
-    ( danger( $( $reason:ident ),+ $(,)? ), silent : $handler:path $(,)? ) => {
-        $crate::routes!( @graded "danger" [ $( $crate::routes!( @reason $reason ) ),+ ] silent : $handler )
-    };
-    ( danger( $( $reason:ident ),+ $(,)? ), audit( $( $action:ident ),+ $(,)? ) : $handler:path $(,)? ) => {
+    ( danger( $( $reason:ident ),+ $(,)? ), $clause:ident $( ( $( $action:ident ),+ $(,)? ) )? : $handler:path $(,)? ) => {
         $crate::routes!(
             @graded "danger" [ $( $crate::routes!( @reason $reason ) ),+ ]
-            audit [ $( $crate::routes!( @action $action ) ),+ ] : $handler
+            $clause $( [ $( $crate::routes!( @action $action ) ),+ ] )? : $handler
         )
     };
     ( danger : $handler:path $(,)? ) => {
@@ -345,9 +349,19 @@ macro_rules! routes {
     // than being the shape an entry falls into by omission. It still declares
     // whether it is audited. One handler to an entry, as the graded surface: a
     // path serving two methods is two entries, which axum merges.
-    ( public, silent : $handler:path $(,)? ) => { $crate::routes!( @public silent : $handler ) };
-    ( public, audit( $( $action:ident ),+ $(,)? ) : $handler:path $(,)? ) => {
-        $crate::routes!( @public audit [ $( $crate::routes!( @action $action ) ),+ ] : $handler )
+    ( public, $clause:ident $( ( $( $action:ident ),+ $(,)? ) )? : $handler:path $(,)? ) => {
+        $crate::routes!( @public $clause $( [ $( $crate::routes!( @action $action ) ),+ ] )? : $handler )
+    };
+    // How a clause reads: `silent` takes no action, `audit(...)` must record at
+    // least one of the actions it names, and `audit_optional(...)` may.
+    ( @optional silent ) => { false };
+    ( @optional audit ) => { false };
+    ( @optional audit_optional ) => { true };
+    ( @optional $other:ident ) => {
+        compile_error!(
+            "an audit declaration is `silent`, `audit(Action, ...)` or `audit_optional(Action, ...)`. \
+             See the AUD spec."
+        )
     };
     ( $schemas:tt: $router:ident: $paths:ident: $handler:path $(, $tail:tt)* ) => {
         {
@@ -366,7 +380,7 @@ macro_rules! routes {
             let mut schemas = Vec::<(String, utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>)>::new();
             let (path, mut item, types) = $crate::routes!(@resolve_types $handler : schemas);
             let actions: &[&str] = &[ $( $( $action ),* )? ];
-            $crate::__set_audit(&mut item, actions);
+            $crate::__set_audit(&mut item, actions, $crate::routes!( @optional $audit ));
             $( let _ = [ $( $action ),* ]; $crate::__assert_audited(&$handler); )?
             let method_router = types.iter().by_ref().fold(axum::routing::MethodRouter::new(), |router, path_type| {
                 router.on(path_type.to_method_filter(), $handler)
@@ -387,7 +401,7 @@ macro_rules! routes {
                 $crate::__set_danger_reasons(&mut item, reasons);
             }
             let actions: &[&str] = &[ $( $( $action ),* )? ];
-            $crate::__set_audit(&mut item, actions);
+            $crate::__set_audit(&mut item, actions, $crate::routes!( @optional $audit ));
             $( let _ = [ $( $action ),* ]; $crate::__assert_audited(&$handler); )?
             let method_router = types.iter().by_ref().fold(axum::routing::MethodRouter::new(), |router, path_type| {
                 router.on(path_type.to_method_filter(), $handler)

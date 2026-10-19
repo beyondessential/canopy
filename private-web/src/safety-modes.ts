@@ -11,6 +11,8 @@ export const SAFETY_MODES = {
 	"admins/add": "danger",
 	"admins/delete": "danger",
 	"admins/list": "read-only",
+	"audit/filters": "read-only",
+	"audit/list": "read-only",
 	"backups/allow_restore": "write",
 	"backups/cancel_maintenance": "write",
 	"backups/cancel_request": "write",

@@ -22,6 +22,7 @@
 //! across more than one of those modules.
 
 mod applications;
+mod audit;
 mod backups;
 mod fleet;
 mod groups;
@@ -43,6 +44,12 @@ use rmcp::{
 	},
 };
 
+/// The tools that are audited, as against silent. None are: every tool reads,
+/// and a read is audited only where its spec names the action (see the AUD
+/// spec). A tool that changes something would be listed here and record through
+/// the audit log; the test below holds every other tool to being a read.
+pub const AUDITED_TOOLS: &[&str] = &[];
+
 #[derive(Clone)]
 pub struct CanopyMcp {
 	db: database::Db,
@@ -54,6 +61,7 @@ impl CanopyMcp {
 		Self {
 			db,
 			tool_router: Self::applications_router()
+				+ Self::audit_router()
 				+ Self::machines_router()
 				+ Self::groups_router()
 				+ Self::versions_router()
@@ -159,4 +167,29 @@ pub fn service(db: database::Db) -> StreamableHttpService<CanopyMcp, LocalSessio
 		LocalSessionManager::default().into(),
 		config,
 	)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[tokio::test]
+	async fn every_tool_is_audited_or_a_silent_read() {
+		let tools = CanopyMcp::new(database::init_to("postgres://localhost/unused"))
+			.tool_router
+			.list_all();
+		assert!(!tools.is_empty());
+		for tool in tools {
+			let silent_read = tool
+				.annotations
+				.as_ref()
+				.and_then(|annotations| annotations.read_only_hint)
+				== Some(true);
+			assert!(
+				silent_read || AUDITED_TOOLS.contains(&tool.name.as_ref()),
+				"tool {} is neither a read nor declared audited",
+				tool.name
+			);
+		}
+	}
 }

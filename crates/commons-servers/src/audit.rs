@@ -32,7 +32,7 @@ use axum::{
 	middleware::Next,
 	response::Response,
 };
-use canopy_utoipa_axum::{AUDIT_EXTENSION, AuditExtractor};
+use canopy_utoipa_axum::{AUDIT_EXTENSION, AUDIT_OPTIONAL_EXTENSION, AuditExtractor};
 use commons_errors::{AppError, Result};
 use database::{
 	Db, PooledConnection,
@@ -46,7 +46,16 @@ use crate::tailscale_auth::TailscaleUser;
 /// The actions each handler declares, keyed by the method and routed path the
 /// request matched. A handler that is silent declares none.
 #[derive(Debug, Default)]
-pub struct AuditMap(HashMap<(Method, String), Vec<String>>);
+pub struct AuditMap(HashMap<(Method, String), Declared>);
+
+/// The actions a handler declares, and whether it must record one.
+#[derive(Debug, Clone, Default)]
+pub struct Declared {
+	pub actions: Vec<String>,
+	/// A handler that may record these without having to: it records none on a
+	/// request that takes no action.
+	pub optional: bool,
+}
 
 impl AuditMap {
 	/// Read every operation's declaration out of the built OpenAPI document.
@@ -81,7 +90,13 @@ impl AuditMap {
 					.iter()
 					.filter_map(|action| action.as_str().map(str::to_owned))
 					.collect();
-				map.insert((method, path.clone()), actions);
+				let optional = operation
+					.extensions
+					.as_ref()
+					.and_then(|ext| ext.get(AUDIT_OPTIONAL_EXTENSION))
+					.and_then(|value| value.as_bool())
+					.unwrap_or(false);
+				map.insert((method, path.clone()), Declared { actions, optional });
 			}
 		}
 		Self(map)
@@ -89,10 +104,8 @@ impl AuditMap {
 
 	/// The actions a request matching this method and path declares: empty for
 	/// a silent handler, `None` where the handler declares nothing.
-	pub fn declared(&self, method: &Method, path: &str) -> Option<&[String]> {
-		self.0
-			.get(&(method.clone(), path.to_owned()))
-			.map(Vec::as_slice)
+	pub fn declared(&self, method: &Method, path: &str) -> Option<&Declared> {
+		self.0.get(&(method.clone(), path.to_owned()))
 	}
 
 	/// Whether any method on this path declares something.
@@ -111,13 +124,19 @@ impl AuditMap {
 
 	/// How many of them are audited rather than silent.
 	pub fn audited(&self) -> usize {
-		self.0.values().filter(|actions| !actions.is_empty()).count()
+		self.0
+			.values()
+			.filter(|declared| !declared.actions.is_empty())
+			.count()
 	}
 
 	/// Every action name any handler declares, for checking against the
 	/// catalogue.
 	pub fn action_names(&self) -> impl Iterator<Item = &str> {
-		self.0.values().flatten().map(String::as_str)
+		self.0
+			.values()
+			.flat_map(|declared| declared.actions.iter())
+			.map(String::as_str)
 	}
 }
 
@@ -129,6 +148,17 @@ pub enum ActorSource {
 	/// Whoever the handler authenticates, which it names with
 	/// [`Audit::acting_as`].
 	Handler,
+}
+
+/// A device as an actor, and the application it acted for where it acted for
+/// one.
+pub fn device_actor(device: &database::Device, application: Option<uuid::Uuid>) -> Actor {
+	Actor::Device {
+		id: device.id,
+		name: None,
+		role: device.role,
+		application,
+	}
 }
 
 /// What a route that declares nothing is.
@@ -149,6 +179,9 @@ pub struct AuditState {
 	pub map: Arc<AuditMap>,
 	pub actor: ActorSource,
 	pub undeclared: Undeclared,
+	/// Where the routes are mounted beneath, where the declarations are of the
+	/// routes without it: a nested router's matched path carries the mount.
+	pub mount: &'static str,
 }
 
 /// An entry committed ahead whose read the layer settles if the handler does not.
@@ -162,6 +195,7 @@ struct ReadEntry {
 pub struct AuditSession {
 	db: Db,
 	declared: Vec<String>,
+	optional: bool,
 	actor: Mutex<Option<Actor>>,
 	recorded: Mutex<Vec<&'static str>>,
 	reads: Mutex<Vec<ReadEntry>>,
@@ -169,10 +203,11 @@ pub struct AuditSession {
 }
 
 impl AuditSession {
-	fn new(db: Db, declared: Vec<String>, actor: Option<Actor>) -> Self {
+	fn new(db: Db, declared: Declared, actor: Option<Actor>) -> Self {
 		Self {
 			db,
-			declared,
+			declared: declared.actions,
+			optional: declared.optional,
 			actor: Mutex::new(actor),
 			recorded: Mutex::default(),
 			reads: Mutex::default(),
@@ -212,7 +247,7 @@ impl AuditSession {
 	/// recorded anything at all.
 	fn check(&self) -> Result<()> {
 		let recorded = self.recorded.lock().unwrap_or_else(|held| held.into_inner());
-		if recorded.is_empty() {
+		if recorded.is_empty() && !self.optional {
 			return Err(AppError::custom(
 				"this audited handler completed without recording an action",
 			));
@@ -417,6 +452,10 @@ pub async fn enforce(
 		.get::<MatchedPath>()
 		.map(|matched| matched.as_str().to_owned())
 		.unwrap_or_else(|| request.uri().path().to_owned());
+	let path = path
+		.strip_prefix(state.mount)
+		.map(str::to_owned)
+		.unwrap_or(path);
 
 	let Some(declared) = state.map.declared(request.method(), &path) else {
 		// A route that declares nothing is the server failing to recognise its
@@ -431,10 +470,10 @@ pub async fn enforce(
 			"no audit declaration is made for {path}"
 		)));
 	};
-	if declared.is_empty() {
+	if declared.actions.is_empty() {
 		return Ok(next.run(request).await);
 	}
-	let declared = declared.to_vec();
+	let declared = declared.clone();
 
 	let (mut parts, body) = request.into_parts();
 	let actor = match state.actor {

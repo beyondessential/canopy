@@ -3,10 +3,11 @@ use std::collections::{HashMap, hash_map::Entry};
 use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
-use commons_errors::{ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::TailscaleAdmin;
+use commons_errors::{AppError, ProblemDetailsSchema, Result};
+use commons_servers::{audit::Audit, tailscale_auth::TailscaleAdmin};
 use commons_types::server::rank::ServerRank;
 use database::{
+	audit::{Action, Record},
 	server_groups::ServerGroup,
 	upgrade_plans::{PlanOutcome, PlannedWhen, UpgradePlan},
 };
@@ -27,9 +28,9 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(read_only, silent: history))
 		.routes(routes!(read_only, silent: targets))
 		.routes(routes!(read_only, silent: for_group))
-		.routes(routes!(write, silent: record))
-		.routes(routes!(write, silent: amend))
-		.routes(routes!(write, silent: withdraw))
+		.routes(routes!(write, audit(UpgradePlanRecorded): record))
+		.routes(routes!(write, audit(UpgradePlanAmended): amend))
+		.routes(routes!(write, audit(UpgradePlanWithdrawn): withdraw))
 }
 
 /// The hours a plan says its work runs, resolved to instants.
@@ -690,11 +691,11 @@ pub struct RecordArgs {
 	),
 )]
 pub async fn record(
-	State(state): State<AppState>,
+	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<RecordArgs>,
 ) -> Result<Json<UpgradePlan>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
 	let note = args
 		.note
 		.as_deref()
@@ -714,6 +715,17 @@ pub async fn record(
 		note,
 		&admin.0.login,
 	)
+	.await?;
+	let plan_record = Record::upgrade_plan(&mut conn, &plan).await?;
+	let group_record = Record::group(&mut conn, plan.group_id).await?;
+	conn.record(Action::UpgradePlanRecorded {
+		plan: plan_record,
+		group: group_record,
+		rank: plan.rank,
+		planned_for: plan.planned_for.map(|date| date.to_string()),
+		planned_time: plan.planned_time.map(|time| time.to_string()),
+		note: plan.note.clone(),
+	})
 	.await?;
 	Ok(Json(plan))
 }
@@ -762,11 +774,11 @@ pub struct AmendArgs {
 	),
 )]
 pub async fn amend(
-	State(state): State<AppState>,
+	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<AmendArgs>,
 ) -> Result<Json<UpgradePlan>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
 	let note = args
 		.note
 		.as_deref()
@@ -784,6 +796,17 @@ pub async fn amend(
 		note,
 		&admin.0.login,
 	)
+	.await?;
+	let plan_record = Record::upgrade_plan(&mut conn, &plan).await?;
+	let group_record = Record::group(&mut conn, plan.group_id).await?;
+	conn.record(Action::UpgradePlanAmended {
+		plan: plan_record,
+		group: group_record,
+		rank: plan.rank,
+		planned_for: plan.planned_for.map(|date| date.to_string()),
+		planned_time: plan.planned_time.map(|time| time.to_string()),
+		note: plan.note.clone(),
+	})
 	.await?;
 	Ok(Json(plan))
 }
@@ -814,12 +837,22 @@ pub struct WithdrawArgs {
 	),
 )]
 pub async fn withdraw(
-	State(state): State<AppState>,
+	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<WithdrawArgs>,
 ) -> Result<Json<()>> {
-	let mut conn = state.db.get().await?;
-	UpgradePlan::withdraw(&mut conn, args.id, &admin.0.login).await?;
+	let mut conn = audit.begin().await?;
+	let plan = UpgradePlan::withdraw(&mut conn, args.id, &admin.0.login)
+		.await?
+		.ok_or_else(|| AppError::NotFound("no open plan with that identifier".into()))?;
+	let plan_record = Record::upgrade_plan(&mut conn, &plan).await?;
+	let group_record = Record::group(&mut conn, plan.group_id).await?;
+	conn.record(Action::UpgradePlanWithdrawn {
+		plan: plan_record,
+		group: group_record,
+		rank: plan.rank,
+	})
+	.await?;
 	Ok(Json(()))
 }
 

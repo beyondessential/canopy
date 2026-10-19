@@ -335,11 +335,10 @@ pub async fn declare(
 		}
 	} else {
 		let upgrade_plan = match args.upgrade_plan_id {
-			Some(plan) => Some(Record::new(
-				RecordKind::UpgradePlan,
-				plan,
-				target.name.clone(),
-			)),
+			Some(plan) => {
+				let plan = database::upgrade_plans::UpgradePlan::get_open(&mut conn, plan).await?;
+				Some(Record::upgrade_plan(&mut conn, &plan).await?)
+			}
 			None => None,
 		};
 		Action::MaintenanceDeclared {

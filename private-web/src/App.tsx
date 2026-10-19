@@ -22,6 +22,7 @@ import BackupDefaults from "./routes/BackupDefaults";
 import RecoveryVault from "./routes/RecoveryVault";
 import BackupPanel from "./routes/BackupPanel";
 import CertificateAuthority from "./routes/CertificateAuthority";
+import AuditLog from "./routes/AuditLog";
 import McpTokens from "./routes/McpTokens";
 import KubernetesClusters from "./routes/KubernetesClusters";
 import RestoreConsumers from "./routes/RestoreConsumers";
@@ -370,6 +371,7 @@ export default function App() {
 						<Route path="restore-consumers" element={<RestoreConsumers />} />
 						<Route path="clusters" element={<KubernetesClusters />} />
 						<Route path="mcp-tokens" element={<McpTokens />} />
+						<Route path="audit-log" element={<AuditLog />} />
 						<Route
 							path="certificate-authority"
 							element={<CertificateAuthority />}
