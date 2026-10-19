@@ -17,7 +17,7 @@ import {
 	AppSidebar,
 	Brand,
 	IncidentCount,
-	SECTIONS,
+	navSections,
 } from "./components/AppSidebar";
 import { AdminProvider } from "./hooks/useIsAdmin";
 import { SafetyModeProvider } from "./hooks/useSafetyMode";
@@ -103,12 +103,9 @@ export default function App() {
 	);
 	const openIncidentsCount =
 		openIncidents.status === "ok" ? openIncidents.data.length : 0;
-	const sections = [
-		...SECTIONS,
-		...(sqlAvailable.status === "ok" && sqlAvailable.data
-			? [{ label: "SQL", to: "/sql" }]
-			: []),
-	];
+	const sections = navSections(
+		sqlAvailable.status === "ok" && !!sqlAvailable.data,
+	);
 	const theme = useTheme();
 	const wide = useMediaQuery(theme.breakpoints.up("md"), { noSsr: true });
 	const [drawerOpen, setDrawerOpen] = useState(false);

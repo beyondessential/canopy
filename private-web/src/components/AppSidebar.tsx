@@ -38,13 +38,15 @@ export interface NavSection {
 	label: string;
 	to: string;
 	groups?: NavGroup[];
+	/** Listed only where the SQL console is available. */
+	needsSql?: boolean;
 }
 
 function page(label: string, to: string, adminOnly?: boolean): NavPage {
 	return { label, to, current: under(to), adminOnly };
 }
 
-export const SECTIONS: NavSection[] = [
+const SECTIONS: NavSection[] = [
 	{ label: "Status", to: "/status" },
 	{ label: "Incidents", to: "/incidents" },
 	{
@@ -121,7 +123,13 @@ export const SECTIONS: NavSection[] = [
 			},
 		],
 	},
+	{ label: "SQL", to: "/sql", needsSql: true },
 ];
+
+/** The sections offered, given whether the SQL console is available. */
+export function navSections(sqlAvailable: boolean): NavSection[] {
+	return SECTIONS.filter((section) => sqlAvailable || !section.needsSql);
+}
 
 /** The Canopy mark and name, linking home. */
 export function Brand() {
