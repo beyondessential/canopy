@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sidebar safety mode band, its modes and open menu</title>
+<style>
+	* { box-sizing: border-box; }
+	body {
+		margin: 0;
+		padding: 24px;
+		font-family: "Roboto", "Helvetica", "Arial", sans-serif;
+		font-size: 1rem;
+		line-height: 1.5;
+		letter-spacing: 0.00938em;
+		color: rgba(0, 0, 0, 0.87);
+		background: #fff;
+	}
+
+	.states { display: flex; flex-wrap: wrap; gap: 32px; }
+	.state > p {
+		margin: 0 0 8px;
+		color: rgba(0, 0, 0, 0.6);
+		font-size: 0.875rem;
+	}
+
+	.brand {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 12px 24px;
+		color: #388e3c;
+		text-decoration: none;
+		font-size: 1.25rem;
+		font-weight: 500;
+		letter-spacing: 0.0075em;
+	}
+	.brand svg { width: 24px; height: 24px; }
+
+	.sidebar {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		width: 240px;
+		height: 620px;
+		background: #f5f5f5;
+		box-shadow: 0 2px 1px -1px rgba(0,0,0,0.2), 0 1px 1px 0 rgba(0,0,0,0.14), 0 1px 3px 0 rgba(0,0,0,0.12);
+	}
+	.sections {
+		flex: 1;
+		overflow-y: auto;
+		margin: 0;
+		padding: 8px;
+		list-style: none;
+	}
+	.section {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 6px 16px;
+		border-radius: 4px;
+		color: rgba(0, 0, 0, 0.6);
+		font-weight: 500;
+		text-decoration: none;
+	}
+	.section.active { color: #32669a; }
+	.section svg { width: 20px; height: 20px; fill: rgba(0, 0, 0, 0.54); }
+	.count {
+		min-width: 20px;
+		height: 20px;
+		padding: 0 6px;
+		border-radius: 10px;
+		background: #d32f2f;
+		color: #fff;
+		font-size: 0.75rem;
+		font-weight: 500;
+		line-height: 20px;
+		text-align: center;
+	}
+	.sections .external { margin-top: 8px; }
+	.section .out { display: inline-flex; align-items: center; gap: 4px; }
+	.section .out svg { width: 1em; height: 1em; fill: currentColor; }
+
+	.mode-band {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		width: 100%;
+		min-height: 48px;
+		padding: 0 16px 0 24px;
+		border: 0;
+		border-top: 1px solid rgba(0, 0, 0, 0.12);
+		background: transparent;
+		color: rgba(0, 0, 0, 0.6);
+		font: inherit;
+		font-size: 0.875rem;
+		font-weight: 500;
+		line-height: 1.75;
+		text-align: left;
+		cursor: pointer;
+	}
+	.mode-band:hover, .mode-band.open { background: rgba(0, 0, 0, 0.04); }
+	.mode-band::before {
+		content: "";
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: currentColor;
+	}
+	.mode-band .label { flex: 1; }
+	.mode-band .left { font-variant-numeric: tabular-nums; opacity: 0.75; }
+	.mode-band svg { width: 20px; height: 20px; fill: currentColor; }
+	.mode-band.write {
+		border-top-color: #ed6c02;
+		background-color: #ed6c02; /* warning.main */
+		background-image: repeating-linear-gradient(135deg, rgba(255,152,0,0.5), rgba(255,152,0,0.5) 6px, rgba(255,152,0,0) 6px, rgba(255,152,0,0) 12px);
+		color: #fff;
+	}
+	.mode-band.write:hover, .mode-band.write.open { background-color: #e65100; }
+	.mode-band.danger {
+		border-top-color: #d32f2f;
+		background-color: #d32f2f; /* error.main */
+		background-image: repeating-linear-gradient(45deg, rgba(239,83,80,0.5), rgba(239,83,80,0.5) 6px, rgba(239,83,80,0) 6px, rgba(239,83,80,0) 12px);
+		color: #fff;
+	}
+	.mode-band.danger:hover, .mode-band.danger.open { background-color: #c62828; }
+
+	/* The mode menu, opening upwards from the band at the sidebar's width. */
+	.menu {
+		position: absolute;
+		left: 8px;
+		right: 8px;
+		bottom: 56px;
+		margin: 0;
+		padding: 8px 0;
+		list-style: none;
+		border-radius: 4px;
+		background: #fff;
+		box-shadow: 0 5px 5px -3px rgba(0,0,0,0.2), 0 8px 10px 1px rgba(0,0,0,0.14), 0 3px 14px 2px rgba(0,0,0,0.12);
+	}
+	.menu li {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 6px 16px;
+		cursor: pointer;
+	}
+	.menu li::before {
+		content: "";
+		flex: none;
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: currentColor;
+	}
+	.menu li:hover { background: rgba(0, 0, 0, 0.04); }
+	.menu li[aria-current="true"] { background: rgba(56, 142, 60, 0.08); }
+	.menu .primary { display: block; }
+	.menu .secondary {
+		display: block;
+		color: rgba(0, 0, 0, 0.6);
+		font-size: 0.875rem;
+		line-height: 1.43;
+		letter-spacing: 0.01071em;
+	}
+	.menu .read-only { color: rgba(0, 0, 0, 0.6); }
+	.menu .write, .menu .danger { filter: grayscale(0.8); }
+	.menu .write {
+		color: #ed6c02;
+		background-image: repeating-linear-gradient(135deg, rgba(255,152,0,0.24), rgba(255,152,0,0.24) 6px, rgba(255,152,0,0.07) 6px, rgba(255,152,0,0.07) 12px);
+	}
+	.menu .danger {
+		color: #d32f2f;
+		background-image: repeating-linear-gradient(45deg, rgba(239,83,80,0.24), rgba(239,83,80,0.24) 6px, rgba(239,83,80,0.07) 6px, rgba(239,83,80,0.07) 12px);
+	}
+	.menu .write:hover, .menu .danger:hover,
+	.menu .write[aria-current="true"], .menu .danger[aria-current="true"] { filter: grayscale(0); }
+</style>
+</head>
+<body>
+	<template id="sections">
+		<a class="brand" href="#">
+			<svg viewBox="0 0 100 100" aria-hidden="true">
+				<rect width="100" height="100" rx="10" fill="#32669A"/>
+				<circle cx="50" cy="50" r="36" fill="white"/>
+				<rect x="42" y="26" width="16" height="48" fill="#388E3C"/>
+				<rect x="26" y="42" width="48" height="16" fill="#388E3C"/>
+			</svg>
+			Canopy
+		</a>
+		<ul class="sections">
+			<li><a class="section active" href="#">Status</a></li>
+			<li><a class="section" href="#">Incidents<span class="count">2</span></a></li>
+			<li><a class="section" href="#">Fleet<svg viewBox="0 0 24 24"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></a></li>
+			<li><a class="section" href="#">Versions</a></li>
+			<li><a class="section" href="#">Upgrades</a></li>
+			<li><a class="section" href="#">Maintenance</a></li>
+			<li><a class="section" href="#">Devices<svg viewBox="0 0 24 24"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></a></li>
+			<li><a class="section" href="#">Bestool</a></li>
+			<li><a class="section" href="#">Settings<svg viewBox="0 0 24 24"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></a></li>
+			<li class="external"><a class="section" href="#"><span class="out">Public<svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3z"/></svg></span></a></li>
+			<li><a class="section" href="#"><span class="out">Server Versions<svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3z"/></svg></span></a></li>
+		</ul>
+	</template>
+
+	<div class="states">
+		<div class="state">
+			<p>Read-only</p>
+			<nav class="sidebar">
+				<button class="mode-band"><span class="label">Read-only</span><svg viewBox="0 0 24 24"><path d="m12 8-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z"/></svg></button>
+			</nav>
+		</div>
+
+		<div class="state">
+			<p>Write, counting down</p>
+			<nav class="sidebar">
+				<button class="mode-band write"><span class="label">Write</span><span class="left">9:12</span><svg viewBox="0 0 24 24"><path d="m12 8-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z"/></svg></button>
+			</nav>
+		</div>
+
+		<div class="state">
+			<p>Danger, counting down</p>
+			<nav class="sidebar">
+				<button class="mode-band danger"><span class="label">Danger</span><span class="left">4:37</span><svg viewBox="0 0 24 24"><path d="m12 8-6 6 1.41 1.41L12 10.83l4.59 4.58L18 14z"/></svg></button>
+			</nav>
+		</div>
+
+		<div class="state">
+			<p>Menu open from read-only</p>
+			<nav class="sidebar">
+				<ul class="menu" role="menu">
+					<li class="read-only" aria-current="true"><span><span class="primary">Read-only</span><span class="secondary">Current</span></span></li>
+					<li class="write"><span><span class="primary">Write</span><span class="secondary">Ten minutes</span></span></li>
+					<li class="danger"><span><span class="primary">Danger</span><span class="secondary">Ten minutes, confirms first</span></span></li>
+				</ul>
+				<button class="mode-band open" aria-expanded="true"><span class="label">Read-only</span><svg viewBox="0 0 24 24"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></button>
+			</nav>
+		</div>
+
+		<div class="state">
+			<p>Menu open from write</p>
+			<nav class="sidebar">
+				<ul class="menu" role="menu">
+					<li class="read-only"><span><span class="primary">Read-only</span><span class="secondary">Back to reading</span></span></li>
+					<li class="write" aria-current="true"><span><span class="primary">Write</span><span class="secondary">Current</span></span></li>
+					<li class="danger"><span><span class="primary">Danger</span><span class="secondary">Ten minutes, confirms first</span></span></li>
+				</ul>
+				<button class="mode-band write open" aria-expanded="true"><span class="label">Write</span><span class="left">9:12</span><svg viewBox="0 0 24 24"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg></button>
+			</nav>
+		</div>
+	</div>
+
+	<script>
+		const sections = document.getElementById("sections");
+		for (const sidebar of document.querySelectorAll(".sidebar")) {
+			sidebar.prepend(sections.content.cloneNode(true));
+		}
+	</script>
+</body>
+</html>
