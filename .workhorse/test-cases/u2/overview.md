@@ -48,6 +48,7 @@ Covers this card's part of [AUD](../../specs/platform/audit-log.md). Archive and
 - [ ] The log page lists entries newest first and filters by actor, action, time, and the records acted on (verifies spec: AUD#reading-the-log)
 - [ ] A non-administrator cannot reach the log page (verifies spec: AUD#reading-the-log)
 - [ ] "Find audit entries" returns entries with the same filters to any caller of the fleet query interface (verifies spec: MCP#audit-log)
+- [ ] "Find audit entries" refuses a window longer than ninety days, naming the limit, and returns no year-kept entry older than that (verifies spec: MCP#audit-log)
 
 ## Keeping entries
 

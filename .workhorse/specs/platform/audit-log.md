@@ -109,7 +109,7 @@ Any administrator can read the whole log from the operator interface.
 The log page lists entries newest first, and can be filtered by actor, action, time, and the records acted on.
 A time range reaching back past what the database holds is answered from the archive, fetching the weeks it covers.
 
-The fleet query interface offers the log to any caller it serves, over what the database holds.
+The fleet query interface offers the last ninety days of the log to any caller it serves.
 
 ## Self-alerts
 
