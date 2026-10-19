@@ -117,6 +117,24 @@ diesel::table! {
 }
 
 diesel::table! {
+	audit_entries (id, recorded_at, retention) {
+		id -> Uuid,
+		recorded_at -> Timestamptz,
+		retention -> Text,
+		actor_kind -> Text,
+		actor_id -> Text,
+		actor_name -> Nullable<Text>,
+		actor_role -> Nullable<Text>,
+		actor_application_id -> Nullable<Uuid>,
+		action -> Text,
+		records -> Jsonb,
+		detail -> Jsonb,
+		outcome -> Nullable<Text>,
+		settled_at -> Nullable<Timestamptz>,
+	}
+}
+
+diesel::table! {
 	backup_credential_issuances (id) {
 		id -> Int8,
 		device_id -> Uuid,
@@ -1126,6 +1144,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	application_reported_detail,
 	applications,
 	artifacts,
+	audit_entries,
 	backup_credential_issuances,
 	backup_maintenance_runs,
 	backup_recovery_verifications,

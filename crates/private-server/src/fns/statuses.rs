@@ -98,12 +98,12 @@ pub struct ServerStatusData {
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: summary))
-		.routes(routes!(read_only: group_ids))
-		.routes(routes!(read_only: group_details))
-		.routes(routes!(read_only: snapshot))
-		.routes(routes!(read_only: check_detail))
-		.routes(routes!(read_only: fleet_detail))
+		.routes(routes!(read_only, silent: summary))
+		.routes(routes!(read_only, silent: group_ids))
+		.routes(routes!(read_only, silent: group_details))
+		.routes(routes!(read_only, silent: snapshot))
+		.routes(routes!(read_only, silent: check_detail))
+		.routes(routes!(read_only, silent: fleet_detail))
 }
 
 /// Get a fleet-wide summary of software versions running in production.

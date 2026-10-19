@@ -26,9 +26,9 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: for_group))
-		.routes(routes!(write: set))
-		.routes(routes!(write: remove))
+		.routes(routes!(read_only, silent: for_group))
+		.routes(routes!(write, silent: set))
+		.routes(routes!(write, silent: remove))
 }
 
 /// Which scope a request addresses: a group, one of its environments, or one

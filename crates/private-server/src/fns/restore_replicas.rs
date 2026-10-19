@@ -40,12 +40,12 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: for_group))
-		.routes(routes!(read_only: consumers))
-		.routes(routes!(read_only: checks))
-		.routes(routes!(write: create))
-		.routes(routes!(write: update))
-		.routes(routes!(danger(invalidates): delete))
+		.routes(routes!(read_only, silent: for_group))
+		.routes(routes!(read_only, silent: consumers))
+		.routes(routes!(read_only, silent: checks))
+		.routes(routes!(write, silent: create))
+		.routes(routes!(write, silent: update))
+		.routes(routes!(danger(invalidates), silent: delete))
 }
 
 // ── Wire types ──────────────────────────────────────────────────────────────

@@ -21,7 +21,7 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 /// The histories whose ranges Canopy provisions. `partition_runway` discovers
 /// partitioned tables on its own; provisioning has to be told, because creating
 /// a partition is not something to do to a table by inference.
-pub const HISTORIES: [&str; 2] = ["statuses", "device_connections"];
+pub const HISTORIES: [&str; 3] = ["statuses", "device_connections", "audit_entries"];
 
 /// Weeks of future range kept provisioned beyond the current week. Four weeks
 /// leaves the runway alert (below) a fortnight of warning before anything is at

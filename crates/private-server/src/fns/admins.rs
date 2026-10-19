@@ -10,9 +10,9 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: list))
-		.routes(routes!(danger(issues): add))
-		.routes(routes!(danger(invalidates): delete))
+		.routes(routes!(read_only, silent: list))
+		.routes(routes!(danger(issues), silent: add))
+		.routes(routes!(danger(invalidates), silent: delete))
 }
 
 /// List the admin allow-list.

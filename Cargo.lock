@@ -1747,6 +1747,7 @@ dependencies = [
  "axum-client-ip",
  "axum-server-timing",
  "axum-test",
+ "canopy-utoipa-axum",
  "chbs",
  "commons-errors",
  "commons-types",
@@ -1773,6 +1774,7 @@ dependencies = [
  "tokio",
  "tower-http 0.7.1",
  "tracing",
+ "utoipa",
  "uuid",
  "x509-parser",
 ]

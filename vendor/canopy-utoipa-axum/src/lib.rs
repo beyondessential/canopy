@@ -38,7 +38,7 @@
 //!  }
 //!  
 //!  let (router, api): (axum::Router, OpenApi) = OpenApiRouter::new()
-//!      .routes(routes!(read_only: get_user))
+//!      .routes(routes!(read_only, silent: get_user))
 //!      .split_for_parts();
 //! ```
 //!
@@ -103,7 +103,7 @@ pub fn __set_safety_mode(operation: &mut utoipa::openapi::path::Operation, mode:
 pub const DANGER_REASONS_EXTENSION: &str = "x-canopy-danger-reasons";
 
 /// Every reason a handler can be danger for, in the order the SAFE spec lists
-/// them. The wire form of each is what a `routes!(danger(reason, ...): handler)`
+/// them. The wire form of each is what a `routes!(danger(reason, ...), silent: handler)`
 /// entry names.
 pub const DANGER_REASONS: [&str; 5] = [
     "irreversible",
@@ -155,6 +155,90 @@ pub fn __set_danger_reasons(operation: &mut utoipa::openapi::path::Operation, re
         .merge(incoming);
 }
 
+// CANOPY FORK: audit declarations (see the AUD spec).
+//
+// Every handler declares, beside its grade, whether it is audited or silent:
+// `routes!(write, audit(MaintenanceDeclared): declare)` or
+// `routes!(read_only, silent: list)`. A declaration is recorded as an OpenAPI
+// operation extension, the single place it is written: the server reads it back
+// to hold an audited handler to the actions it declares. An audited handler
+// must take the audit extractor, which is checked at compile time.
+
+/// The OpenAPI operation-extension key carrying the actions a handler declares.
+/// Its value is an array of action names, empty for a handler that is silent.
+pub const AUDIT_EXTENSION: &str = "x-canopy-audit";
+
+/// Record a handler's audit declaration on its OpenAPI operation. Called by the
+/// [`routes`] macro; not meant to be called directly.
+#[doc(hidden)]
+pub fn __set_audit(operation: &mut utoipa::openapi::path::Operation, actions: &[&str]) {
+    use utoipa::openapi::extensions::Extensions;
+    let incoming = Extensions::from_iter([(AUDIT_EXTENSION, actions.to_vec())]);
+    operation
+        .extensions
+        .get_or_insert_with(Extensions::default)
+        .merge(incoming);
+}
+
+/// Implemented by the audit extractor, so a handler can be checked for taking
+/// it without this crate knowing what it is.
+pub trait AuditExtractor {}
+
+/// Where in a handler's arguments the audit extractor sits, as the arguments
+/// before it.
+#[doc(hidden)]
+pub struct Before<T>(core::marker::PhantomData<T>);
+
+/// A handler that takes the audit extractor as one of its arguments. Implemented
+/// across argument counts and positions the way axum implements `Handler`, with
+/// the arguments before the extractor in the trait's parameter so that the
+/// implementations do not overlap.
+#[doc(hidden)]
+pub trait TakesAudit<Marker> {}
+
+macro_rules! takes_audit_at {
+    ( [ $( $before:ident )* ] $at:ident [ $( $after:ident )* ] ) => {
+        #[allow(non_snake_case, unused_parens)]
+        impl<F, Fut, $( $before, )* $at, $( $after, )*>
+            TakesAudit<(Before<( $( $before, )* )>, $( $before, )* $at, $( $after, )*)> for F
+        where
+            F: Fn($( $before, )* $at, $( $after, )*) -> Fut,
+            $at: AuditExtractor,
+        {
+        }
+    };
+}
+
+macro_rules! takes_audit {
+    ( [ $( $before:ident )* ] [] ) => {};
+    ( [ $( $before:ident )* ] [ $at:ident $( $after:ident )* ] ) => {
+        takes_audit_at!( [ $( $before )* ] $at [ $( $after )* ] );
+        takes_audit!( [ $( $before )* $at ] [ $( $after )* ] );
+    };
+}
+
+takes_audit!([] [A1]);
+takes_audit!([] [A1 A2]);
+takes_audit!([] [A1 A2 A3]);
+takes_audit!([] [A1 A2 A3 A4]);
+takes_audit!([] [A1 A2 A3 A4 A5]);
+takes_audit!([] [A1 A2 A3 A4 A5 A6]);
+takes_audit!([] [A1 A2 A3 A4 A5 A6 A7]);
+takes_audit!([] [A1 A2 A3 A4 A5 A6 A7 A8]);
+takes_audit!([] [A1 A2 A3 A4 A5 A6 A7 A8 A9]);
+takes_audit!([] [A1 A2 A3 A4 A5 A6 A7 A8 A9 A10]);
+takes_audit!([] [A1 A2 A3 A4 A5 A6 A7 A8 A9 A10 A11]);
+takes_audit!([] [A1 A2 A3 A4 A5 A6 A7 A8 A9 A10 A11 A12]);
+
+/// Fail compilation unless the handler takes the audit extractor. Called by the
+/// [`routes`] macro for an audited handler; not meant to be called directly.
+#[doc(hidden)]
+pub fn __assert_audited<F, M>(_: &F)
+where
+    F: TakesAudit<M>,
+{
+}
+
 /// re-export paste so users do not need to add the dependency.
 #[doc(hidden)]
 pub use paste::paste;
@@ -183,7 +267,7 @@ pub use paste::paste;
 ///  #[utoipa::path(get, path = "")]
 ///  async fn get_user() {}
 ///
-///  let _: UtoipaMethodRouter = routes!(read_only: get_user);
+///  let _: UtoipaMethodRouter = routes!(read_only, silent: get_user);
 /// ```
 /// Since the _`axum`_ does not support method filter for `CONNECT` requests, using this macro with
 /// handler having request method type `CONNECT` `#[utoipa::path(connect, path = "")]` will panic at
@@ -202,26 +286,40 @@ pub use paste::paste;
 ///  async fn post_user() {}
 ///
 ///  let _: OpenApiRouter = OpenApiRouter::new()
-///      .routes(routes!(read_only: get_user))
-///      .routes(routes!(write: post_user));
+///      .routes(routes!(read_only, silent: get_user))
+///      .routes(routes!(write, silent: post_user));
 /// ```
 #[macro_export]
 macro_rules! routes {
     // CANOPY FORK: graded entries. The grade prefix names the safety mode the
     // handler requires (see the SAFE spec); it is recorded as an OpenAPI
-    // operation extension and read back by the server to enforce it.
-    ( read_only: $handler:path $(,)? ) => { $crate::routes!( @graded "read-only" [] : $handler ) };
-    ( write: $handler:path $(,)? ) => { $crate::routes!( @graded "write" [] : $handler ) };
-    // A danger handler also says why, as one or more reasons from
-    // `DANGER_REASONS`: `routes!(danger(fleet, invalidates): revoke)`. The
-    // operator is told these when a blocked control asks to raise.
-    ( danger( $( $reason:ident ),+ $(,)? ) : $handler:path $(,)? ) => {
-        $crate::routes!( @graded "danger" [ $( $crate::routes!( @reason $reason ) ),+ ] : $handler )
+    // operation extension and read back by the server to enforce it. The audit
+    // clause beside it says whether the handler is audited or silent (see the
+    // AUD spec), and which actions an audited one takes.
+    ( read_only, silent : $handler:path $(,)? ) => { $crate::routes!( @graded "read-only" [] silent : $handler ) };
+    ( read_only, audit( $( $action:ident ),+ $(,)? ) : $handler:path $(,)? ) => {
+        $crate::routes!( @graded "read-only" [] audit [ $( $crate::routes!( @action $action ) ),+ ] : $handler )
     };
-    ( danger: $handler:path $(,)? ) => {
+    ( write, silent : $handler:path $(,)? ) => { $crate::routes!( @graded "write" [] silent : $handler ) };
+    ( write, audit( $( $action:ident ),+ $(,)? ) : $handler:path $(,)? ) => {
+        $crate::routes!( @graded "write" [] audit [ $( $crate::routes!( @action $action ) ),+ ] : $handler )
+    };
+    // A danger handler also says why, as one or more reasons from
+    // `DANGER_REASONS`: `routes!(danger(fleet, invalidates), silent: revoke)`. The
+    // operator is told these when a blocked control asks to raise.
+    ( danger( $( $reason:ident ),+ $(,)? ), silent : $handler:path $(,)? ) => {
+        $crate::routes!( @graded "danger" [ $( $crate::routes!( @reason $reason ) ),+ ] silent : $handler )
+    };
+    ( danger( $( $reason:ident ),+ $(,)? ), audit( $( $action:ident ),+ $(,)? ) : $handler:path $(,)? ) => {
+        $crate::routes!(
+            @graded "danger" [ $( $crate::routes!( @reason $reason ) ),+ ]
+            audit [ $( $crate::routes!( @action $action ) ),+ ] : $handler
+        )
+    };
+    ( danger : $handler:path $(,)? ) => {
         compile_error!(
             "a danger handler declares why it is danger: \
-             routes!(danger(reason, ...): handler), with each reason one of \
+             routes!(danger(reason, ...), audit(...): handler), with each reason one of \
              canopy_utoipa_axum::DANGER_REASONS. See the SAFE spec."
         )
     };
@@ -237,27 +335,19 @@ macro_rules! routes {
             stringify!($reason)
         }
     };
+    // An action is named by its variant in the audit catalogue, which is also
+    // the constant carrying its stable name, so a misspelt action does not
+    // build.
+    ( @action $action:ident ) => { ::database::audit::names::$action };
     // The device-facing public API is a different surface: its callers are
     // machines presenting a certificate, not operators holding a session, so
     // safety modes do not govern it. Saying so is explicit and greppable rather
-    // than being the shape an entry falls into by omission.
-    // Upstream's multi-handler form survives here, because one path serving two
-    // methods is registered in a single call. The graded arms stay one handler
-    // each: a grade belongs to an operation, not to a path.
-    ( public: $handler:path $(, $tail:path)* $(,)? ) => {
-        {
-            use $crate::PathItemExt;
-            let mut paths = utoipa::openapi::path::Paths::new();
-            let mut schemas = Vec::<(String, utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>)>::new();
-            let (path, item, types) = $crate::routes!(@resolve_types $handler : schemas);
-            #[allow(unused_mut)]
-            let mut method_router = types.iter().by_ref().fold(axum::routing::MethodRouter::new(), |router, path_type| {
-                router.on(path_type.to_method_filter(), $handler)
-            });
-            paths.add_path_operation(&path, types, item);
-            $( method_router = $crate::routes!( schemas: method_router: paths: $tail ); )*
-            (schemas, paths, method_router)
-        }
+    // than being the shape an entry falls into by omission. It still declares
+    // whether it is audited. One handler to an entry, as the graded surface: a
+    // path serving two methods is two entries, which axum merges.
+    ( public, silent : $handler:path $(,)? ) => { $crate::routes!( @public silent : $handler ) };
+    ( public, audit( $( $action:ident ),+ $(,)? ) : $handler:path $(,)? ) => {
+        $crate::routes!( @public audit [ $( $crate::routes!( @action $action ) ),+ ] : $handler )
     };
     ( $schemas:tt: $router:ident: $paths:ident: $handler:path $(, $tail:tt)* ) => {
         {
@@ -269,7 +359,23 @@ macro_rules! routes {
             router
         }
     };
-    ( @graded $mode:literal [ $( $reason:expr ),* ] : $handler:path ) => {
+    ( @public $audit:ident $( [ $( $action:expr ),* ] )? : $handler:path ) => {
+        {
+            use $crate::PathItemExt;
+            let mut paths = utoipa::openapi::path::Paths::new();
+            let mut schemas = Vec::<(String, utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>)>::new();
+            let (path, mut item, types) = $crate::routes!(@resolve_types $handler : schemas);
+            let actions: &[&str] = &[ $( $( $action ),* )? ];
+            $crate::__set_audit(&mut item, actions);
+            $( let _ = [ $( $action ),* ]; $crate::__assert_audited(&$handler); )?
+            let method_router = types.iter().by_ref().fold(axum::routing::MethodRouter::new(), |router, path_type| {
+                router.on(path_type.to_method_filter(), $handler)
+            });
+            paths.add_path_operation(&path, types, item);
+            (schemas, paths, method_router)
+        }
+    };
+    ( @graded $mode:literal [ $( $reason:expr ),* ] $audit:ident $( [ $( $action:expr ),* ] )? : $handler:path ) => {
         {
             use $crate::PathItemExt;
             let mut paths = utoipa::openapi::path::Paths::new();
@@ -280,6 +386,9 @@ macro_rules! routes {
             if !reasons.is_empty() {
                 $crate::__set_danger_reasons(&mut item, reasons);
             }
+            let actions: &[&str] = &[ $( $( $action ),* )? ];
+            $crate::__set_audit(&mut item, actions);
+            $( let _ = [ $( $action ),* ]; $crate::__assert_audited(&$handler); )?
             let method_router = types.iter().by_ref().fold(axum::routing::MethodRouter::new(), |router, path_type| {
                 router.on(path_type.to_method_filter(), $handler)
             });
@@ -287,16 +396,18 @@ macro_rules! routes {
             (schemas, paths, method_router)
         }
     };
-    // CANOPY FORK: an entry without a grade is a compile error, so no handler
-    // can reach the administrative surface ungraded. Upstream's bare and
-    // multi-handler forms are gone with it: every canopy route table is one
-    // handler per entry, and one grade per handler is the point.
+    // CANOPY FORK: an entry without a grade and an audit declaration is a
+    // compile error, so no handler can reach the administrative surface
+    // ungraded or unaudited. Upstream's bare and multi-handler forms are gone
+    // with it: every canopy route table is one handler per entry, and one
+    // declaration per handler is the point.
     ( $handler:path $(, $tail:path)* $(,)? ) => {
         compile_error!(
-            "this handler declares no safety mode. Every handler on the administrative \
-             surface says which mode it requires: routes!(read_only: handler), \
-             routes!(write: handler), or routes!(danger(reason, ...): handler). See the \
-             SAFE spec for which one a handler takes."
+            "this handler declares no safety mode and no audit declaration. Every handler on \
+             the administrative surface says which mode it requires and whether it is \
+             audited: routes!(read_only, silent: handler), \
+             routes!(write, audit(Action): handler), or \
+             routes!(danger(reason, ...), audit(Action): handler). See the SAFE and AUD specs."
         )
     };
     ( @resolve_types $handler:path : $schemas:tt ) => {

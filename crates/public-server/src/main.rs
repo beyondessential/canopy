@@ -42,10 +42,11 @@ async fn main() -> miette::Result<()> {
 		.unwrap_or_else(|| SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, args.port, 0, 0)));
 
 	let state = AppState::init().await?;
-	let (api_router, api_spec) =
+	let (api_router, api_spec) = public_server::audited(
 		OpenApiRouter::with_openapi(public_server::openapi::ApiDoc::openapi())
-			.merge(public_server::routes())
-			.split_for_parts();
+			.merge(public_server::routes()),
+		state.db.clone(),
+	);
 	let app: Router<()> = api_router
 		.with_state(state.clone())
 		.merge(public_server::calendar::routes(state.clone()))

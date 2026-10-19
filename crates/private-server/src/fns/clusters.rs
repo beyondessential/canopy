@@ -26,8 +26,8 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: get_detail))
-		.routes(routes!(write: update))
+		.routes(routes!(read_only, silent: get_detail))
+		.routes(routes!(write, silent: update))
 }
 
 /// Request body identifying a cluster.

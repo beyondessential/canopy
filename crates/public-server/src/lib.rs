@@ -27,6 +27,31 @@ pub mod tags;
 pub mod timesync;
 pub mod versions;
 
+/// Put the audit layer over the device API's routes, returning them beside the
+/// OpenAPI document they declare.
+///
+/// The declarations are read out of that document, so there is one place each is
+/// written. Routes beside the API that are not in the document, the pages, are
+/// outside the audited surface.
+pub fn audited(
+	router: OpenApiRouter<AppState>,
+	db: database::Db,
+) -> (axum::Router<AppState>, utoipa::openapi::OpenApi) {
+	use commons_servers::audit::{ActorSource, AuditMap, AuditState, Undeclared, enforce};
+
+	let (router, spec) = router.split_for_parts();
+	let state = AuditState {
+		db,
+		map: std::sync::Arc::new(AuditMap::from_openapi(&spec)),
+		actor: ActorSource::Handler,
+		undeclared: Undeclared::Pass,
+	};
+	(
+		router.layer(axum::middleware::from_fn_with_state(state, enforce)),
+		spec,
+	)
+}
+
 pub fn routes() -> OpenApiRouter<AppState> {
 	#[cfg_attr(not(feature = "ui"), expect(unused_mut))]
 	let mut router = OpenApiRouter::new()

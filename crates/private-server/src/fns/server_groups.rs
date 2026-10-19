@@ -18,15 +18,15 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: list))
-		.routes(routes!(read_only: get))
-		.routes(routes!(write: create))
-		.routes(routes!(write: update))
-		.routes(routes!(write: delete))
-		.routes(routes!(write: restore))
-		.routes(routes!(read_only: list_archived))
-		.routes(routes!(read_only: server_counts))
-		.routes(routes!(read_only: search))
+		.routes(routes!(read_only, silent: list))
+		.routes(routes!(read_only, silent: get))
+		.routes(routes!(write, silent: create))
+		.routes(routes!(write, silent: update))
+		.routes(routes!(write, silent: delete))
+		.routes(routes!(write, silent: restore))
+		.routes(routes!(read_only, silent: list_archived))
+		.routes(routes!(read_only, silent: server_counts))
+		.routes(routes!(read_only, silent: search))
 }
 
 /// List all live server groups.

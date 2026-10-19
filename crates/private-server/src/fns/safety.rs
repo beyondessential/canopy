@@ -29,9 +29,9 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: session))
-		.routes(routes!(read_only: raise))
-		.routes(routes!(read_only: lower))
+		.routes(routes!(read_only, silent: session))
+		.routes(routes!(read_only, silent: raise))
+		.routes(routes!(read_only, silent: lower))
 }
 
 /// The state of an operator's session, as the client presents it.

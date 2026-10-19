@@ -342,8 +342,8 @@ pub struct TargetResponse {
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(public: create))
-		.routes(routes!(public: check_severities))
+		.routes(routes!(public, silent: create))
+		.routes(routes!(public, silent: check_severities))
 }
 
 /// The application type a unified push names, if it names one.

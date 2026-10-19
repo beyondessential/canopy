@@ -64,11 +64,11 @@ pub(crate) fn instance_default_region() -> String {
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(public: capabilities))
-		.routes(routes!(public: credentials))
-		.routes(routes!(public: target))
-		.routes(routes!(public: progress))
-		.routes(routes!(public: report))
+		.routes(routes!(public, silent: capabilities))
+		.routes(routes!(public, silent: credentials))
+		.routes(routes!(public, silent: target))
+		.routes(routes!(public, silent: progress))
+		.routes(routes!(public, silent: report))
 }
 
 // ---------------------------------------------------------------------------

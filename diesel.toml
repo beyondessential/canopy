@@ -5,6 +5,7 @@
 file = "crates/database/src/schema.rs"
 custom_type_derives = ["diesel::query_builder::QueryId"]
 filter.except_tables = [
+	"audit_entries_\\d+w\\d+(_standard|_year)?",
 	"device_connections_\\d+w\\d+",
 	"statuses_\\d+w\\d+",
 	"test_.+",

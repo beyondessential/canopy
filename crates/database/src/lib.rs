@@ -10,6 +10,7 @@ use jiff::SignedDuration;
 use tokio::time::{Instant, timeout};
 
 pub mod admins;
+pub mod audit;
 pub mod application_certificate_names;
 pub mod application_certificates;
 pub mod application_names;

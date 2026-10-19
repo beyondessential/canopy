@@ -33,9 +33,9 @@ fn mode_of(api: &utoipa::openapi::OpenApi, path: &str) -> String {
 #[test]
 fn each_grade_lands_on_its_operation() {
     let api = OpenApiRouter::<()>::new()
-        .routes(routes!(read_only: list))
-        .routes(routes!(write: add))
-        .routes(routes!(danger(fleet, invalidates): delete))
+        .routes(routes!(read_only, silent: list))
+        .routes(routes!(write, silent: add))
+        .routes(routes!(danger(fleet, invalidates), silent: delete))
         .into_openapi();
 
     assert_eq!(mode_of(&api, "/list"), "read-only");
@@ -54,8 +54,8 @@ fn the_extension_key_is_an_openapi_extension() {
 #[test]
 fn a_danger_handler_carries_its_reasons_and_others_carry_none() {
     let api = OpenApiRouter::<()>::new()
-        .routes(routes!(write: add))
-        .routes(routes!(danger(fleet, invalidates): delete))
+        .routes(routes!(write, silent: add))
+        .routes(routes!(danger(fleet, invalidates), silent: delete))
         .into_openapi();
 
     let reasons_of = |path: &str| {

@@ -188,7 +188,9 @@ where
 			dns_zones: commons_types::dns::ManagedZone::list_from_env().unwrap_or_default(),
 		};
 		let public_router = router(
-			axum::Router::from(public_server::routes().with_state(public_state.clone()))
+			public_server::audited(public_server::routes(), public_state.db.clone())
+				.0
+				.with_state(public_state.clone())
 				.merge(public_server::calendar::routes(public_state.clone()))
 				.merge(public_server::mcp::routes(public_state)),
 			ClientIpSource::RightmostForwarded,
@@ -369,7 +371,9 @@ where
 			dns_zones: commons_types::dns::ManagedZone::list_from_env().unwrap_or_default(),
 		};
 		let public_router = router(
-			axum::Router::from(public_server::routes().with_state(public_state.clone()))
+			public_server::audited(public_server::routes(), public_state.db.clone())
+				.0
+				.with_state(public_state.clone())
 				.merge(public_server::calendar::routes(public_state.clone()))
 				.merge(public_server::mcp::routes(public_state)),
 			ClientIpSource::RightmostForwarded,

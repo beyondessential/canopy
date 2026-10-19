@@ -15,19 +15,19 @@ use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only: list_for_server))
-		.routes(routes!(read_only: list_for_servers))
-		.routes(routes!(read_only: list_for_machine))
-		.routes(routes!(read_only: list_for_group))
-		.routes(routes!(danger(unprotects): silence_server))
-		.routes(routes!(write: unsilence_server))
-		.routes(routes!(danger(unprotects): silence_machine))
-		.routes(routes!(write: unsilence_machine))
-		.routes(routes!(read_only: list_for_cluster))
-		.routes(routes!(danger(unprotects): silence_cluster))
-		.routes(routes!(write: unsilence_cluster))
-		.routes(routes!(danger(unprotects): silence_group))
-		.routes(routes!(write: unsilence_group))
+		.routes(routes!(read_only, silent: list_for_server))
+		.routes(routes!(read_only, silent: list_for_servers))
+		.routes(routes!(read_only, silent: list_for_machine))
+		.routes(routes!(read_only, silent: list_for_group))
+		.routes(routes!(danger(unprotects), silent: silence_server))
+		.routes(routes!(write, silent: unsilence_server))
+		.routes(routes!(danger(unprotects), silent: silence_machine))
+		.routes(routes!(write, silent: unsilence_machine))
+		.routes(routes!(read_only, silent: list_for_cluster))
+		.routes(routes!(danger(unprotects), silent: silence_cluster))
+		.routes(routes!(write, silent: unsilence_cluster))
+		.routes(routes!(danger(unprotects), silent: silence_group))
+		.routes(routes!(write, silent: unsilence_group))
 }
 
 /// Request body identifying a server to look up silences for.
