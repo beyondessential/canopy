@@ -357,7 +357,7 @@ function replay(control: HTMLElement): void {
  * Return focus to `control`, unless something else has taken it since, such as
  * a dialog the activation opened.
  */
-function returnFocus(control: HTMLElement): void {
+export function returnFocus(control: HTMLElement): void {
 	requestAnimationFrame(() => {
 		const active = document.activeElement;
 		const lost =

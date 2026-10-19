@@ -19,6 +19,8 @@
 
 - [x] The mode band opens inline with the three modes and raises and lowers from there (verifies spec: SAFE)
 - [x] Clicking elsewhere closes the mode menu
+- [x] Closing the mode band's list by Escape, or dismissing the danger confirmation, returns focus to the band
+- [ ] Dismissing the danger confirmation from the narrow top bar's mode control returns focus to it
 
 ## Narrow screens
 

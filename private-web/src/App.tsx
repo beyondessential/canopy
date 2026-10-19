@@ -40,7 +40,6 @@ import Bestool from "./routes/Bestool";
 import BestoolSnippetDetail from "./routes/BestoolSnippetDetail";
 import BestoolSnippets from "./routes/BestoolSnippets";
 import DeviceDetail from "./routes/DeviceDetail";
-import Devices from "./routes/Devices";
 import DevicesList from "./routes/DevicesList";
 import DevicesSearch from "./routes/DevicesSearch";
 import GroupDetail from "./routes/GroupDetail";
@@ -65,7 +64,6 @@ import ServerEdit from "./routes/ServerEdit";
 import ArchivedList from "./routes/ArchivedList";
 import FleetFigures from "./routes/FleetFigures";
 import Servers from "./routes/Servers";
-import Settings from "./routes/Settings";
 import Sql from "./routes/Sql";
 import VersionDetail from "./routes/VersionDetail";
 import Upgrades from "./routes/Upgrades";
@@ -348,7 +346,7 @@ export default function App() {
 							<Moved to={(id) => `/fleet/groups/${id}/backups/config`} />
 						}
 					/>
-					<Route path="/settings" element={<Settings />}>
+					<Route path="/settings">
 						<Route
 							index
 							element={<Navigate to="/settings/admins" replace />}
@@ -378,7 +376,7 @@ export default function App() {
 							element={<CertificateAuthority />}
 						/>
 					</Route>
-					<Route path="/devices" element={<Devices />}>
+					<Route path="/devices">
 						<Route index element={<DevicesSearch />} />
 						<Route path="all" element={<DevicesList />} />
 					</Route>

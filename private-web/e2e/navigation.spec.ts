@@ -102,6 +102,25 @@ test.describe("sidebar navigation", () => {
 		await raiseTo(page, "write");
 		await lower(page);
 	});
+
+	test("the mode band hands focus back to itself when its list closes", async ({
+		page,
+	}) => {
+		await page.goto("/status");
+
+		await modeControl(page).click();
+		await expect(page.getByRole("menuitem").first()).toBeFocused();
+		await page.keyboard.press("Escape");
+		await expect(page.getByRole("menuitem")).toHaveCount(0);
+		await expect(modeControl(page)).toBeFocused();
+
+		// Dismissing the danger confirmation returns to the band too.
+		await modeControl(page).click();
+		await page.getByRole("menuitem", { name: /danger/i }).click();
+		await page.getByRole("button", { name: /cancel/i }).click();
+		await expect(modeControl(page)).toBeFocused();
+		await expect(modeControl(page)).toContainText(/read-only/i);
+	});
 });
 
 test.describe("sidebar navigation on a narrow screen", () => {

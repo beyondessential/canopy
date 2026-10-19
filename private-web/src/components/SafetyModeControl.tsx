@@ -10,11 +10,16 @@ import {
 } from "@mui/material";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import { useState } from "react";
+import { type RefObject, useRef, useState } from "react";
 import type { Theme } from "@mui/material/styles";
 import { useRemainingMs, useSafetyMode } from "../hooks/useSafetyMode";
 import { LADDER, type SafetyMode, modeLabel } from "../safety";
-import { modePalette, modeStripe, mutedStripe } from "./GradedAction";
+import {
+	modePalette,
+	modeStripe,
+	mutedStripe,
+	returnFocus,
+} from "./GradedAction";
 
 /**
  * The mode control's face. Read-only is deliberately unremarkable, the chrome
@@ -132,7 +137,11 @@ function ModeFace({ mode, spread }: { mode: SafetyMode; spread?: boolean }) {
  * Returned as elements rather than rendered as a component, so the items are
  * the list's own children and it can focus the current one on opening.
  */
-function useModeOptions(onClose: () => void, inset?: number) {
+function useModeOptions(
+	onClose: () => void,
+	trigger: RefObject<HTMLElement | null>,
+	inset?: number,
+) {
 	const { mode, raise, lower, requestRaise } = useSafetyMode();
 	return LADDER.map((option) => (
 		<MenuItem
@@ -142,8 +151,12 @@ function useModeOptions(onClose: () => void, inset?: number) {
 			onClick={() => {
 				onClose();
 				if (option === mode) return;
-				if (option === "danger") requestRaise({ mode: "danger" });
-				else if (option === "write") raise("write");
+				if (option === "danger") {
+					// The confirmation leaves returning focus to whoever asked.
+					void requestRaise({ mode: "danger" }).then(() => {
+						if (trigger.current) returnFocus(trigger.current);
+					});
+				} else if (option === "write") raise("write");
 				else lower();
 			}}
 			// Each raised mode wears the stripe its blocked controls
@@ -180,11 +193,13 @@ const BAR_WIDTH = 240;
 export function SafetyModeControl() {
 	const { mode, busy } = useSafetyMode();
 	const [anchor, setAnchor] = useState<null | HTMLElement>(null);
-	const options = useModeOptions(() => setAnchor(null), 2);
+	const trigger = useRef<HTMLButtonElement>(null);
+	const options = useModeOptions(() => setAnchor(null), trigger, 2);
 
 	return (
 		<>
 			<ButtonBase
+				ref={trigger}
 				onClick={(event) => setAnchor(event.currentTarget)}
 				disabled={busy}
 				aria-haspopup="menu"
@@ -228,15 +243,21 @@ export function SafetyModeControl() {
 export function SafetyModeBand() {
 	const { mode, busy } = useSafetyMode();
 	const [open, setOpen] = useState(false);
-	const close = () => setOpen(false);
-	const options = useModeOptions(close, 3);
+	const trigger = useRef<HTMLButtonElement>(null);
+	// Closing unmounts the list, so focus inside it goes back to the trigger
+	// rather than to nothing.
+	const closeToTrigger = () => {
+		setOpen(false);
+		trigger.current?.focus();
+	};
+	const options = useModeOptions(closeToTrigger, trigger, 3);
 
 	return (
-		<ClickAwayListener onClickAway={close}>
+		<ClickAwayListener onClickAway={() => setOpen(false)}>
 			<Box
 				sx={{ flexShrink: 0 }}
 				onKeyDown={(event) => {
-					if (event.key === "Escape") close();
+					if (event.key === "Escape" && open) closeToTrigger();
 				}}
 			>
 				<Collapse in={open} unmountOnExit>
@@ -249,6 +270,7 @@ export function SafetyModeBand() {
 					</MenuList>
 				</Collapse>
 				<ButtonBase
+					ref={trigger}
 					onClick={() => setOpen((was) => !was)}
 					disabled={busy}
 					aria-haspopup="menu"
