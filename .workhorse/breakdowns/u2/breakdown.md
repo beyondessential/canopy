@@ -4,7 +4,7 @@ The audit log itself is built on this card. These pieces build on it and go as c
 
 ## Archive the audit log offsite
 
-Freeze each closed week of the audit log against settling, then write it to the recovery escrow's storage as one Parquet object, read it back, check it, and confirm it is under object lock before marking the week archived, with each object recording the hash of the previous week's. Once a week is archived, drop its ninety-day entries when they pass ninety days and the rest at a year. The archiver runs in the backups pod; the private server reads archived weeks back for the log page under a read-only role. Raise the self-alert for archiving falling behind. Needs both roles granted in the escrow bucket's account.
+Freeze each closed week of the audit log against settling, then write it to the recovery escrow's storage as one Parquet object, read it back, check it, and confirm it is under object lock before marking the week archived, with each object recording the hash of the previous week's. Once a week is archived, drop its ninety-day entries when they pass ninety days and the rest at a year. The archiver runs in the backups pod; the private server reads archived weeks back for the log page, only when an operator asks to load older entries, under a read-only role. Raise the self-alert for archiving falling behind. Needs both roles granted in the escrow bucket's account.
 
 ## Replace per-feature provenance with the audit log
 

@@ -106,8 +106,9 @@ Each is under object lock for the same retention as the escrow's own versions, a
 ## Reading the log
 
 Any administrator can read the whole log from the operator interface.
-The log page lists entries newest first, and can be filtered by actor, action, time, and the records acted on.
-A time range reaching back more than ninety days is answered from the archive for the weeks beyond that, since the database holds only some of their entries.
+The log page lists the last ninety days newest first, from the database alone, and can be filtered by actor, action, time within those ninety days, and the records acted on.
+Older entries come from the archive, and are loaded only when the operator asks for them, so consulting the log puts no load on the archive by itself.
+Each such request loads further back, within the filters in force.
 
 The fleet query interface offers the last ninety days of the log to any caller it serves.
 
