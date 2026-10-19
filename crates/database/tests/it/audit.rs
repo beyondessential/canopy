@@ -173,6 +173,8 @@ async fn entries_are_found_by_record_and_detail_and_counted_by_a_detail_value() 
 			(Some("alpha"), window),
 			(Some("alpha"), Uuid::new_v4()),
 			(Some("beta"), Uuid::new_v4()),
+			// Written as a null note, which is no value to count.
+			(None, Uuid::new_v4()),
 		] {
 			audit::record(
 				&mut conn,
@@ -193,7 +195,7 @@ async fn entries_are_found_by_record_and_detail_and_counted_by_a_detail_value() 
 		let by_record = audit::find(
 			&mut conn,
 			&Filter {
-				record: Some(window.to_string()),
+				acted_on: Some(window.to_string()),
 				limit: 10,
 				..Default::default()
 			},
@@ -225,6 +227,7 @@ async fn entries_are_found_by_record_and_detail_and_counted_by_a_detail_value() 
 		.unwrap();
 		assert_eq!(counts.get("alpha"), Some(&2));
 		assert_eq!(counts.get("beta"), Some(&1));
+		assert_eq!(counts.len(), 2, "{counts:?}");
 	})
 	.await
 }

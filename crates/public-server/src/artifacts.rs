@@ -446,9 +446,8 @@ async fn register_for_group(
 			platform: input.platform.clone(),
 		})
 		.await?;
-	if let Err(error) = store.put(artifact_id, Vec::from(body)).await {
-		audit.settle_failed(&pending, None).await?;
-		return Err(error);
+	if let Err(failed) = store.put(artifact_id, Vec::from(body)).await {
+		return Err(audit.effect_failed(&pending, failed).await);
 	}
 
 	let mut tx = audit.begin().await?;
@@ -463,13 +462,17 @@ async fn register_for_group(
 	{
 		Ok(row) => row,
 		Err(refusal) => {
-			audit.settle_failed(&pending, None).await?;
 			// Only bytes put under an id minted here are dropped: under one
-			// already registered they are the live artifact's.
-			if existing.is_none()
-				&& let Err(err) = store.delete(artifact_id).await
-			{
-				tracing::error!(artifact = %artifact_id, "refused registration left its bytes: {err}");
+			// already registered they are the live artifact's, which this put
+			// replaced, so the entry is left to read as unconfirmed.
+			if existing.is_none() {
+				match store.delete(artifact_id).await {
+					Ok(()) => audit.settle_failed(&pending, None).await?,
+					Err(err) => tracing::error!(
+						artifact = %artifact_id,
+						"refused registration left its bytes: {err}"
+					),
+				}
 			}
 			return Err(refusal);
 		}

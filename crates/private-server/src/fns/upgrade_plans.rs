@@ -3,7 +3,7 @@ use std::collections::{HashMap, hash_map::Entry};
 use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
-use commons_errors::{AppError, ProblemDetailsSchema, Result};
+use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::{audit::Audit, tailscale_auth::TailscaleAdmin};
 use commons_types::server::rank::ServerRank;
 use database::{
@@ -842,9 +842,11 @@ pub async fn withdraw(
 	Json(args): Json<WithdrawArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = audit.begin().await?;
-	let plan = UpgradePlan::withdraw(&mut conn, args.id, &admin.0.login)
-		.await?
-		.ok_or_else(|| AppError::NotFound("no open plan with that identifier".into()))?;
+	// A plan already closed has nothing to withdraw, which is no change.
+	let Some(plan) = UpgradePlan::withdraw(&mut conn, args.id, &admin.0.login).await? else {
+		audit.unchanged();
+		return Ok(Json(()));
+	};
 	let plan_record = Record::upgrade_plan(&mut conn, &plan).await?;
 	let group_record = Record::group(&mut conn, plan.group_id).await?;
 	conn.record(Action::UpgradePlanWithdrawn {

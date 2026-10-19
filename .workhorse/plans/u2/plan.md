@@ -64,6 +64,11 @@ Until the archive lands, nothing leaves the database, which AUD already requires
 - The public routes `register_name` and `request_certificate` stay silent for the review card: auditing them puts the request in one transaction, and the undeclared-name notices they persist on a refused request would roll back with it.
 - Sleeping and waking an environment have no operator handler yet (only the relay protocol knows them), so there is nothing of them to audit until one lands.
 - A week's freeze is not needed: lapse is the only rule, and the archiver reads a week once its end is an hour past.
+- An outside effect that fails reports whether it is known to have done nothing (`audit::EffectFailed`): the service answered refusing it. Only then is its entry settled failed; one with no answer is left to read as unconfirmed. The secret store and the artifact store report it, and `Audit::effect_failed` settles accordingly.
+- Routes outside the device API's document (the download proxy, the pages) are merged beside the audit layer, not beneath it, so every route under the layer declares and an undeclared one is refused on both servers.
+- The log page pages by the last entry's time and identifier together, since the entries one action records share their time.
+- Enrolment takes its challenge on a connection of its own, before the audited transaction, so a refused proof still spends it.
+- Yanking an unknown or already-yanked version, and withdrawing a plan that is not open, succeed as no change.
 
 ## Build
 

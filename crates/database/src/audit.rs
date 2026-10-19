@@ -297,9 +297,10 @@ impl Actor {
 				name,
 				profile_pic: None,
 			},
+			// The table holds a device's and a token's identifier to a UUID, a
+			// device's role to being present and a token's name likewise, so
+			// the fallbacks below are never taken.
 			"device" => Self::Device {
-				// A device identifier that is not a UUID is not something this
-				// module writes, so it is shown rather than guessed at.
 				id: id.parse().unwrap_or_default(),
 				name,
 				role: role
@@ -697,7 +698,7 @@ pub struct Entry {
 }
 
 impl EntryRow {
-	fn into_entry(self, now: Timestamp) -> Entry {
+	fn into_entry(self) -> Entry {
 		let status = match self.outcome.as_deref() {
 			Some("failed") => Status::Failed,
 			// Pending and past the window it can be settled in. One still inside
@@ -705,10 +706,6 @@ impl EntryRow {
 			Some("pending") => Status::Unconfirmed,
 			_ => Status::Done,
 		};
-		debug_assert!(
-			self.outcome.as_deref() != Some("pending")
-				|| now.duration_since(self.recorded_at) >= SETTLE_WINDOW
-		);
 		Entry {
 			id: self.id,
 			recorded_at: self.recorded_at,
@@ -886,18 +883,28 @@ pub struct Filter {
 	pub actor_kind: Option<String>,
 	pub actor_id: Option<String>,
 	pub action: Option<String>,
-	/// A record acted on, by identifier.
-	pub record: Option<String>,
-	/// A record acted on, by part of the name it had.
-	pub record_name: Option<String>,
+	/// A record acted on, by its identifier or by part of the name it had. One
+	/// given as a UUID is matched by identifier alone, which the records index
+	/// serves; anything else by either.
+	pub acted_on: Option<String>,
 	/// Entries whose detail contains this.
 	pub detail: Option<Value>,
 	/// Include routine actions. Without it they are left out, unless one is
 	/// asked for by name with [`Self::action`].
 	pub include_routine: bool,
 	pub since: Option<Timestamp>,
-	pub until: Option<Timestamp>,
+	/// Entries after this one in the log's order, to read the next page. An
+	/// entry is placed by when it was recorded and then by its identifier, since
+	/// the entries one action records share their time.
+	pub after: Option<Cursor>,
 	pub limit: i64,
+}
+
+/// Where a page of the log ended: the last entry it held.
+#[derive(Clone, Copy, Debug)]
+pub struct Cursor {
+	pub recorded_at: Timestamp,
+	pub id: Uuid,
 }
 
 /// The pattern matching a name that contains `name`, with the characters
@@ -947,18 +954,18 @@ pub async fn find(conn: &mut AsyncPgConnection, filter: &Filter) -> Result<Vec<E
 	} else if !filter.include_routine {
 		query = query.filter(dsl::action.ne_all(routine()));
 	}
-	match (&filter.record, &filter.record_name) {
-		(Some(id), Some(name)) => {
-			// One box offers both, so an entry matches by either.
+	match filter.acted_on.as_deref().map(str::trim) {
+		None | Some("") => {}
+		Some(id) if id.parse::<Uuid>().is_ok() => {
+			query = query.filter(dsl::records.contains(json!([{ "id": id }])));
+		}
+		Some(either) => {
 			query = query.filter(
 				dsl::records
-					.contains(json!([{ "id": id }]))
-					.or(name_matches!(name)),
+					.contains(json!([{ "id": either }]))
+					.or(name_matches!(either)),
 			);
 		}
-		(Some(id), None) => query = query.filter(dsl::records.contains(json!([{ "id": id }]))),
-		(None, Some(name)) => query = query.filter(name_matches!(name)),
-		(None, None) => {}
 	}
 	if let Some(detail) = &filter.detail {
 		query = query.filter(dsl::detail.contains(detail.clone()));
@@ -966,8 +973,13 @@ pub async fn find(conn: &mut AsyncPgConnection, filter: &Filter) -> Result<Vec<E
 	if let Some(since) = filter.since {
 		query = query.filter(dsl::recorded_at.ge(jiff_diesel::Timestamp::from(since)));
 	}
-	if let Some(until) = filter.until {
-		query = query.filter(dsl::recorded_at.lt(jiff_diesel::Timestamp::from(until)));
+	if let Some(after) = filter.after {
+		let at = jiff_diesel::Timestamp::from(after.recorded_at);
+		query = query.filter(
+			dsl::recorded_at
+				.lt(at)
+				.or(dsl::recorded_at.eq(at).and(dsl::id.lt(after.id))),
+		);
 	}
 
 	let rows: Vec<EntryRow> = query
@@ -977,15 +989,13 @@ pub async fn find(conn: &mut AsyncPgConnection, filter: &Filter) -> Result<Vec<E
 		.load(conn)
 		.await
 		.map_err(AppError::from)?;
-	let now = Timestamp::now();
-	let mut entries: Vec<Entry> = rows.into_iter().map(|row| row.into_entry(now)).collect();
-	with_pictures(conn, entries.iter_mut().map(|entry| &mut entry.actor)).await?;
-	Ok(entries)
+	Ok(rows.into_iter().map(EntryRow::into_entry).collect())
 }
 
 /// Fill in each operator's profile picture from the cache of what Tailscale last
-/// said, where it has one.
-async fn with_pictures<'a>(
+/// said, where it has one. For the operator interface, which shows them; the
+/// fleet query interface, open beyond administrators, has no use for them.
+pub async fn with_pictures<'a>(
 	conn: &mut AsyncPgConnection,
 	actors: impl Iterator<Item = &'a mut Actor>,
 ) -> Result<()> {
@@ -1013,7 +1023,8 @@ async fn with_pictures<'a>(
 
 /// How many entries of an action carry each value of one key of their detail,
 /// over a window. This is how a count per signing key, or per anything else an
-/// action puts in its detail, is read.
+/// action puts in its detail, is read. An entry whose detail holds no value for
+/// the key, or holds it as null, is not counted.
 pub async fn count_by_detail(
 	conn: &mut AsyncPgConnection,
 	action: &str,
@@ -1033,7 +1044,7 @@ pub async fn count_by_detail(
 		"SELECT detail ->> $2 AS value, count(*) AS entries \
 		 FROM audit_entries \
 		 WHERE action = $1 AND recorded_at >= $3 AND recorded_at < $4 \
-		   AND detail ? $2 \
+		   AND detail ->> $2 IS NOT NULL \
 		   AND (outcome IS DISTINCT FROM 'pending' OR recorded_at <= now() - interval '1 hour') \
 		 GROUP BY 1",
 	)
@@ -1052,28 +1063,61 @@ pub async fn count_by_detail(
 
 /// Who has acted in a window, each actor once, as they last appeared: what an
 /// actor filter offers.
+///
+/// Walks the actor index one actor at a time rather than reading every entry in
+/// the window, so it costs what the number of actors does, not the volume of
+/// the log.
 pub async fn actors(conn: &mut AsyncPgConnection, since: Timestamp) -> Result<Vec<Actor>> {
-	use crate::schema::audit_entries::dsl;
+	#[derive(QueryableByName)]
+	struct Row {
+		#[diesel(sql_type = sql_types::Text)]
+		actor_kind: String,
+		#[diesel(sql_type = sql_types::Text)]
+		actor_id: String,
+		#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+		actor_name: Option<String>,
+		#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+		actor_role: Option<String>,
+		#[diesel(sql_type = sql_types::Nullable<sql_types::Uuid>)]
+		actor_application_id: Option<Uuid>,
+	}
 
-	type Row = (String, String, Option<String>, Option<String>, Option<Uuid>);
-	let rows: Vec<Row> = dsl::audit_entries
-		.filter(dsl::recorded_at.ge(jiff_diesel::Timestamp::from(since)))
-		.select((
-			dsl::actor_kind,
-			dsl::actor_id,
-			dsl::actor_name,
-			dsl::actor_role,
-			dsl::actor_application_id,
-		))
-		.distinct_on((dsl::actor_kind, dsl::actor_id))
-		.order((dsl::actor_kind, dsl::actor_id, dsl::recorded_at.desc()))
-		.load(conn)
-		.await
-		.map_err(AppError::from)?;
+	let rows: Vec<Row> = diesel::sql_query(
+		"WITH RECURSIVE seen AS ( \
+		   (SELECT actor_kind, actor_id FROM audit_entries \
+		    WHERE recorded_at >= $1 ORDER BY actor_kind, actor_id LIMIT 1) \
+		   UNION ALL \
+		   SELECT next.actor_kind, next.actor_id FROM seen, LATERAL ( \
+		     SELECT actor_kind, actor_id FROM audit_entries \
+		     WHERE (actor_kind, actor_id) > (seen.actor_kind, seen.actor_id) \
+		       AND recorded_at >= $1 \
+		     ORDER BY actor_kind, actor_id LIMIT 1 \
+		   ) AS next \
+		 ) \
+		 SELECT seen.actor_kind, seen.actor_id, latest.actor_name, latest.actor_role, \
+		        latest.actor_application_id \
+		 FROM seen, LATERAL ( \
+		   SELECT actor_name, actor_role, actor_application_id FROM audit_entries \
+		   WHERE actor_kind = seen.actor_kind AND actor_id = seen.actor_id \
+		     AND recorded_at >= $1 \
+		   ORDER BY recorded_at DESC LIMIT 1 \
+		 ) AS latest \
+		 ORDER BY seen.actor_kind, seen.actor_id",
+	)
+	.bind::<sql_types::Timestamptz, _>(jiff_diesel::Timestamp::from(since))
+	.load(conn)
+	.await
+	.map_err(AppError::from)?;
 	let mut actors: Vec<Actor> = rows
 		.into_iter()
-		.map(|(kind, id, name, role, application)| {
-			Actor::from_columns(&kind, id, name, role, application)
+		.map(|row| {
+			Actor::from_columns(
+				&row.actor_kind,
+				row.actor_id,
+				row.actor_name,
+				row.actor_role,
+				row.actor_application_id,
+			)
 		})
 		.collect();
 	with_pictures(conn, actors.iter_mut()).await?;

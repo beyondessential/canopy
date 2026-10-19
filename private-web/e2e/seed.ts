@@ -2194,6 +2194,24 @@ export interface AuditRecordRef {
 	name: string;
 }
 
+/** The week before the current one, which Canopy never provisions since
+ * nothing is written into the past. Seeding an entry hours old reaches into it
+ * when run early in a week. */
+async function provisionPreviousAuditWeek(sql: Sql): Promise<void> {
+	await sql.query(`DO $$
+		DECLARE week_start date := date_trunc('week', current_date)::date - 7;
+		BEGIN
+			EXECUTE format(
+				'CREATE TABLE IF NOT EXISTS audit_entries_previous_week PARTITION OF audit_entries
+				 FOR VALUES FROM (%L) TO (%L) PARTITION BY LIST (retention)',
+				week_start, week_start + 7);
+			CREATE TABLE IF NOT EXISTS audit_entries_previous_week_standard
+				PARTITION OF audit_entries_previous_week FOR VALUES IN ('standard');
+			CREATE TABLE IF NOT EXISTS audit_entries_previous_week_year
+				PARTITION OF audit_entries_previous_week FOR VALUES IN ('year');
+		END $$`);
+}
+
 /** An audit log entry. `minutesAgo` places it: the table is partitioned by
  * week, so entries are seeded minutes old, never days. `outcome` is null for an
  * entry written with its action; a `pending` one under an hour old is hidden by
@@ -2203,6 +2221,9 @@ export async function seedAuditEntry(
 	opts: {
 		action: string;
 		minutesAgo?: number;
+		/** An exact time, in place of `minutesAgo`, for entries that share one
+		 * as the entries of one action do. */
+		recordedAt?: string;
 		actor?:
 			| { kind: "operator"; login: string; name?: string }
 			| { kind: "device"; id: string; name?: string; role?: string }
@@ -2223,12 +2244,14 @@ export async function seedAuditEntry(
 				: actor.id;
 	const outcome = opts.outcome ?? null;
 	const settled = outcome === "done" || outcome === "failed";
+	await provisionPreviousAuditWeek(sql);
 	const rows = await sql.query<{ id: string }>(
 		`INSERT INTO audit_entries
 		   (recorded_at, retention, actor_kind, actor_id, actor_name, actor_role,
 		    action, records, detail, outcome, settled_at)
-		 VALUES (NOW() - make_interval(mins => $1), $2, $3, $4, $5, $6, $7, $8, $9, $10,
-		         CASE WHEN $11 THEN NOW() - make_interval(mins => $1) + interval '1 second' END)
+		 SELECT at, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+		        CASE WHEN $11 THEN at + interval '1 second' END
+		 FROM (SELECT COALESCE($12::timestamptz, NOW() - make_interval(mins => $1)) AS at) AS t
 		 RETURNING id`,
 		[
 			opts.minutesAgo ?? 1,
@@ -2242,6 +2265,7 @@ export async function seedAuditEntry(
 			JSON.stringify(opts.detail ?? {}),
 			outcome,
 			settled,
+			opts.recordedAt ?? null,
 		],
 	);
 	return { id: rows[0]!.id };

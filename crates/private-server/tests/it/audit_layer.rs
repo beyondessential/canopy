@@ -9,7 +9,7 @@ use std::sync::Arc;
 use axum::{Json, middleware};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, Result};
-use commons_servers::audit::{ActorSource, Audit, AuditMap, AuditState, Undeclared, enforce};
+use commons_servers::audit::{ActorSource, Audit, AuditMap, AuditState, enforce};
 use commons_tests::{axum_test::TestServer, db::TestDb};
 use database::{
 	Db,
@@ -92,6 +92,22 @@ async fn ahead_then_errors(audit: Audit) -> Result<Json<()>> {
 	let mut tx = audit.begin().await?;
 	Admin::add(&mut tx, "ahead@example.com").await?;
 	Err(AppError::BadRequest("no".into()))
+}
+
+/// Commits an action the route does not declare ahead of an outside effect.
+#[utoipa::path(post, path = "/ahead_undeclared", responses((status = 200)))]
+async fn ahead_undeclared(audit: Audit) -> Result<Json<()>> {
+	let _pending = audit
+		.commit_ahead(Action::MaintenanceDeclared {
+			window: record("w"),
+			target: Record::new(RecordKind::Machine, Uuid::new_v4(), "box"),
+			upgrade_plan: None,
+			rank: None,
+			expected_end: jiff::Timestamp::now(),
+			note: None,
+		})
+		.await?;
+	Ok(Json(()))
 }
 
 /// Commits ahead, learns the effect took place, and settles done with what it
@@ -186,6 +202,7 @@ fn app(db: Db, actor: ActorSource) -> TestServer {
 		.routes(routes!(write, audit(MaintenanceLifted): undeclared))
 		.routes(routes!(write, audit(MaintenanceLifted): errors))
 		.routes(routes!(write, audit(MaintenanceLifted): ahead_then_errors))
+		.routes(routes!(write, audit(MaintenanceLifted): ahead_undeclared))
 		.routes(routes!(write, audit(MaintenanceLifted): ahead_then_done))
 		.routes(routes!(write, audit(MaintenanceLifted): ahead_then_failed))
 		.routes(routes!(write, audit(MaintenanceLifted): read))
@@ -200,7 +217,6 @@ fn app(db: Db, actor: ActorSource) -> TestServer {
 		db,
 		map: Arc::new(AuditMap::from_openapi(&spec)),
 		actor,
-		undeclared: Undeclared::Refuse,
 		mount: "",
 	};
 	TestServer::new(router.layer(middleware::from_fn_with_state(state, enforce)))
@@ -299,6 +315,27 @@ async fn recording_an_action_the_route_does_not_declare_fails_and_changes_nothin
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_undeclared_action_is_refused_before_it_is_committed_ahead() {
+	TestDb::run(async |mut conn, url| {
+		let server = app(database::init_to(&url), ActorSource::Operator);
+		server
+			.post("/ahead_undeclared")
+			.await
+			.assert_status(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+		// Pending entries are hidden from the log while they can be settled, so
+		// look at the table itself.
+		diesel_async_run(
+			&mut conn,
+			"DO $$ BEGIN IF EXISTS (SELECT 1 FROM audit_entries) THEN \
+			   RAISE EXCEPTION 'an undeclared action was committed ahead'; \
+			 END IF; END $$",
+		)
+		.await;
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn an_audited_action_that_errors_leaves_no_entry_and_no_change() {
 	TestDb::run(async |mut conn, url| {
 		let server = app(database::init_to(&url), ActorSource::Operator);
@@ -337,9 +374,16 @@ async fn an_entry_committed_ahead_stands_when_the_handler_errors_and_is_hidden_u
 		);
 
 		// An hour on, nothing can settle it any more, and it reads as unconfirmed.
+		// Two hours back can be last week, which is never provisioned ahead.
 		diesel_async_run(
 			&mut conn,
-			"INSERT INTO audit_entries (recorded_at, actor_kind, actor_id, action, outcome) \
+			"DO $$ DECLARE week_start date := date_trunc('week', current_date)::date - 7; BEGIN \
+			   EXECUTE format('CREATE TABLE audit_entries_previous_week PARTITION OF audit_entries \
+			     FOR VALUES FROM (%L) TO (%L) PARTITION BY LIST (retention)', week_start, week_start + 7); \
+			   CREATE TABLE audit_entries_previous_week_standard \
+			     PARTITION OF audit_entries_previous_week FOR VALUES IN ('standard'); \
+			 END $$; \
+			 INSERT INTO audit_entries (recorded_at, actor_kind, actor_id, action, outcome) \
 			 SELECT recorded_at - interval '2 hours', actor_kind, actor_id, 'maintenance_lifted', 'pending' \
 			 FROM audit_entries WHERE outcome = 'pending'",
 		)

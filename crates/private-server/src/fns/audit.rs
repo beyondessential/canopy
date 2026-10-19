@@ -6,7 +6,8 @@ use axum::{Json, extract::State};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
-use database::audit::{self, Actor, Entry, Filter, READ_WINDOW, Tier};
+use commons_types::Uuid;
+use database::audit::{self, Actor, Cursor, Entry, Filter, READ_WINDOW, Tier};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -43,11 +44,21 @@ pub struct AuditListArgs {
 	/// Entries from this time on. Never reaches back further than ninety days.
 	#[schema(value_type = Option<String>, format = DateTime)]
 	pub since: Option<Timestamp>,
-	/// Entries strictly before this time, to read the next page.
-	#[schema(value_type = Option<String>, format = DateTime)]
-	pub before: Option<Timestamp>,
+	/// The last entry of the page before, to read the next: its time and its
+	/// identifier, both of which place an entry in the log's order.
+	pub after: Option<AuditCursor>,
 	/// How many entries to return, at most five hundred.
 	pub limit: Option<i64>,
+}
+
+/// Where a page of the log ended.
+#[derive(Deserialize, ToSchema)]
+pub struct AuditCursor {
+	/// When the last entry of the page was recorded.
+	#[schema(value_type = String, format = DateTime)]
+	pub recorded_at: Timestamp,
+	/// The last entry's identifier.
+	pub id: Uuid,
 }
 
 /// List the audit log, newest first.
@@ -74,26 +85,25 @@ pub async fn list(
 ) -> Result<Json<Vec<Entry>>> {
 	let mut conn = state.db_read.get().await?;
 	let oldest = Timestamp::now() - READ_WINDOW;
-	let (record, record_name) = match args.record.as_deref().map(str::trim) {
-		Some("") | None => (None, None),
-		Some(record) => (Some(record.to_owned()), Some(record.to_owned())),
-	};
-	let entries = audit::find(
+	let mut entries = audit::find(
 		&mut conn,
 		&Filter {
 			actor_kind: args.actor_kind,
 			actor_id: args.actor_id,
 			action: args.action,
 			include_routine: args.include_routine,
-			record,
-			record_name,
+			acted_on: args.record,
 			since: Some(args.since.map_or(oldest, |since| since.max(oldest))),
-			until: args.before,
+			after: args.after.map(|after| Cursor {
+				recorded_at: after.recorded_at,
+				id: after.id,
+			}),
 			limit: args.limit.unwrap_or(PAGE),
 			..Default::default()
 		},
 	)
 	.await?;
+	audit::with_pictures(&mut conn, entries.iter_mut().map(|entry| &mut entry.actor)).await?;
 	Ok(Json(entries))
 }
 

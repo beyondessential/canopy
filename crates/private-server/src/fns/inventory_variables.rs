@@ -9,13 +9,13 @@ use axum::{Json, extract::State};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::{
-	audit::Audit,
+	audit::{Audit, EffectFailed},
 	backup_secrets::BackupSecrets,
 	tailscale_auth::{TailscaleAdmin, TailscaleUser},
 };
 use commons_types::{Uuid, server::rank::ServerRank};
 use database::{
-	audit::{Action, Record, RecordKind},
+	audit::{Action, Pending, Record, RecordKind},
 	inventory_variables::{InventoryVariable, VariableScope},
 	machines::Machine,
 	server_groups::ServerGroup,
@@ -193,12 +193,11 @@ pub async fn set(
 		// The secret store is outside Canopy's records, so the entry stands
 		// before it is written, and is settled by whether it took.
 		let pending = audit.commit_ahead(action(true)).await?;
-		if let Err(error) = store
+		if let Err(failed) = store
 			.put_secret_key(&scope.secret_name(), &args.name, &stored(&args.value))
 			.await
 		{
-			audit.settle_failed(&pending, None).await?;
-			return Err(error);
+			return Err(audit.effect_failed(&pending, failed).await);
 		}
 
 		let set = InventoryVariable::set(&mut conn, scope, &args.name, None, Some(&admin.0.login))
@@ -218,9 +217,14 @@ pub async fn set(
 		)
 		.await?;
 		if was_secret {
-			forget_secret_value(&state, scope, &args.name).await?;
+			// Forgetting the value it held as a secret is outside Canopy's
+			// records, as writing one is.
+			let pending = audit.commit_ahead(action(false)).await?;
+			forget_secret_value(&audit, &pending, &state, scope, &args.name).await?;
+			conn.settle_done(&pending, None).await?;
+		} else {
+			conn.record(action(false)).await?;
 		}
-		conn.record(action(false)).await?;
 		set
 	};
 
@@ -236,8 +240,8 @@ pub async fn set(
 
 /// Forget a variable, value and all.
 ///
-/// The row goes first, so a value the secret store will not let go of leaves
-/// nothing behind that would refuse every later read of the inventory.
+/// The row and its stored value go together: when the secret store refuses,
+/// both stay, and when it does not answer the row stays for a retry to remove.
 #[utoipa::path(
 	post,
 	path = "/remove",
@@ -279,10 +283,7 @@ pub async fn remove(
 		// Forgetting the stored value is outside Canopy's records, so the entry
 		// stands before it, and is settled by whether it took.
 		let pending = audit.commit_ahead(action).await?;
-		if let Err(error) = forget_secret_value(&state, scope, &args.name).await {
-			audit.settle_failed(&pending, None).await?;
-			return Err(error);
-		}
+		forget_secret_value(&audit, &pending, &state, scope, &args.name).await?;
 		conn.settle_done(&pending, None).await?;
 	} else {
 		conn.record(action).await?;
@@ -304,13 +305,27 @@ fn stored(value: &Value) -> SecretString {
 	SecretString::from(value.to_string())
 }
 
-/// The value behind a name the secret store may be holding. Called where a
-/// name is removed, and where it stops being a secret, so a later switch back
+/// Forget the value behind a name the secret store may be holding. Called where
+/// a name is removed, and where it stops being a secret, so a later switch back
 /// never resurrects a stale value.
-async fn forget_secret_value(state: &AppState, scope: VariableScope, name: &str) -> Result<()> {
-	secret_store(state)?
-		.forget_secret_key(&scope.secret_name(), name)
-		.await
+///
+/// The action's entry is committed ahead of it, and settled failed here where
+/// the store is known to have written nothing. The caller settles it done.
+async fn forget_secret_value(
+	audit: &Audit,
+	pending: &Pending,
+	state: &AppState,
+	scope: VariableScope,
+	name: &str,
+) -> Result<()> {
+	let forgot = match secret_store(state) {
+		Ok(store) => store.forget_secret_key(&scope.secret_name(), name).await,
+		Err(error) => Err(EffectFailed::nothing_done(error)),
+	};
+	match forgot {
+		Ok(()) => Ok(()),
+		Err(failed) => Err(audit.effect_failed(pending, failed).await),
+	}
 }
 
 pub(super) fn secret_store(state: &AppState) -> Result<&BackupSecrets> {

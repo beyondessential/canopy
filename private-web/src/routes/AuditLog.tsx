@@ -72,6 +72,7 @@ function AuditLogPage() {
 	const [error, setError] = useState<Error | null>(null);
 	const [full, setFull] = useState(false);
 	const [loadingMore, setLoadingMore] = useState(false);
+	const [moreError, setMoreError] = useState<Error | null>(null);
 	// Bumped whenever the query changes, so a page of the old query that lands
 	// late is dropped rather than shown under the new one.
 	const generation = useRef(0);
@@ -84,7 +85,7 @@ function AuditLogPage() {
 		return () => window.clearTimeout(id);
 	}, [recordText]);
 
-	const query = (before?: string): Record<string, unknown> => {
+	const query = (after?: AuditEntry): Record<string, unknown> => {
 		const [kind, ...rest] = actor.split(":");
 		const ms = RANGES.find((r) => r.value === range)?.ms ?? null;
 		return {
@@ -96,7 +97,7 @@ function AuditLogPage() {
 			include_routine: action === ALL,
 			record: record || undefined,
 			since: ms === null ? undefined : new Date(Date.now() - ms).toISOString(),
-			before,
+			after: after && { recorded_at: after.recorded_at, id: after.id },
 			limit: PAGE,
 		};
 	};
@@ -106,6 +107,7 @@ function AuditLogPage() {
 		const controller = new AbortController();
 		setLoading(true);
 		setLoadingMore(false);
+		setMoreError(null);
 		callApi<"audit", "list", AuditEntry[]>(
 			"audit",
 			"list",
@@ -133,18 +135,19 @@ function AuditLogPage() {
 		if (!last) return;
 		const mine = generation.current;
 		setLoadingMore(true);
+		setMoreError(null);
 		try {
 			const page = await callApi<"audit", "list", AuditEntry[]>(
 				"audit",
 				"list",
-				query(last.recorded_at),
+				query(last),
 			);
 			if (generation.current !== mine) return;
 			setEntries((prev) => [...prev, ...page]);
 			setFull(page.length >= PAGE);
 		} catch (err) {
 			if (generation.current !== mine) return;
-			setError(err instanceof Error ? err : new Error(String(err)));
+			setMoreError(err instanceof Error ? err : new Error(String(err)));
 		} finally {
 			if (generation.current === mine) setLoadingMore(false);
 		}
@@ -194,12 +197,13 @@ function AuditLogPage() {
 							</TableBody>
 						</Table>
 					</Paper>
+					{moreError && <Alert severity="error">{moreError.message}</Alert>}
 					{full && (
 						<Box>
 							<Button
 								variant="outlined"
 								onClick={loadMore}
-								disabled={loadingMore}
+								disabled={loading || loadingMore}
 							>
 								{loadingMore ? "Loading…" : "Load more"}
 							</Button>

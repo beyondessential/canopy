@@ -163,24 +163,12 @@ pub fn device_actor(device: &database::Device, application: Option<uuid::Uuid>) 
 	}
 }
 
-/// What a route that declares nothing is.
-#[derive(Clone, Copy, Debug)]
-pub enum Undeclared {
-	/// A fault: every route on the surface declares, so one that does not is
-	/// the server failing to recognise its own route, and is refused.
-	Refuse,
-	/// Not part of the audited surface: routes mounted beside the API that are
-	/// deliberately outside its OpenAPI document, such as pages.
-	Pass,
-}
-
 /// What [`enforce`] needs to decide a request.
 #[derive(Clone)]
 pub struct AuditState {
 	pub db: Db,
 	pub map: Arc<AuditMap>,
 	pub actor: ActorSource,
-	pub undeclared: Undeclared,
 	/// Where the routes are mounted beneath, where the declarations are of the
 	/// routes without it: a nested router's matched path carries the mount.
 	pub mount: &'static str,
@@ -225,6 +213,18 @@ impl AuditSession {
 			.unwrap_or_else(|held| held.into_inner())
 			.clone()
 			.ok_or_else(|| AppError::custom("an audited action has no actor to record"))
+	}
+
+	/// Refuse an action the route does not declare before it is committed ahead,
+	/// since an entry committed ahead stands whatever the layer decides after.
+	fn check_declared(&self, name: &str) -> Result<()> {
+		if self.declared.iter().any(|declared| declared == name) {
+			Ok(())
+		} else {
+			Err(AppError::custom(format!(
+				"this handler recorded the action {name}, which its route does not declare"
+			)))
+		}
 	}
 
 	fn note(&self, name: &'static str) {
@@ -284,6 +284,40 @@ impl AuditSession {
 			.filter(|read| !read.settled)
 			.map(|read| read.pending.clone())
 			.collect()
+	}
+}
+
+/// An effect outside Canopy's records that did not take, such as a write to a
+/// secret store or an object store.
+#[derive(Debug)]
+pub struct EffectFailed {
+	/// Whether it is known that nothing was done: the outside service answered
+	/// and refused. An effect that got no answer may have taken place.
+	pub nothing_done: bool,
+	pub error: AppError,
+}
+
+impl EffectFailed {
+	/// An effect refused, or never attempted, so known not to have taken place.
+	pub fn nothing_done(error: AppError) -> Self {
+		Self {
+			nothing_done: true,
+			error,
+		}
+	}
+
+	/// An effect whose outcome is unknown.
+	pub fn unknown(error: AppError) -> Self {
+		Self {
+			nothing_done: false,
+			error,
+		}
+	}
+}
+
+impl From<EffectFailed> for AppError {
+	fn from(failed: EffectFailed) -> Self {
+		failed.error
 	}
 }
 
@@ -360,6 +394,12 @@ impl Audit {
 	/// handler settles it: done in its transaction, failed with
 	/// [`Self::settle_failed`].
 	pub async fn commit_ahead(&self, action: Action) -> Result<Pending> {
+		self.0.check_declared(action.name())?;
+		if self.0.unchanged.load(std::sync::atomic::Ordering::Relaxed) {
+			return Err(AppError::custom(
+				"this handler declared that it changed nothing, and recorded an action",
+			));
+		}
 		let actor = self.0.actor()?;
 		let mut conn = self.0.db.get().await?;
 		let pending = audit::commit_ahead(&mut conn, &actor, &action).await?;
@@ -381,6 +421,20 @@ impl Audit {
 				settled: false,
 			});
 		Ok(pending)
+	}
+
+	/// Settle the entry committed ahead of an effect that failed: failed where
+	/// nothing was done, and otherwise left to lapse and read as unconfirmed.
+	/// Returns the effect's error, for the handler to return.
+	pub async fn effect_failed(&self, pending: &Pending, failed: EffectFailed) -> AppError {
+		if failed.nothing_done
+			&& let Err(error) = self.settle_failed(pending, None).await
+		{
+			// Left pending, it lapses and reads as unconfirmed, which is not
+			// wrong, only less than known.
+			tracing::error!(%error, entry = %pending.id, "could not settle a failed effect");
+		}
+		failed.error
 	}
 
 	/// Settle a pending entry failed, on a connection of its own, since the
@@ -481,9 +535,11 @@ pub async fn enforce(
 	let Some(declared) = state.map.declared(request.method(), &path) else {
 		// A route that declares nothing is the server failing to recognise its
 		// own route, not one that is silent: refused, because letting it
-		// through is the one outcome that would leave a hole in the log. A path
-		// the surface serves under another method is the router's to refuse.
-		if state.map.knows_path(&path) || matches!(state.undeclared, Undeclared::Pass) {
+		// through is the one outcome that would leave a hole in the log. Routes
+		// deliberately outside the document, such as pages, are mounted outside
+		// this layer. A path the surface serves under another method is the
+		// router's to refuse.
+		if state.map.knows_path(&path) {
 			return Ok(next.run(request).await);
 		}
 		tracing::error!(%path, method = %request.method(), "no audit declaration for this route; refusing");

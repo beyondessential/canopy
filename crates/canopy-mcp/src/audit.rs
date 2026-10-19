@@ -26,7 +26,7 @@ const MAX_LIMIT: u32 = 200;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct FindAuditEntriesArgs {
-	/// How many days back to look, at most 90. Defaults to 7. A longer window
+	/// How many days back to look, from 1 to 90. Defaults to 7. A longer window
 	/// is refused.
 	pub window_days: Option<u32>,
 	/// Only entries by this actor: an operator's login, or a device's, token's
@@ -76,6 +76,12 @@ impl CanopyMcp {
 		Parameters(args): Parameters<FindAuditEntriesArgs>,
 	) -> Result<CallToolResult, McpError> {
 		let window_days = args.window_days.unwrap_or(DEFAULT_WINDOW_DAYS);
+		if window_days == 0 {
+			return Err(McpError::invalid_params(
+				"window_days is at least 1".to_owned(),
+				None,
+			));
+		}
 		if window_days > MAX_WINDOW_DAYS {
 			return Err(McpError::invalid_params(
 				format!(
@@ -91,15 +97,13 @@ impl CanopyMcp {
 		let oldest = Timestamp::now() - READ_WINDOW;
 		let since =
 			(Timestamp::now() - SignedDuration::from_hours(24 * window_days as i64)).max(oldest);
-		let record = args.record.filter(|record| !record.trim().is_empty());
 		let mut entries = audit::find(
 			&mut conn,
 			&Filter {
 				actor_id: args.actor,
 				action: args.action,
 				include_routine: args.include_routine.unwrap_or(false),
-				record: record.clone(),
-				record_name: record,
+				acted_on: args.record,
 				since: Some(since),
 				// One more than asked for, to say whether there is more.
 				limit: limit as i64 + 1,

@@ -590,7 +590,10 @@ async fn create(
 					extra,
 				},
 			};
+			// An ignored source creates nothing, so whatever it resolves was
+			// already held, though `held` is not read for it.
 			let arrived: Vec<Application> = match &resolved {
+				_ if !record => Vec::new(),
 				ResolvedPush::Split { applications, .. } => applications
 					.iter()
 					.map(|(_, application, _)| application)
@@ -606,6 +609,18 @@ async fn create(
 			Ok((resolved, arrived))
 		})
 		.await?;
+	// A unified push speaks for the one application it resolved, so what it
+	// records names that application as the one the device acted for.
+	if let ResolvedPush::Unified {
+		application: Some(application),
+		..
+	} = &resolved
+	{
+		audit.acting_as(commons_servers::audit::device_actor(
+			&device.0.0,
+			Some(application.id),
+		));
+	}
 	for application in arrived {
 		db.record(database::audit::Action::ApplicationArrived {
 			application: database::audit::Record::new(
@@ -1179,8 +1194,11 @@ async fn file_health_events(
 	let mut registered = Vec::new();
 	for check_name in reported.keys() {
 		let namespace = namespace_of(check_name);
-		if CheckPolicy::upsert_default(conn, &status.source, &namespace, check_name).await? {
+		if let Some(id) =
+			CheckPolicy::upsert_default(conn, &status.source, &namespace, check_name).await?
+		{
 			registered.push(RegisteredCheck {
+				id,
 				name: check_name.to_string(),
 				source: status.source.clone(),
 				namespace: match &namespace {
@@ -1459,6 +1477,7 @@ async fn file_health_events(
 
 /// A check a push brought into the catalogue.
 struct RegisteredCheck {
+	id: Uuid,
 	name: String,
 	source: String,
 	namespace: String,
@@ -1473,7 +1492,7 @@ async fn record_registrations(
 		db.record(database::audit::Action::CheckRegistered {
 			check: database::audit::Record::new(
 				database::audit::RecordKind::Check,
-				format!("{}:{}:{}", check.source, check.namespace, check.name),
+				check.id,
 				check.name,
 			),
 			source: check.source,

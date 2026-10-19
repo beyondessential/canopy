@@ -167,6 +167,14 @@ CREATE TABLE audit_entries (
     CHECK (
         (outcome IS NULL OR outcome = 'pending') = (settled_at IS NULL)
     ),
+    -- A device and a token are named by their identifier, a device carries its
+    -- role, and a token its name, so an actor always reads back whole.
+    CHECK (
+        actor_kind NOT IN ('device', 'token')
+        OR actor_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    ),
+    CHECK (actor_kind <> 'device' OR actor_role IS NOT NULL),
+    CHECK (actor_kind <> 'token' OR actor_name IS NOT NULL),
     PRIMARY KEY (id, recorded_at, retention)
 ) PARTITION BY RANGE (recorded_at);
 
@@ -178,7 +186,10 @@ CREATE INDEX audit_entries_detail_idx ON audit_entries USING gin (detail jsonb_p
 
 -- The only change an entry ever takes is being settled: a pending entry becomes
 -- done or failed, once, within an hour of being committed by the database's own
--- clock, with its detail only added to. Deletes are refused; entries leave by
+-- clock, with its detail only added to. The hour is read off the clock as the
+-- settle runs, not when its transaction began, so a long transaction cannot
+-- settle an entry that has lapsed; from the hour on, the entry is presented as
+-- unconfirmed. Deletes are refused; entries leave by
 -- dropping a partition, which fires no row trigger.
 CREATE FUNCTION audit_entries_guard() RETURNS trigger
 LANGUAGE plpgsql
@@ -199,7 +210,7 @@ BEGIN
             USING ERRCODE = 'restrict_violation';
     END IF;
 
-    IF now() > OLD.recorded_at + interval '1 hour' THEN
+    IF clock_timestamp() >= OLD.recorded_at + interval '1 hour' THEN
         RAISE EXCEPTION 'this audit entry lapsed unsettled and can no longer be settled'
             USING ERRCODE = 'restrict_violation';
     END IF;

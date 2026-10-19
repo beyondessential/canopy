@@ -319,6 +319,17 @@ pub use paste::paste;
 ///  let _ = routes!(get_user);
 /// ```
 ///
+/// Nor does one declared audited that names no actions:
+///
+/// ```compile_fail
+/// # use canopy_utoipa_axum::routes;
+/// # use utoipa::path;
+///  #[utoipa::path(get, path = "")]
+///  async fn get_user() {}
+///
+///  let _ = routes!(write, audit: get_user);
+/// ```
+///
 /// Nor does one that declares a mode and no audit declaration:
 ///
 /// ```compile_fail
@@ -400,12 +411,23 @@ macro_rules! routes {
     ( public, $clause:ident $( ( $( $action:ident ),+ $(,)? ) )? : $handler:path $(,)? ) => {
         $crate::routes!( @public $clause $( [ $( $crate::routes!( @action $action ) ),+ ] )? : $handler )
     };
-    // How a clause reads: `silent` takes no action, `audit(...)` must record at
-    // least one of the actions it names, and `audit_optional(...)` may.
-    ( @optional silent ) => { false };
-    ( @optional audit ) => { false };
-    ( @optional audit_optional ) => { true };
-    ( @optional $other:ident ) => {
+    // How a clause reads, as whether its actions are optional: `silent` takes
+    // no action, `audit(...)` must record at least one of the actions it names,
+    // and `audit_optional(...)` may. Any other shape does not build, so a
+    // clause can never be read as silent by mistake.
+    ( @optional silent [] ) => { false };
+    ( @optional audit [ $( $action:expr ),+ ] ) => { false };
+    ( @optional audit_optional [ $( $action:expr ),+ ] ) => { true };
+    ( @optional silent [ $( $action:expr ),+ ] ) => {
+        compile_error!("a silent handler takes no action: `silent`, not `silent(...)`. See the AUD spec.")
+    };
+    ( @optional $clause:ident [] ) => {
+        compile_error!(
+            "an audited handler names the actions it takes: `audit(Action, ...)` or \
+             `audit_optional(Action, ...)`. See the AUD spec."
+        )
+    };
+    ( @optional $other:ident [ $( $action:expr ),* ] ) => {
         compile_error!(
             "an audit declaration is `silent`, `audit(Action, ...)` or `audit_optional(Action, ...)`. \
              See the AUD spec."
@@ -428,7 +450,7 @@ macro_rules! routes {
             let mut schemas = Vec::<(String, utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>)>::new();
             let (path, mut item, types) = $crate::routes!(@resolve_types $handler : schemas);
             let actions: &[&str] = &[ $( $( $action ),* )? ];
-            $crate::__set_audit(&mut item, actions, $crate::routes!( @optional $audit ));
+            $crate::__set_audit(&mut item, actions, $crate::routes!( @optional $audit [ $( $( $action ),* )? ] ));
             $( let _ = [ $( $action ),* ]; $crate::__assert_audited(&$handler); )?
             let method_router = types.iter().by_ref().fold(axum::routing::MethodRouter::new(), |router, path_type| {
                 router.on(path_type.to_method_filter(), $handler)
@@ -449,7 +471,7 @@ macro_rules! routes {
                 $crate::__set_danger_reasons(&mut item, reasons);
             }
             let actions: &[&str] = &[ $( $( $action ),* )? ];
-            $crate::__set_audit(&mut item, actions, $crate::routes!( @optional $audit ));
+            $crate::__set_audit(&mut item, actions, $crate::routes!( @optional $audit [ $( $( $action ),* )? ] ));
             $( let _ = [ $( $action ),* ]; $crate::__assert_audited(&$handler); )?
             let method_router = types.iter().by_ref().fold(axum::routing::MethodRouter::new(), |router, path_type| {
                 router.on(path_type.to_method_filter(), $handler)

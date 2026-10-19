@@ -271,10 +271,13 @@ test.describe("audit log page", () => {
 		page,
 		sql,
 	}) => {
+		// Entries one action records share their time, so a page can end partway
+		// through them. These straddle the first page's end.
+		const shared = new Date(Date.now() - 50 * 60_000).toISOString();
 		for (let i = 0; i < 55; i++) {
 			await seedAuditEntry(sql, {
 				action: "maintenance_declared",
-				minutesAgo: 2 + i,
+				...(i >= 45 && i < 52 ? { recordedAt: shared } : { minutesAgo: 2 + i }),
 				detail: { note: `entry-${i}` },
 			});
 		}
@@ -285,7 +288,9 @@ test.describe("audit log page", () => {
 
 		await page.getByRole("button", { name: "Load more" }).click();
 		await expect(page.getByRole("row")).toHaveCount(56);
-		await expect(page.getByText("entry-54", { exact: true })).toBeVisible();
+		for (let i = 0; i < 55; i++) {
+			await expect(page.getByText(`entry-${i}`, { exact: true })).toHaveCount(1);
+		}
 		await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
 	});
 

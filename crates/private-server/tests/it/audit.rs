@@ -122,7 +122,7 @@ async fn an_entry_keeps_the_name_a_record_had_and_never_blocks_deleting_it() {
 		))
 		.await
 		.unwrap();
-		let entries = log(&mut conn, Filter { record: Some(BOX.into()), ..Default::default() }).await;
+		let entries = log(&mut conn, Filter { acted_on: Some(BOX.into()), ..Default::default() }).await;
 		assert_eq!(entries.len(), 1, "found by the record it acted on");
 		assert!(entries[0].records.iter().any(|r| r.name == "box"));
 	})

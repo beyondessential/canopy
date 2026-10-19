@@ -31,7 +31,7 @@ use axum::{Json, extract::State, http::StatusCode};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::{
-	audit::{Audit, device_actor},
+	audit::{Audit, EffectFailed, device_actor},
 	device_auth::ServerDevice,
 };
 use commons_types::backup::{BackupConfigStatus, BackupPurpose, BackupType, RunOutcome};
@@ -473,10 +473,13 @@ async fn credentials(
 			);
 			// An answer that refuses is knowing nothing was issued; no answer at
 			// all is not, and leaves the entry to read as unconfirmed.
-			if err.as_service_error().is_some() {
-				audit.settle_failed(&pending, None).await?;
-			}
-			return Err(AppError::Upstream("credential issuance failed".into()));
+			let error = AppError::Upstream("credential issuance failed".into());
+			let failed = if err.as_service_error().is_some() {
+				EffectFailed::nothing_done(error)
+			} else {
+				EffectFailed::unknown(error)
+			};
+			return Err(audit.effect_failed(&pending, failed).await);
 		}
 	};
 
@@ -484,10 +487,14 @@ async fn credentials(
 
 	let Some(creds) = resp.credentials() else {
 		tracing::error!(group = %group_id, "backup-credentials: AssumeRole returned no credentials");
-		audit.settle_failed(&pending, None).await?;
-		return Err(AppError::Upstream(
-			"credential issuance returned no credentials".into(),
-		));
+		return Err(audit
+			.effect_failed(
+				&pending,
+				EffectFailed::nothing_done(AppError::Upstream(
+					"credential issuance returned no credentials".into(),
+				)),
+			)
+			.await);
 	};
 
 	// STS `Expiration` is a smithy DateTime → convert to a jiff Timestamp for

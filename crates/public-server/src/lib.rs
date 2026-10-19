@@ -27,27 +27,25 @@ pub mod tags;
 pub mod timesync;
 pub mod versions;
 
-/// Put the audit layer over the device API's routes, returning them beside the
-/// OpenAPI document they declare.
+/// Put the audit layer over the device API's routes, returning them, with the
+/// [`pages`] beside them, and the OpenAPI document they declare.
 ///
 /// The declarations are read out of that document, so there is one place each is
-/// written. Routes beside the API that are not in the document, the pages, are
-/// outside the audited surface.
+/// written. The pages are outside the document and outside the audited surface,
+/// so they are merged in beside the layer rather than beneath it, and every route
+/// beneath it must declare.
 pub fn audited(
 	router: OpenApiRouter<AppState>,
 	db: database::Db,
 ) -> (axum::Router<AppState>, utoipa::openapi::OpenApi) {
-	audited_under(router, db, "", commons_servers::audit::Undeclared::Pass)
+	audited_under(router, db, "")
 }
 
-/// As [`audited`], for routes mounted beneath `mount` on another server, which
-/// has no pages of its own beside them: a route that declares nothing is then a
-/// fault rather than a page.
+/// As [`audited`], for routes mounted beneath `mount` on another server.
 pub fn audited_under(
 	router: OpenApiRouter<AppState>,
 	db: database::Db,
 	mount: &'static str,
-	undeclared: commons_servers::audit::Undeclared,
 ) -> (axum::Router<AppState>, utoipa::openapi::OpenApi) {
 	use commons_servers::audit::{ActorSource, AuditMap, AuditState, enforce};
 
@@ -56,18 +54,18 @@ pub fn audited_under(
 		db,
 		map: std::sync::Arc::new(AuditMap::from_openapi(&spec)),
 		actor: ActorSource::Handler,
-		undeclared,
 		mount,
 	};
 	(
-		router.layer(axum::middleware::from_fn_with_state(state, enforce)),
+		router
+			.layer(axum::middleware::from_fn_with_state(state, enforce))
+			.merge(pages()),
 		spec,
 	)
 }
 
 pub fn routes() -> OpenApiRouter<AppState> {
-	#[cfg_attr(not(feature = "ui"), expect(unused_mut))]
-	let mut router = OpenApiRouter::new()
+	OpenApiRouter::new()
 		.merge(backup::routes())
 		.merge(restore::routes())
 		.nest("/artifacts", artifacts::routes())
@@ -83,14 +81,20 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		)
 		.nest("/status", statuses::routes())
 		.nest("/tags", tags::routes())
-		.nest("/versions", versions::routes());
+		.nest("/versions", versions::routes())
+}
+
+/// The routes served beside the API that are not part of its OpenAPI document:
+/// the artifact download proxy, and with the `ui` feature the pages.
+pub fn pages() -> axum::Router<AppState> {
+	#[cfg_attr(not(feature = "ui"), expect(unused_mut))]
+	let mut router = axum::Router::new().nest("/versions", versions::pages());
 
 	#[cfg(feature = "ui")]
 	{
-		use axum::Router;
 		use axum::routing::get;
 		use tower_http::services::ServeDir;
-		let ui_router: Router<AppState> = Router::new()
+		router = router
 			.route("/", get(index))
 			.route("/errors/{slug}", get(error))
 			.merge(timesync::routes())
@@ -98,7 +102,6 @@ pub fn routes() -> OpenApiRouter<AppState> {
 			.nest_service("/static", ServeDir::new("static"))
 			// Mount server-versions route (secret is checked in the handler)
 			.nest("/server-versions", server_versions::routes());
-		router = router.merge(OpenApiRouter::from(ui_router));
 	}
 
 	router

@@ -103,3 +103,65 @@ async fn a_push_records_each_application_and_check_it_creates_and_nothing_after(
 	)
 	.await
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_ignored_source_records_no_arrival_for_what_the_box_already_runs() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			use commons_types::source::IngestMode;
+			use database::source_policies::SourcePolicy;
+
+			let machine_id = machine_for(&mut conn, device_id).await;
+			let send = async || {
+				public
+					.post(&format!("/status/{machine_id}"))
+					.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+					.json(&push())
+					.await
+					.assert_status_ok();
+			};
+
+			send().await;
+			assert_eq!(entries(&mut conn, "application_arrived").await.len(), 2);
+
+			SourcePolicy::set_ingest(&mut conn, "alertd", IngestMode::Ignore)
+				.await
+				.expect("set ignore");
+			send().await;
+			send().await;
+			assert_eq!(
+				entries(&mut conn, "application_arrived").await.len(),
+				2,
+				"an ignored push resolves the applications already held without bringing them"
+			);
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn yanking_is_recorded_once_and_yanking_again_or_an_unknown_version_changes_nothing() {
+	commons_tests::server::run_with_device_auth(
+		"admin",
+		async |mut conn, cert, _device_id, public, _| {
+			sql_query(
+				"INSERT INTO versions (major, minor, patch, changelog, status) \
+				 VALUES (1, 0, 1, 'yankable', 'published')",
+			)
+			.execute(&mut conn)
+			.await
+			.expect("insert version");
+
+			for version in ["1.0.1", "1.0.1", "9.9.9"] {
+				public
+					.delete(&format!("/versions/{version}"))
+					.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+					.await
+					.assert_status_ok();
+			}
+			assert_eq!(entries(&mut conn, "version_removed").await.len(), 1);
+		},
+	)
+	.await
+}
