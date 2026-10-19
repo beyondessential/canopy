@@ -24,7 +24,7 @@ Whether a handler is audited is independent of its safety grade (see [SAFE](../p
 A read can be audited, as running a query in the SQL playground is, and a change can be silent.
 
 On the device API, the handlers that issue a credential or trust material, or that change Canopy's records beyond reporting status, are audited.
-Reporting status and reading are silent.
+Reporting status and reading are silent, except that a report records an entry for each record it creates, such as an application arriving or a check being registered.
 
 Canopy's own background work records an entry where a job declares the change it makes worth recording.
 
@@ -52,6 +52,7 @@ A device's enrolment is its own action, its actor being the device the enrolment
 
 An entry holds when it happened, its actor, its action, the records it acted on, and the action's detail.
 The records acted on are the machines, groups, applications, configurations, credentials and the like that the action concerned, and an action that creates a record names the record it created.
+Each record acted on is held by its identifier and by its name as it was when the action was taken, so an entry still reads after the record is renamed or gone.
 The detail is what the action defines as worth knowing about it: the reason given for a revocation, the intent a lease was taken with, what the action produced.
 Nothing reaches an entry that its action does not define.
 
@@ -70,8 +71,10 @@ An entry committed ahead is pending until the action settles it, once, as done o
 Settling it done commits together with the rest of the action's work; settling it failed commits on its own, since that work is rolled back.
 An action settles its entry failed only when it knows its effect did not take place.
 Settling can add to the entry's detail what the action has learned since, such as the identifier of a credential an outside service issued.
-A pending entry that is never settled is presented as unconfirmed, because what it records may have taken place even though the action did not complete.
-Once its week is archived an entry can no longer be settled, and one still pending is archived as unconfirmed.
+
+A pending entry lapses an hour after it was committed, and can no longer be settled once it has.
+A pending entry is not presented while it can still be settled.
+A lapsed entry is presented as unconfirmed, because what it records may have taken place even though the action did not complete.
 
 Committing ahead is how:
 
@@ -92,13 +95,17 @@ The archive is where the log is kept for good, rather than a copy of it.
 It is written to the recovery escrow's storage (see [ESC](../jobs/escrow.md)) under its own prefix, and is not encrypted to the escrow recipients, since Canopy reads it back.
 
 The archive is written one closed week at a time, as one object per week, so periods never overlap and every entry is archived exactly once.
+A week is written only once every entry in it is settled or lapsed, so what is archived is final.
 Each week's object holds every entry recorded in that week, whatever its retention in the database.
+A week with no entries is written as an object too.
 The object is in Parquet format, so that it can be read without Canopy.
 
 A week counts as archived once its object has been written, read back and checked against what was sent, and is under object lock.
 Until then, none of its entries leave the database.
 
-Each week's object records the hash of the previous week's object, so a missing or substituted week breaks the chain and shows.
+Each week's object records the hash of the previous week's object, and the first week's records that it has none.
+Before writing a week, Canopy reads back the previous week's object and checks it is unchanged since it was archived, and a missing or substituted week raises a self-alert (see "Self-alerts").
+Each archived week loaded for the log page is checked against the hash the week after it records, and a break is shown where it falls.
 
 Archived weeks are kept indefinitely.
 Each is under object lock for the same retention as the escrow's own versions, and remains after the lock expires.
@@ -120,3 +127,5 @@ Running out matters more here than for the other histories, because without a ra
 Canopy raises a self-alert (see [SELF](../private-server/self-alerts.md)) when archiving falls behind.
 It warns when a closed week has gone a day without being archived, and fails once an unarchived week's earliest entries are ninety days old, since from then on the database is holding entries it would otherwise have let go.
 It names the weeks outstanding, and clears once every closed week is archived.
+
+Canopy raises a failure self-alert when an archived week reads back missing or changed since it was archived, naming the week, and clears it once that week reads back as it was archived.

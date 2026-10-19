@@ -4,7 +4,7 @@ Implements [AUD](../../specs/platform/audit-log.md).
 The reasoning behind these choices is in the working doc (`.workhorse/working-docs/u2/working-doc.md`).
 
 This card builds the log itself: declarations, capture, storage, the log page, the fleet query tool, and the range self-alert.
-Two pieces are split into their own cards (see the breakdown): the offsite archive, and replacing per-feature provenance with the log.
+Three pieces are split into their own cards (see the breakdown): the offsite archive, reviewing the rest of the surface for what to audit, and replacing per-feature provenance with the log.
 Until the archive lands, nothing leaves the database, which AUD already requires of an unarchived week.
 
 ## Actions
@@ -34,9 +34,9 @@ Until the archive lands, nothing leaves the database, which AUD already requires
 
 - One table, partitioned by week through `database::partitions` and provisioned ahead with the other histories, so the HST runway alert covers it with no new code beyond registering the table.
 - Each week is sub-partitioned by retention class, so the archive card's removals are partition drops: the ninety-day part once the week is archived and old enough, the rest at a year.
-- Row: timestamp, actor kind and identifier, action name, the records acted on, a `jsonb` detail, and for an entry committed ahead an outcome (pending, done, failed) and when it settled. The records acted on are indexed for the subject filter; a GIN index on the detail serves lookups and per-value counts.
-- A trigger refuses every update except settling: outcome from pending to done or failed, once, with detail only added to. Deletes are refused; entries leave by partition drop alone.
-- Archiving and settling serialise on a per-week row: the archiver freezes the week (`FOR UPDATE`, committed) before reading it, and settling checks the week is not frozen under `FOR SHARE` in its own transaction. A pending entry in a frozen week stays pending for good.
+- Row: timestamp, actor kind and identifier, action name, the records acted on (each an identifier with its name as it was, and no foreign keys, since entries outlive and must never block deleting what they name), a `jsonb` detail, and for an entry committed ahead an outcome (pending, done, failed) and when it settled. The records acted on are indexed for the subject filter; a GIN index on the detail serves lookups and per-value counts.
+- A trigger refuses every update except settling: outcome from pending to done or failed, once, within an hour of the entry being committed (by the database's clock), with detail only added to. Deletes are refused; entries leave by partition drop alone.
+- Lapse replaces any freeze: the archiver reads a week only once its end is more than an hour past, so nothing in it can still be settled. Lapsed is derived (pending and over an hour old), not stored. The log page and "Find audit entries" leave out pending entries under an hour old.
 
 ## Reading
 
@@ -66,9 +66,9 @@ Until the archive lands, nothing leaves the database, which AUD already requires
 - [ ] Migration: partitioned entries table with retention sub-partitions, GIN index; registered with partition runway
 - [ ] Database model: write entry, commit an entry ahead, settle it, freeze a week, query with filters, count by detail value over a window
 - [ ] Audit layer and extractor on the private server
-- [ ] Declare every private-server handler audited, with its actions, or silent; the specs already naming audited actions (MNT, K8S, INV, UPG, RST, RPT) are audited
-- [ ] Device API: audit issuance and record-changing handlers, silence status and reads
-- [ ] Fleet query interface: declare each tool, add "Find audit entries"
+- [ ] Audit the handlers of the specs already naming audited actions (MNT, K8S, INV, UPG, RST, RPT) and the SQL playground; declare every other private-server handler silent, for the follow-up review card to revisit
+- [ ] Device API: audit issuance and record-changing handlers, silence status and reads; a status push records each application arrival and each check registration
+- [ ] Fleet query interface: declare each tool silent, add "Find audit entries"
 - [ ] Recorder for jobs
 - [ ] Log page in `private-web/`, with Playwright coverage
 - [ ] `just gen-openapi`, and `just gen-api` if the public API's schema changes
