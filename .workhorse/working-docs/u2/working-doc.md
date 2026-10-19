@@ -80,11 +80,34 @@ A systematic record of who did what in Canopy, captured at the middleware or ext
 - History storage already keeps high-volume tables in weekly ranges (HST). Storing the log the same way lines archive periods up with Postgres ranges: archive a whole closed week as one object, confirm it landed, then drop that week's range. The period boundary is the range boundary, so non-overlap falls out of the storage rather than needing tracking per entry, and removing a week is a cheap drop rather than a bulk delete.
   - Longer-lived entry types break the whole-range drop, since a week's range holds both kinds. Either keep them in a separate table, which can have its own ranges or none at all given the low volume, or move them out of a range before it is dropped.
 
+### Capture: an extractor carrying the audit transaction
+
+Decided: the entry is written inside the handler's own transaction, handed to it by an extractor. The entry and the change commit together, and an action that errors rolls back and leaves no entry, which is what "errored actions are not logged" asks for without any settling or deleting.
+
+- The `routes!` declaration (`audit(...)` or `silent`) is recorded as an OpenAPI extension and read back at startup into an audit map, as grades are.
+- An audit layer, a sibling of `safety::enforce`, buffers the request body, picks the declared fields out of it, and leaves the actor, operation and recorded fields in the request's extensions. The extractor is `FromRequestParts`, so it cannot read the body itself while `Json<Args>` consumes it; the layer does that part.
+- The extractor checks out a primary connection, begins a transaction, writes the entry, and hands the handler the connection. The layer keeps a handle to the same transaction and commits it on a successful response, rolling it back otherwise.
+- Audited handlers swap `state.db.get()` for the extractor. Mechanical, explicit at the call site, and the handler can see it is inside the audit transaction.
+- An audited read takes the extractor too, so the entry goes to the primary even where the read would otherwise use `db_read`.
+- Public-server handlers (device issuance, A5) take the same extractor with the device as actor. Jobs that opt in call the recorder directly inside their own transaction with Canopy as actor.
+- Authorisation refusals happen in `TailscaleAdmin` (or device auth) before the handler, so no transaction exists; the layer writes the refusal entry on its own.
+- Cost: an audited request is one transaction, held across whatever the handler does, and a handler cannot commit part of its work before failing.
+
+### Anchors in the code
+
+- `routes!` (vendored `canopy-utoipa-axum`) takes the grade as a prefix, `routes!(danger(fleet, invalidates): revoke)`, records it as the `x-canopy-safety-mode` OpenAPI extension, and fails to compile without one. `safety::GradeMap` reads it back from the built document at startup. An audit declaration can ride the same macro as its own extension, read back into its own map, with no second copy anywhere.
+- `safety::enforce` is a route layer that already resolves the tailnet identity and the matched path. The audit layer is a sibling, not part of it, since the two concerns are orthogonal; it can sit next to it in the stack.
+- `database::Db` wraps the mobc pool precisely so checkout can change "without changing any of the call sites"; handlers make about 180 `db.get()` calls between them and almost none open their own transaction. That is what would make a request-scoped transaction possible without editing handlers.
+- Partitioned histories have `database::partitions::{ensure_runway, runway}` and the HST self-alert; the log joins them.
+- The recovery escrow writes `canopy-recovery/state.age` to a bucket in a separate account through an assumed role, write-only by design. Reading archived periods back needs `GetObject` on the audit prefix granted to some role Canopy holds, which is an ops-side change in that account. The escrow snapshot also carries the backup schedule history (version 3); once that history folds into the log, the snapshot reads it from the log or drops it.
+
 ## Open questions
 
+- [ ] An audited route whose handler does not take the extractor writes no entry and still acts. Catch it at compile time (the `routes!` audit clause asserts the handler's extractor tuple contains the audit extractor, through a trait implemented across tuple positions the way axum's `all_the_tuples!` does), or at run time (the layer refuses the response when no entry was written, which is after the fact)?
+- [ ] Outside effects inside the transaction. A handler that calls S3, Kubernetes or STS has acted on the world before its transaction commits; if the commit then fails, the effect stands with no entry. Fail-closed for those needs the entry committed before the effect, which brings back an entry for an action that may then error.
 
 
-- [ ] Fail-closed with generic capture. The middleware sits outside the handler's transaction, so "no entry, no action" cannot come from sharing a transaction without touching handlers. Candidates: write the entry ahead of the handler and refuse if that fails, then settle it once the handler returns (which leaves an entry of unknown outcome if Canopy dies mid-request, arguably correct); or hand handlers a transaction-scoped recorder through an extractor (which edits handlers, the thing the card wants to avoid). Write-ahead also produces entries for actions that then error, which the decision above says are not logged, so they would be removed or settled as not carried out.
+
 
 ## Trade-offs
 
