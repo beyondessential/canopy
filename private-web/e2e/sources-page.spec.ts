@@ -1,5 +1,6 @@
 import { resetSeededTables, seedCheckPolicy } from "./seed";
 import { expect, test } from "./test-fixtures";
+import { sidebarLink } from "./nav";
 
 test.describe("Sources page", () => {
 	// Source policy outlives the test that sets it — the stack (and its
@@ -27,10 +28,10 @@ test.describe("Sources page", () => {
 		await expect(page.getByRole("heading", { name: "Sources" })).toBeVisible();
 		await expect(page.getByRole("row", { name: /alertd/ }).first()).toBeVisible();
 
-		// The Settings tab bar keeps Healthchecks selected on the sub-page.
-		await expect(page.getByRole("tab", { name: "Healthchecks" })).toHaveAttribute(
-			"aria-selected",
-			"true",
+		// The sidebar keeps Healthchecks current on the sub-page.
+		await expect(sidebarLink(page, "Healthchecks")).toHaveAttribute(
+			"aria-current",
+			"page",
 		);
 
 		// A back link returns to the catalog.

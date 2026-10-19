@@ -8,6 +8,7 @@ import {
 	seedServerGroup,
 	seedVersion,
 } from "./seed";
+import { sidebar, sidebarLink } from "./nav";
 
 test.describe("servers list page", () => {
 	test.beforeEach(async ({ sql }) => {
@@ -27,17 +28,20 @@ test.describe("servers list page", () => {
 
 		await page.goto("/fleet");
 
-		await expect(
-			page.getByRole("tab", { name: "Groups" }),
-		).toHaveAttribute("aria-selected", "true");
-		await expect(page.getByRole("tab", { name: "Archived" })).toBeVisible();
-		await expect(page.getByRole("tab", { name: "Figures" })).toBeVisible();
+		await expect(sidebarLink(page, "Groups")).toHaveAttribute(
+			"aria-current",
+			"page",
+		);
+		await expect(sidebarLink(page, "Archived")).toBeVisible();
+		await expect(sidebarLink(page, "Figures")).toBeVisible();
 
 		// The fleet is browsed by group, and every machine is in one, so there
 		// is no ungrouped listing to offer.
 		// spec: FLT
-		await expect(page.getByRole("tab", { name: "Ungrouped" })).toHaveCount(0);
-		await expect(page.getByRole("tab")).toHaveCount(3);
+		await expect(sidebarLink(page, "Ungrouped")).toHaveCount(0);
+		await expect(
+			sidebar(page).getByRole("group", { name: "Fleet pages" }).getByRole("link"),
+		).toHaveCount(3);
 
 		// The group's name shows as a link to its detail page.
 		await expect(
@@ -305,7 +309,7 @@ test.describe("the machine's edit form", () => {
 		await expect(
 			page.getByTestId("application-section").getByLabel(/^Name(\s*\*)?$/i),
 		).toHaveValue(server.name);
-		await expect(page.getByLabel(/device/i)).toHaveCount(0);
+		await expect(page.getByRole("main").getByLabel(/device/i)).toHaveCount(0);
 	});
 
 	/// A box carrying two workloads is the case the one-form rule exists for:

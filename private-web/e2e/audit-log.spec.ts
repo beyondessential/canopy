@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { expect, test } from "./test-fixtures";
 import { resetAuditLog, seedAuditEntry } from "./seed";
+import { sidebarLink } from "./nav";
 
 const ALICE = { kind: "operator", login: "alice@example.org", name: "Alice Ng" } as const;
 const BOB = { kind: "operator", login: "bob@example.org" } as const;
@@ -60,9 +61,9 @@ test.describe("audit log page", () => {
 		});
 
 		await page.goto("/settings/audit-log");
-		await expect(page.getByRole("tab", { name: "Audit log" })).toHaveAttribute(
-			"aria-selected",
-			"true",
+		await expect(sidebarLink(page, "Audit log")).toHaveAttribute(
+			"aria-current",
+			"page",
 		);
 
 		const rows = page.getByRole("row");
@@ -321,7 +322,7 @@ test.describe("audit log page", () => {
 		await page.goto("/settings/audit-log");
 
 		await expect(page.getByText("Administrators only.")).toBeVisible();
-		await expect(page.getByRole("tab", { name: "Audit log" })).toHaveCount(0);
+		await expect(sidebarLink(page, "Audit log")).toHaveCount(0);
 		await expect(page.getByText("Declare maintenance")).toHaveCount(0);
 		expect(asked).toBe(false);
 	});

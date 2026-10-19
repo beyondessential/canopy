@@ -1,17 +1,19 @@
 import { expect, test } from "./test-fixtures";
 import { resetSeededTables, seedDevice, seedDeviceKey } from "./seed";
+import { sidebarLink } from "./nav";
 
 test.describe("devices index", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
 	});
 
-	test("renders the tabs and the search input", async ({ page }) => {
+	test("lists its pages in the sidebar and renders the search input", async ({ page }) => {
 		await page.goto("/devices");
-		await expect(page.getByRole("tab", { name: "Search" })).toBeVisible();
-		await expect(
-			page.getByRole("tab", { name: "All devices" }),
-		).toBeVisible();
+		await expect(sidebarLink(page, "Search")).toHaveAttribute(
+			"aria-current",
+			"page",
+		);
+		await expect(sidebarLink(page, "All devices")).toBeVisible();
 		await expect(
 			page.getByRole("searchbox", { name: /Search by public key/i }),
 		).toBeVisible();
