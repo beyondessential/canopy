@@ -38,11 +38,14 @@
 
 ## Recording
 
-- [ ] Each issuance is in the audit log with subject, calling identity, relying party, `jti`, `kid` and expiry, and never the token (verifies spec: IDT)
-- [ ] Each refusal as not granted is in the audit log with the subject, calling identity and relying party (verifies spec: IDT)
+- [ ] Each issuance is an entry acting on the subject and relying party, its actor the machine device (with the application for an application subject), its detail `jti`, `kid`, expiry and `sub`, and never the token (verifies spec: IDT)
+- [ ] Each refusal as not granted is an issuance entry settled failed with reason not granted, on the subject and relying party, and is presented at once rather than as pending (verifies spec: IDT)
 - [ ] Refusals other than not granted leave nothing in the audit log (verifies spec: IDT)
-- [ ] When the audit record cannot be written, no token is returned (verifies spec: IDT)
-- [ ] Granting and revoking are in the audit log with who acted and when (verifies spec: IDP)
+- [ ] When the audit entry cannot be written, no token is returned (verifies spec: IDT)
+- [ ] Granting and revoking are entries acting on the subject and relying party, kept for a year (verifies spec: IDP)
+- [ ] Saving a machine's edit page without changing its grants or its applications' grants records no grant entry and succeeds (verifies spec: IDP)
+- [ ] Saving a relying party unchanged records nothing and succeeds (verifies spec: IDP)
+- [ ] A relying party with no issuance in the last ninety days shows none in that time (verifies spec: IDP)
 
 ## Discovery and keys
 
@@ -66,7 +69,7 @@
 - [ ] Editing a relying party's name and lifetime takes effect; a changed lifetime applies to the next token and not to ones already issued (verifies spec: IDP)
 - [ ] A relying party's audience cannot be changed after registration (verifies spec: IDP)
 - [ ] Removing a relying party asks for confirmation stating how many grants it revokes (verifies spec: IDP)
-- [ ] Registering, editing and removing a relying party are in the audit log, and a removal records each grant it revokes (verifies spec: IDP)
+- [ ] Registering, editing and removing a relying party are entries acting on it, an edit recording what it changed, and a removal records a revocation for each grant it revokes (verifies spec: IDP)
 - [ ] The register shows each relying party's audience, lifetime, grant count and last issuance (verifies spec: IDP)
 - [ ] The machine edit page offers a searchable choice of relying parties for the machine and for each application, and saving grants and revokes accordingly (verifies spec: IDP)
 - [ ] The machine's choice and each application's choice show their `sub`, copyable (verifies spec: IDP)

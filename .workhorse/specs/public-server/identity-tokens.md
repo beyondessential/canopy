@@ -84,7 +84,16 @@ A client exchanges a token with its relying party as soon as it obtains one, so 
 
 ## Recording
 
-Every issuance, and every refusal as not granted, is recorded in Canopy's audit log: the subject, the identity of the calling machine, the relying party, and for an issuance the token's identifier, signing key and expiry.
-A refusal as not granted is a workload asking for access no operator has given it, which an operator may need to look into; every other refusal is a mistake or a passing condition the client reports for itself, and is not recorded.
-The record is written before the response is returned, and a token whose record cannot be written is not issued, so Canopy can account for every token it has issued.
+Issuing an identity token is an audited action (see [AUD](../platform/audit-log.md)).
+Its actor is the calling machine's device, acting for the application when the subject is one.
+It acted on the subject and the relying party.
+Its detail is the token's identifier, the signing key, the expiry, and the subject as issued, since the subject changes with its machine's group and rank and is what a relying party's own records show.
 The token itself is never recorded.
+
+The entry is written with the issuance, before the response is returned, and a token whose entry cannot be written is not issued, so Canopy can account for every token it has issued.
+
+A refusal as not granted is recorded as an issuance that failed, with not granted as its reason, so the same action shows both what a workload was given and what it was refused.
+Such a refusal is a workload asking for access no operator has given it, which an operator may need to look into.
+Every other refusal is a mistake or a passing condition the client reports for itself, and is not recorded.
+
+These entries are kept for the log's default retention.

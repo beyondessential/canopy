@@ -3,7 +3,7 @@
 Specs: [IDT](../../specs/public-server/identity-tokens.md), [IDP](../../specs/private-server/identity-provider.md), and the identity provider condition in [SELF](../../specs/private-server/self-alerts.md).
 Reasoning and rejected options: `.workhorse/working-docs/a5/working-doc.md`.
 
-**Blocked on U2** (general audit log). Grants history, issuance and not-granted refusal records, and the key usage figures all live in it. Requirements are on U2 as a comment.
+**Blocked on U2** (general audit log, [AUD](../../specs/platform/audit-log.md)). Grants history, issuance and not-granted refusal records, and the key usage figures all live in it.
 
 ## Tech design notes
 
@@ -22,6 +22,17 @@ Reasoning and rejected options: `.workhorse/working-docs/a5/working-doc.md`.
 - `first_served_at` is written once per `kid` and never updated.
 - The same fetch drives the self-alert (working name `idp-discovery`, `canopy` source), with the differing `kid`s in the detail. Failed: unreachable, wrong issuer, or the signing `kid` missing from the served JWKS. Warning: any other difference from configuration.
 - Key state: unserved (no observation), waiting (newer than the signing key), signing, retired or removable (older than the signing key; removable once the latest recorded expiry of its tokens has passed, or at once if it signed none). The UI collapses unserved, waiting and retired to "published".
+
+### Audit
+
+- Actions in U2's `database::audit::Action` enum: issue identity token, grant identity, revoke identity grant, register / edit / remove relying party. Grant, revoke and relying-party actions are kept for a year; issuance takes the default ninety days.
+- Issuance: records acted on are the subject (machine or application) and the relying party; detail is `jti`, `kid`, `exp`, `sub`. The actor is the machine device, with the application it acted for set by the handler once `application_type` resolves, so U2's recorder must let the handler name it.
+- A successful issuance records in the handler's transaction, not ahead: the token has no effect until it reaches the client, and the layer commits before responding. Depends on U2's layer committing before the response is sent and turning a failed commit into an error.
+- Not granted: commit an issuance entry ahead and settle it failed at once with reason `not_granted`, since the 403 rolls back the handler's transaction. No other refusal records anything, so nothing is committed ahead on the other paths.
+- No-op saves use AUD's explicit no-change outcome (decided for U2, see the comment there): a grants save or relying-party edit that changes nothing declares so rather than recording an entry.
+- `MachineEdit`: add a grants call to the save plan only for a subject whose set changed, as the silence calls are, so an unchanged save sends nothing for grants.
+- Route declarations: `POST /identity-tokens` is `audit(IssueIdentityToken)`; settings reads and grants reads are `silent`; each write declares its actions (remove declares both remove and revoke).
+- Key "last signed" and thirty-day count, relying party "last issued": AUD's lookup and count by detail value over a window. The removable state reads the latest issuance per `kid`, always recent since a retired key's last token was issued within a lifetime of retirement.
 
 ### Discovery server
 
@@ -58,18 +69,18 @@ Reasoning and rejected options: `.workhorse/working-docs/a5/working-doc.md`.
 
 ## Build steps
 
-- [ ] U2 audit log available, with device actor and the requirements left there
+- [ ] U2 audit log available: device actor with handler-set application, explicit no-change outcome, commit before response
+- [ ] Identity actions in the `Action` enum, with retention
 - [ ] Signer trait with KMS and in-process implementations; `kid` derivation; DER to JOSE signature conversion
 - [ ] Instance configuration for issuer and keys
 - [ ] Migrations: relying parties, identity grants, key observations (`just migration`)
 - [ ] Database models and tests for grants (exactly-one subject, cascade, uniqueness) and relying parties (unique audience, lifetime bounds)
 - [ ] Discovery server crate and image
 - [ ] Jobs: served-JWKS observation, signing-key selection, `idp-discovery` self-alert
-- [ ] Public server `POST /identity-tokens`: subject resolution, refusals, claims and `sub`, alphabet guard, rate limit, audit record before response
+- [ ] Public server `POST /identity-tokens`: subject resolution, refusals, claims and `sub`, alphabet guard, rate limit, issuance entry, not-granted entry committed ahead and settled failed
 - [ ] Error variants and `ERRORS.md`
 - [ ] `just gen-openapi && just gen-api`
 - [ ] Private server fns for settings and grants; `just gen-openapi`
-- [ ] Settings tab and machine edit grants UI, with Playwright coverage
+- [ ] Settings tab and machine edit grants UI (grants calls only on change), with Playwright coverage
 - [ ] ops changes (separate repo)
 - [ ] bestool local endpoint (separate repo)
-- [ ] Link IDT's and IDP's audit-log references to U2's spec once it exists

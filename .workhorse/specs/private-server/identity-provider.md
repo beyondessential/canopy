@@ -66,11 +66,14 @@ A changed lifetime applies to tokens issued from then on, and tokens already iss
 The audience is fixed once registered, since every workload asking for tokens for the relying party names it.
 
 The register presents each relying party with its audience, its token lifetime, how many machines and applications hold a grant for it, and when a token was last issued for it.
+When a token was last issued is read from the audit log's recent entries, so a relying party with no token issued in the last ninety days is presented as having none in that time.
 
 Removing a relying party revokes every grant for it, and a request naming its audience is then refused as unknown.
 Removal is confirmed first, the confirmation saying how many grants it revokes.
 
-Registering, editing and removing a relying party are administrative actions recorded in the audit log, with who acted and when, and each grant a removal revokes is recorded as a revocation.
+Registering, editing and removing a relying party are audited actions (see [AUD](../platform/audit-log.md)), each acting on the relying party, and each grant a removal revokes is recorded as a revocation of its own.
+An edit records the name and lifetime it changed from and to.
+A save that changes nothing records nothing.
 
 ## Grants
 
@@ -83,7 +86,8 @@ Neither covers the other, because a relying party sees them as different princip
 Revoking a grant refuses the subject's next request; tokens already issued run until they expire.
 An archived machine or application keeps its grants but obtains nothing while archived, since an archived machine cannot authenticate and an archived application is not live, and restoring it returns its grants.
 A restored machine obtains tokens again once it is enrolled again, its identity having been released when it was archived (see [FLT](../servers/overview.md), "Archival").
-Granting and revoking are administrative actions recorded in the audit log, with who acted and when.
+Granting and revoking are audited actions, each acting on the subject and the relying party, and a save that leaves a subject's grants as they were records nothing.
+Grants are few and matter long after they are given, so these entries, and those for relying parties, are kept for a year.
 
 ## Presentation
 
