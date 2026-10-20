@@ -57,9 +57,7 @@ impl IdentityConfig {
 /// trailing slash so the documents' paths join onto it one way.
 fn normalise_issuer(issuer: &str) -> Result<String> {
 	let rest = issuer.strip_prefix("https://").ok_or_else(|| {
-		Error::Config(format!(
-			"{ISSUER_ENV} must be an https URL, got {issuer:?}"
-		))
+		Error::Config(format!("{ISSUER_ENV} must be an https URL, got {issuer:?}"))
 	})?;
 	if rest.is_empty() || rest.starts_with('/') || rest.contains(['?', '#']) {
 		return Err(Error::Config(format!(
@@ -86,13 +84,18 @@ mod tests {
 				.unwrap()
 				.issues_tokens()
 		);
-		assert!(!IdentityConfig::parse(None, Some("arn:a")).unwrap().issues_tokens());
+		assert!(
+			!IdentityConfig::parse(None, Some("arn:a"))
+				.unwrap()
+				.issues_tokens()
+		);
 	}
 
 	#[test]
 	fn keys_keep_their_order() {
 		let config =
-			IdentityConfig::parse(Some("https://id.example/"), Some("arn:a, arn:b\narn:c")).unwrap();
+			IdentityConfig::parse(Some("https://id.example/"), Some("arn:a, arn:b\narn:c"))
+				.unwrap();
 		assert_eq!(config.issuer.as_deref(), Some("https://id.example"));
 		assert_eq!(config.keys, ["arn:a", "arn:b", "arn:c"]);
 		assert!(config.issues_tokens());

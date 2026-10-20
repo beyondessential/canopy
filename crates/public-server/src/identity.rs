@@ -115,10 +115,11 @@ pub async fn issue(
 
 	// 1. Ahead of everything, so a client stuck in a loop is held back whatever
 	// it asks for.
-	if !state
-		.rate_limiter
-		.check(&format!("identity-token:{}", device.id), RATE_LIMIT, RATE_WINDOW)
-	{
+	if !state.rate_limiter.check(
+		&format!("identity-token:{}", device.id),
+		RATE_LIMIT,
+		RATE_WINDOW,
+	) {
 		return Err(AppError::RateLimited);
 	}
 
@@ -182,7 +183,10 @@ pub async fn issue(
 			})
 			.await?;
 		audit
-			.settle_failed(&pending, Some(serde_json::json!({ "reason": "not_granted" })))
+			.settle_failed(
+				&pending,
+				Some(serde_json::json!({ "reason": "not_granted" })),
+			)
 			.await?;
 		return Err(AppError::IdentityTokenNotGranted(format!(
 			"{} holds no grant for {}",
@@ -196,9 +200,8 @@ pub async fn issue(
 
 	// 6. After the grant, so a subject missing both learns first of the one
 	// waiting cannot clear.
-	let placement = placement.map_err(|unplaced| {
-		AppError::IdentitySubjectNotPlaced(unplaced.describe().to_owned())
-	})?;
+	let placement = placement
+		.map_err(|unplaced| AppError::IdentitySubjectNotPlaced(unplaced.describe().to_owned()))?;
 	let Some(sub) = sub else {
 		return Err(AppError::custom(
 			"this subject has a value outside the subject alphabet, so no token is issued for it",

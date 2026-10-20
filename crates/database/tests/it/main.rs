@@ -32,6 +32,7 @@ mod event_validation;
 mod fleet_check_detail;
 mod health_rollup;
 mod helpers;
+mod identity;
 mod incident_close_result;
 mod incident_environment;
 mod incident_get_with_issues;

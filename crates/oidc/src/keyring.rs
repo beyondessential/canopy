@@ -184,9 +184,9 @@ async fn resolve(entry: &Entry) -> Result<SigningKey> {
 	if public.key_spec() != Some(&KeySpec::EccNistP256) {
 		return Err(Error::NotP256(entry.key_ref.clone()));
 	}
-	let spki = public
-		.public_key()
-		.ok_or_else(|| Error::KeyService(format!("no public key returned for {}", entry.key_ref)))?;
+	let spki = public.public_key().ok_or_else(|| {
+		Error::KeyService(format!("no public key returned for {}", entry.key_ref))
+	})?;
 	Ok(SigningKey {
 		key_ref: entry.key_ref.clone(),
 		jwk: PublicJwk::from_spki_der(spki.as_ref(), &entry.key_ref)?,
@@ -198,8 +198,12 @@ impl SigningKey {
 	/// An in-process key from its PKCS#8 encoding, for tests that need to know
 	/// the key they will be issued tokens by.
 	pub fn local_from_pkcs8(key_ref: impl Into<String>, pkcs8: &[u8]) -> Result<Self> {
-		let pair = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8, &SystemRandom::new())
-			.map_err(|err| Error::Config(format!("not a P-256 PKCS#8 key: {err}")))?;
+		let pair = EcdsaKeyPair::from_pkcs8(
+			&ECDSA_P256_SHA256_FIXED_SIGNING,
+			pkcs8,
+			&SystemRandom::new(),
+		)
+		.map_err(|err| Error::Config(format!("not a P-256 PKCS#8 key: {err}")))?;
 		let jwk = PublicJwk::from_point(pair.public_key().as_ref())?;
 		Ok(Self {
 			key_ref: key_ref.into(),

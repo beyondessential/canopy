@@ -79,7 +79,10 @@ mod tests {
 	fn thumbprint_is_of_the_canonical_members() {
 		let x = "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU";
 		let y = "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0";
-		assert_eq!(thumbprint(x, y), "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U");
+		assert_eq!(
+			thumbprint(x, y),
+			"oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U"
+		);
 	}
 
 	#[test]

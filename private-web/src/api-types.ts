@@ -3000,6 +3000,152 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/identity/add_relying_party": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register a relying party.
+         * @description Two never share an audience. Registering is recorded in the audit log.
+         */
+        post: operations["add_relying_party"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/identity/edit_relying_party": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Change a relying party's name and token lifetime.
+         * @description A changed lifetime applies to tokens issued from then on. The audience is
+         *     fixed once registered. A save that changes nothing records nothing.
+         */
+        post: operations["edit_relying_party"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/identity/machine_grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The identity token grants of a machine and its applications.
+         * @description With the registered relying parties to choose from, each subject's `sub`,
+         *     and whether the choice is offered for a subject holding no grant.
+         */
+        post: operations["machine_grants"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/identity/relying_parties": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The register of relying parties.
+         * @description Each with its audience, token lifetime, how many machines and applications
+         *     hold a grant for it, and when a token was last issued for it.
+         */
+        post: operations["relying_parties"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/identity/remove_relying_party": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Remove a relying party.
+         * @description Every grant for it is revoked, each recorded as a revocation, and a request
+         *     naming its audience is then refused as unknown.
+         */
+        post: operations["remove_relying_party"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/identity/set_grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a machine's or an application's grants.
+         * @description Its grants become exactly those given, each grant and revocation recorded in
+         *     the audit log. Saving what it already holds changes nothing.
+         */
+        post: operations["set_grants"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/identity/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The issuer, the discovery document's address, and the signing keys.
+         * @description Each key with its state and how it has been used. A key is known by its identifier once Canopy has read it and observed what
+         *     the issuer serves, so a key added since is shown by its reference alone.
+         */
+        post: operations["status"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/incidents/add_note": {
         parameters: {
             query?: never;
@@ -5345,6 +5491,21 @@ export interface components {
              */
             version_id: string;
         };
+        /** @description A relying party to register. */
+        AddRelyingPartyArgs: {
+            /**
+             * @description What its tokens carry as `aud`, and what a machine names when it asks
+             *     for one. Fixed once registered.
+             */
+            audience: string;
+            /** @description What operators see. */
+            name: string;
+            /**
+             * Format: int32
+             * @description Whole minutes, from one to sixty. Five when absent.
+             */
+            token_lifetime_minutes?: number | null;
+        };
         /** @description Request body for amending an open plan. */
         AmendArgs: {
             /**
@@ -7228,6 +7389,21 @@ export interface components {
              */
             observations: number;
         };
+        /** @description A relying party's new name and token lifetime. */
+        EditRelyingPartyArgs: {
+            /**
+             * Format: uuid
+             * @description The relying party.
+             */
+            id: string;
+            /** @description What operators see. */
+            name: string;
+            /**
+             * Format: int32
+             * @description Whole minutes, from one to sixty.
+             */
+            token_lifetime_minutes: number;
+        };
         /** @description What a machine's schedule for one type resolved to. */
         EffectiveSchedule: {
             layer?: null | components["schemas"]["ScheduleLayer"];
@@ -7613,6 +7789,45 @@ export interface components {
              */
             state: string;
         };
+        /**
+         * @description What a grant lets obtain tokens: a machine, for tokens naming itself, or an
+         *     application, for tokens naming that application. Neither covers the other.
+         */
+        GrantSubject: {
+            /**
+             * Format: uuid
+             * @description A machine, for tokens naming itself.
+             */
+            id: string;
+            /** @enum {string} */
+            kind: "machine";
+        } | {
+            /**
+             * Format: uuid
+             * @description An application, for tokens naming it.
+             */
+            id: string;
+            /** @enum {string} */
+            kind: "application";
+        };
+        /** @description A machine or an application, on the way in. */
+        GrantSubjectArg: {
+            /**
+             * Format: uuid
+             * @description A machine, for tokens naming itself.
+             */
+            id: string;
+            /** @enum {string} */
+            kind: "machine";
+        } | {
+            /**
+             * Format: uuid
+             * @description An application, for tokens naming it.
+             */
+            id: string;
+            /** @enum {string} */
+            kind: "application";
+        };
         /** @description A server group together with its member applications and billing labels. */
         GroupDetail: {
             /**
@@ -7968,6 +8183,25 @@ export interface components {
              * @description Identifier of the declaration.
              */
             id: string;
+        };
+        /** @description One machine. */
+        IdentityMachineArgs: {
+            /**
+             * Format: uuid
+             * @description The machine.
+             */
+            machine_id: string;
+        };
+        /** @description The issuer and its signing keys. */
+        IdentityStatus: {
+            /** @description Where the discovery document is served, when there is an issuer. */
+            discovery_url?: string | null;
+            /** @description The issuer, or null when none is configured. */
+            issuer?: string | null;
+            /** @description Whether this Canopy instance issues tokens: it has an issuer and a key. */
+            issues_tokens: boolean;
+            /** @description The configured keys, newest first. */
+            keys: components["schemas"]["KeyView"][];
         };
         /** @description Request to add a note to an incident. */
         IncidentAddNoteArgs: {
@@ -8686,6 +8920,33 @@ export interface components {
              */
             key_id: string;
         };
+        /** @description A configured signing key. */
+        KeyView: {
+            /**
+             * Format: date-time
+             * @description When Canopy first observed it served at the issuer.
+             */
+            first_served_at?: string | null;
+            /** @description Its reference in the configuration, the key service's identifier for it. */
+            key_ref: string;
+            /**
+             * @description Its identifier, as tokens and the key set name it. Null until Canopy has
+             *     read the key.
+             */
+            kid?: string | null;
+            /**
+             * Format: date-time
+             * @description When it last signed, within the audit log's ninety days.
+             */
+            last_signed_at?: string | null;
+            /**
+             * Format: int64
+             * @description How many tokens it signed in the last thirty days.
+             */
+            signed_30d: number;
+            /** @description How it is presented. */
+            state: components["schemas"]["PresentedKeyState"];
+        };
         /**
          * @description A caveat or defect recorded against a range of patches within a release
          *     line.
@@ -9294,6 +9555,19 @@ export interface components {
             machine_id: string;
             /** @description The DNS name, in any case and with or without a trailing dot. */
             name: string;
+        };
+        /** @description What a machine's edit page offers for identity tokens. */
+        MachineGrants: {
+            /**
+             * @description Whether the choice is offered for subjects that hold no grant: some
+             *     relying party is registered, the Canopy instance issues tokens, and the
+             *     machine is placed in an environment.
+             */
+            offered: boolean;
+            /** @description Every registered relying party, to choose from. */
+            relying_parties: components["schemas"]["RelyingPartyOption"][];
+            /** @description The machine, then each of its live applications. */
+            subjects: components["schemas"]["SubjectGrants"][];
         };
         /** @description Identifies one machine. */
         MachineIdArgs: {
@@ -10273,6 +10547,11 @@ export interface components {
              */
             group_id: string;
         };
+        /**
+         * @description A key as an operator sees it.
+         * @enum {string}
+         */
+        PresentedKeyState: "signing" | "published" | "removable";
         /** @description The next firings of a cron schedule for one machine. */
         PreviewMachine: {
             /** @description The firings, in order. Each is an instant; present it in `zone`. */
@@ -10752,6 +11031,83 @@ export interface components {
              * @description Patch version number.
              */
             patch: number;
+        };
+        /** @description A service that trusts Canopy as an issuer. */
+        RelyingParty: {
+            /**
+             * @description What a token carries as `aud`, and what a machine names when it asks for
+             *     one. Fixed once registered.
+             */
+            audience: string;
+            /**
+             * Format: date-time
+             * @description When it was registered.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Its identifier.
+             */
+            id: string;
+            /** @description What operators see. */
+            name: string;
+            /**
+             * Format: int32
+             * @description How long the tokens issued for it live, in minutes.
+             */
+            token_lifetime_minutes: number;
+            /**
+             * Format: date-time
+             * @description When it was last edited.
+             */
+            updated_at: string;
+        };
+        /** @description One relying party. */
+        RelyingPartyIdArgs: {
+            /**
+             * Format: uuid
+             * @description The relying party.
+             */
+            id: string;
+        };
+        /** @description A relying party a subject may be granted. */
+        RelyingPartyOption: {
+            /** @description What its tokens carry as `aud`. */
+            audience: string;
+            /**
+             * Format: uuid
+             * @description Its identifier.
+             */
+            id: string;
+            /** @description What operators see. */
+            name: string;
+        };
+        /** @description A relying party in the register. */
+        RelyingPartyView: {
+            /** @description What its tokens carry as `aud`. */
+            audience: string;
+            /**
+             * Format: int64
+             * @description How many machines and applications hold a grant for it.
+             */
+            grants: number;
+            /**
+             * Format: uuid
+             * @description Its identifier.
+             */
+            id: string;
+            /**
+             * Format: date-time
+             * @description When a token was last issued for it, within the audit log's ninety days.
+             */
+            last_issued_at?: string | null;
+            /** @description What operators see. */
+            name: string;
+            /**
+             * Format: int32
+             * @description How long its tokens live, in minutes.
+             */
+            token_lifetime_minutes: number;
         };
         /** @description Name one variable to forget. */
         RemoveArgs: components["schemas"]["ScopeArgs"] & {
@@ -12255,6 +12611,16 @@ export interface components {
             /** @description Backup type to enable or disable. */
             type: string;
         };
+        /** @description The grants a machine or application should hold. */
+        SetGrantsArgs: {
+            /**
+             * @description Every relying party the subject should hold a grant for; the rest are
+             *     revoked.
+             */
+            relying_party_ids: string[];
+            /** @description The machine or application. */
+            subject: components["schemas"]["GrantSubjectArg"];
+        };
         /** @description Request to set a machine's schedule override for one backup type. */
         SetMachineScheduleArgs: {
             /**
@@ -12735,6 +13101,18 @@ export interface components {
              *     against.
              */
             version_distance?: number | null;
+        };
+        /** @description One machine or application, and the relying parties it holds grants for. */
+        SubjectGrants: {
+            /** @description The relying parties it holds a grant for. */
+            granted: string[];
+            /**
+             * @description The subject its tokens carry, for a relying party's rule. Null while the
+             *     machine is not placed.
+             */
+            sub?: string | null;
+            /** @description The machine or application. */
+            subject: components["schemas"]["GrantSubject"];
         };
         /** @description A manually raised condition to record against a server. */
         SubmitManualEventArgs: {
@@ -17537,6 +17915,212 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    add_relying_party: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddRelyingPartyArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RelyingParty"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The audience is already registered. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    edit_relying_party: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditRelyingPartyArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RelyingParty"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    machine_grants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IdentityMachineArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineGrants"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    relying_parties: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RelyingPartyView"][];
+                };
+            };
+        };
+    };
+    remove_relying_party: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RelyingPartyIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    set_grants: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetGrantsArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IdentityStatus"];
                 };
             };
         };

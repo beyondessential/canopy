@@ -111,7 +111,10 @@ fn verified_claims(token: &str) -> Value {
 	point.extend(URL_SAFE_NO_PAD.decode(&key.jwk.x).unwrap());
 	point.extend(URL_SAFE_NO_PAD.decode(&key.jwk.y).unwrap());
 	UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, point)
-		.verify(signed.as_bytes(), &URL_SAFE_NO_PAD.decode(signature).unwrap())
+		.verify(
+			signed.as_bytes(),
+			&URL_SAFE_NO_PAD.decode(signature).unwrap(),
+		)
 		.expect("the token verifies against the signing key");
 
 	let mut parts = signed.split('.');
@@ -170,7 +173,10 @@ async fn a_granted_machine_is_issued_a_token_naming_itself() {
 			assert!(acted_on.contains(&at.machine.to_string()));
 			assert!(acted_on.contains(&party.id.to_string()));
 			assert!(
-				!entry.detail.to_string().contains(body["token"].as_str().unwrap()),
+				!entry
+					.detail
+					.to_string()
+					.contains(body["token"].as_str().unwrap()),
 				"the token itself is never recorded"
 			);
 
@@ -264,8 +270,12 @@ async fn each_request_mints_a_new_token() {
 			let party = party(&mut conn, None).await;
 			grant(&mut conn, GrantSubject::Machine(at.machine), &party).await;
 
-			let first: Value = ask(&public, &cert, json!({ "audience": AUDIENCE })).await.json();
-			let second: Value = ask(&public, &cert, json!({ "audience": AUDIENCE })).await.json();
+			let first: Value = ask(&public, &cert, json!({ "audience": AUDIENCE }))
+				.await
+				.json();
+			let second: Value = ask(&public, &cert, json!({ "audience": AUDIENCE }))
+				.await
+				.json();
 			let (first, second) = (
 				verified_claims(first["token"].as_str().unwrap()),
 				verified_claims(second["token"].as_str().unwrap()),
@@ -312,7 +322,12 @@ async fn other_refusals_leave_nothing_in_the_log() {
 			let at = placed(&mut conn, device_id, None).await;
 			let party = party(&mut conn, None).await;
 
-			let unknown = ask(&public, &cert, json!({ "audience": "https://typo.example" })).await;
+			let unknown = ask(
+				&public,
+				&cert,
+				json!({ "audience": "https://typo.example" }),
+			)
+			.await;
 			unknown.assert_status(StatusCode::NOT_FOUND);
 			assert_eq!(problem_type(&unknown.json()), "identity-audience-unknown");
 
@@ -368,7 +383,12 @@ async fn an_ungrouped_machine_is_not_placed() {
 			response.assert_status(StatusCode::CONFLICT);
 			let body: Value = response.json();
 			assert_eq!(problem_type(&body), "identity-subject-not-placed");
-			assert!(body["detail"].as_str().unwrap_or_default().contains("no group"));
+			assert!(
+				body["detail"]
+					.as_str()
+					.unwrap_or_default()
+					.contains("no group")
+			);
 		},
 	)
 	.await;

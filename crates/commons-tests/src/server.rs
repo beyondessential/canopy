@@ -219,6 +219,12 @@ where
 		let private_router = router(
 			private_server::routes(private_server::state::AppState {
 				artifacts: Some(artifacts.clone()),
+				// The issuer the public server signs as, so the settings read
+				// what the tokens a test is issued were signed with.
+				identity_config: oidc::IdentityConfig {
+					issuer: Some(IDENTITY_ISSUER.into()),
+					keys: vec![identity_key().key_ref],
+				},
 				..private_server::state::AppState::from_db_url(&url)
 					.await
 					.unwrap()

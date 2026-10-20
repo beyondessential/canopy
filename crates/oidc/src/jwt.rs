@@ -28,10 +28,15 @@ mod tests {
 	#[tokio::test]
 	async fn signs_verifiably_and_names_its_key() {
 		let key = SigningKey::generate_local("local");
-		let token = encode(&key, &serde_json::json!({ "sub": "x" })).await.unwrap();
+		let token = encode(&key, &serde_json::json!({ "sub": "x" }))
+			.await
+			.unwrap();
 		let mut parts = token.split('.');
-		let (header, claims, signature) =
-			(parts.next().unwrap(), parts.next().unwrap(), parts.next().unwrap());
+		let (header, claims, signature) = (
+			parts.next().unwrap(),
+			parts.next().unwrap(),
+			parts.next().unwrap(),
+		);
 		assert!(parts.next().is_none());
 
 		let header: serde_json::Value =
@@ -47,7 +52,10 @@ mod tests {
 		point.extend(URL_SAFE_NO_PAD.decode(&key.jwk.y).unwrap());
 		let signed = &token[..token.rfind('.').unwrap()];
 		UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, point)
-			.verify(signed.as_bytes(), &URL_SAFE_NO_PAD.decode(signature).unwrap())
+			.verify(
+				signed.as_bytes(),
+				&URL_SAFE_NO_PAD.decode(signature).unwrap(),
+			)
 			.expect("the signature verifies against the published key");
 	}
 }
