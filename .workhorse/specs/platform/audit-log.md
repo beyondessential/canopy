@@ -41,7 +41,7 @@ An action names a kind of thing done, never one instance of it: what varies betw
 An action's name is stable, and does not change when the operator interface or an API is reorganised, so a search by action reaches the whole log, the archive included.
 An action is recorded the same way whichever surface it is taken through.
 An action is important or routine.
-A routine action is one taken at high volume that is not what a reader of the log is looking for by default, such as issuing credentials to a backup run or reading an inventory.
+A routine action is one taken at high volume that is not what a reader of the log is looking for by default, such as issuing credentials to a backup run or serving an environment to an Ansible run.
 
 ## Actors
 

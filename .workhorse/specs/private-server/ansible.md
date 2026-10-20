@@ -2,27 +2,27 @@
 id: INV
 ---
 
-# Environment inventory
+# Ansible
 
-Canopy serves an environment's inventory to Ansible: the machines a run acts on, the applications each carries, and the variables that configure them.
+Canopy serves Ansible the environment a run acts on: its machines, the applications each carries, and the variables that configure them.
 A run reads it as it starts, so it acts on the fleet as Canopy holds it.
 
-## What an inventory contains
+## What a run is served
 
-An inventory covers one environment (see [GRP](../servers/groups.md), "Environments").
+A run is served one environment (see [GRP](../servers/groups.md), "Environments").
 
 Each member is a machine, and carries its identifier, its name, the address it is reached at, the applications on it with their names and types, and its effective variables.
 A member names which of those variables are secret.
 The environment's own variables are served once beside the members.
 
-Canopy serves the environment's shape and the caller renders it, so no configuration-management tool's own inventory format appears in the response.
+Canopy serves the environment's shape and the caller renders it into Ansible's inventory, so no Ansible format appears in the response.
 
-An inventory carries secret values, so it is served to an administrator (see [ADM](admin-access.md)), and a run reads it as the administrator running it.
+What a run is served carries secret values, so it is served to an administrator (see [ADM](admin-access.md)), and a run reads it as the administrator running it.
 
-## Inventory variables
+## Variables
 
 A variable has a name, and that name is unique per group, per environment, and per machine.
-An inventory's view merges those three scopes name-wise, a machine's value over its environment's over its group's.
+What a run is served merges those three scopes name-wise, a machine's value over its environment's over its group's.
 
 A value is JSON and is served as it was stored.
 
@@ -47,7 +47,7 @@ The account a run connects as is the `ansible_user` variable, which is set at an
 
 ## Importing an inventory file
 
-An administrator can import an Ansible YAML inventory file into an environment, carrying across the variables it was configured with before Canopy served its inventory.
+An administrator can import an Ansible YAML inventory file into an environment, carrying across the variables it was configured with before Canopy served it to Ansible.
 An import is offered only while neither the environment nor any of its machines carries a variable, so it never meets a value already set.
 Variables set on the whole group do not hold it back, since an imported environment variable overrides one of the same name rather than clashing with it.
 
@@ -90,7 +90,7 @@ The import cannot be applied while a host is neither matched nor skipped, or whi
 
 A variable is proposed as secret when its name, or the name of any key within its value, contains `salt`, `token`, `secret`, `password`, or `key`.
 The operator can mark or unmark any variable as secret before applying.
-Secrecy applies to a whole value, so a structured value with one secret field inside it is secret as a whole (see "Inventory variables").
+Secrecy applies to a whole value, so a structured value with one secret field inside it is secret as a whole (see "Variables").
 
 Each variable is held to the same rules as setting one by hand, such as `ansible_host` being set on a machine alone, and the preview names any that breaks them.
 An import holding one cannot be applied.
@@ -103,7 +103,7 @@ The environment's presentation shows the imported variables as soon as it is app
 ## Run leases
 
 An environment holds at most one run lease, and a run holds that lease for as long as it runs.
-Canopy serves an inventory only to the holder of the environment's lease, so two runs never act on one environment at once.
+Canopy serves an environment only to the holder of its lease, so two runs never act on one environment at once.
 
 Taking a lease names the environment and what the run intends: to configure the environment as it stands, or to upgrade it.
 A lease expires after a fixed period, so a run that dies does not hold an environment shut.
@@ -135,12 +135,12 @@ A lease taken to configure needs no plan, a plan recording a version move and no
 
 ## Refusal
 
-Canopy either serves an inventory or refuses it.
+Canopy either serves a run its environment or refuses it.
 A refusal must name its reason in such a way that an operator can understand how to resolve it or what/who to wait for.
 
 ## Audit
 
-Each inventory read is audited, its entry holding the intent its lease declared.
+Each environment served to a run is audited, its entry holding the intent its lease declared.
 Taking, extending, taking over, and releasing a lease is audited, as is setting or removing a variable (see [AUD](../platform/audit-log.md)).
 Importing a file is audited as one entry naming the environment and the variables it set, with the machine each was set on, and whether it added to the group's notes.
 A secret's value never appears in a log.
