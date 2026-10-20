@@ -313,7 +313,8 @@ async fn status_presents_the_issuer_and_each_key_with_its_usage() {
 				.json(&json!({}))
 				.await
 				.json();
-			assert_eq!(parties[0]["grants"], 1);
+			assert_eq!(parties[0]["machine_grants"], 1);
+			assert_eq!(parties[0]["application_grants"], 0);
 			assert!(parties[0]["last_issued_at"].is_string());
 		},
 	)
@@ -330,7 +331,8 @@ async fn a_relying_party_with_no_recent_issuance_shows_none() {
 			.await
 			.json();
 		assert!(parties[0]["last_issued_at"].is_null());
-		assert_eq!(parties[0]["grants"], 0);
+		assert_eq!(parties[0]["machine_grants"], 0);
+		assert_eq!(parties[0]["application_grants"], 0);
 	})
 	.await;
 }

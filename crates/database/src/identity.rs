@@ -203,18 +203,40 @@ impl RelyingParty {
 		Ok((party, revoked))
 	}
 
-	/// How many machines and applications hold a grant for each relying party.
-	pub async fn grant_counts(conn: &mut AsyncPgConnection) -> Result<HashMap<Uuid, i64>> {
+	/// How many machines, and how many applications, hold a grant for each
+	/// relying party.
+	pub async fn grant_counts(conn: &mut AsyncPgConnection) -> Result<HashMap<Uuid, GrantCounts>> {
 		use crate::schema::identity_grants::dsl;
-		Ok(dsl::identity_grants
+		let rows = dsl::identity_grants
 			.group_by(dsl::relying_party_id)
-			.select((dsl::relying_party_id, diesel::dsl::count_star()))
-			.load::<(Uuid, i64)>(conn)
+			.select((
+				dsl::relying_party_id,
+				diesel::dsl::count(dsl::machine_id),
+				diesel::dsl::count(dsl::application_id),
+			))
+			.load::<(Uuid, i64, i64)>(conn)
 			.await
-			.map_err(AppError::from)?
+			.map_err(AppError::from)?;
+		Ok(rows
 			.into_iter()
+			.map(|(party, machines, applications)| {
+				(
+					party,
+					GrantCounts {
+						machines,
+						applications,
+					},
+				)
+			})
 			.collect())
 	}
+}
+
+/// How many of each kind of subject hold a grant.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GrantCounts {
+	pub machines: i64,
+	pub applications: i64,
 }
 
 fn valid_name(name: &str) -> Result<&str> {

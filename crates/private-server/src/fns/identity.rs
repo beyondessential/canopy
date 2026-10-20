@@ -183,8 +183,10 @@ pub struct RelyingPartyView {
 	pub audience: String,
 	/// How long its tokens live, in minutes.
 	pub token_lifetime_minutes: i32,
-	/// How many machines and applications hold a grant for it.
-	pub grants: i64,
+	/// How many machines hold a grant for it.
+	pub machine_grants: i64,
+	/// How many applications hold a grant for it.
+	pub application_grants: i64,
 	/// When a token was last issued for it, within the audit log's ninety days.
 	#[schema(value_type = Option<String>, format = DateTime)]
 	pub last_issued_at: Option<Timestamp>,
@@ -213,7 +215,8 @@ pub async fn relying_parties(
 		parties
 			.into_iter()
 			.map(|party| RelyingPartyView {
-				grants: counts.get(&party.id).copied().unwrap_or(0),
+				machine_grants: counts.get(&party.id).map_or(0, |c| c.machines),
+				application_grants: counts.get(&party.id).map_or(0, |c| c.applications),
 				last_issued_at: last.get(&party.id).copied(),
 				id: party.id,
 				name: party.name,

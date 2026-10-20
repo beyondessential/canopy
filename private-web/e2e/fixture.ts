@@ -215,6 +215,11 @@ export async function startStack(opts: StartOptions = {}): Promise<StackHandle> 
 				// revocations, so the certificate UI is exercisable without a
 				// network. Debug-only in the binary.
 				CANOPY_FAKE_ACME: "1",
+				// An identity provider issuer with two keys, so its settings and the
+				// grant choices on a machine's edit page are offered. Nothing signs
+				// in e2e: the keys' states come from what the specs seed.
+				CANOPY_IDENTITY_ISSUER: "https://identity.e2e.invalid",
+				CANOPY_IDENTITY_KEYS: "e2e-key-old, e2e-key-new",
 				// Needed by mint_enrollment to build the ticket's api_url; the
 				// setup-instructions flow auto-mints on an unregistered server.
 				PUBLIC_URL: process.env.PUBLIC_URL ?? "https://api.e2e.invalid",

@@ -194,6 +194,10 @@ export type ClusterSilencedRef = Solidify<Schemas["ClusterSilencedRef"]>;
 
 /** Who took an audited action. */
 export type AuditActor = Solidify<Schemas["Actor"]>;
+export type RelyingPartyView = Solidify<Schemas["RelyingPartyView"]>;
+export type IdentityKeyView = Solidify<Schemas["KeyView"]>;
+export type MachineGrants = Solidify<Schemas["MachineGrants"]>;
+export type SubjectGrants = Solidify<Schemas["SubjectGrants"]>;
 export type AuditRecord = Solidify<Schemas["Record"]>;
 export type AuditActionOption = Solidify<Schemas["AuditActionOption"]>;
 export type AuditFilters = Solidify<Schemas["AuditFilters"]>;

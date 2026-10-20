@@ -15,6 +15,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { callApi, useApi } from "../api";
 import ApplicationTypeChip from "../components/ApplicationTypeChip";
 import GroupControl from "../components/GroupControl";
+import IdentityGrants from "../components/IdentityGrants";
 import NameManagementGrants from "../components/NameManagementGrants";
 import { GradedAction } from "../components/GradedAction";
 import TagsEditor from "../components/TagsEditor";
@@ -23,6 +24,7 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import type { GradedEndpoint } from "../safety-modes";
 import {
 	applicationName,
+	type MachineGrants,
 	REACHABILITY_CHECK,
 	type ServerInfo,
 	type ServerRank,
@@ -69,6 +71,12 @@ export default function MachineEdit() {
 		[applicationIds.join(",")],
 		{ skip: detail.status !== "ok" },
 	);
+	const identityGrants = useApi(
+		"identity",
+		"machine_grants",
+		{ machine_id: id },
+		[id],
+	);
 	usePageTitle(
 		detail.status === "ok"
 			? `Edit ${detail.data.machine.name}`
@@ -81,7 +89,9 @@ export default function MachineEdit() {
 		machineSilences.status === "loading" ||
 		machineSilences.status === "idle" ||
 		applicationSilences.status === "loading" ||
-		applicationSilences.status === "idle"
+		applicationSilences.status === "idle" ||
+		identityGrants.status === "loading" ||
+		identityGrants.status === "idle"
 	) {
 		return <LinearProgress />;
 	}
@@ -93,6 +103,9 @@ export default function MachineEdit() {
 	}
 	if (applicationSilences.status === "error") {
 		return <Alert severity="error">{applicationSilences.error.message}</Alert>;
+	}
+	if (identityGrants.status === "error") {
+		return <Alert severity="error">{identityGrants.error.message}</Alert>;
 	}
 
 	const silenced = (refs: Array<{ source: string; ref: string }>) =>
@@ -116,6 +129,7 @@ export default function MachineEdit() {
 					)
 					.map((s) => s.application_id),
 			)}
+			identityGrants={identityGrants.data}
 		/>
 	);
 }
@@ -159,6 +173,7 @@ function Form({
 	applications,
 	machineReachabilitySilenced,
 	applicationReachabilitySilenced,
+	identityGrants,
 }: {
 	machine: {
 		id: string;
@@ -176,6 +191,7 @@ function Form({
 	applications: ServerInfo[];
 	machineReachabilitySilenced: boolean;
 	applicationReachabilitySilenced: Set<string>;
+	identityGrants: MachineGrants;
 }) {
 	const navigate = useNavigate();
 	const [box, setBox] = useState<MachineForm>({
@@ -210,6 +226,14 @@ function Form({
 			]),
 		),
 	);
+	// The relying parties each subject holds as saved, and as edited, keyed by
+	// the machine's or the application's id.
+	const heldGrants = Object.fromEntries(
+		identityGrants.subjects.map((s) => [s.subject.id, s.granted]),
+	);
+	const [grants, setGrants] = useState<Record<string, string[]>>(heldGrants);
+	const subOf = (subjectId: string) =>
+		identityGrants.subjects.find((s) => s.subject.id === subjectId)?.sub;
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -307,6 +331,22 @@ function Form({
 					server_id: application.id,
 					source: REACHABILITY_CHECK.source,
 					ref: REACHABILITY_CHECK.ref,
+				}),
+		});
+	}
+
+	// Only a subject whose grants changed is sent, so a save that leaves them
+	// as they were records nothing.
+	// spec: IDP#grants
+	for (const subject of identityGrants.subjects) {
+		const id = subject.subject.id;
+		if (sameMembers(grants[id] ?? [], heldGrants[id] ?? [])) continue;
+		plan.push({
+			call: "identity/set_grants",
+			run: () =>
+				callApi("identity", "set_grants", {
+					subject: subject.subject,
+					relying_party_ids: grants[id] ?? [],
 				}),
 		});
 	}
@@ -497,6 +537,20 @@ function Form({
 						/>
 					</Stack>
 
+					<IdentityGrants
+						grants={identityGrants}
+						held={heldGrants[machine.id] ?? []}
+						value={grants[machine.id] ?? []}
+						onChange={(ids) => setGrants({ ...grants, [machine.id]: ids })}
+						sub={subOf(machine.id)}
+						caption={
+							subOf(machine.id)
+								? "Tokens that name this machine itself, carrying this subject. Applications on it hold their own grants below."
+								: "Tokens that name this machine itself. Applications on it hold their own grants below."
+						}
+						disabled={pending}
+					/>
+
 					<TextField
 						label="Notes"
 						multiline
@@ -532,6 +586,23 @@ function Form({
 						form={apps[application.id]!}
 						onChange={(patch) => patchApp(application.id, patch)}
 						disabled={pending}
+						identity={
+							<IdentityGrants
+								grants={identityGrants}
+								held={heldGrants[application.id] ?? []}
+								value={grants[application.id] ?? []}
+								onChange={(ids) =>
+									setGrants({ ...grants, [application.id]: ids })
+								}
+								sub={subOf(application.id)}
+								caption={
+									subOf(application.id)
+										? "Its tokens carry this subject. Revoking refuses the next request; tokens already issued run out on their own."
+										: "Revoking refuses the next request; tokens already issued run out on their own."
+								}
+								disabled={pending}
+							/>
+						}
 					/>
 				))
 			)}
@@ -576,12 +647,14 @@ function ApplicationFields({
 	form,
 	onChange,
 	disabled,
+	identity,
 }: {
 	application: ServerInfo;
 	groupId: string | null;
 	form: ApplicationForm;
 	onChange: (patch: Partial<ApplicationForm>) => void;
 	disabled: boolean;
+	identity: React.ReactNode;
 }) {
 	const caps = useApplicationTypeCaps(application.type);
 	const canListPublicly = caps?.public_listing === true;
@@ -678,6 +751,8 @@ function ApplicationFields({
 					disabled={disabled}
 				/>
 
+				{identity}
+
 				<TextField
 					label="Notes"
 					multiline
@@ -699,4 +774,8 @@ function ApplicationFields({
 			</Stack>
 		</Paper>
 	);
+}
+
+function sameMembers(a: string[], b: string[]): boolean {
+	return a.length === b.length && a.every((id) => b.includes(id));
 }

@@ -11084,13 +11084,13 @@ export interface components {
         };
         /** @description A relying party in the register. */
         RelyingPartyView: {
-            /** @description What its tokens carry as `aud`. */
-            audience: string;
             /**
              * Format: int64
-             * @description How many machines and applications hold a grant for it.
+             * @description How many applications hold a grant for it.
              */
-            grants: number;
+            application_grants: number;
+            /** @description What its tokens carry as `aud`. */
+            audience: string;
             /**
              * Format: uuid
              * @description Its identifier.
@@ -11101,6 +11101,11 @@ export interface components {
              * @description When a token was last issued for it, within the audit log's ninety days.
              */
             last_issued_at?: string | null;
+            /**
+             * Format: int64
+             * @description How many machines hold a grant for it.
+             */
+            machine_grants: number;
             /** @description What operators see. */
             name: string;
             /**

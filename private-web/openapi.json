@@ -9387,14 +9387,14 @@
       "RelyingPartyView": {
         "description": "A relying party in the register.",
         "properties": {
+          "application_grants": {
+            "description": "How many applications hold a grant for it.",
+            "format": "int64",
+            "type": "integer"
+          },
           "audience": {
             "description": "What its tokens carry as `aud`.",
             "type": "string"
-          },
-          "grants": {
-            "description": "How many machines and applications hold a grant for it.",
-            "format": "int64",
-            "type": "integer"
           },
           "id": {
             "description": "Its identifier.",
@@ -9408,6 +9408,11 @@
               "string",
               "null"
             ]
+          },
+          "machine_grants": {
+            "description": "How many machines hold a grant for it.",
+            "format": "int64",
+            "type": "integer"
           },
           "name": {
             "description": "What operators see.",
@@ -9424,7 +9429,8 @@
           "name",
           "audience",
           "token_lifetime_minutes",
-          "grants"
+          "machine_grants",
+          "application_grants"
         ],
         "type": "object"
       },
