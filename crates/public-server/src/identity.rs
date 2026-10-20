@@ -312,3 +312,40 @@ async fn application_of(
 		))),
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use std::collections::BTreeSet;
+
+	use super::*;
+
+	/// The discovery document advertises the claims a token carries, so the two
+	/// are held to the same list.
+	#[test]
+	fn every_claim_is_advertised_and_every_advertised_claim_is_carried() {
+		let claims = Claims {
+			iss: "",
+			aud: "",
+			iat: 0,
+			nbf: 0,
+			exp: 0,
+			jti: String::new(),
+			sub: "",
+			group_id: String::new(),
+			group_name: "",
+			rank: String::new(),
+			machine_id: String::new(),
+			application_id: Some(String::new()),
+			application_type: Some(String::new()),
+		};
+		let carried: BTreeSet<String> = serde_json::to_value(&claims)
+			.unwrap()
+			.as_object()
+			.unwrap()
+			.keys()
+			.cloned()
+			.collect();
+		let advertised: BTreeSet<String> = oidc::CLAIMS.iter().map(|c| c.to_string()).collect();
+		assert_eq!(carried, advertised);
+	}
+}

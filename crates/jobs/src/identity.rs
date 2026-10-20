@@ -69,13 +69,11 @@ pub async fn fetch(client: &reqwest::Client, issuer: &str) -> IssuerDocuments {
 	let expected = oidc::jwks_uri(issuer);
 	match discovery["jwks_uri"].as_str() {
 		Some(named) if named == expected => {}
-		Some(named) => {
-			return IssuerDocuments::Unreachable(format!(
-				"the discovery document names the key set at {named}, not {expected}"
-			));
-		}
-		None => {
-			return IssuerDocuments::Unreachable("the discovery document names no jwks_uri".into());
+		named => {
+			return IssuerDocuments::KeySetElsewhere {
+				named: named.map(str::to_owned),
+				expected,
+			};
 		}
 	}
 	let jwks = match json(client, &expected).await {
@@ -259,7 +257,7 @@ mod tests {
 
 		let documents = fetch(&client(), &issuer).await;
 		assert!(
-			matches!(&documents, IssuerDocuments::Unreachable(err) if err.contains("names the key set at")),
+			matches!(&documents, IssuerDocuments::KeySetElsewhere { named: Some(named), .. } if named.ends_with("/elsewhere")),
 			"{documents:?}"
 		);
 		assert_eq!(elsewhere.load(Ordering::SeqCst), 0);
@@ -275,6 +273,13 @@ mod tests {
 		assert!(watch.found(&down));
 		assert!(watch.found(&up));
 		assert!(!watch.found(&down), "a recovery starts the count again");
+		assert!(
+			watch.found(&IssuerDocuments::KeySetElsewhere {
+				named: None,
+				expected: "https://i/.well-known/jwks.json".into(),
+			}),
+			"a document that was fetched and is wrong is evaluated at once"
+		);
 	}
 
 	#[tokio::test(flavor = "multi_thread")]

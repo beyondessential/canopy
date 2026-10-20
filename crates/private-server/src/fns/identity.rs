@@ -117,10 +117,9 @@ pub async fn status(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
 ) -> Result<Json<IdentityStatus>> {
-	let config = &state.identity_config;
+	let config = state.identity.config();
 	let mut conn = state.db_read.get().await?;
 	let observed = IdentityKey::all(&mut conn).await?;
-	let usage = identity::key_usage(&mut conn).await?;
 
 	let configured: Vec<ConfiguredKey> = config
 		.keys
@@ -130,6 +129,11 @@ pub async fn status(
 			kid: IdentityKey::by_ref(&observed, key_ref).map(|row| row.kid.as_str()),
 		})
 		.collect();
+	let kids: Vec<String> = configured
+		.iter()
+		.filter_map(|key| key.kid.map(str::to_owned))
+		.collect();
+	let usage = identity::key_usage(&mut conn, &kids).await?;
 	let expiries: HashMap<String, Timestamp> = usage
 		.iter()
 		.filter_map(|(kid, usage)| Some((kid.clone(), usage.latest_expiry?)))
@@ -208,7 +212,8 @@ pub async fn relying_parties(
 	let mut conn = state.db_read.get().await?;
 	let parties = RelyingParty::list(&mut conn).await?;
 	let counts = RelyingParty::grant_counts(&mut conn).await?;
-	let last = identity::last_issued(&mut conn).await?;
+	let ids: Vec<Uuid> = parties.iter().map(|party| party.id).collect();
+	let last = identity::last_issued(&mut conn, &ids).await?;
 	Ok(Json(
 		parties
 			.into_iter()
@@ -459,7 +464,7 @@ pub async fn machine_grants(
 	};
 
 	Ok(Json(MachineGrants {
-		available: !parties.is_empty() && state.identity_config.issues_tokens(),
+		available: !parties.is_empty() && state.identity.config().issues_tokens(),
 		relying_parties: parties
 			.into_iter()
 			.map(|party| RelyingPartyOption {

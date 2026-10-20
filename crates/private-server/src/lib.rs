@@ -85,7 +85,7 @@ pub fn routes(state: crate::state::AppState) -> commons_errors::Result<axum::rou
 		state.sts.clone(),
 		state.kube.clone(),
 		state.artifacts.clone(),
-		state.identity.clone(),
+		state.identity.issuer().cloned(),
 	)?;
 	let (public_router, _) =
 		public_server::audited_under(public_server::routes(), public_state.db.clone(), "/public");

@@ -956,81 +956,112 @@ pub struct KeyUsage {
 	pub latest_expiry: Option<Timestamp>,
 }
 
-/// Each key's usage, by `kid`, from the issuances in the audit log. A refusal
-/// carries no key, so it counts for none.
+/// The usage of each of `kids`, from the issuances in the audit log; a key
+/// that signed nothing in the log's ninety days is absent. A refusal carries no
+/// key, so it counts for none.
+///
+/// Each figure is read for each key on its own, through the log's index on
+/// what it records, so the most recent signature is found without reading
+/// back past it.
 // spec: IDP#signing-keys
-pub async fn key_usage(conn: &mut AsyncPgConnection) -> Result<HashMap<String, KeyUsage>> {
+pub async fn key_usage(
+	conn: &mut AsyncPgConnection,
+	kids: &[String],
+) -> Result<HashMap<String, KeyUsage>> {
 	#[derive(QueryableByName)]
 	struct Row {
 		#[diesel(sql_type = diesel::sql_types::Text)]
 		kid: String,
-		#[diesel(sql_type = diesel::sql_types::Timestamptz)]
-		last_signed_at: jiff_diesel::Timestamp,
+		#[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>)]
+		last_signed_at: Option<jiff_diesel::Timestamp>,
 		#[diesel(sql_type = diesel::sql_types::BigInt)]
 		signed_30d: i64,
 		#[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>)]
 		latest_expiry: Option<jiff_diesel::Timestamp>,
 	}
 
+	if kids.is_empty() {
+		return Ok(HashMap::new());
+	}
 	// A token lives an hour at most, so one still live was issued within the
 	// last hour, and the expiry is read from those alone.
 	let rows: Vec<Row> = diesel::sql_query(
-		"SELECT detail ->> 'kid' AS kid, \
-		        max(recorded_at) AS last_signed_at, \
-		        count(*) FILTER (WHERE recorded_at > now() - interval '30 days') AS signed_30d, \
-		        max((detail ->> 'expires_at')::timestamptz) \
-		            FILTER (WHERE recorded_at > now() - interval '61 minutes') AS latest_expiry \
-		 FROM audit_entries \
-		 WHERE action = 'identity_token_issued' \
-		   AND recorded_at > now() - interval '90 days' \
-		   AND detail ->> 'kid' IS NOT NULL \
-		 GROUP BY 1",
+		"SELECT k.kid, \
+		        (SELECT a.recorded_at FROM audit_entries a \
+		          WHERE a.action = 'identity_token_issued' \
+		            AND a.recorded_at > now() - interval '90 days' \
+		            AND a.detail @> jsonb_build_object('kid', k.kid) \
+		          ORDER BY a.recorded_at DESC LIMIT 1) AS last_signed_at, \
+		        (SELECT count(*) FROM audit_entries a \
+		          WHERE a.action = 'identity_token_issued' \
+		            AND a.recorded_at > now() - interval '30 days' \
+		            AND a.detail @> jsonb_build_object('kid', k.kid)) AS signed_30d, \
+		        (SELECT max((a.detail ->> 'expires_at')::timestamptz) FROM audit_entries a \
+		          WHERE a.action = 'identity_token_issued' \
+		            AND a.recorded_at > now() - interval '61 minutes' \
+		            AND a.detail @> jsonb_build_object('kid', k.kid)) AS latest_expiry \
+		 FROM unnest($1::text[]) AS k(kid)",
 	)
+	.bind::<diesel::sql_types::Array<diesel::sql_types::Text>, _>(kids)
 	.load(conn)
 	.await
 	.map_err(AppError::from)?;
 	Ok(rows
 		.into_iter()
-		.map(|row| {
-			(
+		.filter_map(|row| {
+			let last_signed_at = row.last_signed_at?.to_jiff();
+			Some((
 				row.kid,
 				KeyUsage {
-					last_signed_at: Some(row.last_signed_at.to_jiff()),
+					last_signed_at: Some(last_signed_at),
 					signed_30d: row.signed_30d,
 					latest_expiry: row.latest_expiry.map(|at| at.to_jiff()),
 				},
-			)
+			))
 		})
 		.collect())
 }
 
-/// When a token was last issued for each relying party, within the log's
-/// ninety days. A relying party with none in that time is absent.
+/// When a token was last issued for each of `relying_parties`, within the
+/// log's ninety days. A relying party with none in that time is absent.
+///
+/// Read for each relying party on its own, through the log's index on the
+/// records an entry acted on, so finding the latest issuance does not read
+/// back past it.
 // spec: IDP#relying-parties
-pub async fn last_issued(conn: &mut AsyncPgConnection) -> Result<HashMap<Uuid, Timestamp>> {
+pub async fn last_issued(
+	conn: &mut AsyncPgConnection,
+	relying_parties: &[Uuid],
+) -> Result<HashMap<Uuid, Timestamp>> {
 	#[derive(QueryableByName)]
 	struct Row {
-		#[diesel(sql_type = diesel::sql_types::Text)]
-		party: String,
-		#[diesel(sql_type = diesel::sql_types::Timestamptz)]
-		at: jiff_diesel::Timestamp,
+		#[diesel(sql_type = diesel::sql_types::Uuid)]
+		party: Uuid,
+		#[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>)]
+		at: Option<jiff_diesel::Timestamp>,
 	}
 
+	if relying_parties.is_empty() {
+		return Ok(HashMap::new());
+	}
 	let rows: Vec<Row> = diesel::sql_query(
-		"SELECT record ->> 'id' AS party, max(recorded_at) AS at \
-		 FROM audit_entries, jsonb_array_elements(records) AS record \
-		 WHERE action = 'identity_token_issued' \
-		   AND recorded_at > now() - interval '90 days' \
-		   AND detail ->> 'jti' IS NOT NULL \
-		   AND record ->> 'kind' = 'relying_party' \
-		 GROUP BY 1",
+		"SELECT p.party, \
+		        (SELECT a.recorded_at FROM audit_entries a \
+		          WHERE a.action = 'identity_token_issued' \
+		            AND a.recorded_at > now() - interval '90 days' \
+		            AND a.records @> jsonb_build_array(jsonb_build_object( \
+		                  'kind', 'relying_party', 'id', p.party::text)) \
+		            AND a.detail ->> 'jti' IS NOT NULL \
+		          ORDER BY a.recorded_at DESC LIMIT 1) AS at \
+		 FROM unnest($1::uuid[]) AS p(party)",
 	)
+	.bind::<diesel::sql_types::Array<diesel::sql_types::Uuid>, _>(relying_parties)
 	.load(conn)
 	.await
 	.map_err(AppError::from)?;
 	Ok(rows
 		.into_iter()
-		.filter_map(|row| Some((row.party.parse().ok()?, row.at.to_jiff())))
+		.filter_map(|row| Some((row.party, row.at?.to_jiff())))
 		.collect())
 }
 

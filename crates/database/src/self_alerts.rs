@@ -734,6 +734,12 @@ pub enum IssuerDocuments {
 	Unreachable(String),
 	/// The discovery document names another issuer.
 	OtherIssuer(String),
+	/// The discovery document names its key set somewhere other than the
+	/// issuer's own address for it, `expected`, or names none. Never fetched.
+	KeySetElsewhere {
+		named: Option<String>,
+		expected: String,
+	},
 	/// The key identifiers the key set serves.
 	Served(std::collections::BTreeSet<String>),
 }
@@ -823,6 +829,19 @@ fn documents_finding(
 			return Some((
 				CheckResult::Failed,
 				format!("The discovery document at {issuer} names the issuer {other}"),
+				Vec::new(),
+				Vec::new(),
+			));
+		}
+		IssuerDocuments::KeySetElsewhere { named, expected } => {
+			return Some((
+				CheckResult::Failed,
+				match named {
+					Some(named) => format!(
+						"The discovery document at {issuer} names its key set at {named}, not {expected}"
+					),
+					None => format!("The discovery document at {issuer} names no key set"),
+				},
 				Vec::new(),
 				Vec::new(),
 			));

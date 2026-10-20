@@ -99,8 +99,7 @@ async fn unknown_tailnet_node_is_rejected_without_creating_a_row() {
 				// Neither harness touches certificates.
 				acme: None,
 				acme_directory: None,
-				identity_config: Default::default(),
-				identity: None,
+				identity: Default::default(),
 			})
 			.unwrap(),
 			ClientIpSource::RightmostForwarded,

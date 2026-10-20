@@ -6,9 +6,10 @@ pub const DISCOVERY_PATH: &str = "/.well-known/openid-configuration";
 /// Where the key set is served, beneath the issuer.
 pub const JWKS_PATH: &str = "/.well-known/jwks.json";
 
-/// The claims a token can carry.
+/// The claims a token can carry, as the discovery document advertises them.
+/// The issuing server holds its own claims to this list in a test.
 // spec: IDT#the-token
-const CLAIMS: &[&str] = &[
+pub const CLAIMS: &[&str] = &[
 	"iss",
 	"aud",
 	"iat",

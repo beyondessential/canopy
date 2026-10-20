@@ -38,8 +38,8 @@ export default function IdentityGrants({
 	value: string[];
 	onChange: (ids: string[]) => void;
 	sub: string | null | undefined;
-	/// The group or rank has been edited, so the saved subject no longer
-	/// stands.
+	/// The group or rank has been edited to another placement, so the subject
+	/// is shown once saved.
 	subChanges: boolean;
 	caption: string;
 	disabled: boolean;
@@ -83,7 +83,7 @@ export default function IdentityGrants({
 					The subject changes once saved.
 				</Typography>
 			)}
-			{sub && !subChanges && (
+			{sub && (
 				<Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
 					<Typography
 						component="code"

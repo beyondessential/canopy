@@ -65,7 +65,8 @@
 - [x] While the key that last signed is not configured, no key signs, and the self-alert fails saying so even when the served documents match (verifies spec: IDP, SELF)
 - [x] With no configured key readable from the key service, the self-alert fails rather than freezing (verifies spec: SELF)
 - [x] Documents unreachable for a single pass raise nothing; unreachable for several in a row raises the failure (verifies spec: SELF)
-- [x] A discovery document naming a key set anywhere but the issuer's own address is a finding, and that address is never fetched; a redirect is not followed
+- [x] A discovery document naming a key set anywhere but the issuer's own address fails at once, saying where it points, and that address is never fetched; a redirect is not followed (verifies spec: SELF)
+- [x] Every claim a token carries is advertised in the discovery document's `claims_supported`, and nothing else is (verifies spec: IDT)
 - [x] A key reference that is an alias resolves to the key it was last read as
 - [x] A key whose public half cannot be read is retried at most once a minute, not on every request
 - [x] A key not yet served, waiting to sign, or retired is presented as published (verifies spec: IDP)
@@ -83,7 +84,8 @@
 - [x] The machine's choice and each application's choice show their `sub`, copyable (verifies spec: IDP)
 - [x] A pending or ungrouped machine's edit page offers no identity token choice, for the machine or its applications (verifies spec: IDP)
 - [x] Ranking a pending machine on its edit page offers the choice before saving, and grants given in the same save take effect (verifies spec: IDP)
-- [x] Changing a machine's group or rank on its edit page hides the saved subject until saved (verifies spec: IDP)
+- [x] Changing a machine's group or rank on its edit page hides the saved subject until saved, including clearing the group (verifies spec: IDP)
+- [x] The machine edit page stays usable when its grants cannot be read, saying so where they would be
 - [x] A token lifetime that is not a whole number of minutes from one to sixty cannot be submitted (verifies spec: IDP)
 - [x] Registering an audience already registered is refused as a conflict, however the requests interleave, and a grant save records only the grants it changed (verifies spec: IDP)
 - [x] With no relying party registered the choice is hidden, unless the subject already holds a grant (verifies spec: IDP)

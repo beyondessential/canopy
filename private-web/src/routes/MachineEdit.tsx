@@ -89,9 +89,7 @@ export default function MachineEdit() {
 		machineSilences.status === "loading" ||
 		machineSilences.status === "idle" ||
 		applicationSilences.status === "loading" ||
-		applicationSilences.status === "idle" ||
-		identityGrants.status === "loading" ||
-		identityGrants.status === "idle"
+		applicationSilences.status === "idle"
 	) {
 		return <LinearProgress />;
 	}
@@ -103,9 +101,6 @@ export default function MachineEdit() {
 	}
 	if (applicationSilences.status === "error") {
 		return <Alert severity="error">{applicationSilences.error.message}</Alert>;
-	}
-	if (identityGrants.status === "error") {
-		return <Alert severity="error">{identityGrants.error.message}</Alert>;
 	}
 
 	const silenced = (refs: Array<{ source: string; ref: string }>) =>
@@ -129,7 +124,12 @@ export default function MachineEdit() {
 					)
 					.map((s) => s.application_id),
 			)}
-			identityGrants={identityGrants.data}
+			// Grants load beside the form rather than ahead of it: the rest of
+			// the page never depends on them.
+			identityGrants={identityGrants.status === "ok" ? identityGrants.data : null}
+			identityError={
+				identityGrants.status === "error" ? identityGrants.error.message : null
+			}
 		/>
 	);
 }
@@ -174,6 +174,7 @@ function Form({
 	machineReachabilitySilenced,
 	applicationReachabilitySilenced,
 	identityGrants,
+	identityError,
 }: {
 	machine: {
 		id: string;
@@ -191,7 +192,8 @@ function Form({
 	applications: ServerInfo[];
 	machineReachabilitySilenced: boolean;
 	applicationReachabilitySilenced: Set<string>;
-	identityGrants: MachineGrants;
+	identityGrants: MachineGrants | null;
+	identityError: string | null;
 }) {
 	const navigate = useNavigate();
 	const [box, setBox] = useState<MachineForm>({
@@ -228,20 +230,26 @@ function Form({
 	);
 	// The relying parties each subject holds as saved, and as edited, keyed by
 	// the machine's or the application's id.
-	const heldGrants = Object.fromEntries(
-		identityGrants.subjects.map((s) => [s.subject.id, s.granted]),
+	const heldGrants: Record<string, string[]> = Object.fromEntries(
+		(identityGrants?.subjects ?? []).map((s) => [s.subject.id, s.granted]),
 	);
-	const [grants, setGrants] = useState<Record<string, string[]>>(heldGrants);
-	const subOf = (subjectId: string) =>
-		identityGrants.subjects.find((s) => s.subject.id === subjectId)?.sub;
+	// Only what has been edited, so grants that arrive after the form mounts
+	// still read as held.
+	const [grantEdits, setGrantEdits] = useState<Record<string, string[]>>({});
+	const grantsOf = (subjectId: string) =>
+		grantEdits[subjectId] ?? heldGrants[subjectId] ?? [];
 	// Placement is read from the form, so ranking or grouping a box here offers
 	// the choice, and the saved subject is not shown once it no longer stands.
 	// spec: IDP#presentation
 	const placed = box.groupId !== null && box.rank !== "";
-	const grantsOffered = identityGrants.available && placed;
+	const grantsOffered = (identityGrants?.available ?? false) && placed;
 	const placementEdited =
 		box.groupId !== (machine.group_id ?? null) || box.rank !== (machine.rank ?? "");
 	const subChanges = placementEdited && placed;
+	const subOf = (subjectId: string) =>
+		placementEdited
+			? undefined
+			: identityGrants?.subjects.find((s) => s.subject.id === subjectId)?.sub;
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -346,15 +354,15 @@ function Form({
 	// Only a subject whose grants changed is sent, so a save that leaves them
 	// as they were records nothing.
 	// spec: IDP#grants
-	for (const subject of identityGrants.subjects) {
+	for (const subject of identityGrants?.subjects ?? []) {
 		const id = subject.subject.id;
-		if (sameMembers(grants[id] ?? [], heldGrants[id] ?? [])) continue;
+		if (sameMembers(grantsOf(id), heldGrants[id] ?? [])) continue;
 		plan.push({
 			call: "identity/set_grants",
 			run: () =>
 				callApi("identity", "set_grants", {
 					subject: subject.subject,
-					relying_party_ids: grants[id] ?? [],
+					relying_party_ids: grantsOf(id),
 				}),
 		});
 	}
@@ -545,21 +553,28 @@ function Form({
 						/>
 					</Stack>
 
-					<IdentityGrants
-						grants={identityGrants}
-						offered={grantsOffered}
-						held={heldGrants[machine.id] ?? []}
-						value={grants[machine.id] ?? []}
-						onChange={(ids) => setGrants({ ...grants, [machine.id]: ids })}
-						sub={subOf(machine.id)}
-						subChanges={subChanges}
-						caption={
-							subOf(machine.id) && !subChanges
-								? "Tokens that name this machine itself, carrying this subject. Applications on it hold their own grants below."
-								: "Tokens that name this machine itself. Applications on it hold their own grants below."
-						}
-						disabled={pending}
-					/>
+					{identityError && (
+						<Alert severity="error">
+							Identity token grants could not be read: {identityError}
+						</Alert>
+					)}
+					{identityGrants && (
+						<IdentityGrants
+							grants={identityGrants}
+							offered={grantsOffered}
+							held={heldGrants[machine.id] ?? []}
+							value={grantsOf(machine.id)}
+							onChange={(ids) => setGrantEdits({ ...grantEdits, [machine.id]: ids })}
+							sub={subOf(machine.id)}
+							subChanges={subChanges}
+							caption={
+								subOf(machine.id)
+									? "Tokens that name this machine itself, carrying this subject. Applications on it hold their own grants below."
+									: "Tokens that name this machine itself. Applications on it hold their own grants below."
+							}
+							disabled={pending}
+						/>
+					)}
 
 					<TextField
 						label="Notes"
@@ -597,23 +612,25 @@ function Form({
 						onChange={(patch) => patchApp(application.id, patch)}
 						disabled={pending}
 						identity={
-							<IdentityGrants
-								grants={identityGrants}
-								offered={grantsOffered}
-								held={heldGrants[application.id] ?? []}
-								value={grants[application.id] ?? []}
-								onChange={(ids) =>
-									setGrants({ ...grants, [application.id]: ids })
-								}
-								sub={subOf(application.id)}
-								subChanges={subChanges}
-								caption={
-									subOf(application.id) && !subChanges
-										? "Its tokens carry this subject. Revoking refuses the next request; tokens already issued run out on their own."
-										: "Revoking refuses the next request; tokens already issued run out on their own."
-								}
-								disabled={pending}
-							/>
+							identityGrants && (
+								<IdentityGrants
+									grants={identityGrants}
+									offered={grantsOffered}
+									held={heldGrants[application.id] ?? []}
+									value={grantsOf(application.id)}
+									onChange={(ids) =>
+										setGrantEdits({ ...grantEdits, [application.id]: ids })
+									}
+									sub={subOf(application.id)}
+									subChanges={subChanges}
+									caption={
+										subOf(application.id)
+											? "Its tokens carry this subject. Revoking refuses the next request; tokens already issued run out on their own."
+											: "Revoking refuses the next request; tokens already issued run out on their own."
+									}
+									disabled={pending}
+								/>
+							)
 						}
 					/>
 				))

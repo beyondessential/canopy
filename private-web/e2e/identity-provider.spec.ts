@@ -259,6 +259,39 @@ test.describe("identity token grants", () => {
 		await expect(box.getByText("The subject changes once saved.")).toBeVisible();
 	});
 
+	test("clearing the group hides the saved subject", async ({ page, sql }) => {
+		const party = await seedRelyingParty(sql, { name: "Anthropic" });
+		const group = await seedServerGroup(sql, { name: "ungroup-here-group" });
+		const app = await seedServer(sql, { groupId: group.id, rank: "production" });
+		await seedIdentityGrant(sql, { relyingPartyId: party.id, machineId: app.machineId });
+
+		await page.goto(`/fleet/machines/${app.machineId}/edit`);
+		const box = page.getByTestId("machine-section");
+		const saved = `group:${group.id}:rank:production:machine:${app.machineId}:`;
+		await expect(box.getByText(saved)).toBeVisible();
+		const groupField = box.getByRole("combobox", { name: "Group" });
+		await groupField.hover();
+		await box.getByRole("button", { name: "Clear" }).click();
+		await expect(box.getByText(saved)).toHaveCount(0);
+		// The grant is still held, so it stays withdrawable.
+		await expect(box.getByText("Identity tokens")).toBeVisible();
+	});
+
+	test("the form stays usable when grants cannot be read", async ({ page, sql }) => {
+		await seedRelyingParty(sql, { name: "Anthropic" });
+		const group = await seedServerGroup(sql, { name: "grants-down-group" });
+		const app = await seedServer(sql, { groupId: group.id, rank: "production" });
+		await page.route("**/api/identity/machine_grants", (route) =>
+			route.fulfill({ status: 500, body: "{}" }),
+		);
+
+		await page.goto(`/fleet/machines/${app.machineId}/edit`);
+		const box = page.getByTestId("machine-section");
+		await expect(box.getByText("Identity token grants could not be read")).toBeVisible();
+		await expect(box.getByText("Identity tokens")).toHaveCount(0);
+		await expect(page.getByRole("button", { name: "Save" })).toBeEnabled();
+	});
+
 	test("with no relying party registered the choice is hidden", async ({
 		page,
 		sql,
