@@ -68,9 +68,10 @@ Because the subject encodes group and rank, it changes when its machine moves gr
 The machine an application runs on and its group's name are carried in claims and never in the subject, so the subject changes only when something a rule selects on changes.
 
 Every segment value is drawn from lowercase letters, digits and hyphens: identifiers, rank names, and application types, which are slugs (see [APP](../servers/application-types.md)).
-So no value contains the separator, and a label appearing as a value cannot be mistaken for the label.
+So no value contains the separator.
+Nor is any value one of the labels, so a label written in a pattern matches only that label.
 Each label appears once, in a fixed position, so a pattern's text between separators matches only the segment it was written for, even where a wildcard before it takes in several segments.
-Canopy issues no token whose subject would carry a value outside that alphabet.
+Canopy issues no token whose subject would carry a value outside that alphabet or equal to a label.
 
 The trailing separator terminates every segment, the last included.
 A pattern that ends at a separator therefore never matches a longer value sharing its prefix, and an exact match written without the trailing separator matches nothing, so a mistake in a rule refuses rather than admits.

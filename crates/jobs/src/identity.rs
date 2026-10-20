@@ -46,13 +46,22 @@ pub fn client() -> reqwest::Client {
 /// document naming somewhere else is a finding and never a request.
 pub async fn fetch(client: &reqwest::Client, issuer: &str) -> IssuerDocuments {
 	async fn json(client: &reqwest::Client, url: &str) -> Result<serde_json::Value, String> {
-		client
+		let response = client
 			.get(url)
 			.timeout(FETCH_TIMEOUT)
 			.send()
 			.await
 			.and_then(reqwest::Response::error_for_status)
-			.map_err(|err| format!("{url}: {err}"))?
+			.map_err(|err| format!("{url}: {err}"))?;
+		if response.status().is_redirection() {
+			let to = response
+				.headers()
+				.get(reqwest::header::LOCATION)
+				.and_then(|to| to.to_str().ok())
+				.unwrap_or("elsewhere");
+			return Err(format!("{url}: redirects to {to}, which is not followed"));
+		}
+		response
 			.json()
 			.await
 			.map_err(|err| format!("{url}: {err}"))
@@ -329,9 +338,10 @@ mod tests {
 			get(async || Redirect::temporary("http://169.254.169.254/")),
 		))
 		.await;
-		assert!(matches!(
-			fetch(&client(), &issuer).await,
-			IssuerDocuments::Unreachable(_)
-		));
+		let documents = fetch(&client(), &issuer).await;
+		assert!(
+			matches!(&documents, IssuerDocuments::Unreachable(err) if err.contains("redirects to http://169.254.169.254/")),
+			"{documents:?}"
+		);
 	}
 }

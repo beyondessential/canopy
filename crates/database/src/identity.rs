@@ -98,6 +98,9 @@ impl RelyingParty {
 		ids: &[Uuid],
 	) -> Result<HashMap<Uuid, Self>> {
 		use crate::schema::relying_parties::dsl;
+		if ids.is_empty() {
+			return Ok(HashMap::new());
+		}
 		let found: HashMap<Uuid, Self> = dsl::relying_parties
 			.filter(dsl::id.eq_any(ids))
 			.select(Self::as_select())
@@ -460,8 +463,11 @@ pub async fn is_granted(
 }
 
 /// Make `subject`'s grants exactly `relying_parties`, returning what it granted
-/// and revoked. What it returns is what its own statements changed, so a save
-/// racing another records only its share.
+/// and revoked.
+///
+/// The subject's row is locked first, so within a transaction two saves of one
+/// subject's grants take turns: the second reads what the first left and makes
+/// its own set exact. What it returns is what its own statements changed.
 // spec: IDP#grants
 pub async fn set_grants(
 	conn: &mut AsyncPgConnection,
@@ -470,6 +476,14 @@ pub async fn set_grants(
 ) -> Result<GrantChanges> {
 	use crate::schema::identity_grants::dsl;
 
+	match subject {
+		GrantSubject::Machine(id) => {
+			Machine::get_by_id_for_update(conn, id).await?;
+		}
+		GrantSubject::Application(id) => {
+			Application::get_by_id_for_update(conn, id).await?;
+		}
+	}
 	let held = grants_of(conn, &[subject])
 		.await?
 		.remove(&subject)
@@ -578,8 +592,8 @@ pub fn placement(machine: &Machine) -> std::result::Result<Placement, Unplaced> 
 }
 
 /// The structured subject a token for this machine, or for this application on
-/// it, carries. `None` when a value falls outside the subject's alphabet, which
-/// Canopy issues no token for.
+/// it, carries. `None` when a value falls outside the subject's alphabet or is
+/// one of its labels, which Canopy issues no token for.
 // spec: IDT#subject
 pub fn subject(
 	placement: &Placement,
@@ -609,7 +623,10 @@ fn subject_of(
 		}
 		None => segments.push(("machine", machine_id.to_string())),
 	}
-	if !segments.iter().all(|(_, value)| in_alphabet(value)) {
+	if !segments
+		.iter()
+		.all(|(_, value)| in_alphabet(value) && !LABELS.contains(&value.as_str()))
+	{
 		return None;
 	}
 
@@ -625,8 +642,14 @@ fn subject_of(
 	Some(out)
 }
 
-/// Lowercase letters, digits and hyphens, so no value can contain the separator
-/// or be mistaken for a label.
+/// The labels a subject's segments carry. No value is one of them, so a label's
+/// text in a pattern matches only that label, wherever a wildcard before it
+/// reaches.
+// spec: IDT#subject
+const LABELS: &[&str] = &["group", "rank", "application", "machine"];
+
+/// Lowercase letters, digits and hyphens, so no value can contain the
+/// separator.
 fn in_alphabet(value: &str) -> bool {
 	!value.is_empty()
 		&& value
@@ -908,8 +931,10 @@ impl KeyState {
 /// The state of each configured key, oldest first. `last_expiry` gives the
 /// latest expiry of a token each key signed, by `kid`.
 ///
-/// While no key can sign, the keys older than the one that last signed still
-/// retire against it.
+/// While the key that last signed is configured but cannot be read, the keys
+/// older than it still retire against it. While it is not configured at all,
+/// no key can be placed against it, so none is presented as retired or
+/// removable.
 // spec: IDP#signing-keys
 pub fn key_states(
 	keys: &[ConfiguredKey<'_>],
@@ -957,8 +982,9 @@ pub struct KeyUsage {
 }
 
 /// The usage of each of `kids`, from the issuances in the audit log; a key
-/// that signed nothing in the log's ninety days is absent. A refusal carries no
-/// key, so it counts for none.
+/// that signed nothing in the log's ninety days is absent. Only issuances that
+/// took place count: a refusal is settled failed, and one committed ahead and
+/// never settled is still pending.
 ///
 /// Each figure is read for each key on its own, through the log's index on
 /// what it records, so the most recent signature is found without reading
@@ -983,26 +1009,31 @@ pub async fn key_usage(
 	if kids.is_empty() {
 		return Ok(HashMap::new());
 	}
-	// A token lives an hour at most, so one still live was issued within the
-	// last hour, and the expiry is read from those alone.
+	// A token lives for its relying party's lifetime at most, so one still live
+	// was issued within that bound, and the expiry is read from those alone.
+	let live_window_minutes = LIFETIME_MINUTES.end() + 1;
 	let rows: Vec<Row> = diesel::sql_query(
 		"SELECT k.kid, \
 		        (SELECT a.recorded_at FROM audit_entries a \
 		          WHERE a.action = 'identity_token_issued' \
 		            AND a.recorded_at > now() - interval '90 days' \
+		            AND (a.outcome IS NULL OR a.outcome = 'done') \
 		            AND a.detail @> jsonb_build_object('kid', k.kid) \
 		          ORDER BY a.recorded_at DESC LIMIT 1) AS last_signed_at, \
 		        (SELECT count(*) FROM audit_entries a \
 		          WHERE a.action = 'identity_token_issued' \
 		            AND a.recorded_at > now() - interval '30 days' \
+		            AND (a.outcome IS NULL OR a.outcome = 'done') \
 		            AND a.detail @> jsonb_build_object('kid', k.kid)) AS signed_30d, \
 		        (SELECT max((a.detail ->> 'expires_at')::timestamptz) FROM audit_entries a \
 		          WHERE a.action = 'identity_token_issued' \
-		            AND a.recorded_at > now() - interval '61 minutes' \
+		            AND a.recorded_at > now() - make_interval(mins => $2) \
+		            AND (a.outcome IS NULL OR a.outcome = 'done') \
 		            AND a.detail @> jsonb_build_object('kid', k.kid)) AS latest_expiry \
 		 FROM unnest($1::text[]) AS k(kid)",
 	)
 	.bind::<diesel::sql_types::Array<diesel::sql_types::Text>, _>(kids)
+	.bind::<diesel::sql_types::Integer, _>(live_window_minutes)
 	.load(conn)
 	.await
 	.map_err(AppError::from)?;
@@ -1023,7 +1054,8 @@ pub async fn key_usage(
 }
 
 /// When a token was last issued for each of `relying_parties`, within the
-/// log's ninety days. A relying party with none in that time is absent.
+/// log's ninety days. A relying party with none in that time is absent, and a
+/// refusal, settled failed, is not an issuance.
 ///
 /// Read for each relying party on its own, through the log's index on the
 /// records an entry acted on, so finding the latest issuance does not read
@@ -1051,7 +1083,7 @@ pub async fn last_issued(
 		            AND a.recorded_at > now() - interval '90 days' \
 		            AND a.records @> jsonb_build_array(jsonb_build_object( \
 		                  'kind', 'relying_party', 'id', p.party::text)) \
-		            AND a.detail ->> 'jti' IS NOT NULL \
+		            AND (a.outcome IS NULL OR a.outcome = 'done') \
 		          ORDER BY a.recorded_at DESC LIMIT 1) AS at \
 		 FROM unnest($1::uuid[]) AS p(party)",
 	)
@@ -1285,6 +1317,13 @@ mod tests {
 			subject_of(&placement, machine, Some(("Bad_Type".into(), application))),
 			None
 		);
+		for label in LABELS {
+			assert_eq!(
+				subject_of(&placement, machine, Some(((*label).into(), application))),
+				None,
+				"an application type spelled as the label {label} is refused"
+			);
+		}
 	}
 
 	#[test]

@@ -9,7 +9,13 @@
 
 use std::{sync::Arc, time::Duration};
 
-use axum::{Json, Router, extract::State, routing::get};
+use axum::{
+	Json, Router,
+	extract::State,
+	http::StatusCode,
+	response::IntoResponse,
+	routing::get,
+};
 use oidc::{Issuer, Jwks};
 use serde_json::Value;
 use tokio::sync::RwLock;
@@ -25,7 +31,8 @@ struct Served {
 }
 
 /// The configured keys' public halves, oldest first, leaving out any that
-/// cannot be read yet.
+/// cannot be read yet. A key once read stays in the set however the key service
+/// fares afterwards, since the keyring keeps it.
 pub async fn jwks(issuer: &Issuer) -> Jwks {
 	Jwks {
 		keys: issuer
@@ -71,7 +78,16 @@ pub async fn router(issuer: Issuer) -> Router {
 		)
 		.route(
 			&format!("{base}{}", oidc::JWKS_PATH),
-			get(async |State(served): State<Served>| Json(served.jwks.read().await.clone())),
+			get(async |State(served): State<Served>| {
+				let jwks = served.jwks.read().await.clone();
+				// While no key has been read, an empty set would be cached by
+				// relying parties as Canopy having no keys; unavailable keeps
+				// them on what they hold.
+				if jwks.keys.is_empty() {
+					return StatusCode::SERVICE_UNAVAILABLE.into_response();
+				}
+				Json(jwks).into_response()
+			}),
 		)
 		.with_state(served)
 }
@@ -126,6 +142,23 @@ mod tests {
 			.get("/.well-known/openid-configuration")
 			.await
 			.assert_status_not_found();
+	}
+
+	#[tokio::test]
+	async fn with_no_key_read_the_key_set_is_unavailable() {
+		let issuer = Issuer {
+			issuer: "https://identity.example".into(),
+			keyring: Keyring::unreadable(&["k".into()]),
+		};
+		let server = TestServer::new(router(issuer).await);
+		server
+			.get("/.well-known/jwks.json")
+			.await
+			.assert_status(axum::http::StatusCode::SERVICE_UNAVAILABLE);
+		server
+			.get("/.well-known/openid-configuration")
+			.await
+			.assert_status_ok();
 	}
 
 	#[tokio::test]

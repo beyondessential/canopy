@@ -53,15 +53,16 @@ impl IdentityConfig {
 	}
 }
 
-/// An issuer is an `https` URL with no query or fragment, held without a
+/// An issuer is an `https` URL with no userinfo, query or fragment, held without a
 /// trailing slash so the documents' paths join onto it one way.
 fn normalise_issuer(issuer: &str) -> Result<String> {
 	let rest = issuer.strip_prefix("https://").ok_or_else(|| {
 		Error::Config(format!("{ISSUER_ENV} must be an https URL, got {issuer:?}"))
 	})?;
-	if rest.is_empty() || rest.starts_with('/') || rest.contains(['?', '#']) {
+	let authority = rest.split('/').next().unwrap_or_default();
+	if authority.is_empty() || rest.contains(['?', '#']) || authority.contains('@') {
 		return Err(Error::Config(format!(
-			"{ISSUER_ENV} must be an https URL with a host and no query or fragment, got {issuer:?}"
+			"{ISSUER_ENV} must be an https URL with a host and no userinfo, query or fragment, got {issuer:?}"
 		)));
 	}
 	Ok(issuer.trim_end_matches('/').to_owned())
@@ -109,9 +110,12 @@ mod tests {
 			"https://",
 			"https://id.example?x=1",
 			"https://id.example#x",
+			"https://user:secret@id.example",
+			"https://user@id.example/path",
 		] {
 			assert!(IdentityConfig::parse(Some(bad), None).is_err(), "{bad}");
 		}
+		assert!(IdentityConfig::parse(Some("https://id.example/a@b"), None).is_ok());
 		assert_eq!(
 			IdentityConfig::parse(Some("https://id.example/canopy"), None)
 				.unwrap()

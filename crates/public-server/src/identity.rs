@@ -204,7 +204,7 @@ pub async fn issue(
 		.map_err(|unplaced| AppError::IdentitySubjectNotPlaced(unplaced.describe().to_owned()))?;
 	let Some(sub) = sub else {
 		return Err(AppError::custom(
-			"this subject has a value outside the subject alphabet, so no token is issued for it",
+			"this subject has a value outside the subject alphabet or spelled as one of its labels, so no token is issued for it",
 		));
 	};
 	let group = ServerGroup::get_by_id(&mut conn, placement.group_id).await?;
