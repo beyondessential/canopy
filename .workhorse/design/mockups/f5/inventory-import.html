@@ -1,0 +1,282 @@
+<!-- spec: private-server/inventory.md -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inventory file import, preview with an unassigned host</title>
+<style>
+:root {
+	--primary: #388e3c;
+	--primary-border: rgba(56, 142, 60, 0.5);
+	--text: rgba(0, 0, 0, 0.87);
+	--text-2: rgba(0, 0, 0, 0.6);
+	--divider: rgba(0, 0, 0, 0.12);
+	--input-border: rgba(0, 0, 0, 0.23);
+	--hover: rgba(0, 0, 0, 0.04);
+	--warning: #ed6c02;
+	--error: #d32f2f;
+}
+* { box-sizing: border-box; }
+body {
+	margin: 0;
+	font-family: "Roboto", "Helvetica", "Arial", sans-serif;
+	color: var(--text);
+	background: #fff;
+	font-size: 1rem;
+	line-height: 1.5;
+}
+.frame-label {
+	font: 500 0.75rem/1 "Roboto", sans-serif;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--text-2);
+	margin: 32px 24px 8px;
+}
+.page { padding: 0 24px 24px; max-width: 960px; }
+h6 { font-size: 1.25rem; font-weight: 500; line-height: 1.6; margin: 0 0 0.35em; }
+.paper { border: 1px solid var(--divider); border-radius: 4px; padding: 16px; background: #fff; }
+.overline { display: block; font-size: 0.75rem; font-weight: 400; letter-spacing: 0.08333em; text-transform: uppercase; line-height: 2.66; color: var(--text-2); }
+.stack > * + * { margin-top: 16px; }
+.body2 { font-size: 0.875rem; line-height: 1.43; }
+.secondary { color: var(--text-2); }
+.gutter { margin: 0 0 0.35em; }
+.subtitle2 { font-size: 0.875rem; font-weight: 500; line-height: 1.57; }
+.caption { font-size: 0.75rem; line-height: 1.66; color: var(--text-2); }
+.row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+pre.cmd {
+	margin: 0; padding: 12px; border-radius: 4px; background: var(--hover);
+	font: 0.85em/1.5 monospace; white-space: pre-wrap; word-break: break-all;
+}
+.icon-btn { display: inline-flex; padding: 5px; border-radius: 50%; color: rgba(0, 0, 0, 0.54); }
+.icon-btn svg, .btn svg { width: 20px; height: 20px; fill: currentColor; }
+.btn {
+	display: inline-flex; align-items: center; gap: 8px;
+	font: 500 0.8125rem/1.75 "Roboto", sans-serif; letter-spacing: 0.02857em; text-transform: uppercase;
+	border-radius: 4px; padding: 3px 9px; background: none; border: 1px solid transparent; cursor: pointer;
+}
+.btn svg { width: 18px; height: 18px; }
+.btn.outlined { color: var(--primary); border-color: var(--primary-border); }
+.btn.text { color: var(--primary); padding: 6px 8px; font-size: 0.875rem; }
+.btn.contained { color: #fff; background: var(--primary); padding: 6px 16px; font-size: 0.875rem; box-shadow: 0 3px 1px -2px rgba(0,0,0,.2), 0 2px 2px 0 rgba(0,0,0,.14), 0 1px 5px 0 rgba(0,0,0,.12); }
+.btn.contained[disabled] { background: rgba(0, 0, 0, 0.12); color: rgba(0, 0, 0, 0.26); box-shadow: none; cursor: default; }
+.field {
+	position: relative; display: inline-flex; align-items: center;
+	height: 40px; padding: 0 14px; border: 1px solid var(--input-border); border-radius: 4px;
+	font-size: 1rem; min-width: 180px; color: var(--text);
+}
+.field label {
+	position: absolute; top: -9px; left: 9px; padding: 0 5px; background: #fff;
+	font-size: 0.75rem; color: var(--text-2); line-height: 1.4;
+}
+.field.select { padding-right: 32px; }
+.field.select::after {
+	content: ""; position: absolute; right: 12px; top: 17px;
+	border: 5px solid transparent; border-top-color: rgba(0, 0, 0, 0.54);
+}
+.field.placeholder { color: var(--text-2); }
+.field.error { border-color: var(--error); }
+.field.error label { color: var(--error); }
+.field.dense { height: 32px; font-size: 0.875rem; min-width: 200px; }
+.field.dense.select::after { top: 13px; }
+.checkbox { display: inline-flex; align-items: center; gap: 4px; font-size: 1rem; }
+.box { width: 18px; height: 18px; border: 2px solid rgba(0, 0, 0, 0.54); border-radius: 2px; display: inline-block; }
+.box.on { background: var(--primary); border-color: var(--primary); position: relative; }
+.box.on::after {
+	content: ""; position: absolute; left: 4px; top: 0; width: 5px; height: 10px;
+	border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+.chip {
+	display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 16px;
+	border: 1px solid #bdbdbd; font: 0.8125rem monospace; white-space: nowrap;
+}
+
+/* The new import action and its dialog */
+.import { margin-top: 8px; }
+.backdrop { background: rgba(0, 0, 0, 0.5); padding: 32px 24px; }
+.dialog {
+	max-width: 900px; margin: 0 auto; background: #fff; border-radius: 4px;
+	box-shadow: 0 11px 15px -7px rgba(0,0,0,.2), 0 24px 38px 3px rgba(0,0,0,.14), 0 9px 46px 8px rgba(0,0,0,.12);
+}
+.dialog-title { font-size: 1.25rem; font-weight: 500; line-height: 1.6; padding: 16px 24px; }
+.dialog-content { padding: 0 24px 20px; }
+.dialog-content > * + * { margin-top: 20px; }
+.dialog-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 8px; }
+.alert {
+	display: flex; gap: 12px; padding: 6px 16px; border-radius: 4px;
+	font-size: 0.875rem; line-height: 1.43;
+}
+.alert svg { width: 22px; height: 22px; flex: none; margin-top: 7px; }
+.alert .msg { padding: 8px 0; }
+.alert.warning { background: rgb(255, 244, 229); color: rgb(102, 60, 0); }
+.alert.warning svg { fill: var(--warning); }
+table { width: 100%; border-collapse: collapse; font-size: 0.875rem; line-height: 1.43; }
+th, td { text-align: left; padding: 6px 16px 6px 0; border-bottom: 1px solid rgba(224, 224, 224, 1); vertical-align: middle; }
+th { font-weight: 500; color: var(--text-2); }
+td.mono, .mono { font-family: monospace; font-size: 0.8125rem; }
+td.secret-col { width: 72px; text-align: center; padding-right: 0; }
+th.secret-col { text-align: center; padding-right: 0; }
+.masked { color: var(--text-2); letter-spacing: 0.1em; }
+.origin { font-family: "Roboto", sans-serif; font-size: 0.75rem; color: var(--text-2); margin-left: 6px; }
+.skipped td { color: rgba(0, 0, 0, 0.38); }
+.machine-head td { padding-top: 14px; font-weight: 500; border-bottom: none; }
+textarea {
+	width: 100%; min-height: 136px; padding: 16.5px 14px; border: 1px solid var(--input-border); border-radius: 4px;
+	font: 0.875rem/1.5 monospace; color: var(--text); resize: vertical;
+}
+.notes { position: relative; }
+.notes label {
+	position: absolute; top: -9px; left: 9px; padding: 0 5px; background: #fff;
+	font-size: 0.75rem; color: var(--text-2); line-height: 1.4;
+}
+</style>
+</head>
+<body>
+
+<div class="frame-label">Environment with no variables</div>
+<div class="page">
+	<h6>Inventory</h6>
+	<div class="paper">
+		<span class="overline">production</span>
+		<div class="stack">
+			<div>
+				<div class="row">
+					<span class="body2 secondary">Run</span>
+					<span class="icon-btn"><svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2m0 16H8V7h11z"/></svg></span>
+				</div>
+				<pre class="cmd">CANOPY_URL=https://canopy.example.ts.net CANOPY_GROUP=example CANOPY_RANK=production ansible-playbook -i inventory/canopy.yml &lt;playbook&gt;</pre>
+				<div style="margin-top: 8px">
+					<span class="btn outlined"><svg viewBox="0 0 24 24"><path d="M22.61 18.99 13.54 9.92c.93-2.34.45-5.1-1.44-7C9.79.61 6.21.4 3.66 2.26L7.5 6.11 6.08 7.52 2.25 3.69C.39 6.23.6 9.82 2.91 12.12c1.86 1.86 4.57 2.35 6.89 1.48l9.11 9.11c.39.39 1.02.39 1.41 0l2.3-2.3c.4-.38.4-1.01-.01-1.42"/></svg>Declare the work</span>
+					<div class="caption">Declare it before running, and no one else can take the lease until you lift it.</div>
+				</div>
+			</div>
+
+			<div>
+				<p class="body2 secondary gutter">Group and environment variables, carried by every machine below</p>
+				<p class="body2 secondary" style="margin: 0">None set</p>
+				<div class="import">
+					<span class="btn outlined"><svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8zm4 18H6V4h7v5h5zM8 15.01l1.41 1.41L11 14.84V19h2v-4.16l1.59 1.59L16 15.01 12.01 11z"/></svg>Import inventory file</span>
+				</div>
+			</div>
+
+			<div>
+				<div class="subtitle2">example-central</div>
+				<p class="body2 secondary" style="margin: 0">Sets nothing of its own</p>
+			</div>
+			<div>
+				<div class="subtitle2">example-facility-a</div>
+				<p class="body2 secondary" style="margin: 0">Sets nothing of its own</p>
+			</div>
+			<div>
+				<div class="subtitle2">example-facility-b</div>
+				<p class="body2 secondary" style="margin: 0">Sets nothing of its own</p>
+			</div>
+			<div>
+				<div class="subtitle2">example-site-office</div>
+				<p class="body2 secondary" style="margin: 0">Sets nothing of its own</p>
+			</div>
+
+			<div>
+				<p class="body2 secondary gutter">Set a variable</p>
+				<div class="row">
+					<span class="field select"><label>Scope</label>This environment</span>
+					<span class="field"><label>Name</label>&nbsp;</span>
+					<span class="field"><label>Value</label>&nbsp;</span>
+					<span class="checkbox"><span class="box"></span>Secret</span>
+					<span class="btn outlined" style="padding: 5px 15px; font-size: 0.875rem">Set</span>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+<div class="frame-label">Preview after choosing a file</div>
+<div class="backdrop">
+	<div class="dialog">
+		<div class="dialog-title">Import example-clone.yml into production</div>
+		<div class="dialog-content">
+
+			<div class="alert warning">
+				<svg viewBox="0 0 24 24"><path d="M12 5.99 19.53 19H4.47zM12 2 1 21h22zm1 14h-2v2h2zm0-6h-2v4h2z"/></svg>
+				<div class="msg">The file sets <span class="mono">tamanu_clone</span>, but production is not a clone.</div>
+			</div>
+
+			<div>
+				<div class="subtitle2 gutter">Hosts</div>
+				<table>
+					<thead><tr><th>In the file</th><th>Machine</th></tr></thead>
+					<tbody>
+						<tr>
+							<td class="mono">example-central</td>
+							<td><span class="field dense select"><label>Machine</label>example-central</span></td>
+						</tr>
+						<tr>
+							<td class="mono">example-facility-a</td>
+							<td><span class="field dense select"><label>Machine</label>example-facility-a</span></td>
+						</tr>
+						<tr>
+							<td class="mono">10.20.30.40:223</td>
+							<td><span class="field dense select error placeholder"><label>Machine</label>Assign or skip</span></td>
+						</tr>
+						<tr class="skipped">
+							<td class="mono">example-old-facility</td>
+							<td><span class="field dense select"><label>Machine</label>Skipped</span></td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+
+			<div>
+				<div class="subtitle2 gutter">Variables</div>
+				<table>
+					<thead><tr><th>Name</th><th>Value</th><th class="secret-col">Secret</th></tr></thead>
+					<tbody>
+						<tr class="machine-head"><td colspan="3">This environment</td></tr>
+						<tr><td class="mono">ansible_user</td><td class="mono">"ubuntu"</td><td class="secret-col"><span class="box"></span></td></tr>
+						<tr><td class="mono">elastic_agent_enabled</td><td class="mono">true</td><td class="secret-col"><span class="box"></span></td></tr>
+						<tr><td class="mono">elastic_agent_enrollment_token</td><td class="mono masked">••••••••</td><td class="secret-col"><span class="box on"></span></td></tr>
+						<tr><td class="mono">salt</td><td class="mono masked">••••••••</td><td class="secret-col"><span class="box on"></span></td></tr>
+						<tr><td class="mono">tamanu_central_canonical_url</td><td class="mono">"https://central.example.org"</td><td class="secret-col"><span class="box"></span></td></tr>
+						<tr><td class="mono">tamanu_version</td><td class="mono">"v2.64.3"</td><td class="secret-col"><span class="box"></span></td></tr>
+						<tr><td class="mono">timezone</td><td class="mono">"Pacific/Auckland"</td><td class="secret-col"><span class="box"></span></td></tr>
+
+						<tr class="machine-head"><td colspan="3">example-central</td></tr>
+						<tr><td class="mono">managed_by_ansible</td><td class="mono">true<span class="origin">added</span></td><td class="secret-col"><span class="box"></span></td></tr>
+						<tr><td class="mono">public_hostname</td><td class="mono">"central.example.org"</td><td class="secret-col"><span class="box"></span></td></tr>
+						<tr><td class="mono">tailscale_name</td><td class="mono">"example-central"</td><td class="secret-col"><span class="box"></span></td></tr>
+						<tr><td class="mono">tamanu_caddy_tls_dns_iam</td><td class="mono masked">••••••••</td><td class="secret-col"><span class="box on"></span></td></tr>
+
+						<tr class="machine-head"><td colspan="3">example-facility-a</td></tr>
+						<tr><td class="mono">managed_by_ansible</td><td class="mono">true<span class="origin">added</span></td><td class="secret-col"><span class="box"></span></td></tr>
+						<tr><td class="mono">public_hostname</td><td class="mono">"facility-a.example.org"</td><td class="secret-col"><span class="box"></span></td></tr>
+						<tr><td class="mono">tailscale_name</td><td class="mono">"example-facility-a"</td><td class="secret-col"><span class="box"></span></td></tr>
+						<tr><td class="mono">tamanu_facility_id</td><td class="mono">"facility-example-a"</td><td class="secret-col"><span class="box"></span></td></tr>
+
+						<tr class="machine-head"><td colspan="3"><span class="mono">10.20.30.40:223</span>, not yet assigned</td></tr>
+						<tr><td class="mono">ansible_host</td><td class="mono">"10.20.30.40"<span class="origin">from host key</span></td><td class="secret-col"><span class="box"></span></td></tr>
+						<tr><td class="mono">ansible_port</td><td class="mono">223<span class="origin">from host key</span></td><td class="secret-col"><span class="box"></span></td></tr>
+						<tr><td class="mono">ansible_user</td><td class="mono">"siteadmin"</td><td class="secret-col"><span class="box"></span></td></tr>
+						<tr><td class="mono">managed_by_ansible</td><td class="mono">true<span class="origin">added</span></td><td class="secret-col"><span class="box"></span></td></tr>
+						<tr><td class="mono">public_hostname</td><td class="mono">"office.example.internal"</td><td class="secret-col"><span class="box"></span></td></tr>
+						<tr><td class="mono">tamanu_facility_id</td><td class="mono">"facility-example-office"</td><td class="secret-col"><span class="box"></span></td></tr>
+					</tbody>
+				</table>
+			</div>
+
+			<div class="notes">
+				<label>Added to the group's notes</label>
+				<textarea>## production
+Use: --key-file /path/to/ssh-key
+SSH key is in the password manager, under Example Linux Servers SSH
+Connect to the site VPN before running</textarea>
+			</div>
+		</div>
+		<div class="dialog-actions">
+			<span class="caption">Assign or skip every host to import</span>
+			<button class="btn text">Cancel</button>
+			<button class="btn contained" disabled>Import</button>
+		</div>
+	</div>
+</div>
+
+</body>
+</html>
