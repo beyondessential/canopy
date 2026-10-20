@@ -63,7 +63,7 @@ Grants history, issuance and not-granted refusal records, and the key usage figu
 
 ### Outside this repo
 
-- ops (Pulumi): KMS key(s), IAM, discovery server deployment and ingress for the issuer name, per instance (production, staging). Issuer config wired into public server, jobs and discovery server.
+- infra (Pulumi, `beyondessential/infra`, where CD deploys Canopy from): KMS key(s), IAM, discovery server deployment and ingress for the issuer name, per instance (production, staging). Issuer config wired into public server, jobs and discovery server.
 - bestool: local endpoint `GET /identity-token?audience=…&application_type=…` on loopback HTTP, restricted with the mechanism bestool already uses for Caddy, returning Canopy's JSON response unchanged and passing refusals through with their problem type. The SDK hook is `identityTokenProvider: async () => (await (await fetch(url)).json()).token`.
 - Kubernetes workloads: the two breakdown entries.
 
@@ -81,5 +81,5 @@ Grants history, issuance and not-granted refusal records, and the key usage figu
 - [x] `just gen-openapi && just gen-api`
 - [x] Private server fns for settings and grants; `just gen-openapi`
 - [x] Settings tab and machine edit grants UI (grants calls only on change), with Playwright coverage
-- [ ] ops changes (separate repo): KMS keys, IAM as above, the discovery deployment and its ingress, and the two environment variables on the public server, private server, monitor and discovery deployments
+- [ ] infra changes (separate repo): KMS keys, IAM as above, the discovery deployment and its ingress, and the two environment variables on the public server, private server, monitor and discovery deployments
 - [ ] bestool local endpoint (separate repo)
