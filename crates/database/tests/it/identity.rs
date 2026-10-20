@@ -83,3 +83,48 @@ async fn a_key_s_first_moments_are_written_once() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_discovery_alert_raises_and_clears() {
+	use database::self_alerts::{
+		IDENTITY_DISCOVERY_REF, IssuerDocuments, current, sweep_identity_discovery,
+	};
+
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let configured = vec!["a".to_owned()];
+		sweep_identity_discovery(
+			&mut conn,
+			"https://i.example",
+			&IssuerDocuments::Unreachable("refused".into()),
+			&configured,
+			Some("a"),
+		)
+		.await
+		.unwrap();
+		assert!(
+			current(&mut conn, IDENTITY_DISCOVERY_REF)
+				.await
+				.unwrap()
+				.unwrap()
+				.active
+		);
+
+		sweep_identity_discovery(
+			&mut conn,
+			"https://i.example",
+			&IssuerDocuments::Served(["a".to_owned()].into()),
+			&configured,
+			Some("a"),
+		)
+		.await
+		.unwrap();
+		assert!(
+			!current(&mut conn, IDENTITY_DISCOVERY_REF)
+				.await
+				.unwrap()
+				.unwrap()
+				.active
+		);
+	})
+	.await;
+}

@@ -245,6 +245,26 @@ async fn a_pending_machine_is_not_offered_the_choice() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn an_ungrouped_machine_is_not_offered_the_choice() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		seed(&mut conn, Some("production")).await;
+		conn.batch_execute(&format!(
+			"UPDATE machines SET group_id = NULL WHERE id = '{BOX}'"
+		))
+		.await
+		.unwrap();
+		add(&private, "https://one.example").await;
+		let grants: Value = private
+			.post("/api/identity/machine_grants")
+			.json(&json!({ "machine_id": BOX }))
+			.await
+			.json();
+		assert_eq!(grants["offered"], false);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn with_no_relying_party_the_choice_is_not_offered() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		seed(&mut conn, Some("production")).await;

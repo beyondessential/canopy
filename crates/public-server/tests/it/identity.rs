@@ -343,7 +343,14 @@ async fn other_refusals_leave_nothing_in_the_log() {
 			grant(&mut conn, GrantSubject::Machine(at.machine), &party).await;
 			let pending = ask(&public, &cert, json!({ "audience": AUDIENCE })).await;
 			pending.assert_status(StatusCode::CONFLICT);
-			assert_eq!(problem_type(&pending.json()), "identity-subject-not-placed");
+			let body: Value = pending.json();
+			assert_eq!(problem_type(&body), "identity-subject-not-placed");
+			assert!(
+				body["detail"]
+					.as_str()
+					.unwrap_or_default()
+					.contains("no rank")
+			);
 
 			assert!(issuances(&mut conn).await.is_empty());
 		},
@@ -525,6 +532,158 @@ async fn no_token_leaves_when_its_entry_cannot_be_written() {
 			assert!(response.status_code().is_server_error());
 			let body = response.text();
 			assert!(!body.contains("\"token\""), "no token is returned: {body}");
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn revoking_or_removing_refuses_the_next_request() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			let at = placed(&mut conn, device_id, Some("production")).await;
+			let party = party(&mut conn, None).await;
+			grant(&mut conn, GrantSubject::Machine(at.machine), &party).await;
+			ask(&public, &cert, json!({ "audience": AUDIENCE }))
+				.await
+				.assert_status_ok();
+
+			identity::set_grants(&mut conn, GrantSubject::Machine(at.machine), &[])
+				.await
+				.unwrap();
+			ask(&public, &cert, json!({ "audience": AUDIENCE }))
+				.await
+				.assert_status(StatusCode::FORBIDDEN);
+
+			grant(&mut conn, GrantSubject::Machine(at.machine), &party).await;
+			RelyingParty::remove(&mut conn, party.id).await.unwrap();
+			let response = ask(&public, &cert, json!({ "audience": AUDIENCE })).await;
+			response.assert_status(StatusCode::NOT_FOUND);
+			assert_eq!(problem_type(&response.json()), "identity-audience-unknown");
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unknown_audience_comes_before_an_unknown_subject() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			placed(&mut conn, device_id, Some("production")).await;
+			let response = ask(
+				&public,
+				&cert,
+				json!({ "audience": "https://typo.example", "application_type": "senaite" }),
+			)
+			.await;
+			assert_eq!(problem_type(&response.json()), "identity-audience-unknown");
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_subject_follows_rank_but_not_the_group_name_and_tags_reach_no_claim() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			let at = placed(&mut conn, device_id, Some("production")).await;
+			let party = party(&mut conn, None).await;
+			grant(&mut conn, GrantSubject::Machine(at.machine), &party).await;
+			sql_query(
+				"UPDATE machines SET tags = '{\"rank\": \"dev\", \"group_id\": \"x\"}' WHERE id = $1",
+			)
+			.bind::<sql_types::Uuid, _>(at.machine)
+			.execute(&mut conn)
+			.await
+			.unwrap();
+
+			let first: Value = ask(&public, &cert, json!({ "audience": AUDIENCE }))
+				.await
+				.json();
+			let first = verified_claims(first["token"].as_str().unwrap());
+			assert_eq!(first["rank"], "production");
+			let mut keys: Vec<&str> = first
+				.as_object()
+				.unwrap()
+				.keys()
+				.map(String::as_str)
+				.collect();
+			keys.sort_unstable();
+			assert_eq!(
+				keys,
+				[
+					"aud",
+					"exp",
+					"group_id",
+					"group_name",
+					"iat",
+					"iss",
+					"jti",
+					"machine_id",
+					"nbf",
+					"rank",
+					"sub"
+				],
+				"claims come from Canopy's record, not from tags"
+			);
+
+			database::Machine::set_rank(
+				&mut conn,
+				at.machine,
+				commons_types::server::rank::ServerRank::Test,
+				None,
+			)
+			.await
+			.unwrap();
+			sql_query("UPDATE server_groups SET name = 'Fiji Islands' WHERE id = $1")
+				.bind::<sql_types::Uuid, _>(at.group)
+				.execute(&mut conn)
+				.await
+				.unwrap();
+
+			let second: Value = ask(&public, &cert, json!({ "audience": AUDIENCE }))
+				.await
+				.json();
+			let second = verified_claims(second["token"].as_str().unwrap());
+			assert_eq!(
+				second["sub"],
+				format!("group:{}:rank:test:machine:{}:", at.group, at.machine)
+			);
+			assert_eq!(second["group_name"], "Fiji Islands");
+			assert_eq!(second["group_id"], first["group_id"]);
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_changed_lifetime_applies_to_the_next_token() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			let at = placed(&mut conn, device_id, Some("production")).await;
+			let party = party(&mut conn, None).await;
+			grant(&mut conn, GrantSubject::Machine(at.machine), &party).await;
+			let before: Value = ask(&public, &cert, json!({ "audience": AUDIENCE }))
+				.await
+				.json();
+
+			RelyingParty::edit(&mut conn, party.id, "Anthropic", 20)
+				.await
+				.unwrap();
+			let after: Value = ask(&public, &cert, json!({ "audience": AUDIENCE }))
+				.await
+				.json();
+
+			let lifetime = |body: &Value| {
+				let claims = verified_claims(body["token"].as_str().unwrap());
+				claims["exp"].as_i64().unwrap() - claims["iat"].as_i64().unwrap()
+			};
+			assert_eq!(lifetime(&before), 5 * 60);
+			assert_eq!(lifetime(&after), 20 * 60);
 		},
 	)
 	.await;

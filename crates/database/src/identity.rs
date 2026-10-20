@@ -497,15 +497,28 @@ pub fn subject(
 	machine: &Machine,
 	application: Option<&Application>,
 ) -> Option<String> {
-	let group = placement.group_id.to_string();
-	let rank = placement.rank.to_string();
-	let mut segments: Vec<(&str, String)> = vec![("group", group), ("rank", rank)];
+	subject_of(
+		placement,
+		machine.id,
+		application.map(|a| (a.r#type.to_string(), a.id)),
+	)
+}
+
+fn subject_of(
+	placement: &Placement,
+	machine_id: Uuid,
+	application: Option<(String, Uuid)>,
+) -> Option<String> {
+	let mut segments: Vec<(&str, String)> = vec![
+		("group", placement.group_id.to_string()),
+		("rank", placement.rank.to_string()),
+	];
 	match application {
-		Some(application) => {
-			segments.push(("application", application.r#type.to_string()));
-			segments.push(("", application.id.to_string()));
+		Some((r#type, id)) => {
+			segments.push(("application", r#type));
+			segments.push(("", id.to_string()));
 		}
-		None => segments.push(("machine", machine.id.to_string())),
+		None => segments.push(("machine", machine_id.to_string())),
 	}
 	if !segments.iter().all(|(_, value)| in_alphabet(value)) {
 		return None;
@@ -936,6 +949,52 @@ mod tests {
 		assert_eq!(
 			key_states(&kids, &observed, &expiries, now()),
 			[KeyState::Removable, KeyState::Retired, KeyState::Signing]
+		);
+	}
+
+	#[test]
+	fn a_key_that_never_signed_is_removable_once_a_newer_one_signs() {
+		let kids = [Some("a"), Some("b")];
+		let observed: HashMap<_, _> = [
+			key("a", Some(at(900)), None),
+			key("b", Some(at(600)), Some(at(600))),
+		]
+		.into();
+		assert_eq!(
+			key_states(&kids, &observed, &HashMap::new(), now()),
+			[KeyState::Removable, KeyState::Signing]
+		);
+		assert_eq!(KeyState::Retired.presented(), "published");
+	}
+
+	#[test]
+	fn no_subject_carries_a_value_outside_the_alphabet() {
+		let placement = Placement {
+			group_id: Uuid::new_v4(),
+			rank: ServerRank::Production,
+		};
+		let (machine, application) = (Uuid::new_v4(), Uuid::new_v4());
+		assert_eq!(
+			subject_of(&placement, machine, None),
+			Some(format!(
+				"group:{}:rank:production:machine:{machine}:",
+				placement.group_id
+			))
+		);
+		assert_eq!(
+			subject_of(
+				&placement,
+				machine,
+				Some(("tamanu-central".into(), application))
+			),
+			Some(format!(
+				"group:{}:rank:production:application:tamanu-central:{application}:",
+				placement.group_id
+			))
+		);
+		assert_eq!(
+			subject_of(&placement, machine, Some(("Bad_Type".into(), application))),
+			None
 		);
 	}
 
