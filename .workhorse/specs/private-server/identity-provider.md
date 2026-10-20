@@ -35,6 +35,9 @@ Every configured key is published in the key set.
 Canopy signs with the newest configured key that has matured, a key maturing once it has been served at the issuer for long enough that relying parties' cached key sets include it.
 The first key a Canopy instance is configured with is mature from the outset, there being no earlier key for relying parties to rely on meanwhile.
 Signing only moves forward: once Canopy has signed with a key, it never signs with an older one.
+A key is older or newer than the key that last signed by their order in the configuration.
+So while the key that last signed cannot be read, the keys older than it still never sign, and a newer one that has matured signs in its place.
+While the key that last signed is not configured at all, no configured key can be placed against it, and none signs until it is configured again.
 Canopy judges maturity from the key set as actually served at the issuer, which it fetches and observes, rather than from its own configuration, because the discovery component and the device API take up a configuration change separately.
 The moment Canopy first observes a key served is recorded once and stands.
 
@@ -53,7 +56,7 @@ A key not yet served is a fault, raised by the self-alert below, and a key stays
 Each key is also presented with when it was first served, when it last signed, and how many tokens it signed in the last thirty days.
 Those figures are derived from the audit log's record of issuance (see [IDT](../public-server/identity-tokens.md), "Recording").
 
-When the documents served at the issuer cannot be fetched, name a different issuer, or carry a key set that differs from the configured keys, Canopy raises a self-alert (see [SELF](self-alerts.md)).
+When the documents served at the issuer cannot be fetched, name a different issuer, or carry a key set that differs from the configured keys, or when no configured key can sign, Canopy raises a self-alert (see [SELF](self-alerts.md)).
 
 ## Relying parties
 

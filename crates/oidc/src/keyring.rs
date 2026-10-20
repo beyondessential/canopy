@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+	sync::{Arc, Mutex},
+	time::{Duration, Instant},
+};
 
 use aws_sdk_kms::{
 	primitives::Blob,
@@ -97,18 +100,62 @@ impl SigningKey {
 /// on first use and kept.
 ///
 /// A key whose public half cannot be read yet, because the key service is
-/// unreachable, is retried the next time the keys are asked for, so a key
-/// service that was down at startup does not leave the keyring empty for good.
+/// unreachable, is retried once [`RETRY`] has passed, so a key service that was
+/// down at startup does not leave the keyring empty for good, and a key that
+/// cannot be read does not cost every caller a round trip.
 #[derive(Clone, Debug, Default)]
 pub struct Keyring {
 	entries: Arc<Vec<Entry>>,
 }
+
+/// How long a key whose public half could not be read waits before it is tried
+/// again.
+pub const RETRY: Duration = Duration::from_secs(60);
 
 #[derive(Debug)]
 struct Entry {
 	key_ref: String,
 	kms: Option<aws_sdk_kms::Client>,
 	resolved: OnceCell<SigningKey>,
+	/// When reading it last failed.
+	failed_at: Mutex<Option<Instant>>,
+}
+
+impl Entry {
+	fn new(
+		key_ref: String,
+		kms: Option<aws_sdk_kms::Client>,
+		resolved: OnceCell<SigningKey>,
+	) -> Self {
+		Self {
+			key_ref,
+			kms,
+			resolved,
+			failed_at: Mutex::new(None),
+		}
+	}
+
+	async fn key(&self) -> Option<SigningKey> {
+		if let Some(key) = self.resolved.get() {
+			return Some(key.clone());
+		}
+		let waiting = self
+			.failed_at
+			.lock()
+			.expect("keyring mutex")
+			.is_some_and(|at| at.elapsed() < RETRY);
+		if waiting {
+			return None;
+		}
+		match self.resolved.get_or_try_init(|| resolve(self)).await {
+			Ok(key) => Some(key.clone()),
+			Err(err) => {
+				tracing::warn!(key = %self.key_ref, %err, "identity signing key unavailable");
+				*self.failed_at.lock().expect("keyring mutex") = Some(Instant::now());
+				None
+			}
+		}
+	}
 }
 
 impl Keyring {
@@ -117,10 +164,8 @@ impl Keyring {
 		Self {
 			entries: Arc::new(
 				refs.iter()
-					.map(|key_ref| Entry {
-						key_ref: key_ref.clone(),
-						kms: Some(client.clone()),
-						resolved: OnceCell::new(),
+					.map(|key_ref| {
+						Entry::new(key_ref.clone(), Some(client.clone()), OnceCell::new())
 					})
 					.collect(),
 			),
@@ -132,11 +177,19 @@ impl Keyring {
 		Self {
 			entries: Arc::new(
 				keys.into_iter()
-					.map(|key| Entry {
-						key_ref: key.key_ref.clone(),
-						kms: None,
-						resolved: OnceCell::new_with(Some(key)),
-					})
+					.map(|key| Entry::new(key.key_ref.clone(), None, OnceCell::new_with(Some(key))))
+					.collect(),
+			),
+		}
+	}
+
+	/// Keys referenced but held by no key service, so their public halves can
+	/// never be read. For tests of a key service that cannot be reached.
+	pub fn unreadable(refs: &[String]) -> Self {
+		Self {
+			entries: Arc::new(
+				refs.iter()
+					.map(|key_ref| Entry::new(key_ref.clone(), None, OnceCell::new()))
 					.collect(),
 			),
 		}
@@ -156,16 +209,7 @@ impl Keyring {
 	pub async fn keys(&self) -> Vec<(String, Option<SigningKey>)> {
 		let mut out = Vec::with_capacity(self.entries.len());
 		for entry in self.entries.iter() {
-			let resolved = entry
-				.resolved
-				.get_or_try_init(|| resolve(entry))
-				.await
-				.inspect_err(|err| {
-					tracing::warn!(key = %entry.key_ref, %err, "identity signing key unavailable");
-				})
-				.ok()
-				.cloned();
-			out.push((entry.key_ref.clone(), resolved));
+			out.push((entry.key_ref.clone(), entry.key().await));
 		}
 		out
 	}
@@ -210,5 +254,23 @@ impl SigningKey {
 			jwk,
 			inner: Inner::Local(Arc::new(pair)),
 		})
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[tokio::test]
+	async fn an_unreadable_key_waits_before_it_is_tried_again() {
+		let keyring = Keyring::unreadable(&["k".into()]);
+		assert!(keyring.keys().await[0].1.is_none());
+		let first = keyring.entries[0].failed_at.lock().unwrap().unwrap();
+		assert!(keyring.keys().await[0].1.is_none());
+		assert_eq!(
+			*keyring.entries[0].failed_at.lock().unwrap(),
+			Some(first),
+			"the second read waited rather than trying again"
+		);
 	}
 }

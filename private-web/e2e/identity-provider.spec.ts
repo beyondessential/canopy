@@ -114,6 +114,21 @@ test.describe("identity provider settings", () => {
 		await confirm.getByRole("button", { name: "Remove" }).click();
 		await expect(row).toHaveCount(0);
 	});
+
+	test("a lifetime that is not whole minutes in range cannot be saved", async ({ page }) => {
+		await page.goto("/settings/identity-provider");
+		await page.getByLabel("Name", { exact: true }).fill("AWS");
+		await page.getByLabel("Audience").fill("sts.amazonaws.com");
+		const lifetime = page.getByLabel("Token lifetime, minutes");
+		for (const bad of ["1.5", "0", "61", ""]) {
+			await lifetime.fill(bad);
+			await expect(page.getByText("Whole minutes, 1 to 60")).toBeVisible();
+			await expect(page.getByRole("button", { name: "Add" })).toBeDisabled();
+		}
+		await lifetime.fill("60");
+		await expect(page.getByText("Whole minutes, 1 to 60")).toHaveCount(0);
+		await expect(page.getByRole("button", { name: "Add" })).toBeEnabled();
+	});
 });
 
 /// The grant choices on a machine's edit page.
@@ -194,6 +209,54 @@ test.describe("identity token grants", () => {
 		await page.goto(`/fleet/machines/${machine.id}/edit`);
 		await expect(page.getByTestId("machine-section")).toBeVisible();
 		await expect(page.getByText("Identity tokens")).toHaveCount(0);
+	});
+
+	test("ranking a pending machine in the form offers the choice", async ({
+		page,
+		request,
+		sql,
+	}) => {
+		const party = await seedRelyingParty(sql, { name: "Anthropic" });
+		const group = await seedServerGroup(sql, { name: "ranked-here-group" });
+		const machine = await seedMachine(sql, { groupId: group.id });
+
+		await page.goto(`/fleet/machines/${machine.id}/edit`);
+		const box = page.getByTestId("machine-section");
+		await expect(box.getByText("Identity tokens")).toHaveCount(0);
+		await box.getByRole("combobox", { name: "Rank" }).click();
+		await page.getByRole("option", { name: "production" }).click();
+
+		await expect(box.getByText("Identity tokens")).toBeVisible();
+		await expect(box.getByText("The subject changes once saved.")).toBeVisible();
+		await box.getByLabel("May obtain tokens for").click();
+		await page.getByRole("option", { name: "Anthropic" }).click();
+		await page.getByRole("button", { name: "Save" }).click();
+		await expect(page).toHaveURL(`/fleet/machines/${machine.id}`);
+
+		const grants = await (
+			await request.post("/api/identity/machine_grants", {
+				data: { machine_id: machine.id },
+			})
+		).json();
+		expect(grants.subjects[0].granted).toEqual([party.id]);
+		expect(grants.subjects[0].sub).toBe(
+			`group:${group.id}:rank:production:machine:${machine.id}:`,
+		);
+	});
+
+	test("changing the rank hides the saved subject", async ({ page, sql }) => {
+		await seedRelyingParty(sql, { name: "Anthropic" });
+		const group = await seedServerGroup(sql, { name: "rerank-group" });
+		const app = await seedServer(sql, { groupId: group.id, rank: "production" });
+
+		await page.goto(`/fleet/machines/${app.machineId}/edit`);
+		const box = page.getByTestId("machine-section");
+		const saved = `group:${group.id}:rank:production:machine:${app.machineId}:`;
+		await expect(box.getByText(saved)).toBeVisible();
+		await box.getByRole("combobox", { name: "Rank" }).click();
+		await page.getByRole("option", { name: "demo" }).click();
+		await expect(box.getByText(saved)).toHaveCount(0);
+		await expect(box.getByText("The subject changes once saved.")).toBeVisible();
 	});
 
 	test("with no relying party registered the choice is hidden", async ({

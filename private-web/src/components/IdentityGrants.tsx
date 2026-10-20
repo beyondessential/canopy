@@ -21,23 +21,30 @@ import type { MachineGrants } from "../types";
 // spec: IDP#presentation
 export default function IdentityGrants({
 	grants,
+	offered,
 	held,
 	value,
 	onChange,
 	sub,
+	subChanges,
 	caption,
 	disabled,
 }: {
 	grants: MachineGrants;
+	/// Whether grants may be added, judged from the machine as edited.
+	offered: boolean;
 	/// What the subject holds as saved.
 	held: string[];
 	value: string[];
 	onChange: (ids: string[]) => void;
 	sub: string | null | undefined;
+	/// The group or rank has been edited, so the saved subject no longer
+	/// stands.
+	subChanges: boolean;
 	caption: string;
 	disabled: boolean;
 }) {
-	if (!grants.offered && held.length === 0) return null;
+	if (!offered && held.length === 0) return null;
 
 	const options = grants.relying_parties;
 	const byId = new Map(options.map((party) => [party.id, party]));
@@ -55,7 +62,7 @@ export default function IdentityGrants({
 				value={selected}
 				onChange={(_, parties) => onChange(parties.map((party) => party.id))}
 				getOptionLabel={(party) => party.name}
-				getOptionDisabled={(party) => !grants.offered && !value.includes(party.id)}
+				getOptionDisabled={(party) => !offered && !value.includes(party.id)}
 				isOptionEqualToValue={(a, b) => a.id === b.id}
 				disabled={disabled}
 				renderValue={(parties, getItemProps) =>
@@ -71,7 +78,12 @@ export default function IdentityGrants({
 			<Typography variant="caption" color="text.secondary">
 				{caption}
 			</Typography>
-			{sub && (
+			{subChanges && (
+				<Typography variant="caption" color="text.secondary">
+					The subject changes once saved.
+				</Typography>
+			)}
+			{sub && !subChanges && (
 				<Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
 					<Typography
 						component="code"

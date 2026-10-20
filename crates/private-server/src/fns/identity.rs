@@ -122,16 +122,12 @@ pub async fn status(
 	let observed = IdentityKey::all(&mut conn).await?;
 	let usage = identity::key_usage(&mut conn).await?;
 
-	let by_ref: HashMap<&str, &IdentityKey> = observed
-		.values()
-		.map(|row| (row.key_ref.as_str(), row))
-		.collect();
 	let configured: Vec<ConfiguredKey> = config
 		.keys
 		.iter()
 		.map(|key_ref| ConfiguredKey {
 			key_ref,
-			kid: by_ref.get(key_ref.as_str()).map(|row| row.kid.as_str()),
+			kid: IdentityKey::by_ref(&observed, key_ref).map(|row| row.kid.as_str()),
 		})
 		.collect();
 	let expiries: HashMap<String, Timestamp> = usage
@@ -358,10 +354,12 @@ pub async fn remove_relying_party(
 	let mut conn = audit.begin().await?;
 	let (party, revoked) = RelyingParty::remove(&mut conn, args.id).await?;
 	let relying_party = party.record();
+	let mut subjects = GrantSubject::records(&mut conn, &revoked).await?;
 	for subject in &revoked {
-		let subject = subject.record(&mut conn).await?;
 		conn.record(Action::IdentityGrantRevoked {
-			subject,
+			subject: subjects
+				.remove(subject)
+				.expect("every subject has a record"),
 			relying_party: relying_party.clone(),
 		})
 		.await?;
@@ -387,10 +385,11 @@ pub struct IdentityMachineArgs {
 /// What a machine's edit page offers for identity tokens.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct MachineGrants {
-	/// Whether the choice is offered for subjects that hold no grant: some
-	/// relying party is registered, the Canopy instance issues tokens, and the
-	/// machine is placed in an environment.
-	pub offered: bool,
+	/// Whether a relying party is registered and the Canopy instance issues
+	/// tokens. The choice is offered for a subject holding no grant only when
+	/// this holds and the machine is placed in an environment, which the edit
+	/// page judges from the group and rank as edited.
+	pub available: bool,
 	/// Every registered relying party, to choose from.
 	pub relying_parties: Vec<RelyingPartyOption>,
 	/// The machine, then each of its live applications.
@@ -422,8 +421,8 @@ pub struct SubjectGrants {
 
 /// The identity token grants of a machine and its applications.
 ///
-/// With the registered relying parties to choose from, each subject's `sub`,
-/// and whether the choice is offered for a subject holding no grant.
+/// With the registered relying parties to choose from, each subject's `sub` as
+/// saved, and whether grants are available to offer at all.
 // spec: IDP#presentation
 #[utoipa::path(
 	post,
@@ -460,9 +459,7 @@ pub async fn machine_grants(
 	};
 
 	Ok(Json(MachineGrants {
-		offered: !parties.is_empty()
-			&& state.identity_config.issues_tokens()
-			&& placement.is_some(),
+		available: !parties.is_empty() && state.identity_config.issues_tokens(),
 		relying_parties: parties
 			.into_iter()
 			.map(|party| RelyingPartyOption {
@@ -486,29 +483,10 @@ pub async fn machine_grants(
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct SetGrantsArgs {
 	/// The machine or application.
-	pub subject: GrantSubjectArg,
+	pub subject: GrantSubject,
 	/// Every relying party the subject should hold a grant for; the rest are
 	/// revoked.
 	pub relying_party_ids: Vec<Uuid>,
-}
-
-/// A machine or an application, on the way in.
-#[derive(Debug, Clone, Copy, Deserialize, ToSchema)]
-#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
-pub enum GrantSubjectArg {
-	/// A machine, for tokens naming itself.
-	Machine(Uuid),
-	/// An application, for tokens naming it.
-	Application(Uuid),
-}
-
-impl From<GrantSubjectArg> for GrantSubject {
-	fn from(arg: GrantSubjectArg) -> Self {
-		match arg {
-			GrantSubjectArg::Machine(id) => Self::Machine(id),
-			GrantSubjectArg::Application(id) => Self::Application(id),
-		}
-	}
 }
 
 /// Set a machine's or an application's grants.
@@ -529,15 +507,10 @@ pub async fn set_grants(
 	_admin: TailscaleAdmin,
 	Json(args): Json<SetGrantsArgs>,
 ) -> Result<Json<()>> {
-	let subject = GrantSubject::from(args.subject);
+	let subject = args.subject;
 	let mut conn = audit.begin().await?;
 	let subject_record = subject.record(&mut conn).await?;
-
-	let mut parties = HashMap::new();
-	for id in &args.relying_party_ids {
-		let party = RelyingParty::get(&mut conn, *id).await?;
-		parties.insert(party.id, party);
-	}
+	let wanted = RelyingParty::get_many(&mut conn, &args.relying_party_ids).await?;
 
 	let changes = identity::set_grants(&mut conn, subject, &args.relying_party_ids).await?;
 	if changes.is_empty() {
@@ -547,15 +520,15 @@ pub async fn set_grants(
 	for id in &changes.granted {
 		conn.record(Action::IdentityGranted {
 			subject: subject_record.clone(),
-			relying_party: parties[id].record(),
+			relying_party: wanted[id].record(),
 		})
 		.await?;
 	}
+	let revoked = RelyingParty::get_many(&mut conn, &changes.revoked).await?;
 	for id in &changes.revoked {
-		let party = RelyingParty::get(&mut conn, *id).await?;
 		conn.record(Action::IdentityGrantRevoked {
 			subject: subject_record.clone(),
-			relying_party: party.record(),
+			relying_party: revoked[id].record(),
 		})
 		.await?;
 	}

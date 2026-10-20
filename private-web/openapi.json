@@ -3888,53 +3888,6 @@
           }
         ]
       },
-      "GrantSubjectArg": {
-        "description": "A machine or an application, on the way in.",
-        "oneOf": [
-          {
-            "description": "A machine, for tokens naming itself.",
-            "properties": {
-              "id": {
-                "description": "A machine, for tokens naming itself.",
-                "format": "uuid",
-                "type": "string"
-              },
-              "kind": {
-                "enum": [
-                  "machine"
-                ],
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "kind"
-            ],
-            "type": "object"
-          },
-          {
-            "description": "An application, for tokens naming it.",
-            "properties": {
-              "id": {
-                "description": "An application, for tokens naming it.",
-                "format": "uuid",
-                "type": "string"
-              },
-              "kind": {
-                "enum": [
-                  "application"
-                ],
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "kind"
-            ],
-            "type": "object"
-          }
-        ]
-      },
       "GroupDetail": {
         "description": "A server group together with its member applications and billing labels.",
         "properties": {
@@ -6695,8 +6648,8 @@
       "MachineGrants": {
         "description": "What a machine's edit page offers for identity tokens.",
         "properties": {
-          "offered": {
-            "description": "Whether the choice is offered for subjects that hold no grant: some\nrelying party is registered, the Canopy instance issues tokens, and the\nmachine is placed in an environment.",
+          "available": {
+            "description": "Whether a relying party is registered and the Canopy instance issues\ntokens. The choice is offered for a subject holding no grant only when\nthis holds and the machine is placed in an environment, which the edit\npage judges from the group and rank as edited.",
             "type": "boolean"
           },
           "relying_parties": {
@@ -6715,7 +6668,7 @@
           }
         },
         "required": [
-          "offered",
+          "available",
           "relying_parties",
           "subjects"
         ],
@@ -11880,7 +11833,7 @@
             "type": "array"
           },
           "subject": {
-            "$ref": "#/components/schemas/GrantSubjectArg",
+            "$ref": "#/components/schemas/GrantSubject",
             "description": "The machine or application."
           }
         },
@@ -20240,7 +20193,7 @@
     },
     "/api/identity/machine_grants": {
       "post": {
-        "description": "With the registered relying parties to choose from, each subject's `sub`,\nand whether the choice is offered for a subject holding no grant.",
+        "description": "With the registered relying parties to choose from, each subject's `sub` as\nsaved, and whether grants are available to offer at all.",
         "operationId": "machine_grants",
         "requestBody": {
           "content": {

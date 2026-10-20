@@ -207,7 +207,7 @@ async fn grants_are_set_per_subject_and_an_unchanged_save_records_nothing() {
 			.json(&json!({ "machine_id": BOX }))
 			.await
 			.json();
-		assert_eq!(grants["offered"], true);
+		assert_eq!(grants["available"], true);
 		let subjects = grants["subjects"].as_array().unwrap();
 		assert_eq!(subjects.len(), 2);
 		assert_eq!(
@@ -229,7 +229,7 @@ async fn grants_are_set_per_subject_and_an_unchanged_save_records_nothing() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_pending_machine_is_not_offered_the_choice() {
+async fn a_pending_machine_has_no_subject_yet() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		seed(&mut conn, None).await;
 		add(&private, "https://one.example").await;
@@ -238,14 +238,16 @@ async fn a_pending_machine_is_not_offered_the_choice() {
 			.json(&json!({ "machine_id": BOX }))
 			.await
 			.json();
-		assert_eq!(grants["offered"], false);
+		// Grants are available; the page offers them once the machine is
+		// ranked, which it judges from the form.
+		assert_eq!(grants["available"], true);
 		assert!(grants["subjects"][0]["sub"].is_null());
 	})
 	.await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_ungrouped_machine_is_not_offered_the_choice() {
+async fn an_ungrouped_machine_has_no_subject_yet() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		seed(&mut conn, Some("production")).await;
 		conn.batch_execute(&format!(
@@ -259,7 +261,8 @@ async fn an_ungrouped_machine_is_not_offered_the_choice() {
 			.json(&json!({ "machine_id": BOX }))
 			.await
 			.json();
-		assert_eq!(grants["offered"], false);
+		assert_eq!(grants["available"], true);
+		assert!(grants["subjects"][0]["sub"].is_null());
 	})
 	.await;
 }
@@ -273,7 +276,7 @@ async fn with_no_relying_party_the_choice_is_not_offered() {
 			.json(&json!({ "machine_id": BOX }))
 			.await
 			.json();
-		assert_eq!(grants["offered"], false);
+		assert_eq!(grants["available"], false);
 	})
 	.await;
 }

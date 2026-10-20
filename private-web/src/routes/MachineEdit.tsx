@@ -234,6 +234,14 @@ function Form({
 	const [grants, setGrants] = useState<Record<string, string[]>>(heldGrants);
 	const subOf = (subjectId: string) =>
 		identityGrants.subjects.find((s) => s.subject.id === subjectId)?.sub;
+	// Placement is read from the form, so ranking or grouping a box here offers
+	// the choice, and the saved subject is not shown once it no longer stands.
+	// spec: IDP#presentation
+	const placed = box.groupId !== null && box.rank !== "";
+	const grantsOffered = identityGrants.available && placed;
+	const placementEdited =
+		box.groupId !== (machine.group_id ?? null) || box.rank !== (machine.rank ?? "");
+	const subChanges = placementEdited && placed;
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -539,12 +547,14 @@ function Form({
 
 					<IdentityGrants
 						grants={identityGrants}
+						offered={grantsOffered}
 						held={heldGrants[machine.id] ?? []}
 						value={grants[machine.id] ?? []}
 						onChange={(ids) => setGrants({ ...grants, [machine.id]: ids })}
 						sub={subOf(machine.id)}
+						subChanges={subChanges}
 						caption={
-							subOf(machine.id)
+							subOf(machine.id) && !subChanges
 								? "Tokens that name this machine itself, carrying this subject. Applications on it hold their own grants below."
 								: "Tokens that name this machine itself. Applications on it hold their own grants below."
 						}
@@ -589,14 +599,16 @@ function Form({
 						identity={
 							<IdentityGrants
 								grants={identityGrants}
+								offered={grantsOffered}
 								held={heldGrants[application.id] ?? []}
 								value={grants[application.id] ?? []}
 								onChange={(ids) =>
 									setGrants({ ...grants, [application.id]: ids })
 								}
 								sub={subOf(application.id)}
+								subChanges={subChanges}
 								caption={
-									subOf(application.id)
+									subOf(application.id) && !subChanges
 										? "Its tokens carry this subject. Revoking refuses the next request; tokens already issued run out on their own."
 										: "Revoking refuses the next request; tokens already issued run out on their own."
 								}

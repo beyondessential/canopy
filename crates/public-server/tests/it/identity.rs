@@ -168,7 +168,16 @@ async fn a_granted_machine_is_issued_a_token_naming_itself() {
 			assert_eq!(entry.detail["jti"], claims["jti"]);
 			assert_eq!(entry.detail["kid"], identity_key().kid());
 			assert_eq!(entry.detail["sub"], sub);
-			assert!(entry.detail["expires_at"].is_string());
+			// The expiry reported and recorded is the token's own, to the second.
+			let exp = claims["exp"].as_i64().unwrap();
+			let second =
+				|value: &Value| value.as_str().unwrap().parse::<jiff::Timestamp>().unwrap();
+			assert_eq!(second(&body["expires_at"]).as_second(), exp);
+			assert_eq!(second(&body["expires_at"]).subsec_nanosecond(), 0);
+			assert_eq!(
+				second(&entry.detail["expires_at"]),
+				second(&body["expires_at"])
+			);
 			let acted_on: Vec<String> = entry.records.iter().map(|r| r.id.clone()).collect();
 			assert!(acted_on.contains(&at.machine.to_string()));
 			assert!(acted_on.contains(&party.id.to_string()));

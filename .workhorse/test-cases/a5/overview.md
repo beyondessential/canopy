@@ -7,6 +7,7 @@
 - [x] Two consecutive requests return tokens with different `jti` values (verifies spec: IDT)
 - [x] The response carries the token, its expiry, and the same subject the token's `sub` holds (verifies spec: IDT)
 - [x] A token's `exp` minus `iat` equals its relying party's configured lifetime (verifies spec: IDT, IDP)
+- [x] The response's and the audit entry's expiry equal the token's own `exp` to the second (verifies spec: IDT)
 
 ## Refusals
 
@@ -60,6 +61,13 @@
 - [x] An unreachable issuer, or a discovery document naming a different issuer, raises the self-alert as a failure; it clears when served documents match the configuration again (verifies spec: SELF)
 - [x] A key that stopped signing shows as removable only once its last token has expired (verifies spec: IDP)
 - [x] A key older than the signing key that never signed is removable as soon as the newer key signs (verifies spec: IDP)
+- [x] While the key that last signed cannot be read, a newer matured key signs, older keys never do, and they still retire against it (verifies spec: IDP)
+- [x] While the key that last signed is not configured, no key signs, and the self-alert fails saying so even when the served documents match (verifies spec: IDP, SELF)
+- [x] With no configured key readable from the key service, the self-alert fails rather than freezing (verifies spec: SELF)
+- [x] Documents unreachable for a single pass raise nothing; unreachable for several in a row raises the failure (verifies spec: SELF)
+- [x] A discovery document naming a key set anywhere but the issuer's own address is a finding, and that address is never fetched; a redirect is not followed
+- [x] A key reference that is an alias resolves to the key it was last read as
+- [x] A key whose public half cannot be read is retried at most once a minute, not on every request
 - [x] A key not yet served, waiting to sign, or retired is presented as published (verifies spec: IDP)
 
 ## Operator interface
@@ -74,6 +82,10 @@
 - [x] The machine edit page offers a searchable choice of relying parties for the machine and for each application, and saving grants and revokes accordingly (verifies spec: IDP)
 - [x] The machine's choice and each application's choice show their `sub`, copyable (verifies spec: IDP)
 - [x] A pending or ungrouped machine's edit page offers no identity token choice, for the machine or its applications (verifies spec: IDP)
+- [x] Ranking a pending machine on its edit page offers the choice before saving, and grants given in the same save take effect (verifies spec: IDP)
+- [x] Changing a machine's group or rank on its edit page hides the saved subject until saved (verifies spec: IDP)
+- [x] A token lifetime that is not a whole number of minutes from one to sixty cannot be submitted (verifies spec: IDP)
+- [x] Registering an audience already registered is refused as a conflict, however the requests interleave, and a grant save records only the grants it changed (verifies spec: IDP)
 - [x] With no relying party registered the choice is hidden, unless the subject already holds a grant (verifies spec: IDP)
 - [x] The settings page shows each key's status, first served, last signed and thirty-day count (verifies spec: IDP)
 - [ ] Interoperability: a token from a staging instance is accepted by an Anthropic federation rule using the documented `sub` pattern, and the minted Anthropic token calls the Messages API

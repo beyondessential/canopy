@@ -32,6 +32,15 @@ import type { IdentityKeyView as KeyRow, RelyingPartyView as RelyingPartyRow } f
 
 const DEFAULT_LIFETIME = 5;
 
+/// A token lifetime as typed, when it is a whole number of minutes in range.
+// spec: IDP#relying-parties
+function wholeMinutes(value: string): number | null {
+	const minutes = Number(value);
+	return value.trim() !== "" && Number.isInteger(minutes) && minutes >= 1 && minutes <= 60
+		? minutes
+		: null;
+}
+
 /// Canopy as an OpenID Connect issuer: the issuer, its signing keys, and the
 /// register of relying parties tokens are issued for.
 // spec: IDP#presentation
@@ -169,7 +178,7 @@ function AddRelyingParty({ onAdded }: { onAdded: () => void }) {
 			await callApi("identity", "add_relying_party", {
 				name: name.trim(),
 				audience: audience.trim(),
-				token_lifetime_minutes: Number(lifetime),
+				token_lifetime_minutes: wholeMinutes(lifetime) ?? undefined,
 			});
 			setName("");
 			setAudience("");
@@ -211,7 +220,9 @@ function AddRelyingParty({ onAdded }: { onAdded: () => void }) {
 					<Button
 						type="submit"
 						variant="contained"
-						disabled={pending || !name.trim() || !audience.trim()}
+						disabled={
+							pending || !name.trim() || !audience.trim() || wholeMinutes(lifetime) === null
+						}
 						sx={{ flexShrink: 0 }}
 					>
 						Add
@@ -244,6 +255,8 @@ function LifetimeField({
 			value={value}
 			onChange={(e) => onChange(e.target.value)}
 			disabled={disabled}
+			error={wholeMinutes(value) === null}
+			helperText={wholeMinutes(value) === null ? "Whole minutes, 1 to 60" : undefined}
 			slotProps={{ htmlInput: { min: 1, max: 60, step: 1 } }}
 			sx={{ width: 180, flexShrink: 0 }}
 		/>
@@ -394,7 +407,7 @@ function EditRelyingParty({
 			await callApi("identity", "edit_relying_party", {
 				id: party.id,
 				name: name.trim(),
-				token_lifetime_minutes: Number(lifetime),
+				token_lifetime_minutes: wholeMinutes(lifetime)!,
 			});
 			onSaved();
 		} catch (err) {
@@ -434,7 +447,10 @@ function EditRelyingParty({
 						calls="identity/edit_relying_party"
 						action={`Edit relying party ${party.name}`}
 					>
-						<Button type="submit" disabled={pending || !name.trim()}>
+						<Button
+							type="submit"
+							disabled={pending || !name.trim() || wholeMinutes(lifetime) === null}
+						>
 							Save
 						</Button>
 					</GradedAction>

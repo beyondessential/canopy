@@ -721,11 +721,11 @@ Canopy signs identity tokens as an OpenID Connect issuer, and relying parties ve
 ## Results
 
 - **warn** — the key set differs from the configured keys, but the key signing is served, so signing is unaffected. Most often a newly added key that has not reached the issuer yet, or a key taken out of the configuration still being served. Signing stays on the key before a new one until the new one has been served for long enough.
-- **fail** — the documents cannot be fetched, they name a different issuer, or the key set omits the key signing. Relying parties cannot verify the tokens Canopy issues.
+- **fail** — the documents cannot be fetched, they name a different issuer, or the key set omits the key signing, so relying parties cannot verify the tokens Canopy issues. Or no configured key can sign: the message says why. A key older than the one that last signed never signs again, so taking the key that last signed out of the configuration stops signing until it is put back.
 
 ## Solve
 
-Open the identity provider settings to see which keys are configured and which is signing. Check that the discovery component is running with the same issuer and keys as the rest of Canopy, and that the issuer's name reaches it. A configuration change takes effect once each component restarts.";
+Open the identity provider settings to see which keys are configured and which is signing. Check that the discovery component is running with the same issuer and keys as the rest of Canopy, and that the issuer's name reaches it. When no key can sign, check that Canopy can read the keys from the key service, and that the key that last signed is still configured. A configuration change takes effect once each component restarts.";
 
 /// What was found at the issuer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -956,13 +956,9 @@ mod identity_discovery_tests {
 
 	#[test]
 	fn the_signing_key_missing_fails() {
-		let (grade, _, not_served, not_configured) = identity_discovery_finding(
-			"https://i",
-			&served(&["x"]),
-			&configured(&["a"]),
-			Ok("a"),
-		)
-		.unwrap();
+		let (grade, _, not_served, not_configured) =
+			identity_discovery_finding("https://i", &served(&["x"]), &configured(&["a"]), Ok("a"))
+				.unwrap();
 		assert_eq!(grade, CheckResult::Failed);
 		assert_eq!(not_served, ["a"]);
 		assert_eq!(not_configured, ["x"]);

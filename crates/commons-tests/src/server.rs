@@ -176,6 +176,15 @@ fn identity_issuer() -> oidc::Issuer {
 	}
 }
 
+/// The configuration [`identity_issuer`] is built from, which the private
+/// server's settings present.
+fn identity_config() -> oidc::IdentityConfig {
+	oidc::IdentityConfig {
+		issuer: Some(IDENTITY_ISSUER.into()),
+		keys: vec![identity_key().key_ref],
+	}
+}
+
 /// [`run`] against an explicitly chosen client-certificate header.
 pub async fn run_on<F, T, Fut>(cert_header: ClientCertHeader, test: F) -> T
 where
@@ -221,10 +230,8 @@ where
 				artifacts: Some(artifacts.clone()),
 				// The issuer the public server signs as, so the settings read
 				// what the tokens a test is issued were signed with.
-				identity_config: oidc::IdentityConfig {
-					issuer: Some(IDENTITY_ISSUER.into()),
-					keys: vec![identity_key().key_ref],
-				},
+				identity_config: identity_config(),
+				identity: Some(identity_issuer()),
 				..private_server::state::AppState::from_db_url(&url)
 					.await
 					.unwrap()
@@ -427,8 +434,8 @@ where
 				dns_zones: Vec::new(),
 				acme: None,
 				acme_directory: None,
-				identity_config: Default::default(),
-				identity: None,
+				identity_config: identity_config(),
+				identity: Some(identity_issuer()),
 			})
 			.unwrap(),
 			ClientIpSource::RightmostForwarded,

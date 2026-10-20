@@ -15,7 +15,7 @@ use commons_types::server::rank::ServerRank;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::{SignedDuration, Timestamp};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
@@ -91,6 +91,28 @@ impl RelyingParty {
 			.map_err(AppError::from)
 	}
 
+	/// The relying parties of `ids`, by identifier, failing as not found when
+	/// any is not registered.
+	pub async fn get_many(
+		conn: &mut AsyncPgConnection,
+		ids: &[Uuid],
+	) -> Result<HashMap<Uuid, Self>> {
+		use crate::schema::relying_parties::dsl;
+		let found: HashMap<Uuid, Self> = dsl::relying_parties
+			.filter(dsl::id.eq_any(ids))
+			.select(Self::as_select())
+			.load::<Self>(conn)
+			.await
+			.map_err(AppError::from)?
+			.into_iter()
+			.map(|party| (party.id, party))
+			.collect();
+		if ids.iter().any(|id| !found.contains_key(id)) {
+			return Err(AppError::DatabaseQuery(diesel::result::Error::NotFound));
+		}
+		Ok(found)
+	}
+
 	pub async fn by_audience(conn: &mut AsyncPgConnection, audience: &str) -> Result<Option<Self>> {
 		use crate::schema::relying_parties::dsl;
 		dsl::relying_parties
@@ -120,22 +142,27 @@ impl RelyingParty {
 			));
 		}
 		let lifetime = valid_lifetime(token_lifetime_minutes.unwrap_or(DEFAULT_LIFETIME_MINUTES))?;
-		if Self::by_audience(conn, audience).await?.is_some() {
-			return Err(AppError::Conflict(format!(
-				"a relying party with the audience {audience:?} is already registered"
-			)));
-		}
 
+		// The constraint decides, so two registering the same audience at once
+		// are told apart rather than one failing on the constraint.
 		diesel::insert_into(dsl::relying_parties)
 			.values((
 				dsl::name.eq(name),
 				dsl::audience.eq(audience),
 				dsl::token_lifetime_minutes.eq(lifetime),
 			))
+			.on_conflict(dsl::audience)
+			.do_nothing()
 			.returning(Self::as_select())
 			.get_result(conn)
 			.await
-			.map_err(AppError::from)
+			.optional()
+			.map_err(AppError::from)?
+			.ok_or_else(|| {
+				AppError::Conflict(format!(
+					"a relying party with the audience {audience:?} is already registered"
+				))
+			})
 	}
 
 	/// Change a relying party's name and token lifetime, returning it as it was
@@ -261,7 +288,19 @@ fn valid_lifetime(minutes: i32) -> Result<i32> {
 /// What a grant lets obtain tokens: a machine, for tokens naming itself, or an
 /// application, for tokens naming that application. Neither covers the other.
 // spec: IDP#grants
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, utoipa::ToSchema)]
+#[derive(
+	Debug,
+	Clone,
+	Copy,
+	PartialEq,
+	Eq,
+	Hash,
+	PartialOrd,
+	Ord,
+	Serialize,
+	Deserialize,
+	utoipa::ToSchema,
+)]
 #[serde(tag = "kind", content = "id", rename_all = "snake_case")]
 pub enum GrantSubject {
 	/// A machine, for tokens naming itself.
@@ -292,6 +331,53 @@ impl GrantSubject {
 			Self::Machine(id) => Record::machine(conn, id).await,
 			Self::Application(id) => Record::application(conn, id).await,
 		}
+	}
+
+	/// Each of `subjects` as a record, named as it is now, read in one query per
+	/// kind of subject.
+	pub async fn records(
+		conn: &mut AsyncPgConnection,
+		subjects: &[Self],
+	) -> Result<HashMap<Self, Record>> {
+		let (machines, applications): (Vec<Self>, Vec<Self>) = subjects
+			.iter()
+			.partition(|subject| matches!(subject, Self::Machine(_)));
+		let ids = |subjects: Vec<Self>| -> Vec<Uuid> {
+			subjects
+				.into_iter()
+				.map(|subject| match subject {
+					Self::Machine(id) | Self::Application(id) => id,
+				})
+				.collect()
+		};
+
+		let mut out = HashMap::with_capacity(subjects.len());
+		let machines = ids(machines);
+		if !machines.is_empty() {
+			for machine in Machine::get_by_ids(conn, &machines).await? {
+				out.insert(
+					Self::Machine(machine.id),
+					Record::new(RecordKind::Machine, machine.id, machine.name),
+				);
+			}
+		}
+		let applications = ids(applications);
+		if !applications.is_empty() {
+			for application in Application::get_by_ids(conn, &applications).await? {
+				out.insert(
+					Self::Application(application.id),
+					Record::new(
+						RecordKind::Application,
+						application.id,
+						application.display_name(),
+					),
+				);
+			}
+		}
+		if subjects.iter().any(|subject| !out.contains_key(subject)) {
+			return Err(AppError::DatabaseQuery(diesel::result::Error::NotFound));
+		}
+		Ok(out)
 	}
 }
 
@@ -374,7 +460,8 @@ pub async fn is_granted(
 }
 
 /// Make `subject`'s grants exactly `relying_parties`, returning what it granted
-/// and revoked.
+/// and revoked. What it returns is what its own statements changed, so a save
+/// racing another records only its share.
 // spec: IDP#grants
 pub async fn set_grants(
 	conn: &mut AsyncPgConnection,
@@ -390,47 +477,45 @@ pub async fn set_grants(
 	let mut wanted = relying_parties.to_vec();
 	wanted.sort_unstable();
 	wanted.dedup();
-
-	let changes = GrantChanges {
-		granted: wanted
-			.iter()
-			.filter(|p| !held.contains(p))
-			.copied()
-			.collect(),
-		revoked: held
-			.iter()
-			.filter(|p| !wanted.contains(p))
-			.copied()
-			.collect(),
-	};
+	let to_revoke: Vec<Uuid> = held
+		.iter()
+		.filter(|p| !wanted.contains(p))
+		.copied()
+		.collect();
+	let to_grant: Vec<Uuid> = wanted
+		.iter()
+		.filter(|p| !held.contains(p))
+		.copied()
+		.collect();
 
 	let (machine, application) = subject.to_columns();
-	if !changes.revoked.is_empty() {
-		let query = diesel::delete(
-			dsl::identity_grants.filter(dsl::relying_party_id.eq_any(&changes.revoked)),
-		);
-		match (machine, application) {
+	let mut changes = GrantChanges::default();
+	if !to_revoke.is_empty() {
+		let query =
+			diesel::delete(dsl::identity_grants.filter(dsl::relying_party_id.eq_any(&to_revoke)));
+		changes.revoked = match (machine, application) {
 			(Some(machine), _) => {
 				query
 					.filter(dsl::machine_id.eq(machine))
-					.execute(conn)
+					.returning(dsl::relying_party_id)
+					.get_results(conn)
 					.await
 			}
 			(_, Some(application)) => {
 				query
 					.filter(dsl::application_id.eq(application))
-					.execute(conn)
+					.returning(dsl::relying_party_id)
+					.get_results(conn)
 					.await
 			}
 			_ => unreachable!("a subject has exactly one column"),
 		}
 		.map_err(AppError::from)?;
 	}
-	if !changes.granted.is_empty() {
-		diesel::insert_into(dsl::identity_grants)
+	if !to_grant.is_empty() {
+		changes.granted = diesel::insert_into(dsl::identity_grants)
 			.values(
-				changes
-					.granted
+				to_grant
 					.iter()
 					.map(|party| {
 						(
@@ -441,10 +526,14 @@ pub async fn set_grants(
 					})
 					.collect::<Vec<_>>(),
 			)
-			.execute(conn)
+			.on_conflict_do_nothing()
+			.returning(dsl::relying_party_id)
+			.get_results(conn)
 			.await
 			.map_err(AppError::from)?;
 	}
+	changes.granted.sort_unstable();
+	changes.revoked.sort_unstable();
 	Ok(changes)
 }
 
@@ -552,6 +641,10 @@ fn in_alphabet(value: &str) -> bool {
 pub struct IdentityKey {
 	pub kid: String,
 	pub key_ref: String,
+	/// When `key_ref` was last read as naming this key. Of the rows sharing a
+	/// reference, the latest known is the key it names now.
+	#[diesel(deserialize_as = jiff_diesel::Timestamp)]
+	pub known_at: Timestamp,
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp)]
 	pub first_served_at: Option<Timestamp>,
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp)]
@@ -572,6 +665,14 @@ impl IdentityKey {
 			.collect())
 	}
 
+	/// Of `observed`, the key `key_ref` names now.
+	pub fn by_ref<'a>(observed: &'a HashMap<String, Self>, key_ref: &str) -> Option<&'a Self> {
+		observed
+			.values()
+			.filter(|row| row.key_ref == key_ref)
+			.max_by_key(|row| row.known_at)
+	}
+
 	/// Record that the configured key `key_ref` has the identifier `kid`, so
 	/// it is known by it before it is ever served.
 	pub async fn know(conn: &mut AsyncPgConnection, kid: &str, key_ref: &str) -> Result<()> {
@@ -580,7 +681,7 @@ impl IdentityKey {
 			.values((dsl::kid.eq(kid), dsl::key_ref.eq(key_ref)))
 			.on_conflict(dsl::kid)
 			.do_update()
-			.set(dsl::key_ref.eq(key_ref))
+			.set((dsl::key_ref.eq(key_ref), dsl::known_at.eq(diesel::dsl::now)))
 			.execute(conn)
 			.await
 			.map_err(AppError::from)?;
@@ -608,6 +709,7 @@ impl IdentityKey {
 			.do_update()
 			.set((
 				dsl::key_ref.eq(key_ref),
+				dsl::known_at.eq(diesel::dsl::now),
 				dsl::first_served_at.eq(diesel::dsl::sql::<
 					diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>,
 				>(
@@ -656,17 +758,17 @@ pub struct ConfiguredKey<'a> {
 impl ConfiguredKey<'_> {
 	/// Whether this is the key `row` records, by `kid` where it is known and by
 	/// reference where it is not.
-	fn is(&self, row: &IdentityKey) -> bool {
+	fn is(&self, row: &IdentityKey, observed: &HashMap<String, IdentityKey>) -> bool {
 		match self.kid {
 			Some(kid) => kid == row.kid,
-			None => self.key_ref == row.key_ref,
+			None => self.row(observed).is_some_and(|known| known.kid == row.kid),
 		}
 	}
 
 	fn row<'r>(&self, observed: &'r HashMap<String, IdentityKey>) -> Option<&'r IdentityKey> {
 		match self.kid {
 			Some(kid) => observed.get(kid),
-			None => observed.values().find(|row| row.key_ref == self.key_ref),
+			None => IdentityKey::by_ref(observed, self.key_ref),
 		}
 	}
 }
@@ -718,7 +820,7 @@ fn floor<'a>(keys: &[ConfiguredKey<'_>], observed: &'a HashMap<String, IdentityK
 	else {
 		return Floor::Unsigned;
 	};
-	match keys.iter().position(|key| key.is(latest)) {
+	match keys.iter().position(|key| key.is(latest, observed)) {
 		Some(at) => Floor::At(at),
 		None => Floor::Unconfigured(latest),
 	}
@@ -946,6 +1048,7 @@ mod tests {
 			IdentityKey {
 				kid: kid.to_owned(),
 				key_ref: format!("ref-{kid}"),
+				known_at: at(1000),
 				first_served_at: served,
 				first_signed_at: signed,
 			},

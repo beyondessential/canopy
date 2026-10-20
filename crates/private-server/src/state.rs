@@ -223,6 +223,9 @@ impl AppState {
 		let sts = Some(aws_sdk_sts::Client::new(&aws));
 
 		let (acme, acme_directory) = acme_from_env().await;
+		// Read once, so the settings and the nested mount's issuance present
+		// the same configuration.
+		let identity_config = identity_config_from_env();
 
 		let db = database::init();
 		let db_read = database::init_ro().unwrap_or_else(|| db.clone());
@@ -243,8 +246,8 @@ impl AppState {
 			dns_zones: dns_zones_from_env(),
 			acme,
 			acme_directory,
-			identity_config: identity_config_from_env(),
-			identity: oidc::Issuer::from_env().await,
+			identity: oidc::Issuer::from_config(&identity_config).await,
+			identity_config,
 		})
 	}
 

@@ -97,7 +97,7 @@ async fn the_discovery_alert_raises_and_clears() {
 			"https://i.example",
 			&IssuerDocuments::Unreachable("refused".into()),
 			&configured,
-			Some("a"),
+			Ok("a"),
 		)
 		.await
 		.unwrap();
@@ -114,7 +114,7 @@ async fn the_discovery_alert_raises_and_clears() {
 			"https://i.example",
 			&IssuerDocuments::Served(["a".to_owned()].into()),
 			&configured,
-			Some("a"),
+			Ok("a"),
 		)
 		.await
 		.unwrap();
@@ -124,6 +124,77 @@ async fn the_discovery_alert_raises_and_clears() {
 				.unwrap()
 				.unwrap()
 				.active
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_audience_is_registered_once() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		RelyingParty::add(&mut conn, "A", "https://a.example", None)
+			.await
+			.unwrap();
+		assert!(matches!(
+			RelyingParty::add(&mut conn, "B", " https://a.example ", None).await,
+			Err(commons_errors::AppError::Conflict(_))
+		));
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_grant_save_reports_only_what_it_changed() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let a = RelyingParty::add(&mut conn, "A", "https://a.example", None)
+			.await
+			.unwrap();
+		let b = RelyingParty::add(&mut conn, "B", "https://b.example", None)
+			.await
+			.unwrap();
+		let machine = Machine::create(&mut conn, NewMachine::named("box"))
+			.await
+			.unwrap();
+		let subject = GrantSubject::Machine(machine.id);
+
+		let changes = identity::set_grants(&mut conn, subject, &[a.id])
+			.await
+			.unwrap();
+		assert_eq!(changes.granted, [a.id]);
+		assert!(changes.revoked.is_empty());
+
+		let changes = identity::set_grants(&mut conn, subject, &[b.id])
+			.await
+			.unwrap();
+		assert_eq!(changes.granted, [b.id]);
+		assert_eq!(changes.revoked, [a.id]);
+
+		assert!(
+			identity::set_grants(&mut conn, subject, &[b.id])
+				.await
+				.unwrap()
+				.is_empty()
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reference_names_the_key_it_was_last_read_as() {
+	use database::identity::IdentityKey;
+
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		IdentityKey::know(&mut conn, "old", "alias/canopy")
+			.await
+			.unwrap();
+		tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+		IdentityKey::know(&mut conn, "new", "alias/canopy")
+			.await
+			.unwrap();
+		let observed = IdentityKey::all(&mut conn).await.unwrap();
+		assert_eq!(
+			IdentityKey::by_ref(&observed, "alias/canopy").map(|row| row.kid.as_str()),
+			Some("new")
 		);
 	})
 	.await;

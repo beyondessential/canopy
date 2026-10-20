@@ -463,6 +463,7 @@ diesel::table! {
 	identity_keys (kid) {
 		kid -> Text,
 		key_ref -> Text,
+		known_at -> Timestamptz,
 		first_served_at -> Nullable<Timestamptz>,
 		first_signed_at -> Nullable<Timestamptz>,
 	}

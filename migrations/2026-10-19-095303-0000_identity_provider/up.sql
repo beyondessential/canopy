@@ -56,9 +56,14 @@ CREATE INDEX identity_grants_relying_party ON identity_grants (relying_party_id)
 -- written once and stands: when the key was first observed served at the
 -- issuer, which is what it matures from, and when it first signed, which is what
 -- keeps signing from ever moving back to an older key.
+--
+-- A reference can be an alias that is later pointed at another key, so several
+-- rows can carry the same `key_ref`; the one known most recently is the key the
+-- reference names now.
 CREATE TABLE identity_keys (
 	kid             TEXT PRIMARY KEY,
 	key_ref         TEXT NOT NULL,
+	known_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
 	first_served_at TIMESTAMPTZ,
 	first_signed_at TIMESTAMPTZ
 );

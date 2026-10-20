@@ -3052,8 +3052,8 @@ export interface paths {
         put?: never;
         /**
          * The identity token grants of a machine and its applications.
-         * @description With the registered relying parties to choose from, each subject's `sub`,
-         *     and whether the choice is offered for a subject holding no grant.
+         * @description With the registered relying parties to choose from, each subject's `sub` as
+         *     saved, and whether grants are available to offer at all.
          */
         post: operations["machine_grants"];
         delete?: never;
@@ -7810,24 +7810,6 @@ export interface components {
             /** @enum {string} */
             kind: "application";
         };
-        /** @description A machine or an application, on the way in. */
-        GrantSubjectArg: {
-            /**
-             * Format: uuid
-             * @description A machine, for tokens naming itself.
-             */
-            id: string;
-            /** @enum {string} */
-            kind: "machine";
-        } | {
-            /**
-             * Format: uuid
-             * @description An application, for tokens naming it.
-             */
-            id: string;
-            /** @enum {string} */
-            kind: "application";
-        };
         /** @description A server group together with its member applications and billing labels. */
         GroupDetail: {
             /**
@@ -9559,11 +9541,12 @@ export interface components {
         /** @description What a machine's edit page offers for identity tokens. */
         MachineGrants: {
             /**
-             * @description Whether the choice is offered for subjects that hold no grant: some
-             *     relying party is registered, the Canopy instance issues tokens, and the
-             *     machine is placed in an environment.
+             * @description Whether a relying party is registered and the Canopy instance issues
+             *     tokens. The choice is offered for a subject holding no grant only when
+             *     this holds and the machine is placed in an environment, which the edit
+             *     page judges from the group and rank as edited.
              */
-            offered: boolean;
+            available: boolean;
             /** @description Every registered relying party, to choose from. */
             relying_parties: components["schemas"]["RelyingPartyOption"][];
             /** @description The machine, then each of its live applications. */
@@ -12624,7 +12607,7 @@ export interface components {
              */
             relying_party_ids: string[];
             /** @description The machine or application. */
-            subject: components["schemas"]["GrantSubjectArg"];
+            subject: components["schemas"]["GrantSubject"];
         };
         /** @description Request to set a machine's schedule override for one backup type. */
         SetMachineScheduleArgs: {
