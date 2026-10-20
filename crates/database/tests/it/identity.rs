@@ -91,7 +91,10 @@ async fn the_discovery_alert_raises_and_clears() {
 	};
 
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let configured = vec!["a".to_owned()];
+		let configured = database::self_alerts::KeysConfigured {
+			known: vec!["a".to_owned()],
+			unread: Vec::new(),
+		};
 		sweep_identity_discovery(
 			&mut conn,
 			"https://i.example",
@@ -196,6 +199,48 @@ async fn a_reference_names_the_key_it_was_last_read_as() {
 			IdentityKey::by_ref(&observed, "alias/canopy").map(|row| row.kid.as_str()),
 			Some("new")
 		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_saves_of_one_subject_take_turns() {
+	use database::diesel_async::{AsyncConnection, AsyncPgConnection};
+
+	commons_tests::db::TestDb::run(async |mut conn, url| {
+		let a = RelyingParty::add(&mut conn, "A", "https://a.example", None)
+			.await
+			.unwrap();
+		let b = RelyingParty::add(&mut conn, "B", "https://b.example", None)
+			.await
+			.unwrap();
+		let machine = Machine::create(&mut conn, NewMachine::named("box"))
+			.await
+			.unwrap();
+		let subject = GrantSubject::Machine(machine.id);
+		let mut other = AsyncPgConnection::establish(&url).await.unwrap();
+
+		conn.batch_execute("BEGIN").await.unwrap();
+		identity::set_grants(&mut conn, subject, &[a.id])
+			.await
+			.unwrap();
+		let second = tokio::spawn(async move {
+			other.batch_execute("BEGIN").await.unwrap();
+			let changes = identity::set_grants(&mut other, subject, &[b.id])
+				.await
+				.unwrap();
+			other.batch_execute("COMMIT").await.unwrap();
+			changes
+		});
+		tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+		assert!(!second.is_finished(), "the second save waits for the first");
+		conn.batch_execute("COMMIT").await.unwrap();
+
+		let changes = second.await.unwrap();
+		assert_eq!(changes.granted, [b.id]);
+		assert_eq!(changes.revoked, [a.id], "it read what the first save left");
+		let held = identity::grants_of(&mut conn, &[subject]).await.unwrap();
+		assert_eq!(held[&subject], [b.id]);
 	})
 	.await;
 }

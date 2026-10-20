@@ -34,7 +34,7 @@
 - [x] Re-ranking a machine changes the `sub` of tokens issued for it and its applications afterwards (verifies spec: IDT)
 - [x] Renaming a group changes `group_name` but not `sub` (verifies spec: IDT)
 - [x] Claims carry no operator-set tags (verifies spec: IDT)
-- [x] No token is issued whose `sub` would carry a value with a character outside lowercase letters, digits and hyphens (verifies spec: IDT)
+- [x] No token is issued whose `sub` would carry a value with a character outside lowercase letters, digits and hyphens, or a value spelled as one of its labels (verifies spec: IDT)
 - [x] The token header names a `kid` present in the served JWKS, and the signature verifies against it as ES256 (verifies spec: IDT, IDP)
 
 ## Recording
@@ -68,7 +68,15 @@
 - [x] A discovery document naming a key set anywhere but the issuer's own address fails at once, saying where it points, and that address is never fetched; a redirect is not followed (verifies spec: SELF)
 - [x] Every claim a token carries is advertised in the discovery document's `claims_supported`, and nothing else is (verifies spec: IDT)
 - [x] A key reference that is an alias resolves to the key it was last read as
+- [x] A configured key never read from the key service raises the self-alert as a warning naming its reference (verifies spec: SELF)
+- [x] While no key has been read, the discovery component answers the key set as unavailable rather than serving an empty one
+- [x] An issuer carrying userinfo is refused as configuration
+- [x] An application type spelled as a subject label is never issued a token (verifies spec: IDT)
 - [x] A key whose public half cannot be read is retried at most once a minute, not on every request
+- [x] A configured key Canopy has never read warns, naming its reference, and the alert's keys each lead to the identity provider settings (verifies spec: SELF)
+- [x] While no key has been read, the discovery component answers the key set as unavailable rather than empty
+- [x] An issuer with userinfo in it is refused as configuration
+- [x] A redirect at the issuer is reported as one and not followed
 - [x] A key not yet served, waiting to sign, or retired is presented as published (verifies spec: IDP)
 
 ## Operator interface
@@ -88,6 +96,7 @@
 - [x] The machine edit page stays usable when its grants cannot be read, saying so where they would be
 - [x] A token lifetime that is not a whole number of minutes from one to sixty cannot be submitted (verifies spec: IDP)
 - [x] Registering an audience already registered is refused as a conflict, however the requests interleave, and a grant save records only the grants it changed (verifies spec: IDP)
+- [x] Two concurrent saves of one subject's grants take turns, the later leaving exactly its own set (verifies spec: IDP)
 - [x] With no relying party registered the choice is hidden, unless the subject already holds a grant (verifies spec: IDP)
-- [x] The settings page shows each key's status, first served, last signed and thirty-day count (verifies spec: IDP)
+- [x] The settings page shows each key's status, first served, last signed and thirty-day count, the count to two significant figures (verifies spec: IDP)
 - [ ] Interoperability: a token from a staging instance is accepted by an Anthropic federation rule using the documented `sub` pattern, and the minted Anthropic token calls the Messages API

@@ -986,9 +986,9 @@ pub struct KeyUsage {
 /// took place count: a refusal is settled failed, and one committed ahead and
 /// never settled is still pending.
 ///
-/// Each figure is read for each key on its own, through the log's index on
-/// what it records, so the most recent signature is found without reading
-/// back past it.
+/// Each figure is read for each key on its own, through the partial index on
+/// issuances by key and time, so the count reads only that key's entries and
+/// the most recent signature is found without reading back past it.
 // spec: IDP#signing-keys
 pub async fn key_usage(
 	conn: &mut AsyncPgConnection,
@@ -1018,18 +1018,18 @@ pub async fn key_usage(
 		          WHERE a.action = 'identity_token_issued' \
 		            AND a.recorded_at > now() - interval '90 days' \
 		            AND (a.outcome IS NULL OR a.outcome = 'done') \
-		            AND a.detail @> jsonb_build_object('kid', k.kid) \
+		            AND a.detail ->> 'kid' = k.kid \
 		          ORDER BY a.recorded_at DESC LIMIT 1) AS last_signed_at, \
 		        (SELECT count(*) FROM audit_entries a \
 		          WHERE a.action = 'identity_token_issued' \
 		            AND a.recorded_at > now() - interval '30 days' \
 		            AND (a.outcome IS NULL OR a.outcome = 'done') \
-		            AND a.detail @> jsonb_build_object('kid', k.kid)) AS signed_30d, \
+		            AND a.detail ->> 'kid' = k.kid) AS signed_30d, \
 		        (SELECT max((a.detail ->> 'expires_at')::timestamptz) FROM audit_entries a \
 		          WHERE a.action = 'identity_token_issued' \
 		            AND a.recorded_at > now() - make_interval(mins => $2) \
 		            AND (a.outcome IS NULL OR a.outcome = 'done') \
-		            AND a.detail @> jsonb_build_object('kid', k.kid)) AS latest_expiry \
+		            AND a.detail ->> 'kid' = k.kid) AS latest_expiry \
 		 FROM unnest($1::text[]) AS k(kid)",
 	)
 	.bind::<diesel::sql_types::Array<diesel::sql_types::Text>, _>(kids)

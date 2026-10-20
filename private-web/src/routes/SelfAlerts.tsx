@@ -97,7 +97,10 @@ function NamedKeys({ detail }: { detail: unknown }) {
 	const notConfigured = strings(
 		(detail as { keys_not_configured?: unknown }).keys_not_configured,
 	);
-	if (notServed.length === 0 && notConfigured.length === 0) return null;
+	const unread = strings((detail as { keys_unread?: unknown }).keys_unread);
+	if (notServed.length === 0 && notConfigured.length === 0 && unread.length === 0) {
+		return null;
+	}
 	const chip = (kid: string, label: string) => (
 		<Chip
 			key={`${label}/${kid}`}
@@ -113,6 +116,7 @@ function NamedKeys({ detail }: { detail: unknown }) {
 		<Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
 			{notServed.map((kid) => chip(kid, "not served"))}
 			{notConfigured.map((kid) => chip(kid, "not configured"))}
+			{unread.map((key) => chip(key, "unreadable"))}
 		</Box>
 	);
 }

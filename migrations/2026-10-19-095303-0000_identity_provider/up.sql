@@ -86,3 +86,10 @@ $$;
 CREATE TRIGGER identity_keys_written_once
 	BEFORE UPDATE ON identity_keys
 	FOR EACH ROW EXECUTE FUNCTION identity_keys_written_once();
+
+-- Each key's issuances, newest first, for the settings page's figures: when it
+-- last signed, how many it signed in thirty days, and the latest expiry still
+-- live. Only issuances that took place, which carry their key.
+CREATE INDEX audit_entries_identity_issued_by_kid
+	ON audit_entries ((detail ->> 'kid'), recorded_at DESC)
+	WHERE action = 'identity_token_issued' AND (outcome IS NULL OR outcome = 'done');

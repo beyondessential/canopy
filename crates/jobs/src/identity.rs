@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use database::{
 	identity::{self, ConfiguredKey, IdentityKey},
-	self_alerts::{IssuerDocuments, sweep_identity_discovery},
+	self_alerts::{IssuerDocuments, KeysConfigured, sweep_identity_discovery},
 };
 use jiff::Timestamp;
 use oidc::{Issuer, Jwks};
@@ -61,10 +61,7 @@ pub async fn fetch(client: &reqwest::Client, issuer: &str) -> IssuerDocuments {
 				.unwrap_or("elsewhere");
 			return Err(format!("{url}: redirects to {to}, which is not followed"));
 		}
-		response
-			.json()
-			.await
-			.map_err(|err| format!("{url}: {err}"))
+		response.json().await.map_err(|err| format!("{url}: {err}"))
 	}
 
 	let discovery = match json(client, &format!("{issuer}{}", oidc::DISCOVERY_PATH)).await {
@@ -185,13 +182,16 @@ pub async fn tick(
 	let signing_kid = signing
 		.as_ref()
 		.map(|&i| configured[i].kid.expect("a signing key is read"));
-	let known: Vec<String> = keys
-		.iter()
-		.filter_map(|(key_ref, key)| match key {
-			Some(key) => Some(key.kid().to_owned()),
-			None => IdentityKey::by_ref(&observed, key_ref).map(|row| row.kid.clone()),
-		})
-		.collect();
+	let mut known = KeysConfigured::default();
+	for (key_ref, key) in &keys {
+		match key {
+			Some(key) => known.known.push(key.kid().to_owned()),
+			None => match IdentityKey::by_ref(&observed, key_ref) {
+				Some(row) => known.known.push(row.kid.clone()),
+				None => known.unread.push(key_ref.clone()),
+			},
+		}
+	}
 
 	match sweep_identity_discovery(db, &issuer.issuer, &documents, &known, signing_kid).await {
 		Ok(_) => debug!(?signing_kid, "identity: documents checked"),

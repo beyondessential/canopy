@@ -9,13 +9,7 @@
 
 use std::{sync::Arc, time::Duration};
 
-use axum::{
-	Json, Router,
-	extract::State,
-	http::StatusCode,
-	response::IntoResponse,
-	routing::get,
-};
+use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
 use oidc::{Issuer, Jwks};
 use serde_json::Value;
 use tokio::sync::RwLock;

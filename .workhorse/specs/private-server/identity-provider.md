@@ -53,7 +53,7 @@ A key older than the key signing never signs again, so a removable key can be ta
 
 Each key is presented as signing, published, or removable, a key in any of the other states being presented as published.
 A key not yet served is a fault, raised by the self-alert below, and a key stays retired for no longer than a token lifetime, so neither needs a presentation of its own.
-Each key is also presented with when it was first served, when it last signed, and how many tokens it signed in the last thirty days.
+Each key is also presented with when it was first served, when it last signed, and how many tokens it signed in the last thirty days, to two significant figures.
 Those figures are derived from the audit log's record of issuance (see [IDT](../public-server/identity-tokens.md), "Recording").
 
 When the documents served at the issuer cannot be fetched, name a different issuer, or carry a key set that differs from the configured keys, or when no configured key can sign, Canopy raises a self-alert (see [SELF](self-alerts.md)).

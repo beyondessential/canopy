@@ -79,6 +79,36 @@ test.describe("self-alerts", () => {
 		);
 	});
 
+	/// The identity provider's alert names the keys that differ, each leading
+	/// to its settings, where the configured keys and the one signing are.
+	///
+	/// spec: SELF#conditions
+	test("the identity provider alert links each key it names to its settings", async ({
+		page,
+		sql,
+	}) => {
+		await seedIssue(sql, {
+			source: "canopy",
+			ref: "identity-provider-discovery",
+			severity: "warning",
+			description: "Identity provider documents differ from its configuration",
+			message: "The key set served at the issuer differs from the configured keys",
+			detail: {
+				keys_not_served: ["kid-new"],
+				keys_not_configured: ["kid-stray"],
+				keys_unread: ["arn:mistyped"],
+			},
+		});
+
+		await page.goto("/alerts");
+		await expect(page.getByRole("link", { name: "not served: kid-new" })).toBeVisible();
+		await expect(page.getByRole("link", { name: "not configured: kid-stray" })).toBeVisible();
+		const unread = page.getByRole("link", { name: "unreadable: arn:mistyped" });
+		await expect(unread).toBeVisible();
+		await unread.click();
+		await expect(page).toHaveURL(/\/settings\/identity-provider$/);
+	});
+
 	test("self-alerts stay out of the fleet issue listing", async ({
 		page,
 		sql,

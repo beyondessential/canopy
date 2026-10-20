@@ -25,6 +25,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import { type FormEvent, useState } from "react";
 import { ApiError, callApi, useApi } from "../api";
+import { approximately } from "../lib/approximately";
 import { GradedAction } from "../components/GradedAction";
 import TimeAgo from "../components/TimeAgo";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -155,7 +156,8 @@ function SigningKeys({ keys }: { keys: KeyRow[] }) {
 						<TableCell>
 							{key.last_signed_at ? <TimeAgo timestamp={key.last_signed_at} /> : "never"}
 						</TableCell>
-						<TableCell align="right">{key.signed_30d.toLocaleString()}</TableCell>
+						{/* spec: IDP#signing-keys */}
+						<TableCell align="right">{approximately(key.signed_30d)}</TableCell>
 					</TableRow>
 				))}
 			</TableBody>

@@ -744,21 +744,40 @@ pub enum IssuerDocuments {
 	Served(std::collections::BTreeSet<String>),
 }
 
+/// The configured keys as Canopy holds them: the identifiers of those it knows,
+/// and the references of those it has never read, which therefore have no
+/// identifier to compare.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KeysConfigured {
+	pub known: Vec<String>,
+	pub unread: Vec<String>,
+}
+
+/// What the identity provider's documents and keys were found to be.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryFinding {
+	pub grade: CheckResult,
+	pub message: String,
+	/// Identifiers configured but not served.
+	pub keys_not_served: Vec<String>,
+	/// Identifiers served but not configured.
+	pub keys_not_configured: Vec<String>,
+	/// References configured that Canopy has never read.
+	pub keys_unread: Vec<String>,
+}
+
 /// Evaluate the identity provider's documents against its configuration and
-/// raise or recover [`IDENTITY_DISCOVERY_REF`]. `configured` are the
-/// identifiers of the configured keys Canopy knows, and `signing` the one
-/// signing, or why none can.
+/// raise or recover [`IDENTITY_DISCOVERY_REF`]. `signing` is the key signing,
+/// or why none can.
 // spec: IDP#signing-keys
 pub async fn sweep_identity_discovery(
 	conn: &mut AsyncPgConnection,
 	issuer: &str,
 	documents: &IssuerDocuments,
-	configured: &[String],
+	configured: &KeysConfigured,
 	signing: std::result::Result<&str, &crate::identity::CannotSign>,
 ) -> Result<Option<Issue>> {
-	let Some((observed, message, not_served, not_configured)) =
-		identity_discovery_finding(issuer, documents, configured, signing)
-	else {
+	let Some(finding) = identity_discovery_finding(issuer, documents, configured, signing) else {
 		return recover(
 			conn,
 			IDENTITY_DISCOVERY_REF,
@@ -767,46 +786,74 @@ pub async fn sweep_identity_discovery(
 		.await;
 	};
 	let detail = crate::check_detail! {
-		"keys_not_served": not_served,
-		"keys_not_configured": not_configured,
+		"keys_not_served": finding.keys_not_served,
+		"keys_not_configured": finding.keys_not_configured,
+		"keys_unread": finding.keys_unread,
 	};
 	raise_with_detail(
 		conn,
 		IDENTITY_DISCOVERY_REF,
-		observed,
+		finding.grade,
 		CheckResult::Failed,
 		false,
 		Some(IDENTITY_DISCOVERY_DOC),
 		"Identity provider documents differ from its configuration",
-		&message,
+		&finding.message,
 		Some(detail),
 	)
 	.await
 	.map(Some)
 }
 
-/// The finding, if there is one: its grade, its message, and the keys
-/// configured but not served and served but not configured. Canopy being
-/// unable to sign fails whatever the documents say.
+/// The finding, if there is one. A configured key Canopy has never read warns,
+/// since it can be neither compared nor served. Canopy being unable to sign
+/// fails whatever the documents say.
 pub fn identity_discovery_finding(
 	issuer: &str,
 	documents: &IssuerDocuments,
-	configured: &[String],
+	configured: &KeysConfigured,
 	signing: std::result::Result<&str, &crate::identity::CannotSign>,
-) -> Option<(CheckResult, String, Vec<String>, Vec<String>)> {
-	let documents = documents_finding(issuer, documents, configured, signing.ok());
+) -> Option<DiscoveryFinding> {
+	let mut finding = documents_finding(issuer, documents, &configured.known, signing.ok());
+
+	if !configured.unread.is_empty() {
+		let part = format!(
+			"configured but never read from the key service: {}",
+			configured.unread.join(", ")
+		);
+		finding = Some(match finding {
+			None => DiscoveryFinding {
+				grade: CheckResult::Warning,
+				message: format!("Some configured keys cannot be read; {part}"),
+				keys_not_served: Vec::new(),
+				keys_not_configured: Vec::new(),
+				keys_unread: configured.unread.clone(),
+			},
+			Some(found) => DiscoveryFinding {
+				message: format!("{}; {part}", found.message),
+				keys_unread: configured.unread.clone(),
+				..found
+			},
+		});
+	}
+
 	let Err(cannot) = signing else {
-		return documents;
+		return finding;
 	};
 	let lead = format!("Canopy cannot sign identity tokens: {}", cannot.describe());
-	Some(match documents {
-		None => (CheckResult::Failed, lead, Vec::new(), Vec::new()),
-		Some((_, message, not_served, not_configured)) => (
-			CheckResult::Failed,
-			format!("{lead}. {message}"),
-			not_served,
-			not_configured,
-		),
+	Some(match finding {
+		None => DiscoveryFinding {
+			grade: CheckResult::Failed,
+			message: lead,
+			keys_not_served: Vec::new(),
+			keys_not_configured: Vec::new(),
+			keys_unread: Vec::new(),
+		},
+		Some(found) => DiscoveryFinding {
+			grade: CheckResult::Failed,
+			message: format!("{lead}. {}", found.message),
+			..found
+		},
 	})
 }
 
@@ -815,36 +862,34 @@ fn documents_finding(
 	documents: &IssuerDocuments,
 	configured: &[String],
 	signing: Option<&str>,
-) -> Option<(CheckResult, String, Vec<String>, Vec<String>)> {
+) -> Option<DiscoveryFinding> {
+	let failed = |message: String| {
+		Some(DiscoveryFinding {
+			grade: CheckResult::Failed,
+			message,
+			keys_not_served: Vec::new(),
+			keys_not_configured: Vec::new(),
+			keys_unread: Vec::new(),
+		})
+	};
 	let served = match documents {
 		IssuerDocuments::Unreachable(error) => {
-			return Some((
-				CheckResult::Failed,
-				format!("The documents at {issuer} could not be fetched: {error}"),
-				Vec::new(),
-				Vec::new(),
+			return failed(format!(
+				"The documents at {issuer} could not be fetched: {error}"
 			));
 		}
 		IssuerDocuments::OtherIssuer(other) => {
-			return Some((
-				CheckResult::Failed,
-				format!("The discovery document at {issuer} names the issuer {other}"),
-				Vec::new(),
-				Vec::new(),
+			return failed(format!(
+				"The discovery document at {issuer} names the issuer {other}"
 			));
 		}
 		IssuerDocuments::KeySetElsewhere { named, expected } => {
-			return Some((
-				CheckResult::Failed,
-				match named {
-					Some(named) => format!(
-						"The discovery document at {issuer} names its key set at {named}, not {expected}"
-					),
-					None => format!("The discovery document at {issuer} names no key set"),
-				},
-				Vec::new(),
-				Vec::new(),
-			));
+			return failed(match named {
+				Some(named) => format!(
+					"The discovery document at {issuer} names its key set at {named}, not {expected}"
+				),
+				None => format!("The discovery document at {issuer} names no key set"),
+			});
 		}
 		IssuerDocuments::Served(served) => served,
 	};
@@ -877,22 +922,22 @@ fn documents_finding(
 		));
 	}
 	let signing_missing = signing.is_some_and(|kid| !served.contains(kid));
-	let observed = if signing_missing {
-		CheckResult::Failed
-	} else {
-		CheckResult::Warning
-	};
 	let lead = if signing_missing {
 		"The key set served at the issuer omits the key signing, so relying parties cannot verify new tokens"
 	} else {
 		"The key set served at the issuer differs from the configured keys"
 	};
-	Some((
-		observed,
-		format!("{lead}; {}", parts.join("; ")),
-		not_served,
-		not_configured,
-	))
+	Some(DiscoveryFinding {
+		grade: if signing_missing {
+			CheckResult::Failed
+		} else {
+			CheckResult::Warning
+		},
+		message: format!("{lead}; {}", parts.join("; ")),
+		keys_not_served: not_served,
+		keys_not_configured: not_configured,
+		keys_unread: Vec::new(),
+	})
 }
 
 #[cfg(test)]
@@ -905,8 +950,11 @@ mod identity_discovery_tests {
 		IssuerDocuments::Served(kids.iter().map(|k| k.to_string()).collect::<BTreeSet<_>>())
 	}
 
-	fn configured(kids: &[&str]) -> Vec<String> {
-		kids.iter().map(|k| k.to_string()).collect()
+	fn configured(kids: &[&str]) -> KeysConfigured {
+		KeysConfigured {
+			known: kids.iter().map(|k| k.to_string()).collect(),
+			unread: Vec::new(),
+		}
 	}
 
 	#[test]
@@ -924,36 +972,38 @@ mod identity_discovery_tests {
 
 	#[test]
 	fn unreachable_and_other_issuer_fail() {
-		let (grade, ..) = identity_discovery_finding(
+		let grade = identity_discovery_finding(
 			"https://i",
 			&IssuerDocuments::Unreachable("timed out".into()),
 			&configured(&["a"]),
 			Ok("a"),
 		)
-		.unwrap();
+		.unwrap()
+		.grade;
 		assert_eq!(grade, CheckResult::Failed);
-		let (grade, ..) = identity_discovery_finding(
+		let grade = identity_discovery_finding(
 			"https://i",
 			&IssuerDocuments::OtherIssuer("https://other".into()),
 			&configured(&["a"]),
 			Ok("a"),
 		)
-		.unwrap();
+		.unwrap()
+		.grade;
 		assert_eq!(grade, CheckResult::Failed);
 	}
 
 	#[test]
 	fn a_new_key_not_yet_served_warns_while_signing_is_served() {
-		let (grade, _, not_served, not_configured) = identity_discovery_finding(
+		let finding = identity_discovery_finding(
 			"https://i",
 			&served(&["a"]),
 			&configured(&["a", "b"]),
 			Ok("a"),
 		)
 		.unwrap();
-		assert_eq!(grade, CheckResult::Warning);
-		assert_eq!(not_served, ["b"]);
-		assert!(not_configured.is_empty());
+		assert_eq!(finding.grade, CheckResult::Warning);
+		assert_eq!(finding.keys_not_served, ["b"]);
+		assert!(finding.keys_not_configured.is_empty());
 	}
 
 	#[test]
@@ -962,24 +1012,49 @@ mod identity_discovery_tests {
 			kid: "a".into(),
 			key_ref: "ref-a".into(),
 		};
-		let (grade, message, ..) = identity_discovery_finding(
+		let finding = identity_discovery_finding(
 			"https://i",
 			&served(&["b"]),
 			&configured(&["b"]),
 			Err(&cannot),
 		)
 		.unwrap();
-		assert_eq!(grade, CheckResult::Failed);
-		assert!(message.contains("last signed"), "{message}");
+		assert_eq!(finding.grade, CheckResult::Failed);
+		assert!(
+			finding.message.contains("last signed"),
+			"{}",
+			finding.message
+		);
 	}
 
 	#[test]
 	fn the_signing_key_missing_fails() {
-		let (grade, _, not_served, not_configured) =
+		let finding =
 			identity_discovery_finding("https://i", &served(&["x"]), &configured(&["a"]), Ok("a"))
 				.unwrap();
-		assert_eq!(grade, CheckResult::Failed);
-		assert_eq!(not_served, ["a"]);
-		assert_eq!(not_configured, ["x"]);
+		assert_eq!(finding.grade, CheckResult::Failed);
+		assert_eq!(finding.keys_not_served, ["a"]);
+		assert_eq!(finding.keys_not_configured, ["x"]);
+	}
+
+	#[test]
+	fn a_key_never_read_warns_naming_its_reference() {
+		let finding = identity_discovery_finding(
+			"https://i",
+			&served(&["a"]),
+			&KeysConfigured {
+				known: vec!["a".into()],
+				unread: vec!["arn:mistyped".into()],
+			},
+			Ok("a"),
+		)
+		.unwrap();
+		assert_eq!(finding.grade, CheckResult::Warning);
+		assert_eq!(finding.keys_unread, ["arn:mistyped"]);
+		assert!(
+			finding.message.contains("arn:mistyped"),
+			"{}",
+			finding.message
+		);
 	}
 }
