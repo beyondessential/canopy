@@ -10594,7 +10594,7 @@ export interface components {
          * @description The kinds of record an action can act on.
          * @enum {string}
          */
-        RecordKind: "machine" | "group" | "application" | "device" | "maintenance_window" | "upgrade_plan" | "restore_replica" | "reporting_schema" | "check" | "cluster" | "credential" | "variable" | "lease" | "version" | "artifact" | "name" | "certificate";
+        RecordKind: "machine" | "group" | "application" | "device" | "maintenance_window" | "upgrade_plan" | "restore_replica" | "reporting_schema" | "check" | "cluster" | "credential" | "variable" | "lease" | "version" | "artifact" | "name" | "certificate" | "relying_party";
         /** @description A freshly issued recovery-verification challenge. */
         RecoveryChallengeResponse: {
             /**

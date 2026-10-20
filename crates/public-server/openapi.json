@@ -658,6 +658,54 @@
         ],
         "type": "object"
       },
+      "IdentityTokenArgs": {
+        "description": "What a machine asks for.",
+        "properties": {
+          "application_type": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ApplicationType",
+                "description": "The application on the calling machine the token names. Without it, the\ntoken names the machine itself."
+              }
+            ]
+          },
+          "audience": {
+            "description": "The relying party, by the audience it expects tokens to carry.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "audience"
+        ],
+        "type": "object"
+      },
+      "IdentityTokenResponse": {
+        "description": "The token, and what it says, so a client can log what it was given without\ndecoding it.",
+        "properties": {
+          "expires_at": {
+            "description": "When it expires.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "subject": {
+            "description": "The subject it names.",
+            "type": "string"
+          },
+          "token": {
+            "description": "The signed token.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "expires_at",
+          "subject"
+        ],
+        "type": "object"
+      },
       "IntentDescriptor": {
         "description": "One restore purpose a consumer advertises support for: the behaviours it\nopts into and the settings it accepts per replica.",
         "properties": {
@@ -2774,6 +2822,106 @@
         "x-canopy-audit": []
       }
     },
+    "/identity-tokens": {
+      "post": {
+        "description": "Each request mints a new token with an identifier of its own; nothing is\ncached between requests.",
+        "operationId": "issue",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityTokenArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityTokenResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "The subject holds no grant for the relying party."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "No relying party has this audience, or no live application of this type is on the machine."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "The subject's machine is pending or belongs to no group."
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Device is not bound to a live machine."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Asking faster than Canopy accepts."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Canopy cannot sign: no issuer or key is configured, or the key service is unavailable."
+          }
+        },
+        "security": [
+          {
+            "server-device": []
+          }
+        ],
+        "summary": "Obtain an identity token.",
+        "tags": [
+          "identity"
+        ],
+        "x-canopy-audit": [
+          "identity_token_issued"
+        ]
+      }
+    },
     "/machines/self": {
       "get": {
         "description": "Resolves the caller from its certificate and returns the box it is enrolled\nas, together with the applications Canopy holds for that box. A machine\nauthenticates entirely from its certificate, so it never needs these ids to\nmake calls; this endpoint lets one that has lost track of them recover them.\n\nAn identity belongs to at most one machine, so the answer is never\nambiguous — unlike `GET /servers/self`, which asks which *application* the\ncaller is and cannot answer for a box running more than one.\n\n- **401**: no client certificate, or one that matches no known identity.\n- **412**: the identity is registered but is not enrolled as a machine.",
@@ -3798,6 +3946,10 @@
     {
       "description": "TLS certificates for a server's own names: requesting one for a signing request, and collecting it once Canopy has obtained it.",
       "name": "certificates"
+    },
+    {
+      "description": "Identity tokens: short-lived signed tokens naming a machine or one of its applications, for services that trust Canopy as an OpenID Connect issuer.",
+      "name": "identity"
     },
     {
       "description": "Public names a server may act on: what it is entitled to, and the addresses to publish for them.",
