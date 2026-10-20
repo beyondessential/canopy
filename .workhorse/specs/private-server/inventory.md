@@ -54,8 +54,8 @@ Variables set on the whole group do not hold it back, since an imported environm
 ### Reading the file
 
 The file is a tree of groups under `all`, each with optional `vars`, `hosts`, and `children`.
-A value is carried as the JSON its YAML parses to.
-A file that does not parse as an inventory is refused, naming where it fails.
+A value is carried as the JSON of what Ansible reads it as, so `yes` and `no` are booleans as they were to a run.
+A file that does not parse as an inventory, or has no `all` group, is refused, naming where it fails.
 A vault-encrypted value cannot be carried, so a file holding one is refused, naming the variable.
 
 The variables under `all` are set on the environment.
@@ -63,11 +63,15 @@ A host's own variables are set on the machine it is matched to.
 A variable on a group below `all` is set on each machine matched to a host in that group or beneath it, a host's own value winning over a group's and a nearer group's over a farther one's.
 The file's groups carry no further meaning, since a run groups a machine by the applications on it.
 `canopy_intent` and `tamanu_clone` are left out, since a run sets them for itself.
+Where the file's `tamanu_clone` disagrees with whether the environment is a clone, the preview says so, since the file may have been meant for another environment.
 
-Ansible reaches a host with no `ansible_host` at its key, so where that key is not the address Canopy reaches the machine at, it becomes the machine's `ansible_host`, and a `:port` suffix on it becomes its `ansible_port`.
+Ansible reaches a host with no `ansible_host` at its key, so where that key is not the address Canopy reaches the machine at, it becomes the machine's `ansible_host`.
+A `:port` suffix on the key becomes the machine's `ansible_port` where the host sets none of its own.
 A key that is the machine's tailnet name, in full or by its first label, adds nothing.
 
 Every machine a host is imported onto has `managed_by_ansible` set, since the file names it as one a run configures.
+
+The file's comment lines are appended to the group's notes, under a heading naming the environment, since they hold what an operator needs to know before a run, such as where a key is kept or which network to join.
 
 ### Matching hosts to machines
 
@@ -80,6 +84,7 @@ A host that matches exactly one machine is proposed for it, and one that matches
 
 Nothing is applied until the operator has reviewed a preview of the import.
 It lists each host beside the machine it is matched to, and every variable that would be set, with its value and where it would be set.
+It shows the comments that would be added to the group's notes, which the operator can edit or remove before applying.
 The operator can assign any host to a different machine in the environment, or skip it, and a skipped host's variables are not imported.
 The import cannot be applied while a host is neither matched nor skipped, or while two hosts are matched to one machine.
 
@@ -137,7 +142,7 @@ A refusal must name its reason in such a way that an operator can understand how
 
 Each inventory read is audited, its entry holding the intent its lease declared.
 Taking, extending, taking over, and releasing a lease is audited, as is setting or removing a variable (see [AUD](../platform/audit-log.md)).
-Importing a file is audited as one entry naming the environment and the variables it set, with the machine each was set on.
+Importing a file is audited as one entry naming the environment and the variables it set, with the machine each was set on, and whether it added to the group's notes.
 A secret's value never appears in a log.
 
 ## Presentation
