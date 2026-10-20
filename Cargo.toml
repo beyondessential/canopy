@@ -8,6 +8,7 @@ members = [
 	"crates/commons-tests",
 	"crates/commons-types",
 	"crates/database",
+	"crates/identity-discovery",
 	"crates/jobs",
 	"crates/oidc",
 	"crates/private-server",
