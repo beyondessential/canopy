@@ -19,7 +19,8 @@ import {
 	spawnSync,
 } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import net from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -234,6 +235,10 @@ export async function startStack(opts: StartOptions = {}): Promise<StackHandle> 
 		});
 		pipeOutput(api, "api", silent);
 
+		// A dependency cache of this worker's own: dev servers sharing one
+		// rewrite each other's pre-bundled modules, and a page mid-load is then
+		// refused them ("504 Outdated Optimize Dep") and renders nothing.
+		const viteCache = mkdtempSync(join(tmpdir(), "canopy-e2e-vite-"));
 		const web = spawn(
 			"npm",
 			[
@@ -249,13 +254,18 @@ export async function startStack(opts: StartOptions = {}): Promise<StackHandle> 
 			],
 			{
 				cwd: FRONTEND_ROOT,
-				env: { ...process.env, VITE_PROXY_TARGET: apiUrl },
+				env: {
+					...process.env,
+					VITE_PROXY_TARGET: apiUrl,
+					VITE_CACHE_DIR: viteCache,
+				},
 			},
 		);
 		pipeOutput(web, "web", silent);
 
 		const stop = async () => {
 			await Promise.allSettled([killGracefully(web), killGracefully(api)]);
+			rmSync(viteCache, { recursive: true, force: true });
 			dropDb();
 		};
 
