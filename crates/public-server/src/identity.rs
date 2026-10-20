@@ -19,7 +19,7 @@ use commons_types::server::app_type::ApplicationType;
 use database::{
 	applications::Application,
 	audit::Action,
-	identity::{self, GrantSubject, IdentityKey, RelyingParty},
+	identity::{self, ConfiguredKey, GrantSubject, IdentityKey, RelyingParty},
 	machines::Machine,
 	server_groups::ServerGroup,
 };
@@ -221,18 +221,25 @@ pub async fn issue(
 	// the audited transaction.
 	drop(conn);
 
-	let kids: Vec<Option<&str>> = keys
+	let configured: Vec<ConfiguredKey> = keys
 		.iter()
-		.map(|(_, key)| key.as_ref().map(|k| k.kid()))
+		.map(|(key_ref, key)| ConfiguredKey {
+			key_ref,
+			kid: key.as_ref().map(|k| k.kid()),
+		})
 		.collect();
-	let key = identity::signing_index(&kids, &observed, Timestamp::now())
+	let key = identity::signing(&configured, &observed, Timestamp::now())
+		.ok()
 		.and_then(|i| keys[i].1.clone())
 		.ok_or_else(|| {
 			tracing::error!("identity-tokens: no signing key is available");
 			AppError::Upstream("no signing key is available".into())
 		})?;
 
-	let now = Timestamp::now();
+	// Whole seconds, as `exp` carries it, so the expiry reported and recorded
+	// is the token's own.
+	let now = Timestamp::from_second(Timestamp::now().as_second())
+		.expect("the current second is a timestamp");
 	let expires_at = now + party.token_lifetime();
 	let jti = Uuid::new_v4().to_string();
 	let claims = Claims {

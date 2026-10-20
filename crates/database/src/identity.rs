@@ -645,53 +645,136 @@ impl IdentityKey {
 	}
 }
 
+/// A configured signing key: its reference in the configuration, and its `kid`
+/// when its public half is known.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConfiguredKey<'a> {
+	pub key_ref: &'a str,
+	pub kid: Option<&'a str>,
+}
+
+impl ConfiguredKey<'_> {
+	/// Whether this is the key `row` records, by `kid` where it is known and by
+	/// reference where it is not.
+	fn is(&self, row: &IdentityKey) -> bool {
+		match self.kid {
+			Some(kid) => kid == row.kid,
+			None => self.key_ref == row.key_ref,
+		}
+	}
+
+	fn row<'r>(&self, observed: &'r HashMap<String, IdentityKey>) -> Option<&'r IdentityKey> {
+		match self.kid {
+			Some(kid) => observed.get(kid),
+			None => observed.values().find(|row| row.key_ref == self.key_ref),
+		}
+	}
+}
+
+/// Why no configured key signs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CannotSign {
+	/// No key is configured.
+	NoKeys,
+	/// The key that would sign, `key_ref`, cannot be read, and no newer key has
+	/// matured.
+	Unreadable { key_ref: String },
+	/// The key that last signed is not configured. Keys are placed against it
+	/// by their order in the configuration, so none can be while it is absent,
+	/// and signing never risks moving back to an older key.
+	Unconfigured { kid: String, key_ref: String },
+}
+
+impl CannotSign {
+	pub fn describe(&self) -> String {
+		match self {
+			Self::NoKeys => "no signing key is configured".into(),
+			Self::Unreadable { key_ref } => {
+				format!("the signing key {key_ref} cannot be read from the key service")
+			}
+			Self::Unconfigured { kid, key_ref } => format!(
+				"the key that last signed, {kid} ({key_ref}), is not configured, so no other key can be placed against it"
+			),
+		}
+	}
+}
+
+/// Where the key that last signed sits among the configured keys.
+enum Floor<'a> {
+	/// No key has signed.
+	Unsigned,
+	At(usize),
+	Unconfigured(&'a IdentityKey),
+}
+
+/// The newest key to have signed is the one that first signed last, since
+/// signing only moves forward. It is found by reference where its public half
+/// cannot be read, so the keys older than it still retire.
+fn floor<'a>(keys: &[ConfiguredKey<'_>], observed: &'a HashMap<String, IdentityKey>) -> Floor<'a> {
+	let Some(latest) = observed
+		.values()
+		.filter(|row| row.first_signed_at.is_some())
+		.max_by_key(|row| row.first_signed_at)
+	else {
+		return Floor::Unsigned;
+	};
+	match keys.iter().position(|key| key.is(latest)) {
+		Some(at) => Floor::At(at),
+		None => Floor::Unconfigured(latest),
+	}
+}
+
 /// Which of the configured keys signs: the newest that has matured, never one
-/// older than a key that has already signed. `kids` are the configured keys
-/// oldest first, `None` for one whose public half is not known.
+/// older than a key that has already signed. `keys` are the configured keys
+/// oldest first; one whose public half is not known cannot sign.
 ///
 /// The first key an instance is configured with is mature from the outset, there
 /// being no earlier key for relying parties to rely on meanwhile, so it signs
 /// while nothing has.
 // spec: IDP#signing-keys
-pub fn signing_index(
-	kids: &[Option<&str>],
+pub fn signing(
+	keys: &[ConfiguredKey<'_>],
 	observed: &HashMap<String, IdentityKey>,
 	now: Timestamp,
-) -> Option<usize> {
-	let row = |i: usize| kids[i].and_then(|kid| observed.get(kid));
-
-	// The newest key to have signed is the one that first signed last, since
-	// signing only moves forward. Where it is not among the keys in hand, its
-	// public half unread or it taken out of the configuration, nothing signs
-	// rather than an older key.
-	let floor = match observed
-		.values()
-		.filter_map(|r| r.first_signed_at.map(|at| (r, at)))
-		.max_by_key(|(_, at)| *at)
-	{
-		None => None,
-		Some((latest, _)) => Some(
-			kids.iter()
-				.position(|kid| *kid == Some(latest.kid.as_str()))?,
-		),
-	};
+) -> std::result::Result<usize, CannotSign> {
 	let mature = |i: usize| {
-		row(i)
+		keys[i]
+			.row(observed)
 			.and_then(|r| r.first_served_at)
 			.is_some_and(|served| served + MATURITY <= now)
 	};
+	let readable = |i: usize| keys[i].kid.is_some();
+	let unreadable = |i: usize| CannotSign::Unreadable {
+		key_ref: keys[i].key_ref.to_owned(),
+	};
 
-	match floor {
-		Some(floor) => (floor..kids.len())
+	match floor(keys, observed) {
+		Floor::Unconfigured(latest) => Err(CannotSign::Unconfigured {
+			kid: latest.kid.clone(),
+			key_ref: latest.key_ref.clone(),
+		}),
+		Floor::At(floor) => (floor..keys.len())
 			.rev()
-			.find(|&i| kids[i].is_some() && (i == floor || mature(i))),
+			.find(|&i| readable(i) && (i == floor || mature(i)))
+			.ok_or_else(|| unreadable(floor)),
 		// Nothing has signed: the newest matured key, or the first key, which
 		// is mature from the outset.
-		None => (1..kids.len())
+		Floor::Unsigned if keys.is_empty() => Err(CannotSign::NoKeys),
+		Floor::Unsigned => (1..keys.len())
 			.rev()
-			.find(|&i| kids[i].is_some() && mature(i))
-			.or_else(|| kids.first().is_some_and(Option::is_some).then_some(0)),
+			.find(|&i| readable(i) && mature(i))
+			.or_else(|| readable(0).then_some(0))
+			.ok_or_else(|| unreadable(0)),
 	}
+}
+
+/// [`signing`], without the reason none signs.
+pub fn signing_index(
+	keys: &[ConfiguredKey<'_>],
+	observed: &HashMap<String, IdentityKey>,
+	now: Timestamp,
+) -> Option<usize> {
+	signing(keys, observed, now).ok()
 }
 
 /// The state a configured key is in.
@@ -722,24 +805,30 @@ impl KeyState {
 
 /// The state of each configured key, oldest first. `last_expiry` gives the
 /// latest expiry of a token each key signed, by `kid`.
+///
+/// While no key can sign, the keys older than the one that last signed still
+/// retire against it.
 // spec: IDP#signing-keys
 pub fn key_states(
-	kids: &[Option<&str>],
+	keys: &[ConfiguredKey<'_>],
 	observed: &HashMap<String, IdentityKey>,
 	last_expiry: &HashMap<String, Timestamp>,
 	now: Timestamp,
 ) -> Vec<KeyState> {
-	let signing = signing_index(kids, observed, now);
-	(0..kids.len())
+	let signing = signing_index(keys, observed, now);
+	let pivot = signing.or(match floor(keys, observed) {
+		Floor::At(at) => Some(at),
+		Floor::Unsigned | Floor::Unconfigured(_) => None,
+	});
+	(0..keys.len())
 		.map(|i| {
-			let served = kids[i]
-				.and_then(|kid| observed.get(kid))
-				.is_some_and(|r| r.first_served_at.is_some());
-			match signing {
-				Some(s) if i == s => KeyState::Signing,
+			let row = keys[i].row(observed);
+			let served = row.is_some_and(|r| r.first_served_at.is_some());
+			match pivot {
+				Some(s) if i == s && signing == Some(s) => KeyState::Signing,
 				Some(s) if i < s => {
-					let live = kids[i]
-						.and_then(|kid| last_expiry.get(kid))
+					let live = row
+						.and_then(|r| last_expiry.get(&r.kid))
 						.is_some_and(|expiry| *expiry > now);
 					if live {
 						KeyState::Retired
@@ -871,16 +960,41 @@ mod tests {
 		at(0)
 	}
 
+	/// Configured keys by `kid`, oldest first, each referenced as `ref-<kid>`;
+	/// a `kid` written `!b` is configured but its public half cannot be read.
+	fn cfg(kids: &[&str]) -> Vec<ConfiguredKey<'static>> {
+		kids.iter()
+			.map(|kid| match kid.strip_prefix('!') {
+				Some(kid) => ConfiguredKey {
+					key_ref: Box::leak(format!("ref-{kid}").into_boxed_str()),
+					kid: None,
+				},
+				None => ConfiguredKey {
+					key_ref: Box::leak(format!("ref-{kid}").into_boxed_str()),
+					kid: Some(Box::leak(kid.to_string().into_boxed_str())),
+				},
+			})
+			.collect()
+	}
+
 	#[test]
 	fn the_first_key_signs_before_it_is_observed() {
-		assert_eq!(signing_index(&[Some("a")], &HashMap::new(), now()), Some(0));
-		assert_eq!(signing_index(&[None], &HashMap::new(), now()), None);
-		assert_eq!(signing_index(&[], &HashMap::new(), now()), None);
+		assert_eq!(signing(&cfg(&["a"]), &HashMap::new(), now()), Ok(0));
+		assert_eq!(
+			signing(&cfg(&["!a"]), &HashMap::new(), now()),
+			Err(CannotSign::Unreadable {
+				key_ref: "ref-a".into()
+			})
+		);
+		assert_eq!(
+			signing(&cfg(&[]), &HashMap::new(), now()),
+			Err(CannotSign::NoKeys)
+		);
 	}
 
 	#[test]
 	fn a_newer_key_signs_once_matured() {
-		let kids = [Some("a"), Some("b")];
+		let kids = cfg(&["a", "b"]);
 		let young: HashMap<_, _> = [
 			key("a", Some(at(600)), Some(at(600))),
 			key("b", Some(at(10)), None),
@@ -899,7 +1013,7 @@ mod tests {
 	fn signing_never_moves_back() {
 		// `b` has signed; `a` is older, so it never signs again even if `b`'s
 		// observation were somehow lost.
-		let kids = [Some("a"), Some("b")];
+		let kids = cfg(&["a", "b"]);
 		let observed: HashMap<_, _> = [
 			key("a", Some(at(900)), Some(at(900))),
 			key("b", None, Some(at(60))),
@@ -907,14 +1021,55 @@ mod tests {
 		.into();
 		assert_eq!(signing_index(&kids, &observed, now()), Some(1));
 		// And with `b`'s public half unknown, nothing signs rather than `a`.
-		assert_eq!(signing_index(&[Some("a"), None], &observed, now()), None);
+		assert_eq!(
+			signing(&cfg(&["a", "!b"]), &observed, now()),
+			Err(CannotSign::Unreadable {
+				key_ref: "ref-b".into()
+			})
+		);
 		// Nor with `b` taken out of the configuration.
-		assert_eq!(signing_index(&[Some("a")], &observed, now()), None);
+		assert_eq!(
+			signing(&cfg(&["a"]), &observed, now()),
+			Err(CannotSign::Unconfigured {
+				kid: "b".into(),
+				key_ref: "ref-b".into()
+			})
+		);
+	}
+
+	#[test]
+	fn an_unreadable_signer_is_still_placed() {
+		// `b` signed and now cannot be read. `c` is newer and matured, so it
+		// signs; without it nothing does, and `a` stays retired against `b`.
+		let observed: HashMap<_, _> = [
+			key("a", Some(at(900)), Some(at(900))),
+			key("b", Some(at(600)), Some(at(600))),
+			key("c", Some(at(60)), None),
+		]
+		.into();
+		assert_eq!(
+			signing_index(&cfg(&["a", "!b", "c"]), &observed, now()),
+			Some(2)
+		);
+		let young: HashMap<_, _> = [
+			key("a", Some(at(900)), Some(at(900))),
+			key("b", Some(at(600)), Some(at(600))),
+			key("c", Some(at(5)), None),
+		]
+		.into();
+		assert_eq!(
+			key_states(&cfg(&["a", "!b", "c"]), &young, &HashMap::new(), now()),
+			[
+				KeyState::Removable,
+				KeyState::WaitingToSign,
+				KeyState::WaitingToSign
+			]
+		);
 	}
 
 	#[test]
 	fn unobserved_later_keys_wait() {
-		let kids = [Some("a"), Some("b"), Some("c")];
+		let kids = cfg(&["a", "b", "c"]);
 		let observed: HashMap<_, _> = [
 			key("a", Some(at(900)), Some(at(900))),
 			key("b", Some(at(5)), None),
@@ -937,7 +1092,7 @@ mod tests {
 
 	#[test]
 	fn older_keys_retire_then_become_removable() {
-		let kids = [Some("a"), Some("b"), Some("c")];
+		let kids = cfg(&["a", "b", "c"]);
 		let observed: HashMap<_, _> = [
 			key("a", Some(at(900)), Some(at(900))),
 			key("b", Some(at(600)), Some(at(600))),
@@ -954,7 +1109,7 @@ mod tests {
 
 	#[test]
 	fn a_key_that_never_signed_is_removable_once_a_newer_one_signs() {
-		let kids = [Some("a"), Some("b")];
+		let kids = cfg(&["a", "b"]);
 		let observed: HashMap<_, _> = [
 			key("a", Some(at(900)), None),
 			key("b", Some(at(600)), Some(at(600))),

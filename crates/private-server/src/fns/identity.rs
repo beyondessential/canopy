@@ -19,7 +19,7 @@ use commons_servers::{
 use database::{
 	Machine,
 	audit::Action,
-	identity::{self, GrantSubject, IdentityKey, KeyState, RelyingParty},
+	identity::{self, ConfiguredKey, GrantSubject, IdentityKey, KeyState, RelyingParty},
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -126,29 +126,31 @@ pub async fn status(
 		.values()
 		.map(|row| (row.key_ref.as_str(), row))
 		.collect();
-	let kids: Vec<Option<&str>> = config
+	let configured: Vec<ConfiguredKey> = config
 		.keys
 		.iter()
-		.map(|key_ref| by_ref.get(key_ref.as_str()).map(|row| row.kid.as_str()))
+		.map(|key_ref| ConfiguredKey {
+			key_ref,
+			kid: by_ref.get(key_ref.as_str()).map(|row| row.kid.as_str()),
+		})
 		.collect();
 	let expiries: HashMap<String, Timestamp> = usage
 		.iter()
 		.filter_map(|(kid, usage)| Some((kid.clone(), usage.latest_expiry?)))
 		.collect();
-	let states = identity::key_states(&kids, &observed, &expiries, Timestamp::now());
+	let states = identity::key_states(&configured, &observed, &expiries, Timestamp::now());
 
-	let mut keys: Vec<KeyView> = config
-		.keys
+	let mut keys: Vec<KeyView> = configured
 		.iter()
-		.zip(kids.iter().zip(states))
-		.map(|(key_ref, (kid, state))| {
+		.zip(states)
+		.map(|(&ConfiguredKey { key_ref, kid }, state)| {
 			let row = kid.and_then(|kid| observed.get(kid));
 			let used = kid
 				.and_then(|kid| usage.get(kid))
 				.cloned()
 				.unwrap_or_default();
 			KeyView {
-				key_ref: key_ref.clone(),
+				key_ref: key_ref.to_owned(),
 				kid: kid.map(str::to_owned),
 				state: state.into(),
 				first_served_at: row.and_then(|row| row.first_served_at),

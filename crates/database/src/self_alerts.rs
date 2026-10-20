@@ -740,15 +740,15 @@ pub enum IssuerDocuments {
 
 /// Evaluate the identity provider's documents against its configuration and
 /// raise or recover [`IDENTITY_DISCOVERY_REF`]. `configured` are the
-/// identifiers of the configured keys Canopy could read, and `signing` the one
-/// signing, if any.
+/// identifiers of the configured keys Canopy knows, and `signing` the one
+/// signing, or why none can.
 // spec: IDP#signing-keys
 pub async fn sweep_identity_discovery(
 	conn: &mut AsyncPgConnection,
 	issuer: &str,
 	documents: &IssuerDocuments,
 	configured: &[String],
-	signing: Option<&str>,
+	signing: std::result::Result<&str, &crate::identity::CannotSign>,
 ) -> Result<Option<Issue>> {
 	let Some((observed, message, not_served, not_configured)) =
 		identity_discovery_finding(issuer, documents, configured, signing)
@@ -780,8 +780,31 @@ pub async fn sweep_identity_discovery(
 }
 
 /// The finding, if there is one: its grade, its message, and the keys
-/// configured but not served and served but not configured.
+/// configured but not served and served but not configured. Canopy being
+/// unable to sign fails whatever the documents say.
 pub fn identity_discovery_finding(
+	issuer: &str,
+	documents: &IssuerDocuments,
+	configured: &[String],
+	signing: std::result::Result<&str, &crate::identity::CannotSign>,
+) -> Option<(CheckResult, String, Vec<String>, Vec<String>)> {
+	let documents = documents_finding(issuer, documents, configured, signing.ok());
+	let Err(cannot) = signing else {
+		return documents;
+	};
+	let lead = format!("Canopy cannot sign identity tokens: {}", cannot.describe());
+	Some(match documents {
+		None => (CheckResult::Failed, lead, Vec::new(), Vec::new()),
+		Some((_, message, not_served, not_configured)) => (
+			CheckResult::Failed,
+			format!("{lead}. {message}"),
+			not_served,
+			not_configured,
+		),
+	})
+}
+
+fn documents_finding(
 	issuer: &str,
 	documents: &IssuerDocuments,
 	configured: &[String],
@@ -874,7 +897,7 @@ mod identity_discovery_tests {
 				"https://i",
 				&served(&["a", "b"]),
 				&configured(&["a", "b"]),
-				Some("a")
+				Ok("a")
 			)
 			.is_none()
 		);
@@ -886,7 +909,7 @@ mod identity_discovery_tests {
 			"https://i",
 			&IssuerDocuments::Unreachable("timed out".into()),
 			&configured(&["a"]),
-			Some("a"),
+			Ok("a"),
 		)
 		.unwrap();
 		assert_eq!(grade, CheckResult::Failed);
@@ -894,7 +917,7 @@ mod identity_discovery_tests {
 			"https://i",
 			&IssuerDocuments::OtherIssuer("https://other".into()),
 			&configured(&["a"]),
-			Some("a"),
+			Ok("a"),
 		)
 		.unwrap();
 		assert_eq!(grade, CheckResult::Failed);
@@ -906,7 +929,7 @@ mod identity_discovery_tests {
 			"https://i",
 			&served(&["a"]),
 			&configured(&["a", "b"]),
-			Some("a"),
+			Ok("a"),
 		)
 		.unwrap();
 		assert_eq!(grade, CheckResult::Warning);
@@ -915,12 +938,29 @@ mod identity_discovery_tests {
 	}
 
 	#[test]
+	fn being_unable_to_sign_fails_even_when_the_documents_match() {
+		let cannot = crate::identity::CannotSign::Unconfigured {
+			kid: "a".into(),
+			key_ref: "ref-a".into(),
+		};
+		let (grade, message, ..) = identity_discovery_finding(
+			"https://i",
+			&served(&["b"]),
+			&configured(&["b"]),
+			Err(&cannot),
+		)
+		.unwrap();
+		assert_eq!(grade, CheckResult::Failed);
+		assert!(message.contains("last signed"), "{message}");
+	}
+
+	#[test]
 	fn the_signing_key_missing_fails() {
 		let (grade, _, not_served, not_configured) = identity_discovery_finding(
 			"https://i",
 			&served(&["x"]),
 			&configured(&["a"]),
-			Some("a"),
+			Ok("a"),
 		)
 		.unwrap();
 		assert_eq!(grade, CheckResult::Failed);
