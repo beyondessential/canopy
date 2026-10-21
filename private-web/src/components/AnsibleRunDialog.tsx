@@ -31,8 +31,8 @@ import { callApi, useApi, useApiAction } from "../api";
 import type { AnsibleLease, CatalogueView, ServerRank } from "../types";
 import { GradedAction } from "./GradedAction";
 
-/** How long a lease waits for its run to start, after which Canopy releases it. */
-const PENDING = 5 * 60 * 1000;
+/** What Canopy says a lease waits for its run to start, until it has said. */
+const PENDING_FALLBACK_SECS = 300;
 const NOTHING = "";
 
 type Playbook = CatalogueView["playbooks"][number];
@@ -44,7 +44,11 @@ type RunMember = {
 	groups: string[];
 	application_types: string[];
 };
-type RunOptions = { members: RunMember[]; has_central: boolean };
+type RunOptions = {
+	members: RunMember[];
+	has_central: boolean;
+	pending_for_secs: number;
+};
 type LimitPreview = {
 	matches: Array<{ id: string; name: string; host_name: string }>;
 	groups: string[];
@@ -124,6 +128,10 @@ export default function AnsibleRunDialog({
 		options.status === "ok" ? (options.data as unknown as RunOptions).members : [];
 	const hasCentral =
 		options.status === "ok" && (options.data as unknown as RunOptions).has_central;
+	const pendingSecs =
+		options.status === "ok"
+			? (options.data as unknown as RunOptions).pending_for_secs
+			: PENDING_FALLBACK_SECS;
 
 	const offered = useMemo(
 		() =>
@@ -234,7 +242,9 @@ export default function AnsibleRunDialog({
 				onChanged();
 			})
 			.catch(() => {
-				// Shown as the refusal.
+				// Shown as the refusal, and the run state is read again so a lease
+				// taken meanwhile is offered for taking over.
+				onChanged();
 			});
 	};
 
@@ -316,13 +326,15 @@ export default function AnsibleRunDialog({
 	};
 
 	const remaining = lease
-		? Math.max(0, Date.parse(lease.taken_at) + PENDING - now)
+		? Math.max(0, Date.parse(lease.taken_at) + pendingSecs * 1000 - now)
 		: 0;
 	const title = preset
 		? `${preset === "install" ? "Install" : "Upgrade"} ${rank}`
 		: `Run on ${rank}`;
 	const refusal = take.error?.message ?? null;
-	const heldByOther = holder !== null || (refusal?.includes("held by") ?? false);
+	// Whether another operator holds the environment is what the run state says,
+	// refreshed when a take is refused, never what the refusal happens to say.
+	const heldByOther = holder !== null;
 
 	return (
 		<Dialog open={open} onClose={stage === "waiting" ? undefined : onClose} fullWidth maxWidth="md">
@@ -662,7 +674,7 @@ export default function AnsibleRunDialog({
 
 				{stage === "timeout" && (
 					<Alert severity="warning" data-testid="run-timeout">
-						The run didn't start within 5 minutes, so the lease was released.
+						The run didn't start within {formatPending(pendingSecs)}, so the lease was released.
 					</Alert>
 				)}
 			</DialogContent>
@@ -792,6 +804,12 @@ function inFourHours(): string {
 	const at = new Date(Date.now() + 4 * 3600_000);
 	const pad = (n: number) => String(n).padStart(2, "0");
 	return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}:${pad(at.getMinutes())}`;
+}
+
+function formatPending(secs: number): string {
+	return secs % 60 === 0
+		? `${secs / 60} minute${secs === 60 ? "" : "s"}`
+		: `${secs} seconds`;
 }
 
 function formatClock(ms: number): string {

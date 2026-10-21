@@ -138,8 +138,15 @@ export default function AnsibleRuns({
 						<b style={{ fontWeight: 500 }}>{holder ?? "An operator"}</b>{" "}
 						{lease ? (
 							<>
-								is running{" "}
-								<code>{lease.playbook ?? lease.intent}</code>
+								{lease.playbook ? (
+									<>
+										is running <code>{lease.playbook}</code>
+									</>
+								) : lease.intent === "upgrade" ? (
+									"is upgrading"
+								) : (
+									"is configuring"
+								)}
 								{lease.started_at ? (
 									<>
 										, started <TimeAgo timestamp={lease.started_at} />
