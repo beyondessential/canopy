@@ -33,12 +33,13 @@ Every request is checked in the same order, stopping at the first refusal, so th
 2. A caller that is not bound to a live machine is refused as on every machine endpoint (412).
 3. An audience that matches no registered relying party is refused as unknown (404), apart from not granted, so a mistyped audience in a workload's configuration reads as a typo rather than as a missing grant.
 4. An application type that names no live application on the calling machine is refused as no such subject (404); an archived application is not live.
-5. A subject that holds no grant for the relying party is refused as not granted (403).
-6. A subject whose machine is pending or belongs to no group is refused as not placed (409), naming what is missing, and the refusal clears once an operator ranks or groups the machine (see [GRP](../servers/groups.md), "Environments").
-7. When Canopy cannot sign, because its key service is unavailable or because the Canopy instance has no issuer or signing key configured, the request fails as an upstream failure (502).
+5. An application type spelled as one of the subject's labels is refused as unrepresentable (422), since no subject can carry it (see "Subject").
+6. A subject that holds no grant for the relying party is refused as not granted (403).
+7. A subject whose machine is pending or belongs to no group is refused as not placed (409), naming what is missing, and the refusal clears once an operator ranks or groups the machine (see [GRP](../servers/groups.md), "Environments").
+8. When Canopy cannot sign, because its key service is unavailable or because the Canopy instance has no issuer or signing key configured, the request fails as an upstream failure (502).
 
 The rate limit comes first so a client stuck in a loop is held back whatever it asks for.
-The grant comes before placement so a subject missing both learns first of the one waiting cannot clear.
+The grant comes before placement so a subject missing both learns first of the one waiting cannot clear, and an unrepresentable subject comes before both because nothing clears it.
 
 ## The token
 

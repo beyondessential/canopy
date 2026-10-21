@@ -18,6 +18,10 @@ use tokio::sync::RwLock;
 /// read at startup is published once it can be.
 pub const REFRESH: Duration = Duration::from_secs(60);
 
+/// How long startup waits for the key service before serving without the keys
+/// it could not read, which the refresh publishes once it can.
+pub const STARTUP_WAIT: Duration = Duration::from_secs(10);
+
 #[derive(Clone)]
 struct Served {
 	discovery: Arc<Value>,
@@ -47,11 +51,18 @@ fn issuer_path(issuer: &str) -> &str {
 }
 
 /// The router serving the two documents, with a task keeping the key set
-/// current.
+/// current. Waits for the key set no longer than [`STARTUP_WAIT`], so a key
+/// service that is slow to answer does not hold back the discovery document.
 pub async fn router(issuer: Issuer) -> Router {
+	let initial = tokio::time::timeout(STARTUP_WAIT, jwks(&issuer))
+		.await
+		.unwrap_or_else(|_| {
+			tracing::warn!("the key service did not answer in time; serving no keys until it does");
+			Jwks::default()
+		});
 	let served = Served {
 		discovery: Arc::new(oidc::discovery_document(&issuer.issuer)),
-		jwks: Arc::new(RwLock::new(jwks(&issuer).await)),
+		jwks: Arc::new(RwLock::new(initial)),
 	};
 
 	let refreshed = served.jwks.clone();

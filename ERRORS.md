@@ -222,6 +222,14 @@ type that no live application on the machine has. Either the client is
 configured with the wrong type, or the application it means is not on
 this machine in Canopy, or is archived.
 
+## Identity subject unrepresentable
+
+Issued when a machine asks for an identity token naming an application
+type spelled as one of the subject's labels (`group`, `rank`,
+`application` or `machine`). A label in a subject must match only that
+label, so no token names an application of such a type, and waiting
+does not help.
+
 ## Identity token not granted
 
 Issued when the machine or application asking for an identity token

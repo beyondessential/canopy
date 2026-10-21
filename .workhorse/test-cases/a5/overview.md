@@ -71,7 +71,7 @@
 - [x] A configured key never read from the key service raises the self-alert as a warning naming its reference (verifies spec: SELF)
 - [x] While no key has been read, the discovery component answers the key set as unavailable rather than serving an empty one
 - [x] An issuer carrying userinfo is refused as configuration
-- [x] An application type spelled as a subject label is never issued a token (verifies spec: IDT)
+- [x] An application type spelled as a subject label is refused as unrepresentable (422), ahead of the grant and placement, and nothing is recorded (verifies spec: IDT)
 - [x] A key whose public half cannot be read is retried at most once a minute, not on every request
 - [x] A configured key Canopy has never read warns, naming its reference, and the alert's keys each lead to the identity provider settings (verifies spec: SELF)
 - [x] While no key has been read, the discovery component answers the key set as unavailable rather than empty

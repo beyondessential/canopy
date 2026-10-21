@@ -410,6 +410,38 @@ async fn an_ungrouped_machine_is_not_placed() {
 	.await;
 }
 
+/// Ahead of the grant and of placement, since nothing clears it, and not
+/// recorded.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_application_type_spelled_as_a_label_is_unrepresentable() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			let at = placed(&mut conn, device_id, None).await;
+			sql_query("UPDATE applications SET type = 'machine' WHERE id = $1")
+				.bind::<sql_types::Uuid, _>(at.application)
+				.execute(&mut conn)
+				.await
+				.unwrap();
+			party(&mut conn, None).await;
+
+			let response = ask(
+				&public,
+				&cert,
+				json!({ "audience": AUDIENCE, "application_type": "machine" }),
+			)
+			.await;
+			response.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+			assert_eq!(
+				problem_type(&response.json()),
+				"identity-subject-unrepresentable"
+			);
+			assert!(issuances(&mut conn).await.is_empty());
+		},
+	)
+	.await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn an_archived_application_is_no_such_subject() {
 	commons_tests::server::run_with_device_auth(

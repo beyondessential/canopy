@@ -217,6 +217,12 @@ pub enum AppError {
 	#[error("no such subject on this machine: {0}")]
 	IdentitySubjectNotFound(String),
 
+	/// The application type an identity token was asked for is spelled as one
+	/// of the subject's labels, so no subject can carry it. Maps to 422.
+	// spec: IDT#refusals
+	#[error("no identity token can name this subject: {0}")]
+	IdentitySubjectUnrepresentable(String),
+
 	/// The subject holds no grant for the relying party. Only an operator can
 	/// change this, so waiting does not help. Maps to 403.
 	// spec: IDT#refusals
@@ -354,6 +360,7 @@ impl AppError {
 			Self::DnsNameTypeMismatch(_) => StatusCode::CONFLICT,
 			Self::IdentityAudienceUnknown(_) => StatusCode::NOT_FOUND,
 			Self::IdentitySubjectNotFound(_) => StatusCode::NOT_FOUND,
+			Self::IdentitySubjectUnrepresentable(_) => StatusCode::UNPROCESSABLE_ENTITY,
 			Self::IdentityTokenNotGranted(_) => StatusCode::FORBIDDEN,
 			Self::IdentitySubjectNotPlaced(_) => StatusCode::CONFLICT,
 			Self::EnrollmentFailed => StatusCode::FORBIDDEN,
@@ -433,6 +440,9 @@ impl AppError {
 						Self::DnsNameTypeMismatch(_) => "dns-name-type-mismatch",
 						Self::IdentityAudienceUnknown(_) => "identity-audience-unknown",
 						Self::IdentitySubjectNotFound(_) => "identity-subject-not-found",
+						Self::IdentitySubjectUnrepresentable(_) => {
+							"identity-subject-unrepresentable"
+						}
 						Self::IdentityTokenNotGranted(_) => "identity-token-not-granted",
 						Self::IdentitySubjectNotPlaced(_) => "identity-subject-not-placed",
 						Self::EnrollmentFailed => "enrollment-failed",

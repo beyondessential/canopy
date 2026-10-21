@@ -217,15 +217,21 @@ impl RelyingParty {
 			.first(conn)
 			.await
 			.map_err(AppError::from)?;
-		let revoked = grants::identity_grants
-			.filter(grants::relying_party_id.eq(id))
-			.select((grants::machine_id, grants::application_id))
-			.load::<(Option<Uuid>, Option<Uuid>)>(conn)
-			.await
-			.map_err(AppError::from)?
-			.into_iter()
-			.filter_map(|(machine, application)| GrantSubject::from_columns(machine, application))
-			.collect();
+		// Deleted explicitly rather than left to the cascade, so the revocations
+		// are exactly the rows this removal deleted: a grant revoked by a
+		// concurrent save is not counted twice, and one added concurrently
+		// waits on the lock above and then fails its foreign key.
+		let revoked =
+			diesel::delete(grants::identity_grants.filter(grants::relying_party_id.eq(id)))
+				.returning((grants::machine_id, grants::application_id))
+				.get_results::<(Option<Uuid>, Option<Uuid>)>(conn)
+				.await
+				.map_err(AppError::from)?
+				.into_iter()
+				.filter_map(|(machine, application)| {
+					GrantSubject::from_columns(machine, application)
+				})
+				.collect();
 		diesel::delete(dsl::relying_parties.find(id))
 			.execute(conn)
 			.await
@@ -625,7 +631,7 @@ fn subject_of(
 	}
 	if !segments
 		.iter()
-		.all(|(_, value)| in_alphabet(value) && !LABELS.contains(&value.as_str()))
+		.all(|(_, value)| in_alphabet(value) && !is_subject_label(value))
 	{
 		return None;
 	}
@@ -647,6 +653,13 @@ fn subject_of(
 /// reaches.
 // spec: IDT#subject
 const LABELS: &[&str] = &["group", "rank", "application", "machine"];
+
+/// Whether `value` is spelled as one of the subject's labels, so no subject can
+/// carry it.
+// spec: IDT#subject
+pub fn is_subject_label(value: &str) -> bool {
+	LABELS.contains(&value)
+}
 
 /// Lowercase letters, digits and hyphens, so no value can contain the
 /// separator.

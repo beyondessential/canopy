@@ -100,6 +100,7 @@ struct Claims<'a> {
 		(status = 403, description = "The subject holds no grant for the relying party.", body = ProblemDetailsSchema),
 		(status = 404, description = "No relying party has this audience, or no live application of this type is on the machine.", body = ProblemDetailsSchema),
 		(status = 409, description = "The subject's machine is pending or belongs to no group.", body = ProblemDetailsSchema),
+		(status = 422, description = "The application type is spelled as one of the subject's labels.", body = ProblemDetailsSchema),
 		(status = 412, description = "Device is not bound to a live machine.", body = ProblemDetailsSchema),
 		(status = 429, description = "Asking faster than Canopy accepts.", body = ProblemDetailsSchema),
 		(status = 502, description = "Canopy cannot sign: no issuer or key is configured, or the key service is unavailable.", body = ProblemDetailsSchema),
@@ -141,6 +142,16 @@ pub async fn issue(
 		None => None,
 		Some(wanted) => Some(application_of(&mut conn, &machine, wanted).await?),
 	};
+
+	// 5. Beside no such subject, and ahead of the grant and placement, since
+	// neither an operator nor waiting can clear it.
+	if let Some(wanted) = &args.application_type
+		&& identity::is_subject_label(&wanted.to_string())
+	{
+		return Err(AppError::IdentitySubjectUnrepresentable(format!(
+			"the application type {wanted} is spelled as one of the subject's labels"
+		)));
+	}
 	audit.acting_as(device_actor(device, application.as_ref().map(|a| a.id)));
 	let (subject, subject_record) = match &application {
 		Some(application) => (
@@ -166,7 +177,7 @@ pub async fn issue(
 		.ok()
 		.and_then(|p| identity::subject(p, &machine, application.as_ref()));
 
-	// 5. A workload asking for access no operator has given it, which is kept:
+	// 6. A workload asking for access no operator has given it, which is kept:
 	// committed ahead, since the refusal rolls back the handler's transaction,
 	// and settled failed at once.
 	// spec: IDT#recording
@@ -198,18 +209,20 @@ pub async fn issue(
 		)));
 	}
 
-	// 6. After the grant, so a subject missing both learns first of the one
+	// 7. After the grant, so a subject missing both learns first of the one
 	// waiting cannot clear.
 	let placement = placement
 		.map_err(|unplaced| AppError::IdentitySubjectNotPlaced(unplaced.describe().to_owned()))?;
+	// Every other value is an identifier, a rank or a slug, so this is a fault
+	// in Canopy rather than a refusal.
 	let Some(sub) = sub else {
 		return Err(AppError::custom(
-			"this subject has a value outside the subject alphabet or spelled as one of its labels, so no token is issued for it",
+			"this subject has a value outside the subject alphabet, so no token is issued for it",
 		));
 	};
 	let group = ServerGroup::get_by_id(&mut conn, placement.group_id).await?;
 
-	// 7.
+	// 8.
 	let Some(issuer) = &state.identity else {
 		return Err(AppError::Upstream(
 			"identity tokens are not configured on this Canopy instance".into(),
@@ -229,10 +242,17 @@ pub async fn issue(
 		})
 		.collect();
 	let key = identity::signing(&configured, &observed, Timestamp::now())
-		.ok()
-		.and_then(|i| keys[i].1.clone())
-		.ok_or_else(|| {
-			tracing::error!("identity-tokens: no signing key is available");
+		.map_err(|cannot| cannot.describe())
+		.and_then(|i| {
+			keys[i].1.clone().ok_or_else(|| {
+				format!(
+					"the signing key {} cannot be read from the key service",
+					keys[i].0
+				)
+			})
+		})
+		.map_err(|why| {
+			tracing::error!(%why, "identity-tokens: no signing key is available");
 			AppError::Upstream("no signing key is available".into())
 		})?;
 

@@ -2887,6 +2887,16 @@
             },
             "description": "Device is not bound to a live machine."
           },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "The application type is spelled as one of the subject's labels."
+          },
           "429": {
             "content": {
               "application/json": {
