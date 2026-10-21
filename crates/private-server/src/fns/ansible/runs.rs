@@ -211,6 +211,7 @@ pub async fn members(
 		machine: &'a database::machines::Machine,
 		address: Option<String>,
 		tailnet: bool,
+		managed: bool,
 		types: Vec<String>,
 	}
 	let mut seen: Vec<Seen<'_>> = Vec::new();
@@ -220,9 +221,6 @@ pub async fn members(
 				.and_then(|vars| vars.get(name))
 				.or_else(|| wide.get(name))
 		};
-		if !get(MANAGED).is_some_and(truthy) {
-			continue;
-		}
 		let on_machine: Vec<&Application> = applications
 			.iter()
 			.filter(|application| application.machine_id == Some(machine.id))
@@ -237,6 +235,7 @@ pub async fn members(
 			machine,
 			address,
 			tailnet: tailnet_named,
+			managed: get(MANAGED).is_some_and(truthy),
 			types: on_machine
 				.iter()
 				.map(|application| application.r#type.to_string())
@@ -244,6 +243,8 @@ pub async fn members(
 		});
 	}
 
+	// Named among the whole environment as the served environment names them,
+	// then narrowed to what a run acts on.
 	let names = hosts::host_names(
 		&seen
 			.iter()
@@ -252,6 +253,7 @@ pub async fn members(
 				name: &member.machine.name,
 				address: member.address.as_deref(),
 				tailnet: member.tailnet,
+				managed: member.managed,
 			})
 			.collect::<Vec<_>>(),
 	)?;
@@ -259,6 +261,7 @@ pub async fn members(
 	let mut out: Vec<Member> = seen
 		.into_iter()
 		.zip(names)
+		.filter(|(member, _)| member.managed)
 		.map(|(member, host_name)| {
 			let mut types = member.types.clone();
 			if types.is_empty()

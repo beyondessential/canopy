@@ -17,9 +17,41 @@ pub struct Candidate<'a> {
 	/// Whether that address is the tailnet name of the device bound to it, as
 	/// opposed to an `ansible_host` variable or an application's recorded host.
 	pub tailnet: bool,
+	/// Whether a run acts on it: it carries `managed_by_ansible`.
+	pub managed: bool,
 }
 
-/// The host name of each of `members`, in order.
+/// The host name of each of an environment's `members`, in order.
+///
+/// A run acts on the managed members, so they are named among themselves, and
+/// two of them that would share a name are refused. The rest are named among
+/// themselves too, and where two of them would share a name they are all named
+/// by their identifiers, since no run reaches them.
+///
+/// The served environment, the limit preview and the import all name members
+/// through this, so none of them can name a machine differently.
+pub fn host_names(members: &[Candidate<'_>]) -> Result<Vec<String>> {
+	let mut names = vec![String::new(); members.len()];
+	for run_acts_on in [true, false] {
+		let among: Vec<usize> = (0..members.len())
+			.filter(|index| members[*index].managed == run_acts_on)
+			.collect();
+		let named = match name_among(among.iter().map(|index| &members[*index])) {
+			Ok(named) => named,
+			Err(refusal) if run_acts_on => return Err(refusal),
+			Err(_) => among
+				.iter()
+				.map(|index| members[*index].id.to_string())
+				.collect(),
+		};
+		for (index, name) in among.into_iter().zip(named) {
+			names[index] = name;
+		}
+	}
+	Ok(names)
+}
+
+/// The host name of each of `members`, in order, named among themselves.
 ///
 /// A member is named by the first label of its address where that is a tailnet
 /// name, and by the address itself otherwise. A member that has no address, or
@@ -27,7 +59,8 @@ pub struct Candidate<'a> {
 /// Ansible accepts, or by its identifier where nothing of that remains.
 /// Refuses an environment where two members would still share a name, since
 /// Ansible would merge them into one host.
-pub fn host_names(members: &[Candidate<'_>]) -> Result<Vec<String>> {
+fn name_among<'a>(members: impl Iterator<Item = &'a Candidate<'a>>) -> Result<Vec<String>> {
+	let members: Vec<&Candidate<'_>> = members.collect();
 	let first: Vec<&str> = members
 		.iter()
 		.map(|member| match member.address {
@@ -101,6 +134,7 @@ mod tests {
 			name,
 			address,
 			tailnet,
+			managed: true,
 		}
 	}
 
@@ -152,5 +186,36 @@ mod tests {
 		])
 		.unwrap_err();
 		assert!(matches!(refused, AppError::Conflict(_)));
+	}
+
+	#[test]
+	fn the_unmanaged_are_named_apart_from_what_a_run_acts_on() {
+		let mut unmanaged = member("Spare", Some("box.east.ts.net"), true);
+		unmanaged.managed = false;
+		// Named among everything, the label "box" the spare shares would send
+		// Central to its own name, and nothing would collide. A run sees only
+		// Central and "box", which would both be the host "box".
+		let refused = host_names(&[
+			member("Central", Some("box.west.ts.net"), true),
+			member("box", None, false),
+			unmanaged,
+		])
+		.unwrap_err();
+		assert!(matches!(refused, AppError::Conflict(_)));
+	}
+
+	#[test]
+	fn unmanaged_members_sharing_a_name_are_named_by_identifier() {
+		let mut a = member("same", Some("a.ts.net"), true);
+		let mut b = member("same", Some("a.ts.net"), true);
+		a.managed = false;
+		b.managed = false;
+		let ids = [a.id.to_string(), b.id.to_string()];
+		let managed = member("Central", Some("central.ts.net"), true);
+		let names = host_names(&[a, managed, b]).unwrap();
+		assert_eq!(
+			names,
+			[ids[0].clone(), "central".to_owned(), ids[1].clone()]
+		);
 	}
 }

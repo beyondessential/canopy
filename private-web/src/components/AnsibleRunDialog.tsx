@@ -28,7 +28,13 @@ import {
 } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
 import { callApi, useApi, useApiAction } from "../api";
-import type { AnsibleLease, CatalogueView, ServerRank } from "../types";
+import type {
+	AnsibleLease,
+	CatalogueView,
+	LimitPreview,
+	RunMember,
+	ServerRank,
+} from "../types";
 import { GradedAction } from "./GradedAction";
 
 /** What Canopy says a lease waits for its run to start, until it has said. */
@@ -36,28 +42,6 @@ const PENDING_FALLBACK_SECS = 300;
 const NOTHING = "";
 
 type Playbook = CatalogueView["playbooks"][number];
-
-type RunMember = {
-	id: string;
-	name: string;
-	host_name: string;
-	groups: string[];
-	application_types: string[];
-};
-type RunOptions = {
-	members: RunMember[];
-	has_central: boolean;
-	pending_for_secs: number;
-};
-type LimitPreview = {
-	matches: Array<{ id: string; name: string; host_name: string }>;
-	groups: string[];
-	hosts: string[];
-	error: string | null;
-};
-type RunState = {
-	lease: AnsibleLease | null;
-};
 
 type Stage = "configure" | "waiting" | "started" | "timeout" | "gone";
 
@@ -124,12 +108,12 @@ export default function AnsibleRunDialog({
 		{ skip: !open },
 	);
 	const members: RunMember[] =
-		options.status === "ok" ? (options.data as unknown as RunOptions).members : [];
+		options.status === "ok" ? options.data.members : [];
 	const hasCentral =
-		options.status === "ok" && (options.data as unknown as RunOptions).has_central;
+		options.status === "ok" && options.data.has_central;
 	const pendingSecs =
 		options.status === "ok"
-			? (options.data as unknown as RunOptions).pending_for_secs
+			? options.data.pending_for_secs
 			: PENDING_FALLBACK_SECS;
 
 	const offered = useMemo(
@@ -199,7 +183,7 @@ export default function AnsibleRunDialog({
 				assignments: assignmentList(assignments),
 			})
 				.then((result) => {
-					if (current) setPreview(result as unknown as LimitPreview);
+					if (current) setPreview(result);
 				})
 				.catch(() => {
 					if (current) setPreview(null);
@@ -255,13 +239,12 @@ export default function AnsibleRunDialog({
 		const poll = window.setInterval(() => {
 			callApi("ansible", "run_state", { server_group_id: groupId, rank })
 				.then((state) => {
-					const held = (state as unknown as RunState).lease;
+					const held = state.lease;
 					if (held && held.id === lease.id) {
 						if (held.started_at) {
 							setLease(held);
 							setWindowId(
-								(state as unknown as { window: { id: string; lease_id: string | null } | null })
-									.window?.id ?? null,
+								state.window?.id ?? null,
 							);
 							setStage("started");
 							onChanged();
@@ -322,7 +305,7 @@ export default function AnsibleRunDialog({
 		// is under way and releasing would end the maintenance it declared.
 		callApi("ansible", "run_state", { server_group_id: groupId, rank })
 			.then((state) => {
-				const held = (state as unknown as RunState).lease;
+				const held = state.lease;
 				if (held && held.id === lease.id && held.started_at) {
 					setLease(held);
 					setStage("started");

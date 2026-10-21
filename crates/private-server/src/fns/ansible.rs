@@ -703,10 +703,9 @@ pub async fn for_group(
 	admin: TailscaleAdmin,
 	Json(args): Json<AnsibleArgs>,
 ) -> Result<Json<AnsibleView>> {
-	// One transaction, so the first read stamps the lease, declares the run's
-	// maintenance and records the run starting only if the whole read serves: a
-	// read that fails starts nothing, and the next is the first again.
-	let mut conn = audit.begin().await?;
+	// The environment is read, and its secrets fetched, on a connection that
+	// holds no transaction, so nothing is held open across the secret store.
+	let mut conn = state.db.get().await?;
 	let lease = AnsibleLease::get(&mut conn, args.lease_id).await?;
 	held_by_caller(&lease, &admin.0.login)?;
 	if !lease.holds_at(Timestamp::now()) {
@@ -756,27 +755,18 @@ pub async fn for_group(
 		group_id: group.id,
 		rank,
 	};
-	let mut wide = Scoped::read(
-		&state,
-		group_scope,
-		&AnsibleVariable::list_at(&mut conn, group_scope).await?,
-	)
-	.await?;
-	wide.overlay(
-		&Scoped::read(
-			&state,
-			environment_scope,
-			&AnsibleVariable::list_at(&mut conn, environment_scope).await?,
-		)
-		.await?,
-	);
-
+	let group_variables = AnsibleVariable::list_at(&mut conn, group_scope).await?;
+	let environment_variables = AnsibleVariable::list_at(&mut conn, environment_scope).await?;
 	let mut by_machine: BTreeMap<Uuid, Vec<AnsibleVariable>> = BTreeMap::new();
 	for variable in AnsibleVariable::list_for_machines(&mut conn, &machine_ids).await? {
 		if let Some(machine_id) = variable.machine_id {
 			by_machine.entry(machine_id).or_default().push(variable);
 		}
 	}
+	drop(conn);
+
+	let mut wide = Scoped::read(&state, group_scope, &group_variables).await?;
+	wide.overlay(&Scoped::read(&state, environment_scope, &environment_variables).await?);
 
 	let reads: Vec<_> = machines
 		.iter()
@@ -836,45 +826,39 @@ pub async fn for_group(
 			secret_vars: effective.secret.into_iter().collect(),
 		});
 	}
-	// A run acts on the members that carry `managed_by_ansible`, and names them
-	// among themselves, as the limit preview does (see `runs::members`), so the
-	// two cannot name a machine differently. The rest are named among
-	// themselves too, and a name two of them would share is no run's concern.
 	// spec: INV#reaching-a-machine
-	let managed: Vec<bool> = hosts
-		.iter()
-		.map(|host| host.vars.0.get(runs::MANAGED).is_some_and(runs::truthy))
-		.collect();
-	for run_acts_on in [true, false] {
-		let indices: Vec<usize> = (0..hosts.len())
-			.filter(|index| managed[*index] == run_acts_on)
-			.collect();
-		let candidates: Vec<hosts::Candidate<'_>> = indices
+	let names = hosts::host_names(
+		&hosts
 			.iter()
-			.map(|index| hosts::Candidate {
-				id: hosts[*index].id,
-				name: &hosts[*index].name,
-				address: hosts[*index].address.as_deref(),
-				tailnet: tailnet_named_by_machine[*index],
+			.zip(&tailnet_named_by_machine)
+			.map(|(host, tailnet)| hosts::Candidate {
+				id: host.id,
+				name: &host.name,
+				address: host.address.as_deref(),
+				tailnet: *tailnet,
+				managed: host.vars.0.get(runs::MANAGED).is_some_and(runs::truthy),
 			})
-			.collect();
-		let names = match hosts::host_names(&candidates) {
-			Ok(names) => names,
-			Err(refusal) if run_acts_on => return Err(refusal),
-			Err(_) => candidates.iter().map(|c| c.id.to_string()).collect(),
-		};
-		for (index, name) in indices.into_iter().zip(names) {
-			hosts[index].host_name = name;
-		}
+			.collect::<Vec<_>>(),
+	)?;
+	for (host, name) in hosts.iter_mut().zip(names) {
+		host.host_name = name;
 	}
 	hosts.sort_by(|a, b| a.name.cmp(&b.name));
 	reject_shared_address(&hosts)?;
 
-	// Last, so the group's row is held only for the writes and not across the
-	// secret store, and a read that fails before here starts nothing.
 	// The first read under a lease is the run starting, and declares maintenance
-	// over what the run acts on, for the holder.
+	// over what the run acts on, for the holder. It is one transaction, begun
+	// once the read has served, so a read that fails starts nothing and the next
+	// is the first again, and the group's row is held only for these writes.
+	// The lease is read again within it, since the run may have lost it while
+	// the environment was read.
 	// spec: ANSRUN#work-under-way
+	let mut conn = audit.begin().await?;
+	let lease = AnsibleLease::get(&mut conn, lease.id).await?;
+	held_by_caller(&lease, &admin.0.login)?;
+	if !lease.holds_at(Timestamp::now()) {
+		return Err(AppError::Conflict(no_longer_held(&lease, &admin.0.login)));
+	}
 	if let Some(started) = AnsibleLease::start(&mut conn, lease.id).await? {
 		let note = started
 			.playbook

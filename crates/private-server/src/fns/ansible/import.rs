@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
-use super::runs::MANAGED;
+use super::runs::{MANAGED, truthy};
 use super::{
 	ANSIBLE_HOST, Environment, EnvironmentArgs, host_of, hosts, inventory_file, reach,
 	resolve_environment,
@@ -652,6 +652,24 @@ async fn plan(conn: &mut AsyncPgConnection, args: &ImportArgs) -> Result<Plan> {
 			));
 		}
 	}
+
+	let group_scope = VariableScope::Group { group_id: group.id };
+	let group_variables = AnsibleVariable::list_at(conn, group_scope).await?;
+
+	// A machine a host is imported onto is managed; any other member is only
+	// where the environment's variables or the group's make it so, since the
+	// import is offered only while no machine carries a variable of its own.
+	let managed_wide = file
+		.environment
+		.get(MANAGED)
+		.filter(|_| !is_reserved(MANAGED))
+		.or_else(|| {
+			group_variables
+				.iter()
+				.find(|variable| variable.name == MANAGED)
+				.and_then(|variable| variable.value.as_ref())
+		})
+		.is_some_and(truthy);
 	if let Err(error) = hosts::host_names(
 		&served
 			.iter()
@@ -661,15 +679,14 @@ async fn plan(conn: &mut AsyncPgConnection, args: &ImportArgs) -> Result<Plan> {
 				name: &machine.name,
 				address: address.as_deref(),
 				tailnet: *tailnet,
+				managed: taken.contains_key(&machine.id) || managed_wide,
 			})
 			.collect::<Vec<_>>(),
 	) {
 		problems.push(message(error));
 	}
 
-	let group_scope = VariableScope::Group { group_id: group.id };
-	let group_names: BTreeSet<String> = AnsibleVariable::list_at(conn, group_scope)
-		.await?
+	let group_names: BTreeSet<String> = group_variables
 		.into_iter()
 		.map(|variable| variable.name)
 		.collect();
