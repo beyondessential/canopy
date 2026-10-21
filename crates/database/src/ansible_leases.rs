@@ -211,6 +211,17 @@ pub struct RunSpec<'a> {
 	pub assignments: &'a BTreeMap<Uuid, String>,
 }
 
+/// What a release is conditional on, where a sweep decided it from a read that
+/// may since have gone stale.
+#[derive(Clone, Copy)]
+enum Guard {
+	None,
+	/// The lease has not been started.
+	Unread,
+	/// The lease has run out as of this time.
+	RanOut(Timestamp),
+}
+
 /// What a sweep of the leases released.
 #[derive(Debug, Default)]
 pub struct Swept {
@@ -424,7 +435,7 @@ impl AnsibleLease {
 				};
 				// A takeover keeps the windows the run declared, passing them on
 				// below; anything else ends them with the lease.
-				Self::release_inner(conn, open.id, held_by, reason, !another).await?;
+				Self::release_inner(conn, open.id, held_by, reason, !another, Guard::None).await?;
 				if another {
 					taken_over = Some(open.id);
 				}
@@ -507,7 +518,7 @@ impl AnsibleLease {
 		by: Option<&str>,
 		reason: ReleaseReason,
 	) -> Result<bool> {
-		Self::release_inner(db, id, by, reason, true).await
+		Self::release_inner(db, id, by, reason, true, Guard::None).await
 	}
 
 	async fn release_inner(
@@ -516,13 +527,25 @@ impl AnsibleLease {
 		by: Option<&str>,
 		reason: ReleaseReason,
 		end_windows: bool,
+		guard: Guard,
 	) -> Result<bool> {
 		use crate::schema::ansible_leases::dsl;
 
+		// What a sweep read is checked again as it is written, so a lease its
+		// run started or extended in between is left for the next tick.
+		let (unread_only, ran_out_by) = match guard {
+			Guard::None => (false, None),
+			Guard::Unread => (true, None),
+			Guard::RanOut(now) => (false, Some(now)),
+		};
 		let released = diesel::update(
 			dsl::ansible_leases
 				.find(id)
-				.filter(dsl::released_at.is_null()),
+				.filter(dsl::released_at.is_null())
+				.filter(dsl::started_at.is_null().or(!unread_only))
+				.filter(dsl::expires_at.le(jiff_diesel::Timestamp::from(
+					ran_out_by.unwrap_or(Timestamp::MAX),
+				))),
 		)
 		.set((
 			dsl::released_at.eq(Into::<jiff_diesel::Timestamp>::into(Timestamp::now())),
@@ -594,7 +617,16 @@ impl AnsibleLease {
 			.await
 			.map_err(AppError::from)?;
 		for lease in unread {
-			if Self::release_inner(db, lease.id, None, ReleaseReason::Unstarted, true).await? {
+			if Self::release_inner(
+				db,
+				lease.id,
+				None,
+				ReleaseReason::Unstarted,
+				true,
+				Guard::Unread,
+			)
+			.await?
+			{
 				swept.unstarted.push(lease);
 			}
 		}
@@ -610,7 +642,8 @@ impl AnsibleLease {
 			let released = diesel::update(
 				dsl::ansible_leases
 					.find(lease.id)
-					.filter(dsl::released_at.is_null()),
+					.filter(dsl::released_at.is_null())
+					.filter(dsl::expires_at.le(Into::<jiff_diesel::Timestamp>::into(now))),
 			)
 			.set((
 				dsl::released_at.eq(Into::<jiff_diesel::Timestamp>::into(lease.expires_at)),

@@ -743,9 +743,17 @@ impl MaintenanceWindow {
 						})?;
 				}
 
+				// Giving a window that lasts a run an end of its own is holding it:
+				// it no longer follows the lease, which would otherwise overwrite
+				// the end on its next extension.
+				let lease_id = match amendment.expected_end {
+					Some(_) => None,
+					None => window.lease_id,
+				};
 				let amended = diesel::update(dsl::maintenance_windows.filter(dsl::id.eq(id)))
 					.set((
 						dsl::expected_end.eq(jiff_diesel::Timestamp::from(expected_end)),
+						dsl::lease_id.eq(lease_id),
 						dsl::note.eq(note.as_deref()),
 						dsl::amended_by.eq(by),
 						dsl::amended_at.eq(jiff_diesel::Timestamp::from(now)),

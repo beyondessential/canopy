@@ -100,7 +100,12 @@ struct Builder {
 	/// can make grow exponentially.
 	aliased: usize,
 	too_many_aliases: bool,
+	too_deep: bool,
 }
+
+/// How deeply a file may nest, far deeper than any inventory a person wrote,
+/// and what keeps the recursion over the tree off the stack's end.
+const DEPTH_LIMIT: usize = 100;
 
 /// What aliases may copy into one file before it is refused, far more than any
 /// inventory a person wrote holds.
@@ -142,6 +147,16 @@ impl Builder {
 
 impl MarkedEventReceiver for Builder {
 	fn on_event(&mut self, event: Event, mark: Marker) {
+		if self.too_deep {
+			return;
+		}
+		if matches!(event, Event::SequenceStart(..) | Event::MappingStart(..))
+			&& self.stack.len() >= DEPTH_LIMIT
+		{
+			self.too_deep = true;
+			self.stack.clear();
+			return;
+		}
 		match event {
 			Event::Scalar(text, style, id, tag) => {
 				if matches!(style, TScalarStyle::Literal | TScalarStyle::Folded) {
@@ -417,6 +432,11 @@ pub fn parse(text: &str) -> Result<InventoryFile, ParseError> {
 	Parser::new_from_str(text)
 		.load(&mut builder, false)
 		.map_err(|e| error(e.to_string()))?;
+	if builder.too_deep {
+		return Err(error(format!(
+			"the file nests more than {DEPTH_LIMIT} levels deep, which no inventory needs"
+		)));
+	}
 	if builder.too_many_aliases {
 		return Err(error(
 			"the file's aliases expand to far more than it holds, which no inventory needs",
@@ -826,6 +846,23 @@ mod tests {
 			file.environment["derived"],
 			json!({ "region": "nz", "tier": "two" })
 		);
+	}
+
+	#[test]
+	fn refuses_nesting_that_would_run_out_the_stack() {
+		let text = format!(
+			"all:\n  vars:\n    deep: {}x{}\n",
+			"[".repeat(5_000),
+			"]".repeat(5_000)
+		);
+		let refused = parse(&text).unwrap_err();
+		assert!(refused.0.contains("levels deep"), "{refused}");
+		let shallow = format!(
+			"all:\n  vars:\n    ok: {}x{}\n",
+			"[".repeat(20),
+			"]".repeat(20)
+		);
+		assert!(parse(&shallow).is_ok());
 	}
 
 	#[test]
