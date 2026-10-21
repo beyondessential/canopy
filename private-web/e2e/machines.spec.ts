@@ -256,12 +256,23 @@ test.describe("machine detail", () => {
 
 		await page.goto(`/fleet/groups/${group.id}/machines/new`);
 		await page.getByLabel(/^Name(\s*\*)?$/i).fill("landed-box");
-		await page.getByRole("button", { name: "Create machine" }).click();
+		// A rank is required, so the box is never left pending.
+		const create = page.getByRole("button", { name: "Create machine" });
+		await expect(create).toBeDisabled();
+		await page.getByRole("combobox", { name: /^Rank(\s*\*)?$/ }).click();
+		await page.getByRole("option", { name: "test" }).click();
+		await create.click();
 
 		await expect(page).toHaveURL(/\/machines\/[0-9a-f-]{36}$/);
 		await expect(
 			page.getByRole("heading", { level: 1, name: /landed-box/ }),
 		).toBeVisible();
+		const id = page.url().split("/").pop()!;
+		const rows = await sql.query<{ rank: string | null }>(
+			"SELECT rank FROM machines WHERE id = $1",
+			[id],
+		);
+		expect(rows[0]!.rank).toBe("test");
 	});
 
 	/// A box serves one environment, so its rank is offered once, on the

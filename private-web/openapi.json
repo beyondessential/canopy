@@ -6147,13 +6147,20 @@
         "type": "object"
       },
       "MachineCreateArgs": {
-        "description": "What an operator supplies when adding a machine.\n\nThe group is the only field that matters to get right up front: which\ngroup a box belongs to is the one thing the box has no way of knowing.",
+        "description": "What an operator supplies when adding a machine.\n\nThe group and the rank are the fields that matter to get right up front:\nwhich group a box belongs to and which environment it serves are the things\nthe box has no way of knowing.",
         "properties": {
           "alert_when_down_for": {
             "description": "How long the box may be silent before it is unreachable, in seconds.\nDefaults to the column's own default.",
             "format": "int64",
             "type": [
               "integer",
+              "null"
+            ]
+          },
+          "alert_when_unreachable": {
+            "description": "Whether the box going away alerts. Defaults to on. Off writes the\nmachine-scoped silence on canopy's reachability check, the same one\nthe check itself offers.",
+            "type": [
+              "boolean",
               "null"
             ]
           },
@@ -6199,6 +6206,17 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "The rank the box carries, which every application arriving on it\ntakes. Omit to leave the box pending until it is ranked."
+              }
             ]
           },
           "tags": {

@@ -524,6 +524,8 @@ test.describe("server create → setup → archive flow", () => {
 		// on the box arrives by report.
 		await page.goto(`/fleet/groups/${group.id}/machines/new`);
 		await page.getByLabel(/^Name(\s*\*)?$/i).fill("flow-machine");
+		await page.getByRole("combobox", { name: /^Rank(\s*\*)?$/ }).click();
+		await page.getByRole("option", { name: "production" }).click();
 		await page.getByRole("button", { name: "Create machine" }).click();
 
 		// Lands on the new box's own page.

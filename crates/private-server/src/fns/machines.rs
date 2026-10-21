@@ -29,7 +29,7 @@ use database::devices::{Device, TailscaleIdentity};
 use jiff::Timestamp;
 
 use database::machine_enrollment_tokens::MachineEnrollmentToken;
-use database::machines::{Machine, MachineUpdate, NewMachine};
+use database::machines::{Machine, MachineAddition, MachineUpdate, NewMachine};
 use database::maintenance_windows::MaintenanceWindow;
 use database::pg_duration::PgDuration;
 use database::reported_detail::MachineReportedDetail;
@@ -353,8 +353,9 @@ pub async fn get_detail(
 
 /// What an operator supplies when adding a machine.
 ///
-/// The group is the only field that matters to get right up front: which
-/// group a box belongs to is the one thing the box has no way of knowing.
+/// The group and the rank are the fields that matter to get right up front:
+/// which group a box belongs to and which environment it serves are the things
+/// the box has no way of knowing.
 #[derive(Deserialize, ToSchema)]
 pub struct MachineCreateArgs {
 	/// What to call the box; required and never blank. Distinct from the
@@ -363,12 +364,19 @@ pub struct MachineCreateArgs {
 	pub name: String,
 	/// The group this machine belongs to. The applications on it take it.
 	pub group_id: Option<Uuid>,
+	/// The rank the box carries, which every application arriving on it
+	/// takes. Omit to leave the box pending until it is ranked.
+	pub rank: Option<ServerRank>,
 	/// Whether the box is cloud-hosted, if known.
 	pub cloud: Option<bool>,
 	/// Where the box is, if known.
 	pub geolocation: Option<GeoPoint>,
 	/// Whether the machine's own checks alert. Defaults to on.
 	pub is_monitored: Option<bool>,
+	/// Whether the box going away alerts. Defaults to on. Off writes the
+	/// machine-scoped silence on canopy's reachability check, the same one
+	/// the check itself offers.
+	pub alert_when_unreachable: Option<bool>,
 	/// How long the box may be silent before it is unreachable, in seconds.
 	/// Defaults to the column's own default.
 	pub alert_when_down_for: Option<i64>,
@@ -405,51 +413,45 @@ pub struct MachineCreateArgs {
 )]
 pub async fn create(
 	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
+	admin: TailscaleAdmin,
 	Json(args): Json<MachineCreateArgs>,
 ) -> Result<Json<Uuid>> {
 	// Refused before the tailnet bind, so a blank name leaves nothing behind.
 	let name = database::machines::normalise_name(&args.name)?;
 	let mut conn = state.db.get().await?;
 
-	// Bind the tailnet node first: a machine created and then failed to bind
-	// would leave a record the operator did not ask for.
+	// Resolve the tailnet node first, so a node that cannot be bound leaves
+	// no machine behind; the addition itself is one transaction.
 	let device_id = match args.tailscale_identifier.as_deref() {
 		None => None,
 		Some(identifier) => Some(resolve_tailnet_device(&state, &mut conn, identifier).await?),
 	};
 
-	let machine = Machine::create(
+	let machine = Machine::add(
 		&mut conn,
-		NewMachine {
-			name,
-			group_id: args.group_id,
-			cloud: args.cloud,
-			geolocation: args.geolocation,
+		MachineAddition {
+			machine: NewMachine {
+				name,
+				group_id: args.group_id,
+				cloud: args.cloud,
+				geolocation: args.geolocation,
+				rank: args.rank,
+			},
+			settings: MachineUpdate {
+				is_monitored: args.is_monitored,
+				alert_when_down_for: args
+					.alert_when_down_for
+					.map(|s| PgDuration(jiff::SignedDuration::from_secs(s))),
+				notes: args.notes,
+				tags: args.tags,
+				..Default::default()
+			},
+			alert_when_unreachable: args.alert_when_unreachable.unwrap_or(true),
+			device_id,
+			by: Some(&admin.0.login),
 		},
 	)
 	.await?;
-
-	// The rest of the form is an edit applied to the machine just made, so
-	// creating and editing cannot disagree about what a field means.
-	Machine::update(
-		&mut conn,
-		machine.id,
-		MachineUpdate {
-			is_monitored: args.is_monitored,
-			alert_when_down_for: args
-				.alert_when_down_for
-				.map(|s| PgDuration(jiff::SignedDuration::from_secs(s))),
-			notes: args.notes,
-			tags: args.tags,
-			..Default::default()
-		},
-	)
-	.await?;
-
-	if let Some(device_id) = device_id {
-		Machine::bind_device(&mut conn, machine.id, device_id).await?;
-	}
 
 	Ok(Json(machine.id))
 }

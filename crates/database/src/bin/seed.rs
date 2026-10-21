@@ -639,6 +639,7 @@ async fn seed_servers(
 				group_id: server.group_id,
 				cloud: server.cloud,
 				geolocation: server.geolocation,
+				rank: None,
 			},
 		)
 		.await?;

@@ -25,8 +25,9 @@ Identities that authenticate something other than a machine — an operator's cr
 An operator creates a machine and places it in a group.
 Canopy issues an enrolment ticket, the agent on the box presents it, and the machine is enrolled.
 
-The group is the only thing an operator supplies, because it is the only thing that exists nowhere else.
-Which group a box belongs to is an organisational fact the machine has no way of knowing; what is installed on the box is not.
+The group and the rank are what an operator supplies, because they exist nowhere else.
+Which group a box belongs to and which environment it serves are organisational facts the machine has no way of knowing; what is installed on the box is not.
+An operator gives a machine its rank as they create it, so what arrives on it is ranked from the start rather than pending (see "Environments").
 
 A machine that has been created but has not yet reported has no applications, and presents as one that has not checked in rather than as an error.
 

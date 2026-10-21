@@ -9123,8 +9123,9 @@ export interface components {
         /**
          * @description What an operator supplies when adding a machine.
          *
-         *     The group is the only field that matters to get right up front: which
-         *     group a box belongs to is the one thing the box has no way of knowing.
+         *     The group and the rank are the fields that matter to get right up front:
+         *     which group a box belongs to and which environment it serves are the things
+         *     the box has no way of knowing.
          */
         MachineCreateArgs: {
             /**
@@ -9133,6 +9134,12 @@ export interface components {
              *     Defaults to the column's own default.
              */
             alert_when_down_for?: number | null;
+            /**
+             * @description Whether the box going away alerts. Defaults to on. Off writes the
+             *     machine-scoped silence on canopy's reachability check, the same one
+             *     the check itself offers.
+             */
+            alert_when_unreachable?: boolean | null;
             /** @description Whether the box is cloud-hosted, if known. */
             cloud?: boolean | null;
             geolocation?: null | components["schemas"]["GeoPoint"];
@@ -9151,6 +9158,7 @@ export interface components {
             name: string;
             /** @description Operator notes shown on the machine's page. */
             notes?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
             tags?: null | components["schemas"]["TagMap"];
             /**
              * @description A tailnet node to bind this machine to up front, by address, node key,

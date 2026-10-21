@@ -144,6 +144,24 @@ pub struct NewMachine {
 	pub group_id: Option<Uuid>,
 	pub cloud: Option<bool>,
 	pub geolocation: Option<GeoPoint>,
+	/// The rank the box carries from the start. Nothing is on a new box for
+	/// a rank to re-evaluate, so it is written with the row rather than
+	/// through [`Machine::set_rank`].
+	// spec: FLT#machines-come-from-operators
+	pub rank: Option<commons_types::server::rank::ServerRank>,
+}
+
+/// What an operator supplies when adding a machine (see [`Machine::add`]).
+pub struct MachineAddition<'a> {
+	pub machine: NewMachine,
+	/// The rest of the form, applied as an edit to the machine just made.
+	pub settings: MachineUpdate,
+	/// Off writes the machine-scoped silence on canopy's reachability check.
+	pub alert_when_unreachable: bool,
+	/// A tailnet node already resolved for the box, to bind it to.
+	pub device_id: Option<Uuid>,
+	/// Who is adding it, recorded on the silence.
+	pub by: Option<&'a str>,
 }
 
 /// A partial update to a machine. An absent field is left alone; a present
@@ -186,6 +204,7 @@ impl NewMachine {
 			group_id: None,
 			cloud: None,
 			geolocation: None,
+			rank: None,
 		}
 	}
 }
@@ -201,6 +220,42 @@ impl Machine {
 			.get_result(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// Add a machine as an operator does from the form: create it, apply the
+	/// rest of the form as an edit, quiet its reachability if asked, and bind
+	/// the tailnet node already resolved for it. One transaction, so a failure
+	/// part-way leaves no machine behind for a retry to duplicate.
+	///
+	/// A box being added has no alerting yet for a silence to take away, so
+	/// the reachability silence is part of the addition rather than the
+	/// removal of a protection.
+	// spec: SAFE#grading-the-administrative-surface
+	pub async fn add(db: &mut AsyncPgConnection, addition: MachineAddition<'_>) -> Result<Self> {
+		use diesel_async::AsyncConnection;
+
+		db.transaction::<_, AppError, _>(async move |conn| {
+			let machine = Self::create(conn, addition.machine).await?;
+			// The rest of the form is an edit applied to the machine just made,
+			// so creating and editing cannot disagree about what a field means.
+			let machine = Self::update(conn, machine.id, addition.settings).await?;
+			if !addition.alert_when_unreachable {
+				crate::silenced_refs::MachineSilencedRef::add(
+					conn,
+					machine.id,
+					crate::statuses::CANOPY_SOURCE,
+					crate::statuses::REACHABILITY_REF,
+					None,
+					addition.by,
+				)
+				.await?;
+			}
+			if let Some(device_id) = addition.device_id {
+				Self::bind_device(conn, machine.id, device_id).await?;
+			}
+			Ok(machine)
+		})
+		.await
 	}
 
 	/// Apply an operator's edit.
