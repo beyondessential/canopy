@@ -218,8 +218,6 @@ enum Guard {
 	None,
 	/// The lease has not been started.
 	Unread,
-	/// The lease has run out as of this time.
-	RanOut(Timestamp),
 }
 
 /// What a sweep of the leases released.
@@ -533,27 +531,33 @@ impl AnsibleLease {
 
 		// What a sweep read is checked again as it is written, so a lease its
 		// run started or extended in between is left for the next tick.
-		let (unread_only, ran_out_by) = match guard {
-			Guard::None => (false, None),
-			Guard::Unread => (true, None),
-			Guard::RanOut(now) => (false, Some(now)),
-		};
-		let released = diesel::update(
-			dsl::ansible_leases
-				.find(id)
-				.filter(dsl::released_at.is_null())
-				.filter(dsl::started_at.is_null().or(!unread_only))
-				.filter(dsl::expires_at.le(jiff_diesel::Timestamp::from(
-					ran_out_by.unwrap_or(Timestamp::MAX),
-				))),
-		)
-		.set((
-			dsl::released_at.eq(Into::<jiff_diesel::Timestamp>::into(Timestamp::now())),
-			dsl::released_by.eq(by),
-			dsl::release_reason.eq(reason.to_string()),
-		))
-		.execute(db)
-		.await
+		let released_at = Into::<jiff_diesel::Timestamp>::into(Timestamp::now());
+		let reason = reason.to_string();
+		let open = dsl::ansible_leases
+			.find(id)
+			.filter(dsl::released_at.is_null());
+		let released = match guard {
+			Guard::None => {
+				diesel::update(open)
+					.set((
+						dsl::released_at.eq(released_at),
+						dsl::released_by.eq(by),
+						dsl::release_reason.eq(&reason),
+					))
+					.execute(db)
+					.await
+			}
+			Guard::Unread => {
+				diesel::update(open.filter(dsl::started_at.is_null()))
+					.set((
+						dsl::released_at.eq(released_at),
+						dsl::released_by.eq(by),
+						dsl::release_reason.eq(&reason),
+					))
+					.execute(db)
+					.await
+			}
+		}
 		.map_err(AppError::from)?;
 		if released > 0 && end_windows {
 			MaintenanceWindow::end_for_lease(db, id, by).await?;

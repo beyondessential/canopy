@@ -633,3 +633,66 @@ async fn names_what_a_run_acts_on_as_the_limit_preview_does() {
 	})
 	.await
 }
+
+/// An upgrade is gated on a plan, so a playbook the catalogue runs as an upgrade
+/// cannot be started as a configure to go around it.
+// spec: ANSRUN#planned-upgrades
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_an_intent_that_disagrees_with_the_playbook() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		environment(&mut conn, &private).await;
+		database::ansible_catalogue::CatalogueState::record_read(
+			&mut conn,
+			&json!({
+				"$schema": "https://json-schema.org/draft/2020-12/schema",
+				"type": "object",
+				"properties": {},
+				"x-canopy": { "playbooks": {
+					"tamanu-upgrade.yml": { "intent": "upgrade", "tags": [] }
+				} }
+			}),
+			None,
+			jiff::Timestamp::now(),
+		)
+		.await
+		.unwrap();
+
+		let refusal = refused(
+			&private,
+			json!({ "group": "kamaka", "playbook": "tamanu-upgrade.yml", "intent": "configure" }),
+		)
+		.await;
+		assert!(refusal.contains("is run as upgrade"), "{refusal}");
+	})
+	.await
+}
+
+/// A run started for a playbook over an environment where nothing is managed
+/// would hold it shut and act on nothing.
+// spec: ANSRUN#presentation
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_a_run_that_would_act_on_nothing() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "bare").await;
+		insert_application_on_its_own_machine(
+			&mut conn,
+			group,
+			"bare-central",
+			"tamanu-central",
+			Some("production"),
+			Some("https://bare.example.org"),
+		)
+		.await;
+		read_catalogue(&mut conn).await;
+
+		let refusal = refused(
+			&private,
+			json!({ "group": "bare", "playbook": "base-install.yml" }),
+		)
+		.await;
+		assert!(refusal.contains("would act on nothing"), "{refusal}");
+		// A lease the plugin takes for itself is left to the plugin to refuse.
+		take_lease(&private, json!({ "group": "bare" })).await;
+	})
+	.await
+}

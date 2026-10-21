@@ -309,12 +309,12 @@ fn limit_members(members: &[Member]) -> Vec<limit::Member<'_>> {
 pub async fn check(
 	conn: &mut AsyncPgConnection,
 	environment: &Environment,
-	playbook: Option<&str>,
-	limit: Option<&str>,
-	tags: &[String],
-	skip_tags: &[String],
-	assignments: &[AssignmentArg],
+	args: &super::TakeLeaseArgs,
 ) -> Result<Checked> {
+	let intent = args.intent;
+	let playbook = args.playbook.as_deref();
+	let limit = args.limit.as_deref();
+	let (tags, skip_tags, assignments) = (&args.tags, &args.skip_tags, &args.assignments);
 	let loaded = Loaded::get(conn).await?;
 	let chosen = match (playbook, &loaded) {
 		(Some(name), Some(loaded)) => {
@@ -324,6 +324,16 @@ pub async fn check(
 		}
 		_ => None,
 	};
+	// The catalogue says what a playbook is run as, and an upgrade is gated on a
+	// plan, so a run cannot be labelled as the other to go around it.
+	if let Some(chosen) = &chosen
+		&& chosen.intent != intent
+	{
+		return Err(AppError::BadRequest(format!(
+			"{} is run as {}, not as {intent}",
+			chosen.name, chosen.intent
+		)));
+	}
 	// The catalogue lists every tag a playbook takes, so one it lists none for
 	// takes none: `--tags` there would run only its `always` tasks and configure
 	// nothing.
@@ -341,6 +351,15 @@ pub async fn check(
 
 	let assigned = assignments_of(assignments);
 	let members = members(conn, environment, &assigned).await?;
+
+	// A run started for a playbook, or limited, acts on the managed members; with
+	// none it would hold the environment shut and act on nothing.
+	if (playbook.is_some() || limit.is_some()) && members.is_empty() {
+		return Err(AppError::BadRequest(
+			"no machine in this environment carries managed_by_ansible, so a run would act on nothing"
+				.into(),
+		));
+	}
 
 	let environment_has_central = environment
 		.applications

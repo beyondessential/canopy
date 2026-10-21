@@ -553,6 +553,49 @@ async fn taking_the_lease_over_passes_the_window_to_the_new_holder() {
 	.await
 }
 
+/// Giving a run's window an end by amending it is holding it: the lease no
+/// longer overwrites the end when it is extended.
+// spec: MNT#ending
+#[tokio::test(flavor = "multi_thread")]
+async fn amending_a_run_windows_end_frees_it_from_the_lease() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let fleet = fleet(&mut conn).await;
+		let lease = lease(&mut conn, fleet.group, "op").await;
+		let window = MaintenanceWindow::declare_for_run(&mut conn, &lease, None, None)
+			.await
+			.expect("declared")
+			.declared
+			.remove(0);
+
+		let end = in_hours(6);
+		let amended = MaintenanceWindow::amend(
+			&mut conn,
+			window.id,
+			Amendment {
+				expected_end: Some(end),
+				..Amendment::default()
+			},
+			Some("op"),
+		)
+		.await
+		.expect("amended");
+		assert!(amended.lease_id.is_none(), "no longer follows the lease");
+
+		AnsibleLease::extend(&mut conn, lease.id)
+			.await
+			.expect("extended");
+		let after = MaintenanceWindow::get(&mut conn, window.id)
+			.await
+			.expect("window");
+		assert_eq!(
+			after.expected_end.as_microsecond(),
+			end.as_microsecond(),
+			"the lease does not overwrite it"
+		);
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn holding_a_window_frees_it_from_the_lease() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {

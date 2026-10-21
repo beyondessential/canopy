@@ -850,19 +850,18 @@ mod tests {
 
 	#[test]
 	fn refuses_nesting_that_would_run_out_the_stack() {
-		let text = format!(
-			"all:\n  vars:\n    deep: {}x{}\n",
-			"[".repeat(5_000),
-			"]".repeat(5_000)
-		);
-		let refused = parse(&text).unwrap_err();
+		let nested = |levels: usize| {
+			format!(
+				"all:\n  vars:\n    deep: {}x{}\n",
+				"[".repeat(levels),
+				"]".repeat(levels)
+			)
+		};
+		let refused = parse(&nested(150)).unwrap_err();
 		assert!(refused.0.contains("levels deep"), "{refused}");
-		let shallow = format!(
-			"all:\n  vars:\n    ok: {}x{}\n",
-			"[".repeat(20),
-			"]".repeat(20)
-		);
-		assert!(parse(&shallow).is_ok());
+		// Far deeper is refused too, by the parser's own limit before ours.
+		assert!(parse(&nested(5_000)).is_err());
+		assert!(parse(&nested(20)).is_ok());
 	}
 
 	#[test]

@@ -702,3 +702,26 @@ async fn a_group_wide_variable_does_not_hold_it_back_and_is_named_where_overridd
 	})
 	.await
 }
+
+/// What an environment serves changes under a run that holds it, so nothing is
+/// imported into one meanwhile.
+// spec: ANSIMP#applying
+#[tokio::test(flavor = "multi_thread")]
+async fn is_refused_while_a_run_holds_the_environment() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let env = environment(&mut conn).await;
+		let request = json!({
+			"group": "kamaka", "file": FILE,
+			"hosts": [{ "host": "10.20.30.40:223", "machine_id": env.office }],
+		});
+		let previewed = preview(&private, request.clone()).await;
+		crate::ansible::take_lease(&private, json!({ "group": "kamaka" })).await;
+
+		let mut apply = request;
+		apply["members"] = previewed["members"].clone();
+		let refused = private.post("/api/ansible/import_apply").json(&apply).await;
+		refused.assert_status(axum::http::StatusCode::CONFLICT);
+		assert!(refused.text().contains("a run holds this environment"));
+	})
+	.await
+}

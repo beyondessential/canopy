@@ -424,16 +424,7 @@ pub async fn take_lease(
 		)));
 	}
 
-	let checked = runs::check(
-		&mut conn,
-		&environment,
-		args.playbook.as_deref(),
-		args.limit.as_deref(),
-		&args.tags,
-		&args.skip_tags,
-		&args.assignments,
-	)
-	.await?;
+	let checked = runs::check(&mut conn, &environment, &args).await?;
 
 	// A window over any member refuses the environment, since a run acts on the
 	// environment as a whole, whatever its limit leaves out.
@@ -736,47 +727,6 @@ pub async fn for_group(
 			.await?;
 	}
 
-	// The first read under a lease is the run starting, and declares maintenance
-	// over what the run acts on, for the holder.
-	// spec: ANSRUN#work-under-way
-	if let Some(started) = AnsibleLease::start(&mut conn, lease.id).await? {
-		let note = started
-			.playbook
-			.clone()
-			.unwrap_or_else(|| started.intent.to_string());
-		let windows = MaintenanceWindow::declare_for_run(
-			&mut conn,
-			&started,
-			started.limited_to.as_deref(),
-			Some(&note),
-		)
-		.await?;
-		let (group_record, lease_record) = lease_records(&group_for_entry, &started);
-		// Each window the start opened names the lease it was declared for.
-		for window in &windows.declared {
-			let (record, target) =
-				crate::fns::maintenance::window_records(&mut conn, window).await?;
-			conn.record(Action::MaintenanceDeclared {
-				window: record,
-				target,
-				upgrade_plan: None,
-				lease: Some(lease_record.clone()),
-				rank: window.rank,
-				expected_end: window.expected_end,
-				note: window.note.clone(),
-			})
-			.await?;
-		}
-		conn.record(Action::AnsibleRunStarted {
-			group: group_record,
-			lease: lease_record,
-			rank: started.rank,
-			intent: started.intent.to_string(),
-			playbook: started.playbook.clone(),
-		})
-		.await?;
-	}
-
 	let environment = resolve_environment(
 		&mut conn,
 		&EnvironmentArgs {
@@ -919,6 +869,49 @@ pub async fn for_group(
 	}
 	hosts.sort_by(|a, b| a.name.cmp(&b.name));
 	reject_shared_address(&hosts)?;
+
+	// Last, so the group's row is held only for the writes and not across the
+	// secret store, and a read that fails before here starts nothing.
+	// The first read under a lease is the run starting, and declares maintenance
+	// over what the run acts on, for the holder.
+	// spec: ANSRUN#work-under-way
+	if let Some(started) = AnsibleLease::start(&mut conn, lease.id).await? {
+		let note = started
+			.playbook
+			.clone()
+			.unwrap_or_else(|| started.intent.to_string());
+		let windows = MaintenanceWindow::declare_for_run(
+			&mut conn,
+			&started,
+			started.limited_to.as_deref(),
+			Some(&note),
+		)
+		.await?;
+		let (group_record, lease_record) = lease_records(&group_for_entry, &started);
+		// Each window the start opened names the lease it was declared for.
+		for window in &windows.declared {
+			let (record, target) =
+				crate::fns::maintenance::window_records(&mut conn, window).await?;
+			conn.record(Action::MaintenanceDeclared {
+				window: record,
+				target,
+				upgrade_plan: None,
+				lease: Some(lease_record.clone()),
+				rank: window.rank,
+				expected_end: window.expected_end,
+				note: window.note.clone(),
+			})
+			.await?;
+		}
+		conn.record(Action::AnsibleRunStarted {
+			group: group_record,
+			lease: lease_record,
+			rank: started.rank,
+			intent: started.intent.to_string(),
+			playbook: started.playbook.clone(),
+		})
+		.await?;
+	}
 
 	tracing::info!(
 		login = %admin.0.login,

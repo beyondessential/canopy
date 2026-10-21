@@ -706,6 +706,51 @@ test.describe("group Ansible", () => {
 			.toBe("0");
 	});
 
+	// The run may read the lease between the last poll and the click, in which
+	// case it is under way and giving up would end the maintenance it declared.
+	// spec: ANSRUN#starting-a-run
+	test("does not give up a lease whose run has started", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
+		const central = await seedServer(sql, {
+			name: "kamaka-prod-central",
+			type: "tamanu-central",
+			rank: "production",
+			groupId: group.id,
+			tags: {},
+			reported: true,
+		});
+		await seedAnsibleCatalogue(sql);
+		await seedAnsibleVariable(sql, {
+			machineId: central.machineId,
+			name: "managed_by_ansible",
+			value: true,
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		await page
+			.getByTestId("group-ansible")
+			.getByTestId("environment-production")
+			.getByTestId("run-install")
+			.click();
+		await page.getByTestId("run-start").click();
+		await expect(page.getByTestId("run-waiting")).toBeVisible();
+
+		const [lease] = await sql.query<{ id: string }>(
+			"SELECT id FROM ansible_leases WHERE released_at IS NULL",
+		);
+		const read = await page.request.post("/api/ansible/for_group", {
+			data: { lease_id: lease?.id },
+		});
+		expect(read.ok()).toBe(true);
+		await page.getByTestId("run-give-up").click();
+
+		await expect(page.getByTestId("run-started")).toBeVisible();
+		const open = await sql.query<{ n: string }>(
+			"SELECT COUNT(*)::text AS n FROM ansible_leases WHERE released_at IS NULL",
+		);
+		expect(open[0]?.n).toBe("1");
+	});
+
 	// The run reading its environment starts it: the dialog says so, and
 	// maintenance is declared for as long as the lease holds.
 	// spec: ANSRUN#work-under-way

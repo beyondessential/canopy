@@ -327,7 +327,7 @@ export default function AnsibleRunDialog({
 					setLease(held);
 					setStage("started");
 					onChanged();
-					return null;
+					return "started" as const;
 				}
 				return release.call({ lease_id: lease.id });
 			})
@@ -335,7 +335,7 @@ export default function AnsibleRunDialog({
 				// Already gone, which is what was asked for.
 			})
 			.then((released) => {
-				if (released === null) return;
+				if (released === "started") return;
 				onChanged();
 				onClose();
 			});

@@ -15,6 +15,7 @@ use commons_types::{Uuid, server::rank::ServerRank};
 use database::{
 	Device,
 	ansible_catalogue::{Catalogue, Loaded, ScopeKind},
+	ansible_leases::AnsibleLease,
 	ansible_variables::{AnsibleVariable, VariableScope},
 	applications::Application,
 	audit::{Action, ImportedVariable, Record},
@@ -777,6 +778,17 @@ pub async fn import_apply(
 	// Held for the rest of the transaction, so two imports, or an import and a
 	// run's lease, are decided one after the other.
 	database::ansible_leases::lock_group(&mut conn, resolved.group.id).await?;
+
+	// What an environment serves changes under a run that holds it, so an import
+	// waits for the run to end.
+	if let Some(held) = AnsibleLease::open_for(&mut conn, resolved.group.id, resolved.rank).await?
+		&& held.holds_at(jiff::Timestamp::now())
+	{
+		return Err(AppError::Conflict(format!(
+			"a run holds this environment, so nothing is imported into it meanwhile: {}",
+			held.held_by_another()
+		)));
+	}
 
 	let Plan {
 		preview,
