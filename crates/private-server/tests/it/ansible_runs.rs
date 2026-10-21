@@ -178,6 +178,16 @@ async fn a_lease_records_the_run_it_was_taken_for() {
 async fn refuses_what_could_not_run() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		environment(&mut conn, &private).await;
+		// Before any catalogue is read, no playbook is known, so none can be
+		// labelled with an intent that goes around the upgrade plan.
+		assert!(
+			refused(
+				&private,
+				json!({ "group": "kamaka", "playbook": "tamanu-upgrade.yml", "intent": "configure" })
+			)
+			.await
+			.contains("read no catalogue")
+		);
 		read_catalogue(&mut conn).await;
 
 		assert!(
@@ -693,6 +703,73 @@ async fn refuses_a_run_that_would_act_on_nothing() {
 		assert!(refusal.contains("would act on nothing"), "{refusal}");
 		// A lease the plugin takes for itself is left to the plugin to refuse.
 		take_lease(&private, json!({ "group": "bare" })).await;
+	})
+	.await
+}
+
+/// Giving up on a run releases its lease only while no run has read it, so a run
+/// that started in the meantime keeps the lease and the maintenance it declared.
+// spec: ANSRUN#starting-a-run
+#[tokio::test(flavor = "multi_thread")]
+async fn giving_up_releases_only_a_lease_no_run_has_read() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		environment(&mut conn, &private).await;
+		let give_up = async |lease: &Uuid| {
+			private
+				.post("/api/ansible/release_lease")
+				.json(&json!({ "lease_id": lease, "unless_started": true }))
+				.await
+		};
+
+		let unread = take_lease(&private, json!({ "group": "kamaka" })).await;
+		give_up(&unread).await.assert_status_ok();
+
+		let read = take_lease(&private, json!({ "group": "kamaka" })).await;
+		private
+			.post("/api/ansible/for_group")
+			.json(&json!({ "lease_id": read }))
+			.await
+			.assert_status_ok();
+		give_up(&read)
+			.await
+			.assert_status(axum::http::StatusCode::CONFLICT);
+		assert_eq!(
+			database::maintenance_windows::MaintenanceWindow::list_open(&mut conn)
+				.await
+				.unwrap()
+				.len(),
+			1,
+			"the run's maintenance stands"
+		);
+	})
+	.await
+}
+
+/// A window another operator holds over a machine at the rank that no run can
+/// reach yet refuses the take, as it would refuse the maintenance the run
+/// declares on its first read.
+// spec: ANSRUN#work-under-way
+#[tokio::test(flavor = "multi_thread")]
+async fn a_window_over_a_machine_no_run_reaches_yet_refuses_the_take() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		use commons_tests::diesel_async::SimpleAsyncConnection;
+		let env = environment(&mut conn, &private).await;
+		let spare = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (name, id, group_id, rank)
+			 VALUES ('kamaka-spare', '{spare}', '{}', 'production');
+			 INSERT INTO maintenance_windows (machine_id, expected_end, declared_by)
+			 VALUES ('{spare}', NOW() + INTERVAL '2 hours', 'someone.else@bes.au')",
+			env.group
+		))
+		.await
+		.unwrap();
+
+		assert!(
+			refused(&private, json!({ "group": "kamaka" }))
+				.await
+				.contains("someone.else@bes.au")
+		);
 	})
 	.await
 }

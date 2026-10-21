@@ -19,6 +19,8 @@ describe("resolvePlain", () => {
 		expect(resolvePlain("1:30")).toBe(90);
 		expect(resolvePlain("02:30")).toBe("02:30");
 		expect(resolvePlain("12345678901234567890123")).toBe("12345678901234567890123");
+		expect(resolvePlain("9007199254740991")).toBe(9007199254740991);
+		expect(resolvePlain("9007199254740993")).toBe("9007199254740993");
 	});
 
 	it("reads floats only where PyYAML does", () => {

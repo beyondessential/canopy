@@ -519,6 +519,19 @@ impl AnsibleLease {
 		Self::release_inner(db, id, by, reason, true, Guard::None).await
 	}
 
+	/// Give the environment back while no run has read the lease, as an
+	/// operator giving up on a run that never started does. Answers whether it
+	/// was released: a lease its run has started is left held, since releasing
+	/// it would end the maintenance the run declared.
+	// spec: ANSRUN#starting-a-run
+	pub async fn release_unstarted(
+		db: &mut AsyncPgConnection,
+		id: Uuid,
+		by: Option<&str>,
+	) -> Result<bool> {
+		Self::release_inner(db, id, by, ReleaseReason::Released, true, Guard::Unread).await
+	}
+
 	async fn release_inner(
 		db: &mut AsyncPgConnection,
 		id: Uuid,

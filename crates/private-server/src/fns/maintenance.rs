@@ -35,11 +35,7 @@ pub async fn window_records(
 ) -> Result<(Record, Vec<Record>)> {
 	let label = database::maintenance_windows::window_label(conn, window).await?;
 	let targets = if window.is_machine_set() {
-		let mut records = Vec::with_capacity(window.machine_ids.len());
-		for machine in &window.machine_ids {
-			records.push(Record::machine(conn, *machine).await?);
-		}
-		records
+		Record::machines(conn, &window.machine_ids).await?
 	} else {
 		vec![
 			Record::scope(conn, window.scope())

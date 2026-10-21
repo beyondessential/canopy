@@ -11531,6 +11531,19 @@ export interface components {
              */
             patch: number;
         };
+        /** @description Give a lease back. */
+        ReleaseLeaseArgs: {
+            /**
+             * Format: uuid
+             * @description Identifier of the lease.
+             */
+            lease_id: string;
+            /**
+             * @description Release only while no run has read the lease, as giving up on a run that
+             *     never started does, and refuse once one has.
+             */
+            unless_started?: boolean;
+        };
         /**
          * @description Why a lease stopped holding.
          * @enum {string}
@@ -14669,7 +14682,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["LeaseArgs"];
+                "application/json": components["schemas"]["ReleaseLeaseArgs"];
             };
         };
         responses: {
@@ -14684,6 +14697,15 @@ export interface operations {
             };
             /** @description No such lease, or it was already released */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description Asked to release only an unstarted lease, and its run has started */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

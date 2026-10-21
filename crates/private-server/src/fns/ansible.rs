@@ -132,6 +132,17 @@ pub struct LeaseArgs {
 	pub lease_id: Uuid,
 }
 
+/// Give a lease back.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct ReleaseLeaseArgs {
+	/// Identifier of the lease.
+	pub lease_id: Uuid,
+	/// Release only while no run has read the lease, as giving up on a run that
+	/// never started does, and refuse once one has.
+	#[serde(default)]
+	pub unless_started: bool,
+}
+
 /// Read what an environment serves Ansible, under a lease held on it.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct AnsibleArgs {
@@ -427,9 +438,11 @@ pub async fn take_lease(
 	let checked = runs::check(&mut conn, &environment, &args).await?;
 
 	// A window over any member refuses the environment, since a run acts on the
-	// environment as a whole, whatever its limit leaves out.
+	// environment as a whole, whatever its limit leaves out. Every machine at the
+	// rank counts, as it does to the run's own declaration, so a take this lets
+	// through is not refused at the run's first read.
 	let machine_ids: Vec<Uuid> = environment
-		.machines
+		.at_rank
 		.iter()
 		.map(|machine| machine.id)
 		.collect();
@@ -457,7 +470,7 @@ pub async fn take_lease(
 	)
 	.await?
 	.map_err(|window| {
-		AppError::Conflict(under_maintenance(group, &environment.machines, &window))
+		AppError::Conflict(under_maintenance(group, &environment.at_rank, &window))
 	})?;
 
 	let (group_record, lease_record) = lease_records(group, &taken);
@@ -466,10 +479,8 @@ pub async fn take_lease(
 		taken.note.clone(),
 		taken.expires_at,
 	);
-	let mut limited_to: Vec<Record> = Vec::new();
-	for id in taken.limited_to.iter().flatten() {
-		limited_to.push(Record::machine(&mut conn, *id).await?);
-	}
+	let limited_to: Vec<Record> =
+		Record::machines(&mut conn, taken.limited_to.as_deref().unwrap_or_default()).await?;
 	let assignments: Vec<LeaseAssignment> = taken
 		.assignments
 		.iter()
@@ -580,28 +591,33 @@ pub async fn extend_lease(
 	operation_id = "ansible_release_lease",
 	tag = "ansible",
 	security(("tailscale-admin" = [])),
-	request_body = LeaseArgs,
+	request_body = ReleaseLeaseArgs,
 	responses(
 		(status = 200, description = "Released", body = ()),
 		(status = 404, description = "No such lease, or it was already released", body = ProblemDetailsSchema),
+		(status = 409, description = "Asked to release only an unstarted lease, and its run has started", body = ProblemDetailsSchema),
 	),
 )]
 pub async fn release_lease(
 	audit: Audit,
 	admin: TailscaleAdmin,
-	Json(args): Json<LeaseArgs>,
+	Json(args): Json<ReleaseLeaseArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = audit.begin().await?;
 	let lease = AnsibleLease::get(&mut conn, args.lease_id).await?;
-	if !AnsibleLease::release(
-		&mut conn,
-		lease.id,
-		Some(&admin.0.login),
-		ReleaseReason::Released,
-	)
-	.await?
-	{
-		return Err(AppError::NotFound("that lease is no longer held".into()));
+	let by = Some(admin.0.login.as_str());
+	let released = if args.unless_started {
+		AnsibleLease::release_unstarted(&mut conn, lease.id, by).await?
+	} else {
+		AnsibleLease::release(&mut conn, lease.id, by, ReleaseReason::Released).await?
+	};
+	if !released {
+		let now = AnsibleLease::get(&mut conn, lease.id).await?;
+		return Err(if now.released_at.is_none() {
+			AppError::Conflict("that lease's run has started, so it is left held".into())
+		} else {
+			AppError::NotFound("that lease is no longer held".into())
+		});
 	}
 	let group = ServerGroup::get_by_id(&mut conn, lease.server_group_id).await?;
 	let (group_record, lease_record) = lease_records(&group, &lease);
@@ -846,56 +862,17 @@ pub async fn for_group(
 	hosts.sort_by(|a, b| a.name.cmp(&b.name));
 	reject_shared_address(&hosts)?;
 
-	// The first read under a lease is the run starting, and declares maintenance
-	// over what the run acts on, for the holder. It is one transaction, begun
-	// once the read has served, so a read that fails starts nothing and the next
-	// is the first again, and the group's row is held only for these writes.
-	// The lease is read again within it, since the run may have lost it while
-	// the environment was read.
-	// spec: ANSRUN#work-under-way
+	// The run starts in one transaction, begun once the read has served, so a
+	// read that fails starts nothing and the next is the first again, and the
+	// group's row is held only for the start's writes. The lease is read again
+	// within it, since the run may have lost it while the environment was read.
 	let mut conn = audit.begin().await?;
 	let lease = AnsibleLease::get(&mut conn, lease.id).await?;
 	held_by_caller(&lease, &admin.0.login)?;
 	if !lease.holds_at(Timestamp::now()) {
 		return Err(AppError::Conflict(no_longer_held(&lease, &admin.0.login)));
 	}
-	if let Some(started) = AnsibleLease::start(&mut conn, lease.id).await? {
-		let note = started
-			.playbook
-			.clone()
-			.unwrap_or_else(|| started.intent.to_string());
-		let windows = MaintenanceWindow::declare_for_run(
-			&mut conn,
-			&started,
-			started.limited_to.as_deref(),
-			Some(&note),
-		)
-		.await?;
-		let (group_record, lease_record) = lease_records(&group_for_entry, &started);
-		// Each window the start opened names the lease it was declared for.
-		for window in &windows.declared {
-			let (record, target) =
-				crate::fns::maintenance::window_records(&mut conn, window).await?;
-			conn.record(Action::MaintenanceDeclared {
-				window: record,
-				target,
-				upgrade_plan: None,
-				lease: Some(lease_record.clone()),
-				rank: window.rank,
-				expected_end: window.expected_end,
-				note: window.note.clone(),
-			})
-			.await?;
-		}
-		conn.record(Action::AnsibleRunStarted {
-			group: group_record,
-			lease: lease_record,
-			rank: started.rank,
-			intent: started.intent.to_string(),
-			playbook: started.playbook.clone(),
-		})
-		.await?;
-	}
+	runs::start(&mut conn, &lease, &group_for_entry).await?;
 
 	tracing::info!(
 		login = %admin.0.login,

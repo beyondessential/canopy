@@ -4365,7 +4365,7 @@ pub async fn reevaluate_open_issues_for_scope(
 	scope: Scope,
 	by: Option<&str>,
 ) -> Result<()> {
-	use crate::schema::{applications, issues};
+	use crate::schema::applications;
 
 	// The applications whose issues are re-evaluated, and the group they answer
 	// to. A machine's window covers the workloads on it, so re-evaluating a
@@ -4408,6 +4408,55 @@ pub async fn reevaluate_open_issues_for_scope(
 		// nothing to re-evaluate for it, exactly as for canopy-wide scope.
 		Scope::Cluster(_) | Scope::Global => return Ok(()),
 	};
+	reevaluate_open_issues_on(
+		db,
+		application_ids,
+		machine_ids,
+		include_group_scoped.then_some(gid),
+		by,
+	)
+	.await
+}
+
+/// Re-evaluate every currently-open issue on several machines and what they
+/// host, in one pass: a window over several machines covers them together, so
+/// declaring or ending it re-evaluates them once rather than once a machine.
+/// A machine in no group answers to no incident, and is passed over as
+/// [`reevaluate_open_issues_for_scope`] passes it over.
+pub async fn reevaluate_open_issues_for_machines(
+	db: &mut AsyncPgConnection,
+	machine_ids: &[Uuid],
+	by: Option<&str>,
+) -> Result<()> {
+	use crate::schema::{applications, machines};
+
+	let grouped: Vec<Uuid> = machines::table
+		.select(machines::id)
+		.filter(machines::id.eq_any(machine_ids))
+		.filter(machines::group_id.is_not_null())
+		.load(db)
+		.await?;
+	if grouped.is_empty() {
+		return Ok(());
+	}
+	let application_ids: Vec<Uuid> = applications::table
+		.select(applications::id)
+		.filter(applications::machine_id.eq_any(&grouped))
+		.load(db)
+		.await?;
+	reevaluate_open_issues_on(db, application_ids, grouped, None, by).await
+}
+
+/// Re-evaluate the open issues on `application_ids` and `machine_ids`, and on
+/// `group` itself where one is named.
+async fn reevaluate_open_issues_on(
+	db: &mut AsyncPgConnection,
+	application_ids: Vec<Uuid>,
+	machine_ids: Vec<Uuid>,
+	group: Option<Uuid>,
+	by: Option<&str>,
+) -> Result<()> {
+	use crate::schema::issues;
 
 	let mut query = issues::table
 		.select(Issue::as_select())
@@ -4417,10 +4466,9 @@ pub async fn reevaluate_open_issues_for_scope(
 	let on_target = issues::application_id
 		.eq_any(application_ids.clone())
 		.or(issues::machine_id.eq_any(machine_ids.clone()));
-	query = if include_group_scoped {
-		query.filter(on_target.or(issues::server_group_id.eq(gid)))
-	} else {
-		query.filter(on_target)
+	query = match group {
+		Some(gid) => query.filter(on_target.or(issues::server_group_id.eq(gid))),
+		None => query.filter(on_target),
 	};
 	let open_issues: Vec<Issue> = query.load(db).await?;
 

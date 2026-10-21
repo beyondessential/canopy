@@ -647,10 +647,15 @@ impl MaintenanceWindow {
 	/// Re-evaluate the open issues of everything this window covers, so what it
 	/// newly suspends leaves its incident now.
 	async fn reevaluate_covered(&self, db: &mut AsyncPgConnection, by: Option<&str>) -> Result<()> {
-		for scope in self.scopes() {
-			crate::issues::reevaluate_open_issues_for_scope(db, scope, by).await?;
+		match self.cover() {
+			Some(Cover::Machines(ids)) => {
+				crate::issues::reevaluate_open_issues_for_machines(db, &ids, by).await
+			}
+			Some(Cover::Grain(grain)) => {
+				crate::issues::reevaluate_open_issues_for_scope(db, grain.scope(), by).await
+			}
+			None => Ok(()),
 		}
-		Ok(())
 	}
 
 	/// Amend an open window, changing only what `amendment` names. A new

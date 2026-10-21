@@ -84,7 +84,8 @@ While the lease waits, the time left for the run to start is shown, and the oper
 Once the run has started, the presentation says so, and that maintenance is declared.
 
 A refusal to take the lease is shown before any command, naming its reason (see [INV](overview.md), "Refusal").
-Where a lease or a maintenance window holds over the environment, the presentation names who holds it and what they are running, by playbook where the lease names one and by intent otherwise, and offers taking the lease over.
+Where a lease or a maintenance window holds over the environment, the presentation names who holds it and what they are running, by playbook where the lease names one and by intent otherwise.
+Where a run can be started, it offers taking the lease over, which starts one in its place.
 
 ### Machines with nothing on them
 

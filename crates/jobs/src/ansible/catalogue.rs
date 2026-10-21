@@ -256,11 +256,23 @@ pub async fn make_secret(
 
 		let name = variable.name.clone();
 		let set_by = variable.set_by.clone();
-		db.transaction::<_, commons_errors::AppError, _>(async |conn| {
-			AnsibleVariable::set(conn, scope, &name, None, set_by.as_deref()).await?;
-			audit::settle(conn, &pending, Outcome::Done, None).await
-		})
-		.await?;
+		// The row still holding the value is the move not having happened, so
+		// the entry is settled failed, and the value the store took is written
+		// over when the move is tried again.
+		if let Err(failed) = db
+			.transaction::<_, commons_errors::AppError, _>(async |conn| {
+				AnsibleVariable::set(conn, scope, &name, None, set_by.as_deref()).await?;
+				audit::settle(conn, &pending, Outcome::Done, None).await
+			})
+			.await
+		{
+			error!(
+				name = %variable.name,
+				"ansible-catalogue: the row was not cleared after the store took a value: {failed:?}"
+			);
+			audit::settle(db, &pending, Outcome::Failed, None).await?;
+			continue;
+		}
 		moved += 1;
 	}
 	Ok(moved)

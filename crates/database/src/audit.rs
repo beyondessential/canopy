@@ -118,6 +118,24 @@ impl Record {
 		Ok(Self::new(RecordKind::Machine, id, machine.name))
 	}
 
+	/// Several machines, in the order given, named as they are now, read
+	/// together.
+	pub async fn machines(conn: &mut AsyncPgConnection, ids: &[Uuid]) -> Result<Vec<Self>> {
+		let names: std::collections::HashMap<Uuid, String> = crate::Machine::get_by_ids(conn, ids)
+			.await?
+			.into_iter()
+			.map(|machine| (machine.id, machine.name))
+			.collect();
+		ids.iter()
+			.map(|id| {
+				names
+					.get(id)
+					.map(|name| Self::new(RecordKind::Machine, *id, name.clone()))
+					.ok_or_else(|| AppError::NotFound(format!("no machine {id}")))
+			})
+			.collect()
+	}
+
 	/// A group, named as it is now.
 	pub async fn group(conn: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
 		let group = crate::server_groups::ServerGroup::get_by_id(conn, id).await?;

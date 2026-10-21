@@ -11,14 +11,19 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use axum::{Json, extract::State};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
+use commons_servers::audit::AuditTx;
 use commons_servers::tailscale_auth::TailscaleUser;
 use commons_types::Uuid;
 use database::{
 	Device,
 	ansible_catalogue::Loaded,
+	ansible_leases::AnsibleLease,
 	ansible_variables::{AnsibleVariable, VariableScope},
 	applications::Application,
+	audit::Action,
 	diesel_async::AsyncPgConnection,
+	maintenance_windows::MaintenanceWindow,
+	server_groups::ServerGroup,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -282,6 +287,54 @@ pub async fn members(
 	Ok(out)
 }
 
+/// Start the run a lease is for, where this is its first read: stamp the lease,
+/// declare maintenance over what the run acts on for the holder, and record
+/// both. Does nothing where the lease had started already.
+// spec: ANSRUN#work-under-way
+pub async fn start(
+	conn: &mut AuditTx<'_>,
+	lease: &AnsibleLease,
+	group: &ServerGroup,
+) -> Result<()> {
+	let Some(started) = AnsibleLease::start(conn, lease.id).await? else {
+		return Ok(());
+	};
+	let note = started
+		.playbook
+		.clone()
+		.unwrap_or_else(|| started.intent.to_string());
+	let windows = MaintenanceWindow::declare_for_run(
+		conn,
+		&started,
+		started.limited_to.as_deref(),
+		Some(&note),
+	)
+	.await?;
+	let (group_record, lease_record) = super::lease_records(group, &started);
+	// Each window the start opened names the lease it was declared for.
+	for window in &windows.declared {
+		let (record, target) = crate::fns::maintenance::window_records(conn, window).await?;
+		conn.record(Action::MaintenanceDeclared {
+			window: record,
+			target,
+			upgrade_plan: None,
+			lease: Some(lease_record.clone()),
+			rank: window.rank,
+			expected_end: window.expected_end,
+			note: window.note.clone(),
+		})
+		.await?;
+	}
+	conn.record(Action::AnsibleRunStarted {
+		group: group_record,
+		lease: lease_record,
+		rank: started.rank,
+		intent: started.intent.to_string(),
+		playbook: started.playbook.clone(),
+	})
+	.await
+}
+
 fn assignments_of(args: &[AssignmentArg]) -> BTreeMap<Uuid, String> {
 	args.iter()
 		.filter_map(|arg| {
@@ -319,13 +372,20 @@ pub async fn check(
 	let limit = args.limit.as_deref();
 	let (tags, skip_tags, assignments) = (&args.tags, &args.skip_tags, &args.assignments);
 	let loaded = Loaded::get(conn).await?;
+	// A playbook is known, with the intent it runs as and the tags it takes,
+	// only from the catalogue, so one is not run before Canopy has read one.
 	let chosen = match (playbook, &loaded) {
 		(Some(name), Some(loaded)) => {
 			Some(loaded.catalogue.playbook(name).cloned().ok_or_else(|| {
 				AppError::BadRequest(format!("the catalogue lists no playbook {name:?}"))
 			})?)
 		}
-		_ => None,
+		(Some(_), None) => {
+			return Err(AppError::BadRequest(
+				"Canopy has read no catalogue yet, so it knows no playbook to run".into(),
+			));
+		}
+		(None, _) => None,
 	};
 	// The catalogue says what a playbook is run as, and an upgrade is gated on a
 	// plan, so a run cannot be labelled as the other to go around it.

@@ -10134,6 +10134,24 @@
         ],
         "type": "object"
       },
+      "ReleaseLeaseArgs": {
+        "description": "Give a lease back.",
+        "properties": {
+          "lease_id": {
+            "description": "Identifier of the lease.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "unless_started": {
+            "description": "Release only while no run has read the lease, as giving up on a run that\nnever started does, and refuse once one has.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "lease_id"
+        ],
+        "type": "object"
+      },
       "ReleaseReason": {
         "description": "Why a lease stopped holding.",
         "enum": [
@@ -15180,7 +15198,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/LeaseArgs"
+                "$ref": "#/components/schemas/ReleaseLeaseArgs"
               }
             }
           },
@@ -15206,6 +15224,16 @@
               }
             },
             "description": "No such lease, or it was already released"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Asked to release only an unstarted lease, and its run has started"
           }
         },
         "security": [

@@ -27,7 +27,7 @@ import {
 	Typography,
 } from "@mui/material";
 import { useEffect, useMemo, useState } from "react";
-import { callApi, useApi, useApiAction } from "../api";
+import { ApiError, callApi, useApi, useApiAction } from "../api";
 import type {
 	AnsibleLease,
 	CatalogueView,
@@ -146,6 +146,7 @@ export default function AnsibleRunDialog({
 		setHolding(false);
 		setHeld(null);
 		take.reset();
+		release.reset();
 		hold.reset();
 	}, [open, preset]);
 
@@ -301,28 +302,45 @@ export default function AnsibleRunDialog({
 
 	const giveUp = () => {
 		if (!lease) return;
-		// The run may have read the lease since the last poll, in which case it
-		// is under way and releasing would end the maintenance it declared.
-		callApi("ansible", "run_state", { server_group_id: groupId, rank })
-			.then((state) => {
+		// Released only while the run has not read the lease, since a run that
+		// has is under way and releasing would end the maintenance it declared.
+		release
+			.call({ lease_id: lease.id, unless_started: true })
+			.then(
+				() => true,
+				(error) => {
+					if (error instanceof ApiError && error.status === 409) return false;
+					// Already gone, which is what was asked for.
+					return error instanceof ApiError && error.status === 404;
+				},
+			)
+			.then(async (done) => {
+				if (done) {
+					onChanged();
+					onClose();
+					return;
+				}
+				const state = await callApi("ansible", "run_state", { server_group_id: groupId, rank });
 				const held = state.lease;
 				if (held && held.id === lease.id && held.started_at) {
 					setLease(held);
+					setWindowId(state.window?.id ?? null);
 					setStage("started");
-					onChanged();
-					return "started" as const;
 				}
-				return release.call({ lease_id: lease.id });
+				onChanged();
 			})
 			.catch(() => {
-				// Already gone, which is what was asked for.
-			})
-			.then((released) => {
-				if (released === "started") return;
-				onChanged();
-				onClose();
+				// The run state is read again on the next poll.
 			});
 	};
+
+	// A refusal because the run has started, or because the lease is already
+	// gone, is the answer to giving up rather than a failure of it.
+	const giveUpFailed =
+		release.error &&
+		!(release.error instanceof ApiError && [404, 409].includes(release.error.status))
+			? release.error
+			: null;
 
 	const remaining = lease
 		? Math.max(0, Date.parse(lease.taken_at) + pendingSecs * 1000 - now)
@@ -668,6 +686,12 @@ export default function AnsibleRunDialog({
 						)}
 						{hold.error && <Alert severity="warning">{hold.error.message}</Alert>}
 					</Stack>
+				)}
+
+				{stage === "waiting" && giveUpFailed && (
+					<Alert severity="warning" data-testid="run-give-up-failed">
+						{giveUpFailed.message}
+					</Alert>
 				)}
 
 				{stage === "gone" && (

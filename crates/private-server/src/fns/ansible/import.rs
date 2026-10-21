@@ -18,7 +18,7 @@ use database::{
 	ansible_leases::AnsibleLease,
 	ansible_variables::{AnsibleVariable, VariableScope},
 	applications::Application,
-	audit::{Action, ImportedVariable, Record},
+	audit::{Action, ImportedVariable, Record, RecordKind},
 	diesel_async::AsyncPgConnection,
 	machines::Machine,
 	server_groups::{PartialServerGroup, ServerGroup},
@@ -856,10 +856,10 @@ pub async fn import_apply(
 	let mut machine_records: Vec<Record> = Vec::new();
 	let mut seen = BTreeSet::new();
 	for write in &writes {
-		if let Some((id, _)) = &write.machine
+		if let Some((id, name)) = &write.machine
 			&& seen.insert(*id)
 		{
-			machine_records.push(Record::machine(&mut conn, *id).await?);
+			machine_records.push(Record::new(RecordKind::Machine, *id, name.clone()));
 		}
 	}
 	let action = Action::AnsibleInventoryImported {

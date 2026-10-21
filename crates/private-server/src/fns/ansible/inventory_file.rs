@@ -242,13 +242,15 @@ fn resolve_plain(text: &str) -> Value {
 
 	let sign = |n: i128, text: &str| if text.starts_with('-') { -n } else { n };
 	let digits = |text: &str| text.trim_start_matches(['-', '+']).replace('_', "");
+	// Beyond what every reader of JSON holds exactly, the browser's text editor
+	// among them, carried as the text it was, as the editor carries it too.
+	const SAFE: i128 = (1 << 53) - 1;
 	let integer = |n: i128| {
-		i64::try_from(n)
-			.map(Number::from)
-			.or_else(|_| u64::try_from(n).map(Number::from))
-			.map(Value::Number)
-			// Beyond what JSON holds, carried as the text it was.
-			.unwrap_or_else(|_| Value::String(text.to_owned()))
+		if (-SAFE..=SAFE).contains(&n) {
+			Value::Number(Number::from(n as i64))
+		} else {
+			Value::String(text.to_owned())
+		}
 	};
 
 	if INT_DECIMAL.is_match(text) {
@@ -663,6 +665,8 @@ mod tests {
     k: .inf
     l: 0x1F
     m: 12345678901234567890123
+    n: 9007199254740991
+    o: 9007199254740993
   hosts:
     h1:
       list: [1, two, {three: 3}]
@@ -683,6 +687,12 @@ mod tests {
 		assert_eq!(vars["k"], json!(".inf"), "no JSON form, so its text");
 		assert_eq!(vars["l"], json!(31));
 		assert_eq!(vars["m"], json!("12345678901234567890123"));
+		assert_eq!(vars["n"], json!(9007199254740991_i64));
+		assert_eq!(
+			vars["o"],
+			json!("9007199254740993"),
+			"past what the browser holds exactly, so its text"
+		);
 		assert_eq!(
 			host(&file, "h1").own["list"],
 			json!([1, "two", { "three": 3 }])

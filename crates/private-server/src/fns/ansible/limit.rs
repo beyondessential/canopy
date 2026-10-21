@@ -61,8 +61,11 @@ pub fn matching(pattern: &str, members: &[Member<'_>]) -> Result<Vec<uuid::Uuid>
 		return Err(Unsupported("the limit is empty".into()));
 	}
 
-	// With nothing chosen to begin from, a limit of only exclusions is every
-	// machine less those.
+	// Ansible applies every plain pattern, then every `&`, then every `!`,
+	// whatever order they are written in (`order_patterns` in its inventory
+	// manager), so an exclusion written before a union still excludes. With
+	// nothing chosen to begin from, a limit of only exclusions is every machine
+	// less those.
 	let mut result: BTreeSet<usize> = chosen.unwrap_or_else(|| (0..members.len()).collect());
 	for other in &intersect {
 		result = result.intersection(other).copied().collect();
@@ -246,6 +249,20 @@ mod tests {
 			f.run("!central").unwrap().len(),
 			3,
 			"only exclusions is everything but those"
+		);
+	}
+
+	#[test]
+	fn an_exclusion_holds_wherever_it_is_written() {
+		let f = Fixture::new();
+		assert_eq!(
+			f.run("!example-facility-b:facility").unwrap(),
+			f.run("facility:!example-facility-b").unwrap()
+		);
+		assert!(
+			!f.run("facility:!example-facility-a:tamanu")
+				.unwrap()
+				.contains(&"example-facility-a")
 		);
 	}
 
