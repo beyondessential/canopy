@@ -40,7 +40,7 @@ Steps:
 - [ ] Infra repo, ahead of the Canopy deploy: the plugin's `/api/inventory/*` calls move to `/api/ansible/*`, falling back to `/api/inventory/*` on a 404 until Canopy has shipped. Links to `private-server/inventory.md` move: `#what-an-inventory-contains` → `ansible/overview.md#what-a-run-is-served`, `#reaching-a-machine` → `ansible/overview.md#reaching-a-machine`, `#run-leases` → `ansible/runs.md#run-leases`
 - [ ] Deploy the rename while no Ansible lease is open. The callback plugin takes a 404 on `extend_lease` as a refusal and stops extending, so a run in flight across the cutover would carry on unleased once its lease runs out, and another operator could take the environment under it. A run started from a checkout that predates the plugin change is refused its lease and never starts, so only a run already under way is exposed
 - [ ] Drop the plugin's `/api/inventory/*` fallback once Canopy has shipped
-- [ ] `grep -rin inventor` over `crates`, `private-web/src`, `private-web/e2e` and `.workhorse/specs` should then turn up only the stored names above, Ansible's own inventory (the import), and the unrelated backup-repository inventory
+- [x] `grep -rin inventor` over `crates`, `private-web/src`, `private-web/e2e` and `.workhorse/specs` should then turn up only the stored names above, Ansible's own inventory (the import), and the unrelated backup-repository inventory
 
 ## UI rework (mockups: ansible-section, ansible-run)
 
