@@ -19,6 +19,7 @@ use utoipa::{Modify, OpenApi, openapi::security::SecurityScheme};
 		(name = "backup", description = "Device backup credential minting, target config, capability registration, and run reporting."),
 		(name = "bestool", description = "Bestool SQL snippet read API."),
 		(name = "certificates", description = "TLS certificates for a server's own names: requesting one for a signing request, and collecting it once Canopy has obtained it."),
+		(name = "identity", description = "Identity tokens: short-lived signed tokens naming a machine or one of its applications, for services that trust Canopy as an OpenID Connect issuer."),
 		(name = "names", description = "Public names a server may act on: what it is entitled to, and the addresses to publish for them."),
 		(name = "machines", description = "The boxes applications run on: a machine asking which box it is enrolled as, and what Canopy holds running on it."),
 		(name = "restore", description = "Managed restore replicas: consumer capability registration, worklist, and read-only restore credentials."),

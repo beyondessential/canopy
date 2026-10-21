@@ -577,6 +577,7 @@ fn public_server_with_sts(url: &str, sts: aws_sdk_sts::Client) -> TestServer {
 		kube: None,
 		artifacts: None,
 		dns_zones: Vec::new(),
+		identity: None,
 	};
 	let app = router(
 		public_server::audited(public_server::routes(), state.db.clone())

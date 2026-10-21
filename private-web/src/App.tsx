@@ -31,6 +31,7 @@ import RecoveryVault from "./routes/RecoveryVault";
 import BackupPanel from "./routes/BackupPanel";
 import CertificateAuthority from "./routes/CertificateAuthority";
 import AuditLog from "./routes/AuditLog";
+import IdentityProvider from "./routes/IdentityProvider";
 import McpTokens from "./routes/McpTokens";
 import KubernetesClusters from "./routes/KubernetesClusters";
 import RestoreConsumers from "./routes/RestoreConsumers";
@@ -375,6 +376,7 @@ export default function App() {
 							path="certificate-authority"
 							element={<CertificateAuthority />}
 						/>
+						<Route path="identity-provider" element={<IdentityProvider />} />
 					</Route>
 					<Route path="/devices">
 						<Route index element={<DevicesSearch />} />

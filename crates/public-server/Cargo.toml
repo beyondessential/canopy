@@ -15,6 +15,7 @@ name = "public-server"
 required-features = ["cli"]
 
 [dependencies]
+oidc = { path = "../oidc" }
 aws-config.workspace = true
 aws-sdk-sts.workspace = true
 axum = { workspace = true, features = ["json", "macros"] }

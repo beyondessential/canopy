@@ -708,3 +708,353 @@ pub async fn list(conn: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Issue>
 		.await
 		.map_err(commons_errors::AppError::from)
 }
+
+/// What is served at the identity provider's issuer differs from its
+/// configuration.
+// spec: IDP#signing-keys
+pub const IDENTITY_DISCOVERY_REF: &str = "identity-provider-discovery";
+
+pub const IDENTITY_DISCOVERY_DOC: &str = "## Description
+
+Canopy signs identity tokens as an OpenID Connect issuer, and relying parties verify them against the discovery document and key set served at the issuer. Canopy fetches both and compares them with its own configuration. This alert means they disagree.
+
+## Results
+
+- **warn** — the key set differs from the configured keys, but the key signing is served, so signing is unaffected. Most often a newly added key that has not reached the issuer yet, or a key taken out of the configuration still being served. Signing stays on the key before a new one until the new one has been served for long enough.
+- **fail** — the documents cannot be fetched, they name a different issuer, or the key set omits the key signing, so relying parties cannot verify the tokens Canopy issues. Or no configured key can sign: the message says why. A key older than the one that last signed never signs again, so taking the key that last signed out of the configuration stops signing until it is put back.
+
+## Solve
+
+Open the identity provider settings to see which keys are configured and which is signing. Check that the discovery component is running with the same issuer and keys as the rest of Canopy, and that the issuer's name reaches it. When no key can sign, check that Canopy can read the keys from the key service, and that the key that last signed is still configured. A configuration change takes effect once each component restarts.";
+
+/// What was found at the issuer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IssuerDocuments {
+	/// The discovery document or the key set could not be fetched or read.
+	Unreachable(String),
+	/// The discovery document names another issuer.
+	OtherIssuer(String),
+	/// The discovery document names its key set somewhere other than the
+	/// issuer's own address for it, `expected`, or names none. Never fetched.
+	KeySetElsewhere {
+		named: Option<String>,
+		expected: String,
+	},
+	/// The key identifiers the key set serves.
+	Served(std::collections::BTreeSet<String>),
+}
+
+/// The configured keys as Canopy holds them: the identifiers of those it knows,
+/// and the references of those it has never read, which therefore have no
+/// identifier to compare.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KeysConfigured {
+	pub known: Vec<String>,
+	pub unread: Vec<String>,
+}
+
+/// What the identity provider's documents and keys were found to be.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryFinding {
+	pub grade: CheckResult,
+	pub message: String,
+	/// Identifiers configured but not served.
+	pub keys_not_served: Vec<String>,
+	/// Identifiers served but not configured.
+	pub keys_not_configured: Vec<String>,
+	/// References configured that Canopy has never read.
+	pub keys_unread: Vec<String>,
+}
+
+/// Evaluate the identity provider's documents against its configuration and
+/// raise or recover [`IDENTITY_DISCOVERY_REF`]. `signing` is the key signing,
+/// or why none can.
+// spec: IDP#signing-keys
+pub async fn sweep_identity_discovery(
+	conn: &mut AsyncPgConnection,
+	issuer: &str,
+	documents: &IssuerDocuments,
+	configured: &KeysConfigured,
+	signing: std::result::Result<&str, &crate::identity::CannotSign>,
+) -> Result<Option<Issue>> {
+	let Some(finding) = identity_discovery_finding(issuer, documents, configured, signing) else {
+		return recover(
+			conn,
+			IDENTITY_DISCOVERY_REF,
+			"the documents served at the issuer match the configuration",
+		)
+		.await;
+	};
+	let detail = crate::check_detail! {
+		"keys_not_served": finding.keys_not_served,
+		"keys_not_configured": finding.keys_not_configured,
+		"keys_unread": finding.keys_unread,
+	};
+	raise_with_detail(
+		conn,
+		IDENTITY_DISCOVERY_REF,
+		finding.grade,
+		CheckResult::Failed,
+		false,
+		Some(IDENTITY_DISCOVERY_DOC),
+		"Identity provider documents differ from its configuration",
+		&finding.message,
+		Some(detail),
+	)
+	.await
+	.map(Some)
+}
+
+/// The finding, if there is one. A configured key Canopy has never read warns,
+/// since it can be neither compared nor served. Canopy being unable to sign
+/// fails whatever the documents say.
+pub fn identity_discovery_finding(
+	issuer: &str,
+	documents: &IssuerDocuments,
+	configured: &KeysConfigured,
+	signing: std::result::Result<&str, &crate::identity::CannotSign>,
+) -> Option<DiscoveryFinding> {
+	let mut finding = documents_finding(issuer, documents, &configured.known, signing.ok());
+
+	if !configured.unread.is_empty() {
+		let part = format!(
+			"configured but never read from the key service: {}",
+			configured.unread.join(", ")
+		);
+		finding = Some(match finding {
+			None => DiscoveryFinding {
+				grade: CheckResult::Warning,
+				message: format!("Some configured keys cannot be read; {part}"),
+				keys_not_served: Vec::new(),
+				keys_not_configured: Vec::new(),
+				keys_unread: configured.unread.clone(),
+			},
+			Some(found) => DiscoveryFinding {
+				message: format!("{}; {part}", found.message),
+				keys_unread: configured.unread.clone(),
+				..found
+			},
+		});
+	}
+
+	let Err(cannot) = signing else {
+		return finding;
+	};
+	let lead = format!("Canopy cannot sign identity tokens: {}", cannot.describe());
+	Some(match finding {
+		None => DiscoveryFinding {
+			grade: CheckResult::Failed,
+			message: lead,
+			keys_not_served: Vec::new(),
+			keys_not_configured: Vec::new(),
+			keys_unread: Vec::new(),
+		},
+		Some(found) => DiscoveryFinding {
+			grade: CheckResult::Failed,
+			message: format!("{lead}. {}", found.message),
+			..found
+		},
+	})
+}
+
+fn documents_finding(
+	issuer: &str,
+	documents: &IssuerDocuments,
+	configured: &[String],
+	signing: Option<&str>,
+) -> Option<DiscoveryFinding> {
+	let failed = |message: String| {
+		Some(DiscoveryFinding {
+			grade: CheckResult::Failed,
+			message,
+			keys_not_served: Vec::new(),
+			keys_not_configured: Vec::new(),
+			keys_unread: Vec::new(),
+		})
+	};
+	let served = match documents {
+		IssuerDocuments::Unreachable(error) => {
+			return failed(format!(
+				"The documents at {issuer} could not be fetched: {error}"
+			));
+		}
+		IssuerDocuments::OtherIssuer(other) => {
+			return failed(format!(
+				"The discovery document at {issuer} names the issuer {other}"
+			));
+		}
+		IssuerDocuments::KeySetElsewhere { named, expected } => {
+			return failed(match named {
+				Some(named) => format!(
+					"The discovery document at {issuer} names its key set at {named}, not {expected}"
+				),
+				None => format!("The discovery document at {issuer} names no key set"),
+			});
+		}
+		IssuerDocuments::Served(served) => served,
+	};
+
+	let not_served: Vec<String> = configured
+		.iter()
+		.filter(|kid| !served.contains(*kid))
+		.cloned()
+		.collect();
+	let not_configured: Vec<String> = served
+		.iter()
+		.filter(|kid| !configured.contains(kid))
+		.cloned()
+		.collect();
+	if not_served.is_empty() && not_configured.is_empty() {
+		return None;
+	}
+
+	let mut parts = Vec::new();
+	if !not_served.is_empty() {
+		parts.push(format!(
+			"configured but not served: {}",
+			not_served.join(", ")
+		));
+	}
+	if !not_configured.is_empty() {
+		parts.push(format!(
+			"served but not configured: {}",
+			not_configured.join(", ")
+		));
+	}
+	let signing_missing = signing.is_some_and(|kid| !served.contains(kid));
+	let lead = if signing_missing {
+		"The key set served at the issuer omits the key signing, so relying parties cannot verify new tokens"
+	} else {
+		"The key set served at the issuer differs from the configured keys"
+	};
+	Some(DiscoveryFinding {
+		grade: if signing_missing {
+			CheckResult::Failed
+		} else {
+			CheckResult::Warning
+		},
+		message: format!("{lead}; {}", parts.join("; ")),
+		keys_not_served: not_served,
+		keys_not_configured: not_configured,
+		keys_unread: Vec::new(),
+	})
+}
+
+#[cfg(test)]
+mod identity_discovery_tests {
+	use std::collections::BTreeSet;
+
+	use super::*;
+
+	fn served(kids: &[&str]) -> IssuerDocuments {
+		IssuerDocuments::Served(kids.iter().map(|k| k.to_string()).collect::<BTreeSet<_>>())
+	}
+
+	fn configured(kids: &[&str]) -> KeysConfigured {
+		KeysConfigured {
+			known: kids.iter().map(|k| k.to_string()).collect(),
+			unread: Vec::new(),
+		}
+	}
+
+	#[test]
+	fn matching_documents_are_no_finding() {
+		assert!(
+			identity_discovery_finding(
+				"https://i",
+				&served(&["a", "b"]),
+				&configured(&["a", "b"]),
+				Ok("a")
+			)
+			.is_none()
+		);
+	}
+
+	#[test]
+	fn unreachable_and_other_issuer_fail() {
+		let grade = identity_discovery_finding(
+			"https://i",
+			&IssuerDocuments::Unreachable("timed out".into()),
+			&configured(&["a"]),
+			Ok("a"),
+		)
+		.unwrap()
+		.grade;
+		assert_eq!(grade, CheckResult::Failed);
+		let grade = identity_discovery_finding(
+			"https://i",
+			&IssuerDocuments::OtherIssuer("https://other".into()),
+			&configured(&["a"]),
+			Ok("a"),
+		)
+		.unwrap()
+		.grade;
+		assert_eq!(grade, CheckResult::Failed);
+	}
+
+	#[test]
+	fn a_new_key_not_yet_served_warns_while_signing_is_served() {
+		let finding = identity_discovery_finding(
+			"https://i",
+			&served(&["a"]),
+			&configured(&["a", "b"]),
+			Ok("a"),
+		)
+		.unwrap();
+		assert_eq!(finding.grade, CheckResult::Warning);
+		assert_eq!(finding.keys_not_served, ["b"]);
+		assert!(finding.keys_not_configured.is_empty());
+	}
+
+	#[test]
+	fn being_unable_to_sign_fails_even_when_the_documents_match() {
+		let cannot = crate::identity::CannotSign::Unconfigured {
+			kid: "a".into(),
+			key_ref: "ref-a".into(),
+		};
+		let finding = identity_discovery_finding(
+			"https://i",
+			&served(&["b"]),
+			&configured(&["b"]),
+			Err(&cannot),
+		)
+		.unwrap();
+		assert_eq!(finding.grade, CheckResult::Failed);
+		assert!(
+			finding.message.contains("last signed"),
+			"{}",
+			finding.message
+		);
+	}
+
+	#[test]
+	fn the_signing_key_missing_fails() {
+		let finding =
+			identity_discovery_finding("https://i", &served(&["x"]), &configured(&["a"]), Ok("a"))
+				.unwrap();
+		assert_eq!(finding.grade, CheckResult::Failed);
+		assert_eq!(finding.keys_not_served, ["a"]);
+		assert_eq!(finding.keys_not_configured, ["x"]);
+	}
+
+	#[test]
+	fn a_key_never_read_warns_naming_its_reference() {
+		let finding = identity_discovery_finding(
+			"https://i",
+			&served(&["a"]),
+			&KeysConfigured {
+				known: vec!["a".into()],
+				unread: vec!["arn:mistyped".into()],
+			},
+			Ok("a"),
+		)
+		.unwrap();
+		assert_eq!(finding.grade, CheckResult::Warning);
+		assert_eq!(finding.keys_unread, ["arn:mistyped"]);
+		assert!(
+			finding.message.contains("arn:mistyped"),
+			"{}",
+			finding.message
+		);
+	}
+}

@@ -51,6 +51,7 @@ async fn private_with_directory(url: &str, directory: TailnetDirectory) -> TestS
 			// Neither harness touches certificates.
 			acme: None,
 			acme_directory: None,
+			identity: Default::default(),
 		})
 		.unwrap(),
 		ClientIpSource::RightmostForwarded,

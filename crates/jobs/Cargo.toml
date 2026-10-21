@@ -11,6 +11,7 @@ authors = [
 ]
 
 [dependencies]
+oidc = { path = "../oidc" }
 relay-protocol = { path = "../relay-protocol" }
 quinn = { version = "0.11.9", default-features = false, features = [
 	"bloom",

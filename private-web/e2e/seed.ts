@@ -167,7 +167,7 @@ async function applicationTypeOf(sql: Sql, applicationId: string): Promise<strin
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, machine_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, reporting_schema_builds, reporting_schema_requests, migration_test_requests, upgrade_plans, maintenance_windows, inventory_variables, inventory_leases, version_known_issues, recovery_vault_writes, application_names, application_certificate_names, application_certificates, kubernetes_clusters, compromised_keys RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, machine_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, reporting_schema_builds, reporting_schema_requests, migration_test_requests, upgrade_plans, maintenance_windows, inventory_variables, inventory_leases, version_known_issues, recovery_vault_writes, application_names, application_certificate_names, application_certificates, kubernetes_clusters, compromised_keys, relying_parties, identity_keys RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" application with
 	// it; self-alerts attach to that row, so put it back.
@@ -2275,4 +2275,50 @@ export async function seedAuditEntry(
  * so a spec about the log starts from nothing. */
 export async function resetAuditLog(sql: Sql): Promise<void> {
 	await sql.query("TRUNCATE audit_entries");
+}
+
+/** A relying party identity tokens are issued for. */
+export async function seedRelyingParty(
+	sql: Sql,
+	opts: { name?: string; audience?: string; lifetimeMinutes?: number } = {},
+): Promise<{ id: string; name: string; audience: string }> {
+	const name = opts.name ?? randomLabel("party");
+	const audience = opts.audience ?? `https://${randomLabel("aud")}.example`;
+	const rows = await sql.query<{ id: string }>(
+		`INSERT INTO relying_parties (name, audience, token_lifetime_minutes)
+		 VALUES ($1, $2, $3) RETURNING id`,
+		[name, audience, opts.lifetimeMinutes ?? 5],
+	);
+	return { id: rows[0]!.id, name, audience };
+}
+
+/** A grant of identity tokens to a machine or an application. */
+export async function seedIdentityGrant(
+	sql: Sql,
+	opts: { relyingPartyId: string; machineId?: string; applicationId?: string },
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO identity_grants (relying_party_id, machine_id, application_id)
+		 VALUES ($1, $2, $3)`,
+		[opts.relyingPartyId, opts.machineId ?? null, opts.applicationId ?? null],
+	);
+}
+
+/** What Canopy has observed of a configured signing key. */
+export async function seedIdentityKey(
+	sql: Sql,
+	opts: {
+		kid: string;
+		keyRef: string;
+		servedMinutesAgo?: number;
+		signedMinutesAgo?: number;
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO identity_keys (kid, key_ref, first_served_at, first_signed_at)
+		 VALUES ($1, $2,
+		         NOW() - make_interval(mins => $3::int),
+		         NOW() - make_interval(mins => $4::int))`,
+		[opts.kid, opts.keyRef, opts.servedMinutesAgo ?? null, opts.signedMinutesAgo ?? null],
+	);
 }

@@ -15,6 +15,9 @@
 //!   has elapsed, and queue the daily reminder for long-open ones.
 //! - **undeclared DNS names** — drops requests no machine has repeated for a
 //!   day.
+//! - **identity provider** — fetches what the issuer serves, records when each
+//!   signing key is first served, and raises the self-alert when it differs
+//!   from the configuration (see `jobs::identity`).
 //! - **operator sessions** — retires safety-mode sessions no client has
 //!   presented for a day, on its own hourly timer (see `jobs::session_sweep`).
 //!
@@ -121,6 +124,11 @@ pub fn spawn() -> JoinHandle<()> {
 		// own and is decided as read-only wherever it is read, so this is only
 		// about not keeping rows for clients that have gone away.
 		jobs::session_sweep::spawn();
+
+		// What the identity provider's issuer serves, against its configuration,
+		// on its own timer since each pass fetches from the issuer.
+		// spec: IDP#signing-keys
+		jobs::identity::spawn();
 
 		// Deferred incident (re-)evaluation worker. The status-ingest path
 		// enqueues applications instead of evaluating incident membership inline

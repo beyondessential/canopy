@@ -19,7 +19,8 @@ import {
 	spawnSync,
 } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import net from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -215,6 +216,11 @@ export async function startStack(opts: StartOptions = {}): Promise<StackHandle> 
 				// revocations, so the certificate UI is exercisable without a
 				// network. Debug-only in the binary.
 				CANOPY_FAKE_ACME: "1",
+				// An identity provider issuer with two keys, so its settings and the
+				// grant choices on a machine's edit page are offered. Nothing signs
+				// in e2e: the keys' states come from what the specs seed.
+				CANOPY_IDENTITY_ISSUER: "https://identity.e2e.invalid",
+				CANOPY_IDENTITY_KEYS: "e2e-key-old, e2e-key-new",
 				// Needed by mint_enrollment to build the ticket's api_url; the
 				// setup-instructions flow auto-mints on an unregistered server.
 				PUBLIC_URL: process.env.PUBLIC_URL ?? "https://api.e2e.invalid",
@@ -229,6 +235,10 @@ export async function startStack(opts: StartOptions = {}): Promise<StackHandle> 
 		});
 		pipeOutput(api, "api", silent);
 
+		// A dependency cache of this worker's own: dev servers sharing one
+		// rewrite each other's pre-bundled modules, and a page mid-load is then
+		// refused them ("504 Outdated Optimize Dep") and renders nothing.
+		const viteCache = mkdtempSync(join(tmpdir(), "canopy-e2e-vite-"));
 		const web = spawn(
 			"npm",
 			[
@@ -244,13 +254,18 @@ export async function startStack(opts: StartOptions = {}): Promise<StackHandle> 
 			],
 			{
 				cwd: FRONTEND_ROOT,
-				env: { ...process.env, VITE_PROXY_TARGET: apiUrl },
+				env: {
+					...process.env,
+					VITE_PROXY_TARGET: apiUrl,
+					VITE_CACHE_DIR: viteCache,
+				},
 			},
 		);
 		pipeOutput(web, "web", silent);
 
 		const stop = async () => {
 			await Promise.allSettled([killGracefully(web), killGracefully(api)]);
+			rmSync(viteCache, { recursive: true, force: true });
 			dropDb();
 		};
 

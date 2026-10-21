@@ -15,6 +15,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { callApi, useApi } from "../api";
 import ApplicationTypeChip from "../components/ApplicationTypeChip";
 import GroupControl from "../components/GroupControl";
+import IdentityGrants from "../components/IdentityGrants";
 import NameManagementGrants from "../components/NameManagementGrants";
 import { GradedAction } from "../components/GradedAction";
 import TagsEditor from "../components/TagsEditor";
@@ -23,6 +24,7 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import type { GradedEndpoint } from "../safety-modes";
 import {
 	applicationName,
+	type MachineGrants,
 	REACHABILITY_CHECK,
 	SERVER_RANK_ORDER,
 	type ServerInfo,
@@ -59,6 +61,12 @@ export default function MachineEdit() {
 		{ application_ids: applicationIds },
 		[applicationIds.join(",")],
 		{ skip: detail.status !== "ok" },
+	);
+	const identityGrants = useApi(
+		"identity",
+		"machine_grants",
+		{ machine_id: id },
+		[id],
 	);
 	usePageTitle(
 		detail.status === "ok"
@@ -107,6 +115,12 @@ export default function MachineEdit() {
 					)
 					.map((s) => s.application_id),
 			)}
+			// Grants load beside the form rather than ahead of it: the rest of
+			// the page never depends on them.
+			identityGrants={identityGrants.status === "ok" ? identityGrants.data : null}
+			identityError={
+				identityGrants.status === "error" ? identityGrants.error.message : null
+			}
 		/>
 	);
 }
@@ -150,6 +164,8 @@ function Form({
 	applications,
 	machineReachabilitySilenced,
 	applicationReachabilitySilenced,
+	identityGrants,
+	identityError,
 }: {
 	machine: {
 		id: string;
@@ -167,6 +183,8 @@ function Form({
 	applications: ServerInfo[];
 	machineReachabilitySilenced: boolean;
 	applicationReachabilitySilenced: Set<string>;
+	identityGrants: MachineGrants | null;
+	identityError: string | null;
 }) {
 	const navigate = useNavigate();
 	const [box, setBox] = useState<MachineForm>({
@@ -201,6 +219,28 @@ function Form({
 			]),
 		),
 	);
+	// The relying parties each subject holds as saved, and as edited, keyed by
+	// the machine's or the application's id.
+	const heldGrants: Record<string, string[]> = Object.fromEntries(
+		(identityGrants?.subjects ?? []).map((s) => [s.subject.id, s.granted]),
+	);
+	// Only what has been edited, so grants that arrive after the form mounts
+	// still read as held.
+	const [grantEdits, setGrantEdits] = useState<Record<string, string[]>>({});
+	const grantsOf = (subjectId: string) =>
+		grantEdits[subjectId] ?? heldGrants[subjectId] ?? [];
+	// Placement is read from the form, so ranking or grouping a box here offers
+	// the choice, and the saved subject is not shown once it no longer stands.
+	// spec: IDP#presentation
+	const placed = box.groupId !== null && box.rank !== "";
+	const grantsOffered = (identityGrants?.available ?? false) && placed;
+	const placementEdited =
+		box.groupId !== (machine.group_id ?? null) || box.rank !== (machine.rank ?? "");
+	const subChanges = placementEdited && placed;
+	const subOf = (subjectId: string) =>
+		placementEdited
+			? undefined
+			: identityGrants?.subjects.find((s) => s.subject.id === subjectId)?.sub;
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -298,6 +338,22 @@ function Form({
 					server_id: application.id,
 					source: REACHABILITY_CHECK.source,
 					ref: REACHABILITY_CHECK.ref,
+				}),
+		});
+	}
+
+	// Only a subject whose grants changed is sent, so a save that leaves them
+	// as they were records nothing.
+	// spec: IDP#grants
+	for (const subject of identityGrants?.subjects ?? []) {
+		const id = subject.subject.id;
+		if (sameMembers(grantsOf(id), heldGrants[id] ?? [])) continue;
+		plan.push({
+			call: "identity/set_grants",
+			run: () =>
+				callApi("identity", "set_grants", {
+					subject: subject.subject,
+					relying_party_ids: grantsOf(id),
 				}),
 		});
 	}
@@ -491,6 +547,29 @@ function Form({
 						/>
 					</Stack>
 
+					{identityError && (
+						<Alert severity="error">
+							Identity token grants could not be read: {identityError}
+						</Alert>
+					)}
+					{identityGrants && (
+						<IdentityGrants
+							grants={identityGrants}
+							offered={grantsOffered}
+							held={heldGrants[machine.id] ?? []}
+							value={grantsOf(machine.id)}
+							onChange={(ids) => setGrantEdits({ ...grantEdits, [machine.id]: ids })}
+							sub={subOf(machine.id)}
+							subChanges={subChanges}
+							caption={
+								subOf(machine.id)
+									? "Tokens that name this machine itself, carrying this subject. Applications on it hold their own grants below."
+									: "Tokens that name this machine itself. Applications on it hold their own grants below."
+							}
+							disabled={pending}
+						/>
+					)}
+
 					<TextField
 						label="Notes"
 						multiline
@@ -526,6 +605,27 @@ function Form({
 						form={apps[application.id]!}
 						onChange={(patch) => patchApp(application.id, patch)}
 						disabled={pending}
+						identity={
+							identityGrants && (
+								<IdentityGrants
+									grants={identityGrants}
+									offered={grantsOffered}
+									held={heldGrants[application.id] ?? []}
+									value={grantsOf(application.id)}
+									onChange={(ids) =>
+										setGrantEdits({ ...grantEdits, [application.id]: ids })
+									}
+									sub={subOf(application.id)}
+									subChanges={subChanges}
+									caption={
+										subOf(application.id)
+											? "Its tokens carry this subject. Revoking refuses the next request; tokens already issued run out on their own."
+											: "Revoking refuses the next request; tokens already issued run out on their own."
+									}
+									disabled={pending}
+								/>
+							)
+						}
 					/>
 				))
 			)}
@@ -570,12 +670,14 @@ function ApplicationFields({
 	form,
 	onChange,
 	disabled,
+	identity,
 }: {
 	application: ServerInfo;
 	groupId: string | null;
 	form: ApplicationForm;
 	onChange: (patch: Partial<ApplicationForm>) => void;
 	disabled: boolean;
+	identity: React.ReactNode;
 }) {
 	const caps = useApplicationTypeCaps(application.type);
 	const canListPublicly = caps?.public_listing === true;
@@ -672,6 +774,8 @@ function ApplicationFields({
 					disabled={disabled}
 				/>
 
+				{identity}
+
 				<TextField
 					label="Notes"
 					multiline
@@ -693,4 +797,8 @@ function ApplicationFields({
 			</Stack>
 		</Paper>
 	);
+}
+
+function sameMembers(a: string[], b: string[]): boolean {
+	return a.length === b.length && a.every((id) => b.includes(id));
 }

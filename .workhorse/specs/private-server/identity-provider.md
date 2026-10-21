@@ -1,0 +1,101 @@
+---
+id: IDP
+---
+
+# Identity provider
+
+Canopy is an OpenID Connect issuer for its fleet.
+It publishes the keys its identity tokens are signed with, keeps the register of relying parties those tokens are issued for, and holds which machines and applications may obtain tokens for each.
+How a machine requests a token, and what the token carries, are in [IDT](../public-server/identity-tokens.md).
+
+## Configuration
+
+The issuer and the signing keys come from the Canopy instance's configuration, set by the infrastructure that provisions Canopy, rather than from operator-editable state.
+Each Canopy instance has an issuer of its own, so a token from one instance is never accepted where another's is trusted.
+The issuer is a name of its own, apart from the device API's, because it is fixed in every relying party's trust configuration while the device API is free to move.
+Canopy reads the configuration when it starts, so a change takes effect once Canopy restarts.
+
+A Canopy instance with no issuer or no signing key configured issues no tokens.
+Its identity provider settings present that, and the grant choices are withheld (see "Presentation").
+
+## Discovery
+
+The discovery document is served at `<issuer>/.well-known/openid-configuration`, and the key set it names is served beside it, both at the issuer name itself.
+So a relying party registers Canopy in ordinary discovery mode, finding the documents where it expects them and checking the document's issuer against where it fetched it.
+
+The two documents are served by a component of their own that serves nothing else.
+It is unauthenticated, holds no access to Canopy's database and no ability to sign, and builds the key set from the public halves of the configured keys.
+The only internet-facing part of the identity provider therefore holds nothing secret.
+
+## Signing keys
+
+Signing keys are P-256 keys held by a managed key service that signs on Canopy's behalf and never releases the private key, so no copy of a signing key exists anywhere for Canopy to lose.
+
+Every configured key is published in the key set.
+Canopy signs with the newest configured key that has matured, a key maturing once it has been served at the issuer for long enough that relying parties' cached key sets include it.
+The first key a Canopy instance is configured with is mature from the outset, there being no earlier key for relying parties to rely on meanwhile.
+Signing only moves forward: once Canopy has signed with a key, it never signs with an older one.
+A key is older or newer than the key that last signed by their order in the configuration.
+So while the key that last signed cannot be read, the keys older than it still never sign, and a newer one that has matured signs in its place.
+While the key that last signed is not configured at all, no configured key can be placed against it, and none signs until it is configured again.
+Canopy judges maturity from the key set as actually served at the issuer, which it fetches and observes, rather than from its own configuration, because the discovery component and the device API take up a configuration change separately.
+The moment Canopy first observes a key served is recorded once and stands.
+
+Each configured key is in one of five states:
+
+- not yet served, while Canopy has not observed it served at the issuer;
+- waiting to sign, while it is served and newer than the key signing, but has not matured;
+- signing;
+- retired, while it is older than the key signing and a token it signed has not yet expired;
+- removable, once it is older than the key signing and every token it signed has expired, which a key that never signed is from the moment a newer key signs.
+
+A key older than the key signing never signs again, so a removable key can be taken out of the configuration without affecting any token, and removing one follows Canopy's record rather than an estimate.
+
+Each key is presented as signing, published, or removable, a key in any of the other states being presented as published.
+A key not yet served is a fault, raised by the self-alert below, and a key stays retired for no longer than a token lifetime, so neither needs a presentation of its own.
+Each key is also presented with when it was first served, when it last signed, and how many tokens it signed in the last thirty days, to two significant figures.
+Those figures are derived from the audit log's record of issuance (see [IDT](../public-server/identity-tokens.md), "Recording").
+
+When the documents served at the issuer cannot be fetched, name a different issuer, or carry a key set that differs from the configured keys, or when no configured key can sign, Canopy raises a self-alert (see [SELF](self-alerts.md)).
+
+## Relying parties
+
+An operator registers each relying party with a name, its audience, and the lifetime of the tokens issued for it.
+The name is what operators see; the audience is what a token carries and what a machine names when it asks for one, so two relying parties never share an audience.
+A token lifetime is a whole number of minutes, from one minute to an hour, defaulting to five minutes.
+
+A relying party's name and token lifetime can be edited.
+A changed lifetime applies to tokens issued from then on, and tokens already issued keep the expiry they were issued with.
+The audience is fixed once registered, since every workload asking for tokens for the relying party names it.
+
+The register presents each relying party with its audience, its token lifetime, how many machines and applications hold a grant for it, and when a token was last issued for it.
+When a token was last issued is read from the audit log's recent entries, so a relying party with no token issued in the last ninety days is presented as having none in that time.
+
+Removing a relying party revokes every grant for it, and a request naming its audience is then refused as unknown.
+Removal is confirmed first, the confirmation saying how many grants it revokes.
+
+Registering, editing and removing a relying party are audited actions (see [AUD](../platform/audit-log.md)), each acting on the relying party, and each grant a removal revokes is recorded as a revocation of its own.
+An edit records the name and lifetime it changed from and to.
+A save that changes nothing records nothing.
+
+## Grants
+
+A grant lets one machine, or one application, obtain tokens for one relying party.
+Grants are withheld by default, and a subject without one is refused and told so (see [IDT](../public-server/identity-tokens.md), "Refusals").
+
+A machine's grant covers tokens naming the machine itself, and an application's covers tokens naming that application.
+Neither covers the other, because a relying party sees them as different principals, and a machine carrying several workloads must not let one stand in for another.
+
+Revoking a grant refuses the subject's next request; tokens already issued run until they expire.
+An archived machine or application keeps its grants but obtains nothing while archived, since an archived machine cannot authenticate and an archived application is not live, and restoring it returns its grants.
+A restored machine obtains tokens again once it is enrolled again, its identity having been released when it was archived (see [FLT](../servers/overview.md), "Archival").
+Granting and revoking are audited actions, each acting on the subject and the relying party, and a save that leaves a subject's grants as they were records nothing.
+Grants are few and matter long after they are given, so these entries, and those for relying parties, are kept for a year.
+
+## Presentation
+
+The identity provider has its own page among Canopy's settings, presenting the issuer, the discovery document's address, the signing keys, and the register of relying parties, where relying parties are added, edited and removed.
+
+A machine's edit page offers, for the machine and for each of its applications, a searchable choice of the registered relying parties it may obtain tokens for, beside the other permissions an operator holds over it.
+Each choice also shows the subject its tokens carry, ready to copy into a relying party's rule.
+The choice is not offered while no relying party is registered, the Canopy instance issues no tokens, or the machine is pending or belongs to no group, unless the machine or application already holds a grant, so a held grant can always be withdrawn.

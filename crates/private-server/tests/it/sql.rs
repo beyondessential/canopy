@@ -30,6 +30,7 @@ async fn private_with_ro_pool(url: &str) -> TestServer {
 			dns_zones: Vec::new(),
 			acme: None,
 			acme_directory: None,
+			identity: Default::default(),
 		})
 		.unwrap(),
 		ClientIpSource::RightmostForwarded,

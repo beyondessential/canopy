@@ -175,6 +175,32 @@
         ],
         "type": "object"
       },
+      "AddRelyingPartyArgs": {
+        "description": "A relying party to register.",
+        "properties": {
+          "audience": {
+            "description": "What its tokens carry as `aud`, and what a machine names when it asks\nfor one. Fixed once registered.",
+            "type": "string"
+          },
+          "name": {
+            "description": "What operators see.",
+            "type": "string"
+          },
+          "token_lifetime_minutes": {
+            "description": "Whole minutes, from one to sixty. Five when absent.",
+            "format": "int32",
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "audience"
+        ],
+        "type": "object"
+      },
       "AmendArgs": {
         "description": "Request body for amending an open plan.",
         "properties": {
@@ -3173,6 +3199,31 @@
         ],
         "type": "object"
       },
+      "EditRelyingPartyArgs": {
+        "description": "A relying party's new name and token lifetime.",
+        "properties": {
+          "id": {
+            "description": "The relying party.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "description": "What operators see.",
+            "type": "string"
+          },
+          "token_lifetime_minutes": {
+            "description": "Whole minutes, from one to sixty.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "token_lifetime_minutes"
+        ],
+        "type": "object"
+      },
       "EffectiveSchedule": {
         "description": "What a machine's schedule for one type resolved to.",
         "properties": {
@@ -3790,6 +3841,53 @@
         ],
         "type": "object"
       },
+      "GrantSubject": {
+        "description": "What a grant lets obtain tokens: a machine, for tokens naming itself, or an\napplication, for tokens naming that application. Neither covers the other.",
+        "oneOf": [
+          {
+            "description": "A machine, for tokens naming itself.",
+            "properties": {
+              "id": {
+                "description": "A machine, for tokens naming itself.",
+                "format": "uuid",
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "machine"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "An application, for tokens naming it.",
+            "properties": {
+              "id": {
+                "description": "An application, for tokens naming it.",
+                "format": "uuid",
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "application"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "GroupDetail": {
         "description": "A server group together with its member applications and billing labels.",
         "properties": {
@@ -4370,6 +4468,55 @@
         },
         "required": [
           "id"
+        ],
+        "type": "object"
+      },
+      "IdentityMachineArgs": {
+        "description": "One machine.",
+        "properties": {
+          "machine_id": {
+            "description": "The machine.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine_id"
+        ],
+        "type": "object"
+      },
+      "IdentityStatus": {
+        "description": "The issuer and its signing keys.",
+        "properties": {
+          "discovery_url": {
+            "description": "Where the discovery document is served, when there is an issuer.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "issuer": {
+            "description": "The issuer, or null when none is configured.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "issues_tokens": {
+            "description": "Whether this Canopy instance issues tokens: it has an issuer and a key.",
+            "type": "boolean"
+          },
+          "keys": {
+            "description": "The configured keys, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/KeyView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "issues_tokens",
+          "keys"
         ],
         "type": "object"
       },
@@ -5491,6 +5638,53 @@
         ],
         "type": "object"
       },
+      "KeyView": {
+        "description": "A configured signing key.",
+        "properties": {
+          "first_served_at": {
+            "description": "When Canopy first observed it served at the issuer.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "key_ref": {
+            "description": "Its reference in the configuration, the key service's identifier for it.",
+            "type": "string"
+          },
+          "kid": {
+            "description": "Its identifier, as tokens and the key set name it. Null until Canopy has\nread the key.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_signed_at": {
+            "description": "When it last signed, within the audit log's ninety days.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "signed_30d": {
+            "description": "How many tokens it signed in the last thirty days.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/PresentedKeyState",
+            "description": "How it is presented."
+          }
+        },
+        "required": [
+          "key_ref",
+          "state",
+          "signed_30d"
+        ],
+        "type": "object"
+      },
       "KnownIssueData": {
         "description": "A caveat or defect recorded against a range of patches within a release\nline.",
         "properties": {
@@ -6466,6 +6660,35 @@
         "required": [
           "machine_id",
           "name"
+        ],
+        "type": "object"
+      },
+      "MachineGrants": {
+        "description": "What a machine's edit page offers for identity tokens.",
+        "properties": {
+          "available": {
+            "description": "Whether a relying party is registered and the Canopy instance issues\ntokens. The choice is offered for a subject holding no grant only when\nthis holds and the machine is placed in an environment, which the edit\npage judges from the group and rank as edited.",
+            "type": "boolean"
+          },
+          "relying_parties": {
+            "description": "Every registered relying party, to choose from.",
+            "items": {
+              "$ref": "#/components/schemas/RelyingPartyOption"
+            },
+            "type": "array"
+          },
+          "subjects": {
+            "description": "The machine, then each of its live applications.",
+            "items": {
+              "$ref": "#/components/schemas/SubjectGrants"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "available",
+          "relying_parties",
+          "subjects"
         ],
         "type": "object"
       },
@@ -8289,6 +8512,15 @@
         ],
         "type": "object"
       },
+      "PresentedKeyState": {
+        "description": "A key as an operator sees it.",
+        "enum": [
+          "signing",
+          "published",
+          "removable"
+        ],
+        "type": "string"
+      },
       "PreviewMachine": {
         "description": "The next firings of a cron schedule for one machine.",
         "properties": {
@@ -8798,7 +9030,8 @@
           "version",
           "artifact",
           "name",
-          "certificate"
+          "certificate",
+          "relying_party"
         ],
         "type": "string"
       },
@@ -9039,6 +9272,136 @@
           "minor",
           "patch",
           "changelog"
+        ],
+        "type": "object"
+      },
+      "RelyingParty": {
+        "description": "A service that trusts Canopy as an issuer.",
+        "properties": {
+          "audience": {
+            "description": "What a token carries as `aud`, and what a machine names when it asks for\none. Fixed once registered.",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "When it was registered.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "description": "Its identifier.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "description": "What operators see.",
+            "type": "string"
+          },
+          "token_lifetime_minutes": {
+            "description": "How long the tokens issued for it live, in minutes.",
+            "format": "int32",
+            "type": "integer"
+          },
+          "updated_at": {
+            "description": "When it was last edited.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "audience",
+          "token_lifetime_minutes",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "RelyingPartyIdArgs": {
+        "description": "One relying party.",
+        "properties": {
+          "id": {
+            "description": "The relying party.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "RelyingPartyOption": {
+        "description": "A relying party a subject may be granted.",
+        "properties": {
+          "audience": {
+            "description": "What its tokens carry as `aud`.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Its identifier.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "description": "What operators see.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "audience"
+        ],
+        "type": "object"
+      },
+      "RelyingPartyView": {
+        "description": "A relying party in the register.",
+        "properties": {
+          "application_grants": {
+            "description": "How many applications hold a grant for it.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "audience": {
+            "description": "What its tokens carry as `aud`.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Its identifier.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "last_issued_at": {
+            "description": "When a token was last issued for it, within the audit log's ninety days.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "machine_grants": {
+            "description": "How many machines hold a grant for it.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "description": "What operators see.",
+            "type": "string"
+          },
+          "token_lifetime_minutes": {
+            "description": "How long its tokens live, in minutes.",
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "audience",
+          "token_lifetime_minutes",
+          "machine_grants",
+          "application_grants"
         ],
         "type": "object"
       },
@@ -11476,6 +11839,28 @@
         ],
         "type": "object"
       },
+      "SetGrantsArgs": {
+        "description": "The grants a machine or application should hold.",
+        "properties": {
+          "relying_party_ids": {
+            "description": "Every relying party the subject should hold a grant for; the rest are\nrevoked.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "subject": {
+            "$ref": "#/components/schemas/GrantSubject",
+            "description": "The machine or application."
+          }
+        },
+        "required": [
+          "subject",
+          "relying_party_ids"
+        ],
+        "type": "object"
+      },
       "SetMachineScheduleArgs": {
         "description": "Request to set a machine's schedule override for one backup type.",
         "properties": {
@@ -12169,6 +12554,35 @@
           "extra",
           "operators",
           "checks"
+        ],
+        "type": "object"
+      },
+      "SubjectGrants": {
+        "description": "One machine or application, and the relying parties it holds grants for.",
+        "properties": {
+          "granted": {
+            "description": "The relying parties it holds a grant for.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "sub": {
+            "description": "The subject its tokens carry, for a relying party's rule. Null while the\nmachine is not placed.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "subject": {
+            "$ref": "#/components/schemas/GrantSubject",
+            "description": "The machine or application."
+          }
+        },
+        "required": [
+          "subject",
+          "granted"
         ],
         "type": "object"
       },
@@ -19673,6 +20087,331 @@
         "x-canopy-safety-mode": "write"
       }
     },
+    "/api/identity/add_relying_party": {
+      "post": {
+        "description": "Two never share an audience. Registering is recorded in the audit log.",
+        "operationId": "add_relying_party",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddRelyingPartyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelyingParty"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "The audience is already registered."
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Register a relying party.",
+        "tags": [
+          "identity"
+        ],
+        "x-canopy-audit": [
+          "relying_party_registered"
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/identity/edit_relying_party": {
+      "post": {
+        "description": "A changed lifetime applies to tokens issued from then on. The audience is\nfixed once registered. A save that changes nothing records nothing.",
+        "operationId": "edit_relying_party",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditRelyingPartyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelyingParty"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Change a relying party's name and token lifetime.",
+        "tags": [
+          "identity"
+        ],
+        "x-canopy-audit": [
+          "relying_party_edited"
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/identity/machine_grants": {
+      "post": {
+        "description": "With the registered relying parties to choose from, each subject's `sub` as\nsaved, and whether grants are available to offer at all.",
+        "operationId": "machine_grants",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityMachineArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineGrants"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "The identity token grants of a machine and its applications.",
+        "tags": [
+          "identity"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/identity/relying_parties": {
+      "post": {
+        "description": "Each with its audience, token lifetime, how many machines and applications\nhold a grant for it, and when a token was last issued for it.",
+        "operationId": "relying_parties",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RelyingPartyView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "The register of relying parties.",
+        "tags": [
+          "identity"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/identity/remove_relying_party": {
+      "post": {
+        "description": "Every grant for it is revoked, each recorded as a revocation, and a request\nnaming its audience is then refused as unknown.",
+        "operationId": "remove_relying_party",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RelyingPartyIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Remove a relying party.",
+        "tags": [
+          "identity"
+        ],
+        "x-canopy-audit": [
+          "relying_party_removed",
+          "identity_grant_revoked"
+        ],
+        "x-canopy-danger-reasons": [
+          "irreversible"
+        ],
+        "x-canopy-safety-mode": "danger"
+      }
+    },
+    "/api/identity/set_grants": {
+      "post": {
+        "description": "Its grants become exactly those given, each grant and revocation recorded in\nthe audit log. Saving what it already holds changes nothing.",
+        "operationId": "set_grants",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetGrantsArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Set a machine's or an application's grants.",
+        "tags": [
+          "identity"
+        ],
+        "x-canopy-audit": [
+          "identity_granted",
+          "identity_grant_revoked"
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/identity/status": {
+      "post": {
+        "description": "Each key with its state and how it has been used. A key is known by its identifier once Canopy has read it and observed what\nthe issuer serves, so a key added since is shown by its reference alone.",
+        "operationId": "status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityStatus"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "The issuer, the discovery document's address, and the signing keys.",
+        "tags": [
+          "identity"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
     "/api/incidents/add_note": {
       "post": {
         "description": "Records a note authored by the calling operator and returns it. Requires\nthe caller to be on the admin allow-list. Responds 400 if the note body\nis empty or whitespace-only.",
@@ -24639,6 +25378,10 @@
     {
       "description": "Healthcheck catalog: severities, conditional rules, and sample data.",
       "name": "healthchecks"
+    },
+    {
+      "description": "Canopy as an OpenID Connect issuer: its signing keys, the relying parties it issues identity tokens for, and which machines and applications hold grants.",
+      "name": "identity"
     },
     {
       "description": "Operational incidents (groups of issues against a server).",

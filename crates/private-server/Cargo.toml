@@ -11,6 +11,7 @@ authors = [
 ]
 
 [dependencies]
+oidc = { path = "../oidc" }
 aws-config.workspace = true
 aws-sdk-s3.workspace = true
 aws-sdk-sts.workspace = true

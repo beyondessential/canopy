@@ -451,6 +451,25 @@ diesel::table! {
 }
 
 diesel::table! {
+	identity_grants (id) {
+		id -> Uuid,
+		relying_party_id -> Uuid,
+		machine_id -> Nullable<Uuid>,
+		application_id -> Nullable<Uuid>,
+	}
+}
+
+diesel::table! {
+	identity_keys (kid) {
+		kid -> Text,
+		key_ref -> Text,
+		known_at -> Timestamptz,
+		first_served_at -> Nullable<Timestamptz>,
+		first_signed_at -> Nullable<Timestamptz>,
+	}
+}
+
+diesel::table! {
 	incident_issues (incident_id, issue_id, joined_at) {
 		incident_id -> Uuid,
 		issue_id -> Uuid,
@@ -769,6 +788,17 @@ diesel::table! {
 }
 
 diesel::table! {
+	relying_parties (id) {
+		id -> Uuid,
+		name -> Text,
+		audience -> Text,
+		token_lifetime_minutes -> Int4,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	reporting_schema_builds (check_id) {
 		check_id -> Int8,
 		group_id -> Uuid,
@@ -1070,6 +1100,9 @@ diesel::joinable!(compromised_keys -> application_certificates (certificate_id))
 diesel::joinable!(denied_dns_names -> machines (machine_id));
 diesel::joinable!(device_connections -> devices (device_id));
 diesel::joinable!(device_keys -> devices (device_id));
+diesel::joinable!(identity_grants -> applications (application_id));
+diesel::joinable!(identity_grants -> machines (machine_id));
+diesel::joinable!(identity_grants -> relying_parties (relying_party_id));
 diesel::joinable!(incident_issues -> incidents (incident_id));
 diesel::joinable!(incident_issues -> issues (issue_id));
 diesel::joinable!(incident_notes -> incidents (incident_id));
@@ -1166,6 +1199,8 @@ diesel::allow_tables_to_appear_in_same_query!(
 	device_connections,
 	device_keys,
 	devices,
+	identity_grants,
+	identity_keys,
 	incident_issues,
 	incident_notes,
 	incident_reeval_queue,
@@ -1190,6 +1225,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	migration_timings,
 	operator_sessions,
 	recovery_vault_writes,
+	relying_parties,
 	reporting_schema_builds,
 	reporting_schema_requests,
 	restore_consumer_capabilities,

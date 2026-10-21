@@ -11,6 +11,7 @@ authors = [
 ]
 
 [dependencies]
+oidc = { path = "../oidc" }
 axum = { workspace = true, features = ["json", "macros"] }
 axum-client-ip = { version = "1.3.1", features = ["forwarded-header"] }
 axum-server-timing = "3.0.1"

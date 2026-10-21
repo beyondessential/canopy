@@ -14,6 +14,7 @@ mod check_severities;
 mod device_key_auth;
 mod error_scenarios;
 mod health;
+mod identity;
 mod index;
 mod instanced_checks;
 mod machine_enrollment;

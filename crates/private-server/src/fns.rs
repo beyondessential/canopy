@@ -13,6 +13,7 @@ pub mod devices;
 pub mod dns_names;
 pub mod domains;
 pub mod healthchecks;
+pub mod identity;
 pub mod incidents;
 pub mod inventory;
 pub mod inventory_variables;
@@ -149,6 +150,7 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 			.nest("/dns_names", dns_names::routes())
 			.nest("/domains", domains::routes())
 			.nest("/healthchecks", healthchecks::routes())
+			.nest("/identity", identity::routes())
 			.nest("/incidents", incidents::routes())
 			.nest("/inventory", inventory::routes())
 			.nest("/inventory_variables", inventory_variables::routes())

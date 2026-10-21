@@ -86,6 +86,41 @@ function QuietChecks({ detail }: { detail: unknown }) {
 	);
 }
 
+/// The signing keys the identity provider's alert names, each leading to its
+/// settings, where the configured keys and the one signing are shown.
+/// spec: SELF#conditions
+function NamedKeys({ detail }: { detail: unknown }) {
+	if (typeof detail !== "object" || detail === null) return null;
+	const strings = (value: unknown): string[] =>
+		Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+	const notServed = strings((detail as { keys_not_served?: unknown }).keys_not_served);
+	const notConfigured = strings(
+		(detail as { keys_not_configured?: unknown }).keys_not_configured,
+	);
+	const unread = strings((detail as { keys_unread?: unknown }).keys_unread);
+	if (notServed.length === 0 && notConfigured.length === 0 && unread.length === 0) {
+		return null;
+	}
+	const chip = (kid: string, label: string) => (
+		<Chip
+			key={`${label}/${kid}`}
+			size="small"
+			variant="outlined"
+			clickable
+			component={RouterLink}
+			to="/settings/identity-provider"
+			label={`${label}: ${kid}`}
+		/>
+	);
+	return (
+		<Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+			{notServed.map((kid) => chip(kid, "not served"))}
+			{notConfigured.map((kid) => chip(kid, "not configured"))}
+			{unread.map((key) => chip(key, "unreadable"))}
+		</Box>
+	);
+}
+
 /// Canopy's alerts about its own operation — kept apart from fleet
 /// issues/incidents (these belong to no server or group).
 export default function SelfAlerts() {
@@ -165,6 +200,7 @@ export default function SelfAlerts() {
 								{a.message}
 							</Typography>
 							<QuietChecks detail={a.detail} />
+							<NamedKeys detail={a.detail} />
 							<Typography variant="caption" color="text.secondary">
 								{a.ref} · first seen{" "}
 								{new Date(a.first_seen).toLocaleString()} · last activity{" "}

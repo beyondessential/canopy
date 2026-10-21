@@ -87,6 +87,12 @@ pub struct AppState {
 	/// account key is configured.
 	#[from_ref(skip)]
 	pub acme_directory: Option<String>,
+	/// The identity provider's configuration, as read at startup, which its
+	/// settings present, and the issuer the nested `/public` mount signs
+	/// identity tokens as, as the standalone public server does.
+	// spec: IDP#configuration
+	#[from_ref(skip)]
+	pub identity: oidc::IdentityProvider,
 }
 
 /// Environment variable that swaps in the in-process fake certificate authority,
@@ -204,6 +210,7 @@ impl AppState {
 		let sts = Some(aws_sdk_sts::Client::new(&aws));
 
 		let (acme, acme_directory) = acme_from_env().await;
+		let identity = oidc::IdentityProvider::from_env().await;
 
 		let db = database::init();
 		let db_read = database::init_ro().unwrap_or_else(|| db.clone());
@@ -224,6 +231,7 @@ impl AppState {
 			dns_zones: dns_zones_from_env(),
 			acme,
 			acme_directory,
+			identity,
 		})
 	}
 
@@ -261,6 +269,11 @@ impl AppState {
 			// network.
 			acme: Some(Acme::fake()),
 			acme_directory: Some("https://acme.test.invalid/directory".into()),
+			// Read from env so the e2e fixture can present a configured issuer.
+			// Nothing signs here: the nested mount's issuance isn't exercised.
+			identity: oidc::IdentityProvider::without_signing(
+				oidc::IdentityConfig::from_env().unwrap_or_default(),
+			),
 		})
 	}
 }

@@ -38,7 +38,7 @@ jobs:
           - group: jobs-core
             bins: backups monitor relayhub
           - group: jobs-misc
-            bins: domains slacker_outbox chrome_versions
+            bins: domains slacker_outbox chrome_versions identity-discovery
     env:
       TARGET: aarch64-unknown-linux-gnu
     steps:

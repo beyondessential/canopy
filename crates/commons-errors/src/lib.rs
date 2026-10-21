@@ -204,6 +204,38 @@ pub enum AppError {
 	#[error("this machine contradicts the application type named: {0}")]
 	DnsNameTypeMismatch(String),
 
+	/// The audience an identity token was asked for matches no registered
+	/// relying party. Apart from not granted, so a mistyped audience reads as a
+	/// typo rather than as a missing grant. Maps to 404.
+	// spec: IDT#refusals
+	#[error("no relying party is registered with this audience: {0}")]
+	IdentityAudienceUnknown(String),
+
+	/// The application type an identity token was asked for names no live
+	/// application on the calling machine. Maps to 404.
+	// spec: IDT#refusals
+	#[error("no such subject on this machine: {0}")]
+	IdentitySubjectNotFound(String),
+
+	/// The application type an identity token was asked for is spelled as one
+	/// of the subject's labels, so no subject can carry it. Maps to 422.
+	// spec: IDT#refusals
+	#[error("no identity token can name this subject: {0}")]
+	IdentitySubjectUnrepresentable(String),
+
+	/// The subject holds no grant for the relying party. Only an operator can
+	/// change this, so waiting does not help. Maps to 403.
+	// spec: IDT#refusals
+	#[error("this subject is not granted identity tokens for this relying party: {0}")]
+	IdentityTokenNotGranted(String),
+
+	/// The subject's machine is pending or belongs to no group, so its subject
+	/// cannot carry a group and rank. Clears once an operator ranks or groups
+	/// the machine. Maps to 409.
+	// spec: IDT#refusals
+	#[error("this subject is not placed in an environment: {0}")]
+	IdentitySubjectNotPlaced(String),
+
 	/// Deliberately opaque failure for the public enrollment endpoints. Every
 	/// pre-completion reason (unknown/archived server, invalid/expired/consumed
 	/// token, bad/expired/used challenge nonce, bad signature) collapses to this
@@ -326,6 +358,11 @@ impl AppError {
 			Self::DnsNameUndeclared(_) => StatusCode::FORBIDDEN,
 			Self::DnsNameDenied(_) => StatusCode::FORBIDDEN,
 			Self::DnsNameTypeMismatch(_) => StatusCode::CONFLICT,
+			Self::IdentityAudienceUnknown(_) => StatusCode::NOT_FOUND,
+			Self::IdentitySubjectNotFound(_) => StatusCode::NOT_FOUND,
+			Self::IdentitySubjectUnrepresentable(_) => StatusCode::UNPROCESSABLE_ENTITY,
+			Self::IdentityTokenNotGranted(_) => StatusCode::FORBIDDEN,
+			Self::IdentitySubjectNotPlaced(_) => StatusCode::CONFLICT,
 			Self::EnrollmentFailed => StatusCode::FORBIDDEN,
 			Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
 			Self::Upstream(_) => StatusCode::BAD_GATEWAY,
@@ -401,6 +438,13 @@ impl AppError {
 						Self::DnsNameUndeclared(_) => "dns-name-undeclared",
 						Self::DnsNameDenied(_) => "dns-name-denied",
 						Self::DnsNameTypeMismatch(_) => "dns-name-type-mismatch",
+						Self::IdentityAudienceUnknown(_) => "identity-audience-unknown",
+						Self::IdentitySubjectNotFound(_) => "identity-subject-not-found",
+						Self::IdentitySubjectUnrepresentable(_) => {
+							"identity-subject-unrepresentable"
+						}
+						Self::IdentityTokenNotGranted(_) => "identity-token-not-granted",
+						Self::IdentitySubjectNotPlaced(_) => "identity-subject-not-placed",
 						Self::EnrollmentFailed => "enrollment-failed",
 						Self::RateLimited => "rate-limited",
 						Self::Upstream(_) => "upstream",

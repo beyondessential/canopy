@@ -8,6 +8,10 @@ const PRIVATE_SERVER = process.env.VITE_PROXY_TARGET ?? "http://127.0.0.1:8081";
 
 export default defineConfig({
 	plugins: [react()],
+	// Each e2e worker runs a dev server of its own, and servers sharing one
+	// dependency cache rewrite each other's pre-bundled modules, which a page
+	// already loading then fails to fetch. The fixture gives each its own.
+	cacheDir: process.env.VITE_CACHE_DIR ?? "node_modules/.vite",
 	build: {
 		outDir: "dist",
 		emptyOutDir: true,

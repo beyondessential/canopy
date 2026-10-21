@@ -26,6 +26,7 @@ pub mod chrome_releases;
 pub mod devices;
 pub mod dns_name_dispositions;
 pub mod dns_names;
+pub mod identity;
 pub mod inventory_leases;
 pub mod inventory_variables;
 pub mod issues;

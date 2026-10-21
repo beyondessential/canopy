@@ -24,6 +24,7 @@ mod enrollment_ticket;
 mod group_card_version;
 mod health;
 mod healthchecks;
+mod identity;
 mod instance_silences;
 mod inventory;
 mod inventory_variables;

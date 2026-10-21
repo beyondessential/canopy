@@ -7,7 +7,7 @@ pub const OPENAPI_VERSION: &str = "1.1.1";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "7421ca07a8c978d5740cb8d34745849bdf13e4b7b67d9f6e44689b8f049b0553";
+pub const OPENAPI_BLAKE3: &str = "1e98fda0fb5da44c227e7768f646eee2b255171a8b0f8a37d5e51bde22aae671";
 
 /// Error types.
 pub mod error {
@@ -1541,6 +1541,88 @@ pair has to be replaced before asking again.*/
 a renewal is under way, the chain in hand staying valid until the new one
 lands.*/
     pub usable: bool,
+}
+///What a machine asks for.
+///
+/// <details><summary>JSON schema</summary>
+///
+/// ```json
+///{
+///  "description": "What a machine asks for.",
+///  "type": "object",
+///  "required": [
+///    "audience"
+///  ],
+///  "properties": {
+///    "application_type": {
+///      "oneOf": [
+///        {
+///          "type": "null"
+///        },
+///        {
+///          "description": "The application on the calling machine the token names. Without it, the\ntoken names the machine itself.",
+///          "$ref": "#/components/schemas/ApplicationType"
+///        }
+///      ]
+///    },
+///    "audience": {
+///      "description": "The relying party, by the audience it expects tokens to carry.",
+///      "type": "string"
+///    }
+///  }
+///}
+/// ```
+/// </details>
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[derive(::bon::Builder)]
+#[non_exhaustive]
+pub struct IdentityTokenArgs {
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub application_type: ::std::option::Option<ApplicationType>,
+    ///The relying party, by the audience it expects tokens to carry.
+    pub audience: ::std::string::String,
+}
+/**The token, and what it says, so a client can log what it was given without
+decoding it.*/
+///
+/// <details><summary>JSON schema</summary>
+///
+/// ```json
+///{
+///  "description": "The token, and what it says, so a client can log what it was given without\ndecoding it.",
+///  "type": "object",
+///  "required": [
+///    "expires_at",
+///    "subject",
+///    "token"
+///  ],
+///  "properties": {
+///    "expires_at": {
+///      "description": "When it expires.",
+///      "$ref": "#/definitions/CanopyTimestamp"
+///    },
+///    "subject": {
+///      "description": "The subject it names.",
+///      "type": "string"
+///    },
+///    "token": {
+///      "description": "The signed token.",
+///      "type": "string"
+///    }
+///  }
+///}
+/// ```
+/// </details>
+#[derive(::serde::Deserialize, ::serde::Serialize, Clone, Debug)]
+#[derive(::bon::Builder)]
+#[non_exhaustive]
+pub struct IdentityTokenResponse {
+    ///When it expires.
+    pub expires_at: ::jiff::Timestamp,
+    ///The subject it names.
+    pub subject: ::std::string::String,
+    ///The signed token.
+    pub token: ::std::string::String,
 }
 /**One restore purpose a consumer advertises support for: the behaviours it
 opts into and the settings it accepts per replica.*/
@@ -4574,6 +4656,18 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
         body: &RequestCertificateArgs,
     ) -> crate::Result<CertificateResponse> {
         self.call_json(::http::Method::POST, "/certificates/request", Some(body)).await
+    }
+    /// Obtain an identity token.
+    ///
+    /// Each request mints a new token with an identifier of its own; nothing is
+    /// cached between requests.
+    ///
+    /// `POST /identity-tokens`
+    pub async fn identity_tokens(
+        &self,
+        body: &IdentityTokenArgs,
+    ) -> crate::Result<IdentityTokenResponse> {
+        self.call_json(::http::Method::POST, "/identity-tokens", Some(body)).await
     }
     /// Report the calling machine's own identity.
     ///
