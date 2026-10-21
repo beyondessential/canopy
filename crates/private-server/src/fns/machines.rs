@@ -34,7 +34,8 @@ use database::maintenance_windows::MaintenanceWindow;
 use database::pg_duration::PgDuration;
 use database::reported_detail::MachineReportedDetail;
 use database::server_groups::ServerGroup;
-use database::statuses::MergedDetail;
+use database::silenced_refs::MachineSilencedRef;
+use database::statuses::{CANOPY_SOURCE, MergedDetail, REACHABILITY_REF};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -353,8 +354,9 @@ pub async fn get_detail(
 
 /// What an operator supplies when adding a machine.
 ///
-/// The group is the only field that matters to get right up front: which
-/// group a box belongs to is the one thing the box has no way of knowing.
+/// The group and the rank are the fields that matter to get right up front:
+/// which group a box belongs to and which environment it serves are the things
+/// the box has no way of knowing.
 #[derive(Deserialize, ToSchema)]
 pub struct MachineCreateArgs {
 	/// What to call the box; required and never blank. Distinct from the
@@ -363,12 +365,19 @@ pub struct MachineCreateArgs {
 	pub name: String,
 	/// The group this machine belongs to. The applications on it take it.
 	pub group_id: Option<Uuid>,
+	/// The rank the box carries, which every application arriving on it
+	/// takes. Omit to leave the box pending until it is ranked.
+	pub rank: Option<ServerRank>,
 	/// Whether the box is cloud-hosted, if known.
 	pub cloud: Option<bool>,
 	/// Where the box is, if known.
 	pub geolocation: Option<GeoPoint>,
 	/// Whether the machine's own checks alert. Defaults to on.
 	pub is_monitored: Option<bool>,
+	/// Whether the box going away alerts. Defaults to on. Off writes the
+	/// machine-scoped silence on canopy's reachability check, the same one
+	/// the check itself offers.
+	pub alert_when_unreachable: Option<bool>,
 	/// How long the box may be silent before it is unreachable, in seconds.
 	/// Defaults to the column's own default.
 	pub alert_when_down_for: Option<i64>,
@@ -405,7 +414,7 @@ pub struct MachineCreateArgs {
 )]
 pub async fn create(
 	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
+	admin: TailscaleAdmin,
 	Json(args): Json<MachineCreateArgs>,
 ) -> Result<Json<Uuid>> {
 	// Refused before the tailnet bind, so a blank name leaves nothing behind.
@@ -446,6 +455,26 @@ pub async fn create(
 		},
 	)
 	.await?;
+
+	if let Some(rank) = args.rank {
+		Machine::set_rank(&mut conn, machine.id, rank, Some(&admin.0.login)).await?;
+	}
+
+	// A box being created has no alerting yet for this to take away, so it is
+	// written here at the creation's grade rather than through the silence
+	// handlers, which remove alerting an existing box has.
+	// spec: SAFE#grading-the-administrative-surface
+	if args.alert_when_unreachable == Some(false) {
+		MachineSilencedRef::add(
+			&mut conn,
+			machine.id,
+			CANOPY_SOURCE,
+			REACHABILITY_REF,
+			None,
+			Some(&admin.0.login),
+		)
+		.await?;
+	}
 
 	if let Some(device_id) = device_id {
 		Machine::bind_device(&mut conn, machine.id, device_id).await?;

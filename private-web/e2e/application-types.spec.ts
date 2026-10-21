@@ -162,16 +162,19 @@ test.describe("application types", () => {
 		await page.goto(`/fleet/groups/${group.id}/machines/new`);
 
 		// A type is reported, never entered, so none of what used to be asked
-		// here is offered: no product, no role, no rank, no URL.
+		// here is offered: no product, no role, no URL.
 		await expect(page.getByRole("combobox", { name: "Product" })).toHaveCount(0);
 		await expect(page.getByRole("combobox", { name: "Kind" })).toHaveCount(0);
-		await expect(page.getByRole("combobox", { name: "Rank" })).toHaveCount(0);
 		await expect(page.getByLabel("URL")).toHaveCount(0);
 		await expect(page.getByLabel("Name in Tamanu Mobile app")).toHaveCount(0);
 
 		// What the box is, where it is, and how it is watched: that is a
 		// machine's form.
 		await expect(page.getByRole("combobox", { name: "Location" })).toBeVisible();
+		// The box's rank is what its applications take, so it is the machine's.
+		await expect(
+			page.getByRole("combobox", { name: /^Rank(\s*\*)?$/ }),
+		).toBeVisible();
 		await expect(page.getByLabel("Tailscale identity")).toBeVisible();
 		await expect(page.getByLabel("Monitor this machine")).toBeVisible();
 	});

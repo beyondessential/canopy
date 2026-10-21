@@ -65,6 +65,8 @@ test.describe("the reachability alerting switch, on both forms", () => {
 		// On by default: a new box alerts when it goes away unless told not to.
 		await expect(page.getByLabel(MACHINE_SWITCH)).toBeChecked();
 		await page.getByLabel(MACHINE_SWITCH).uncheck();
+		await page.getByRole("combobox", { name: /^Rank(\s*\*)?$/ }).click();
+		await page.getByRole("option", { name: "test" }).click();
 		await page.getByRole("button", { name: "Create machine" }).click();
 
 		await expect(page).toHaveURL(/\/machines\/[0-9a-f-]{36}$/);
@@ -84,6 +86,8 @@ test.describe("the reachability alerting switch, on both forms", () => {
 		// The switch settling is what says the form is live; clicking before
 		// that lands on markup with no handler attached yet.
 		await expect(page.getByLabel(MACHINE_SWITCH)).toBeChecked();
+		await page.getByRole("combobox", { name: /^Rank(\s*\*)?$/ }).click();
+		await page.getByRole("option", { name: "test" }).click();
 		await page.getByRole("button", { name: "Create machine" }).click();
 
 		await expect(page).toHaveURL(/\/machines\/[0-9a-f-]{36}$/);
@@ -227,5 +231,39 @@ test.describe("the reachability alerting switch, on both forms", () => {
 		await page.waitForURL(`**/fleet/machines/${server.machineId}`);
 
 		expect(await reachabilitySilences(sql, server.id)).toBe(1);
+	});
+});
+
+// spec: SAFE#grading-the-administrative-surface
+test.describe("adding a machine with its reachability quiet", () => {
+	test.use({ safetyMode: "read-only" });
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("needs write mode, as adding any machine does", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "graded-add" });
+
+		await page.goto(`/fleet/groups/${group.id}/machines/new`);
+		await page.getByLabel(/^Name(\s*\*)?$/i).fill("quiet-from-the-start");
+		await expect(page.getByLabel(MACHINE_SWITCH)).toBeChecked();
+		await page.getByLabel(MACHINE_SWITCH).uncheck();
+		await page.getByRole("combobox", { name: /^Rank(\s*\*)?$/ }).click();
+		await page.getByRole("option", { name: "dev" }).click();
+
+		const create = page.getByRole("button", { name: "Create machine" });
+		await expect(
+			page.getByLabel(/requires write mode/i).getByRole("button", {
+				name: "Create machine",
+			}),
+		).toBeVisible();
+		await create.click();
+		const raise = page.getByRole("dialog");
+		await expect(raise).toContainText("This action needs write mode");
+		await raise.getByRole("button", { name: "Continue in write mode" }).click();
+
+		await expect(page).toHaveURL(/\/machines\/[0-9a-f-]{36}$/);
+		const id = page.url().split("/").pop()!;
+		expect(await machineReachabilitySilences(sql, id)).toBe(1);
 	});
 });

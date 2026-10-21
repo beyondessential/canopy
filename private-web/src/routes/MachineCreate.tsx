@@ -16,17 +16,18 @@ import { GradedAction } from "../components/GradedAction";
 import GroupControl from "../components/GroupControl";
 import TagsEditor from "../components/TagsEditor";
 import { usePageTitle } from "../hooks/usePageTitle";
-import { REACHABILITY_CHECK } from "../types";
-import type { TagMap, TailnetLiveInfo } from "../types";
+import { SERVER_RANK_ORDER } from "../types";
+import type { ServerRank, TagMap, TailnetLiveInfo } from "../types";
 
 /// Operator-first machine creation, reachable at `/fleet/groups/:id/machines/new`
 /// with the group preselected. A group is required — machines are always
-/// grouped.
+/// grouped — and so is a rank, so what arrives on the box is never pending.
 ///
 /// A machine is what an operator adds; the applications on it arrive by report
-/// and take its group. So there is nothing here about an application's type,
-/// rank, URL or public name.
+/// and take its group and rank. So there is nothing here about an
+/// application's type, URL or public name.
 /// spec: APP#where-a-type-comes-from
+/// spec: FLT#machines-come-from-operators
 export default function MachineCreate() {
 	usePageTitle("Add machine");
 	const navigate = useNavigate();
@@ -34,17 +35,20 @@ export default function MachineCreate() {
 	// group to default-select.
 	const { id: presetGroupId } = useParams<{ id?: string }>();
 	const action = useApiAction("fleet/machines", "create");
-	const silence = useApiAction("silenced_refs", "silence_machine");
 
 	const [name, setName] = useState("");
 	const [isMonitored, setIsMonitored] = useState(true);
 	// Off means "alert on everything else, just not this box going away".
-	// Written as the machine-scoped silence on canopy's reachability check —
-	// the same one the check itself offers, so either place reflects the other.
+	// The create call writes it as the machine-scoped silence on canopy's
+	// reachability check — the same one the check itself offers, so either
+	// place reflects the other. A box being added has no alerting to remove,
+	// so this stays at the creation's write grade.
 	// spec: CHK#silences-follow-the-event
+	// spec: SAFE#grading-the-administrative-surface
 	const [alertWhenUnreachable, setAlertWhenUnreachable] = useState(true);
 	const [alertWhenDownMinutes, setAlertWhenDownMinutes] = useState("10");
 	const [groupId, setGroupId] = useState<string | null>(presetGroupId ?? null);
+	const [rank, setRank] = useState<ServerRank | "">("");
 	const [tailscaleIdentifier, setTailscaleIdentifier] = useState("");
 	const [cloud, setCloud] = useState<"" | "true" | "false">("");
 	const [lat, setLat] = useState("");
@@ -52,21 +56,23 @@ export default function MachineCreate() {
 	const [notes, setNotes] = useState("");
 	const [tags, setTags] = useState<TagMap>({});
 
-	const pending = action.pending || silence.pending;
-	const error = action.error ?? silence.error;
+	const pending = action.pending;
+	const error = action.error;
 
 	const onSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
-		if (!groupId || !name.trim()) return; // name and group are required
+		if (!groupId || !name.trim() || rank === "") return; // all required
 		const data: Record<string, unknown> = {
 			name: name.trim(),
 			group_id: groupId,
+			rank,
 			tailscale_identifier:
 				tailscaleIdentifier.trim() === "" ? null : tailscaleIdentifier.trim(),
 			cloud: cloud === "" ? null : cloud === "true",
 			geolocation:
 				lat && lon ? { lat: Number(lat), lon: Number(lon) } : null,
 			is_monitored: isMonitored,
+			alert_when_unreachable: alertWhenUnreachable,
 			alert_when_down_for: Math.max(
 				60,
 				Math.round(Number(alertWhenDownMinutes) * 60),
@@ -76,16 +82,9 @@ export default function MachineCreate() {
 		};
 		try {
 			const machineId = await action.call(data);
-			if (!alertWhenUnreachable) {
-				await silence.call({
-					machine_id: machineId,
-					source: REACHABILITY_CHECK.source,
-					ref: REACHABILITY_CHECK.ref,
-				});
-			}
 			navigate(`/fleet/machines/${machineId}`);
 		} catch {
-			/* surfaced via the actions' errors */
+			/* surfaced via the action's error */
 		}
 	};
 
@@ -115,6 +114,22 @@ export default function MachineCreate() {
 					disabled={pending}
 					required
 				/>
+
+				<TextField
+					select
+					label="Rank"
+					value={rank}
+					onChange={(e) => setRank(e.target.value as ServerRank)}
+					disabled={pending}
+					required
+					helperText="Every application on this machine shares its rank."
+				>
+					{SERVER_RANK_ORDER.map((r) => (
+						<MenuItem key={r} value={r}>
+							{r}
+						</MenuItem>
+					))}
+				</TextField>
 
 				<Stack direction={{ xs: "column", md: "row" }} spacing={2}>
 					<TextField
@@ -218,17 +233,13 @@ export default function MachineCreate() {
 
 				<Stack direction="row" spacing={1}>
 					<GradedAction
-						calls={
-							alertWhenUnreachable
-								? "fleet/machines/create"
-								: ["fleet/machines/create", "silenced_refs/silence_machine"]
-						}
+						calls="fleet/machines/create"
 						action={`Create machine ${name.trim()}`}
 					>
 						<Button
 							type="submit"
 							variant="contained"
-							disabled={pending || !groupId || !name.trim()}
+							disabled={pending || !groupId || !name.trim() || rank === ""}
 						>
 							{pending ? "Creating…" : "Create machine"}
 						</Button>

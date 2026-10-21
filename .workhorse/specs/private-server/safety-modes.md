@@ -90,6 +90,9 @@ The operator is given them, in the order of the list above, as: it cannot be und
 
 Changing a backup schedule at any layer is graded write, including setting it to manual-only or clearing it: a schedule is routine configuration, set back from the same editor, and every change to it is recorded (see [BKO](backup.md)).
 
+Adding a machine is graded write, including adding it with its reachability check silenced: a machine being added has no alerting yet to remove, so that silence is part of the addition rather than the removal of a protection.
+Silencing a check on a machine that already exists removes a protection and is danger.
+
 A handler that lets an already-trusted machine obtain credentials is graded write, because making a machine trusted is itself danger and the decision to trust it has already been made there.
 Opening a machine's restore window is graded on this basis.
 

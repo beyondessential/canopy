@@ -24,20 +24,11 @@ import type { GradedEndpoint } from "../safety-modes";
 import {
 	applicationName,
 	REACHABILITY_CHECK,
+	SERVER_RANK_ORDER,
 	type ServerInfo,
 	type ServerRank,
 	type TagMap,
 } from "../types";
-
-/// A rank is changed and never cleared, so there is no empty choice: a
-/// pending box shows its placeholder until one of these is picked.
-const RANK_OPTIONS: ServerRank[] = [
-	"production",
-	"clone",
-	"demo",
-	"test",
-	"dev",
-];
 
 /// Editing is machine-first: one form per machine, holding the box's own
 /// section and one section per application on it.
@@ -391,7 +382,10 @@ function Form({
 							},
 						}}
 					>
-						{RANK_OPTIONS.map((rank) => (
+						{/* A rank is changed and never cleared, so there is no empty
+						    choice: a pending box shows its placeholder until one of
+						    these is picked. */}
+						{SERVER_RANK_ORDER.map((rank) => (
 							<MenuItem key={rank} value={rank}>
 								{rank}
 							</MenuItem>
