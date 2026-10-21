@@ -102,6 +102,14 @@ table.assign { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
 .tpop div { padding: 4px 12px; font: 0.8125rem monospace; }
 .tpop div.hl { background: rgba(56,142,60,.08); }
 .tpop div small { display: block; font: 0.6875rem "Roboto", sans-serif; color: var(--text-2); }
+.limit .field { width: 100%; min-width: 0; height: auto; min-height: 40px; flex-wrap: wrap; gap: 4px; padding: 6px 10px; }
+.limit .matches { margin-top: 4px; }
+.adv-row { display: flex; align-items: center; gap: 8px; }
+.adv { display: inline-flex; align-items: center; gap: 2px; font-size: 0.875rem; font-weight: 500; color: var(--text-2); }
+.adv svg { width: 20px; height: 20px; fill: rgba(0,0,0,.54); }
+.adv-row .toggle { margin-left: auto; }
+.opts.adv-body { grid-template-columns: 1fr 1fr; }
+.opts.adv-body .extra { grid-column: 1 / -1; }
 </style>
 </head>
 <body>
@@ -111,17 +119,17 @@ table.assign { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
 	<div class="dialog">
 		<div class="dialog-title">Install production <span class="mono secondary">tamanu-install.yml</span></div>
 		<div class="dialog-content">
-			<div class="opts">
-				<span class="field mono"><label>Limit</label><span class="tchip">facility</span><span class="tchip neg">!example-facility-b</span></span>
+			<div class="limit">
+				<span class="field mono"><label>Limit</label><span class="tchip">facility</span><span class="tchip neg">!example-facility-b</span><span class="tchip">outreach-clinic-north-pts01.site-network.example.internal</span></span>
+				<div class="matches">Matches <span class="mono">example-facility-a</span>, <span class="mono">example-facility-c</span>, <span class="mono">outreach-clinic-north-pts01.site-network.example.internal</span></div>
+			</div>
+			<div class="adv-row"><span class="adv"><svg viewBox="0 0 24 24"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg>Advanced</span><span class="toggle"><span class="on">git</span><span>jj</span></span></div>
+			<div class="opts adv-body">
 				<span class="field mono focus" style="position: relative"><label>Tags</label><span class="tchip">app</span>ta<span class="caret"></span>
 					<div class="tpop"><div class="hl">tailscale</div><div>tamanu</div><div>timezone</div></div>
 				</span>
 				<span class="field mono"><label>Skip tags</label></span>
-				<div class="matches">Matches <span class="mono">example-facility-a</span>, <span class="mono">example-facility-c</span></div>
-			</div>
-			<div class="row">
-				<span class="toggle"><span class="on">git</span><span>jj</span></span>
-				<span class="field mono wide ph"><label>Extra arguments</label>-vv, --check…</span>
+				<span class="field mono ph extra"><label>Extra arguments</label>-vv, --check…</span>
 			</div>
 		</div>
 		<div class="dialog-actions">
@@ -139,15 +147,11 @@ table.assign { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
 			<table class="assign">
 				<tr><td>example-facility-c</td><td><span class="field dense select"><label>Install as</label>Tamanu facility</span></td></tr>
 			</table>
-			<div class="opts">
+			<div class="limit">
 				<span class="field mono ph"><label>Limit</label>all</span>
-				<span class="field mono"><label>Tags</label></span>
-				<span class="field mono"><label>Skip tags</label></span>
+				
 			</div>
-			<div class="row">
-				<span class="toggle"><span class="on">git</span><span>jj</span></span>
-				<span class="field mono wide ph"><label>Extra arguments</label>-vv, --check…</span>
-			</div>
+			<div class="adv-row"><span class="adv"><svg viewBox="0 0 24 24"><path d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>Advanced</span><span class="toggle"><span class="on">git</span><span>jj</span></span></div>
 		</div>
 		<div class="dialog-actions">
 			<span class="btn text">Cancel</span>
@@ -165,16 +169,11 @@ table.assign { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
 				<span class="field select mono"><label>Playbook</label>postgres-upgrade-check.yml</span>
 				<span class="toggle"><span class="on">Configure</span><span>Upgrade</span></span>
 			</div>
-			<div class="opts">
+			<div class="limit">
 				<span class="field mono"><label>Limit</label><span class="tchip">central</span></span>
-				<span class="field mono"><label>Tags</label></span>
-				<span class="field mono"><label>Skip tags</label></span>
 				<div class="matches">Matches <span class="mono">example-central</span></div>
 			</div>
-			<div class="row">
-				<span class="toggle"><span>git</span><span class="on">jj</span></span>
-				<span class="field mono wide ph"><label>Extra arguments</label>-vv, --check…</span>
-			</div>
+			<div class="adv-row"><span class="adv"><svg viewBox="0 0 24 24"><path d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>Advanced</span><span class="toggle"><span>git</span><span class="on">jj</span></span></div>
 		</div>
 		<div class="dialog-actions">
 			<span class="btn text">Cancel</span>
@@ -198,15 +197,11 @@ table.assign { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
 				<tr><td>example-facility-b</td><td><span class="field dense select error ph"><label>Install as</label>Choose</span></td></tr>
 				<tr><td>example-backup</td><td><span class="field dense select"><label>Install as</label>Nothing</span></td></tr>
 			</table>
-			<div class="opts">
+			<div class="limit">
 				<span class="field mono ph"><label>Limit</label>all</span>
-				<span class="field mono"><label>Tags</label></span>
-				<span class="field mono"><label>Skip tags</label></span>
+				
 			</div>
-			<div class="row">
-				<span class="toggle"><span class="on">git</span><span>jj</span></span>
-				<span class="field mono wide ph"><label>Extra arguments</label>-vv, --check…</span>
-			</div>
+			<div class="adv-row"><span class="adv"><svg viewBox="0 0 24 24"><path d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>Advanced</span><span class="toggle"><span class="on">git</span><span>jj</span></span></div>
 		</div>
 		<div class="dialog-actions">
 			<span class="btn text">Cancel</span>
@@ -301,15 +296,11 @@ CANOPY_URL=https://canopy.example.ts.net CANOPY_GROUP=example CANOPY_RANK=produc
 				<svg viewBox="0 0 24 24"><path d="M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2M12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8"/></svg>
 				<div class="msg">Upgrading production needs an open upgrade plan. <a href="#">Plan an upgrade</a></div>
 			</div>
-			<div class="opts">
+			<div class="limit">
 				<span class="field mono ph"><label>Limit</label>all</span>
-				<span class="field mono"><label>Tags</label></span>
-				<span class="field mono"><label>Skip tags</label></span>
+				
 			</div>
-			<div class="row">
-				<span class="toggle"><span class="on">git</span><span>jj</span></span>
-				<span class="field mono wide ph"><label>Extra arguments</label>-vv, --check…</span>
-			</div>
+			<div class="adv-row"><span class="adv"><svg viewBox="0 0 24 24"><path d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>Advanced</span><span class="toggle"><span class="on">git</span><span>jj</span></span></div>
 		</div>
 		<div class="dialog-actions">
 			<span class="btn text">Cancel</span>

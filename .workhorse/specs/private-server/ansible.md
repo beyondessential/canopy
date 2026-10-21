@@ -193,6 +193,7 @@ A run can be limited to some of the environment's machines.
 The limit is picked from the environment's machines and the groups a run puts them in, or typed as an Ansible host pattern, and the machines it matches are shown as it is typed.
 A run can be given tags to run and tags to skip, picked from those the catalogue lists for the playbook.
 Any further arguments for the playbook are typed as they would be on the command line.
+Tags and further arguments are collapsed until asked for, leaving the limit, which most runs use, the room a list of long host names needs.
 
 Starting work takes the lease, and only then is the command shown, since it carries the lease.
 The command brings the operator's checkout of the infra repository up to date with its main branch, by git or by jj as the operator chooses, then runs the playbook against the environment.
