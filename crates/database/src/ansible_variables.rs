@@ -122,6 +122,28 @@ impl AnsibleVariable {
 			.map_err(AppError::from)
 	}
 
+	/// The variables held as plain values whose names are among `names`, for a
+	/// caller moving them somewhere else.
+	pub async fn list_plain_named(
+		conn: &mut AsyncPgConnection,
+		names: &[String],
+	) -> Result<Vec<Self>> {
+		use crate::schema::ansible_variables::dsl;
+
+		if names.is_empty() {
+			return Ok(Vec::new());
+		}
+		dsl::ansible_variables
+			.filter(dsl::is_secret.eq(false))
+			.filter(dsl::value.is_not_null())
+			.filter(dsl::name.eq_any(names))
+			.order(dsl::name.asc())
+			.select(Self::as_select())
+			.get_results(conn)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// The variables at one scope, sorted by name.
 	pub async fn list_at(conn: &mut AsyncPgConnection, scope: VariableScope) -> Result<Vec<Self>> {
 		use crate::schema::ansible_variables::dsl;

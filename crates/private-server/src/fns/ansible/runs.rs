@@ -64,6 +64,9 @@ pub struct RunOptions {
 	/// Whether the environment already holds a Tamanu central, of which it holds
 	/// at most one.
 	pub has_central: bool,
+	/// How long, in seconds, a lease waits for its run to start before Canopy
+	/// releases it.
+	pub pending_for_secs: i64,
 }
 
 /// A limit to evaluate against an environment's machines.
@@ -137,6 +140,10 @@ fn truthy(value: &Value) -> bool {
 
 /// The groups the plugin puts a machine in: the product of each application
 /// type on it and the role it plays, a type naming no role being a standalone.
+///
+/// This mirrors `ansible_groups` in infra's `inventory_plugins/canopy.py`, which
+/// reads the product and role off the type's first hyphen. A limit is previewed
+/// against these groups, so the two have to change together.
 fn ansible_groups<'a>(types: impl Iterator<Item = &'a str>) -> BTreeSet<String> {
 	let mut groups = BTreeSet::new();
 	for application_type in types {
@@ -419,6 +426,7 @@ pub async fn run_options(
 			.applications
 			.iter()
 			.any(|application| application.r#type.to_string() == CENTRAL),
+		pending_for_secs: database::ansible_leases::PENDING_FOR.as_secs(),
 		members: members
 			.into_iter()
 			.map(|member| RunMember {

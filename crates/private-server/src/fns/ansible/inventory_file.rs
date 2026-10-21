@@ -96,6 +96,29 @@ struct Builder {
 	/// Lines that hold the text of a block scalar, which a `#` on does not
 	/// begin a comment.
 	block_lines: BTreeSet<usize>,
+	/// How many nodes aliases have copied in, which a document that nests them
+	/// can make grow exponentially.
+	aliased: usize,
+	too_many_aliases: bool,
+}
+
+/// What aliases may copy into one file before it is refused, far more than any
+/// inventory a person wrote holds.
+const ALIAS_BUDGET: usize = 100_000;
+
+impl Node {
+	fn weight(&self) -> usize {
+		match self {
+			Node::Scalar { .. } => 1,
+			Node::Seq(items) => 1 + items.iter().map(Node::weight).sum::<usize>(),
+			Node::Map(pairs) => {
+				1 + pairs
+					.iter()
+					.map(|(key, value)| key.weight() + value.weight())
+					.sum::<usize>()
+			}
+		}
+	}
 }
 
 impl Builder {
@@ -155,6 +178,11 @@ impl MarkedEventReceiver for Builder {
 			}
 			Event::Alias(id) => {
 				if let Some(node) = self.anchors.get(&id).cloned() {
+					self.aliased = self.aliased.saturating_add(node.weight());
+					if self.aliased > ALIAS_BUDGET {
+						self.too_many_aliases = true;
+						return;
+					}
 					self.push(node);
 				}
 			}
@@ -389,6 +417,11 @@ pub fn parse(text: &str) -> Result<InventoryFile, ParseError> {
 	Parser::new_from_str(text)
 		.load(&mut builder, false)
 		.map_err(|e| error(e.to_string()))?;
+	if builder.too_many_aliases {
+		return Err(error(
+			"the file's aliases expand to far more than it holds, which no inventory needs",
+		));
+	}
 	let Some(root) = builder.root.take() else {
 		return Err(error("the file is empty"));
 	};
@@ -793,6 +826,19 @@ mod tests {
 			file.environment["derived"],
 			json!({ "region": "nz", "tier": "two" })
 		);
+	}
+
+	#[test]
+	fn refuses_aliases_that_expand_without_bound() {
+		let mut text = String::from("all:\n  vars:\n    a0: &a0 [x, x, x, x, x, x, x, x, x, x]\n");
+		for level in 1..12 {
+			let previous = level - 1;
+			text.push_str(&format!(
+				"    a{level}: &a{level} [*a{previous}, *a{previous}, *a{previous}, *a{previous}, *a{previous}, *a{previous}, *a{previous}, *a{previous}, *a{previous}, *a{previous}]\n"
+			));
+		}
+		let refused = parse(&text).unwrap_err();
+		assert!(refused.0.contains("aliases"), "{refused}");
 	}
 
 	#[test]

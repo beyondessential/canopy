@@ -17,7 +17,7 @@ use commons_servers::{
 use commons_types::{Uuid, server::rank::ServerRank};
 use database::{
 	ansible_catalogue::{
-		Catalogue, CataloguePlaybook, CatalogueState, CatalogueVariable, Loaded, Problem, ScopeKind,
+		Catalogue, CataloguePlaybook, CatalogueVariable, Loaded, Problem, ScopeKind,
 	},
 	ansible_variables::{AnsibleVariable, VariableScope},
 	audit::{Action, Pending},

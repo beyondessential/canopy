@@ -220,13 +220,15 @@ pub async fn make_secret(
 	let actor = Actor::canopy(JOB);
 
 	let mut moved = 0;
-	for variable in AnsibleVariable::list_all(db).await? {
+	let names: Vec<String> = catalogue
+		.variables()
+		.filter(|variable| variable.secret)
+		.map(|variable| variable.name.clone())
+		.collect();
+	for variable in AnsibleVariable::list_plain_named(db, &names).await? {
 		let Some(value) = variable.value.as_ref() else {
 			continue;
 		};
-		if variable.is_secret || !catalogue.is_secret(&variable.name) {
-			continue;
-		}
 
 		let scope = variable.scope();
 		let (record, scope_record, rank) =

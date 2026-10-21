@@ -91,19 +91,39 @@ fn named(name: &str, members: &[Member<'_>]) -> BTreeSet<usize> {
 
 /// Whether `text` matches `glob`, where `*` is any run of characters and `?` any
 /// one. Case matters, as it does to Ansible.
+///
+/// Remembers only where the last `*` was, so the work is bounded by the lengths
+/// of the two rather than by how many stars the pattern has.
 fn matches(glob: &str, text: &str) -> bool {
-	fn go(glob: &[char], text: &[char]) -> bool {
-		match glob.split_first() {
-			None => text.is_empty(),
-			Some(('*', rest)) => (0..=text.len()).any(|skip| go(rest, &text[skip..])),
-			Some(('?', rest)) => !text.is_empty() && go(rest, &text[1..]),
-			Some((c, rest)) => text.first() == Some(c) && go(rest, &text[1..]),
+	let glob: Vec<char> = glob.chars().collect();
+	let text: Vec<char> = text.chars().collect();
+	let (mut g, mut t) = (0, 0);
+	let mut star: Option<(usize, usize)> = None;
+	while t < text.len() {
+		match glob.get(g) {
+			Some('*') => {
+				star = Some((g, t));
+				g += 1;
+			}
+			Some('?') => {
+				g += 1;
+				t += 1;
+			}
+			Some(c) if *c == text[t] => {
+				g += 1;
+				t += 1;
+			}
+			_ => match star {
+				Some((star_g, star_t)) => {
+					g = star_g + 1;
+					t = star_t + 1;
+					star = Some((star_g, star_t + 1));
+				}
+				None => return false,
+			},
 		}
 	}
-	go(
-		&glob.chars().collect::<Vec<_>>(),
-		&text.chars().collect::<Vec<_>>(),
-	)
+	glob[g..].iter().all(|c| *c == '*')
 }
 
 /// The names a limit can be picked from: every group any member is in, and
@@ -198,6 +218,17 @@ mod tests {
 			["example-facility-a", "example-facility-b"]
 		);
 		assert_eq!(f.run("example-facility-?").unwrap().len(), 2);
+	}
+
+	#[test]
+	fn a_pattern_of_many_stars_matches_in_time_that_does_not_depend_on_them() {
+		let f = Fixture::new();
+		let stars = "*a".repeat(40) + "*x";
+		assert!(f.run(&stars).unwrap().is_empty());
+		assert!(matches("*a*b*", "xxaxxbxx"));
+		assert!(!matches("*a*b*", "xxbxxaxx"));
+		assert!(matches("a*", "a"));
+		assert!(!matches("a?", "a"));
 	}
 
 	#[test]
