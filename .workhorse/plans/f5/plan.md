@@ -53,6 +53,9 @@ Steps:
   - One facility host sets `tamanu_facility_id` to a list of two ids. The facility template renders it as `["{{ tamanu_facility_id }}"]`, which a list breaks, in ops as well as infra. Either the host is configured by hand, or the variable has to become a list in infra. The schema keeps it a string.
 - The infra repo is public, so Canopy fetches `https://raw.githubusercontent.com/beyondessential/infra/main/ansible/variables.schema.json` with no credentials. It keeps the last good copy in the database, so a restart while GitHub is unreachable still has a catalogue, and refreshes it periodically.
 - Validation uses a JSON Schema 2020-12 validator with format checks for `hostname`, `ipv4`, `ipv6`, `uri` and `email`, since the schema relies on them.
+- Keep only a copy that parses and validates as a catalogue. A self-alert check under the `canopy` source (SELF) warns after a day without a good read, or when the published copy is invalid. With no catalogue ever read, Run… is disabled.
+- When a newly read catalogue marks a stored plain variable secret, move its value into the secret store (`commit_ahead`, then clear the plain value in the transaction), one audit entry per value.
+- `x-canopy.applications` only filters the add row's offers. A machine with no applications is offered everything, and the API doesn't enforce it.
 - `x-canopy.scope` generalises the hard-coded `ansible_host` rule. Keep the hard-coded rule as well, since Canopy's addressing depends on it whatever the catalogue says.
 
 ## Environments are their machines
@@ -71,10 +74,11 @@ New and widened actions in the `actions!` catalogue (stable names follow the new
 - [ ] `AnsibleLeaseReleased` detail gains `reason`: `released` (by the holder), `taken_over`, or `unstarted` (by Canopy after five minutes, actor Canopy itself)
 - [ ] `AnsibleLeaseExpired`, actor Canopy itself, recorded by the job that notices an expired lease. Today a lease that expires leaves no entry
 - [ ] `AnsibleCatalogueChanged`, actor Canopy itself, naming the infra commit the file was read at (from the GitHub contents/commits API rather than the raw URL, which carries no commit) and its digest
+- [ ] `AnsibleVariableMadeSecret`, actor Canopy itself, naming the variable and the catalogue version that made it secret
 - [ ] `AnsibleInventoryImported`, as already planned
 
 ## Run limit and tags
 
-- The limit preview has to match the host names the plugin uses. Today the plugin computes them (address cut to its first label for tailnet names, else Canopy's name slugged). That rule moves into Canopy, which serves each member's host name, so the preview and the run cannot disagree. The plugin then uses the served name.
+- The limit preview has to match the host names the plugin uses. Today the plugin computes them in `host_names` (`ansible/inventory_plugins/canopy.py` in infra): the address, cut to its first label for tailnet names; where that's empty or shared, Canopy's name slugged (`[^A-Za-z0-9_.-]+` → `-`); else the machine id. Canopy adds the refusal when names still collide. That rule moves into Canopy, which serves each member's host name, so the preview and the run cannot disagree. The plugin then uses the served name.
 - The pattern is the subset of Ansible host patterns that matches names and groups: `:` or `,` separated, `*` globs, `!` exclusion, `&` intersection. A pattern Canopy can't evaluate (a `~` regex) is refused rather than previewed wrongly.
 - The draft catalogue's `x-canopy.playbooks` tags came from `ansible-playbook --list-tags` against each playbook (with `always`/`never` dropped). Infra should generate that list in CI rather than keep it by hand, and fail when it's stale.
