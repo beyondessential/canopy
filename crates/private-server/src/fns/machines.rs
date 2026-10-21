@@ -29,13 +29,12 @@ use database::devices::{Device, TailscaleIdentity};
 use jiff::Timestamp;
 
 use database::machine_enrollment_tokens::MachineEnrollmentToken;
-use database::machines::{Machine, MachineUpdate, NewMachine};
+use database::machines::{Machine, MachineAddition, MachineUpdate, NewMachine};
 use database::maintenance_windows::MaintenanceWindow;
 use database::pg_duration::PgDuration;
 use database::reported_detail::MachineReportedDetail;
 use database::server_groups::ServerGroup;
-use database::silenced_refs::MachineSilencedRef;
-use database::statuses::{CANOPY_SOURCE, MergedDetail, REACHABILITY_REF};
+use database::statuses::MergedDetail;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -421,64 +420,38 @@ pub async fn create(
 	let name = database::machines::normalise_name(&args.name)?;
 	let mut conn = state.db.get().await?;
 
-	// Bind the tailnet node first: a machine created and then failed to bind
-	// would leave a record the operator did not ask for.
+	// Resolve the tailnet node first, so a node that cannot be bound leaves
+	// no machine behind; the addition itself is one transaction.
 	let device_id = match args.tailscale_identifier.as_deref() {
 		None => None,
 		Some(identifier) => Some(resolve_tailnet_device(&state, &mut conn, identifier).await?),
 	};
 
-	let machine = Machine::create(
+	let machine = Machine::add(
 		&mut conn,
-		NewMachine {
-			name,
-			group_id: args.group_id,
-			cloud: args.cloud,
-			geolocation: args.geolocation,
+		MachineAddition {
+			machine: NewMachine {
+				name,
+				group_id: args.group_id,
+				cloud: args.cloud,
+				geolocation: args.geolocation,
+				rank: args.rank,
+			},
+			settings: MachineUpdate {
+				is_monitored: args.is_monitored,
+				alert_when_down_for: args
+					.alert_when_down_for
+					.map(|s| PgDuration(jiff::SignedDuration::from_secs(s))),
+				notes: args.notes,
+				tags: args.tags,
+				..Default::default()
+			},
+			alert_when_unreachable: args.alert_when_unreachable.unwrap_or(true),
+			device_id,
+			by: Some(&admin.0.login),
 		},
 	)
 	.await?;
-
-	// The rest of the form is an edit applied to the machine just made, so
-	// creating and editing cannot disagree about what a field means.
-	Machine::update(
-		&mut conn,
-		machine.id,
-		MachineUpdate {
-			is_monitored: args.is_monitored,
-			alert_when_down_for: args
-				.alert_when_down_for
-				.map(|s| PgDuration(jiff::SignedDuration::from_secs(s))),
-			notes: args.notes,
-			tags: args.tags,
-			..Default::default()
-		},
-	)
-	.await?;
-
-	if let Some(rank) = args.rank {
-		Machine::set_rank(&mut conn, machine.id, rank, Some(&admin.0.login)).await?;
-	}
-
-	// A box being created has no alerting yet for this to take away, so it is
-	// written here at the creation's grade rather than through the silence
-	// handlers, which remove alerting an existing box has.
-	// spec: SAFE#grading-the-administrative-surface
-	if args.alert_when_unreachable == Some(false) {
-		MachineSilencedRef::add(
-			&mut conn,
-			machine.id,
-			CANOPY_SOURCE,
-			REACHABILITY_REF,
-			None,
-			Some(&admin.0.login),
-		)
-		.await?;
-	}
-
-	if let Some(device_id) = device_id {
-		Machine::bind_device(&mut conn, machine.id, device_id).await?;
-	}
 
 	Ok(Json(machine.id))
 }

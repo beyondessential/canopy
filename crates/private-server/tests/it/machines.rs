@@ -28,6 +28,36 @@ async fn a_machine_is_created_with_nothing_but_a_name() {
 	.await
 }
 
+/// Adding a machine is one transaction: a form refused part-way through, here
+/// for a reserved tag key, leaves no machine behind for a retry to duplicate.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_addition_leaves_no_machine() {
+	commons_tests::server::run(async |_conn, _, private| {
+		let refused = private
+			.post("/api/fleet/machines/create")
+			.json(&json!({
+				"name": "half-made",
+				"rank": "production",
+				"alert_when_unreachable": false,
+				"tags": { "canopy:anything": "x" },
+			}))
+			.await;
+		refused.assert_status_bad_request();
+
+		let listed = private
+			.post("/api/fleet/machines/list")
+			.json(&json!({}))
+			.await;
+		listed.assert_status_ok();
+		let machines: Vec<serde_json::Value> = listed.json();
+		assert!(
+			machines.iter().all(|m| m["name"] != "half-made"),
+			"{machines:?}"
+		);
+	})
+	.await
+}
+
 /// A machine added with a rank carries it from the start, so what arrives on
 /// it is never pending; one added without stays pending until ranked.
 // spec: FLT#machines-come-from-operators
