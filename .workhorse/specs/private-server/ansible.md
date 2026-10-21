@@ -12,7 +12,8 @@ A run reads it as it starts, so it acts on the fleet as Canopy holds it.
 A run is served one environment (see [GRP](../servers/groups.md), "Environments").
 
 Each member is a machine, and carries its identifier, its name, the name a run addresses it by, the address it is reached at, the applications on it with their names and types, and its effective variables.
-Every live machine at the environment's rank is a member, one with nothing on it yet included, since a run is how its applications get there.
+A live machine at the environment's rank is a member once a device is bound to it or an application on it has reported, since a run can reach it only then.
+One with a bound device and nothing on it yet is a member, since a run is how its applications get there.
 A member with nothing on it is served with the application type its run assigns it, if any, so the run configures it as that (see "Machines with nothing on them").
 A member names which of those variables are secret.
 The environment's own variables are served once beside the members.
@@ -90,7 +91,7 @@ The file's comment lines are appended to the group's notes, under a heading nami
 
 ### Matching hosts to machines
 
-Each host is matched against the machines in the environment by the names and addresses it gives: its key, and its `tailscale_name`, `public_hostname`, and `ansible_host`.
+Each host is matched against the environment's members by the names and addresses it gives: its key, and its `tailscale_name`, `public_hostname`, and `ansible_host`.
 Those are compared with each machine's name, the tailnet name of the device bound to it, and the hosts recorded for its applications.
 A machine need not be on the tailnet to be matched, and one with no bound device matches by its name and its applications' hosts.
 A host that matches exactly one machine is proposed for it, and one that matches none or several is left for the operator to assign.
@@ -139,9 +140,9 @@ Taking a lease waits only on another take of the same environment. Canopy's own 
 
 ### Work under way
 
-Taking a lease is refused while another operator's maintenance window holds over the environment: over its group, or over any of its machines (see [MNT](../monitoring/maintenance.md)).
-A window over one machine refuses the whole environment, since a run acts on the environment as a whole.
-A window over a machine outside the environment refuses nothing.
+Taking a lease is refused while another operator's maintenance window holds over the environment: over its group, or over any of its members (see [MNT](../monitoring/maintenance.md)).
+A window over one member refuses the whole environment, since a run acts on the environment as a whole.
+A window over a machine that is not a member refuses nothing.
 
 A run's first read under its lease declares a maintenance window over the environment, as the lease's holder, noting the playbook it runs.
 Where a window of the holder's own already covers the environment, that window serves instead and nothing new is declared.
