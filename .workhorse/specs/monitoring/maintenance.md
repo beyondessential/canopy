@@ -41,9 +41,9 @@ A target stays suspended until the last window covering it has ended: for an app
 
 A group's own window, and the window over each of its environments, are separate targets, so a target has at most one open window: declaring over one that already has a window amends it, recording who amended and when.
 A machine is named by at most one open window, whether alone or among others, so a window over several machines is the window of each of them.
-The window is then the amender's work as well as the declarer's, which decides who may run against it (see [INV](../private-server/ansible.md), "Work under way").
+The window is then the amender's work as well as the declarer's, which decides who may run against it (see [ANSRUN](../private-server/ansible/runs.md), "Work under way").
 
-Canopy opens a window itself only when an Ansible run starts, declaring it over what the run acts on for the operator holding the run's lease, who is its declarer from then on (see [INV](../private-server/ansible.md), "Work under way").
+Canopy opens a window itself only when an Ansible run starts, declaring it over what the run acts on for the operator holding the run's lease, who is its declarer from then on (see [ANSRUN](../private-server/ansible/runs.md), "Work under way").
 Such a window lasts the run rather than to an expected end, and taking over the lease passes it to the new holder as an amendment.
 Every other window is an operator's declaration.
 An environment with an open upgrade plan is offered the declaration over itself from that plan, prefilled with the plan's window and note, so declaring is one action at the moment the work starts (see [UPG](../private-server/upgrade-plans.md)).
@@ -71,7 +71,7 @@ A choice that leaves any of the incident's failing checks contributing is marked
 So an operator reading a backup failure on a group's headline environment learns from the dialog that only the group quiets it, since a window over that environment leaves the group's own checks watched.
 Coverage is reckoned against failures alone, because an incident whose failures have all left closes whatever warnings remain in it (see [INC](incidents.md), "Membership").
 
-The declaration an upgrade plan offers, and the one a run's start makes, stay over what they declare and cannot be retargeted: the plan stays open for that environment and the lease is served against it (see [UPG](../private-server/upgrade-plans.md) and [INV](../private-server/ansible.md), "Work under way").
+The declaration an upgrade plan offers, and the one a run's start makes, stay over what they declare and cannot be retargeted: the plan stays open for that environment and the lease is served against it (see [UPG](../private-server/upgrade-plans.md) and [ANSRUN](../private-server/ansible/runs.md), "Work under way").
 
 ## Moving a window
 
@@ -87,7 +87,7 @@ One offered over a target with no window of its own declares at whichever grain 
 
 A window declared from an upgrade plan's offer is that plan's window and stays over the plan's environment: it can be amended and lifted but not moved, so the plan it holds open is not released partway through the work (see [UPG](../private-server/upgrade-plans.md), "When a plan is met").
 Any other window over the environment, such as one declared before the plan was recorded, moves like any other.
-A window a run lease is being served against cannot be moved while that lease is held, since the run is acting on the environment the window covers; once the lease is released or expires, the window moves like any other (see [INV](../private-server/ansible.md), "Work under way").
+A window a run lease is being served against cannot be moved while that lease is held, since the run is acting on the environment the window covers; once the lease is released or expires, the window moves like any other (see [ANSRUN](../private-server/ansible/runs.md), "Work under way").
 
 What the move newly covers is suspended from the moment of the move.
 What it leaves uncovered serves the settle period as though the window had ended over it, so narrowing a group's window to one environment does not page for the rest of the group the moment it moves.
@@ -104,7 +104,7 @@ Where that close is notified, the notice says maintenance was declared, so a rea
 
 Canopy-wide checks are Canopy monitoring its own operation, and are never suspended by any window (see [SELF](../private-server/self-alerts.md)).
 
-A window also holds off Ansible runs by others: while it holds, no one but the operator who declared it, or the one whose amendment of it stands, can take a run lease on an environment it covers (see [INV](../private-server/ansible.md), "Work under way").
+A window also holds off Ansible runs by others: while it holds, no one but the operator who declared it, or the one whose amendment of it stands, can take a run lease on an environment it covers (see [ANSRUN](../private-server/ansible/runs.md), "Work under way").
 
 ## Ending
 

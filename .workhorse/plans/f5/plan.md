@@ -21,7 +21,7 @@ The import was checked against every inventory file in the ops repo (49 files, a
 
 ## Rename to Ansible
 
-The feature is "Ansible", since in Canopy the inventory is the fleet. The spec has moved to `private-server/ansible.md` and keeps its `INV` id, so `// spec: INV` references in code stay valid. The rename covers everything except names already stored, which keep their spelling:
+The feature is "Ansible", since in Canopy the inventory is the fleet. The spec has moved to the `private-server/ansible/` folder: `overview.md` keeps the `INV` id (what a run is served, reaching a machine, refusal), with `variables.md` (`ANSVAR`), `import.md` (`ANSIMP`) and `runs.md` (`ANSRUN`) beside it. The rename covers everything except names already stored, which keep their spelling:
 
 - audit actions' stable names (`inventory_read`, `inventory_lease_taken`, …), which are written into existing log entries
 - secret-store keys (`inv-vars-g-…`, `inv-vars-<rank>-…`, `inv-vars-m-…`). Renaming them would move secrets outside a transaction for no behavioural gain
@@ -35,14 +35,15 @@ Steps:
 - [ ] Private server: modules `fns/inventory.rs` → `fns/ansible.rs` and `fns/inventory_variables.rs` → `fns/ansible_variables.rs`, mounted at `/api/ansible/*` and `/api/ansible_variables/*`, with the openapi tag and its description, log messages, and tests
 - [ ] Keep the `/api/inventory/*` paths as aliases until the plugin has moved, since the plugin in the infra repo (and its copy in ops) calls them. Then remove them in a follow-up
 - [ ] `just gen-openapi`, then `safety-modes.ts` grades for the new paths
+- [ ] Retag `// spec:` comments for the split: `INV#run-leases` and `INV#work-under-way` → `ANSRUN#…`, `INV#inventory-variables` → `ANSVAR#variables`, `INV#presentation` → `ANSVAR#presentation` (variables) or `ANSRUN#presentation` (runs). A bare `INV` stays where the code serves the environment
 - [ ] SPA: `GroupInventorySection` → `GroupAnsibleSection`, heading "Ansible", action labels, test ids. `e2e/inventory.spec.ts` → `e2e/ansible.spec.ts`, with seed helpers
-- [ ] Infra repo, in lockstep: the plugin's `/api/inventory/*` calls move to `/api/ansible/*`. Links to `private-server/inventory.md` move to `private-server/ansible.md`, and `#what-an-inventory-contains` becomes `#what-a-run-is-served` (`#run-leases` and `#reaching-a-machine` are unchanged)
+- [ ] Infra repo, in lockstep: the plugin's `/api/inventory/*` calls move to `/api/ansible/*`. Links to `private-server/inventory.md` move: `#what-an-inventory-contains` → `ansible/overview.md#what-a-run-is-served`, `#reaching-a-machine` → `ansible/overview.md#reaching-a-machine`, `#run-leases` → `ansible/runs.md#run-leases`
 - [ ] `grep -rin inventor` over `crates`, `private-web/src`, `private-web/e2e` and `.workhorse/specs` should then turn up only the stored names above, Ansible's own inventory (the import), and the unrelated backup-repository inventory
 
 ## UI rework (mockups: ansible-section, ansible-run)
 
 - The run dialog takes the lease from the browser ("Start work"), so the plugin needs to be handed it: `CANOPY_LEASE=<id>` in the command, used instead of taking a lease of its own. The lease records the playbook and intent the dialog chose, so a run started with a different command is still the run the lease was taken for.
-- The lease is pending until the plugin's first read under it. That read declares maintenance over the environment. With no read within 5 minutes, Canopy releases the lease itself, so a closed tab or abandoned dialog doesn't hold the environment.
+- The lease is pending until the plugin's first read under it. That read declares maintenance over what the run acts on. The spec leaves the pending period unnamed; use 5 minutes. With no read in that time, Canopy releases the lease itself, so a closed tab or abandoned dialog doesn't hold the environment.
 - The command's first `cd` names the operator's own checkout, so it is shown but left out of the copied text.
 
 ## Variable catalogue
