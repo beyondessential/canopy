@@ -36,6 +36,8 @@ use crate::state::AppState;
 
 const ANSIBLE_PORT: &str = "ansible_port";
 const CLONE: &str = "tamanu_clone";
+/// The variables a run sets for itself, which no import carries.
+const RUN_SET: [&str; 2] = ["canopy_intent", CLONE];
 
 /// What a name has to contain to be guessed secret where the catalogue does not
 /// say.
@@ -403,7 +405,13 @@ async fn plan(conn: &mut AsyncPgConnection, args: &ImportArgs) -> Result<Plan> {
 		.collect();
 
 	let mut left_out: BTreeSet<String> = BTreeSet::new();
-	let is_reserved = |name: &str| catalogue.is_some_and(|c| c.is_reserved(name));
+	// Before Canopy has read a catalogue, the two variables a run is known to set
+	// for itself are left out all the same, so an import never stores what the
+	// catalogue would later refuse to have set.
+	let is_reserved = |name: &str| match catalogue {
+		Some(catalogue) => catalogue.is_reserved(name),
+		None => RUN_SET.contains(&name),
+	};
 
 	// A variable as the preview shows it, and as it would be written.
 	let variable = |host: Option<&str>,

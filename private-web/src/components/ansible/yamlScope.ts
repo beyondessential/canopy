@@ -12,6 +12,9 @@ import { resolvePlain } from "./pyyaml";
 import type { CatalogueView } from "../../types";
 import { type Schema, type ScopeKind, offered, problems } from "./schema";
 
+/** The longest variable name the server accepts. */
+const NAME_LIMIT = 253;
+
 /// A variable as a scope holds it.
 export type ScopeVariable = {
 	name: string;
@@ -111,7 +114,10 @@ export function parseScope(text: string): Parsed {
 		return found;
 	}
 	for (const pair of root.items) {
-		const key = isScalar(pair.key) ? String(pair.key.value) : String(pair.key);
+		// The key as written: a bare `.` would otherwise be read as a number.
+		const key = isScalar(pair.key)
+			? (pair.key.source ?? String(pair.key.value))
+			: String(pair.key);
 		const line = isScalar(pair.key) && pair.key.range
 			? lines.linePos(pair.key.range[0]).line
 			: 1;
@@ -175,7 +181,12 @@ export function checkScope(
 	const out = [...parsed.problems];
 	const held = new Set(before.filter((v) => v.secret).map((v) => v.name));
 	for (const entry of parsed.entries) {
-		if (!/^[-._a-zA-Z0-9]+$/.test(entry.name)) {
+		if (
+			!/^[-._a-zA-Z0-9]+$/.test(entry.name) ||
+			entry.name === "." ||
+			entry.name === ".." ||
+			entry.name.length > NAME_LIMIT
+		) {
 			out.push({
 				line: entry.line,
 				message: `${entry.name} is not a usable variable name`,
@@ -190,6 +201,12 @@ export function checkScope(
 		}
 		const described = catalogue?.variables.find((v) => v.name === entry.name);
 		if (!described) continue;
+		if (entry.secret && !described.secret) {
+			out.push({
+				line: entry.line,
+				message: `${entry.name} is not secret in the catalogue, so it is set as a plain value`,
+			});
+		}
 		if (described.reserved) {
 			out.push({
 				line: entry.line,

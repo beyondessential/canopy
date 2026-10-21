@@ -725,3 +725,22 @@ async fn is_refused_while_a_run_holds_the_environment() {
 	})
 	.await
 }
+
+/// Before Canopy has read a catalogue, the variables a run sets for itself are
+/// left out all the same.
+// spec: ANSIMP#reading-the-file
+#[tokio::test(flavor = "multi_thread")]
+async fn leaves_out_the_variables_a_run_sets_before_any_catalogue_is_read() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		environment(&mut conn).await;
+		let preview = preview(&private, json!({ "group": "kamaka", "file": FILE })).await;
+
+		assert_eq!(
+			preview["left_out"],
+			json!(["canopy_intent", "tamanu_clone"])
+		);
+		assert!(!names(&preview["environment"]).contains(&"canopy_intent"));
+		assert!(!names(&preview["environment"]).contains(&"tamanu_clone"));
+	})
+	.await
+}

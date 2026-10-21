@@ -513,34 +513,28 @@ pub fn parse(text: &str) -> Result<InventoryFile, ParseError> {
 		all.children.extend(beside_all);
 	}
 
-	// Every group each host is in, directly or through a group beneath.
-	let mut membership: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-	for host in host_vars.keys() {
-		membership.insert(host.clone(), BTreeSet::new());
-	}
-	fn contains(
-		groups: &BTreeMap<String, Group>,
-		group: &str,
-		host: &str,
-		seen: &mut BTreeSet<String>,
-	) -> bool {
-		if !seen.insert(group.to_owned()) {
-			return false;
-		}
-		let Some(data) = groups.get(group) else {
-			return false;
-		};
-		data.hosts.iter().any(|h| h == host)
-			|| data
-				.children
-				.iter()
-				.any(|child| contains(groups, child, host, seen))
-	}
-	for (host, member_of) in &mut membership {
-		for name in groups.keys().filter(|name| *name != "all") {
-			if contains(&groups, name, host, &mut BTreeSet::new()) {
-				member_of.insert(name.clone());
+	// Every group each host is in, directly or through a group beneath: each
+	// group is walked once for the hosts under it.
+	let mut membership: BTreeMap<String, BTreeSet<String>> = host_vars
+		.keys()
+		.map(|host| (host.clone(), BTreeSet::new()))
+		.collect();
+	for name in groups.keys().filter(|name| *name != "all") {
+		let mut seen: BTreeSet<&str> = BTreeSet::new();
+		let mut pending = vec![name.as_str()];
+		while let Some(group) = pending.pop() {
+			if !seen.insert(group) {
+				continue;
 			}
+			let Some(data) = groups.get(group) else {
+				continue;
+			};
+			for host in &data.hosts {
+				if let Some(member_of) = membership.get_mut(host) {
+					member_of.insert(name.clone());
+				}
+			}
+			pending.extend(data.children.iter().map(String::as_str));
 		}
 	}
 
@@ -793,6 +787,31 @@ mod tests {
 				.contains_key("ansible_group_priority"),
 			"the priority orders groups and is not itself a variable"
 		);
+	}
+
+	#[test]
+	fn a_host_is_in_every_group_above_it_and_a_cycle_ends() {
+		let file = parse(
+			"all:
+  children:
+    outer:
+      vars: { o: outer }
+      children:
+        inner:
+          vars: { i: inner }
+          hosts: { h: }
+          children:
+            outer:
+    other:
+      vars: { w: other }
+      hosts: { g: }
+",
+		)
+		.unwrap();
+		assert_eq!(host(&file, "h").inherited["i"], json!("inner"));
+		assert_eq!(host(&file, "h").inherited["o"], json!("outer"));
+		assert!(!host(&file, "h").inherited.contains_key("w"));
+		assert!(!host(&file, "g").inherited.contains_key("o"));
 	}
 
 	#[test]

@@ -22,6 +22,7 @@ A variable on a group below `all` is set on each machine matched to a host in th
 Where a host sits in groups at the same depth that set the same variable, the value Ansible would have used is carried: the group with the higher `ansible_group_priority`, then the one whose name sorts later.
 The file's groups carry no further meaning, since a run groups a machine by the applications on it.
 Variables the catalogue marks reserved, such as `canopy_intent` and `tamanu_clone`, are left out, since a run sets them for itself.
+Where Canopy has read no catalogue, `canopy_intent` and `tamanu_clone` are left out all the same.
 Where the file's `tamanu_clone` disagrees with whether the environment is a clone, the preview says so, since the file may have been meant for another environment.
 
 Ansible reaches a host with no `ansible_host` at its key, so where that key is not the address Canopy reaches the machine at, it becomes the machine's `ansible_host`.

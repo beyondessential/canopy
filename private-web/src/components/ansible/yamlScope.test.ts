@@ -172,4 +172,16 @@ describe("checkScope", () => {
 		expect(check("'bad name': 1\n")[0].message).toContain("not a usable variable name");
 		expect(check("other: !secret\n")[0].message).toContain("no secret value to keep");
 	});
+
+	it("refuses the names the server refuses", () => {
+		expect(check(".: 1\n")[0].message).toContain("not a usable variable name");
+		expect(check("..: 1\n")[0].message).toContain("not a usable variable name");
+		expect(check(`${"a".repeat(254)}: 1\n`)[0].message).toContain("not a usable variable name");
+		expect(check(`${"a".repeat(253)}: 1\n`)).toEqual([]);
+	});
+
+	it("refuses a secret tag on a variable the catalogue calls plain", () => {
+		const out = check("elastic_agent_enabled: !secret true\n");
+		expect(out.map((p) => p.message).join("\n")).toContain("not secret in the catalogue");
+	});
 });
