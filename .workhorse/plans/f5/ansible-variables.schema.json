@@ -64,7 +64,8 @@
 			"description": "Program tag prefixes whose messages are dropped from /var/log/syslog. They stay in the journal.",
 			"type": "array",
 			"items": {
-				"type": "string"
+				"type": "string",
+				"title": "Prefix"
 			},
 			"default": [
 				"systemd-tamanu",
@@ -75,7 +76,8 @@
 			"description": "Programs whose messages are dropped from /var/log/syslog, matched exactly. They stay in the journal.",
 			"type": "array",
 			"items": {
-				"type": "string"
+				"type": "string",
+				"title": "Program"
 			},
 			"default": [
 				"caddy",
@@ -271,10 +273,14 @@
 				"additionalProperties": false,
 				"properties": {
 					"subnet": {
-						"type": "string"
+						"type": "string",
+						"title": "Subnet",
+						"description": "The subnet in CIDR notation."
 					},
 					"gateway": {
-						"type": "string"
+						"type": "string",
+						"title": "Gateway",
+						"description": "The gateway address within the subnet."
 					}
 				}
 			},
@@ -300,10 +306,14 @@
 				"additionalProperties": false,
 				"properties": {
 					"subnet": {
-						"type": "string"
+						"type": "string",
+						"title": "Subnet",
+						"description": "The subnet in CIDR notation."
 					},
 					"gateway": {
-						"type": "string"
+						"type": "string",
+						"title": "Gateway",
+						"description": "The gateway address within the subnet."
 					}
 				}
 			},
@@ -461,7 +471,8 @@
 			"type": "array",
 			"items": {
 				"type": "string",
-				"format": "hostname"
+				"format": "hostname",
+				"title": "Hostname"
 			},
 			"default": [],
 			"x-canopy": {
@@ -507,12 +518,15 @@
 			"properties": {
 				"access_key_id": {
 					"type": "string",
-					"pattern": "^AKIA[A-Z0-9]{16}$"
+					"pattern": "^AKIA[A-Z0-9]{16}$",
+					"title": "Access key ID",
+					"description": "The IAM user's access key ID."
 				},
 				"secret_access_key": {
 					"type": "string",
-					"minLength": 40,
-					"maxLength": 40
+					"title": "Secret access key",
+					"description": "The IAM user's secret access key.",
+					"pattern": "^[A-Za-z0-9/+]{40}$"
 				}
 			},
 			"x-canopy": {

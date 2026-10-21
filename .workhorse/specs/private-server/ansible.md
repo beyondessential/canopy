@@ -209,6 +209,10 @@ A secret variable appears by name, with when it last changed, and never its valu
 
 Each scope ends with a row for adding a variable, driven from the keyboard: its name completes from the catalogue, showing each known variable's type, default, and meaning, and its value is entered in a form shaped by that type.
 Setting a variable leaves the operator in a fresh row of the same scope, so several are entered in a run of typing.
+A value the catalogue types as an object is entered as a field for each property it names, each labelled, required where the catalogue requires it, and held to that property's own constraints as it is typed.
+A list is entered one item at a time, items added and removed without retyping the rest, and a list of objects takes a row of fields per item.
+A value the catalogue does not describe is entered as JSON.
+Fields of a secret value are masked as they are typed.
 A known variable that is secret is entered as one, and one the catalogue limits to other scopes or other application types is not offered.
 
 A scope can instead be edited as text, one variable per line as YAML, with names completing from the catalogue as they do in a row.
