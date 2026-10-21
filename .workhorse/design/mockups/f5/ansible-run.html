@@ -88,6 +88,20 @@ table.assign { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
 .field.dense.select::after { top: 13px; }
 .field.error { border-color: var(--error); }
 .field.error label { color: var(--error); }
+.opts { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px 8px; }
+.opts .field { min-width: 0; height: auto; min-height: 40px; flex-wrap: wrap; gap: 4px; padding: 6px 10px; }
+.tchip { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 16px; background: rgba(0,0,0,.08); font: 0.8125rem monospace; }
+.tchip.neg { background: rgba(211,47,47,.08); }
+.matches { grid-column: 1 / -1; margin-top: -10px; font-size: 0.75rem; color: var(--text-2); }
+.matches .mono { font-size: 0.75rem; }
+.field.focus { border: 2px solid var(--primary); padding: 5px 9px; }
+.field.focus label { color: var(--primary); }
+.caret { display: inline-block; width: 1px; height: 16px; background: var(--text); }
+.tpop { position: absolute; left: -2px; top: calc(100% + 4px); width: 240px; background: #fff; border-radius: 4px; z-index: 2; padding: 4px 0;
+	box-shadow: 0 5px 5px -3px rgba(0,0,0,.2), 0 8px 10px 1px rgba(0,0,0,.14), 0 3px 14px 2px rgba(0,0,0,.12); }
+.tpop div { padding: 4px 12px; font: 0.8125rem monospace; }
+.tpop div.hl { background: rgba(56,142,60,.08); }
+.tpop div small { display: block; font: 0.6875rem "Roboto", sans-serif; color: var(--text-2); }
 </style>
 </head>
 <body>
@@ -97,9 +111,17 @@ table.assign { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
 	<div class="dialog">
 		<div class="dialog-title">Install production <span class="mono secondary">tamanu-install.yml</span></div>
 		<div class="dialog-content">
+			<div class="opts">
+				<span class="field mono"><label>Limit</label><span class="tchip">facility</span><span class="tchip neg">!example-facility-b</span></span>
+				<span class="field mono focus" style="position: relative"><label>Tags</label><span class="tchip">app</span>ta<span class="caret"></span>
+					<div class="tpop"><div class="hl">tailscale</div><div>tamanu</div><div>timezone</div></div>
+				</span>
+				<span class="field mono"><label>Skip tags</label></span>
+				<div class="matches">Matches <span class="mono">example-facility-a</span>, <span class="mono">example-facility-c</span></div>
+			</div>
 			<div class="row">
 				<span class="toggle"><span class="on">git</span><span>jj</span></span>
-				<span class="field mono wide ph"><label>Extra arguments</label>--limit, --tags…</span>
+				<span class="field mono wide ph"><label>Extra arguments</label>-vv, --check…</span>
 			</div>
 		</div>
 		<div class="dialog-actions">
@@ -117,9 +139,14 @@ table.assign { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
 			<table class="assign">
 				<tr><td>example-facility-c</td><td><span class="field dense select"><label>Install as</label>Tamanu facility</span></td></tr>
 			</table>
+			<div class="opts">
+				<span class="field mono ph"><label>Limit</label>all</span>
+				<span class="field mono"><label>Tags</label></span>
+				<span class="field mono"><label>Skip tags</label></span>
+			</div>
 			<div class="row">
 				<span class="toggle"><span class="on">git</span><span>jj</span></span>
-				<span class="field mono wide ph"><label>Extra arguments</label>--limit, --tags…</span>
+				<span class="field mono wide ph"><label>Extra arguments</label>-vv, --check…</span>
 			</div>
 		</div>
 		<div class="dialog-actions">
@@ -138,9 +165,15 @@ table.assign { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
 				<span class="field select mono"><label>Playbook</label>postgres-upgrade-check.yml</span>
 				<span class="toggle"><span class="on">Configure</span><span>Upgrade</span></span>
 			</div>
+			<div class="opts">
+				<span class="field mono"><label>Limit</label><span class="tchip">central</span></span>
+				<span class="field mono"><label>Tags</label></span>
+				<span class="field mono"><label>Skip tags</label></span>
+				<div class="matches">Matches <span class="mono">example-central</span></div>
+			</div>
 			<div class="row">
 				<span class="toggle"><span>git</span><span class="on">jj</span></span>
-				<span class="field mono wide"><label>Extra arguments</label>--limit central</span>
+				<span class="field mono wide ph"><label>Extra arguments</label>-vv, --check…</span>
 			</div>
 		</div>
 		<div class="dialog-actions">
@@ -165,9 +198,14 @@ table.assign { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
 				<tr><td>example-facility-b</td><td><span class="field dense select error ph"><label>Install as</label>Choose</span></td></tr>
 				<tr><td>example-backup</td><td><span class="field dense select"><label>Install as</label>Nothing</span></td></tr>
 			</table>
+			<div class="opts">
+				<span class="field mono ph"><label>Limit</label>all</span>
+				<span class="field mono"><label>Tags</label></span>
+				<span class="field mono"><label>Skip tags</label></span>
+			</div>
 			<div class="row">
 				<span class="toggle"><span class="on">git</span><span>jj</span></span>
-				<span class="field mono wide ph"><label>Extra arguments</label>--limit, --tags…</span>
+				<span class="field mono wide ph"><label>Extra arguments</label>-vv, --check…</span>
 			</div>
 		</div>
 		<div class="dialog-actions">
@@ -185,7 +223,7 @@ table.assign { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
 			<div class="cmd"><span class="nocopy">cd &lt;infra&gt;</span>
 git switch main &amp;&amp; git pull --ff-only
 cd ansible
-CANOPY_URL=https://canopy.example.ts.net CANOPY_GROUP=example CANOPY_RANK=production CANOPY_LEASE=7c1e9a52-40b3-4d7e-9f0a-2e6b51c8d913 uv run ansible-playbook -i inventory/canopy.yml tamanu-install.yml<span class="copy"><svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2m0 16H8V7h11z"/></svg></span></div>
+CANOPY_URL=https://canopy.example.ts.net CANOPY_GROUP=example CANOPY_RANK=production CANOPY_LEASE=7c1e9a52-40b3-4d7e-9f0a-2e6b51c8d913 uv run ansible-playbook -i inventory/canopy.yml tamanu-install.yml --limit 'facility:!example-facility-b' --tags app<span class="copy"><svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2m0 16H8V7h11z"/></svg></span></div>
 			<div class="state">
 				<span class="spinner"></span>
 				<span>Waiting for the run to start</span>
@@ -263,9 +301,14 @@ CANOPY_URL=https://canopy.example.ts.net CANOPY_GROUP=example CANOPY_RANK=produc
 				<svg viewBox="0 0 24 24"><path d="M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2M12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8"/></svg>
 				<div class="msg">Upgrading production needs an open upgrade plan. <a href="#">Plan an upgrade</a></div>
 			</div>
+			<div class="opts">
+				<span class="field mono ph"><label>Limit</label>all</span>
+				<span class="field mono"><label>Tags</label></span>
+				<span class="field mono"><label>Skip tags</label></span>
+			</div>
 			<div class="row">
 				<span class="toggle"><span class="on">git</span><span>jj</span></span>
-				<span class="field mono wide ph"><label>Extra arguments</label>--limit, --tags…</span>
+				<span class="field mono wide ph"><label>Extra arguments</label>-vv, --check…</span>
 			</div>
 		</div>
 		<div class="dialog-actions">

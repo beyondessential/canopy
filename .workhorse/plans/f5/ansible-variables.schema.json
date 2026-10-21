@@ -2,8 +2,158 @@
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"$id": "https://raw.githubusercontent.com/beyondessential/infra/main/ansible/variables.schema.json",
 	"title": "Linux server Ansible variables",
-	"description": "The variables the Linux server playbooks read from an inventory. Variables not listed here are permitted. The x-canopy annotation tells Canopy how to hold a variable: secret (its value is a secret), scope (the scopes it may be set at: group, environment, machine; any where absent), applications (the application types it configures; any where absent), reserved (set by the inventory plugin, never stored), and spec (the requirement that defines it).",
+	"description": "The variables the Linux server playbooks read from an inventory. Variables not listed here are permitted. The x-canopy annotation tells Canopy how to hold a variable: secret (its value is a secret), scope (the scopes it may be set at: group, environment, machine; any where absent), applications (the application types it configures; any where absent), reserved (set by the inventory plugin, never stored), and spec (the requirement that defines it). The top-level x-canopy annotation lists the playbooks a run can start, each with its description, the intent it is run with, the run button it backs (preset), the application types it configures, and the tags it takes, and describes the tags that have a documented meaning.",
 	"type": "object",
+	"x-canopy": {
+		"playbooks": {
+			"base-install.yml": {
+				"description": "The host arrangement and the container runtime.",
+				"intent": "configure",
+				"tags": [
+					"accounting",
+					"base",
+					"baseline",
+					"bash-history",
+					"bes-repo",
+					"btrfs",
+					"chrony",
+					"io-scheduler",
+					"journald",
+					"kernel-mitigations",
+					"locale",
+					"network",
+					"packages",
+					"podman",
+					"podman-network",
+					"qos",
+					"rsyslog",
+					"tailscale",
+					"timezone",
+					"toolbox",
+					"tuning",
+					"ubuntu-motd"
+				]
+			},
+			"tamanu-install.yml": {
+				"description": "Every arrangement a Tamanu server requires, including its database, services and proxy.",
+				"intent": "configure",
+				"preset": "install",
+				"applications": [
+					"tamanu-central",
+					"tamanu-facility"
+				],
+				"tags": [
+					"accounting",
+					"app",
+					"avahi",
+					"base",
+					"baseline",
+					"bash-history",
+					"bes-repo",
+					"bestool",
+					"btrfs",
+					"caddy",
+					"chrony",
+					"elastic",
+					"io-scheduler",
+					"iti",
+					"journald",
+					"kernel-mitigations",
+					"kopia",
+					"locale",
+					"msupply",
+					"munin",
+					"network",
+					"packages",
+					"pi-tools",
+					"podman",
+					"podman-network",
+					"postgres",
+					"qos",
+					"rsyslog",
+					"rtc-battery",
+					"tailscale",
+					"tamanu",
+					"timezone",
+					"toolbox",
+					"tuning",
+					"ubuntu-motd",
+					"ufw",
+					"volumes"
+				]
+			},
+			"tamanu-upgrade.yml": {
+				"description": "The upgrade of the Tamanu version.",
+				"intent": "upgrade",
+				"preset": "upgrade",
+				"applications": [
+					"tamanu-central",
+					"tamanu-facility"
+				],
+				"tags": [
+					"bestool",
+					"go",
+					"msupply",
+					"postgres",
+					"pre",
+					"tamanu"
+				]
+			},
+			"tamanu-frontend-upgrade.yml": {
+				"description": "The upgrade of the Tamanu frontend alone.",
+				"intent": "upgrade",
+				"applications": [
+					"tamanu-central",
+					"tamanu-facility"
+				],
+				"tags": []
+			},
+			"postgres-upgrade-check.yml": {
+				"description": "Reports whether each host needs a PostgreSQL major upgrade, changing nothing.",
+				"intent": "configure",
+				"tags": []
+			},
+			"check-linux-lpe-2026.yml": {
+				"description": "Reports whether each hardened kernel module is loaded, loadable or blocked, changing nothing.",
+				"intent": "configure",
+				"tags": []
+			},
+			"convert-three-disk-to-btrfs.yml": {
+				"description": "Converts a host with separate root, log and database partitions to the single btrfs layout.",
+				"intent": "configure",
+				"tags": [
+					"bootloader1",
+					"bootloader_final",
+					"cleanup",
+					"copy",
+					"create_final",
+					"delete_ext4",
+					"extend",
+					"finalcopy",
+					"gather",
+					"phase1",
+					"phase10",
+					"phase12",
+					"phase2",
+					"phase3",
+					"phase4",
+					"phase5",
+					"phase7",
+					"phase8",
+					"phase9",
+					"reboot1",
+					"reboot2",
+					"setup"
+				]
+			}
+		},
+		"tags": {
+			"base": "The arrangement of a host that is not the Tamanu application, including the bestool daemon.",
+			"app": "The applications that run on the server.",
+			"pre": "In an upgrade, the provisioning of the new version.",
+			"go": "In an upgrade, the stopping, migrating and starting of services."
+		}
+	},
 	"properties": {
 		"alertd_app_db": {
 			"description": "The database the monitoring daemon's schema-aware checks connect to. Empty for none.",

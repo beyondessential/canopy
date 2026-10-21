@@ -11,7 +11,7 @@ A run reads it as it starts, so it acts on the fleet as Canopy holds it.
 
 A run is served one environment (see [GRP](../servers/groups.md), "Environments").
 
-Each member is a machine, and carries its identifier, its name, the address it is reached at, the applications on it with their names and types, and its effective variables.
+Each member is a machine, and carries its identifier, its name, the name a run addresses it by, the address it is reached at, the applications on it with their names and types, and its effective variables.
 Every live machine at the environment's rank is a member, one with nothing on it yet included, since a run is how its applications get there.
 A member with nothing on it is served with the application type its run assigns it, if any, so the run configures it as that (see "Machines with nothing on them").
 A member names which of those variables are secret.
@@ -42,6 +42,7 @@ Variables are backed up in the escrow store (see [ESC](../jobs/escrow.md)) to su
 
 The variables the playbooks read are described by a catalogue the infra repository publishes on its main branch, at `ansible/variables.schema.json`.
 It is a JSON Schema of an environment's variables, each with its type, its default, what it means, and annotations under `x-canopy`: whether it is secret, the scopes it may be set at, the application types it configures, and whether it is reserved to the plugin.
+The same file lists the playbooks a run can start, each with the intent it is run with, the application types it configures, and the tags it takes.
 Canopy reads it from the main branch, and keeps using the last copy it read while the repository cannot be reached.
 
 A variable the catalogue describes is held to it.
@@ -167,6 +168,13 @@ A refusal must name its reason in such a way that an operator can understand how
 
 Each environment served to a run is audited, its entry holding the intent its lease declared.
 Taking, extending, taking over, and releasing a lease is audited, as is setting or removing a variable (see [AUD](../platform/audit-log.md)).
+A lease taken to start a run records the playbook, its limit and the machines that limit matched, the tags run and skipped, and the application type assigned to each machine with nothing on it.
+Further arguments are not recorded, since they are typed freely and can carry a secret.
+
+A run's first read under its lease is audited as the run starting, apart from the routine reads after it, so a reader of the log sees each run without asking for routine entries.
+The maintenance window a run's start declares names the lease it was declared for.
+Canopy releasing a lease that no run started, and a lease expiring with its run, are audited as Canopy's own actions.
+A change in the catalogue Canopy reads is audited as Canopy's own action, naming the version read, since it changes what a variable is held to.
 Importing a file is audited as one entry naming the environment and the variables it set, with the machine each was set on, and whether it added to the group's notes.
 A secret's value never appears in a log.
 
@@ -179,7 +187,12 @@ A group presents one of its environments at a time, chosen by the operator where
 An environment offers three ways to start a run: an install, an upgrade, and a run of any playbook the operator chooses, with the intent it is run with.
 The install and the upgrade name their playbooks and intents already.
 They are Tamanu's playbooks, so they are offered only where the environment holds a Tamanu application.
-Each can be given extra arguments for the playbook, such as a limit or tags.
+The playbooks offered, and the intent each runs with, come from the catalogue.
+
+A run can be limited to some of the environment's machines.
+The limit is picked from the environment's machines and the groups a run puts them in, or typed as an Ansible host pattern, and the machines it matches are shown as it is typed.
+A run can be given tags to run and tags to skip, picked from those the catalogue lists for the playbook.
+Any further arguments for the playbook are typed as they would be on the command line.
 
 Starting work takes the lease, and only then is the command shown, since it carries the lease.
 The command brings the operator's checkout of the infra repository up to date with its main branch, by git or by jj as the operator chooses, then runs the playbook against the environment.

@@ -60,3 +60,21 @@ Steps:
 - `resolve_environment` in `fns/inventory.rs` builds an environment from the group's live applications, refusing one with no application at the rank. GRP already defines an environment by its machines' rank, so this is a bug. Rebuild it from the group's live machines through `Machine::environment_rank` / `environment_ranks`, take the applications on those machines, and refuse only a group with nothing ranked. The SPA's environment picker (`GroupInventorySection`) derives ranks from applications too, and needs the same fix.
 - The empty-machine assignments the dialog makes are held on the lease, as machine id → application type. A served member with no applications carries its assigned type, and the plugin groups by it as it would by an application (the infra plugin needs the change, and LNXANS's "Inventory" grouping rule needs a sentence for it).
 - The preset run buttons appear when the environment holds a `tamanu-*` application. The facility default applies when it holds a `tamanu-central`.
+
+## Audit
+
+New and widened actions in the `actions!` catalogue (stable names follow the new vocabulary, since none of these exist yet):
+
+- [ ] `AnsibleLeaseTaken`/`TakenOver` detail gains `playbook`, `limit` (pattern), `limited_to` (the matched machines, as records), `tags`, `skip_tags`, and `assignments` (machine → application type). All are optional, since a plugin-taken lease knows none of them. Extra arguments are never stored on the lease, so they cannot reach an entry
+- [ ] `AnsibleRunStarted`, important: the first read under a lease, naming the group and lease. The reads after it stay as the routine `inventory_read`
+- [ ] `MaintenanceDeclared` gains an optional `lease` record, set when a run's start declares the window. Holding it is a `MaintenanceAmended`
+- [ ] `AnsibleLeaseReleased` detail gains `reason`: `released` (by the holder), `taken_over`, or `unstarted` (by Canopy after five minutes, actor Canopy itself)
+- [ ] `AnsibleLeaseExpired`, actor Canopy itself, recorded by the job that notices an expired lease. Today a lease that expires leaves no entry
+- [ ] `AnsibleCatalogueChanged`, actor Canopy itself, naming the infra commit the file was read at (from the GitHub contents/commits API rather than the raw URL, which carries no commit) and its digest
+- [ ] `AnsibleInventoryImported`, as already planned
+
+## Run limit and tags
+
+- The limit preview has to match the host names the plugin uses. Today the plugin computes them (address cut to its first label for tailnet names, else Canopy's name slugged). That rule moves into Canopy, which serves each member's host name, so the preview and the run cannot disagree. The plugin then uses the served name.
+- The pattern is the subset of Ansible host patterns that matches names and groups: `:` or `,` separated, `*` globs, `!` exclusion, `&` intersection. A pattern Canopy can't evaluate (a `~` regex) is refused rather than previewed wrongly.
+- The draft catalogue's `x-canopy.playbooks` tags came from `ansible-playbook --list-tags` against each playbook (with `always`/`never` dropped). Infra should generate that list in CI rather than keep it by hand, and fail when it's stale.
