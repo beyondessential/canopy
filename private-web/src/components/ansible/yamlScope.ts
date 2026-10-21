@@ -1,0 +1,180 @@
+import { LineCounter, Scalar, isMap, isScalar, parseDocument, stringify } from "yaml";
+import type { CatalogueView } from "../../types";
+import { type Schema, type ScopeKind, offered, problems } from "./schema";
+
+/// A variable as a scope holds it.
+export type ScopeVariable = {
+	name: string;
+	/** `undefined` for a secret, whose value is never read here. */
+	value?: unknown;
+	secret: boolean;
+};
+
+export type LineProblem = { line: number; message: string };
+
+export type Parsed = {
+	entries: Array<{
+		name: string;
+		line: number;
+		value: unknown;
+		/** Tagged `!secret`. */
+		secret: boolean;
+		/** A secret with no value after its tag, which keeps the one it has. */
+		kept: boolean;
+	}>;
+	problems: LineProblem[];
+};
+
+export type Changes = {
+	set: Array<{ name: string; value: unknown; secret: boolean }>;
+	remove: string[];
+};
+
+const SECRET_TAG = "!secret";
+
+/// A scope as text: one `name: value` per variable, YAML values, a secret as
+/// `name: !secret` so its value is never shown.
+export function formatScope(variables: ReadonlyArray<ScopeVariable>): string {
+	return [...variables]
+		.sort((a, b) => a.name.localeCompare(b.name))
+		.map((variable) =>
+			variable.secret
+				? `${variable.name}: ${SECRET_TAG}`
+				: stringify({ [variable.name]: variable.value }, { version: "1.1" }).trimEnd(),
+		)
+		.join("\n");
+}
+
+/// Read a scope's text. A value is read as it would be in an inventory file, so
+/// YAML 1.1: `yes` and `no` are booleans.
+export function parseScope(text: string): Parsed {
+	const lines = new LineCounter();
+	const document = parseDocument(text, {
+		version: "1.1",
+		lineCounter: lines,
+		uniqueKeys: true,
+		customTags: [
+			{
+				tag: SECRET_TAG,
+				resolve: (value: string) => new Scalar(value === "" ? null : value),
+				identify: () => false,
+			},
+		],
+	});
+	const found: Parsed = { entries: [], problems: [] };
+	for (const error of document.errors) {
+		found.problems.push({
+			line: error.linePos?.[0].line ?? 1,
+			message: error.message.split("\n")[0],
+		});
+	}
+	if (found.problems.length > 0) return found;
+
+	const root = document.contents;
+	if (root === null) return found;
+	if (!isMap(root)) {
+		found.problems.push({
+			line: 1,
+			message: "One variable per line, as name: value",
+		});
+		return found;
+	}
+	for (const pair of root.items) {
+		const key = isScalar(pair.key) ? String(pair.key.value) : String(pair.key);
+		const line = isScalar(pair.key) && pair.key.range
+			? lines.linePos(pair.key.range[0]).line
+			: 1;
+		const value = pair.value;
+		const secret = isScalar(value) && value.tag === SECRET_TAG;
+		const plain = isScalar(value) ? value.value : value?.toJSON();
+		found.entries.push({
+			name: key,
+			line,
+			value: secret ? (plain ?? undefined) : plain,
+			secret,
+			kept: secret && (plain === null || plain === undefined),
+		});
+	}
+	return found;
+}
+
+/// What saving would change: the variables set or replaced, and those removed.
+/// A secret left as `!secret` keeps its value, and a variable the catalogue
+/// calls secret is set as one however it was typed.
+export function diffScope(
+	before: ReadonlyArray<ScopeVariable>,
+	parsed: Parsed,
+	catalogue: CatalogueView | null,
+): Changes {
+	const held = new Map(before.map((variable) => [variable.name, variable]));
+	const changes: Changes = { set: [], remove: [] };
+	const seen = new Set<string>();
+	for (const entry of parsed.entries) {
+		seen.add(entry.name);
+		const described = catalogue?.variables.find((v) => v.name === entry.name);
+		const secret = entry.secret || (described?.secret ?? false);
+		const previous = held.get(entry.name);
+		if (entry.kept && previous?.secret) continue;
+		if (
+			previous &&
+			!previous.secret &&
+			!secret &&
+			JSON.stringify(previous.value) === JSON.stringify(entry.value)
+		) {
+			continue;
+		}
+		changes.set.push({ name: entry.name, value: entry.value, secret });
+	}
+	for (const variable of before) {
+		if (!seen.has(variable.name)) changes.remove.push(variable.name);
+	}
+	return changes;
+}
+
+/// What stops the text being saved, line by line: what does not parse, a name
+/// that is not usable, a secret with no value to keep, and what the catalogue
+/// refuses at this scope.
+export function checkScope(
+	parsed: Parsed,
+	before: ReadonlyArray<ScopeVariable>,
+	scope: ScopeKind,
+	applicationTypes: ReadonlyArray<string>,
+	catalogue: CatalogueView | null,
+): LineProblem[] {
+	const out = [...parsed.problems];
+	const held = new Set(before.filter((v) => v.secret).map((v) => v.name));
+	for (const entry of parsed.entries) {
+		if (!/^[-._a-zA-Z0-9]+$/.test(entry.name)) {
+			out.push({
+				line: entry.line,
+				message: `${entry.name} is not a usable variable name`,
+			});
+			continue;
+		}
+		if (entry.kept && !held.has(entry.name)) {
+			out.push({
+				line: entry.line,
+				message: `${entry.name} has no secret value to keep`,
+			});
+		}
+		const described = catalogue?.variables.find((v) => v.name === entry.name);
+		if (!described) continue;
+		if (described.reserved) {
+			out.push({
+				line: entry.line,
+				message: `${entry.name} is set by a run for itself`,
+			});
+		} else if (!offered({ ...described, applications: null }, scope, applicationTypes)) {
+			out.push({
+				line: entry.line,
+				message: `${entry.name} cannot be set at ${scope}`,
+			});
+		}
+		if (!entry.kept && entry.value !== undefined) {
+			for (const message of problems(described.schema as Schema, entry.value)) {
+				out.push({ line: entry.line, message: `${entry.name}: ${message}` });
+			}
+		}
+	}
+	return out;
+}

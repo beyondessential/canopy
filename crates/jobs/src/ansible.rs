@@ -2,3 +2,4 @@
 //! publishes, and keeping leases honest.
 
 pub mod catalogue;
+pub mod leases;

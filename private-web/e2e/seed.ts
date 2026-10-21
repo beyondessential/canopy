@@ -167,7 +167,7 @@ async function applicationTypeOf(sql: Sql, applicationId: string): Promise<strin
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, machine_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, reporting_schema_builds, reporting_schema_requests, migration_test_requests, upgrade_plans, maintenance_windows, ansible_variables, ansible_leases, version_known_issues, recovery_vault_writes, application_names, application_certificate_names, application_certificates, kubernetes_clusters, compromised_keys, relying_parties, identity_keys RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, machine_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, reporting_schema_builds, reporting_schema_requests, migration_test_requests, upgrade_plans, maintenance_windows, ansible_variables, ansible_leases, ansible_catalogue, version_known_issues, recovery_vault_writes, application_names, application_certificate_names, application_certificates, kubernetes_clusters, compromised_keys, relying_parties, identity_keys RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" application with
 	// it; self-alerts attach to that row, so put it back.
@@ -369,6 +369,9 @@ export async function seedServer(
 		 * another application's `machineId` for the two-workloads-on-one-box
 		 * case. */
 		machineId?: string;
+		/** Whether the application has reported, which is what makes a box
+		 * without a bound device one a run can reach. */
+		reported?: boolean;
 	} = {},
 ): Promise<SeededServer> {
 	const id = randomUUID();
@@ -411,8 +414,9 @@ export async function seedServer(
 		);
 	}
 	await sql.query(
-		`INSERT INTO applications (id, name, host, type, rank, group_id, is_monitored, alert_when_down_for, notes, tags, may_manage_dns, may_manage_tls, machine_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13)`,
+		`INSERT INTO applications (id, name, host, type, rank, group_id, is_monitored, alert_when_down_for, notes, tags, may_manage_dns, may_manage_tls, machine_id, registered_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13,
+		         CASE WHEN $14::boolean THEN NOW() ELSE NULL END)`,
 		[
 			id,
 			name,
@@ -427,6 +431,7 @@ export async function seedServer(
 			opts.mayManageDns ?? false,
 			opts.mayManageTls ?? false,
 			machineId,
+			opts.reported ?? false,
 		],
 	);
 	return { id, name, host, type, rank, machineId };
@@ -2320,5 +2325,104 @@ export async function seedIdentityKey(
 		         NOW() - make_interval(mins => $3::int),
 		         NOW() - make_interval(mins => $4::int))`,
 		[opts.kid, opts.keyRef, opts.servedMinutesAgo ?? null, opts.signedMinutesAgo ?? null],
+	);
+}
+
+/** A catalogue Canopy has read, naming the playbooks a run can start. */
+export async function seedAnsibleCatalogue(sql: Sql): Promise<void> {
+	const document = {
+		$schema: "https://json-schema.org/draft/2020-12/schema",
+		type: "object",
+		properties: {
+			salt: { type: "string", "x-canopy": { secret: true } },
+			elastic_agent_enabled: {
+				type: "boolean",
+				description: "Whether the endpoint security agent is installed.",
+			},
+			ansible_host: {
+				type: "string",
+				description: "Address a run connects to.",
+				"x-canopy": { scope: ["machine"] },
+			},
+			tamanu_caddy_extra_hostnames: {
+				type: "array",
+				description: "Additional hostnames the proxy serves.",
+				items: { type: "string" },
+			},
+			podman_network_subnets_v4: {
+				type: "array",
+				items: {
+					type: "object",
+					required: ["subnet", "gateway"],
+					properties: {
+						subnet: { type: "string" },
+						gateway: { type: "string" },
+					},
+				},
+			},
+			tamanu_caddy_tls_dns_iam: {
+				type: "object",
+				description: "Route 53 credentials.",
+				required: ["access_key_id", "secret_access_key"],
+				properties: {
+					access_key_id: { type: "string" },
+					secret_access_key: { type: "string", minLength: 8 },
+				},
+				"x-canopy": { secret: true, scope: ["machine"] },
+			},
+		},
+		"x-canopy": {
+			playbooks: {
+				"tamanu-install.yml": {
+					description: "Every arrangement a Tamanu server requires.",
+					intent: "configure",
+					preset: "install",
+					applications: ["tamanu-central", "tamanu-facility"],
+					tags: ["app", "base"],
+				},
+				"tamanu-upgrade.yml": {
+					description: "The upgrade of the Tamanu version.",
+					intent: "upgrade",
+					preset: "upgrade",
+					applications: ["tamanu-central", "tamanu-facility"],
+					tags: [],
+				},
+				"base-install.yml": {
+					description: "The host arrangement.",
+					intent: "configure",
+					tags: [],
+				},
+			},
+		},
+	};
+	await sql.query(
+		`INSERT INTO ansible_catalogue (document, digest, read_at, first_checked_at, checked_at)
+		 VALUES ($1::jsonb, 'seed', NOW(), NOW(), NOW())
+		 ON CONFLICT (id) DO UPDATE SET document = EXCLUDED.document, digest = 'seed', read_at = NOW()`,
+		[JSON.stringify(document)],
+	);
+}
+
+/** An Ansible variable at one machine, or at an environment. */
+export async function seedAnsibleVariable(
+	sql: Sql,
+	opts: {
+		machineId?: string;
+		serverGroupId?: string;
+		rank?: ServerRank;
+		name: string;
+		value: unknown;
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO ansible_variables (machine_id, server_group_id, rank, name, value)
+		 VALUES ($1, $2, $3, $4, $5::jsonb)`,
+		[
+			opts.machineId ?? null,
+			opts.serverGroupId ?? null,
+			opts.rank ?? null,
+			opts.name,
+			JSON.stringify(opts.value),
+		],
 	);
 }

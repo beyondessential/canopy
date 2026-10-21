@@ -25,7 +25,7 @@ fn record(name: &str) -> Record {
 fn lifted(name: &str) -> Action {
 	Action::MaintenanceLifted {
 		window: record(name),
-		target: Record::new(RecordKind::Machine, Uuid::new_v4(), "box"),
+		target: vec![Record::new(RecordKind::Machine, Uuid::new_v4(), "box")],
 		rank: None,
 		already_ended: false,
 	}
@@ -66,8 +66,9 @@ async fn undeclared(audit: Audit) -> Result<Json<()>> {
 	Admin::add(&mut tx, "undeclared@example.com").await?;
 	tx.record(Action::MaintenanceDeclared {
 		window: record("w"),
-		target: Record::new(RecordKind::Machine, Uuid::new_v4(), "box"),
+		target: vec![Record::new(RecordKind::Machine, Uuid::new_v4(), "box")],
 		upgrade_plan: None,
+		lease: None,
 		rank: None,
 		expected_end: jiff::Timestamp::now(),
 		note: None,
@@ -100,8 +101,9 @@ async fn ahead_undeclared(audit: Audit) -> Result<Json<()>> {
 	let _pending = audit
 		.commit_ahead(Action::MaintenanceDeclared {
 			window: record("w"),
-			target: Record::new(RecordKind::Machine, Uuid::new_v4(), "box"),
+			target: vec![Record::new(RecordKind::Machine, Uuid::new_v4(), "box")],
 			upgrade_plan: None,
+			lease: None,
 			rank: None,
 			expected_end: jiff::Timestamp::now(),
 			note: None,

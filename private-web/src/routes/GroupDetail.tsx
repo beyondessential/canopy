@@ -289,6 +289,7 @@ export default function GroupDetail() {
 				groupId={group.id}
 				groupName={group.name}
 				machines={machines}
+				applications={applications}
 				maintenanceTick={maintenanceTick}
 				onMaintenanceChange={() => setMaintenanceTick((n) => n + 1)}
 			/>

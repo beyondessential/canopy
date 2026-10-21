@@ -162,14 +162,18 @@ async fn taking_over_and_serving_an_environment_are_recorded_and_the_read_is_rou
 
 		let important = log(&mut conn, Filter::default()).await;
 		let actions: Vec<&str> = important.iter().rev().map(|e| e.action.as_str()).collect();
+		// The two a run's start records share a moment, so their order is not
+		// one to rely on.
+		let mut starting = actions[2..4].to_vec();
+		starting.sort_unstable();
 		assert_eq!(
-			actions,
-			[
-				"inventory_lease_taken",
-				"inventory_variable_set",
-				"inventory_lease_released"
-			],
-			"a read is routine and left out by default"
+			(&actions[..2], starting.as_slice(), &actions[4..]),
+			(
+				&["inventory_lease_taken", "inventory_variable_set"][..],
+				&["ansible_run_started", "maintenance_declared"][..],
+				&["inventory_lease_released"][..],
+			),
+			"a read is routine and left out by default, and the run starting is not"
 		);
 		let variable = important
 			.iter()

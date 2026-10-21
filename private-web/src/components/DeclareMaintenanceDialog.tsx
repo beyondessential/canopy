@@ -2,11 +2,13 @@ import {
 	Alert,
 	Box,
 	Button,
+	Checkbox,
 	Dialog,
 	DialogActions,
 	DialogContent,
 	DialogContentText,
 	DialogTitle,
+	FormControlLabel,
 	LinearProgress,
 	MenuItem,
 	Stack,
@@ -21,7 +23,7 @@ import { useApi, useApiAction } from "../api";
 import { GradedAction } from "./GradedAction";
 import KindChip from "./KindChip";
 import ServerRankChip from "./ServerRankChip";
-import TimeAgo from "./TimeAgo";
+import WindowEnd from "./WindowEnd";
 import { targetKind } from "../types";
 import type {
 	HeldInPlace,
@@ -49,11 +51,22 @@ function targetKey(target: MaintenanceTarget): string {
 			return `application:${target.application_id}`;
 		case "machine":
 			return `machine:${target.machine_id}`;
+		case "machines":
+			return "machines";
 		case "environment":
 			return `environment:${target.server_group_id}:${target.rank}`;
 		case "group":
 			return `group:${target.server_group_id}`;
 	}
+}
+
+/** Whether two targets are the same one, several machines being the same where
+ * they name the same machines. */
+function sameTarget(a: MaintenanceTarget, b: MaintenanceTarget): boolean {
+	if (targetKey(a) !== targetKey(b)) return false;
+	if (targetKind(a) !== "machines") return true;
+	const ids = (t: MaintenanceTarget) => [...(t.machine_ids ?? [])].sort().join();
+	return ids(a) === ids(b);
 }
 
 function heldInPlace(reason: HeldInPlace): string {
@@ -73,6 +86,8 @@ function explanation(target: MaintenanceTarget): string {
 			return "Every check on this group and its machines is suspended: nothing opens or joins an incident, and nothing notifies.";
 		case "machine":
 			return "Every check on this machine and the applications on it is suspended: nothing opens or joins an incident, and nothing notifies.";
+		case "machines":
+			return "Every check on the machines picked and the applications on them is suspended: nothing opens or joins an incident, and nothing notifies. The rest of the environment stays watched.";
 		case "application":
 			return "Every check on this application is suspended: nothing opens or joins an incident, and nothing notifies. The machine it runs on, and anything else on it, stays watched.";
 	}
@@ -186,6 +201,7 @@ export default function DeclareMaintenanceDialog({
 						depth: 0,
 						window: null,
 						covers_failures: null,
+						machines: null,
 					},
 				];
 	const choiceOf = (target: MaintenanceTarget) =>
@@ -197,7 +213,7 @@ export default function DeclareMaintenanceDialog({
 	// that window from the start, so choosing another grain moves it.
 	// spec: MNT#moving-a-window
 	const own = existing ?? (targets.status === "ok" ? targets.data.amends : null);
-	const moving = own !== null && targetKey(chosen) !== targetKey(start);
+	const moving = own !== null && !sameTarget(chosen, start);
 	// Declaring onto someone else's window amends it, changing only what the
 	// operator has explicitly changed.
 	const joined = own === null ? (chosenChoice?.window ?? null) : null;
@@ -315,6 +331,50 @@ export default function DeclareMaintenanceDialog({
 							})}
 						</TextField>
 					)}
+					{targetKind(chosen) === "machines" && chosenChoice?.machines && (
+						<Stack data-testid="machines-picker">
+							<Typography variant="caption" color="text.secondary">
+								Machines to cover
+							</Typography>
+							{chosenChoice.machines.map((machine) => {
+								// A machine is named by at most one window.
+								const occupied =
+									machine.window !== null && machine.window.id !== own?.id;
+								return (
+									<FormControlLabel
+										key={machine.machine_id}
+										disabled={occupied}
+										control={
+											<Checkbox
+												size="small"
+												checked={(chosen.machine_ids ?? []).includes(machine.machine_id)}
+												onChange={(event) => {
+													const current = chosen.machine_ids ?? [];
+													setChosen({
+														...chosen,
+														machine_ids: event.target.checked
+															? [...current, machine.machine_id]
+															: current.filter((id) => id !== machine.machine_id),
+													});
+												}}
+												slotProps={{
+													input: {
+														// biome-ignore lint/a11y/useSemanticElements: MUI renders the input.
+														"aria-label": machine.name,
+													},
+												}}
+											/>
+										}
+										label={
+											occupied
+												? `${machine.name} (has its own window)`
+												: machine.name
+										}
+									/>
+								);
+							})}
+						</Stack>
+					)}
 					{chosenChoice?.covers_failures === false && (
 						<Alert severity="warning" data-testid="not-all-failing-checks">
 							Doesn't cover all failing checks
@@ -326,7 +386,7 @@ export default function DeclareMaintenanceDialog({
 							icon={<BuildOutlinedIcon fontSize="inherit" />}
 							data-testid="joins-window"
 						>
-							Already under maintenance, ending <TimeAgo timestamp={joined.expected_end} />
+							Already under maintenance, ending <WindowEnd window={joined} />
 						</Alert>
 					)}
 					<DialogContentText>
@@ -416,7 +476,12 @@ export default function DeclareMaintenanceDialog({
 					<Button
 						variant="contained"
 						onClick={submit}
-						disabled={pending || shownEnd === "" || loading}
+						disabled={
+							pending ||
+							shownEnd === "" ||
+							loading ||
+							(targetKind(chosen) === "machines" && (chosen.machine_ids ?? []).length === 0)
+						}
 					>
 						{moving ? "Move" : amending ? "Amend" : "Declare"}
 					</Button>

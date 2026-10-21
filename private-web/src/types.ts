@@ -118,6 +118,7 @@ export function maintenanceTarget(
 	return {
 		application_id: scope === "application" ? id : null,
 		machine_id: scope === "machine" ? id : null,
+		machine_ids: null,
 		server_group_id: scope === "group" ? id : null,
 		rank: scope === "group" ? (rank ?? null) : null,
 	};
@@ -125,6 +126,15 @@ export function maintenanceTarget(
 
 /** The target a window covers now, where it covers one a window can name. */
 export function targetOfWindow(window: MaintenanceWindow): MaintenanceTarget | null {
+	if (window.machine_ids.length > 0) {
+		return {
+			application_id: null,
+			machine_id: null,
+			machine_ids: window.machine_ids,
+			server_group_id: null,
+			rank: null,
+		};
+	}
 	if (window.application_id) return maintenanceTarget("application", window.application_id);
 	if (window.machine_id) return maintenanceTarget("machine", window.machine_id);
 	if (window.server_group_id)
@@ -135,7 +145,8 @@ export function targetOfWindow(window: MaintenanceWindow): MaintenanceTarget | n
 /** What kind of target it is, as the kind chip names it. */
 export function targetKind(
 	target: MaintenanceTarget,
-): "application" | "machine" | "environment" | "group" {
+): "application" | "machine" | "machines" | "environment" | "group" {
+	if (target.machine_ids) return "machines";
 	if (target.application_id) return "application";
 	if (target.machine_id) return "machine";
 	return target.rank ? "environment" : "group";
@@ -157,6 +168,11 @@ export type ServerGroup = Solidify<Schemas["ServerGroup"]>;
 export type GroupDetail = Solidify<Schemas["GroupDetail"]>;
 export type AnsibleVariable = Solidify<Schemas["AnsibleVariable"]>;
 export type AnsibleLease = Solidify<Schemas["AnsibleLease"]>;
+export type AnsibleVariableView = Solidify<Schemas["AnsibleVariableView"]>;
+export type ImportPreview = Solidify<Schemas["ImportPreview"]>;
+export type ImportHost = Solidify<Schemas["ImportHost"]>;
+export type ImportVariable = Solidify<Schemas["ImportVariable"]>;
+export type CatalogueView = Solidify<Schemas["CatalogueView"]>;
 export type SummaryData = Solidify<Schemas["SummaryData"]>;
 export type CheckDetailData = Solidify<Schemas["CheckDetailData"]>;
 export type NamespaceRef = Solidify<Schemas["NamespaceRef"]>;

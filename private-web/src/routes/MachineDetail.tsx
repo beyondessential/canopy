@@ -365,6 +365,9 @@ export default function MachineDetail() {
 				rank={rank}
 				reloadKey={refreshTick}
 				onChanged={bumpRefresh}
+				machineNames={Object.fromEntries(
+					data.group_machines.map((machine) => [machine.id, machine.name]),
+				)}
 			/>
 
 			{data.group && (

@@ -15,6 +15,8 @@
 mod hosts;
 mod import;
 mod inventory_file;
+mod limit;
+mod runs;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -33,10 +35,10 @@ use commons_types::{
 };
 use database::{
 	Device,
-	ansible_leases::{AnsibleLease, RunIntent},
+	ansible_leases::{AnsibleLease, ReleaseReason, RunIntent, RunSpec},
 	ansible_variables::{AnsibleVariable, VariableScope},
 	applications::Application,
-	audit::{Action, Record, RecordKind},
+	audit::{Action, LeaseAssignment, Record, RecordKind},
 	machines::Machine,
 	maintenance_windows::MaintenanceWindow,
 	server_groups::ServerGroup,
@@ -61,11 +63,15 @@ pub(super) const ANSIBLE_HOST: &str = "ansible_host";
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only, audit(AnsibleRead): for_group))
+		.routes(
+			routes!(read_only, audit(AnsibleRead, AnsibleRunStarted, MaintenanceDeclared): for_group),
+		)
 		.routes(routes!(write, audit(AnsibleLeaseTaken, AnsibleLeaseTakenOver): take_lease))
 		.routes(routes!(write, audit(AnsibleLeaseExtended): extend_lease))
 		.routes(routes!(write, audit(AnsibleLeaseReleased): release_lease))
 		.routes(routes!(read_only, silent: run_state))
+		.routes(routes!(read_only, silent: runs::run_options))
+		.routes(routes!(read_only, silent: runs::limit_preview))
 		.routes(routes!(read_only, silent: import::import_preview))
 		.routes(routes!(write, audit(AnsibleInventoryImported): import::import_apply))
 }
@@ -100,6 +106,23 @@ pub struct TakeLeaseArgs {
 	/// Take over a lease another operator holds, which is audited.
 	#[serde(default)]
 	pub take_over: bool,
+	/// The playbook the run is started with, from the catalogue.
+	#[serde(default)]
+	pub playbook: Option<String>,
+	/// What the run is limited to, as an Ansible host pattern. The whole
+	/// environment where not given.
+	#[serde(default)]
+	pub limit: Option<String>,
+	/// The tags the run runs.
+	#[serde(default)]
+	pub tags: Vec<String>,
+	/// The tags the run skips.
+	#[serde(default)]
+	pub skip_tags: Vec<String>,
+	/// The application type each machine with nothing on it is assigned for
+	/// this run.
+	#[serde(default)]
+	pub assignments: Vec<runs::AssignmentArg>,
 }
 
 /// Name a lease.
@@ -145,6 +168,9 @@ pub struct AnsibleHost {
 	pub address: Option<String>,
 	/// The applications the machine carries in this environment, by name.
 	pub applications: Vec<AnsibleApplication>,
+	/// The application type this run assigns the machine where nothing is on it
+	/// yet, which a run groups it by as it would by an application.
+	pub assigned_type: Option<String>,
 	/// The effective variables: the machine's over the environment's over the
 	/// group's. This is what a run acts on.
 	pub vars: VarMap,
@@ -398,6 +424,19 @@ pub async fn take_lease(
 		)));
 	}
 
+	let checked = runs::check(
+		&mut conn,
+		&environment,
+		args.playbook.as_deref(),
+		args.limit.as_deref(),
+		&args.tags,
+		&args.skip_tags,
+		&args.assignments,
+	)
+	.await?;
+
+	// A window over any member refuses the environment, since a run acts on the
+	// environment as a whole, whatever its limit leaves out.
 	let machine_ids: Vec<Uuid> = environment
 		.machines
 		.iter()
@@ -412,9 +451,17 @@ pub async fn take_lease(
 		group.id,
 		rank,
 		&machine_ids,
-		args.intent,
+		&RunSpec {
+			intent: args.intent,
+			note: args.note.as_deref(),
+			playbook: args.playbook.as_deref(),
+			limit_pattern: args.limit.as_deref(),
+			limited_to: checked.limited_to.as_deref(),
+			tags: &args.tags,
+			skip_tags: &args.skip_tags,
+			assignments: &checked.assignments,
+		},
 		Some(login),
-		args.note.as_deref(),
 		args.take_over,
 	)
 	.await?
@@ -428,23 +475,52 @@ pub async fn take_lease(
 		taken.note.clone(),
 		taken.expires_at,
 	);
+	let mut limited_to: Vec<Record> = Vec::new();
+	for id in taken.limited_to.iter().flatten() {
+		limited_to.push(Record::machine(&mut conn, *id).await?);
+	}
+	let assignments: Vec<LeaseAssignment> = taken
+		.assignments
+		.iter()
+		.map(|(machine, application_type)| LeaseAssignment {
+			machine: checked
+				.members
+				.iter()
+				.find(|member| member.id == *machine)
+				.map(|member| member.name.clone())
+				.unwrap_or_else(|| machine.to_string()),
+			application_type: application_type.clone(),
+		})
+		.collect();
 	conn.record(match previous_holder {
 		Some(previous_holder) => Action::AnsibleLeaseTakenOver {
 			group: group_record,
 			lease: lease_record,
+			limited_to,
 			rank,
 			intent,
 			note,
 			expires_at,
 			previous_holder,
+			playbook: taken.playbook.clone(),
+			limit: taken.limit_pattern.clone(),
+			tags: taken.tags.clone(),
+			skip_tags: taken.skip_tags.clone(),
+			assignments,
 		},
 		None => Action::AnsibleLeaseTaken {
 			group: group_record,
 			lease: lease_record,
+			limited_to,
 			rank,
 			intent,
 			note,
 			expires_at,
+			playbook: taken.playbook.clone(),
+			limit: taken.limit_pattern.clone(),
+			tags: taken.tags.clone(),
+			skip_tags: taken.skip_tags.clone(),
+			assignments,
 		},
 	})
 	.await?;
@@ -526,7 +602,14 @@ pub async fn release_lease(
 ) -> Result<Json<()>> {
 	let mut conn = audit.begin().await?;
 	let lease = AnsibleLease::get(&mut conn, args.lease_id).await?;
-	if !AnsibleLease::release(&mut conn, lease.id, Some(&admin.0.login)).await? {
+	if !AnsibleLease::release(
+		&mut conn,
+		lease.id,
+		Some(&admin.0.login),
+		ReleaseReason::Released,
+	)
+	.await?
+	{
 		return Err(AppError::NotFound("that lease is no longer held".into()));
 	}
 	let group = ServerGroup::get_by_id(&mut conn, lease.server_group_id).await?;
@@ -536,6 +619,7 @@ pub async fn release_lease(
 		lease: lease_record,
 		rank: lease.rank,
 		held_by: lease.held_by.clone(),
+		reason: ReleaseReason::Released.to_string(),
 	})
 	.await?;
 	tracing::info!(
@@ -628,7 +712,10 @@ pub async fn for_group(
 	admin: TailscaleAdmin,
 	Json(args): Json<AnsibleArgs>,
 ) -> Result<Json<AnsibleView>> {
-	let mut conn = state.db.get().await?;
+	// One transaction, so the first read stamps the lease, declares the run's
+	// maintenance and records the run starting only if the whole read serves: a
+	// read that fails starts nothing, and the next is the first again.
+	let mut conn = audit.begin().await?;
 	let lease = AnsibleLease::get(&mut conn, args.lease_id).await?;
 	held_by_caller(&lease, &admin.0.login)?;
 	if !lease.holds_at(Timestamp::now()) {
@@ -636,9 +723,9 @@ pub async fn for_group(
 	}
 	// Recorded before the read, so a read that fails is recorded as failed: the
 	// layer settles it by how the handler ends.
+	let group_for_entry = ServerGroup::get_by_id(&mut conn, lease.server_group_id).await?;
 	{
-		let group = ServerGroup::get_by_id(&mut conn, lease.server_group_id).await?;
-		let (group_record, lease_record) = lease_records(&group, &lease);
+		let (group_record, lease_record) = lease_records(&group_for_entry, &lease);
 		audit
 			.read(Action::AnsibleRead {
 				group: group_record,
@@ -647,6 +734,47 @@ pub async fn for_group(
 				intent: lease.intent.to_string(),
 			})
 			.await?;
+	}
+
+	// The first read under a lease is the run starting, and declares maintenance
+	// over what the run acts on, for the holder.
+	// spec: ANSRUN#work-under-way
+	if let Some(started) = AnsibleLease::start(&mut conn, lease.id).await? {
+		let note = started
+			.playbook
+			.clone()
+			.unwrap_or_else(|| started.intent.to_string());
+		let windows = MaintenanceWindow::declare_for_run(
+			&mut conn,
+			&started,
+			started.limited_to.as_deref(),
+			Some(&note),
+		)
+		.await?;
+		let (group_record, lease_record) = lease_records(&group_for_entry, &started);
+		// Each window the start opened names the lease it was declared for.
+		for window in &windows.declared {
+			let (record, target) =
+				crate::fns::maintenance::window_records(&mut conn, window).await?;
+			conn.record(Action::MaintenanceDeclared {
+				window: record,
+				target,
+				upgrade_plan: None,
+				lease: Some(lease_record.clone()),
+				rank: window.rank,
+				expected_end: window.expected_end,
+				note: window.note.clone(),
+			})
+			.await?;
+		}
+		conn.record(Action::AnsibleRunStarted {
+			group: group_record,
+			lease: lease_record,
+			rank: started.rank,
+			intent: started.intent.to_string(),
+			playbook: started.playbook.clone(),
+		})
+		.await?;
 	}
 
 	let environment = resolve_environment(
@@ -735,10 +863,15 @@ pub async fn for_group(
 		);
 		tailnet_named_by_machine.push(tailnet_named);
 
+		let assigned_type = on_machine
+			.is_empty()
+			.then(|| lease.assignments.get(&machine.id).cloned())
+			.flatten();
 		hosts.push(AnsibleHost {
 			id: machine.id,
 			name: machine.name.clone(),
 			host_name: String::new(),
+			assigned_type,
 			address,
 			applications: on_machine
 				.into_iter()

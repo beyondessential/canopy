@@ -6,6 +6,7 @@
 mod abandoned_grain_migration;
 mod admins;
 mod ansible_catalogue;
+mod ansible_leases;
 mod ansible_variables;
 mod application_certificates;
 mod application_empty_update;
@@ -52,6 +53,8 @@ mod machine_enrollment;
 mod machine_restore_window;
 mod machine_silences;
 mod machines;
+mod maintenance_machine_sets;
+mod maintenance_run_windows;
 mod maintenance_window_application_migration;
 mod maintenance_window_machine_migration;
 mod maintenance_window_moves;

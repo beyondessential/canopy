@@ -44,6 +44,8 @@ Steps:
 
 ## UI rework (mockups: ansible-section, ansible-run)
 
+Built: the section (variables collapsed by count, a table per scope with entry rows driven from the keyboard, name completion from the catalogue, a value form shaped by the variable's type, edit as text with Ctrl+Shift+E, add a machine, the import button and dialog), the run buttons, and the run dialog from limit and assignments through the pending command to started, hold, timeout and refusal. What the plugin does with the handed-over lease (`CANOPY_LEASE`) is the infra plugin's to build.
+
 - The run dialog takes the lease from the browser ("Start work"), so the plugin needs to be handed it: `CANOPY_LEASE=<id>` in the command, used instead of taking a lease of its own. The lease records the playbook and intent the dialog chose, so a run started with a different command is still the run the lease was taken for.
 - The lease is pending until the plugin's first read under it. That read declares maintenance over what the run acts on. The spec leaves the pending period unnamed; use 5 minutes. With no read in that time, Canopy releases the lease itself, so a closed tab or abandoned dialog doesn't hold the environment.
 - The command's first `cd` names the operator's own checkout, so it is shown but left out of the copied text.
@@ -75,14 +77,14 @@ Steps:
 
 New and widened actions in the `actions!` catalogue (stable names follow the new vocabulary, since none of these exist yet):
 
-- [ ] `AnsibleLeaseTaken`/`TakenOver` detail gains `playbook`, `limit` (pattern), `limited_to` (the matched machines, as records), `tags`, `skip_tags`, and `assignments` (machine → application type). All are optional, since a plugin-taken lease knows none of them. Extra arguments are never stored on the lease, so they cannot reach an entry
-- [ ] `AnsibleRunStarted`, important: the first read under a lease, naming the group and lease. The reads after it stay as the routine `inventory_read`
-- [ ] `MaintenanceDeclared` gains an optional `lease` record, set when a run's start declares the window. Holding it is a `MaintenanceAmended`
-- [ ] `AnsibleLeaseReleased` detail gains `reason`: `released` (by the holder), `taken_over`, or `unstarted` (by Canopy after five minutes, actor Canopy itself)
-- [ ] `AnsibleLeaseExpired`, actor Canopy itself, recorded by the job that notices an expired lease. Today a lease that expires leaves no entry
-- [ ] `AnsibleCatalogueChanged`, actor Canopy itself, naming the infra commit the file was read at (from the GitHub contents/commits API rather than the raw URL, which carries no commit) and its digest
-- [ ] `AnsibleVariableMadeSecret`, actor Canopy itself, naming the variable and the catalogue version that made it secret
-- [ ] `AnsibleInventoryImported`, as already planned
+- [x] `AnsibleLeaseTaken`/`TakenOver` detail gains `playbook`, `limit` (pattern), `limited_to` (the matched machines, as records), `tags`, `skip_tags`, and `assignments` (machine → application type). All are optional, since a plugin-taken lease knows none of them. Extra arguments are never stored on the lease, so they cannot reach an entry
+- [x] `AnsibleRunStarted`, important: the first read under a lease, naming the group and lease. The reads after it stay as the routine `inventory_read`
+- [x] `MaintenanceDeclared` gains an optional `lease` record, set when a run's start declares the window. Holding it is a `MaintenanceAmended`
+- [x] `AnsibleLeaseReleased` detail gains `reason`: `released` (by the holder), `taken_over`, or `unstarted` (by Canopy after five minutes, actor Canopy itself)
+- [x] `AnsibleLeaseExpired`, actor Canopy itself, recorded by the job that notices an expired lease. Today a lease that expires leaves no entry
+- [x] `AnsibleCatalogueChanged`, actor Canopy itself, naming the infra commit the file was read at (from the GitHub contents/commits API rather than the raw URL, which carries no commit) and its digest
+- [x] `AnsibleVariableMadeSecret`, actor Canopy itself, naming the variable and the catalogue version that made it secret
+- [x] `AnsibleInventoryImported`, as already planned
 
 ## Run limit and tags
 
@@ -94,8 +96,8 @@ New and widened actions in the `actions!` catalogue (stable names follow the new
 
 A run's window is bound to its lease and covers what the run acts on: the environment, or the members its limit matches. MNT gains a window over several machines of one environment for that, which operators can also declare by hand.
 
-- [ ] Window over several machines: a `maintenance_window_machines` join table (window, machine), with the one-open-window-per-machine rule enforced across single-machine and set windows. Keep `machine_id` for a single machine, or fold it into the join table, whichever keeps `Scope`-style mapping in one place
-- [ ] Suspension (`SuspendedTargets`), moves, history, and the declaration dialog's grain choices learn the set. A set left with one machine is that machine's window
-- [ ] Run-bound windows: `expected_end` nullable, with a `lease_id` binding. The window ends when the lease ends (released, expired, or unstarted), and passes to the new holder on takeover as an amendment. Holding sets `expected_end` and clears the binding
-- [ ] Notifications and presentation read "lasts the run" where an expected end would be shown
-- [ ] `for_group` (graded read-only) declares the window on a lease's first read, so check its grading and audit clause
+- [x] Window over several machines: one window row naming its machines in `maintenance_windows.machine_ids` (at least two, at its group and rank, no `machine_id`), so a window has one declarer and one history. A set is not its environment's window: `open_for` on the environment skips it, and the one-open-per-environment index excludes it. That a machine is named by at most one open window, alone or in a set, cannot be an index over an array, so it is checked under `lock_group` by every declaration and move that names machines
+- [x] Suspension (`SuspendedTargets`, `suspends`), moves, history, lease taking (`open_over`), and the declaration dialog's grain choices learn the set. The dialog's choices list "Several machines" between the environment and its machines, from an environment, one of its machines, or a set. A set left with one machine is that machine's window. Machines a set stops covering are recorded as machine move rows, marked `carried_on` while the window carries on over the rest so its own `covered_from` stands
+- [x] Run-bound windows: `expected_end` stays `NOT NULL` (deviating from "nullable"), and `lease_id` binds a window to its lease. While bound, `expected_end` is kept equal to the lease's `expires_at` (`track_lease`), so the existing sweep ends it at expiry; `end_for_lease` ends it on release; `pass_lease` amends it to the new holder; `hold` gives it an end of its own and clears `lease_id`. A window the lease is served against does not move while the lease is held, held or not (the existing `serving_lease` rule)
+- [x] Notifications read "lasting the run" in the declaration and "the run's lease ending" in the ending. The operator interface shows a bound window as lasting the run wherever an expected end is shown (`WindowEnd`), and a machine presents a set naming it as its own, naming the others it covers
+- [x] `for_group` (graded read-only) declares the window on a lease's first read, in the transaction that stamps the lease started and records the run starting, so a read that fails starts nothing. Its audit clause declares `AnsibleRead`, `AnsibleRunStarted` and `MaintenanceDeclared`

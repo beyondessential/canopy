@@ -33,6 +33,14 @@ diesel::table! {
 		expires_at -> Timestamptz,
 		released_at -> Nullable<Timestamptz>,
 		released_by -> Nullable<Text>,
+		playbook -> Nullable<Text>,
+		limit_pattern -> Nullable<Text>,
+		limited_to -> Nullable<Array<Nullable<Uuid>>>,
+		tags -> Array<Nullable<Text>>,
+		skip_tags -> Array<Nullable<Text>>,
+		assignments -> Jsonb,
+		started_at -> Nullable<Timestamptz>,
+		release_reason -> Nullable<Text>,
 	}
 }
 
@@ -713,6 +721,7 @@ diesel::table! {
 		moved_at -> Timestamptz,
 		moved_by -> Nullable<Text>,
 		settled_at -> Nullable<Timestamptz>,
+		carried_on -> Bool,
 	}
 }
 
@@ -735,6 +744,8 @@ diesel::table! {
 		rank -> Nullable<Text>,
 		application_id -> Nullable<Uuid>,
 		upgrade_plan_id -> Nullable<Uuid>,
+		machine_ids -> Array<Nullable<Uuid>>,
+		lease_id -> Nullable<Uuid>,
 	}
 }
 
@@ -1144,6 +1155,7 @@ diesel::joinable!(maintenance_window_moves -> applications (application_id));
 diesel::joinable!(maintenance_window_moves -> machines (machine_id));
 diesel::joinable!(maintenance_window_moves -> maintenance_windows (window_id));
 diesel::joinable!(maintenance_window_moves -> server_groups (server_group_id));
+diesel::joinable!(maintenance_windows -> ansible_leases (lease_id));
 diesel::joinable!(maintenance_windows -> applications (application_id));
 diesel::joinable!(maintenance_windows -> machines (machine_id));
 diesel::joinable!(maintenance_windows -> server_groups (server_group_id));

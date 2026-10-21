@@ -217,6 +217,15 @@ pub struct ImportedVariable {
 	pub secret: bool,
 }
 
+/// The application type a run's lease assigned a machine with nothing on it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct LeaseAssignment {
+	/// The machine's name.
+	pub machine: String,
+	/// The application type it was assigned.
+	pub application_type: String,
+}
+
 /// Who took an action.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -434,22 +443,26 @@ macro_rules! actions {
 }
 
 actions! {
-	/// A maintenance window was declared over a target.
+	/// A maintenance window was declared over a target, or over several machines,
+	/// each named among `target`. A run's start declares one for the lease
+	/// named in `lease`.
 	MaintenanceDeclared = "maintenance_declared", "Declare maintenance" {
-		records { window: Record, target: Record, upgrade_plan: Option<Record> }
+		records { window: Record, target: Vec<Record>, upgrade_plan: Option<Record>, lease: Option<Record> }
 		detail { rank: Option<ServerRank>, expected_end: Timestamp, note: Option<String> }
 	}
 
 	/// An open maintenance window was changed: its end, its note, or what it
-	/// covers. Declaring over a target that already has a window amends it.
+	/// covers, including the machines of a window over several. Declaring over a
+	/// target that already has a window amends it, and holding a window a run
+	/// declared is an amendment too.
 	MaintenanceAmended = "maintenance_amended", "Amend maintenance" {
-		records { window: Record, target: Record, moved_from: Option<Record> }
+		records { window: Record, target: Vec<Record>, moved_from: Vec<Record> }
 		detail { rank: Option<ServerRank>, expected_end: Timestamp, note: Option<String> }
 	}
 
 	/// An open maintenance window was lifted before its expected end.
 	MaintenanceLifted = "maintenance_lifted", "Lift maintenance" {
-		records { window: Record, target: Record }
+		records { window: Record, target: Vec<Record> }
 		detail { rank: Option<ServerRank>, already_ended: bool }
 	}
 
@@ -460,19 +473,36 @@ actions! {
 		detail { rank: ServerRank, intent: String }
 	}
 
-	/// A run lease on an environment was taken.
+	/// A run lease on an environment was taken. Started from the operator
+	/// interface it records the playbook, its limit and the machines that
+	/// matched, the tags run and skipped, and the application type assigned to
+	/// each machine with nothing on it. Further arguments are never recorded.
 	AnsibleLeaseTaken = "inventory_lease_taken", "Take Ansible lease" {
-		records { group: Record, lease: Record }
-		detail { rank: ServerRank, intent: String, note: Option<String>, expires_at: Timestamp }
+		records { group: Record, lease: Record, limited_to: Vec<Record> }
+		detail {
+			rank: ServerRank, intent: String, note: Option<String>, expires_at: Timestamp,
+			playbook: Option<String>, limit: Option<String>, tags: Vec<String>,
+			skip_tags: Vec<String>, assignments: Vec<LeaseAssignment>,
+		}
 	}
 
 	/// A run lease another operator held was taken over.
 	AnsibleLeaseTakenOver = "inventory_lease_taken_over", "Take over Ansible lease" {
-		records { group: Record, lease: Record }
+		records { group: Record, lease: Record, limited_to: Vec<Record> }
 		detail {
 			rank: ServerRank, intent: String, note: Option<String>, expires_at: Timestamp,
 			previous_holder: Option<String>,
+			playbook: Option<String>, limit: Option<String>, tags: Vec<String>,
+			skip_tags: Vec<String>, assignments: Vec<LeaseAssignment>,
 		}
+	}
+
+	/// A run first read its environment under its lease, which is the run
+	/// starting. The reads after it are routine, so this is how a reader of the
+	/// log sees each run without asking for them.
+	AnsibleRunStarted = "ansible_run_started", "Start Ansible run" {
+		records { group: Record, lease: Record }
+		detail { rank: ServerRank, intent: String, playbook: Option<String> }
 	}
 
 	/// A held lease's expiry was pushed out. A run does it every few minutes,
@@ -482,8 +512,15 @@ actions! {
 		detail { rank: ServerRank, expires_at: Timestamp }
 	}
 
-	/// A lease was released, by its holder or by someone taking the work over.
+	/// A lease was released: by its holder, by someone taking the work over, or
+	/// by Canopy itself where no run read it in time (`unstarted`).
 	AnsibleLeaseReleased = "inventory_lease_released", "Release Ansible lease" {
+		records { group: Record, lease: Record }
+		detail { rank: ServerRank, held_by: Option<String>, reason: String }
+	}
+
+	/// A lease ran out without being extended, noticed by Canopy itself.
+	AnsibleLeaseExpired = "ansible_lease_expired", "Expire Ansible lease" {
 		records { group: Record, lease: Record }
 		detail { rank: ServerRank, held_by: Option<String> }
 	}

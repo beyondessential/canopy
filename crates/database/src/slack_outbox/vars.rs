@@ -102,6 +102,16 @@ pub fn maintenance_ended(target: &str, by: Option<&str>, watching_from: &str) ->
 	})
 }
 
+/// `maintenance_ended` for a window that lasted a run: the same variables, with
+/// `by` naming the run's lease ending as what ended it.
+pub fn maintenance_ended_with_run(target: &str, watching_from: &str) -> Value {
+	json!({
+		"target": target,
+		"by": "the run's lease ending",
+		"watching_from": watching_from,
+	})
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;

@@ -6,6 +6,7 @@
 mod admin_auth;
 mod ansible;
 mod ansible_import;
+mod ansible_runs;
 mod ansible_variables;
 mod application_host;
 mod application_paths;
@@ -34,6 +35,7 @@ mod kubernetes_clusters;
 mod machines;
 mod maintenance;
 mod maintenance_amend;
+mod maintenance_machines;
 mod maintenance_targets;
 mod mcp;
 mod migration_tests;
