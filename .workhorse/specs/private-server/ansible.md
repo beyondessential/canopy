@@ -36,6 +36,18 @@ Non-admins can list secret variables by name only.
 Variables must expose whether they are secret over the API; consumers should avoid caching or displaying them if so.
 Variables are backed up in the escrow store (see [ESC](../jobs/escrow.md)) to survive the loss of the secret store.
 
+### Catalogue
+
+The variables the playbooks read are described by a catalogue the infra repository publishes on its main branch, at `ansible/variables.schema.json`.
+It is a JSON Schema of an environment's variables, each with its type, its default, what it means, and annotations under `x-canopy`: whether it is secret, the scopes it may be set at, the application types it configures, and whether it is reserved to the plugin.
+Canopy reads it from the main branch, and keeps using the last copy it read while the repository cannot be reached.
+
+A variable the catalogue describes is held to it.
+Its value must match its type, it can be set only at the scopes the catalogue allows, and it is secret exactly when the catalogue says so.
+A reserved variable cannot be set, since a run sets it for itself.
+A name the catalogue does not describe can be set freely, so a variable a playbook has just started reading is not held up by the catalogue.
+A value set before the catalogue described it, or before the catalogue changed, stays as it is and is marked where it no longer matches.
+
 ## Reaching a machine
 
 A machine's address is the tailnet name of the device bound to it, or the recorded host of an application on it where no device is bound.
@@ -62,7 +74,7 @@ The variables under `all` are set on the environment.
 A host's own variables are set on the machine it is matched to.
 A variable on a group below `all` is set on each machine matched to a host in that group or beneath it, a host's own value winning over a group's and a nearer group's over a farther one's.
 The file's groups carry no further meaning, since a run groups a machine by the applications on it.
-`canopy_intent` and `tamanu_clone` are left out, since a run sets them for itself.
+Variables the catalogue marks reserved, such as `canopy_intent` and `tamanu_clone`, are left out, since a run sets them for itself.
 Where the file's `tamanu_clone` disagrees with whether the environment is a clone, the preview says so, since the file may have been meant for another environment.
 
 Ansible reaches a host with no `ansible_host` at its key, so where that key is not the address Canopy reaches the machine at, it becomes the machine's `ansible_host`.
@@ -88,11 +100,11 @@ It shows the comments that would be added to the group's notes, which the operat
 The operator can assign any host to a different machine in the environment, or skip it, and a skipped host's variables are not imported.
 The import cannot be applied while a host is neither matched nor skipped, or while two hosts are matched to one machine.
 
-A variable is proposed as secret when its name, or the name of any key within its value, contains `salt`, `token`, `secret`, `password`, or `key`.
-The operator can mark or unmark any variable as secret before applying.
+A variable the catalogue describes is secret as the catalogue says.
+Any other is proposed as secret when its name, or the name of any key within its value, contains `salt`, `token`, `secret`, `password`, or `key`, and the operator can mark or unmark it before applying.
 Secrecy applies to a whole value, so a structured value with one secret field inside it is secret as a whole (see "Variables").
 
-Each variable is held to the same rules as setting one by hand, such as `ansible_host` being set on a machine alone, and the preview names any that breaks them.
+Each variable is held to the same rules as setting one by hand, its catalogue entry among them, and the preview names any that breaks them.
 An import holding one cannot be applied.
 
 ### Applying
@@ -109,6 +121,14 @@ Taking a lease names the environment and what the run intends: to configure the 
 A lease expires after a fixed period, so a run that dies does not hold an environment shut.
 Its holder extends it while the run is still going and releases it when the run ends.
 
+### Starting a run
+
+An operator usually starts a run from the operator interface, which takes the lease for the playbook they choose and hands it to the run in the command it gives them.
+The lease then waits for the run: it is pending until the run first reads its environment under it.
+A lease no run has read within five minutes of being taken is released by Canopy, and the operator is told to start again, so an abandoned start does not hold the environment.
+
+A run can also take a lease of its own when it is started without one, and is then treated as though the lease had been handed to it.
+
 An attempt to take a lease another operator holds is refused, naming who holds it and when it expires.
 Taking one over is a deliberate, audited step, so a run never proceeds over another operator's work by accident.
 
@@ -120,8 +140,11 @@ Taking a lease is refused while another operator's maintenance window holds over
 A window over one machine refuses the whole environment, since a run acts on the environment as a whole.
 A window over a machine none of the environment's applications run on refuses nothing.
 
-An operator about to run declares their own window first and is served the environment their window covers.
-The window stays over that environment while their lease is held (see [MNT](../monitoring/maintenance.md), "Moving a window").
+A run's first read under its lease declares a maintenance window over the environment, as the lease's holder, noting the playbook it runs.
+Where a window of the holder's own already covers the environment, that window serves instead and nothing new is declared.
+A window a run declared ends five minutes after the lease ends, whether released or expired, so checks settle after the run before anyone is paged.
+While it is open, its declarer can hold it, giving it an expected end as a declaration does, and it then ends like any other window, when lifted or when that end passes (see [MNT](../monitoring/maintenance.md), "Ending").
+The window stays over the environment while the lease is held (see [MNT](../monitoring/maintenance.md), "Moving a window").
 A target holds at most one open window, so a second operator's declaration amends the first's rather than opening one of their own.
 An amendment declares the same work, so the window is the amender's as well as the declarer's: both are served the environment it covers, and everyone else is refused and told whose work is under way.
 An amendment a later one replaces stops speaking for the operator who made it.
@@ -147,7 +170,37 @@ A secret's value never appears in a log.
 
 ## Presentation
 
-A group presents one of its environments at a time, chosen by the operator where the group has more than one: the machines in it and the variables set at each scope, with a value inherited from a wider scope distinguished from one the machine sets itself.
-A secret variable appears by name, with the scope it is set at and when it last changed, and never its value.
-Where a lease or a maintenance window holds over the environment, the presentation names it.
-The invocation a run is started with is given, filled in with Canopy's address and the environment's identity.
+A group presents one of its environments at a time, chosen by the operator where the group has more than one.
+
+### Runs
+
+An environment offers three ways to start a run: an install, an upgrade, and a run of any playbook the operator chooses, with the intent it is run with.
+The install and the upgrade name their playbooks and intents already.
+Each can be given extra arguments for the playbook, such as a limit or tags.
+
+Starting work takes the lease, and only then is the command shown, since it carries the lease.
+The command brings the operator's checkout of the infra repository up to date with its main branch, by git or by jj as the operator chooses, then runs the playbook against the environment.
+Its first step, changing into the checkout, names a place only the operator knows, so it is shown but left out of what is copied.
+While the lease waits, the time left for the run to start is shown, and the operator can give it up.
+Once the run has started, the presentation says so, and that maintenance is declared.
+
+A refusal to take the lease is shown before any command, naming its reason (see "Refusal").
+Where a lease or a maintenance window holds over the environment, the presentation names who holds it and what they are running, and offers taking it over.
+
+### Variables
+
+An environment with variables set presents them collapsed, by count, so they take no room until asked for.
+An environment with none offers an import (see "Importing an inventory file").
+
+Expanded, the variables are listed by scope: the group's, the environment's, then each machine that sets anything of its own.
+A value overriding one from a wider scope is marked with the scope it overrides.
+A secret variable appears by name, with when it last changed, and never its value.
+
+Each scope ends with a row for adding a variable, driven from the keyboard: its name completes from the catalogue, showing each known variable's type, default, and meaning, and its value is entered in a form shaped by that type.
+Setting a variable leaves the operator in a fresh row of the same scope, so several are entered in a run of typing.
+A known variable that is secret is entered as one, and one the catalogue limits to other scopes or other application types is not offered.
+
+A scope can instead be edited as text, one variable per line as YAML, with names completing from the catalogue as they do in a row.
+A secret appears as a placeholder that is kept unless a new value is typed over it.
+Saving applies only what changed, as variables set and removed, and is refused while a line breaks a rule, naming the line.
+The text editor is opened from a button on the scope, or from a keyboard shortcut acting on the scope that holds focus.

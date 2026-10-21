@@ -1,0 +1,225 @@
+<!-- spec: private-server/ansible.md -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ansible run dialog, from start to timeout</title>
+<style>
+:root {
+	--primary: #388e3c;
+	--primary-border: rgba(56, 142, 60, 0.5);
+	--text: rgba(0, 0, 0, 0.87);
+	--text-2: rgba(0, 0, 0, 0.6);
+	--text-3: rgba(0, 0, 0, 0.38);
+	--divider: rgba(0, 0, 0, 0.12);
+	--input-border: rgba(0, 0, 0, 0.23);
+	--hover: rgba(0, 0, 0, 0.04);
+	--warning: #ed6c02;
+	--error: #d32f2f;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: "Roboto", "Helvetica", "Arial", sans-serif; color: var(--text); background: #fff; line-height: 1.5; }
+.frame-label { font: 500 0.75rem/1 "Roboto", sans-serif; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-2); margin: 32px 24px 8px; }
+.frames { display: grid; grid-template-columns: 1fr; gap: 0; }
+.backdrop { background: rgba(0, 0, 0, 0.5); padding: 32px 24px; }
+.dialog {
+	max-width: 760px; margin: 0 auto; background: #fff; border-radius: 4px;
+	box-shadow: 0 11px 15px -7px rgba(0,0,0,.2), 0 24px 38px 3px rgba(0,0,0,.14), 0 9px 46px 8px rgba(0,0,0,.12);
+}
+.dialog-title { font-size: 1.25rem; font-weight: 500; line-height: 1.6; padding: 16px 24px; }
+.dialog-title .mono { font-size: 1rem; }
+.dialog-content { padding: 0 24px 16px; }
+.dialog-content > * + * { margin-top: 16px; }
+.dialog-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 8px; }
+.mono { font-family: monospace; font-size: 0.8125rem; }
+.secondary { color: var(--text-2); }
+.row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+
+.btn {
+	display: inline-flex; align-items: center; gap: 8px; font: 500 0.875rem/1.75 "Roboto", sans-serif;
+	letter-spacing: 0.02857em; text-transform: uppercase; border-radius: 4px; padding: 6px 16px;
+	background: none; border: 1px solid transparent; cursor: pointer;
+}
+.btn svg { width: 18px; height: 18px; fill: currentColor; }
+.btn.contained { color: #fff; background: var(--primary); box-shadow: 0 3px 1px -2px rgba(0,0,0,.2), 0 2px 2px 0 rgba(0,0,0,.14), 0 1px 5px 0 rgba(0,0,0,.12); }
+.btn.contained[disabled] { background: rgba(0,0,0,.12); color: rgba(0,0,0,.26); box-shadow: none; }
+.btn.text { color: var(--primary); padding: 6px 8px; }
+.btn.outlined { color: var(--primary); border-color: var(--primary-border); padding: 5px 15px; }
+
+.field {
+	position: relative; display: inline-flex; align-items: center; height: 40px; padding: 0 14px;
+	border: 1px solid var(--input-border); border-radius: 4px; font-size: 1rem; min-width: 260px;
+}
+.field label { position: absolute; top: -9px; left: 9px; padding: 0 5px; background: #fff; font-size: 0.75rem; color: var(--text-2); line-height: 1.4; }
+.field.select { padding-right: 36px; }
+.field.select::after { content: ""; position: absolute; right: 12px; top: 17px; border: 5px solid transparent; border-top-color: rgba(0,0,0,.54); }
+.field.mono { font-family: monospace; font-size: 0.875rem; }
+.field.wide { flex: 1; min-width: 0; }
+.field.ph { color: var(--text-3); }
+
+.toggle { display: inline-flex; border: 1px solid var(--divider); border-radius: 4px; overflow: hidden; }
+.toggle span { padding: 5px 12px; font: 500 0.8125rem/1.75 "Roboto", sans-serif; text-transform: uppercase; letter-spacing: 0.02857em; color: var(--text-2); }
+.toggle span + span { border-left: 1px solid var(--divider); }
+.toggle span.on { background: rgba(56, 142, 60, 0.12); color: var(--primary); }
+
+.cmd { position: relative; border-radius: 4px; background: var(--hover); padding: 12px 44px 12px 12px; font: 0.85em/1.7 monospace; white-space: pre-wrap; word-break: break-all; }
+.cmd .nocopy { color: var(--text-3); user-select: none; }
+.cmd .copy { position: absolute; top: 6px; right: 6px; padding: 5px; border-radius: 50%; }
+.cmd .copy svg { width: 20px; height: 20px; fill: rgba(0,0,0,.54); }
+
+.state { display: flex; align-items: center; gap: 12px; font-size: 0.875rem; }
+.spinner { width: 20px; height: 20px; border-radius: 50%; border: 3px solid rgba(56,142,60,.2); border-top-color: var(--primary); flex: none; }
+.clock { font-variant-numeric: tabular-nums; color: var(--text-2); margin-left: auto; }
+.ok { width: 20px; height: 20px; fill: var(--primary); flex: none; }
+.chip { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 16px; font-size: 0.8125rem; border: 1px solid var(--warning); color: var(--warning); }
+
+.alert { display: flex; gap: 12px; padding: 6px 16px; border-radius: 4px; font-size: 0.875rem; line-height: 1.43; }
+.alert svg { width: 22px; height: 22px; flex: none; margin-top: 7px; }
+.alert .msg { padding: 8px 0; }
+.alert.warning { background: rgb(255, 244, 229); color: rgb(102, 60, 0); }
+.alert.warning svg { fill: var(--warning); }
+.alert.error { background: rgb(253, 237, 237); color: rgb(95, 33, 32); }
+.alert.error svg { fill: var(--error); }
+a { color: var(--primary); }
+</style>
+</head>
+<body>
+
+<div class="frame-label">1. Run install, before starting</div>
+<div class="backdrop">
+	<div class="dialog">
+		<div class="dialog-title">Install production <span class="mono secondary">tamanu-install.yml</span></div>
+		<div class="dialog-content">
+			<div class="row">
+				<span class="toggle"><span class="on">git</span><span>jj</span></span>
+				<span class="field mono wide ph"><label>Extra arguments</label>--limit, --tags…</span>
+			</div>
+		</div>
+		<div class="dialog-actions">
+			<span class="btn text">Cancel</span>
+			<span class="btn contained"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Start work</span>
+		</div>
+	</div>
+</div>
+
+<div class="frame-label">2. Run…, choosing the playbook</div>
+<div class="backdrop">
+	<div class="dialog">
+		<div class="dialog-title">Run on production</div>
+		<div class="dialog-content">
+			<div class="row">
+				<span class="field select mono"><label>Playbook</label>postgres-upgrade-check.yml</span>
+				<span class="toggle"><span class="on">Configure</span><span>Upgrade</span></span>
+			</div>
+			<div class="row">
+				<span class="toggle"><span>git</span><span class="on">jj</span></span>
+				<span class="field mono wide"><label>Extra arguments</label>--limit central</span>
+			</div>
+		</div>
+		<div class="dialog-actions">
+			<span class="btn text">Cancel</span>
+			<span class="btn contained"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Start work</span>
+		</div>
+	</div>
+</div>
+
+<div class="frame-label">3. Work started, waiting for the run</div>
+<div class="backdrop">
+	<div class="dialog">
+		<div class="dialog-title">Install production <span class="mono secondary">tamanu-install.yml</span></div>
+		<div class="dialog-content">
+			<div class="cmd"><span class="nocopy">cd &lt;infra&gt;</span>
+git switch main &amp;&amp; git pull --ff-only
+cd ansible
+CANOPY_URL=https://canopy.example.ts.net CANOPY_GROUP=example CANOPY_RANK=production CANOPY_LEASE=7c1e9a52-40b3-4d7e-9f0a-2e6b51c8d913 uv run ansible-playbook -i inventory/canopy.yml tamanu-install.yml<span class="copy"><svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2m0 16H8V7h11z"/></svg></span></div>
+			<div class="state">
+				<span class="spinner"></span>
+				<span>Waiting for the run to start</span>
+				<span class="clock">4:12</span>
+			</div>
+		</div>
+		<div class="dialog-actions">
+			<span class="btn text">Give up</span>
+		</div>
+	</div>
+</div>
+
+<div class="frame-label">3b. Same, upgrade with jj</div>
+<div class="backdrop">
+	<div class="dialog">
+		<div class="dialog-title">Upgrade production <span class="mono secondary">tamanu-upgrade.yml</span></div>
+		<div class="dialog-content">
+			<div class="cmd"><span class="nocopy">cd &lt;infra&gt;</span>
+jj git fetch &amp;&amp; jj new main@origin
+cd ansible
+CANOPY_URL=https://canopy.example.ts.net CANOPY_GROUP=example CANOPY_RANK=production CANOPY_INTENT=upgrade CANOPY_LEASE=0d4f2c77-9a1e-4b85-b3c6-71e0a9d2f4b8 uv run ansible-playbook -i inventory/canopy.yml tamanu-upgrade.yml<span class="copy"><svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2m0 16H8V7h11z"/></svg></span></div>
+			<div class="state">
+				<span class="spinner"></span>
+				<span>Waiting for the run to start</span>
+				<span class="clock">4:58</span>
+			</div>
+		</div>
+		<div class="dialog-actions">
+			<span class="btn text">Give up</span>
+		</div>
+	</div>
+</div>
+
+<div class="frame-label">4. The run has started</div>
+<div class="backdrop">
+	<div class="dialog">
+		<div class="dialog-title">Install production <span class="mono secondary">tamanu-install.yml</span></div>
+		<div class="dialog-content">
+			<div class="state">
+				<svg class="ok" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2m-2 15-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8z"/></svg>
+				<span>Running since 13:02</span>
+				<span class="chip">Maintenance</span>
+			</div>
+		</div>
+		<div class="dialog-actions">
+			<span class="btn text">Hold maintenance</span>
+			<span class="btn text">Close</span>
+		</div>
+	</div>
+</div>
+
+<div class="frame-label">5. Nothing started in time</div>
+<div class="backdrop">
+	<div class="dialog">
+		<div class="dialog-title">Install production <span class="mono secondary">tamanu-install.yml</span></div>
+		<div class="dialog-content">
+			<div class="alert warning">
+				<svg viewBox="0 0 24 24"><path d="M12 5.99 19.53 19H4.47zM12 2 1 21h22zm1 14h-2v2h2zm0-6h-2v4h2z"/></svg>
+				<div class="msg">The run didn't start within 5 minutes, so the lease was released.</div>
+			</div>
+		</div>
+		<div class="dialog-actions">
+			<span class="btn text">Close</span>
+			<span class="btn contained"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Start again</span>
+		</div>
+	</div>
+</div>
+
+<div class="frame-label">6. Refused at start</div>
+<div class="backdrop">
+	<div class="dialog">
+		<div class="dialog-title">Upgrade production <span class="mono secondary">tamanu-upgrade.yml</span></div>
+		<div class="dialog-content">
+			<div class="alert error">
+				<svg viewBox="0 0 24 24"><path d="M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2M12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8"/></svg>
+				<div class="msg">Upgrading production needs an open upgrade plan. <a href="#">Plan an upgrade</a></div>
+			</div>
+			<div class="row">
+				<span class="toggle"><span class="on">git</span><span>jj</span></span>
+				<span class="field mono wide ph"><label>Extra arguments</label>--limit, --tags…</span>
+			</div>
+		</div>
+		<div class="dialog-actions">
+			<span class="btn text">Cancel</span>
+			<span class="btn contained" disabled><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Start work</span>
+		</div>
+	</div>
+</div>
+
+</body>
+</html>

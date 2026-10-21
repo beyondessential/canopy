@@ -38,3 +38,19 @@ Steps:
 - [ ] SPA: `GroupInventorySection` → `GroupAnsibleSection`, heading "Ansible", action labels, test ids. `e2e/inventory.spec.ts` → `e2e/ansible.spec.ts`, with seed helpers
 - [ ] Infra repo, in lockstep: the plugin's `/api/inventory/*` calls move to `/api/ansible/*`. Links to `private-server/inventory.md` move to `private-server/ansible.md`, and `#what-an-inventory-contains` becomes `#what-a-run-is-served` (`#run-leases` and `#reaching-a-machine` are unchanged)
 - [ ] `grep -rin inventor` over `crates`, `private-web/src`, `private-web/e2e` and `.workhorse/specs` should then turn up only the stored names above, Ansible's own inventory (the import), and the unrelated backup-repository inventory
+
+## UI rework (mockups: ansible-section, ansible-run)
+
+- The run dialog takes the lease from the browser ("Start work"), so the plugin needs to be handed it: `CANOPY_LEASE=<id>` in the command, used instead of taking a lease of its own. The lease records the playbook and intent the dialog chose, so a run started with a different command is still the run the lease was taken for.
+- The lease is pending until the plugin's first read under it. That read declares maintenance over the environment. With no read within 5 minutes, Canopy releases the lease itself, so a closed tab or abandoned dialog doesn't hold the environment.
+- The command's first `cd` names the operator's own checkout, so it is shown but left out of the copied text.
+
+## Variable catalogue
+
+- `ansible-variables.schema.json` beside this plan is the draft catalogue for the infra repo, at `ansible/variables.schema.json`. It covers the variable tables of LNXANS, LNXSRV, LNXRUN, LNXDB, LNXTLS and LNXMSP, the reference page's derived and role-default variables that a play reads, the accepted `ansible_*` names, `managed_by_ansible`, and the reserved `canopy_intent`/`tamanu_clone`. It leaves out variables that nothing reads (`caddy_waf_enforce`, `mergerfs_version`, the letterhead pair).
+- Checked against every old inventory file, with the effective variables per host, it flags two things, both in the files rather than the schema:
+  - `tamanu_cache_central_dns` (5 hosts) is read by no playbook or template in infra, so it falls through as an unknown name.
+  - One facility host sets `tamanu_facility_id` to a list of two ids. The facility template renders it as `["{{ tamanu_facility_id }}"]`, which a list breaks, in ops as well as infra. Either the host is configured by hand, or the variable has to become a list in infra. The schema keeps it a string.
+- The infra repo is public, so Canopy fetches `https://raw.githubusercontent.com/beyondessential/infra/main/ansible/variables.schema.json` with no credentials. It keeps the last good copy in the database, so a restart while GitHub is unreachable still has a catalogue, and refreshes it periodically.
+- Validation uses a JSON Schema 2020-12 validator with format checks for `hostname`, `ipv4`, `ipv6`, `uri` and `email`, since the schema relies on them.
+- `x-canopy.scope` generalises the hard-coded `ansible_host` rule. Keep the hard-coded rule as well, since Canopy's addressing depends on it whatever the catalogue says.

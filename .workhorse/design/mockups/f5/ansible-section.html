@@ -1,0 +1,292 @@
+<!-- spec: private-server/ansible.md -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ansible section, variables and keyboard entry</title>
+<style>
+:root {
+	--primary: #388e3c;
+	--primary-border: rgba(56, 142, 60, 0.5);
+	--primary-tint: rgba(56, 142, 60, 0.08);
+	--text: rgba(0, 0, 0, 0.87);
+	--text-2: rgba(0, 0, 0, 0.6);
+	--text-3: rgba(0, 0, 0, 0.38);
+	--divider: rgba(0, 0, 0, 0.12);
+	--row: rgba(224, 224, 224, 1);
+	--input-border: rgba(0, 0, 0, 0.23);
+	--hover: rgba(0, 0, 0, 0.04);
+	--warning: #ed6c02;
+	--error: #d32f2f;
+	--info: #0288d1;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: "Roboto", "Helvetica", "Arial", sans-serif; color: var(--text); background: #fff; line-height: 1.5; }
+.frame-label { font: 500 0.75rem/1 "Roboto", sans-serif; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-2); margin: 32px 24px 8px; }
+.frame-note { font-size: 0.8125rem; color: var(--text-2); margin: 0 24px 8px; max-width: 760px; }
+.page { padding: 0 24px 24px; max-width: 960px; }
+.paper { border: 1px solid var(--divider); border-radius: 4px; padding: 16px; background: #fff; }
+.mono { font-family: monospace; font-size: 0.8125rem; }
+.secondary { color: var(--text-2); }
+
+.head { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; }
+.head h6 { font-size: 1.25rem; font-weight: 500; line-height: 1.6; margin: 0; }
+.env-select {
+	position: relative; display: inline-flex; align-items: center; height: 32px; padding: 0 32px 0 12px;
+	border: 1px solid var(--input-border); border-radius: 4px; font-size: 0.875rem;
+}
+.env-select::after, .select::after {
+	content: ""; position: absolute; right: 10px; top: 13px; border: 5px solid transparent; border-top-color: rgba(0, 0, 0, 0.54);
+}
+
+.runs { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.btn {
+	display: inline-flex; align-items: center; gap: 8px; font: 500 0.875rem/1.75 "Roboto", sans-serif;
+	letter-spacing: 0.02857em; text-transform: uppercase; border-radius: 4px; padding: 5px 15px;
+	background: none; border: 1px solid transparent; cursor: pointer;
+}
+.btn svg { width: 18px; height: 18px; fill: currentColor; }
+.btn.outlined { color: var(--primary); border-color: var(--primary-border); }
+.btn.contained { color: #fff; background: var(--primary); box-shadow: 0 3px 1px -2px rgba(0,0,0,.2), 0 2px 2px 0 rgba(0,0,0,.14), 0 1px 5px 0 rgba(0,0,0,.12); }
+.btn.text { color: var(--primary); padding: 4px 8px; }
+.btn.small { font-size: 0.8125rem; padding: 3px 9px; }
+
+.status { display: flex; align-items: center; gap: 8px; font-size: 0.875rem; margin-top: 12px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warning); flex: none; }
+.chip { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 16px; font-size: 0.8125rem; border: 1px solid #bdbdbd; }
+.chip.warning { border-color: var(--warning); color: var(--warning); }
+
+table.vars { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 0.875rem; }
+.vars td { padding: 4px 8px 4px 0; border-bottom: 1px solid var(--row); vertical-align: middle; height: 36px; }
+.vars tr.scope td { border-bottom: none; padding-top: 16px; height: auto; font-weight: 500; font-size: 0.8125rem; letter-spacing: 0.02em; }
+.vars tr.scope td .sub { font-weight: 400; color: var(--text-2); margin-left: 6px; }
+.vars td.name { width: 34%; font-family: monospace; font-size: 0.8125rem; }
+.vars td.value { font-family: monospace; font-size: 0.8125rem; word-break: break-all; }
+.vars td.when { width: 92px; color: var(--text-3); font-size: 0.75rem; text-align: right; white-space: nowrap; }
+.vars td.act { width: 32px; text-align: right; padding-right: 0; }
+.vars td.act svg { width: 18px; height: 18px; fill: var(--text-3); }
+.secret { color: var(--text-2); display: inline-flex; align-items: center; gap: 4px; }
+.secret svg { width: 14px; height: 14px; fill: var(--warning); }
+.over { font-family: "Roboto", sans-serif; font-size: 0.75rem; color: var(--text-2); margin-left: 8px; }
+.over::before { content: "▲ "; font-size: 0.625rem; }
+
+/* entry row */
+tr.entry td { border-bottom: none; padding-top: 6px; }
+.in {
+	position: relative; display: flex; align-items: center; height: 32px; padding: 0 8px;
+	border: 1px solid var(--input-border); border-radius: 4px; font: 0.8125rem monospace; color: var(--text); background: #fff;
+}
+.in.ph { color: var(--text-3); }
+.in.focus { border: 2px solid var(--primary); padding: 0 7px; }
+.in.error { border: 2px solid var(--error); padding: 0 7px; }
+.caret { display: inline-block; width: 1px; height: 16px; background: var(--text); margin-left: 1px; }
+.entry-row { display: flex; gap: 8px; align-items: center; }
+.entry-row .in.name { width: 34%; flex: none; }
+.entry-row .in.val { flex: 1; }
+.kbd { font: 0.6875rem monospace; border: 1px solid var(--divider); border-bottom-width: 2px; border-radius: 3px; padding: 0 4px; color: var(--text-2); }
+.lock-toggle { display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center; border-radius: 4px; }
+.lock-toggle svg { width: 18px; height: 18px; fill: var(--text-3); }
+.lock-toggle.on svg { fill: var(--warning); }
+.err-text { font-size: 0.75rem; color: var(--error); margin: 4px 0 0 calc(34% + 8px); }
+
+/* combobox popup */
+.combo { position: relative; }
+.popup {
+	position: absolute; left: 0; top: 36px; width: 560px; background: #fff; border-radius: 4px; z-index: 2;
+	box-shadow: 0 5px 5px -3px rgba(0,0,0,.2), 0 8px 10px 1px rgba(0,0,0,.14), 0 3px 14px 2px rgba(0,0,0,.12);
+	padding: 4px 0; font-family: "Roboto", sans-serif;
+}
+.opt { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; padding: 6px 12px; }
+.opt.hl { background: var(--primary-tint); }
+.opt .n { font: 0.8125rem monospace; }
+.opt .n b { font-weight: 700; }
+.opt .t { font-size: 0.6875rem; color: var(--text-2); text-align: right; }
+.opt .d { grid-column: 1 / -1; font-size: 0.75rem; color: var(--text-2); }
+.opt .t svg { width: 12px; height: 12px; fill: var(--warning); vertical-align: -1px; }
+.opt.set .n { color: var(--text-3); }
+
+/* text editor variant */
+.editor { border: 2px solid var(--primary); border-radius: 4px; margin-top: 6px; font: 0.8125rem/1.7 monospace; position: relative; }
+.editor .line { display: flex; }
+.editor .gut { width: 32px; flex: none; text-align: right; padding-right: 8px; color: var(--text-3); user-select: none; background: var(--hover); }
+.editor .code { padding-left: 8px; white-space: pre; }
+.editor .k { color: #1565c0; }
+.editor .s { color: #2e7d32; }
+.editor .b { color: #6a1b9a; }
+.editor .tag { color: var(--warning); }
+.editor .line.bad .gut { color: var(--error); background: rgba(211, 47, 47, 0.08); }
+.editor .squig { text-decoration: underline wavy var(--error); text-underline-offset: 3px; }
+.editor-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 0.75rem; color: var(--text-2); }
+.editor .popup { top: auto; left: 140px; width: 460px; }
+.collapse { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding: 8px 0; border-top: 1px solid var(--divider); font-size: 0.875rem; font-weight: 500; }
+.collapse .count { font-weight: 400; color: var(--text-2); }
+.collapse svg { width: 20px; height: 20px; fill: rgba(0,0,0,.54); }
+.scope-edit { float: right; display: inline-flex; padding: 2px; border-radius: 4px; }
+.scope-edit svg { width: 16px; height: 16px; fill: var(--text-3); }
+</style>
+</head>
+<body>
+
+<div class="frame-label">A. At rest</div>
+<div class="page">
+	<div class="paper">
+		<div class="head">
+			<h6>Ansible</h6>
+			<span class="env-select">production</span>
+		</div>
+		<div class="runs">
+			<span class="btn contained"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Run install</span>
+			<span class="btn outlined"><svg viewBox="0 0 24 24"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8z"/></svg>Run upgrade</span>
+			<span class="btn outlined">Run…</span>
+		</div>
+		<div class="collapse"><svg viewBox="0 0 24 24"><path d="M10 6 8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>Variables<span class="count">13</span></div>
+	</div>
+</div>
+
+<div class="frame-label">A2. Variables expanded, entry rows</div>
+<div class="page">
+	<div class="paper">
+		<div class="head">
+			<h6>Ansible</h6>
+			<span class="env-select">production</span>
+		</div>
+		<div class="runs">
+			<span class="btn contained"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Run install</span>
+			<span class="btn outlined"><svg viewBox="0 0 24 24"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8z"/></svg>Run upgrade</span>
+			<span class="btn outlined">Run…</span>
+		</div>
+
+		<div class="collapse"><svg viewBox="0 0 24 24"><path d="M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z"/></svg>Variables<span class="count">13</span></div>
+		<table class="vars" style="margin-top: 0">
+			<tr class="scope"><td colspan="4">example<span class="sub">all environments</span><span class="scope-edit" title="Edit as text"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.996.996 0 0 0-1.41 0l-1.83 1.83 3.75 3.75z"/></svg></span></td></tr>
+			<tr><td class="name">ansible_user</td><td class="value">"ubuntu"</td><td class="when">3 weeks ago</td><td class="act"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z"/></svg></td></tr>
+			<tr><td class="name">timezone</td><td class="value">"Pacific/Auckland"</td><td class="when">3 weeks ago</td><td class="act"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z"/></svg></td></tr>
+			<tr class="entry"><td colspan="4"><div class="entry-row"><span class="in name ph">add to example</span></div></td></tr>
+
+			<tr class="scope"><td colspan="4">production<span class="scope-edit" title="Edit as text"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.996.996 0 0 0-1.41 0l-1.83 1.83 3.75 3.75z"/></svg></span></td></tr>
+			<tr><td class="name">elastic_agent_enabled</td><td class="value">true</td><td class="when">2 days ago</td><td class="act"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z"/></svg></td></tr>
+			<tr><td class="name">salt</td><td class="value"><span class="secret"><svg viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2m-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2m3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1z"/></svg>secret</span></td><td class="when">2 days ago</td><td class="act"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z"/></svg></td></tr>
+			<tr><td class="name">tamanu_central_canonical_url</td><td class="value">"https://central.example.org"</td><td class="when">2 days ago</td><td class="act"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z"/></svg></td></tr>
+			<tr><td class="name">tamanu_version</td><td class="value">"v2.64.3"</td><td class="when">2 days ago</td><td class="act"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z"/></svg></td></tr>
+			<tr class="entry"><td colspan="4"><div class="entry-row"><span class="in name ph">add to production</span></div></td></tr>
+
+			<tr class="scope"><td colspan="4">example-central<span class="scope-edit" title="Edit as text"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.996.996 0 0 0-1.41 0l-1.83 1.83 3.75 3.75z"/></svg></span></td></tr>
+			<tr><td class="name">managed_by_ansible</td><td class="value">true</td><td class="when">2 days ago</td><td class="act"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z"/></svg></td></tr>
+			<tr><td class="name">public_hostname</td><td class="value">"central.example.org"</td><td class="when">2 days ago</td><td class="act"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z"/></svg></td></tr>
+			<tr><td class="name">tamanu_version</td><td class="value">"v2.65.0"<span class="over">production</span></td><td class="when">today</td><td class="act"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z"/></svg></td></tr>
+			<tr class="entry"><td colspan="4"><div class="entry-row"><span class="in name ph">add to example-central</span></div></td></tr>
+
+			<tr class="scope"><td colspan="4">example-facility-a<span class="scope-edit" title="Edit as text"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.996.996 0 0 0-1.41 0l-1.83 1.83 3.75 3.75z"/></svg></span></td></tr>
+			<tr><td class="name">managed_by_ansible</td><td class="value">true</td><td class="when">2 days ago</td><td class="act"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z"/></svg></td></tr>
+			<tr><td class="name">tamanu_facility_id</td><td class="value">"facility-example-a"</td><td class="when">2 days ago</td><td class="act"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z"/></svg></td></tr>
+			<tr class="entry"><td colspan="4"><div class="entry-row"><span class="in name ph">add to example-facility-a</span></div></td></tr>
+
+			<tr class="entry"><td colspan="4" style="padding-top: 16px"><div class="entry-row"><span class="in name select ph" style="padding-right: 28px">add a machine…</span></div></td></tr>
+		</table>
+	</div>
+</div>
+
+<div class="frame-label">B. Typing into an entry row</div>
+<p class="frame-note">Name autocompletes from the known variables; Tab moves to a value field shaped by the variable's type; Enter sets it and leaves focus in a fresh row of the same scope. Already-set names sink to the bottom of the list, greyed.</p>
+<div class="page">
+	<div class="paper">
+		<table class="vars" style="margin-top: 0">
+			<tr class="scope"><td colspan="4">example-facility-a</td></tr>
+			<tr><td class="name">managed_by_ansible</td><td class="value">true</td><td class="when">2 days ago</td><td class="act"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z"/></svg></td></tr>
+			<tr><td class="name">tamanu_facility_id</td><td class="value">"facility-example-a"</td><td class="when">2 days ago</td><td class="act"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6zM19 4h-3.5l-1-1h-5l-1 1H5v2h14z"/></svg></td></tr>
+			<tr class="entry"><td colspan="4" style="padding-bottom: 260px">
+				<div class="entry-row combo">
+					<span class="in name focus">tamanu_ca<span class="caret"></span></span>
+					<span class="in val ph">value</span>
+					<span class="lock-toggle"><svg viewBox="0 0 24 24"><path d="M12 17c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2m6-9h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6h1.9c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2m0 12H6V10h12z"/></svg></span>
+					<div class="popup">
+						<div class="opt hl"><span class="n"><b>tamanu_ca</b>ddy_tls</span><span class="t">bool · default true</span><span class="d">Whether the proxy serves HTTPS on the public hostname</span></div>
+						<div class="opt"><span class="n"><b>tamanu_ca</b>ddy_tls_dns_iam</span><span class="t"><svg viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2m-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2m3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1z"/></svg> object · machine</span><span class="d">Route 53 credentials, with access_key_id and secret_access_key</span></div>
+						<div class="opt"><span class="n"><b>tamanu_ca</b>ddy_extra_hostnames</span><span class="t">list of strings</span><span class="d">Additional hostnames that the proxy serves</span></div>
+						<div class="opt"><span class="n"><b>tamanu_ca</b>ddy_extra_hostnames_redirect</span><span class="t">bool · default true</span><span class="d">Whether additional hostnames redirect to the public hostname</span></div>
+						<div class="opt"><span class="n"><b>tamanu_ca</b>che_central_dns</span><span class="t">bool</span></div>
+					</div>
+				</div>
+			</td></tr>
+		</table>
+	</div>
+</div>
+
+<div class="frame-label">B2. Value shaped by the chosen variable</div>
+<div class="page">
+	<div class="paper">
+		<table class="vars" style="margin-top: 0">
+			<tr class="scope"><td colspan="4">example-facility-a</td></tr>
+			<tr class="entry"><td colspan="4">
+				<div class="entry-row">
+					<span class="in name">tamanu_caddy_tls</span>
+					<span class="in val focus">false<span class="caret"></span><span style="margin-left: auto" class="secondary">true · false</span></span>
+					<span class="lock-toggle"><svg viewBox="0 0 24 24"><path d="M12 17c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2m6-9h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6h1.9c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2m0 12H6V10h12z"/></svg></span>
+				</div>
+			</td></tr>
+			<tr class="entry"><td colspan="4">
+				<div class="entry-row">
+					<span class="in name">tamanu_caddy_tls_dns_iam</span>
+					<span class="in val error">{"access_key_id": "AKIA…"<span class="caret"></span></span>
+					<span class="lock-toggle on"><svg viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2m-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2m3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1z"/></svg></span>
+				</div>
+				<div class="err-text">Missing secret_access_key</div>
+			</td></tr>
+		</table>
+	</div>
+</div>
+
+<div class="frame-label">C. Alternative: edit a scope as text</div>
+<p class="frame-note">The pencil on a scope, or Ctrl+Shift+E while focus is anywhere in that scope, swaps its rows for an editor: one <span class="mono">name: value</span> per line, YAML values. Secrets read <span class="mono">!secret</span> and are left alone unless retyped. Ctrl+Enter saves the difference as sets and removes; Esc discards.</p>
+<div class="page">
+	<div class="paper">
+		<table class="vars" style="margin-top: 0">
+			<tr class="scope"><td colspan="4">production</td></tr>
+		</table>
+		<div class="editor">
+			<div class="line"><span class="gut">1</span><span class="code"><span class="k">elastic_agent_enabled</span>: <span class="b">true</span></span></div>
+			<div class="line"><span class="gut">2</span><span class="code"><span class="k">salt</span>: <span class="tag">!secret</span></span></div>
+			<div class="line"><span class="gut">3</span><span class="code"><span class="k">tamanu_central_canonical_url</span>: <span class="s">https://central.example.org</span></span></div>
+			<div class="line"><span class="gut">4</span><span class="code"><span class="k">tamanu_version</span>: <span class="s">v2.65.0</span></span></div>
+			<div class="line bad"><span class="gut">5</span><span class="code"><span class="k">tamanu_tailscale_tls</span>: <span class="squig">yes please</span></span></div>
+			<div class="line" style="position: relative"><span class="gut">6</span><span class="code"><span class="k">elastic_agent_</span><span class="caret" style="vertical-align: -3px"></span></span>
+				<div class="popup">
+					<div class="opt hl"><span class="n"><b>elastic_agent_</b>enrollment_token</span><span class="t"><svg viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2m-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2m3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1z"/></svg> string</span><span class="d">Enrolment token of the endpoint security agent</span></div>
+					<div class="opt"><span class="n"><b>elastic_agent_</b>fleet_url</span><span class="t">string · default production Fleet</span></div>
+					<div class="opt set"><span class="n"><b>elastic_agent_</b>enabled</span><span class="t">set on line 1</span></div>
+				</div>
+			</div>
+			<div class="line"><span class="gut">7</span><span class="code"> </span></div>
+			<div class="line"><span class="gut">8</span><span class="code"> </span></div>
+			<div class="line"><span class="gut">9</span><span class="code"> </span></div>
+		</div>
+		<div class="editor-foot">
+			<span style="color: var(--error)">Line 5: tamanu_tailscale_tls is a bool</span>
+			<span><span class="btn text small">Discard</span> <span class="btn contained small">Save 2 changes</span></span>
+		</div>
+	</div>
+</div>
+
+<div class="frame-label">D. While a run holds the environment</div>
+<div class="page">
+	<div class="paper">
+		<div class="head">
+			<h6>Ansible</h6>
+			<span class="env-select">production</span>
+		</div>
+		<div class="runs">
+			<span class="btn contained" style="opacity: .5">Run install</span>
+			<span class="btn outlined" style="opacity: .5">Run upgrade</span>
+			<span class="btn outlined" style="opacity: .5">Run…</span>
+		</div>
+		<div class="status">
+			<span class="dot"></span>
+			<span><b style="font-weight: 500">Sam</b> is running <span class="mono">tamanu-install.yml</span>, started 4 minutes ago</span>
+			<span class="chip warning">Maintenance</span>
+			<span class="btn text small">Take over</span>
+		</div>
+	</div>
+</div>
+
+</body>
+</html>

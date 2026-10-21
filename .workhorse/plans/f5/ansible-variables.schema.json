@@ -1,0 +1,714 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://raw.githubusercontent.com/beyondessential/infra/main/ansible/variables.schema.json",
+	"title": "Linux server Ansible variables",
+	"description": "The variables the Linux server playbooks read from an inventory. Variables not listed here are permitted. The x-canopy annotation tells Canopy how to hold a variable: secret (its value is a secret), scope (the scopes it may be set at: group, environment, machine; any where absent), applications (the application types it configures; any where absent), reserved (set by the inventory plugin, never stored), and spec (the requirement that defines it).",
+	"type": "object",
+	"properties": {
+		"alertd_app_db": {
+			"description": "The database the monitoring daemon's schema-aware checks connect to. Empty for none.",
+			"type": "string",
+			"default": "tamanu"
+		},
+		"alertd_cluster_db": {
+			"description": "The database the monitoring daemon's cluster checks connect to.",
+			"type": "string",
+			"default": "postgres"
+		},
+		"alertd_db_role": {
+			"description": "The read-only Postgres role the monitoring daemon connects as.",
+			"type": "string",
+			"default": "alertd"
+		},
+		"ansible_host": {
+			"description": "Address a run connects to, overriding the one Canopy holds for the machine.",
+			"type": "string",
+			"anyOf": [
+				{
+					"format": "hostname"
+				},
+				{
+					"format": "ipv4"
+				},
+				{
+					"format": "ipv6"
+				}
+			],
+			"x-canopy": {
+				"scope": [
+					"machine"
+				]
+			}
+		},
+		"ansible_port": {
+			"description": "SSH port a run connects to.",
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 65535,
+			"default": 22
+		},
+		"ansible_python_interpreter": {
+			"description": "Python interpreter on the host.",
+			"type": "string"
+		},
+		"ansible_timeout": {
+			"description": "Connection timeout, in seconds.",
+			"type": "integer",
+			"minimum": 1
+		},
+		"ansible_user": {
+			"description": "Account a run connects as.",
+			"type": "string"
+		},
+		"baseline_syslog_exclude_prefixes": {
+			"description": "Program tag prefixes whose messages are dropped from /var/log/syslog. They stay in the journal.",
+			"type": "array",
+			"items": {
+				"type": "string"
+			},
+			"default": [
+				"systemd-tamanu",
+				"systemd-msupply"
+			]
+		},
+		"baseline_syslog_excludes": {
+			"description": "Programs whose messages are dropped from /var/log/syslog, matched exactly. They stay in the journal.",
+			"type": "array",
+			"items": {
+				"type": "string"
+			},
+			"default": [
+				"caddy",
+				"bestool-alertd",
+				"aardvark-dns"
+			]
+		},
+		"bestool_version": {
+			"description": "Version of bestool, read by the Raspberry Pi role only.",
+			"type": "string",
+			"default": "1.7.1"
+		},
+		"caddy_canopy_certificates": {
+			"description": "Whether sites name the certificate endpoint.",
+			"type": "boolean",
+			"default": true,
+			"x-canopy": {
+				"spec": "LNXTLS#inventory-variables"
+			}
+		},
+		"caddy_email": {
+			"description": "ACME contact.",
+			"type": "string",
+			"format": "email",
+			"default": "tls-renewal@bes.au"
+		},
+		"caddy_version": {
+			"description": "The package version of the proxy. Selected by the playbooks by default.",
+			"type": "string",
+			"x-canopy": {
+				"spec": "LNXRUN#inventory-variables"
+			}
+		},
+		"caddy_zerossl_api_key": {
+			"description": "A ZeroSSL API key that adds ZeroSSL as an issuer.",
+			"type": "string",
+			"x-canopy": {
+				"secret": true,
+				"spec": "LNXTLS#inventory-variables"
+			}
+		},
+		"canopy_intent": {
+			"description": "The intent of the run, set by the inventory plugin.",
+			"type": "string",
+			"enum": [
+				"configure",
+				"upgrade"
+			],
+			"x-canopy": {
+				"reserved": true,
+				"spec": "LNXANS#inventory"
+			}
+		},
+		"dangerously_leave_ufw_alone": {
+			"description": "Whether an unmanaged host firewall is left as the server has it.",
+			"type": "boolean",
+			"default": false,
+			"x-canopy": {
+				"spec": "LNXSRV#inventory-variables"
+			}
+		},
+		"edit_version": {
+			"description": "Version of the edit tool.",
+			"type": "string",
+			"default": "1.2.0"
+		},
+		"elastic_agent_enabled": {
+			"description": "Whether the endpoint security agent runs.",
+			"type": "boolean",
+			"default": false,
+			"x-canopy": {
+				"spec": "LNXSRV#inventory-variables"
+			}
+		},
+		"elastic_agent_enrollment_token": {
+			"description": "The enrolment token of the endpoint security agent.",
+			"type": "string",
+			"x-canopy": {
+				"secret": true,
+				"spec": "LNXSRV#inventory-variables"
+			}
+		},
+		"elastic_agent_fleet_url": {
+			"description": "The URL of the Fleet that the endpoint security agent enrols in. Defaults to the production Fleet.",
+			"type": "string",
+			"format": "uri",
+			"x-canopy": {
+				"spec": "LNXSRV#inventory-variables"
+			}
+		},
+		"is_iti": {
+			"description": "Whether the host is a Tamanu Iti device.",
+			"type": "boolean",
+			"default": false,
+			"x-canopy": {
+				"scope": [
+					"machine"
+				]
+			}
+		},
+		"managed_by_ansible": {
+			"description": "Whether runs configure this machine. Machines without it are left out of the inventory.",
+			"type": "boolean",
+			"x-canopy": {
+				"scope": [
+					"machine"
+				],
+				"spec": "LNXANS#inventory"
+			}
+		},
+		"msupply_enabled": {
+			"description": "Whether the server runs mSupply.",
+			"type": "boolean",
+			"x-canopy": {
+				"spec": "LNXMSP#enablement"
+			}
+		},
+		"msupply_hostname": {
+			"description": "The hostname that the proxy serves mSupply on.",
+			"type": "string",
+			"format": "hostname",
+			"x-canopy": {
+				"scope": [
+					"machine"
+				],
+				"spec": "LNXMSP#enablement"
+			}
+		},
+		"msupply_tailscale_service": {
+			"description": "The Tailscale service that the server advertises for mSupply. The svc: prefix may be omitted.",
+			"type": "string",
+			"pattern": "^(svc:)?[a-z0-9][a-z0-9-]*$",
+			"x-canopy": {
+				"scope": [
+					"machine"
+				],
+				"spec": "LNXMSP#enablement"
+			}
+		},
+		"msupply_version_amd64": {
+			"description": "The image tag of mSupply on an amd64 host. Selected by the playbooks by default.",
+			"type": "string",
+			"x-canopy": {
+				"spec": "LNXMSP#enablement"
+			}
+		},
+		"msupply_version_arm64": {
+			"description": "The image tag of mSupply on an arm64 host. Selected by the playbooks by default.",
+			"type": "string",
+			"x-canopy": {
+				"spec": "LNXMSP#enablement"
+			}
+		},
+		"munin_enabled": {
+			"description": "Whether the Munin node runs.",
+			"type": "boolean",
+			"default": true,
+			"x-canopy": {
+				"spec": "LNXSRV#inventory-variables"
+			}
+		},
+		"munin_tailscale_port": {
+			"description": "Port of the Munin graphs site.",
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 65535,
+			"default": 4950
+		},
+		"patient_portal_fqdn": {
+			"description": "The patient portal hostname of a central server.",
+			"type": "string",
+			"format": "hostname",
+			"x-canopy": {
+				"applications": [
+					"tamanu-central"
+				],
+				"spec": "LNXANS#inventory-variables"
+			}
+		},
+		"podman_ipv6_enabled": {
+			"description": "Whether the IPv6 subnet is added to the default Podman network. Follows the host's default IPv6 route by default.",
+			"type": "boolean"
+		},
+		"podman_network_subnets_v4": {
+			"description": "IPv4 subnets of the default Podman network, each with its gateway.",
+			"type": "array",
+			"items": {
+				"type": "object",
+				"required": [
+					"subnet",
+					"gateway"
+				],
+				"additionalProperties": false,
+				"properties": {
+					"subnet": {
+						"type": "string"
+					},
+					"gateway": {
+						"type": "string"
+					}
+				}
+			},
+			"default": [
+				{
+					"subnet": "10.100.0.1/16",
+					"gateway": "10.100.0.1"
+				}
+			],
+			"x-canopy": {
+				"spec": "LNXRUN#inventory-variables"
+			}
+		},
+		"podman_network_subnets_v6": {
+			"description": "IPv6 subnets of the default Podman network, each with its gateway.",
+			"type": "array",
+			"items": {
+				"type": "object",
+				"required": [
+					"subnet",
+					"gateway"
+				],
+				"additionalProperties": false,
+				"properties": {
+					"subnet": {
+						"type": "string"
+					},
+					"gateway": {
+						"type": "string"
+					}
+				}
+			},
+			"default": [
+				{
+					"subnet": "fd62:6573:b558:f686::1/64",
+					"gateway": "fd62:6573:b558:f686::1"
+				}
+			],
+			"x-canopy": {
+				"spec": "LNXRUN#inventory-variables"
+			}
+		},
+		"postgresql_btrfs_quota_percent": {
+			"description": "The percentage of the filesystem at which the @postgres subvolume is capped.",
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 100,
+			"x-canopy": {
+				"spec": "LNXDB#inventory-variables"
+			}
+		},
+		"postgresql_cleanup_old_cluster": {
+			"description": "Whether the data of the old cluster is removed after an upgrade.",
+			"type": "boolean",
+			"default": false,
+			"x-canopy": {
+				"spec": "LNXDB#inventory-variables"
+			}
+		},
+		"postgresql_tune_enabled": {
+			"description": "Whether the cluster is tuned.",
+			"type": "boolean",
+			"default": true,
+			"x-canopy": {
+				"spec": "LNXDB#inventory-variables"
+			}
+		},
+		"postgresql_tune_max_connections": {
+			"description": "The value of max_connections.",
+			"type": "integer",
+			"minimum": 1,
+			"default": 100,
+			"x-canopy": {
+				"spec": "LNXDB#inventory-variables"
+			}
+		},
+		"postgresql_tune_temp_file_limit": {
+			"description": "A value of temp_file_limit, such as 10GB, that replaces the derived limit. Empty derives it.",
+			"type": "string",
+			"pattern": "^([0-9]+ ?(kB|MB|GB|TB))?$",
+			"default": "",
+			"x-canopy": {
+				"spec": "LNXDB#inventory-variables"
+			}
+		},
+		"postgresql_tune_temp_file_limit_percent": {
+			"description": "The percentage of the temporary-file basis that the derived temp_file_limit is.",
+			"type": "integer",
+			"minimum": 1,
+			"maximum": 100,
+			"default": 25,
+			"x-canopy": {
+				"spec": "LNXDB#inventory-variables"
+			}
+		},
+		"postgresql_upgrade_detect_only": {
+			"description": "Detect a needed major upgrade without performing it.",
+			"type": "boolean",
+			"default": false
+		},
+		"postgresql_upgrade_enabled": {
+			"description": "Whether major version upgrades are enabled.",
+			"type": "boolean",
+			"default": false,
+			"x-canopy": {
+				"spec": "LNXDB#inventory-variables"
+			}
+		},
+		"postgresql_version": {
+			"description": "The major version of the cluster.",
+			"type": "string",
+			"pattern": "^[0-9]+$",
+			"default": "18",
+			"x-canopy": {
+				"spec": "LNXDB#inventory-variables"
+			}
+		},
+		"public_hostname": {
+			"description": "The primary hostname of the server.",
+			"type": "string",
+			"format": "hostname",
+			"x-canopy": {
+				"scope": [
+					"machine"
+				],
+				"spec": "LNXANS#inventory-variables"
+			}
+		},
+		"salt": {
+			"description": "The credential seed.",
+			"type": "string",
+			"x-canopy": {
+				"secret": true,
+				"spec": "LNXANS#inventory-variables"
+			}
+		},
+		"starship_version": {
+			"description": "Version of the starship prompt.",
+			"type": "string",
+			"default": "1.24.1"
+		},
+		"tailnet": {
+			"description": "The tailnet name used to form Tailscale hostnames.",
+			"type": "string",
+			"default": "tail53aef",
+			"x-canopy": {
+				"spec": "LNXRUN#inventory-variables"
+			}
+		},
+		"tailscale_name": {
+			"description": "Hostname on the tailnet. Without it the tailscale role does not run. A name containing prod marks a production server.",
+			"type": "string",
+			"format": "hostname",
+			"x-canopy": {
+				"scope": [
+					"machine"
+				]
+			}
+		},
+		"tailscale_tags": {
+			"description": "Tags the server advertises, comma-separated. With tailscale_name, writes the ts-up helper.",
+			"type": "string",
+			"pattern": "^tag:[a-z0-9-]+(,tag:[a-z0-9-]+)*$",
+			"x-canopy": {
+				"scope": [
+					"machine"
+				]
+			}
+		},
+		"tamanu_allow_downgrade": {
+			"description": "Permits a version lower than the deployed version.",
+			"type": "boolean",
+			"default": false,
+			"x-canopy": {
+				"applications": [
+					"tamanu-central",
+					"tamanu-facility"
+				],
+				"spec": "LNXANS#inventory-variables"
+			}
+		},
+		"tamanu_caddy_extra_hostnames": {
+			"description": "Additional hostnames that the proxy serves.",
+			"type": "array",
+			"items": {
+				"type": "string",
+				"format": "hostname"
+			},
+			"default": [],
+			"x-canopy": {
+				"applications": [
+					"tamanu-central",
+					"tamanu-facility"
+				],
+				"spec": "LNXRUN#inventory-variables"
+			}
+		},
+		"tamanu_caddy_extra_hostnames_redirect": {
+			"description": "Whether additional hostnames redirect to the public hostname.",
+			"type": "boolean",
+			"default": true,
+			"x-canopy": {
+				"applications": [
+					"tamanu-central",
+					"tamanu-facility"
+				],
+				"spec": "LNXRUN#inventory-variables"
+			}
+		},
+		"tamanu_caddy_tls": {
+			"description": "Whether the proxy serves HTTPS on the public hostname.",
+			"type": "boolean",
+			"default": true,
+			"x-canopy": {
+				"applications": [
+					"tamanu-central",
+					"tamanu-facility"
+				],
+				"spec": "LNXRUN#inventory-variables"
+			}
+		},
+		"tamanu_caddy_tls_dns_iam": {
+			"description": "The Route 53 credentials of a server.",
+			"type": "object",
+			"required": [
+				"access_key_id",
+				"secret_access_key"
+			],
+			"additionalProperties": false,
+			"properties": {
+				"access_key_id": {
+					"type": "string",
+					"pattern": "^AKIA[A-Z0-9]{16}$"
+				},
+				"secret_access_key": {
+					"type": "string",
+					"minLength": 40,
+					"maxLength": 40
+				}
+			},
+			"x-canopy": {
+				"secret": true,
+				"scope": [
+					"machine"
+				],
+				"spec": "LNXTLS#inventory-variables"
+			}
+		},
+		"tamanu_central_canonical_url": {
+			"description": "The URL that facility servers synchronise against.",
+			"type": "string",
+			"format": "uri",
+			"x-canopy": {
+				"applications": [
+					"tamanu-central",
+					"tamanu-facility"
+				],
+				"spec": "LNXANS#inventory-variables"
+			}
+		},
+		"tamanu_central_ip": {
+			"description": "An address for the central hostname on a facility server, or false for none.",
+			"anyOf": [
+				{
+					"type": "string",
+					"anyOf": [
+						{
+							"format": "ipv4"
+						},
+						{
+							"format": "ipv6"
+						}
+					]
+				},
+				{
+					"const": false
+				}
+			],
+			"default": false,
+			"x-canopy": {
+				"applications": [
+					"tamanu-facility"
+				],
+				"spec": "LNXANS#central-server-address"
+			}
+		},
+		"tamanu_clone": {
+			"description": "Whether the deployment is a clone, set by the inventory plugin from the rank.",
+			"type": "boolean",
+			"default": false,
+			"x-canopy": {
+				"reserved": true,
+				"spec": "LNXANS#inventory"
+			}
+		},
+		"tamanu_country_alpha2": {
+			"description": "Central localisation: ISO 3166-1 alpha-2 country code.",
+			"type": "string",
+			"pattern": "^[A-Z]{2}$",
+			"default": "UT",
+			"x-canopy": {
+				"applications": [
+					"tamanu-central"
+				]
+			}
+		},
+		"tamanu_country_alpha3": {
+			"description": "Central localisation: ISO 3166-1 alpha-3 country code.",
+			"type": "string",
+			"pattern": "^[A-Z]{3}$",
+			"default": "UTO",
+			"x-canopy": {
+				"applications": [
+					"tamanu-central"
+				]
+			}
+		},
+		"tamanu_country_name": {
+			"description": "Central localisation: country name.",
+			"type": "string",
+			"default": "Utopia",
+			"x-canopy": {
+				"applications": [
+					"tamanu-central"
+				]
+			}
+		},
+		"tamanu_default_department": {
+			"description": "Facility survey default department code.",
+			"type": "string",
+			"default": "GenericClinic",
+			"x-canopy": {
+				"applications": [
+					"tamanu-facility"
+				]
+			}
+		},
+		"tamanu_default_location": {
+			"description": "Facility survey default location code.",
+			"type": "string",
+			"default": "GenericClinic",
+			"x-canopy": {
+				"applications": [
+					"tamanu-facility"
+				]
+			}
+		},
+		"tamanu_extra_certs": {
+			"description": "Whether Tamanu containers trust the host certificate store.",
+			"type": "boolean",
+			"default": false,
+			"x-canopy": {
+				"applications": [
+					"tamanu-central",
+					"tamanu-facility"
+				],
+				"spec": "LNXRUN#inventory-variables"
+			}
+		},
+		"tamanu_facility_id": {
+			"description": "The facility identifier of a facility server.",
+			"type": "string",
+			"x-canopy": {
+				"scope": [
+					"machine"
+				],
+				"applications": [
+					"tamanu-facility"
+				],
+				"spec": "LNXANS#inventory-variables"
+			}
+		},
+		"tamanu_frontend_version": {
+			"description": "The image tag of the frontend. Defaults to tamanu_version.",
+			"type": "string",
+			"x-canopy": {
+				"applications": [
+					"tamanu-central",
+					"tamanu-facility"
+				],
+				"spec": "LNXANS#inventory-variables"
+			}
+		},
+		"tamanu_ipv6": {
+			"description": "Whether Tamanu containers have IPv6.",
+			"type": "boolean",
+			"default": true,
+			"x-canopy": {
+				"applications": [
+					"tamanu-central",
+					"tamanu-facility"
+				],
+				"spec": "LNXRUN#inventory-variables"
+			}
+		},
+		"tamanu_tailscale_tls": {
+			"description": "Whether the proxy serves HTTPS on the Tailscale hostname.",
+			"type": "boolean",
+			"default": true,
+			"x-canopy": {
+				"applications": [
+					"tamanu-central",
+					"tamanu-facility"
+				],
+				"spec": "LNXRUN#inventory-variables"
+			}
+		},
+		"tamanu_version": {
+			"description": "The image tag of the backend and patient portal.",
+			"type": "string",
+			"x-canopy": {
+				"applications": [
+					"tamanu-central",
+					"tamanu-facility"
+				],
+				"spec": "LNXANS#inventory-variables"
+			}
+		},
+		"timezone": {
+			"description": "The time zone of the host and of Tamanu.",
+			"type": "string",
+			"pattern": "^[A-Za-z_]+(/[A-Za-z0-9_+-]+)*$",
+			"x-canopy": {
+				"spec": "LNXANS#inventory-variables"
+			}
+		},
+		"ufw_managed": {
+			"description": "Whether the host firewall is managed.",
+			"type": "boolean",
+			"default": false,
+			"x-canopy": {
+				"spec": "LNXSRV#inventory-variables"
+			}
+		}
+	},
+	"additionalProperties": true
+}

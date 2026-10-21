@@ -64,7 +64,7 @@ A choice that leaves any of the incident's failing checks contributing is marked
 So an operator reading a backup failure on a group's headline environment learns from the dialog that only the group quiets it, since a window over that environment leaves the group's own checks watched.
 Coverage is reckoned against failures alone, because an incident whose failures have all left closes whatever warnings remain in it (see [INC](incidents.md), "Membership").
 
-The declaration an upgrade plan offers, and the one a configuration run asks for before taking its lease, stay over the target they were offered for and cannot be retargeted: each declares the work on one environment, which the plan stays open for and the lease is served against (see [UPG](../private-server/upgrade-plans.md) and [INV](../private-server/ansible.md), "Work under way").
+The declaration an upgrade plan offers, and the one a run's start makes, stay over the environment they declare and cannot be retargeted: the plan stays open for that environment and the lease is served against it (see [UPG](../private-server/upgrade-plans.md) and [INV](../private-server/ansible.md), "Work under way").
 
 ## Moving a window
 

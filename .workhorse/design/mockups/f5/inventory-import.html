@@ -134,57 +134,26 @@ textarea {
 
 <div class="frame-label">Environment with no variables</div>
 <div class="page">
-	<h6>Ansible</h6>
 	<div class="paper">
-		<span class="overline">production</span>
-		<div class="stack">
-			<div>
-				<div class="row">
-					<span class="body2 secondary">Run</span>
-					<span class="icon-btn"><svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2m0 16H8V7h11z"/></svg></span>
-				</div>
-				<pre class="cmd">CANOPY_URL=https://canopy.example.ts.net CANOPY_GROUP=example CANOPY_RANK=production ansible-playbook -i inventory/canopy.yml &lt;playbook&gt;</pre>
-				<div style="margin-top: 8px">
-					<span class="btn outlined"><svg viewBox="0 0 24 24"><path d="M22.61 18.99 13.54 9.92c.93-2.34.45-5.1-1.44-7C9.79.61 6.21.4 3.66 2.26L7.5 6.11 6.08 7.52 2.25 3.69C.39 6.23.6 9.82 2.91 12.12c1.86 1.86 4.57 2.35 6.89 1.48l9.11 9.11c.39.39 1.02.39 1.41 0l2.3-2.3c.4-.38.4-1.01-.01-1.42"/></svg>Declare the work</span>
-					<div class="caption">Declare it before running, and no one else can take the lease until you lift it.</div>
-				</div>
-			</div>
-
-			<div>
-				<p class="body2 secondary gutter">Group and environment variables, carried by every machine below</p>
-				<p class="body2 secondary" style="margin: 0">None set</p>
-				<div class="import">
-					<span class="btn outlined"><svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8zm4 18H6V4h7v5h5zM8 15.01l1.41 1.41L11 14.84V19h2v-4.16l1.59 1.59L16 15.01 12.01 11z"/></svg>Import inventory file</span>
-				</div>
-			</div>
-
-			<div>
-				<div class="subtitle2">example-central</div>
-				<p class="body2 secondary" style="margin: 0">Sets nothing of its own</p>
-			</div>
-			<div>
-				<div class="subtitle2">example-facility-a</div>
-				<p class="body2 secondary" style="margin: 0">Sets nothing of its own</p>
-			</div>
-			<div>
-				<div class="subtitle2">example-facility-b</div>
-				<p class="body2 secondary" style="margin: 0">Sets nothing of its own</p>
-			</div>
-			<div>
-				<div class="subtitle2">example-site-office</div>
-				<p class="body2 secondary" style="margin: 0">Sets nothing of its own</p>
-			</div>
-
-			<div>
-				<p class="body2 secondary gutter">Set a variable</p>
-				<div class="row">
-					<span class="field select"><label>Scope</label>This environment</span>
-					<span class="field"><label>Name</label>&nbsp;</span>
-					<span class="field"><label>Value</label>&nbsp;</span>
-					<span class="checkbox"><span class="box"></span>Secret</span>
-					<span class="btn outlined" style="padding: 5px 15px; font-size: 0.875rem">Set</span>
-				</div>
-			</div>
+		<div class="row" style="gap: 16px; margin-bottom: 12px">
+			<h6 style="margin: 0">Ansible</h6>
+			<span class="field dense select" style="min-width: 0">production</span>
+		</div>
+		<div class="row">
+			<span class="btn contained">Run install</span>
+			<span class="btn outlined" style="padding: 5px 15px; font-size: 0.875rem">Run upgrade</span>
+			<span class="btn outlined" style="padding: 5px 15px; font-size: 0.875rem">Run…</span>
+		</div>
+		<table style="margin-top: 16px">
+			<tbody>
+				<tr class="machine-head"><td colspan="2">example <span class="secondary" style="font-weight: 400">all environments</span></td></tr>
+				<tr><td class="mono" style="width: 34%">timezone</td><td class="mono">"Pacific/Auckland"</td></tr>
+				<tr class="machine-head"><td colspan="2">production</td></tr>
+			</tbody>
+		</table>
+		<div class="row" style="margin-top: 6px">
+			<span class="field dense placeholder mono" style="width: 34%">add to production</span>
+			<span class="btn outlined"><svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8zm4 18H6V4h7v5h5zM8 15.01l1.41 1.41L11 14.84V19h2v-4.16l1.59 1.59L16 15.01 12.01 11z"/></svg>Import inventory file</span>
 		</div>
 	</div>
 </div>
