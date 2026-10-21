@@ -131,8 +131,8 @@ async fn a_row_sits_at_exactly_one_scope() {
 
 		for values in [
 			format!("'{group}', 'production', '{machine}'"),
-			format!("NULL, 'production', NULL"),
-			format!("NULL, NULL, NULL"),
+			"NULL, 'production', NULL".to_string(),
+			"NULL, NULL, NULL".to_string(),
 		] {
 			let bad = conn
 				.batch_execute(&format!(

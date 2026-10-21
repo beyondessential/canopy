@@ -435,15 +435,15 @@ pub fn parse(text: &str) -> Result<InventoryFile, ParseError> {
 				entry.vars.insert(key.clone(), value.clone());
 			}
 		}
-		if let Some(hosts) = map.get("hosts") {
-			if let Some(hosts) = object(hosts, &format!("`hosts` of {here}"))? {
-				for (key, value) in hosts {
-					let vars = object(value, &format!("host {key:?} of {here}"))?;
-					entry.hosts.push(key.clone());
-					let own = host_vars.entry(key.clone()).or_default();
-					for (name, value) in vars.into_iter().flatten() {
-						own.insert(name.clone(), value.clone());
-					}
+		if let Some(hosts) = map.get("hosts")
+			&& let Some(hosts) = object(hosts, &format!("`hosts` of {here}"))?
+		{
+			for (key, value) in hosts {
+				let vars = object(value, &format!("host {key:?} of {here}"))?;
+				entry.hosts.push(key.clone());
+				let own = host_vars.entry(key.clone()).or_default();
+				for (name, value) in vars.into_iter().flatten() {
+					own.insert(name.clone(), value.clone());
 				}
 			}
 		}
@@ -608,7 +608,7 @@ mod tests {
     c: 'yes'
     d: 0644
     e: 1_000
-    f: 3.14
+    f: 2.5
     g: 1e3
     h: 1:30
     i: null
@@ -628,7 +628,7 @@ mod tests {
 		assert_eq!(vars["c"], json!("yes"), "quoted is a string");
 		assert_eq!(vars["d"], json!(420), "a leading zero is octal");
 		assert_eq!(vars["e"], json!(1000));
-		assert_eq!(vars["f"], json!(3.14));
+		assert_eq!(vars["f"], json!(2.5));
 		assert_eq!(vars["g"], json!("1e3"), "no dot, so it is a string");
 		assert_eq!(vars["h"], json!(90), "sexagesimal");
 		assert_eq!(vars["i"], Value::Null);
