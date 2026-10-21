@@ -41,7 +41,7 @@ pub const RECOVERY_ESCROW_REF: &str = "recovery-escrow";
 
 pub const RECOVERY_ESCROW_DOC: &str = "## Description
 
-Canopy holds the only copy of every backup repository passphrase and every secret inventory variable, and escrows them to the recovery vault so they can be recovered without Canopy. This alert means the latest escrow is not a whole copy: it either could not be written, or was written with values Canopy could not read left out.
+Canopy holds the only copy of every backup repository passphrase and every secret Ansible variable, and escrows them to the recovery vault so they can be recovered without Canopy. This alert means the latest escrow is not a whole copy: it either could not be written, or was written with values Canopy could not read left out.
 
 A partial escrow is still written, so everything Canopy could read stays current, and the escrow names what it left out. Earlier versions of the vault object still hold what a later one left out, but only until their object-lock retention expires. A value that stays unreadable will eventually have no escrowed copy at all.
 

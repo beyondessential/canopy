@@ -1,8 +1,8 @@
 //! Setting and listing the variables that configure an environment.
 //!
 //! A secret's value goes to canopy's secret store and is served back only as
-//! part of an inventory (see [`super::inventory`]). Nothing here returns one.
-// spec: INV#inventory-variables
+//! part of what an environment serves (see [`super::ansible`]). Nothing here returns one.
+// spec: ANSVAR#variables
 
 use algae_cli::passphrases::SecretString;
 use axum::{Json, extract::State};
@@ -16,8 +16,8 @@ use commons_servers::{
 };
 use commons_types::{Uuid, server::rank::ServerRank};
 use database::{
+	ansible_variables::{AnsibleVariable, VariableScope},
 	audit::{Action, Pending, Record, RecordKind},
-	inventory_variables::{InventoryVariable, VariableScope},
 	machines::Machine,
 	server_groups::ServerGroup,
 };
@@ -30,8 +30,8 @@ use crate::state::AppState;
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(read_only, silent: for_group))
-		.routes(routes!(write, audit(InventoryVariableSet): set))
-		.routes(routes!(write, audit(InventoryVariableRemoved): remove))
+		.routes(routes!(write, audit(AnsibleVariableSet): set))
+		.routes(routes!(write, audit(AnsibleVariableRemoved): remove))
 }
 
 /// Which scope a request addresses: a group, one of its environments, or one
@@ -76,7 +76,7 @@ pub struct SetArgs {
 	#[schema(value_type = serde_json::Value)]
 	pub value: Value,
 	/// Whether the value is a secret, held in the secret store and served only
-	/// as part of an inventory.
+	/// as part of what an environment serves.
 	#[serde(default)]
 	pub secret: bool,
 }
@@ -101,16 +101,16 @@ pub struct VariablesForGroupArgs {
 /// machines in it.
 ///
 /// A secret's value is not among them; it is served only as part of an
-/// inventory, and only to an administrator.
+/// what an environment serves, and only to an administrator.
 #[utoipa::path(
 	post,
 	path = "/for_group",
-	operation_id = "inventory_variables_for_group",
-	tag = "inventory",
+	operation_id = "ansible_variables_for_group",
+	tag = "ansible",
 	security(("tailscale-user" = [])),
 	request_body = VariablesForGroupArgs,
 	responses(
-		(status = 200, body = Vec<InventoryVariable>),
+		(status = 200, body = Vec<AnsibleVariable>),
 		(status = 404, description = "No such server group", body = ProblemDetailsSchema),
 	),
 )]
@@ -118,11 +118,11 @@ pub async fn for_group(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
 	Json(args): Json<VariablesForGroupArgs>,
-) -> Result<Json<Vec<InventoryVariable>>> {
+) -> Result<Json<Vec<AnsibleVariable>>> {
 	let mut conn = state.db.get().await?;
 	ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
 	Ok(Json(
-		InventoryVariable::list_under_group(&mut conn, args.server_group_id).await?,
+		AnsibleVariable::list_under_group(&mut conn, args.server_group_id).await?,
 	))
 }
 
@@ -158,12 +158,12 @@ async fn variable_records(
 #[utoipa::path(
 	post,
 	path = "/set",
-	operation_id = "inventory_variables_set",
-	tag = "inventory",
+	operation_id = "ansible_variables_set",
+	tag = "ansible",
 	security(("tailscale-admin" = [])),
 	request_body = SetArgs,
 	responses(
-		(status = 200, body = InventoryVariable),
+		(status = 200, body = AnsibleVariable),
 		(status = 400, description = "Not one scope, not a usable variable name, or an `ansible_host` outside machine scope or not a string", body = ProblemDetailsSchema),
 		(status = 404, description = "No such server group or machine", body = ProblemDetailsSchema),
 		(status = 502, description = "The secret store is unavailable", body = ProblemDetailsSchema),
@@ -174,7 +174,7 @@ pub async fn set(
 	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<SetArgs>,
-) -> Result<Json<InventoryVariable>> {
+) -> Result<Json<AnsibleVariable>> {
 	let scope = VariableScope::try_from(args.scope)?;
 	check_name(&args.name)?;
 	check_ansible_host(scope, &args.name, &args.value)?;
@@ -182,7 +182,7 @@ pub async fn set(
 	let mut conn = audit.begin().await?;
 	check_scope(&mut conn, scope).await?;
 	let (variable, scope_record, rank) = variable_records(&mut conn, scope, &args.name).await?;
-	let action = |secret| Action::InventoryVariableSet {
+	let action = |secret| Action::AnsibleVariableSet {
 		variable: variable.clone(),
 		scope: scope_record.clone(),
 		rank,
@@ -201,15 +201,15 @@ pub async fn set(
 			return Err(audit.effect_failed(&pending, failed).await);
 		}
 
-		let set = InventoryVariable::set(&mut conn, scope, &args.name, None, Some(&admin.0.login))
-			.await?;
+		let set =
+			AnsibleVariable::set(&mut conn, scope, &args.name, None, Some(&admin.0.login)).await?;
 		conn.settle_done(&pending, None).await?;
 		set
 	} else {
-		let was_secret = InventoryVariable::at(&mut conn, scope, &args.name)
+		let was_secret = AnsibleVariable::at(&mut conn, scope, &args.name)
 			.await?
 			.is_some_and(|prior| prior.is_secret);
-		let set = InventoryVariable::set(
+		let set = AnsibleVariable::set(
 			&mut conn,
 			scope,
 			&args.name,
@@ -234,7 +234,7 @@ pub async fn set(
 		scope = ?scope,
 		name = %args.name,
 		secret = args.secret,
-		"inventory variable set"
+		"ansible variable set"
 	);
 	Ok(Json(set))
 }
@@ -246,8 +246,8 @@ pub async fn set(
 #[utoipa::path(
 	post,
 	path = "/remove",
-	operation_id = "inventory_variables_remove",
-	tag = "inventory",
+	operation_id = "ansible_variables_remove",
+	tag = "ansible",
 	security(("tailscale-admin" = [])),
 	request_body = RemoveArgs,
 	responses(
@@ -266,14 +266,14 @@ pub async fn remove(
 	let scope = VariableScope::try_from(args.scope)?;
 	let mut conn = audit.begin().await?;
 
-	let Some(removed) = InventoryVariable::remove(&mut conn, scope, &args.name).await? else {
+	let Some(removed) = AnsibleVariable::remove(&mut conn, scope, &args.name).await? else {
 		return Err(AppError::NotFound(format!(
 			"no variable {:?} in that scope",
 			args.name
 		)));
 	};
 	let (variable, scope_record, rank) = variable_records(&mut conn, scope, &args.name).await?;
-	let action = Action::InventoryVariableRemoved {
+	let action = Action::AnsibleVariableRemoved {
 		variable,
 		scope: scope_record,
 		rank,
@@ -295,7 +295,7 @@ pub async fn remove(
 		scope = ?scope,
 		name = %args.name,
 		secret = removed.is_secret,
-		"inventory variable removed"
+		"ansible variable removed"
 	);
 	Ok(Json(()))
 }
@@ -364,7 +364,7 @@ fn check_name(name: &str) -> Result<()> {
 /// connects to, which is read as a string, so a value of any other shape would
 /// leave the machine on the address it was overriding.
 fn check_ansible_host(scope: VariableScope, name: &str, value: &Value) -> Result<()> {
-	if name != super::inventory::ANSIBLE_HOST {
+	if name != super::ansible::ANSIBLE_HOST {
 		return Ok(());
 	}
 	if !matches!(scope, VariableScope::Machine { .. }) {

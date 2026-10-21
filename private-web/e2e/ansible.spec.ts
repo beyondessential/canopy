@@ -6,11 +6,11 @@ import {
 	seedServerGroup,
 } from "./seed";
 
-// The inventory a configuration run would receive, presented on the group
+// What a configuration run would be served, presented on the group
 // page: one environment at a time, the variables set at each scope, and
 // whether a run could take the environment's lease.
-// spec: INV#presentation
-test.describe("group inventory", () => {
+// spec: ANSRUN#presentation
+test.describe("group Ansible", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
 	});
@@ -39,27 +39,27 @@ test.describe("group inventory", () => {
 
 		await page.goto(`/fleet/groups/${group.id}`);
 
-		const inventory = page.getByTestId("group-inventory");
-		const production = inventory.getByTestId("environment-production");
+		const ansible = page.getByTestId("group-ansible");
+		const production = ansible.getByTestId("environment-production");
 		await expect(production).toBeVisible();
-		await expect(inventory.getByTestId("environment-demo")).toHaveCount(0);
+		await expect(ansible.getByTestId("environment-demo")).toHaveCount(0);
 
 		// Each environment carries only the machines its own applications run
 		// on, though both sit in the same group.
-		await expect(production.getByTestId("inventory-machine")).toHaveCount(1);
+		await expect(production.getByTestId("ansible-machine")).toHaveCount(1);
 		await expect(
 			production.getByText("kamaka-prod-central", { exact: true }),
 		).toBeVisible();
 
-		await inventory.getByLabel("Environment").click();
+		await ansible.getByLabel("Environment").click();
 		await page.getByRole("option", { name: "demo" }).click();
 
-		const demo = inventory.getByTestId("environment-demo");
-		await expect(demo.getByTestId("inventory-machine")).toHaveCount(1);
+		const demo = ansible.getByTestId("environment-demo");
+		await expect(demo.getByTestId("ansible-machine")).toHaveCount(1);
 		await expect(
 			demo.getByText("kamaka-demo-central", { exact: true }),
 		).toBeVisible();
-		await expect(inventory.getByTestId("environment-production")).toHaveCount(0);
+		await expect(ansible.getByTestId("environment-production")).toHaveCount(0);
 
 		// The line a run is started with follows the selection.
 		await expect(demo.getByTestId("run-command")).toContainText(
@@ -82,9 +82,9 @@ test.describe("group inventory", () => {
 
 		await page.goto(`/fleet/groups/${group.id}`);
 
-		const inventory = page.getByTestId("group-inventory");
-		await expect(inventory.getByTestId("environment-production")).toBeVisible();
-		await expect(inventory.getByLabel("Environment")).toHaveCount(0);
+		const ansible = page.getByTestId("group-ansible");
+		await expect(ansible.getByTestId("environment-production")).toBeVisible();
+		await expect(ansible.getByLabel("Environment")).toHaveCount(0);
 	});
 
 	test("says there is nothing to configure with no live applications", async ({
@@ -95,9 +95,9 @@ test.describe("group inventory", () => {
 
 		await page.goto(`/fleet/groups/${group.id}`);
 
-		const inventory = page.getByTestId("group-inventory");
-		await expect(inventory).toContainText("no environment to configure");
-		await expect(inventory.getByLabel("Environment")).toHaveCount(0);
+		const ansible = page.getByTestId("group-ansible");
+		await expect(ansible).toContainText("no environment to configure");
+		await expect(ansible.getByLabel("Environment")).toHaveCount(0);
 	});
 
 	// A pending application is in no environment, so a group with nothing
@@ -118,9 +118,9 @@ test.describe("group inventory", () => {
 
 		await page.goto(`/fleet/groups/${group.id}`);
 
-		const inventory = page.getByTestId("group-inventory");
-		await expect(inventory).toContainText("no environment to configure");
-		await expect(inventory.getByLabel("Environment")).toHaveCount(0);
+		const ansible = page.getByTestId("group-ansible");
+		await expect(ansible).toContainText("no environment to configure");
+		await expect(ansible.getByLabel("Environment")).toHaveCount(0);
 	});
 
 	test("sets a variable on the environment the selector names", async ({
@@ -144,12 +144,12 @@ test.describe("group inventory", () => {
 		});
 
 		await page.goto(`/fleet/groups/${group.id}`);
-		const inventory = page.getByTestId("group-inventory");
+		const ansible = page.getByTestId("group-ansible");
 
-		await inventory.getByLabel("Environment").click();
+		await ansible.getByLabel("Environment").click();
 		await page.getByRole("option", { name: "demo" }).click();
 
-		const demo = inventory.getByTestId("environment-demo");
+		const demo = ansible.getByTestId("environment-demo");
 		const form = demo.getByTestId("set-variable");
 		await form.getByLabel("Name").fill("log_level");
 		await form.getByLabel("Value").fill("trace");
@@ -158,9 +158,9 @@ test.describe("group inventory", () => {
 
 		// The variable is the demo environment's, so production does not carry
 		// it, and the machine offered as a scope is the selected environment's.
-		await inventory.getByLabel("Environment").click();
+		await ansible.getByLabel("Environment").click();
 		await page.getByRole("option", { name: "production" }).click();
-		const production = inventory.getByTestId("environment-production");
+		const production = ansible.getByTestId("environment-production");
 		await expect(production.getByTestId("var")).toHaveCount(0);
 
 		await production.getByTestId("set-variable").getByLabel("Scope").click();
@@ -187,7 +187,7 @@ test.describe("group inventory", () => {
 
 		await page.goto(`/fleet/groups/${group.id}`);
 		const production = page
-			.getByTestId("group-inventory")
+			.getByTestId("group-ansible")
 			.getByTestId("environment-production");
 
 		const form = production.getByTestId("set-variable");
@@ -227,7 +227,7 @@ test.describe("group inventory", () => {
 
 		await page.goto(`/fleet/groups/${group.id}`);
 		const production = page
-			.getByTestId("group-inventory")
+			.getByTestId("group-ansible")
 			.getByTestId("environment-production");
 
 		const form = production.getByTestId("set-variable");
@@ -265,7 +265,7 @@ test.describe("group inventory", () => {
 
 		await page.goto(`/fleet/groups/${group.id}`);
 		const production = page
-			.getByTestId("group-inventory")
+			.getByTestId("group-ansible")
 			.getByTestId("environment-production");
 
 		await expect(production.getByTestId("run-declared")).toContainText(
@@ -294,7 +294,7 @@ test.describe("group inventory", () => {
 
 		await page.goto(`/fleet/groups/${group.id}`);
 		const production = page
-			.getByTestId("group-inventory")
+			.getByTestId("group-ansible")
 			.getByTestId("environment-production");
 
 		await expect(production.getByTestId("run-declared")).toContainText(
@@ -318,7 +318,7 @@ test.describe("group inventory", () => {
 
 		await page.goto(`/fleet/groups/${group.id}`);
 		const production = page
-			.getByTestId("group-inventory")
+			.getByTestId("group-ansible")
 			.getByTestId("environment-production");
 
 		// Canopy's address and the environment's identity are filled in; the
@@ -346,7 +346,7 @@ test.describe("group inventory", () => {
 
 		await page.goto(`/fleet/groups/${group.id}`);
 		const production = page
-			.getByTestId("group-inventory")
+			.getByTestId("group-ansible")
 			.getByTestId("environment-production");
 
 		await expect(production.getByTestId("run-command")).toContainText(

@@ -19,7 +19,7 @@ import GroupDomainsSection from "../components/GroupDomainsSection";
 import GroupNamesSection from "../components/GroupNamesSection";
 import UndeclaredDnsNamesNotice from "../components/UndeclaredDnsNamesNotice";
 import { MaintenanceMarker } from "../components/HealthChip";
-import GroupInventorySection from "../components/GroupInventorySection";
+import GroupAnsibleSection from "../components/GroupAnsibleSection";
 import MigrationTestsSection from "../components/MigrationTestsSection";
 import ReportingSchemasSection from "../components/ReportingSchemasSection";
 import { OperatorAvatar, connectedFor } from "../components/OperatorAvatars";
@@ -44,7 +44,7 @@ export default function GroupDetail() {
 	const { id = "" } = useParams<{ id: string }>();
 	const navigate = useNavigate();
 	// A window declared or lifted below changes what a run on this group's
-	// inventory would be served, and which environments the tree marks, so the
+	// an environment would be served, and which environments the tree marks, so the
 	// page reads one state.
 	const [maintenanceTick, setMaintenanceTick] = useState(0);
 	const detail = useApi("fleet/groups", "get", { server_group_id: id }, [
@@ -285,7 +285,7 @@ export default function GroupDetail() {
 			<MigrationTestsSection groupId={group.id} servers={applications} />
 			<ReportingSchemasSection groupId={group.id} />
 
-			<GroupInventorySection
+			<GroupAnsibleSection
 				groupId={group.id}
 				groupName={group.name}
 				applications={applications}

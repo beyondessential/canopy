@@ -1,16 +1,16 @@
 //! Endpoint tests for the variables that configure an environment: the three
 //! scopes and how they merge, a secret's value reaching a run and never a
-//! reader, and a value canopy cannot produce refusing the whole inventory.
+//! reader, and a value canopy cannot produce refusing the whole environment.
 //!
-//! spec: INV#inventory-variables
+//! spec: ANSVAR#variables
 
 use commons_tests::diesel_async::{AsyncPgConnection, SimpleAsyncConnection};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::inventory::{
+use crate::ansible::{
 	insert_application, insert_application_on_its_own_machine, insert_group,
-	insert_ranked_application, read_inventory, take_lease,
+	insert_ranked_application, read_served, take_lease,
 };
 
 async fn set_var(
@@ -25,7 +25,7 @@ async fn set_var(
 	args["value"] = value;
 	args["secret"] = json!(secret);
 	private
-		.post("/api/inventory_variables/set")
+		.post("/api/ansible_variables/set")
 		.json(&args)
 		.await
 		.assert_status_ok();
@@ -35,7 +35,7 @@ async fn set_var(
 /// store would produce.
 async fn secret_without_value(conn: &mut AsyncPgConnection, group: Uuid, rank: &str, name: &str) {
 	conn.batch_execute(&format!(
-		"INSERT INTO inventory_variables (server_group_id, rank, name, is_secret)
+		"INSERT INTO ansible_variables (server_group_id, rank, name, is_secret)
 		 VALUES ('{group}', '{rank}', '{name}', TRUE)"
 	))
 	.await
@@ -103,7 +103,7 @@ async fn a_machines_value_wins_over_its_environments_and_its_groups() {
 		.await;
 		set_var(&private, environment, "replicas", json!(3), false).await;
 
-		let body = read_inventory(
+		let body = read_served(
 			&private,
 			json!({ "server_group_id": group, "rank": "production" }),
 		)
@@ -170,7 +170,7 @@ async fn serves_a_value_as_the_json_it_was_stored_as() {
 		)
 		.await;
 
-		let body = read_inventory(&private, json!({ "server_group_id": group })).await;
+		let body = read_served(&private, json!({ "server_group_id": group })).await;
 		assert_eq!(body["vars"]["elastic_agent_enabled"], json!(false));
 		assert_eq!(body["vars"]["ansible_port"], json!(2222));
 		assert_eq!(body["vars"]["tamanu_version"], "v2.54.8");
@@ -196,7 +196,7 @@ async fn a_secret_reaches_a_run_and_is_marked_as_one() {
 		)
 		.await;
 
-		let body = read_inventory(&private, json!({ "server_group_id": group })).await;
+		let body = read_served(&private, json!({ "server_group_id": group })).await;
 		assert_eq!(body["vars"]["sync_salt"], "pepper");
 		assert_eq!(body["secret_vars"], json!(["sync_salt"]));
 
@@ -240,7 +240,7 @@ async fn a_machines_secret_overlays_the_environments() {
 		)
 		.await;
 
-		let body = read_inventory(&private, json!({ "server_group_id": group })).await;
+		let body = read_served(&private, json!({ "server_group_id": group })).await;
 		assert_eq!(body["vars"]["api_key"], "shared");
 		assert_eq!(body["hosts"][0]["vars"]["api_key"], "mine");
 		assert_eq!(body["hosts"][0]["secret_vars"], json!(["api_key"]));
@@ -251,7 +251,7 @@ async fn a_machines_secret_overlays_the_environments() {
 /// A run receiving a machine that looks configured and is missing a value is
 /// worse than one that does not run.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_secret_with_no_value_refuses_the_inventory() {
+async fn a_secret_with_no_value_refuses_the_environment() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka").await;
 		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
@@ -259,7 +259,7 @@ async fn a_secret_with_no_value_refuses_the_inventory() {
 
 		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
 		let response = private
-			.post("/api/inventory/for_group")
+			.post("/api/ansible/for_group")
 			.json(&json!({ "lease_id": lease }))
 			.await;
 		response.assert_status(axum::http::StatusCode::BAD_GATEWAY);
@@ -296,7 +296,7 @@ async fn ansible_host_overrides_the_address() {
 		)
 		.await;
 
-		let body = read_inventory(&private, json!({ "server_group_id": group })).await;
+		let body = read_served(&private, json!({ "server_group_id": group })).await;
 		assert_eq!(body["hosts"][0]["address"], "10.0.0.4");
 	})
 	.await
@@ -344,7 +344,7 @@ async fn the_group_page_reads_names_without_secret_values() {
 		.await;
 
 		let response = private
-			.post("/api/inventory_variables/for_group")
+			.post("/api/ansible_variables/for_group")
 			.json(&json!({ "server_group_id": group }))
 			.await;
 		response.assert_status_ok();
@@ -358,7 +358,7 @@ async fn the_group_page_reads_names_without_secret_values() {
 		assert_eq!(secret["is_secret"], json!(true));
 		assert_eq!(secret["value"], Value::Null);
 		assert_eq!(secret["rank"], "dev");
-		assert_eq!(secret["set_by"], crate::inventory::ME);
+		assert_eq!(secret["set_by"], crate::ansible::ME);
 
 		let plain = listed
 			.iter()
@@ -387,13 +387,13 @@ async fn removing_forgets_the_value() {
 		let mut args = scope.clone();
 		args["name"] = json!("sync_salt");
 		private
-			.post("/api/inventory_variables/remove")
+			.post("/api/ansible_variables/remove")
 			.json(&args)
 			.await
 			.assert_status_ok();
 		// Gone, so removing it again finds nothing.
 		private
-			.post("/api/inventory_variables/remove")
+			.post("/api/ansible_variables/remove")
 			.json(&args)
 			.await
 			.assert_status(axum::http::StatusCode::NOT_FOUND);
@@ -401,7 +401,7 @@ async fn removing_forgets_the_value() {
 		// And the name is free to come back as a plain variable, carrying no
 		// trace of the value it held.
 		set_var(&private, scope, "sync_salt", json!("visible"), false).await;
-		let body = read_inventory(&private, json!({ "server_group_id": group })).await;
+		let body = read_served(&private, json!({ "server_group_id": group })).await;
 		assert_eq!(body["vars"]["sync_salt"], "visible");
 		assert_eq!(body["secret_vars"], json!([]));
 	})
@@ -414,7 +414,7 @@ async fn refuses_a_name_the_secret_store_cannot_key_a_value_under() {
 		let group = insert_group(&mut conn, "kamaka").await;
 		for name in ["not a name", "..", "n".repeat(254).as_str()] {
 			private
-				.post("/api/inventory_variables/set")
+				.post("/api/ansible_variables/set")
 				.json(&json!({
 					"server_group_id": group,
 					"name": name,
@@ -462,7 +462,7 @@ async fn a_groups_value_reaches_every_environment_in_it() {
 
 		for rank in ["production", "demo"] {
 			let body =
-				read_inventory(&private, json!({ "server_group_id": group, "rank": rank })).await;
+				read_served(&private, json!({ "server_group_id": group, "rank": rank })).await;
 			assert_eq!(body["vars"]["timezone"], "Pacific/Fiji", "{rank}");
 			assert_eq!(
 				body["hosts"][0]["vars"]["timezone"], "Pacific/Fiji",
@@ -485,7 +485,7 @@ async fn a_secret_turned_plain_forgets_the_value_it_held() {
 		set_var(&private, scope.clone(), "salt", json!("pepper"), true).await;
 		set_var(&private, scope.clone(), "salt", json!("visible"), false).await;
 
-		let body = read_inventory(&private, json!({ "server_group_id": group })).await;
+		let body = read_served(&private, json!({ "server_group_id": group })).await;
 		assert_eq!(body["vars"]["salt"], "visible");
 		assert_eq!(body["secret_vars"], json!([]));
 
@@ -494,7 +494,7 @@ async fn a_secret_turned_plain_forgets_the_value_it_held() {
 		let mut args = scope;
 		args["name"] = json!("salt");
 		private
-			.post("/api/inventory_variables/remove")
+			.post("/api/ansible_variables/remove")
 			.json(&args)
 			.await
 			.assert_status_ok();
@@ -502,7 +502,7 @@ async fn a_secret_turned_plain_forgets_the_value_it_held() {
 
 		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
 		let response = private
-			.post("/api/inventory/for_group")
+			.post("/api/ansible/for_group")
 			.json(&json!({ "lease_id": lease }))
 			.await;
 		response.assert_status(axum::http::StatusCode::BAD_GATEWAY);
@@ -526,7 +526,7 @@ async fn refuses_a_rank_that_is_not_one() {
 		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
 
 		let response = private
-			.post("/api/inventory_variables/set")
+			.post("/api/ansible_variables/set")
 			.json(&json!({
 				"server_group_id": group,
 				"rank": "prod",
@@ -538,7 +538,7 @@ async fn refuses_a_rank_that_is_not_one() {
 		assert_ne!(response.status_code(), axum::http::StatusCode::OK);
 
 		let listed = private
-			.post("/api/inventory_variables/for_group")
+			.post("/api/ansible_variables/for_group")
 			.json(&json!({ "server_group_id": group }))
 			.await;
 		listed.assert_status_ok();
@@ -572,7 +572,7 @@ async fn a_secret_set_plain_at_the_environment_is_no_longer_one() {
 		)
 		.await;
 
-		let body = read_inventory(&private, json!({ "server_group_id": group })).await;
+		let body = read_served(&private, json!({ "server_group_id": group })).await;
 		assert_eq!(body["vars"]["salt"], "visible");
 		assert_eq!(body["secret_vars"], json!([]));
 		assert_eq!(body["hosts"][0]["vars"]["salt"], "visible");
@@ -614,7 +614,7 @@ async fn a_machines_value_reaches_only_that_machine() {
 		)
 		.await;
 
-		let body = read_inventory(&private, json!({ "server_group_id": group })).await;
+		let body = read_served(&private, json!({ "server_group_id": group })).await;
 		let hosts = body["hosts"].as_array().expect("hosts");
 		let mine = hosts
 			.iter()
@@ -646,10 +646,7 @@ async fn refuses_ansible_host_outside_machine_scope() {
 			let mut args = scope;
 			args["name"] = json!("ansible_host");
 			args["value"] = json!("10.0.0.4");
-			let response = private
-				.post("/api/inventory_variables/set")
-				.json(&args)
-				.await;
+			let response = private.post("/api/ansible_variables/set").json(&args).await;
 			response.assert_status(axum::http::StatusCode::BAD_REQUEST);
 			assert!(
 				response.json::<Value>()["detail"]
@@ -662,7 +659,7 @@ async fn refuses_ansible_host_outside_machine_scope() {
 		// A machine's address is a string, so a value of another shape is
 		// refused rather than served as no override at all.
 		let response = private
-			.post("/api/inventory_variables/set")
+			.post("/api/ansible_variables/set")
 			.json(&json!({
 				"machine_id": Uuid::new_v4(),
 				"name": "ansible_host",
@@ -718,7 +715,7 @@ async fn refuses_an_environment_whose_machines_share_an_address() {
 
 		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
 		let response = private
-			.post("/api/inventory/for_group")
+			.post("/api/ansible/for_group")
 			.json(&json!({ "lease_id": lease }))
 			.await;
 		response.assert_status(axum::http::StatusCode::CONFLICT);
@@ -739,7 +736,7 @@ async fn refuses_an_environment_whose_machines_share_an_address() {
 		)
 		.await;
 		private
-			.post("/api/inventory/for_group")
+			.post("/api/ansible/for_group")
 			.json(&json!({ "lease_id": lease }))
 			.await
 			.assert_status_ok();

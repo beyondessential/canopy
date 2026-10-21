@@ -3,7 +3,7 @@
 //!
 //! A secret's value is held in canopy's secret store and never here, so
 //! listing what a group carries never reads one.
-// spec: INV#inventory-variables
+// spec: ANSVAR#variables
 
 use commons_errors::{AppError, Result};
 use commons_types::server::rank::ServerRank;
@@ -17,9 +17,9 @@ use uuid::Uuid;
 /// One variable: where it is set, its name, and its value where it is not a
 /// secret.
 #[derive(Clone, Debug, Serialize, Queryable, Selectable, utoipa::ToSchema)]
-#[diesel(table_name = crate::schema::inventory_variables)]
+#[diesel(table_name = crate::schema::ansible_variables)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct InventoryVariable {
+pub struct AnsibleVariable {
 	/// Unique identifier of this variable.
 	pub id: Uuid,
 	/// Set for a variable belonging to a group or to one of its environments.
@@ -46,7 +46,7 @@ pub struct InventoryVariable {
 	pub updated_at: Timestamp,
 }
 
-/// Where a variable is set. An inventory merges the three name-wise, a
+/// Where a variable is set. A run merges the three name-wise, a
 /// machine's over its environment's over its group's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(untagged)]
@@ -71,22 +71,22 @@ impl VariableScope {
 	}
 }
 
-impl InventoryVariable {
+impl AnsibleVariable {
 	/// The scope this variable is set at.
 	pub fn scope(&self) -> VariableScope {
 		match (self.server_group_id, self.rank, self.machine_id) {
 			(Some(group_id), None, None) => VariableScope::Group { group_id },
 			(Some(group_id), Some(rank), None) => VariableScope::Environment { group_id, rank },
 			(None, None, Some(machine_id)) => VariableScope::Machine { machine_id },
-			_ => unreachable!("inventory_variables_one_scope admits no other shape"),
+			_ => unreachable!("ansible_variables_one_scope admits no other shape"),
 		}
 	}
 
 	/// Every variable canopy holds, sorted by name.
 	pub async fn list_all(conn: &mut AsyncPgConnection) -> Result<Vec<Self>> {
-		use crate::schema::inventory_variables::dsl;
+		use crate::schema::ansible_variables::dsl;
 
-		dsl::inventory_variables
+		dsl::ansible_variables
 			.order(dsl::name.asc())
 			.select(Self::as_select())
 			.get_results(conn)
@@ -96,9 +96,9 @@ impl InventoryVariable {
 
 	/// The variables at one scope, sorted by name.
 	pub async fn list_at(conn: &mut AsyncPgConnection, scope: VariableScope) -> Result<Vec<Self>> {
-		use crate::schema::inventory_variables::dsl;
+		use crate::schema::ansible_variables::dsl;
 
-		dsl::inventory_variables
+		dsl::ansible_variables
 			.filter(at_scope(scope))
 			.order(dsl::name.asc())
 			.select(Self::as_select())
@@ -113,9 +113,9 @@ impl InventoryVariable {
 		scope: VariableScope,
 		name: &str,
 	) -> Result<Option<Self>> {
-		use crate::schema::inventory_variables::dsl;
+		use crate::schema::ansible_variables::dsl;
 
-		dsl::inventory_variables
+		dsl::ansible_variables
 			.filter(dsl::name.eq(name))
 			.filter(at_scope(scope))
 			.select(Self::as_select())
@@ -130,12 +130,12 @@ impl InventoryVariable {
 		conn: &mut AsyncPgConnection,
 		machine_ids: &[Uuid],
 	) -> Result<Vec<Self>> {
-		use crate::schema::inventory_variables::dsl;
+		use crate::schema::ansible_variables::dsl;
 
 		if machine_ids.is_empty() {
 			return Ok(Vec::new());
 		}
-		dsl::inventory_variables
+		dsl::ansible_variables
 			.filter(dsl::machine_id.eq_any(machine_ids))
 			.order((dsl::machine_id.asc(), dsl::name.asc()))
 			.select(Self::as_select())
@@ -150,7 +150,7 @@ impl InventoryVariable {
 		conn: &mut AsyncPgConnection,
 		group_id: Uuid,
 	) -> Result<Vec<Self>> {
-		use crate::schema::{inventory_variables::dsl, machines};
+		use crate::schema::{ansible_variables::dsl, machines};
 
 		let machine_ids: Vec<Uuid> = machines::table
 			.filter(machines::group_id.eq(group_id))
@@ -160,7 +160,7 @@ impl InventoryVariable {
 			.await
 			.map_err(AppError::from)?;
 
-		dsl::inventory_variables
+		dsl::ansible_variables
 			.filter(
 				dsl::server_group_id
 					.eq(group_id)
@@ -182,12 +182,12 @@ impl InventoryVariable {
 		value: Option<&Value>,
 		set_by: Option<&str>,
 	) -> Result<Self> {
-		use crate::schema::inventory_variables::dsl;
+		use crate::schema::ansible_variables::dsl;
 
 		let existing: Option<Uuid> = Self::at(conn, scope, name).await?.map(|var| var.id);
 
 		if let Some(id) = existing {
-			return diesel::update(dsl::inventory_variables.find(id))
+			return diesel::update(dsl::ansible_variables.find(id))
 				.set((
 					dsl::value.eq(value),
 					dsl::is_secret.eq(value.is_none()),
@@ -201,7 +201,7 @@ impl InventoryVariable {
 		}
 
 		let (group_id, rank, machine_id) = columns(scope);
-		diesel::insert_into(dsl::inventory_variables)
+		diesel::insert_into(dsl::ansible_variables)
 			.values((
 				dsl::server_group_id.eq(group_id),
 				dsl::rank.eq(rank),
@@ -224,10 +224,10 @@ impl InventoryVariable {
 		scope: VariableScope,
 		name: &str,
 	) -> Result<Option<Self>> {
-		use crate::schema::inventory_variables::dsl;
+		use crate::schema::ansible_variables::dsl;
 
 		diesel::delete(
-			dsl::inventory_variables
+			dsl::ansible_variables
 				.filter(dsl::name.eq(name))
 				.filter(at_scope(scope)),
 		)
@@ -246,12 +246,12 @@ fn at_scope(
 	scope: VariableScope,
 ) -> Box<
 	dyn diesel::BoxableExpression<
-			crate::schema::inventory_variables::table,
+			crate::schema::ansible_variables::table,
 			diesel::pg::Pg,
 			SqlType = diesel::sql_types::Nullable<diesel::sql_types::Bool>,
 		>,
 > {
-	use crate::schema::inventory_variables::dsl;
+	use crate::schema::ansible_variables::dsl;
 
 	match scope {
 		VariableScope::Group { group_id } => Box::new(

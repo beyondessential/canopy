@@ -1,11 +1,11 @@
 //! The scoping rules the table itself enforces: a name is unique within its
 //! scope, a row sits at exactly one scope, and a secret carries no value here.
 //!
-//! spec: INV#inventory-variables
+//! spec: ANSVAR#variables
 
 use commons_tests::diesel_async::SimpleAsyncConnection;
 use commons_types::server::rank::ServerRank;
-use database::inventory_variables::{InventoryVariable, VariableScope};
+use database::ansible_variables::{AnsibleVariable, VariableScope};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -43,7 +43,7 @@ async fn a_name_is_unique_within_its_scope() {
 			rank: ServerRank::Production,
 		};
 
-		InventoryVariable::set(
+		AnsibleVariable::set(
 			&mut conn,
 			scope,
 			"log_level",
@@ -52,7 +52,7 @@ async fn a_name_is_unique_within_its_scope() {
 		)
 		.await
 		.expect("first set");
-		let replaced = InventoryVariable::set(
+		let replaced = AnsibleVariable::set(
 			&mut conn,
 			scope,
 			"log_level",
@@ -63,7 +63,7 @@ async fn a_name_is_unique_within_its_scope() {
 		.expect("second set");
 		assert_eq!(replaced.value, Some(json!("trace")));
 
-		let held = InventoryVariable::list_at(&mut conn, scope)
+		let held = AnsibleVariable::list_at(&mut conn, scope)
 			.await
 			.expect("list");
 		assert_eq!(held.len(), 1, "no duplicate row");
@@ -72,7 +72,7 @@ async fn a_name_is_unique_within_its_scope() {
 		// inserted around `set` is refused too.
 		let straight_in = conn
 			.batch_execute(&format!(
-				"INSERT INTO inventory_variables (server_group_id, rank, name, value)
+				"INSERT INTO ansible_variables (server_group_id, rank, name, value)
 				 VALUES ('{group}', 'production', 'log_level', '\"warn\"')"
 			))
 			.await;
@@ -100,20 +100,20 @@ async fn the_same_name_sits_at_every_scope_at_once() {
 		];
 
 		for scope in scopes {
-			InventoryVariable::set(&mut conn, scope, "log_level", Some(&json!("info")), None)
+			AnsibleVariable::set(&mut conn, scope, "log_level", Some(&json!("info")), None)
 				.await
 				.expect("set");
 		}
 
 		for scope in scopes {
-			let held = InventoryVariable::list_at(&mut conn, scope)
+			let held = AnsibleVariable::list_at(&mut conn, scope)
 				.await
 				.expect("list");
 			assert_eq!(held.len(), 1, "{scope:?}");
 			assert_eq!(held[0].scope(), scope, "the row reads back at its scope");
 		}
 
-		let under = InventoryVariable::list_under_group(&mut conn, group)
+		let under = AnsibleVariable::list_under_group(&mut conn, group)
 			.await
 			.expect("list under group");
 		assert_eq!(under.len(), 3, "the group page sees all three");
@@ -136,7 +136,7 @@ async fn a_row_sits_at_exactly_one_scope() {
 		] {
 			let bad = conn
 				.batch_execute(&format!(
-					"INSERT INTO inventory_variables (server_group_id, rank, machine_id, name, value)
+					"INSERT INTO ansible_variables (server_group_id, rank, machine_id, name, value)
 					 VALUES ({values}, 'log_level', '\"info\"')"
 				))
 				.await;
@@ -159,7 +159,7 @@ async fn a_secret_carries_no_value_and_a_plain_one_must() {
 		] {
 			let bad = conn
 				.batch_execute(&format!(
-					"INSERT INTO inventory_variables (server_group_id, {columns})"
+					"INSERT INTO ansible_variables (server_group_id, {columns})"
 				))
 				.await;
 			assert!(bad.is_err(), "admitted {columns}");
@@ -167,13 +167,13 @@ async fn a_secret_carries_no_value_and_a_plain_one_must() {
 
 		// And the code's own two paths land on the right side of it.
 		let scope = VariableScope::Group { group_id: group };
-		let secret = InventoryVariable::set(&mut conn, scope, "salt", None, Some("me"))
+		let secret = AnsibleVariable::set(&mut conn, scope, "salt", None, Some("me"))
 			.await
 			.expect("set a secret");
 		assert!(secret.is_secret);
 		assert_eq!(secret.value, None);
 
-		let plain = InventoryVariable::set(
+		let plain = AnsibleVariable::set(
 			&mut conn,
 			scope,
 			"salt",
@@ -237,7 +237,7 @@ async fn a_machines_variables_go_with_the_machine() {
 		let scope = VariableScope::Machine {
 			machine_id: machine,
 		};
-		InventoryVariable::set(&mut conn, scope, "log_level", Some(&json!("info")), None)
+		AnsibleVariable::set(&mut conn, scope, "log_level", Some(&json!("info")), None)
 			.await
 			.expect("set");
 
@@ -245,7 +245,7 @@ async fn a_machines_variables_go_with_the_machine() {
 			.await
 			.expect("delete the machine");
 
-		let left = InventoryVariable::list_all(&mut conn).await.expect("list");
+		let left = AnsibleVariable::list_all(&mut conn).await.expect("list");
 		assert!(left.is_empty(), "{left:?}");
 	})
 	.await

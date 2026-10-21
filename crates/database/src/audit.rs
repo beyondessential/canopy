@@ -441,21 +441,21 @@ actions! {
 		detail { rank: Option<ServerRank>, already_ended: bool }
 	}
 
-	/// An inventory was read under a lease. Taken at the rate runs read, so it
+	/// An environment was served to Ansible under a lease. Taken at the rate runs read, so it
 	/// is routine.
-	InventoryRead = "inventory_read", "Read inventory", tier = Routine {
+	AnsibleRead = "inventory_read", "Serve environment to Ansible", tier = Routine {
 		records { group: Record, lease: Record }
 		detail { rank: ServerRank, intent: String }
 	}
 
 	/// A run lease on an environment was taken.
-	InventoryLeaseTaken = "inventory_lease_taken", "Take inventory lease" {
+	AnsibleLeaseTaken = "inventory_lease_taken", "Take Ansible lease" {
 		records { group: Record, lease: Record }
 		detail { rank: ServerRank, intent: String, note: Option<String>, expires_at: Timestamp }
 	}
 
 	/// A run lease another operator held was taken over.
-	InventoryLeaseTakenOver = "inventory_lease_taken_over", "Take over inventory lease" {
+	AnsibleLeaseTakenOver = "inventory_lease_taken_over", "Take over Ansible lease" {
 		records { group: Record, lease: Record }
 		detail {
 			rank: ServerRank, intent: String, note: Option<String>, expires_at: Timestamp,
@@ -465,25 +465,25 @@ actions! {
 
 	/// A held lease's expiry was pushed out. A run does it every few minutes,
 	/// so it is routine.
-	InventoryLeaseExtended = "inventory_lease_extended", "Extend inventory lease", tier = Routine {
+	AnsibleLeaseExtended = "inventory_lease_extended", "Extend Ansible lease", tier = Routine {
 		records { group: Record, lease: Record }
 		detail { rank: ServerRank, expires_at: Timestamp }
 	}
 
 	/// A lease was released, by its holder or by someone taking the work over.
-	InventoryLeaseReleased = "inventory_lease_released", "Release inventory lease" {
+	AnsibleLeaseReleased = "inventory_lease_released", "Release Ansible lease" {
 		records { group: Record, lease: Record }
 		detail { rank: ServerRank, held_by: Option<String> }
 	}
 
-	/// An inventory variable was set. The value is not recorded.
-	InventoryVariableSet = "inventory_variable_set", "Set inventory variable" {
+	/// An Ansible variable was set. The value is not recorded.
+	AnsibleVariableSet = "inventory_variable_set", "Set Ansible variable" {
 		records { variable: Record, scope: Record }
 		detail { rank: Option<ServerRank>, secret: bool }
 	}
 
-	/// An inventory variable was removed.
-	InventoryVariableRemoved = "inventory_variable_removed", "Remove inventory variable" {
+	/// An Ansible variable was removed.
+	AnsibleVariableRemoved = "inventory_variable_removed", "Remove Ansible variable" {
 		records { variable: Record, scope: Record }
 		detail { rank: Option<ServerRank>, secret: bool }
 	}

@@ -10,7 +10,7 @@
 use commons_errors::AppError;
 use commons_types::{server::rank::ServerRank, status::CheckResult};
 use database::{
-	inventory_leases::{InventoryLease, RunIntent},
+	ansible_leases::{AnsibleLease, RunIntent},
 	issues::{CheckFiling, Scope, file_check},
 	maintenance_windows::{Amendment, Grain, MaintenanceWindow, SETTLE, line_of_descent},
 	statuses::CANOPY_SOURCE,
@@ -536,7 +536,7 @@ async fn a_window_a_run_is_served_against_stays_until_the_lease_is_released() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let site = site(&mut conn).await;
 		let window = declare_group(&mut conn, site.group, Some(ServerRank::Production)).await;
-		let lease = InventoryLease::take(
+		let lease = AnsibleLease::take(
 			&mut conn,
 			site.group,
 			ServerRank::Production,
@@ -570,7 +570,7 @@ async fn a_window_a_run_is_served_against_stays_until_the_lease_is_released() {
 			"the run is acting on the environment the window covers: {refused:?}"
 		);
 
-		InventoryLease::release(&mut conn, lease.id, Some("op"))
+		AnsibleLease::release(&mut conn, lease.id, Some("op"))
 			.await
 			.expect("release");
 		MaintenanceWindow::amend(
@@ -593,7 +593,7 @@ async fn a_lease_on_an_environment_nothing_is_ranked_in_holds_a_group_window() {
 		let site = site(&mut conn).await;
 		let window = declare_group(&mut conn, site.group, None).await;
 		sql_query(
-			"INSERT INTO inventory_leases (server_group_id, rank, intent, held_by, expires_at) \
+			"INSERT INTO ansible_leases (server_group_id, rank, intent, held_by, expires_at) \
 			 VALUES ($1, 'demo', 'configure', 'op', NOW() + INTERVAL '1 hour')",
 		)
 		.bind::<sql_types::Uuid, _>(site.group)
@@ -682,13 +682,13 @@ async fn coverage_marks_agree_with_suspension() {
 
 /// Taking a lease reads the windows over the environment under the group's
 /// lock, so another operator's window refuses it from inside the take.
-// spec: INV#work-under-way
+// spec: ANSRUN#work-under-way
 #[tokio::test(flavor = "multi_thread")]
 async fn a_take_under_another_operators_window_is_refused_inside_the_lock() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let site = site(&mut conn).await;
 		let window = declare_group(&mut conn, site.group, Some(ServerRank::Production)).await;
-		let refused = InventoryLease::take(
+		let refused = AnsibleLease::take(
 			&mut conn,
 			site.group,
 			ServerRank::Production,
@@ -716,7 +716,7 @@ async fn another_operators_lease_does_not_hold_a_window_in_place() {
 		let window = declare_group(&mut conn, site.group, Some(ServerRank::Production)).await;
 		// Taken before the window, since one taken under it would be refused.
 		sql_query(
-			"INSERT INTO inventory_leases (server_group_id, rank, intent, held_by, expires_at) \
+			"INSERT INTO ansible_leases (server_group_id, rank, intent, held_by, expires_at) \
 			 VALUES ($1, 'production', 'configure', 'someone-else', NOW() + INTERVAL '1 hour')",
 		)
 		.bind::<sql_types::Uuid, _>(site.group)

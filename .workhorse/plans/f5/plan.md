@@ -29,14 +29,14 @@ The feature is "Ansible", since in Canopy the inventory is the fleet. The spec h
 
 Steps:
 
-- [ ] Migration renaming `inventory_variables` → `ansible_variables` and `inventory_leases` → `ansible_leases`, with their constraints and indexes (`just migration rename_inventory_to_ansible`)
-- [ ] Database crate: `inventory_variables.rs` → `ansible_variables.rs`, `inventory_leases.rs` → `ansible_leases.rs`, types `InventoryVariable` → `AnsibleVariable`, etc.
-- [ ] Audit catalogue: variants `Inventory*` → `Ansible*`, with labels "Serve environment to Ansible", "Take/Take over/Extend/Release Ansible lease", "Set/Remove Ansible variable". Add `AnsibleInventoryImported`, "Import Ansible inventory"
-- [ ] Private server: modules `fns/inventory.rs` → `fns/ansible.rs` and `fns/inventory_variables.rs` → `fns/ansible_variables.rs`, mounted at `/api/ansible/*` and `/api/ansible_variables/*`, with the openapi tag and its description, log messages, and tests
-- [ ] Keep the `/api/inventory/*` paths as aliases until the plugin has moved, since the plugin in the infra repo (and its copy in ops) calls them. Then remove them in a follow-up
-- [ ] `just gen-openapi`, then `safety-modes.ts` grades for the new paths
-- [ ] Retag `// spec:` comments for the split: `INV#run-leases` and `INV#work-under-way` → `ANSRUN#…`, `INV#inventory-variables` → `ANSVAR#variables`, `INV#presentation` → `ANSVAR#presentation` (variables) or `ANSRUN#presentation` (runs). A bare `INV` stays where the code serves the environment
-- [ ] SPA: `GroupInventorySection` → `GroupAnsibleSection`, heading "Ansible", action labels, test ids. `e2e/inventory.spec.ts` → `e2e/ansible.spec.ts`, with seed helpers
+- [x] Migration renaming `inventory_variables` → `ansible_variables` and `inventory_leases` → `ansible_leases`, with their constraints and indexes (`just migration rename_inventory_to_ansible`)
+- [x] Database crate: `inventory_variables.rs` → `ansible_variables.rs`, `inventory_leases.rs` → `ansible_leases.rs`, types `InventoryVariable` → `AnsibleVariable`, etc.
+- [x] Audit catalogue: variants `Inventory*` → `Ansible*`, with labels "Serve environment to Ansible", "Take/Take over/Extend/Release Ansible lease", "Set/Remove Ansible variable". The `AnsibleInventoryImported` action ("Import Ansible inventory") is added with the import itself
+- [x] Private server: modules `fns/inventory.rs` → `fns/ansible.rs` and `fns/inventory_variables.rs` → `fns/ansible_variables.rs`, mounted at `/api/ansible/*` and `/api/ansible_variables/*`, with the openapi tag and its description, log messages, and tests
+- [x] Keep the `/api/inventory/*` paths as aliases until the plugin has moved, since the plugin in the infra repo (and its copy in ops) calls them. They are 308 redirects beside the API (the `moved_paths` pattern: a redirect carries no safety grade, and the followed request does), so a client that does not follow a POST redirect needs the plugin change first. Remove them in a follow-up
+- [x] `just gen-openapi`, then `safety-modes.ts` grades for the new paths
+- [x] Retag `// spec:` comments for the split: `INV#run-leases` and `INV#work-under-way` → `ANSRUN#…`, `INV#inventory-variables` → `ANSVAR#variables`, `INV#presentation` → `ANSVAR#presentation` (variables) or `ANSRUN#presentation` (runs). A bare `INV` stays where the code serves the environment
+- [x] SPA: `GroupInventorySection` → `GroupAnsibleSection`, heading "Ansible", action labels, test ids. `e2e/inventory.spec.ts` → `e2e/ansible.spec.ts`, with seed helpers
 - [ ] Infra repo, in lockstep: the plugin's `/api/inventory/*` calls move to `/api/ansible/*`. Links to `private-server/inventory.md` move: `#what-an-inventory-contains` → `ansible/overview.md#what-a-run-is-served`, `#reaching-a-machine` → `ansible/overview.md#reaching-a-machine`, `#run-leases` → `ansible/runs.md#run-leases`
 - [ ] `grep -rin inventor` over `crates`, `private-web/src`, `private-web/e2e` and `.workhorse/specs` should then turn up only the stored names above, Ansible's own inventory (the import), and the unrelated backup-repository inventory
 

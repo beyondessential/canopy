@@ -1,8 +1,8 @@
 //! The lease a configuration run holds over an environment while it runs.
 //!
-//! An environment holds at most one, and the inventory is served to its holder
+//! An environment holds at most one, and the environment is served to its holder
 //! alone, so two runs never act on one environment at once.
-// spec: INV#run-leases
+// spec: ANSRUN#run-leases
 
 use std::{fmt::Display, str::FromStr};
 
@@ -88,11 +88,11 @@ impl Display for RunIntentFromStringError {
 
 /// A run's hold on one environment.
 #[derive(Clone, Debug, Serialize, Queryable, Selectable, utoipa::ToSchema)]
-#[diesel(table_name = crate::schema::inventory_leases)]
+#[diesel(table_name = crate::schema::ansible_leases)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct InventoryLease {
+pub struct AnsibleLease {
 	/// Unique identifier of this lease, which a run names to read the
-	/// inventory.
+	/// environment.
 	pub id: Uuid,
 	/// The group the environment belongs to.
 	pub server_group_id: Uuid,
@@ -119,7 +119,7 @@ pub struct InventoryLease {
 	pub released_by: Option<String>,
 }
 
-impl InventoryLease {
+impl AnsibleLease {
 	/// Whether this lease still holds the environment shut at `now`.
 	pub fn holds_at(&self, now: Timestamp) -> bool {
 		self.released_at.is_none() && self.expires_at > now
@@ -142,9 +142,9 @@ impl InventoryLease {
 		group_id: Uuid,
 		rank: ServerRank,
 	) -> Result<Option<Self>> {
-		use crate::schema::inventory_leases::dsl;
+		use crate::schema::ansible_leases::dsl;
 
-		dsl::inventory_leases
+		dsl::ansible_leases
 			.select(Self::as_select())
 			.filter(dsl::server_group_id.eq(group_id))
 			.filter(dsl::rank.eq(rank.to_string()))
@@ -157,9 +157,9 @@ impl InventoryLease {
 
 	/// Every unreleased lease on the group's environments, expired or not.
 	pub async fn open_for_group(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<Vec<Self>> {
-		use crate::schema::inventory_leases::dsl;
+		use crate::schema::ansible_leases::dsl;
 
-		dsl::inventory_leases
+		dsl::ansible_leases
 			.select(Self::as_select())
 			.filter(dsl::server_group_id.eq(group_id))
 			.filter(dsl::released_at.is_null())
@@ -180,7 +180,7 @@ impl InventoryLease {
 	/// is checked against cannot move off the environment before the lease is
 	/// in. The no-key form is what makes that cheap: `FOR UPDATE` would also
 	/// queue behind every job writing a row that references the group.
-	// spec: INV#work-under-way
+	// spec: ANSRUN#work-under-way
 	#[allow(clippy::too_many_arguments)]
 	pub async fn take(
 		db: &mut AsyncPgConnection,
@@ -192,7 +192,7 @@ impl InventoryLease {
 		note: Option<&str>,
 		take_over: bool,
 	) -> Result<std::result::Result<Self, MaintenanceWindow>> {
-		use crate::schema::inventory_leases::dsl;
+		use crate::schema::ansible_leases::dsl;
 		use diesel_async::AsyncConnection;
 
 		db.transaction::<_, AppError, _>(async |conn| {
@@ -215,7 +215,7 @@ impl InventoryLease {
 			}
 
 			let expires: jiff_diesel::Timestamp = (Timestamp::now() + LEASE_DURATION).into();
-			diesel::insert_into(dsl::inventory_leases)
+			diesel::insert_into(dsl::ansible_leases)
 				.values((
 					dsl::server_group_id.eq(group_id),
 					dsl::rank.eq(rank.to_string()),
@@ -249,11 +249,11 @@ impl InventoryLease {
 
 	/// Push an unreleased lease's expiry out, so a run still going keeps it.
 	pub async fn extend(db: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
-		use crate::schema::inventory_leases::dsl;
+		use crate::schema::ansible_leases::dsl;
 
 		let expires: jiff_diesel::Timestamp = (Timestamp::now() + LEASE_DURATION).into();
 		diesel::update(
-			dsl::inventory_leases
+			dsl::ansible_leases
 				.find(id)
 				.filter(dsl::released_at.is_null()),
 		)
@@ -268,10 +268,10 @@ impl InventoryLease {
 
 	/// Give the environment back. Answers whether the lease was still held.
 	pub async fn release(db: &mut AsyncPgConnection, id: Uuid, by: Option<&str>) -> Result<bool> {
-		use crate::schema::inventory_leases::dsl;
+		use crate::schema::ansible_leases::dsl;
 
 		let released = diesel::update(
-			dsl::inventory_leases
+			dsl::ansible_leases
 				.find(id)
 				.filter(dsl::released_at.is_null()),
 		)
@@ -287,9 +287,9 @@ impl InventoryLease {
 
 	/// Find a lease by identifier.
 	pub async fn get(db: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
-		use crate::schema::inventory_leases::dsl;
+		use crate::schema::ansible_leases::dsl;
 
-		dsl::inventory_leases
+		dsl::ansible_leases
 			.select(Self::as_select())
 			.find(id)
 			.first(db)

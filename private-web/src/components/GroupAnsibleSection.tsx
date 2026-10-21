@@ -28,8 +28,8 @@ import {
 } from "./GradedAction";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import type {
-	InventoryLease,
-	InventoryVariable,
+	AnsibleLease,
+	AnsibleVariable,
 	MaintenanceWindow,
 	ServerRank,
 } from "../types";
@@ -43,8 +43,8 @@ type Machine = { id: string; name?: string | null };
 /// the machines it acts on, and the variables that configure them, with a
 /// value inherited from a wider scope told apart from one the machine sets
 /// itself. A secret appears by name and never by value.
-// spec: INV#presentation
-export default function GroupInventorySection({
+// spec: ANSVAR#presentation
+export default function GroupAnsibleSection({
 	groupId,
 	groupName,
 	applications,
@@ -68,7 +68,7 @@ export default function GroupInventorySection({
 	const [selected, setSelected] = useState<ServerRank | null>(null);
 	const reload = () => setTick((n) => n + 1);
 	const variables = useApi(
-		"inventory_variables",
+		"ansible_variables",
 		"for_group",
 		{ server_group_id: groupId },
 		[groupId, tick],
@@ -83,9 +83,9 @@ export default function GroupInventorySection({
 		selected !== null && ranks.includes(selected) ? selected : ranks[0];
 
 	return (
-		<Box data-testid="group-inventory">
+		<Box data-testid="group-ansible">
 			<Typography variant="h6" gutterBottom>
-				Inventory
+				Ansible
 			</Typography>
 			{variables.status === "loading" && <LinearProgress />}
 			{variables.status === "error" && (
@@ -98,7 +98,7 @@ export default function GroupInventorySection({
 					</Typography>
 				</Paper>
 			) : (
-				<EnvironmentInventory
+				<EnvironmentAnsible
 					groupId={groupId}
 					groupName={groupName}
 					rank={rank}
@@ -121,7 +121,7 @@ export default function GroupInventorySection({
 	);
 }
 
-function EnvironmentInventory({
+function EnvironmentAnsible({
 	groupId,
 	groupName,
 	rank,
@@ -139,7 +139,7 @@ function EnvironmentInventory({
 	ranks: ReadonlyArray<ServerRank>;
 	onSelect: (rank: ServerRank) => void;
 	machines: ReadonlyArray<Machine>;
-	variables: ReadonlyArray<InventoryVariable>;
+	variables: ReadonlyArray<AnsibleVariable>;
 	onChanged: () => void;
 	maintenanceTick: number;
 	onMaintenanceChange: () => void;
@@ -208,7 +208,7 @@ function EnvironmentInventory({
 				</Box>
 
 				{machines.map((machine) => (
-					<Box key={machine.id} data-testid="inventory-machine">
+					<Box key={machine.id} data-testid="ansible-machine">
 						<Typography variant="subtitle2">{machine.name}</Typography>
 						<Vars
 							items={machineVars(machine.id)}
@@ -238,7 +238,7 @@ function EnvironmentInventory({
 /// The invocation a run on this environment is started with, filled in with
 /// canopy's address and the environment's identity, and the lease and window
 /// state that says whether a run would be served.
-// spec: INV#presentation
+// spec: ANSRUN#presentation
 function Run({
 	groupId,
 	groupName,
@@ -255,13 +255,13 @@ function Run({
 	const [copied, setCopied] = useState(false);
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const state = useApi(
-		"inventory",
+		"ansible",
 		"run_state",
 		{ server_group_id: groupId, rank },
 		[groupId, rank, maintenanceTick],
 	);
 
-	const held: InventoryLease | null =
+	const held: AnsibleLease | null =
 		state.status === "ok" ? state.data.lease : null;
 	const declared: MaintenanceWindow | null =
 		state.status === "ok" ? state.data.window : null;
@@ -280,7 +280,7 @@ function Run({
 	};
 
 	return (
-		<Box data-testid="inventory-run">
+		<Box data-testid="ansible-run">
 			<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 				<Typography variant="body2" color="text.secondary">
 					Run
@@ -389,18 +389,18 @@ function Vars({
 	onRemove,
 	empty = "None set",
 }: {
-	items: ReadonlyArray<InventoryVariable>;
-	inherited?: ReadonlyArray<InventoryVariable>;
-	scopeOf: (variable: InventoryVariable) => Record<string, unknown>;
+	items: ReadonlyArray<AnsibleVariable>;
+	inherited?: ReadonlyArray<AnsibleVariable>;
+	scopeOf: (variable: AnsibleVariable) => Record<string, unknown>;
 	onRemove?: () => void;
 	empty?: string;
 }) {
-	const remove = useApiAction("inventory_variables", "remove");
+	const remove = useApiAction("ansible_variables", "remove");
 	// The delete icon belongs to the chip, which clones it to attach its own
 	// handler, so it takes the blocked treatment directly rather than a wrapper.
 	const removal = useGradedActivation({
-		calls: "inventory_variables/remove",
-		action: "Remove inventory variable",
+		calls: "ansible_variables/remove",
+		action: "Remove Ansible variable",
 	});
 
 	if (items.length === 0) {
@@ -518,7 +518,7 @@ function SetVariable({
 	const [name, setName] = useState("");
 	const [value, setValue] = useState("");
 	const [secret, setSecret] = useState(false);
-	const set = useApiAction("inventory_variables", "set");
+	const set = useApiAction("ansible_variables", "set");
 
 	const scope =
 		where === GROUP
@@ -585,8 +585,8 @@ function SetVariable({
 					label="Secret"
 				/>
 				<GradedAction
-					calls="inventory_variables/set"
-					action="Set inventory variable"
+					calls="ansible_variables/set"
+					action="Set Ansible variable"
 				>
 					<Button
 						variant="outlined"

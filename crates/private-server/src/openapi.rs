@@ -29,7 +29,7 @@ use utoipa::{
 		(name = "healthchecks", description = "Healthcheck catalog: severities, conditional rules, and sample data."),
 		(name = "identity", description = "Canopy as an OpenID Connect issuer: its signing keys, the relying parties it issues identity tokens for, and which machines and applications hold grants."),
 		(name = "incidents", description = "Operational incidents (groups of issues against a server)."),
-		(name = "inventory", description = "An environment's applications and the variables that configure them, for the tooling that configures them."),
+		(name = "ansible", description = "What Ansible is served for an environment: its machines and the variables that configure them, the lease a run holds, and the run state."),
 		(name = "issues", description = "Per-server issues raised from device events."),
 		(name = "kubernetes_clusters", description = "The Kubernetes cluster registry: registering a cluster and its relay, and confirming the relay is answering."),
 		(name = "machines", description = "The hosts applications run on: their group, location, and monitoring."),

@@ -5,6 +5,7 @@
 
 mod abandoned_grain_migration;
 mod admins;
+mod ansible_variables;
 mod application_certificates;
 mod application_empty_update;
 mod application_reported_key;
@@ -45,7 +46,6 @@ mod incident_result_semantics;
 mod incident_stats;
 mod incident_stranded_membership;
 mod instanced_checks;
-mod inventory_variables;
 mod issue_list_filters;
 mod machine_enrollment;
 mod machine_restore_window;

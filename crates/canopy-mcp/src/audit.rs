@@ -67,8 +67,8 @@ impl CanopyMcp {
 		               was never settled and may or may not have taken effect. Reaches back at \
 		               most 90 days (window_days) and no further, even for entries Canopy keeps \
 		               longer; older entries are read from the operator interface. Actions taken \
-		               at high volume, such as issuing backup credentials or reading an \
-		               inventory, are left out unless include_routine is set or the action is \
+		               at high volume, such as issuing backup credentials or serving an \
+		               environment to Ansible, are left out unless include_routine is set or the action is \
 		               named."
 	)]
 	async fn find_audit_entries(

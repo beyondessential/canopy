@@ -28,8 +28,8 @@ use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::ansible_leases::AnsibleLease;
 use crate::applications::Application;
-use crate::inventory_leases::InventoryLease;
 use crate::issues::Scope;
 use crate::machines::Machine;
 use crate::server_groups::{ServerGroup, environment_name};
@@ -590,9 +590,9 @@ impl MaintenanceWindow {
 					// A run lease taken on what the window covers while it moves
 					// would be served against a window that has gone, so the move
 					// and the take queue on the group's row.
-					// spec: INV#work-under-way
+					// spec: ANSRUN#work-under-way
 					if let Some(group) = group_of(conn, from).await? {
-						crate::inventory_leases::lock_group(conn, group).await?;
+						crate::ansible_leases::lock_group(conn, group).await?;
 					}
 					window.check_movable(conn, from, to, now).await?;
 					let latest = MaintenanceWindowMove::latest_for_window(conn, id).await?;
@@ -722,13 +722,13 @@ impl MaintenanceWindow {
 
 	/// A live run lease on an environment this window covers, held by an
 	/// operator the window speaks for: the declarer, or the standing amender.
-	// spec: INV#work-under-way
+	// spec: ANSRUN#work-under-way
 	async fn serving_lease(
 		&self,
 		db: &mut AsyncPgConnection,
 		grain: Grain,
 		now: Timestamp,
-	) -> Result<Option<InventoryLease>> {
+	) -> Result<Option<AnsibleLease>> {
 		// The one environment the grain is in, or for a group's own window
 		// every environment it has a lease on, whether or not anything in it is
 		// still ranked at that rank.
@@ -744,11 +744,9 @@ impl MaintenanceWindow {
 			}
 			(Scope::Group(_), None) | (Scope::Cluster(_) | Scope::Global, _) => None,
 		};
-		let leases: Vec<InventoryLease> = match (grain.scope(), grain.rank(), environment) {
-			(Scope::Group(group_id), None, _) => {
-				InventoryLease::open_for_group(db, group_id).await?
-			}
-			(_, _, Some((group, rank))) => InventoryLease::open_for(db, group, rank)
+		let leases: Vec<AnsibleLease> = match (grain.scope(), grain.rank(), environment) {
+			(Scope::Group(group_id), None, _) => AnsibleLease::open_for_group(db, group_id).await?,
+			(_, _, Some((group, rank))) => AnsibleLease::open_for(db, group, rank)
 				.await?
 				.into_iter()
 				.collect(),
@@ -856,7 +854,7 @@ impl MaintenanceWindow {
 	/// the group's environments is not over this one. A window past its
 	/// expected end stays open until the sweep stamps it, so pair with
 	/// [`Self::holds_at`].
-	// spec: INV#work-under-way
+	// spec: ANSRUN#work-under-way
 	pub async fn open_over(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
@@ -883,7 +881,7 @@ impl MaintenanceWindow {
 	/// holding over the environment that belongs to somebody else. Taking a
 	/// lease and the group page read the same windows this way, so they cannot
 	/// disagree.
-	// spec: INV#work-under-way
+	// spec: ANSRUN#work-under-way
 	pub fn refusing_run<'a>(windows: &'a [Self], login: &str, now: Timestamp) -> Option<&'a Self> {
 		windows.iter().find(|window| {
 			window.holds_at(now)

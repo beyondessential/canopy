@@ -1,13 +1,13 @@
-//! An environment's inventory: the machines a configuration run acts on, the
+//! What Ansible is served for an environment: the machines a configuration run acts on, the
 //! applications each carries, the address each is reached at, and the
 //! variables that configure them.
 //!
 //! Assembled from what canopy already holds (group membership, rank, the
 //! applications on each machine, and the tailnet name of the device bound to
 //! it) plus the variables set against the group, the environment, and the
-//! machine (see [`super::inventory_variables`]).
+//! machine (see [`super::ansible_variables`]).
 //!
-//! An environment holds at most one run lease and the inventory is served to
+//! An environment holds at most one run lease and the environment is served to
 //! its holder alone, so two runs never act on one environment at once. It
 //! carries secret values, so it is served to an administrator.
 // spec: INV
@@ -29,10 +29,10 @@ use commons_types::{
 };
 use database::{
 	Device,
+	ansible_leases::{AnsibleLease, RunIntent},
+	ansible_variables::{AnsibleVariable, VariableScope},
 	applications::Application,
 	audit::{Action, Record, RecordKind},
-	inventory_leases::{InventoryLease, RunIntent},
-	inventory_variables::{InventoryVariable, VariableScope},
 	machines::Machine,
 	maintenance_windows::MaintenanceWindow,
 	server_groups::ServerGroup,
@@ -57,10 +57,10 @@ pub(super) const ANSIBLE_HOST: &str = "ansible_host";
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
-		.routes(routes!(read_only, audit(InventoryRead): for_group))
-		.routes(routes!(write, audit(InventoryLeaseTaken, InventoryLeaseTakenOver): take_lease))
-		.routes(routes!(write, audit(InventoryLeaseExtended): extend_lease))
-		.routes(routes!(write, audit(InventoryLeaseReleased): release_lease))
+		.routes(routes!(read_only, audit(AnsibleRead): for_group))
+		.routes(routes!(write, audit(AnsibleLeaseTaken, AnsibleLeaseTakenOver): take_lease))
+		.routes(routes!(write, audit(AnsibleLeaseExtended): extend_lease))
+		.routes(routes!(write, audit(AnsibleLeaseReleased): release_lease))
 		.routes(routes!(read_only, silent: run_state))
 }
 
@@ -103,16 +103,16 @@ pub struct LeaseArgs {
 	pub lease_id: Uuid,
 }
 
-/// Read an environment's inventory under a lease held on it.
+/// Read what an environment serves Ansible, under a lease held on it.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
-pub struct InventoryArgs {
+pub struct AnsibleArgs {
 	/// Identifier of the lease the run holds, from `take_lease`.
 	pub lease_id: Uuid,
 }
 
 /// One application on a machine, so a run knows what it is configuring there.
 #[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct InventoryApplication {
+pub struct AnsibleApplication {
 	/// Identifier of the application.
 	pub id: Uuid,
 	/// The application's name, or its type's where nobody has named it.
@@ -124,7 +124,7 @@ pub struct InventoryApplication {
 
 /// One machine in an environment.
 #[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct InventoryHost {
+pub struct AnsibleHost {
 	/// Identifier of the machine.
 	pub id: Uuid,
 	/// The machine's name, falling back to its identifier.
@@ -134,7 +134,7 @@ pub struct InventoryHost {
 	/// Null where canopy holds none of those.
 	pub address: Option<String>,
 	/// The applications the machine carries in this environment, by name.
-	pub applications: Vec<InventoryApplication>,
+	pub applications: Vec<AnsibleApplication>,
 	/// The effective variables: the machine's over the environment's over the
 	/// group's. This is what a run acts on.
 	pub vars: VarMap,
@@ -149,7 +149,7 @@ pub struct InventoryHost {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct RunState {
 	/// The lease holding the environment, where one holds.
-	pub lease: Option<InventoryLease>,
+	pub lease: Option<AnsibleLease>,
 	/// The window holding over the environment or over a machine in it: the
 	/// one refusing a take where one does, and otherwise the caller's own.
 	pub window: Option<MaintenanceWindow>,
@@ -157,10 +157,10 @@ pub struct RunState {
 	pub refuses: bool,
 }
 
-/// An environment's inventory.
+/// What an environment serves Ansible.
 #[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct InventoryView {
-	/// Identifier of the server group the inventory covers.
+pub struct AnsibleView {
+	/// Identifier of the server group the environment belongs to.
 	pub group_id: Uuid,
 	/// Name of the server group.
 	pub group: String,
@@ -172,7 +172,7 @@ pub struct InventoryView {
 	/// Which of `vars` are secret.
 	pub secret_vars: Vec<String>,
 	/// The environment's machines, ordered by name.
-	pub hosts: Vec<InventoryHost>,
+	pub hosts: Vec<AnsibleHost>,
 }
 
 /// Variables as a JSON object.
@@ -289,7 +289,7 @@ async fn resolve_environment(
 		)));
 	}
 
-	// The inventory environment is machine-oriented; a cluster-hosted
+	// The served environment is machine-oriented; a cluster-hosted
 	// application has no box to carry machine-scoped variables.
 	let machine_ids: Vec<Uuid> = applications
 		.iter()
@@ -309,7 +309,7 @@ async fn resolve_environment(
 
 /// The group and lease an entry about a lease names. The lease is named by the
 /// environment it holds.
-fn lease_records(group: &ServerGroup, lease: &InventoryLease) -> (Record, Record) {
+fn lease_records(group: &ServerGroup, lease: &AnsibleLease) -> (Record, Record) {
 	(
 		Record::new(RecordKind::Group, group.id, group.name.clone()),
 		Record::new(
@@ -331,12 +331,12 @@ fn lease_records(group: &ServerGroup, lease: &InventoryLease) -> (Record, Record
 #[utoipa::path(
 	post,
 	path = "/take_lease",
-	operation_id = "inventory_take_lease",
-	tag = "inventory",
+	operation_id = "ansible_take_lease",
+	tag = "ansible",
 	security(("tailscale-admin" = [])),
 	request_body = TakeLeaseArgs,
 	responses(
-		(status = 200, body = InventoryLease),
+		(status = 200, body = AnsibleLease),
 		(status = 400, description = "Neither or both of the group arguments", body = ProblemDetailsSchema),
 		(status = 404, description = "No such server group", body = ProblemDetailsSchema),
 		(status = 409, description = "Archived, empty, ambiguously named, spanning environments, held by someone else, under someone else's maintenance, or an unplanned upgrade of production", body = ProblemDetailsSchema),
@@ -346,7 +346,7 @@ pub async fn take_lease(
 	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<TakeLeaseArgs>,
-) -> Result<Json<InventoryLease>> {
+) -> Result<Json<AnsibleLease>> {
 	let mut conn = audit.begin().await?;
 	let environment = resolve_environment(&mut conn, &args.environment).await?;
 	let group = &environment.group;
@@ -354,7 +354,7 @@ pub async fn take_lease(
 	let login = admin.0.login.as_str();
 	let now = Timestamp::now();
 
-	let held = InventoryLease::open_for(&mut conn, group.id, rank).await?;
+	let held = AnsibleLease::open_for(&mut conn, group.id, rank).await?;
 	let taking_over = held
 		.as_ref()
 		.filter(|held| held.holds_for_another(Some(login), now));
@@ -385,8 +385,8 @@ pub async fn take_lease(
 	// The windows over the environment are read under the group's lock, which
 	// a window moving over any part of the group also takes, so a window cannot
 	// move off the environment between this check and the lease it lets through.
-	// spec: INV#work-under-way
-	let taken = InventoryLease::take(
+	// spec: ANSRUN#work-under-way
+	let taken = AnsibleLease::take(
 		&mut conn,
 		group.id,
 		rank,
@@ -408,7 +408,7 @@ pub async fn take_lease(
 		taken.expires_at,
 	);
 	conn.record(match previous_holder {
-		Some(previous_holder) => Action::InventoryLeaseTakenOver {
+		Some(previous_holder) => Action::AnsibleLeaseTakenOver {
 			group: group_record,
 			lease: lease_record,
 			rank,
@@ -417,7 +417,7 @@ pub async fn take_lease(
 			expires_at,
 			previous_holder,
 		},
-		None => Action::InventoryLeaseTaken {
+		None => Action::AnsibleLeaseTaken {
 			group: group_record,
 			lease: lease_record,
 			rank,
@@ -434,7 +434,7 @@ pub async fn take_lease(
 		%rank,
 		intent = %args.intent,
 		take_over = args.take_over,
-		"inventory lease taken"
+		"ansible lease taken"
 	);
 	Ok(Json(taken))
 }
@@ -447,12 +447,12 @@ pub async fn take_lease(
 #[utoipa::path(
 	post,
 	path = "/extend_lease",
-	operation_id = "inventory_extend_lease",
-	tag = "inventory",
+	operation_id = "ansible_extend_lease",
+	tag = "ansible",
 	security(("tailscale-admin" = [])),
 	request_body = LeaseArgs,
 	responses(
-		(status = 200, body = InventoryLease),
+		(status = 200, body = AnsibleLease),
 		(status = 404, description = "No such lease", body = ProblemDetailsSchema),
 		(status = 409, description = "Held by someone else, or no longer held", body = ProblemDetailsSchema),
 	),
@@ -461,24 +461,24 @@ pub async fn extend_lease(
 	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<LeaseArgs>,
-) -> Result<Json<InventoryLease>> {
+) -> Result<Json<AnsibleLease>> {
 	let mut conn = audit.begin().await?;
-	let lease = InventoryLease::get(&mut conn, args.lease_id).await?;
+	let lease = AnsibleLease::get(&mut conn, args.lease_id).await?;
 	held_by_caller(&lease, &admin.0.login)?;
 	if !lease.holds_at(Timestamp::now()) {
 		return Err(AppError::Conflict(no_longer_held(&lease, &admin.0.login)));
 	}
-	let extended = InventoryLease::extend(&mut conn, lease.id).await?;
+	let extended = AnsibleLease::extend(&mut conn, lease.id).await?;
 	let group = ServerGroup::get_by_id(&mut conn, extended.server_group_id).await?;
 	let (group_record, lease_record) = lease_records(&group, &extended);
-	conn.record(Action::InventoryLeaseExtended {
+	conn.record(Action::AnsibleLeaseExtended {
 		group: group_record,
 		lease: lease_record,
 		rank: extended.rank,
 		expires_at: extended.expires_at,
 	})
 	.await?;
-	tracing::info!(login = %admin.0.login, lease = %lease.id, "inventory lease extended");
+	tracing::info!(login = %admin.0.login, lease = %lease.id, "ansible lease extended");
 	Ok(Json(extended))
 }
 
@@ -489,8 +489,8 @@ pub async fn extend_lease(
 #[utoipa::path(
 	post,
 	path = "/release_lease",
-	operation_id = "inventory_release_lease",
-	tag = "inventory",
+	operation_id = "ansible_release_lease",
+	tag = "ansible",
 	security(("tailscale-admin" = [])),
 	request_body = LeaseArgs,
 	responses(
@@ -504,13 +504,13 @@ pub async fn release_lease(
 	Json(args): Json<LeaseArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = audit.begin().await?;
-	let lease = InventoryLease::get(&mut conn, args.lease_id).await?;
-	if !InventoryLease::release(&mut conn, lease.id, Some(&admin.0.login)).await? {
+	let lease = AnsibleLease::get(&mut conn, args.lease_id).await?;
+	if !AnsibleLease::release(&mut conn, lease.id, Some(&admin.0.login)).await? {
 		return Err(AppError::NotFound("that lease is no longer held".into()));
 	}
 	let group = ServerGroup::get_by_id(&mut conn, lease.server_group_id).await?;
 	let (group_record, lease_record) = lease_records(&group, &lease);
-	conn.record(Action::InventoryLeaseReleased {
+	conn.record(Action::AnsibleLeaseReleased {
 		group: group_record,
 		lease: lease_record,
 		rank: lease.rank,
@@ -521,7 +521,7 @@ pub async fn release_lease(
 		login = %admin.0.login,
 		lease = %lease.id,
 		held_by = lease.held_by.as_deref().unwrap_or("unknown"),
-		"inventory lease released"
+		"ansible lease released"
 	);
 	Ok(Json(()))
 }
@@ -535,8 +535,8 @@ pub async fn release_lease(
 #[utoipa::path(
 	post,
 	path = "/run_state",
-	operation_id = "inventory_run_state",
-	tag = "inventory",
+	operation_id = "ansible_run_state",
+	tag = "ansible",
 	security(("tailscale-user" = [])),
 	request_body = EnvironmentArgs,
 	responses(
@@ -555,7 +555,7 @@ pub async fn run_state(
 	let now = Timestamp::now();
 	let login = user.login.as_str();
 
-	let lease = InventoryLease::open_for(&mut conn, environment.group.id, environment.rank)
+	let lease = AnsibleLease::open_for(&mut conn, environment.group.id, environment.rank)
 		.await?
 		.filter(|lease| lease.holds_at(now));
 
@@ -582,7 +582,7 @@ pub async fn run_state(
 	}))
 }
 
-/// Serve the inventory of the environment the caller holds the lease on.
+/// Serve the environment the caller holds the lease on.
 ///
 /// Refuses a lease that is not the caller's or no longer holds, and a secret
 /// variable whose value cannot be read: a run receiving a machine that looks
@@ -590,12 +590,12 @@ pub async fn run_state(
 #[utoipa::path(
 	post,
 	path = "/for_group",
-	operation_id = "inventory_for_group",
-	tag = "inventory",
+	operation_id = "ansible_for_group",
+	tag = "ansible",
 	security(("tailscale-admin" = [])),
-	request_body = InventoryArgs,
+	request_body = AnsibleArgs,
 	responses(
-		(status = 200, body = InventoryView),
+		(status = 200, body = AnsibleView),
 		(status = 404, description = "No such lease", body = ProblemDetailsSchema),
 		(status = 409, description = "The lease is someone else's, no longer holds, the environment is gone, or two machines share an address", body = ProblemDetailsSchema),
 		(status = 502, description = "A secret variable could not be read", body = ProblemDetailsSchema),
@@ -605,10 +605,10 @@ pub async fn for_group(
 	State(state): State<AppState>,
 	audit: Audit,
 	admin: TailscaleAdmin,
-	Json(args): Json<InventoryArgs>,
-) -> Result<Json<InventoryView>> {
+	Json(args): Json<AnsibleArgs>,
+) -> Result<Json<AnsibleView>> {
 	let mut conn = state.db.get().await?;
-	let lease = InventoryLease::get(&mut conn, args.lease_id).await?;
+	let lease = AnsibleLease::get(&mut conn, args.lease_id).await?;
 	held_by_caller(&lease, &admin.0.login)?;
 	if !lease.holds_at(Timestamp::now()) {
 		return Err(AppError::Conflict(no_longer_held(&lease, &admin.0.login)));
@@ -619,7 +619,7 @@ pub async fn for_group(
 		let group = ServerGroup::get_by_id(&mut conn, lease.server_group_id).await?;
 		let (group_record, lease_record) = lease_records(&group, &lease);
 		audit
-			.read(Action::InventoryRead {
+			.read(Action::AnsibleRead {
 				group: group_record,
 				lease: lease_record,
 				rank: lease.rank,
@@ -659,20 +659,20 @@ pub async fn for_group(
 	let mut wide = Scoped::read(
 		&state,
 		group_scope,
-		&InventoryVariable::list_at(&mut conn, group_scope).await?,
+		&AnsibleVariable::list_at(&mut conn, group_scope).await?,
 	)
 	.await?;
 	wide.overlay(
 		&Scoped::read(
 			&state,
 			environment_scope,
-			&InventoryVariable::list_at(&mut conn, environment_scope).await?,
+			&AnsibleVariable::list_at(&mut conn, environment_scope).await?,
 		)
 		.await?,
 	);
 
-	let mut by_machine: BTreeMap<Uuid, Vec<InventoryVariable>> = BTreeMap::new();
-	for variable in InventoryVariable::list_for_machines(&mut conn, &machine_ids).await? {
+	let mut by_machine: BTreeMap<Uuid, Vec<AnsibleVariable>> = BTreeMap::new();
+	for variable in AnsibleVariable::list_for_machines(&mut conn, &machine_ids).await? {
 		if let Some(machine_id) = variable.machine_id {
 			by_machine.entry(machine_id).or_default().push(variable);
 		}
@@ -721,13 +721,13 @@ pub async fn for_group(
 					.find_map(|application| host_of(application))
 			});
 
-		hosts.push(InventoryHost {
+		hosts.push(AnsibleHost {
 			id: machine.id,
 			name: machine.name.clone(),
 			address,
 			applications: on_machine
 				.into_iter()
-				.map(|application| InventoryApplication {
+				.map(|application| AnsibleApplication {
 					id: application.id,
 					name: application.display_name(),
 					r#type: application.r#type.clone(),
@@ -747,10 +747,10 @@ pub async fn for_group(
 		%rank,
 		intent = %lease.intent,
 		lease = %lease.id,
-		"inventory served"
+		"ansible served"
 	);
 
-	Ok(Json(InventoryView {
+	Ok(Json(AnsibleView {
 		group_id: group.id,
 		group: group.name,
 		rank,
@@ -771,7 +771,7 @@ fn window_operator(window: &MaintenanceWindow) -> Option<&str> {
 
 /// Two machines at one address would have a run configure one box twice and
 /// leave the other untouched.
-fn reject_shared_address(hosts: &[InventoryHost]) -> Result<()> {
+fn reject_shared_address(hosts: &[AnsibleHost]) -> Result<()> {
 	let mut seen: BTreeMap<&str, &str> = BTreeMap::new();
 	for host in hosts {
 		let Some(address) = host.address.as_deref() else {
@@ -801,11 +801,11 @@ impl Scoped {
 	async fn read(
 		state: &AppState,
 		scope: VariableScope,
-		variables: &[InventoryVariable],
+		variables: &[AnsibleVariable],
 	) -> Result<Self> {
 		let secrets: BTreeMap<String, SecretString> =
 			if variables.iter().any(|variable| variable.is_secret) {
-				super::inventory_variables::secret_store(state)?
+				super::ansible_variables::secret_store(state)?
 					.try_read_secret_keys(&scope.secret_name())
 					.await?
 					.unwrap_or_default()
@@ -824,7 +824,7 @@ impl Scoped {
 							variable.name
 						))
 					})?;
-					// Exposed once, into the value this inventory exists to
+					// Exposed once, into the value this serving exists to
 					// serve to the run holding the lease.
 					let held = held.expose_secret();
 					serde_json::from_str(held).unwrap_or_else(|_| Value::String(held.to_owned()))
@@ -859,7 +859,7 @@ fn host_of(application: &Application) -> Option<String> {
 		.and_then(|host| host.0.host_str().map(str::to_owned))
 }
 
-fn held_by_caller(lease: &InventoryLease, login: &str) -> Result<()> {
+fn held_by_caller(lease: &AnsibleLease, login: &str) -> Result<()> {
 	match lease.held_by.as_deref() {
 		Some(who) if who == login => Ok(()),
 		_ => Err(AppError::Conflict(lease.held_by_another())),
@@ -869,15 +869,15 @@ fn held_by_caller(lease: &InventoryLease, login: &str) -> Result<()> {
 /// Why a lease stopped holding, which decides whether taking another is the
 /// whole answer: an operator whose lease was taken over is walking into work
 /// somebody else has started.
-fn no_longer_held(lease: &InventoryLease, login: &str) -> String {
+fn no_longer_held(lease: &AnsibleLease, login: &str) -> String {
 	match lease.released_by.as_deref() {
 		Some(who) if who != login => {
 			format!("that lease was taken over by {who}; talk to them before taking another")
 		}
 		Some(_) => {
-			"that lease has been released; take one again before reading the inventory".into()
+			"that lease has been released; take one again before reading the environment".into()
 		}
-		None => "that lease has expired; take one again before reading the inventory".into(),
+		None => "that lease has expired; take one again before reading the environment".into(),
 	}
 }
 

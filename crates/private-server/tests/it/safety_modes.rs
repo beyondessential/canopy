@@ -64,7 +64,7 @@ async fn a_read_only_session_is_refused_a_higher_graded_request() {
 		// A write-graded one is refused, and says so as a mode refusal: the
 		// operator can make this request once they raise.
 		let refused = private
-			.post("/api/inventory_variables/set")
+			.post("/api/ansible_variables/set")
 			.add_header("Tailscale-User-Login", OPERATOR)
 			.add_header("Tailscale-User-Name", "Operator")
 			.add_header(SESSION_HEADER, &id)
@@ -120,7 +120,7 @@ async fn the_ladder_holds_downwards_and_lowering_ends_a_raise() {
 		// group does not exist, so this fails on its way to the database — what
 		// matters is that it is not turned away at the boundary.
 		let write_graded = private
-			.post("/api/inventory_variables/set")
+			.post("/api/ansible_variables/set")
 			.add_header("Tailscale-User-Login", OPERATOR)
 			.add_header("Tailscale-User-Name", "Operator")
 			.add_header(SESSION_HEADER, &id)
@@ -282,7 +282,7 @@ async fn an_unknown_session_reads_as_read_only_rather_than_being_refused() {
 		// A higher-graded request from it reads as read-only, so it is a mode
 		// refusal rather than a rejection of the identifier.
 		let refused = private
-			.post("/api/inventory_variables/set")
+			.post("/api/ansible_variables/set")
 			.add_header("Tailscale-User-Login", OPERATOR)
 			.add_header("Tailscale-User-Name", "Operator")
 			.add_header(SESSION_HEADER, &unknown)

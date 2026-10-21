@@ -10,6 +10,8 @@ use jiff::SignedDuration;
 use tokio::time::{Instant, timeout};
 
 pub mod admins;
+pub mod ansible_leases;
+pub mod ansible_variables;
 pub mod application_certificate_names;
 pub mod application_certificates;
 pub mod application_names;
@@ -27,8 +29,6 @@ pub mod devices;
 pub mod dns_name_dispositions;
 pub mod dns_names;
 pub mod identity;
-pub mod inventory_leases;
-pub mod inventory_variables;
 pub mod issues;
 pub mod kubernetes_clusters;
 pub mod machine_enrollment_challenges;

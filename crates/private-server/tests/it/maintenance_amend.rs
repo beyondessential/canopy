@@ -345,7 +345,7 @@ async fn a_leased_windows_choices_say_it_cannot_move() {
 			.await
 			.json();
 		conn.batch_execute(&format!(
-			"INSERT INTO inventory_leases (server_group_id, rank, intent, held_by, expires_at) \
+			"INSERT INTO ansible_leases (server_group_id, rank, intent, held_by, expires_at) \
 			 VALUES ('{GROUP}', 'production', 'configure', 'admin@localhost', NOW() + INTERVAL '1 hour')"
 		))
 		.await
