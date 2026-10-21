@@ -123,7 +123,10 @@ export default function AnsibleImportDialog({
 		preview?.hosts.some(
 			(host) => host.state === "unmatched" || host.state === "ambiguous",
 		) ?? false;
-	const blocked = preview === null || !preview.can_apply || applying.pending;
+	// Applied only as the preview on screen describes it, so not while the next
+	// one is being worked out.
+	const blocked =
+		preview === null || !preview.can_apply || previewing.pending || applying.pending;
 
 	return (
 		<Dialog open={open} onClose={close} fullWidth maxWidth="md">

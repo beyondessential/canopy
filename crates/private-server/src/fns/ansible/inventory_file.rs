@@ -91,8 +91,11 @@ enum Frame {
 #[derive(Default)]
 struct Builder {
 	stack: Vec<Frame>,
+	/// The height of what each open frame holds so far, beside it.
+	heights: Vec<usize>,
 	root: Option<Node>,
-	anchors: HashMap<usize, Node>,
+	/// Each anchored node, with its height.
+	anchors: HashMap<usize, (Node, usize)>,
 	/// Lines that hold the text of a block scalar, which a `#` on does not
 	/// begin a comment.
 	block_lines: BTreeSet<usize>,
@@ -127,7 +130,11 @@ impl Node {
 }
 
 impl Builder {
-	fn push(&mut self, node: Node) {
+	/// Place a node of `height` levels in what is open.
+	fn push(&mut self, node: Node, height: usize) {
+		if let Some(held) = self.heights.last_mut() {
+			*held = (*held).max(height);
+		}
 		match self.stack.last_mut() {
 			None => self.root = Some(node),
 			Some(Frame::Seq { items, .. }) => items.push(node),
@@ -138,10 +145,16 @@ impl Builder {
 		}
 	}
 
-	fn anchor(&mut self, id: usize, node: &Node) {
+	fn anchor(&mut self, id: usize, node: &Node, height: usize) {
 		if id > 0 {
-			self.anchors.insert(id, node.clone());
+			self.anchors.insert(id, (node.clone(), height));
 		}
+	}
+
+	fn refuse_as_too_deep(&mut self) {
+		self.too_deep = true;
+		self.stack.clear();
+		self.heights.clear();
 	}
 }
 
@@ -153,8 +166,7 @@ impl MarkedEventReceiver for Builder {
 		if matches!(event, Event::SequenceStart(..) | Event::MappingStart(..))
 			&& self.stack.len() >= DEPTH_LIMIT
 		{
-			self.too_deep = true;
-			self.stack.clear();
+			self.refuse_as_too_deep();
 			return;
 		}
 		match event {
@@ -165,40 +177,55 @@ impl MarkedEventReceiver for Builder {
 						.extend(mark.line()..mark.line() + text.lines().count().max(1));
 				}
 				let node = Node::Scalar { text, style, tag };
-				self.anchor(id, &node);
-				self.push(node);
+				self.anchor(id, &node, 1);
+				self.push(node, 1);
 			}
-			Event::SequenceStart(anchor, _) => self.stack.push(Frame::Seq {
-				anchor,
-				items: Vec::new(),
-			}),
-			Event::MappingStart(anchor, _) => self.stack.push(Frame::Map {
-				anchor,
-				pairs: Vec::new(),
-				key: None,
-			}),
+			Event::SequenceStart(anchor, _) => {
+				self.stack.push(Frame::Seq {
+					anchor,
+					items: Vec::new(),
+				});
+				self.heights.push(0);
+			}
+			Event::MappingStart(anchor, _) => {
+				self.stack.push(Frame::Map {
+					anchor,
+					pairs: Vec::new(),
+					key: None,
+				});
+				self.heights.push(0);
+			}
 			Event::SequenceEnd => {
 				if let Some(Frame::Seq { anchor, items }) = self.stack.pop() {
+					let height = self.heights.pop().unwrap_or_default() + 1;
 					let node = Node::Seq(items);
-					self.anchor(anchor, &node);
-					self.push(node);
+					self.anchor(anchor, &node, height);
+					self.push(node, height);
 				}
 			}
 			Event::MappingEnd => {
 				if let Some(Frame::Map { anchor, pairs, .. }) = self.stack.pop() {
+					let height = self.heights.pop().unwrap_or_default() + 1;
 					let node = Node::Map(pairs);
-					self.anchor(anchor, &node);
-					self.push(node);
+					self.anchor(anchor, &node, height);
+					self.push(node, height);
 				}
 			}
 			Event::Alias(id) => {
-				if let Some(node) = self.anchors.get(&id).cloned() {
+				if let Some((node, height)) = self.anchors.get(&id).cloned() {
+					// An alias places its anchor's whole tree where it stands, so
+					// the tree is held to the depth a file may nest as though it
+					// had been written out there.
+					if self.stack.len() + height > DEPTH_LIMIT + 1 {
+						self.refuse_as_too_deep();
+						return;
+					}
 					self.aliased = self.aliased.saturating_add(node.weight());
 					if self.aliased > ALIAS_BUDGET {
 						self.too_many_aliases = true;
 						return;
 					}
-					self.push(node);
+					self.push(node, height);
 				}
 			}
 			Event::Nothing
@@ -891,6 +918,24 @@ mod tests {
 		// Far deeper is refused too, by the parser's own limit before ours.
 		assert!(parse(&nested(5_000)).is_err());
 		assert!(parse(&nested(20)).is_ok());
+	}
+
+	#[test]
+	fn refuses_aliases_that_stack_trees_deeper_than_a_file_may_nest() {
+		// Each anchor is shallow, but each holds the one before it, so placed
+		// together they nest far past the limit.
+		let mut text = String::from("all:\n  vars:\n    a0: &a0 [[[[[[[[[[x]]]]]]]]]]\n");
+		for level in 1..40 {
+			let previous = level - 1;
+			text.push_str(&format!(
+				"    a{level}: &a{level} [[[[[[[[[[*a{previous}]]]]]]]]]]\n"
+			));
+		}
+		let refused = parse(&text).unwrap_err();
+		assert!(refused.0.contains("levels deep"), "{refused}");
+
+		let shallow = "all:\n  vars:\n    a: &a [[x]]\n    b: [[*a]]\n";
+		assert_eq!(parse(shallow).unwrap().environment["b"], json!([[[["x"]]]]));
 	}
 
 	#[test]
