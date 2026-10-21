@@ -67,9 +67,9 @@ Steps:
 - The empty-machine assignments the dialog makes are held on the lease, as machine id → application type. A served member with no applications carries its assigned type, and the plugin groups by it as it would by an application (the infra plugin needs the change, and LNXANS's "Inventory" grouping rule needs a sentence for it).
 - The preset run buttons appear when the environment holds a `tamanu-*` application. The facility default applies when it holds a `tamanu-central`.
 
-- [ ] Rebuild `resolve_environment` from the group's live machines (`Machine::environment_rank` / `environment_ranks`), taking the applications on them, and refuse only a group with nothing ranked
-- [ ] Serve only members with a bound device or a reported application, leaving the rest out rather than refusing the environment
-- [ ] Derive the SPA's environment picker from machine ranks too
+- [x] Rebuild `resolve_environment` from the group's live machines (`Machine::environment_rank` / `environment_ranks`), taking the applications on them, and refuse only a group with nothing ranked
+- [x] Serve only members with a bound device or a reported application, leaving the rest out rather than refusing the environment
+- [x] Derive the SPA's environment picker from machine ranks too
 
 ## Audit
 

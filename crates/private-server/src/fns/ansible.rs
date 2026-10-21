@@ -12,6 +12,8 @@
 //! carries secret values, so it is served to an administrator.
 // spec: INV
 
+mod hosts;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use algae_cli::passphrases::{ExposeSecret, SecretString};
@@ -129,6 +131,10 @@ pub struct AnsibleHost {
 	pub id: Uuid,
 	/// The machine's name, falling back to its identifier.
 	pub name: String,
+	/// What a run's limit and output name the machine by: the first label of
+	/// its tailnet name, or its address, or its Canopy name where that would
+	/// leave two machines the same.
+	pub host_name: String,
 	/// The address to reach it at: an `ansible_host` variable, the tailnet name
 	/// of the device bound to it, or the recorded host of an application on it.
 	/// Null where canopy holds none of those.
@@ -241,23 +247,19 @@ async fn resolve_environment(
 		)));
 	}
 
-	let members = Application::list_live_in_group(conn, group.id).await?;
-	if members.is_empty() {
-		return Err(AppError::Conflict(format!(
-			"server group {:?} has no live members",
-			group.name
-		)));
-	}
-
-	// A pending application is in no environment, so the group's environments
-	// are the ranks its ranked applications sit at.
+	let live = Machine::list_for_group(conn, group.id).await?;
+	// A machine is in the environment its rank names, whether or not anything
+	// on it has reported yet, and a pending one is in none.
 	// spec: GRP#environments
-	let ranks: BTreeSet<ServerRank> = members
-		.iter()
-		.filter_map(|application| application.rank)
-		.collect();
+	let ranks: BTreeSet<ServerRank> = live.iter().filter_map(Machine::environment_rank).collect();
 	let rank = match args.rank {
-		Some(rank) => rank,
+		Some(rank) if ranks.contains(&rank) => rank,
+		Some(rank) => {
+			return Err(AppError::Conflict(format!(
+				"server group {:?} has no machine at rank {rank}",
+				group.name
+			)));
+		}
 		None if ranks.len() > 1 => {
 			return Err(AppError::Conflict(format!(
 				"server group {:?} holds {} environments ({}); name the rank",
@@ -278,26 +280,35 @@ async fn resolve_environment(
 		})?,
 	};
 
-	let applications: Vec<Application> = members
+	let at_rank: Vec<Machine> = live
 		.into_iter()
-		.filter(|application| application.rank == Some(rank))
+		.filter(|machine| machine.environment_rank() == Some(rank))
 		.collect();
-	if applications.is_empty() {
-		return Err(AppError::Conflict(format!(
-			"server group {:?} has no live application at rank {rank}",
-			group.name
-		)));
-	}
+	let at_rank_ids: BTreeSet<Uuid> = at_rank.iter().map(|machine| machine.id).collect();
+	let applications: Vec<Application> = Application::list_live_in_group(conn, group.id)
+		.await?
+		.into_iter()
+		.filter(|application| {
+			application
+				.machine_id
+				.is_some_and(|machine| at_rank_ids.contains(&machine))
+		})
+		.collect();
 
-	// The served environment is machine-oriented; a cluster-hosted
-	// application has no box to carry machine-scoped variables.
-	let machine_ids: Vec<Uuid> = applications
-		.iter()
-		.filter_map(|application| application.machine_id)
-		.collect::<BTreeSet<_>>()
+	// A run reaches a machine only once a device is bound to it or something on
+	// it has reported, so the rest are left out rather than refusing the
+	// environment: a run is how a bound machine's applications get there.
+	// spec: INV#what-a-run-is-served
+	let machines: Vec<Machine> = at_rank
 		.into_iter()
+		.filter(|machine| {
+			machine.device_id.is_some()
+				|| applications.iter().any(|application| {
+					application.machine_id == Some(machine.id)
+						&& application.registered_at.is_some()
+				})
+		})
 		.collect();
-	let machines = Machine::get_many(conn, &machine_ids).await?;
 
 	Ok(Environment {
 		group,
@@ -696,6 +707,7 @@ pub async fn for_group(
 		.await?;
 
 	let mut hosts = Vec::with_capacity(machines.len());
+	let mut tailnet_named_by_machine = Vec::with_capacity(machines.len());
 	for (machine, own) in machines.iter().zip(owned) {
 		let mut effective = wide.clone();
 		effective.overlay(&own);
@@ -704,26 +716,33 @@ pub async fn for_group(
 			.iter()
 			.filter(|application| application.machine_id == Some(machine.id))
 			.collect();
-		let address = effective
+		let (address, tailnet_named) = match effective
 			.vars
 			.0
 			.get(ANSIBLE_HOST)
 			.and_then(Value::as_str)
 			.map(str::to_owned)
-			.or_else(|| {
-				machine
-					.device_id
-					.and_then(|device| tailnet.get(&device).cloned())
-			})
-			.or_else(|| {
-				on_machine
-					.iter()
-					.find_map(|application| host_of(application))
-			});
+		{
+			Some(address) => (Some(address), false),
+			None => match machine
+				.device_id
+				.and_then(|device| tailnet.get(&device).cloned())
+			{
+				Some(name) => (Some(name), true),
+				None => (
+					on_machine
+						.iter()
+						.find_map(|application| host_of(application)),
+					false,
+				),
+			},
+		};
+		tailnet_named_by_machine.push(tailnet_named);
 
 		hosts.push(AnsibleHost {
 			id: machine.id,
 			name: machine.name.clone(),
+			host_name: String::new(),
 			address,
 			applications: on_machine
 				.into_iter()
@@ -737,6 +756,21 @@ pub async fn for_group(
 			own_vars: own.vars,
 			secret_vars: effective.secret.into_iter().collect(),
 		});
+	}
+	let names = hosts::host_names(
+		&hosts
+			.iter()
+			.zip(&tailnet_named_by_machine)
+			.map(|(host, tailnet)| hosts::Candidate {
+				id: host.id,
+				name: &host.name,
+				address: host.address.as_deref(),
+				tailnet: *tailnet,
+			})
+			.collect::<Vec<_>>(),
+	)?;
+	for (host, name) in hosts.iter_mut().zip(names) {
+		host.host_name = name;
 	}
 	hosts.sort_by(|a, b| a.name.cmp(&b.name));
 	reject_shared_address(&hosts)?;

@@ -5583,6 +5583,12 @@ export interface components {
             /** @description The applications the machine carries in this environment, by name. */
             applications: components["schemas"]["AnsibleApplication"][];
             /**
+             * @description What a run's limit and output name the machine by: the first label of
+             *     its tailnet name, or its address, or its Canopy name where that would
+             *     leave two machines the same.
+             */
+            host_name: string;
+            /**
              * Format: uuid
              * @description Identifier of the machine.
              */

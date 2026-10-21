@@ -345,6 +345,10 @@
             },
             "type": "array"
           },
+          "host_name": {
+            "description": "What a run's limit and output name the machine by: the first label of\nits tailnet name, or its address, or its Canopy name where that would\nleave two machines the same.",
+            "type": "string"
+          },
           "id": {
             "description": "Identifier of the machine.",
             "format": "uuid",
@@ -373,6 +377,7 @@
         "required": [
           "id",
           "name",
+          "host_name",
           "applications",
           "vars",
           "own_vars",

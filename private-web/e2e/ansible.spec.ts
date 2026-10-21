@@ -1,6 +1,7 @@
 import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
+	seedMachine,
 	seedMaintenanceWindow,
 	seedServer,
 	seedServerGroup,
@@ -98,6 +99,27 @@ test.describe("group Ansible", () => {
 		const ansible = page.getByTestId("group-ansible");
 		await expect(ansible).toContainText("no environment to configure");
 		await expect(ansible.getByLabel("Environment")).toHaveCount(0);
+	});
+
+	// A machine is in the environment its rank names before anything on it has
+	// reported, so a ranked box with nothing on it is one to configure.
+	// spec: GRP#environments
+	test("offers the environment of a ranked machine with nothing on it", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
+		await seedMachine(sql, {
+			name: "kamaka-new",
+			groupId: group.id,
+			rank: "production",
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+
+		const ansible = page.getByTestId("group-ansible");
+		await expect(ansible.getByTestId("environment-production")).toBeVisible();
+		await expect(ansible).not.toContainText("no environment to configure");
 	});
 
 	// A pending application is in no environment, so a group with nothing

@@ -67,8 +67,8 @@ pub(crate) async fn insert_application_on_its_own_machine(
 	let rank = format!("'{}'", rank.unwrap_or("dev"));
 	conn.batch_execute(&format!(
 		"INSERT INTO machines (id, name, group_id) VALUES ('{machine}', '{name}', '{group}');
-		 INSERT INTO applications (id, name, type, rank, host, group_id, machine_id)
-		 VALUES ('{id}', '{name}', '{ty}', {rank}, {host}, '{group}', '{machine}')"
+		 INSERT INTO applications (id, name, type, rank, host, group_id, machine_id, registered_at)
+		 VALUES ('{id}', '{name}', '{ty}', {rank}, {host}, '{group}', '{machine}', NOW())"
 	))
 	.await
 	.expect("insert application");
@@ -1278,6 +1278,143 @@ async fn refuses_to_extend_a_lease_someone_else_holds() {
 			.json(&json!({ "lease_id": lease }))
 			.await
 			.assert_status(axum::http::StatusCode::CONFLICT);
+	})
+	.await
+}
+
+/// A machine ranked before anything has reported is already in its
+/// environment, and a bound device is enough for a run to reach it, so a run is
+/// how its applications get there.
+// spec: INV#what-a-run-is-served
+#[tokio::test(flavor = "multi_thread")]
+async fn serves_a_machine_with_a_bound_device_and_nothing_on_it() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		let machine = Uuid::new_v4();
+		let device = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO devices (id, role, tailscale_node_name)
+			 VALUES ('{device}', 'server', 'kamaka-new.tail1234.ts.net');
+			 INSERT INTO machines (id, name, group_id, rank, device_id)
+			 VALUES ('{machine}', 'kamaka-new', '{group}', 'production', '{device}')"
+		))
+		.await
+		.expect("seed a bare machine");
+
+		let body = read_served(&private, json!({ "group": "kamaka" })).await;
+		let hosts = body["hosts"].as_array().expect("hosts");
+		assert_eq!(hosts.len(), 1, "{body}");
+		assert_eq!(hosts[0]["id"], machine.to_string());
+		assert_eq!(hosts[0]["applications"], json!([]));
+		assert_eq!(hosts[0]["host_name"], "kamaka-new");
+	})
+	.await
+}
+
+/// A ranked machine with no device and nothing reported has no address a run
+/// could reach, so it is left out rather than refusing the environment.
+// spec: INV#what-a-run-is-served
+#[tokio::test(flavor = "multi_thread")]
+async fn leaves_out_a_machine_a_run_cannot_reach() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_ranked_application(
+			&mut conn,
+			group,
+			"kamaka-central",
+			"tamanu-central",
+			Some("production"),
+			Some("https://central.example.org"),
+		)
+		.await;
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (id, name, group_id, rank)
+			 VALUES (gen_random_uuid(), 'kamaka-waiting', '{group}', 'production');
+			 INSERT INTO machines (id, name, group_id, rank, deleted_at)
+			 VALUES (gen_random_uuid(), 'kamaka-gone', '{group}', 'production', NOW())"
+		))
+		.await
+		.expect("seed machines");
+
+		let body = read_served(&private, json!({ "group": "kamaka" })).await;
+		let hosts = body["hosts"].as_array().expect("hosts");
+		assert_eq!(hosts.len(), 1, "{body}");
+		assert_eq!(hosts[0]["name"], "kamaka-central");
+	})
+	.await
+}
+
+/// Two members whose tailnet names share a first label are each named by their
+/// Canopy name, so a run's limit can tell them apart.
+// spec: INV#reaching-a-machine
+#[tokio::test(flavor = "multi_thread")]
+async fn names_machines_apart_where_their_first_labels_match() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		for (name, tailnet) in [
+			("kamaka east", "box.east.tail1234.ts.net"),
+			("kamaka west", "box.west.tail1234.ts.net"),
+			("kamaka lone", "lone.west.tail1234.ts.net"),
+		] {
+			let application = insert_ranked_application(
+				&mut conn,
+				group,
+				name,
+				"tamanu-facility",
+				Some("production"),
+				None,
+			)
+			.await;
+			bind_device(&mut conn, application, tailnet).await;
+		}
+
+		let body = read_served(&private, json!({ "group": "kamaka" })).await;
+		let names: Vec<(&str, &str)> = body["hosts"]
+			.as_array()
+			.expect("hosts")
+			.iter()
+			.map(|host| {
+				(
+					host["name"].as_str().unwrap(),
+					host["host_name"].as_str().unwrap(),
+				)
+			})
+			.collect();
+		assert_eq!(
+			names,
+			[
+				("kamaka east", "kamaka-east"),
+				("kamaka lone", "lone"),
+				("kamaka west", "kamaka-west"),
+			]
+		);
+	})
+	.await
+}
+
+/// A rank no machine holds is no environment, so it is refused rather than
+/// served empty.
+// spec: GRP#environments
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_a_rank_no_machine_holds() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_ranked_application(
+			&mut conn,
+			group,
+			"kamaka-central",
+			"tamanu-central",
+			Some("production"),
+			None,
+		)
+		.await;
+
+		let refused = private
+			.post("/api/ansible/take_lease")
+			.json(&json!({ "group": "kamaka", "rank": "demo" }))
+			.await;
+		refused.assert_status(commons_tests::axum_test::http::StatusCode::CONFLICT);
+		assert!(refused.text().contains("no machine at rank demo"));
 	})
 	.await
 }

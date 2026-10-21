@@ -37,7 +37,11 @@ import { SERVER_RANK_ORDER, maintenanceTarget } from "../types";
 import DeclareMaintenanceDialog from "./DeclareMaintenanceDialog";
 import TimeAgo from "./TimeAgo";
 
-type Machine = { id: string; name?: string | null };
+type Machine = {
+	id: string;
+	name?: string | null;
+	environment_rank?: ServerRank | null;
+};
 
 /// What a configuration run receives for one of this group's environments:
 /// the machines it acts on, and the variables that configure them, with a
@@ -47,17 +51,12 @@ type Machine = { id: string; name?: string | null };
 export default function GroupAnsibleSection({
 	groupId,
 	groupName,
-	applications,
 	machines,
 	maintenanceTick,
 	onMaintenanceChange,
 }: {
 	groupId: string;
 	groupName: string;
-	applications: ReadonlyArray<{
-		machine_id: string;
-		rank?: ServerRank | null;
-	}>;
 	machines: ReadonlyArray<Machine>;
 	/// Bumped when a window over the group is declared or lifted anywhere on
 	/// the page, since that changes whether a run here could take the lease.
@@ -74,10 +73,11 @@ export default function GroupAnsibleSection({
 		[groupId, tick],
 	);
 
-	// A group's environments are the ranks its applications sit at. A pending
-	// application is in none.
+	// A group's environments are the ranks its machines sit at, whether or not
+	// anything on them has reported. A pending machine is in none.
+	// spec: GRP#environments
 	const ranks = SERVER_RANK_ORDER.filter((rank) =>
-		applications.some((application) => application.rank === rank),
+		machines.some((machine) => machine.environment_rank === rank),
 	);
 	const rank =
 		selected !== null && ranks.includes(selected) ? selected : ranks[0];
@@ -104,12 +104,8 @@ export default function GroupAnsibleSection({
 					rank={rank}
 					ranks={ranks}
 					onSelect={setSelected}
-					machines={machines.filter((machine) =>
-						applications.some(
-							(application) =>
-								application.machine_id === machine.id &&
-								application.rank === rank,
-						),
+					machines={machines.filter(
+						(machine) => machine.environment_rank === rank,
 					)}
 					variables={variables.status === "ok" ? variables.data : []}
 					onChanged={reload}

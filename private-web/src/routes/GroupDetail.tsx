@@ -43,9 +43,9 @@ import {
 export default function GroupDetail() {
 	const { id = "" } = useParams<{ id: string }>();
 	const navigate = useNavigate();
-	// A window declared or lifted below changes what a run on this group's
-	// an environment would be served, and which environments the tree marks, so the
-	// page reads one state.
+	// A window declared or lifted below changes what a run on one of this
+	// group's environments would be served, and which environments the tree
+	// marks, so the page reads one state.
 	const [maintenanceTick, setMaintenanceTick] = useState(0);
 	const detail = useApi("fleet/groups", "get", { server_group_id: id }, [
 		id,
@@ -288,7 +288,6 @@ export default function GroupDetail() {
 			<GroupAnsibleSection
 				groupId={group.id}
 				groupName={group.name}
-				applications={applications}
 				machines={machines}
 				maintenanceTick={maintenanceTick}
 				onMaintenanceChange={() => setMaintenanceTick((n) => n + 1)}
