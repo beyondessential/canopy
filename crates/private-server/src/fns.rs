@@ -83,10 +83,6 @@ pub(crate) fn generate_passphrase() -> String {
 /// were spread across three top-level prefixes. Each has its own word now, all
 /// three under `/api/fleet`.
 ///
-/// What Ansible is served was under `inventory` before the feature took its
-/// own name; the two prefixes redirect to `/api/ansible` and
-/// `/api/ansible_variables`.
-///
 /// The SPA ships with this server and calls the new prefixes, so this is not
 /// compatibility for a client we do not control — it is for a tab left open
 /// across a deploy, and for a bookmarked or scripted call.
@@ -110,11 +106,6 @@ pub fn moved_paths() -> axum::Router<crate::state::AppState> {
 		Redirect::permanent(&format!("/api/fleet/{prefix}/{rest}{query}"))
 	}
 
-	fn moved_to_ansible(prefix: &str, rest: &str, uri: &axum::http::Uri) -> Redirect {
-		let query = uri.query().map(|q| format!("?{q}")).unwrap_or_default();
-		Redirect::permanent(&format!("/api/{prefix}/{rest}{query}"))
-	}
-
 	async fn applications(Path(rest): Path<String>, OriginalUri(uri): OriginalUri) -> Redirect {
 		moved_to("applications", &rest, &uri)
 	}
@@ -124,15 +115,6 @@ pub fn moved_paths() -> axum::Router<crate::state::AppState> {
 	async fn groups(Path(rest): Path<String>, OriginalUri(uri): OriginalUri) -> Redirect {
 		moved_to("groups", &rest, &uri)
 	}
-	async fn inventory(Path(rest): Path<String>, OriginalUri(uri): OriginalUri) -> Redirect {
-		moved_to_ansible("ansible", &rest, &uri)
-	}
-	async fn inventory_variables(
-		Path(rest): Path<String>,
-		OriginalUri(uri): OriginalUri,
-	) -> Redirect {
-		moved_to_ansible("ansible_variables", &rest, &uri)
-	}
 
 	axum::Router::new()
 		// `servers` was the applications' prefix before the split gave the
@@ -141,10 +123,6 @@ pub fn moved_paths() -> axum::Router<crate::state::AppState> {
 		.route("/api/applications/{*rest}", any(applications))
 		.route("/api/machines/{*rest}", any(machines))
 		.route("/api/server_groups/{*rest}", any(groups))
-		// What Ansible is served was `inventory` before the feature took its
-		// name. The configuration plugin calls these paths until it moves.
-		.route("/api/inventory/{*rest}", any(inventory))
-		.route("/api/inventory_variables/{*rest}", any(inventory_variables))
 }
 
 pub fn routes() -> OpenApiRouter<crate::state::AppState> {

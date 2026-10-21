@@ -31,10 +31,6 @@ async fn every_old_prefix_redirects_permanently() {
 			("/api/applications/list", "/api/fleet/applications/list"),
 			("/api/machines/list", "/api/fleet/machines/list"),
 			("/api/server_groups/list", "/api/fleet/groups/list"),
-			// What Ansible is served was `inventory` before the feature took
-			// its name.
-			("/api/inventory/for_group", "/api/ansible/for_group"),
-			("/api/inventory_variables/set", "/api/ansible_variables/set"),
 		] {
 			let response = private.post(from).json(&serde_json::json!({})).await;
 			// Permanent, not temporary: these are POSTs, and only the permanent
