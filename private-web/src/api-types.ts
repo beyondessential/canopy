@@ -111,6 +111,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ansible/import_apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply an import.
+         * @description The plan is worked out again against the environment as it stands. An
+         *     import that cannot be applied, or whose machines have changed since the
+         *     preview, is refused whole; one that applies sets every variable, writes
+         *     every secret to the secret store, and appends the notes, or does none of it.
+         */
+        post: operations["ansible_import_apply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ansible/import_preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Show what importing a file would do, changing nothing.
+         * @description Reads the file, proposes the machine each host is imported onto, and lists
+         *     every variable that would be set, where, and whether as a secret.
+         */
+        post: operations["ansible_import_preview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ansible/limit_preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The machines a limit matches, as typed, so an operator sees what a run would
+         *     act on before starting it.
+         * @description The limit is evaluated as the subset of Ansible host patterns that names
+         *     hosts and groups: `:` or `,` separated, `*` and `?` globs, `!` to exclude and
+         *     `&` to intersect. A pattern outside that subset is reported rather than
+         *     previewed wrongly.
+         */
+        post: operations["ansible_limit_preview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ansible/release_lease": {
         parameters: {
             query?: never;
@@ -126,6 +194,29 @@ export interface paths {
          *     taking work over rather than the holder finishing.
          */
         post: operations["ansible_release_lease"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ansible/run_options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The machines a run on an environment acts on.
+         * @description Only the members that carry `managed_by_ansible` are listed, since the
+         *     plugin builds an inventory of those alone, each named and grouped as a run
+         *     sees it. Says whether the environment already holds a Tamanu central, of
+         *     which it holds at most one.
+         */
+        post: operations["ansible_run_options"];
         delete?: never;
         options?: never;
         head?: never;
@@ -180,6 +271,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ansible_variables/catalogue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The catalogue Canopy holds.
+         * @description It shapes how a variable is entered and which playbooks a run can start.
+         *     Null while Canopy has never read one.
+         */
+        post: operations["ansible_variables_catalogue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ansible_variables/for_group": {
         parameters: {
             query?: never;
@@ -192,8 +304,8 @@ export interface paths {
         /**
          * Everything set under a group: its own, its environments', and those of the
          *     machines in it.
-         * @description A secret's value is not among them; it is served only as part of an
-         *     what an environment serves, and only to an administrator.
+         * @description A secret's value is not among them; it is served only as part of what an
+         *     environment serves, and only to an administrator.
          */
         post: operations["ansible_variables_for_group"];
         delete?: never;
@@ -3881,8 +3993,10 @@ export interface paths {
          * @description Only what the request names changes. A new target moves the window there:
          *     it stays the same window, the target it left settles as though the window
          *     had ended over it, and what it newly covers is suspended from now. A window
-         *     declared from an upgrade plan, or one a configuration run's lease is being
-         *     served against, cannot move.
+         *     over several machines is moved by naming the machines it should cover:
+         *     those it stops covering settle as though the window had ended over them. A
+         *     window declared from an upgrade plan, or one a configuration run's lease is
+         *     being served against, cannot move.
          *     Requires admin access.
          */
         post: operations["amend"];
@@ -3902,15 +4016,17 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Declare that an application, a machine, a group, or one of a group's
-         *     environments is being worked on.
+         * Declare that an application, one or several machines, a group, or one of a
+         *     group's environments is being worked on.
          * @description Every check on the target grades to skipped while the window holds and
          *     for a settle period after it ends, so nothing on it opens or joins an
          *     incident. A window over one application leaves the rest of the box watched;
          *     one over the machine covers everything on it. Issues already in an open
          *     incident leave it, closing the incident where nothing else holds it open. A
          *     target that already has an open window has that window amended rather than
-         *     a second opened.
+         *     a second opened. Several machines of one environment are declared together
+         *     as one window covering each of them; a machine another window names cannot
+         *     be named in a second.
          *     Requires admin access.
          */
         post: operations["declare"];
@@ -3937,6 +4053,30 @@ export interface paths {
          *     per application, machine, or group, and a rank is refused.
          */
         post: operations["for_target"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/maintenance/hold": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Hold the window a run declared, giving it an expected end.
+         * @description A window a run declared lasts the run and ends when the run's lease does.
+         *     Holding it gives it an expected end instead, and it then ends as any window
+         *     does, whatever becomes of the lease. Only the operator whose run it is can
+         *     hold it. Recorded as an amendment.
+         *     Requires admin access.
+         */
+        post: operations["hold"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5583,6 +5723,11 @@ export interface components {
             /** @description The applications the machine carries in this environment, by name. */
             applications: components["schemas"]["AnsibleApplication"][];
             /**
+             * @description The application type this run assigns the machine where nothing is on it
+             *     yet, which a run groups it by as it would by an application.
+             */
+            assigned_type?: string | null;
+            /**
              * @description What a run's limit and output name the machine by: the first label of
              *     its tailnet name, or its address, or its Canopy name where that would
              *     leave two machines the same.
@@ -5611,6 +5756,13 @@ export interface components {
         /** @description A run's hold on one environment. */
         AnsibleLease: {
             /**
+             * @description The application type assigned to each machine with nothing on it, by
+             *     machine identifier.
+             */
+            assignments: {
+                [key: string]: string;
+            };
+            /**
              * Format: date-time
              * @description When it stops holding unless extended.
              */
@@ -5625,10 +5777,20 @@ export interface components {
             id: string;
             /** @description What the run holding it intends. */
             intent: components["schemas"]["RunIntent"];
+            /** @description The limit as the operator typed it. */
+            limit_pattern?: string | null;
+            /**
+             * @description The machines that limit matched, null where the run acts on the whole
+             *     environment.
+             */
+            limited_to?: string[] | null;
             /** @description What the holder said they are doing. */
             note?: string | null;
+            /** @description The playbook the lease was taken to run, where it was taken for one. */
+            playbook?: string | null;
             /** @description The rank of the environment within it. */
             rank: components["schemas"]["ServerRank"];
+            release_reason?: null | components["schemas"]["ReleaseReason"];
             /**
              * Format: date-time
              * @description When it was released, and `None` while it is still held.
@@ -5641,6 +5803,16 @@ export interface components {
              * @description The group the environment belongs to.
              */
             server_group_id: string;
+            /** @description The tags the run skips. */
+            skip_tags: string[];
+            /**
+             * Format: date-time
+             * @description When the run first read the environment under this lease. A lease is
+             *     pending until then.
+             */
+            started_at?: string | null;
+            /** @description The tags the run runs. */
+            tags: string[];
             /**
              * Format: date-time
              * @description When it was taken.
@@ -5686,6 +5858,18 @@ export interface components {
             updated_at: string;
             /** @description The value, and `None` for a secret, whose value is in the secret store. */
             value?: unknown;
+        };
+        /** @description A variable, and where the catalogue disagrees with it as it stands. */
+        AnsibleVariableView: components["schemas"]["AnsibleVariable"] & {
+            /**
+             * @description What is wrong with the variable against the catalogue as it is now: a
+             *     value that no longer matches its type, a scope it may no longer be set
+             *     at, a name that has become reserved, or a value the catalogue calls
+             *     secret that is held in the clear. Empty where it agrees, and where no
+             *     catalogue has been read. A secret's value cannot be checked, so only
+             *     where it is set is.
+             */
+            problems: string[];
         };
         /** @description What an environment serves Ansible. */
         AnsibleView: {
@@ -5949,6 +6133,19 @@ export interface components {
              * @description Id of the artifact to delete.
              */
             artifact_id: string;
+        };
+        /** @description The application type to assign a machine with nothing on it, or none. */
+        AssignmentArg: {
+            /**
+             * @description The application type the run carries it as, or null to leave it
+             *     unassigned.
+             */
+            application_type?: string | null;
+            /**
+             * Format: uuid
+             * @description The machine, which has nothing on it.
+             */
+            machine_id: string;
         };
         /** @description Request to attach a device to a Tailscale network node. */
         AttachTailscaleArgs: {
@@ -6427,6 +6624,63 @@ export interface components {
             /** @description How this type's application version is treated. */
             version_tracking: components["schemas"]["VersionTracking"];
         };
+        /** @description A playbook a run can start. */
+        CataloguePlaybook: {
+            /** @description The application types it configures, every type where absent. */
+            applications?: string[] | null;
+            /** @description What the playbook does. */
+            description?: string | null;
+            /** @description The intent a run of it is taken with. */
+            intent: components["schemas"]["RunIntent"];
+            /** @description The playbook's file name. */
+            name: string;
+            preset?: null | components["schemas"]["Preset"];
+            /** @description The tags it takes. */
+            tags: string[];
+        };
+        /** @description A variable the catalogue describes. */
+        CatalogueVariable: {
+            /** @description The application types it configures, any where absent. */
+            applications?: string[] | null;
+            /** @description The value a playbook uses where the variable is not set. */
+            default?: unknown;
+            /** @description What the variable means. */
+            description?: string | null;
+            /** @description The variable's name. */
+            name: string;
+            /** @description Whether the inventory plugin sets it for itself, so it is never stored. */
+            reserved: boolean;
+            /**
+             * @description The variable's JSON Schema, as the catalogue gives it, which is what a
+             *     form for its value is shaped by.
+             */
+            schema: unknown;
+            /** @description The scopes it may be set at, every scope where absent. */
+            scopes?: components["schemas"]["ScopeKind"][] | null;
+            /** @description Whether its value is a secret. */
+            secret: boolean;
+        };
+        /** @description What the catalogue says, and when it was read. */
+        CatalogueView: {
+            /** @description The playbooks a run can start. */
+            playbooks: components["schemas"]["CataloguePlaybook"][];
+            problem?: null | components["schemas"]["Problem"];
+            /** @description What was wrong with it. */
+            problem_detail?: string | null;
+            /**
+             * Format: date-time
+             * @description When this copy was read.
+             */
+            read_at: string;
+            /** @description The infra commit it was read at. */
+            source_commit?: string | null;
+            /** @description What it says of tags that have a documented meaning. */
+            tags: {
+                [key: string]: string;
+            };
+            /** @description The variables it describes, by name. */
+            variables: components["schemas"]["CatalogueVariable"][];
+        };
         /** @description A DNS name an application holds for certificates. */
         CertificateNameView: {
             /**
@@ -6849,6 +7103,13 @@ export interface components {
             server_group_id: string;
             /** @description Backup type whose override to remove. */
             type: string;
+        };
+        /** @description The file says the environment is a clone, or not, against what it is. */
+        CloneMismatch: {
+            /** @description Whether the environment is a clone. */
+            environment: boolean;
+            /** @description Whether the file sets `tamanu_clone`. */
+            file: boolean;
         };
         /** @description A cluster, as its page presents it. */
         Cluster: {
@@ -8314,6 +8575,35 @@ export interface components {
              */
             id: string;
         };
+        /** @description The window a run declared, and the end to give it. */
+        HoldArgs: {
+            /**
+             * Format: date-time
+             * @description When the work is expected to finish. The window ends itself then, whatever
+             *     becomes of the run's lease.
+             */
+            expected_end: string;
+            /**
+             * Format: uuid
+             * @description The window, as returned when it was listed.
+             */
+            id: string;
+        };
+        /** @description One host's machine, chosen by the operator. */
+        HostChoice: {
+            /** @description The host's key in the file. */
+            host: string;
+            /**
+             * Format: uuid
+             * @description The machine to import the host onto, or null to skip the host.
+             */
+            machine_id?: string | null;
+        };
+        /**
+         * @description How a host stands against the environment's machines.
+         * @enum {string}
+         */
+        HostState: "matched" | "assigned" | "ambiguous" | "unmatched" | "skipped";
         /** @description Identifies the declaration to operate on. */
         IdArgs: {
             /**
@@ -8340,6 +8630,125 @@ export interface components {
             issues_tokens: boolean;
             /** @description The configured keys, newest first. */
             keys: components["schemas"]["KeyView"][];
+        };
+        /** @description What an applied import did. */
+        ImportApplied: {
+            /** @description How many machines they were set on. */
+            machines: number;
+            /** @description Whether the group's notes were added to. */
+            notes_added: boolean;
+            /** @description How many variables were set. */
+            variables: number;
+        };
+        /**
+         * @description An import to apply: what was previewed, with the notes as the operator left
+         *     them.
+         */
+        ImportApplyArgs: components["schemas"]["ImportArgs"] & {
+            /**
+             * @description The identifier of the environment's machines the preview was taken
+             *     against, so an import is refused if they have changed since.
+             */
+            members: string;
+            /**
+             * @description The notes to append to the group's, as the operator left them. Omitted
+             *     to append what was proposed, and blank to append nothing.
+             */
+            notes?: string | null;
+        };
+        /** @description What the operator has chosen about the import, with the file. */
+        ImportArgs: components["schemas"]["EnvironmentArgs"] & {
+            /** @description The text of the inventory file. */
+            file: string;
+            /**
+             * @description What the operator has chosen for hosts, by the key the file gives them.
+             *     A host not named here takes what Canopy proposed.
+             */
+            hosts?: components["schemas"]["HostChoice"][];
+            /**
+             * @description Which variables the operator has marked or unmarked as secret, where the
+             *     catalogue does not decide.
+             */
+            secrets?: components["schemas"]["SecretChoice"][];
+        };
+        /** @description A host in the file, and what the import would do with it. */
+        ImportHost: {
+            /** @description The machines it matched, where it matched several. */
+            candidates: string[];
+            /** @description The host's key in the file. */
+            key: string;
+            /**
+             * Format: uuid
+             * @description The machine it would be imported onto, where it has one.
+             */
+            machine_id?: string | null;
+            /** @description How the host stands against the environment's machines. */
+            state: components["schemas"]["HostState"];
+            /** @description The variables it would set on its machine. None for a skipped host. */
+            variables: components["schemas"]["ImportVariable"][];
+        };
+        /** @description A machine of the environment a host can be imported onto. */
+        ImportMachine: {
+            /**
+             * Format: uuid
+             * @description The machine's identifier.
+             */
+            id: string;
+            /** @description The machine's name. */
+            name: string;
+        };
+        /** @description Everything the import would do, for the operator to review. */
+        ImportPreview: {
+            /** @description Whether it can be applied. */
+            can_apply: boolean;
+            /**
+             * @description Whether a catalogue is held, which decides which variables are secret
+             *     and which are reserved.
+             */
+            catalogue: boolean;
+            clone_mismatch?: null | components["schemas"]["CloneMismatch"];
+            /** @description The variables set on the environment itself. */
+            environment: components["schemas"]["ImportVariable"][];
+            /** @description Name of the group. */
+            group: string;
+            /**
+             * Format: uuid
+             * @description Identifier of the group.
+             */
+            group_id: string;
+            /** @description The file's hosts, by key. */
+            hosts: components["schemas"]["ImportHost"][];
+            /** @description The reserved variables the file sets, which are left out. */
+            left_out: string[];
+            /** @description The environment's machines, which a host can be assigned to. */
+            machines: components["schemas"]["ImportMachine"][];
+            /** @description Identifies those machines, to send back when applying. */
+            members: string;
+            /**
+             * @description The file's comments as proposed notes for the group, blank where there
+             *     are none.
+             */
+            notes: string;
+            /** @description Group variables an environment variable would override. */
+            overrides: string[];
+            /** @description What stops the import being applied, beyond a variable's own problems. */
+            problems: string[];
+            /** @description The environment imported into. */
+            rank: components["schemas"]["ServerRank"];
+        };
+        /** @description One variable the import would set. */
+        ImportVariable: {
+            /** @description Whether the catalogue decides that, so the operator cannot change it. */
+            locked: boolean;
+            /** @description The variable's name. */
+            name: string;
+            origin?: null | components["schemas"]["Origin"];
+            /** @description What breaks the rules for setting it by hand. */
+            problems: string[];
+            /** @description Whether it would be set as a secret. */
+            secret: boolean;
+            /** @description Its value, and null where it is secret, which a preview does not show. */
+            value?: unknown;
         };
         /** @description Request to add a note to an incident. */
         IncidentAddNoteArgs: {
@@ -9046,6 +9455,39 @@ export interface components {
              */
             id: string;
         };
+        /** @description A machine a limit matches. */
+        LimitMatch: {
+            /** @description The name a run addresses it by. */
+            host_name: string;
+            /**
+             * Format: uuid
+             * @description Identifier of the machine.
+             */
+            id: string;
+            /** @description The machine's name. */
+            name: string;
+        };
+        /** @description What a limit matches. */
+        LimitPreview: {
+            /** @description Why the limit cannot be evaluated, where it cannot. */
+            error?: string | null;
+            /** @description The groups a limit can name. */
+            groups: string[];
+            /** @description The host names a limit can name. */
+            hosts: string[];
+            /** @description The machines it matches. */
+            matches: components["schemas"]["LimitMatch"][];
+        };
+        /** @description A limit to evaluate against an environment's machines. */
+        LimitPreviewArgs: components["schemas"]["EnvironmentArgs"] & {
+            /**
+             * @description The types assigned to machines with nothing on them, which decide the
+             *     groups those machines are in.
+             */
+            assignments?: components["schemas"]["AssignmentArg"][];
+            /** @description The limit as an Ansible host pattern. */
+            limit: string;
+        };
         /** @description Filters for listing open incidents. */
         ListActiveArgs: {
             /**
@@ -9688,10 +10130,27 @@ export interface components {
          * @enum {string}
          */
         MaintenanceKind: "quick" | "full";
+        /** @description One machine of an environment, offered as one of several a window covers. */
+        MaintenanceMachineChoice: {
+            /**
+             * @description Offered from an incident: whether any of its failing checks are on this
+             *     machine or on an application running on it, so a choice of machines can
+             *     tell whether it covers them.
+             */
+            has_failures?: boolean | null;
+            /**
+             * Format: uuid
+             * @description The machine.
+             */
+            machine_id: string;
+            /** @description The machine's name. */
+            name: string;
+            window?: null | components["schemas"]["MaintenanceWindow"];
+        };
         /**
          * @description A target a window can cover, named the way a declaration names it: exactly
          *     one of the ids, and with the group, optionally the rank of one of its
-         *     environments.
+         *     environments; or several machines of one environment, named alone.
          */
         MaintenanceTarget: {
             /**
@@ -9704,6 +10163,13 @@ export interface components {
              * @description The machine, for a window over one box.
              */
             machine_id?: string | null;
+            /**
+             * @description Several machines of one environment, for a window over each of them. Named
+             *     alone, without the other fields: the group and environment are the
+             *     machines'. One machine is that machine's window. Offered as a choice with
+             *     none or the window's own machines until the operator picks.
+             */
+            machine_ids?: string[] | null;
             rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: uuid
@@ -9715,7 +10181,8 @@ export interface components {
         MaintenanceTargetChoice: {
             /**
              * @description Offered from an incident: whether a window here would cover every one
-             *     of its failing checks.
+             *     of its failing checks. Absent for a choice of several machines, which
+             *     covers what the machines picked do (see `has_failures`).
              */
             covers_failures?: boolean | null;
             /**
@@ -9728,6 +10195,12 @@ export interface components {
              *     environment's rank.
              */
             label: string;
+            /**
+             * @description Set for the choice of several machines of the environment, listed between
+             *     the environment and its machines: the machines to pick from, each with
+             *     the window that names it.
+             */
+            machines?: components["schemas"]["MaintenanceMachineChoice"][] | null;
             /** @description The target a window here would cover. */
             target: components["schemas"]["MaintenanceTarget"];
             window?: null | components["schemas"]["MaintenanceWindow"];
@@ -9814,10 +10287,24 @@ export interface components {
             id: string;
             /**
              * Format: uuid
+             * @description The run lease this window was declared for, while it lasts the run: its
+             *     expected end follows the lease's expiry, and it ends when the lease does.
+             *     Cleared when the window is held to an end of its own.
+             */
+            lease_id?: string | null;
+            /**
+             * Format: uuid
              * @description Set for a window over one machine, covering the machine's own checks
              *     and those of every application running on it.
              */
             machine_id?: string | null;
+            /**
+             * @description Set for a window over several machines of one environment: the machines
+             *     it names, at least two, each covered as a window over that machine alone
+             *     would. Empty for every other window, a set having no `machine_id` of its
+             *     own: it sits at its group and rank.
+             */
+            machine_ids?: string[];
             /** @description What is being done, where the operator said. */
             note?: string | null;
             rank?: null | components["schemas"]["ServerRank"];
@@ -10122,6 +10609,11 @@ export interface components {
             /** @description URL of the person's profile picture, if known. */
             profile_pic?: string | null;
         };
+        /**
+         * @description Where a variable comes from where it is not simply what the file sets.
+         * @enum {string}
+         */
+        Origin: "added" | "from_host_key";
         /** @description A single page of a paginated list response. */
         Page_BestoolSnippetInfo: {
             /** @description The items in this page. */
@@ -10549,6 +11041,11 @@ export interface components {
          * @enum {string}
          */
         PresentedKeyState: "signing" | "published" | "removable";
+        /**
+         * @description What a run of a playbook is started as.
+         * @enum {string}
+         */
+        Preset: "install" | "upgrade";
         /** @description The next firings of a cron schedule for one machine. */
         PreviewMachine: {
             /** @description The firings, in order. Each is an instant; present it in `zone`. */
@@ -10615,6 +11112,11 @@ export interface components {
              */
             state: string;
         };
+        /**
+         * @description Why the latest attempt to read the catalogue did not replace it.
+         * @enum {string}
+         */
+        Problem: "unreachable" | "invalid";
         /**
          * @description Standard error response body, returned for every non-2xx response.
          *
@@ -11029,6 +11531,11 @@ export interface components {
              */
             patch: number;
         };
+        /**
+         * @description Why a lease stopped holding.
+         * @enum {string}
+         */
+        ReleaseReason: "released" | "taken_over" | "unstarted" | "expired";
         /** @description A service that trusts Canopy as an issuer. */
         RelyingParty: {
             /**
@@ -11669,6 +12176,38 @@ export interface components {
          * @enum {string}
          */
         RunIntent: "configure" | "upgrade";
+        /** @description One machine a run acts on. */
+        RunMember: {
+            /** @description The application types on the machine. Empty for one nothing is on yet. */
+            application_types: string[];
+            /** @description The Ansible groups a run puts it in, besides `all`. */
+            groups: string[];
+            /** @description The name a run's limit and output address it by. */
+            host_name: string;
+            /**
+             * Format: uuid
+             * @description Identifier of the machine.
+             */
+            id: string;
+            /** @description The machine's name. */
+            name: string;
+        };
+        /** @description The machines a run on an environment acts on. */
+        RunOptions: {
+            /**
+             * @description Whether the environment already holds a Tamanu central, of which it holds
+             *     at most one.
+             */
+            has_central: boolean;
+            /** @description The managed members of the environment, ordered by name. */
+            members: components["schemas"]["RunMember"][];
+            /**
+             * Format: int64
+             * @description How long, in seconds, a lease waits for its run to start before Canopy
+             *     releases it.
+             */
+            pending_for_secs: number;
+        };
         /**
          * @description Outcome of a reported backup or restore run.
          * @enum {string}
@@ -11910,6 +12449,23 @@ export interface components {
              *     or one of its environments does.
              */
             server_group_id?: string | null;
+        };
+        /**
+         * @description The three places a variable is set.
+         * @enum {string}
+         */
+        ScopeKind: "group" | "environment" | "machine";
+        /** @description One variable marked or unmarked as secret by the operator. */
+        SecretChoice: {
+            /**
+             * @description The key of the host whose variable it is, or null for one of the
+             *     environment's own.
+             */
+            host?: string | null;
+            /** @description The variable's name. */
+            name: string;
+            /** @description Whether it is secret. */
+            secret: boolean;
         };
         /**
          * @description A self-alert: a problem with canopy's own operation, such as an
@@ -13208,10 +13764,26 @@ export interface components {
         };
         /** @description Take the lease on an environment, which a run holds while it runs. */
         TakeLeaseArgs: components["schemas"]["EnvironmentArgs"] & {
+            /**
+             * @description The application type each machine with nothing on it is assigned for
+             *     this run.
+             */
+            assignments?: components["schemas"]["AssignmentArg"][];
             /** @description What the run intends. Configuring where not named. */
             intent?: components["schemas"]["RunIntent"];
+            /**
+             * @description What the run is limited to, as an Ansible host pattern. The whole
+             *     environment where not given.
+             */
+            limit?: string | null;
             /** @description What the holder is doing, shown to whoever is refused meanwhile. */
             note?: string | null;
+            /** @description The playbook the run is started with, from the catalogue. */
+            playbook?: string | null;
+            /** @description The tags the run skips. */
+            skip_tags?: string[];
+            /** @description The tags the run runs. */
+            tags?: string[];
             /** @description Take over a lease another operator holds, which is audited. */
             take_over?: boolean;
         };
@@ -13938,6 +14510,156 @@ export interface operations {
             };
         };
     };
+    ansible_import_apply: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportApplyArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportApplied"];
+                };
+            };
+            /** @description Not an inventory file, or an import that breaks the rules for setting variables */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description No such server group */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The environment carries variables, its machines changed since the preview, or a host is not matched or skipped */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The secret store is unavailable */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    ansible_import_preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportPreview"];
+                };
+            };
+            /** @description Not an inventory file, or a machine that is not in the environment */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description No such server group */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The environment already carries variables, is archived, or is ambiguous */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    ansible_limit_preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LimitPreviewArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LimitPreview"];
+                };
+            };
+            /** @description No such server group */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description Archived, empty, ambiguously named, or two machines would share a host name */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     ansible_release_lease: {
         parameters: {
             query?: never;
@@ -13962,6 +14684,47 @@ export interface operations {
             };
             /** @description No such lease, or it was already released */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    ansible_run_options: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnvironmentArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOptions"];
+                };
+            };
+            /** @description No such server group */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description Archived, empty, ambiguously named, or two machines would share a host name */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -14062,6 +14825,25 @@ export interface operations {
             };
         };
     };
+    ansible_variables_catalogue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": null | components["schemas"]["CatalogueView"];
+                };
+            };
+        };
+    };
     ansible_variables_for_group: {
         parameters: {
             query?: never;
@@ -14080,7 +14862,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AnsibleVariable"][];
+                    "application/json": components["schemas"]["AnsibleVariableView"][];
                 };
             };
             /** @description No such server group */
@@ -19207,6 +19989,54 @@ export interface operations {
                 };
             };
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    hold: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HoldArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceWindow"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The window is not the caller's, so they cannot hold it */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
