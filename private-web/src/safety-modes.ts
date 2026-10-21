@@ -11,6 +11,7 @@ export const SAFETY_MODES = {
 	"admins/add": "danger",
 	"admins/delete": "danger",
 	"admins/list": "read-only",
+	"ansible_variables/catalogue": "read-only",
 	"ansible_variables/for_group": "read-only",
 	"ansible_variables/remove": "write",
 	"ansible_variables/set": "write",

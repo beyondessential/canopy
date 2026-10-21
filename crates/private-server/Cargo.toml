@@ -46,6 +46,7 @@ utoipa-swagger-ui.workspace = true
 uuid = { version = "1.23.1", features = ["serde", "v4"] }
 chbs = "0.1.1"
 algae-cli = "1.1.0"
+yaml-rust2 = "0.13.0"
 
 [dev-dependencies]
 age = { version = "0.12.1", default-features = false }

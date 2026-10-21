@@ -5,6 +5,7 @@
 //! listing what a group carries never reads one.
 // spec: ANSVAR#variables
 
+use crate::audit::{Record, RecordKind};
 use commons_errors::{AppError, Result};
 use commons_types::server::rank::ServerRank;
 use diesel::prelude::*;
@@ -80,6 +81,33 @@ impl AnsibleVariable {
 			(None, None, Some(machine_id)) => VariableScope::Machine { machine_id },
 			_ => unreachable!("ansible_variables_one_scope admits no other shape"),
 		}
+	}
+
+	/// The variable, named by where it is set and what it is called, and where
+	/// it is set, as the records an entry names, with the rank where the scope
+	/// is an environment. A variable has the same name before and after it is
+	/// set, so one that is not there yet can be named ahead of the secret store
+	/// being written.
+	pub async fn records(
+		conn: &mut AsyncPgConnection,
+		scope: VariableScope,
+		name: &str,
+	) -> Result<(Record, Record, Option<ServerRank>)> {
+		let (scope_record, rank) = match scope {
+			VariableScope::Group { group_id } => (Record::group(conn, group_id).await?, None),
+			VariableScope::Environment { group_id, rank } => {
+				(Record::group(conn, group_id).await?, Some(rank))
+			}
+			VariableScope::Machine { machine_id } => {
+				(Record::machine(conn, machine_id).await?, None)
+			}
+		};
+		let variable = Record::new(
+			RecordKind::Variable,
+			format!("{}:{name}", scope.secret_name()),
+			name,
+		);
+		Ok((variable, scope_record, rank))
 	}
 
 	/// Every variable canopy holds, sorted by name.

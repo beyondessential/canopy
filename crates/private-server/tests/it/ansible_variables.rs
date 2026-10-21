@@ -743,3 +743,283 @@ async fn refuses_an_environment_whose_machines_share_an_address() {
 	})
 	.await
 }
+
+/// A small catalogue: a typed variable, one limited to machines, a secret, and
+/// one a run sets for itself.
+fn catalogue() -> Value {
+	json!({
+		"$schema": "https://json-schema.org/draft/2020-12/schema",
+		"type": "object",
+		"properties": {
+			"ansible_port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+			"tamanu_facility_id": { "type": "string", "x-canopy": { "scope": ["machine"] } },
+			"salt": { "type": "string", "x-canopy": { "secret": true } },
+			"canopy_intent": { "type": "string", "x-canopy": { "reserved": true } }
+		},
+		"x-canopy": { "playbooks": {
+			"base-install.yml": { "description": "The host arrangement.", "intent": "configure", "tags": ["base"] }
+		} }
+	})
+}
+
+async fn read_catalogue(conn: &mut AsyncPgConnection) {
+	database::ansible_catalogue::CatalogueState::record_read(
+		conn,
+		&catalogue(),
+		Some("abc123"),
+		jiff::Timestamp::now(),
+	)
+	.await
+	.expect("read a catalogue");
+}
+
+async fn refused(
+	private: &commons_tests::axum_test::TestServer,
+	scope: Value,
+	name: &str,
+	value: Value,
+	secret: bool,
+) -> String {
+	let mut args = scope;
+	args["name"] = json!(name);
+	args["value"] = value;
+	args["secret"] = json!(secret);
+	let response = private.post("/api/ansible_variables/set").json(&args).await;
+	response.assert_status(axum::http::StatusCode::BAD_REQUEST);
+	response.json::<Value>()["detail"]
+		.as_str()
+		.expect("detail")
+		.to_owned()
+}
+
+/// A variable the catalogue describes is held to its type, its scopes and its
+/// secrecy, and a name it does not describe is free.
+// spec: ANSVAR#catalogue
+#[tokio::test(flavor = "multi_thread")]
+async fn a_variable_the_catalogue_describes_is_held_to_it() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		let (_, machine) = insert_application_on_its_own_machine(
+			&mut conn,
+			group,
+			"kamaka-central",
+			"tamanu-central",
+			Some("production"),
+			None,
+		)
+		.await;
+		let environment = json!({ "server_group_id": group, "rank": "production" });
+		let on_machine = json!({ "machine_id": machine });
+
+		// Before any catalogue has been read nothing is held to one.
+		set_var(
+			&private,
+			environment.clone(),
+			"ansible_port",
+			json!("not a port"),
+			false,
+		)
+		.await;
+		read_catalogue(&mut conn).await;
+
+		assert!(
+			refused(
+				&private,
+				environment.clone(),
+				"ansible_port",
+				json!("2222"),
+				false
+			)
+			.await
+			.contains("ansible_port")
+		);
+		assert!(
+			refused(
+				&private,
+				environment.clone(),
+				"ansible_port",
+				json!(70000),
+				false
+			)
+			.await
+			.contains("ansible_port")
+		);
+		set_var(
+			&private,
+			environment.clone(),
+			"ansible_port",
+			json!(2222),
+			false,
+		)
+		.await;
+
+		assert!(
+			refused(
+				&private,
+				environment.clone(),
+				"tamanu_facility_id",
+				json!("a"),
+				false
+			)
+			.await
+			.contains("only at machine")
+		);
+		set_var(
+			&private,
+			on_machine.clone(),
+			"tamanu_facility_id",
+			json!("a"),
+			false,
+		)
+		.await;
+
+		assert!(
+			refused(
+				&private,
+				on_machine.clone(),
+				"canopy_intent",
+				json!("configure"),
+				false
+			)
+			.await
+			.contains("by a run for itself")
+		);
+
+		assert!(
+			refused(
+				&private,
+				environment.clone(),
+				"salt",
+				json!("pepper"),
+				false
+			)
+			.await
+			.contains("is secret in the catalogue")
+		);
+		set_var(&private, environment.clone(), "salt", json!("pepper"), true).await;
+		assert!(
+			refused(
+				&private,
+				environment.clone(),
+				"ansible_port",
+				json!(22),
+				true
+			)
+			.await
+			.contains("is not secret in the catalogue")
+		);
+
+		set_var(
+			&private,
+			environment.clone(),
+			"something_new",
+			json!({ "any": [1] }),
+			false,
+		)
+		.await;
+	})
+	.await
+}
+
+/// A value set before the catalogue described it stays, marked where it no
+/// longer matches.
+// spec: ANSVAR#catalogue
+#[tokio::test(flavor = "multi_thread")]
+async fn marks_a_value_that_no_longer_matches_the_catalogue() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_ranked_application(
+			&mut conn,
+			group,
+			"kamaka-central",
+			"tamanu-central",
+			Some("production"),
+			None,
+		)
+		.await;
+		let environment = json!({ "server_group_id": group, "rank": "production" });
+		set_var(
+			&private,
+			environment.clone(),
+			"ansible_port",
+			json!("2222"),
+			false,
+		)
+		.await;
+		set_var(
+			&private,
+			environment.clone(),
+			"salt",
+			json!("pepper"),
+			false,
+		)
+		.await;
+		set_var(
+			&private,
+			environment.clone(),
+			"timezone",
+			json!("Pacific/Fiji"),
+			false,
+		)
+		.await;
+		read_catalogue(&mut conn).await;
+
+		let listed: Value = private
+			.post("/api/ansible_variables/for_group")
+			.json(&json!({ "server_group_id": group }))
+			.await
+			.json();
+		let problems = |name: &str| -> Vec<String> {
+			let variable = listed
+				.as_array()
+				.unwrap()
+				.iter()
+				.find(|variable| variable["name"] == name)
+				.unwrap_or_else(|| panic!("{name} is listed: {listed}"));
+			serde_json::from_value(variable["problems"].clone()).unwrap()
+		};
+
+		assert_eq!(problems("ansible_port").len(), 1, "{listed}");
+		assert!(problems("ansible_port")[0].contains("ansible_port"));
+		assert!(problems("salt")[0].contains("secret in the catalogue"));
+		assert!(
+			problems("timezone").is_empty(),
+			"a name the catalogue lacks is unmarked"
+		);
+	})
+	.await
+}
+
+/// The catalogue is offered to the operator interface, and null before one has
+/// been read.
+// spec: ANSVAR#catalogue
+#[tokio::test(flavor = "multi_thread")]
+async fn offers_the_catalogue_it_holds() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let none: Value = private
+			.post("/api/ansible_variables/catalogue")
+			.json(&json!({}))
+			.await
+			.json();
+		assert!(none.is_null(), "{none}");
+
+		read_catalogue(&mut conn).await;
+		let held: Value = private
+			.post("/api/ansible_variables/catalogue")
+			.json(&json!({}))
+			.await
+			.json();
+		assert_eq!(held["source_commit"], "abc123");
+		assert_eq!(held["variables"].as_array().unwrap().len(), 4);
+		assert_eq!(held["playbooks"][0]["name"], "base-install.yml");
+		assert_eq!(held["playbooks"][0]["intent"], "configure");
+		let salt = held["variables"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|variable| variable["name"] == "salt")
+			.unwrap();
+		assert_eq!(salt["secret"], true);
+	})
+	.await
+}

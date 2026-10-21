@@ -237,6 +237,84 @@ pub async fn sweep_certificate_authority(
 	Ok(())
 }
 
+/// The Ansible variable catalogue has not been read for a day, or the copy last
+/// published does not read as a catalogue. Recovers on the next good read.
+// spec: ANSVAR#catalogue
+pub const ANSIBLE_CATALOGUE_REF: &str = "ansible-catalogue";
+
+pub const ANSIBLE_CATALOGUE_DOC: &str = "## Description
+
+Canopy reads the catalogue of Ansible variables and playbooks infra publishes, and holds the variables it describes to it: their types, where they may be set, and which are secret. This alert means Canopy is working from an old copy, or from none: either it has not read one for a day, or the latest one published does not read as a catalogue.
+
+Canopy keeps using the last copy that did read, so variables are still held to something. What stops is anything newer in infra reaching them, and with no copy ever read, starting a run of any playbook from the operator interface.
+
+## Results
+
+- **warn** — the repository could not be reached for a day, or what it published does not read as a catalogue. The message says which. Recovers on the next good read.
+
+## Solve
+
+For an unreachable repository, check Canopy's egress to GitHub. For a copy that does not read, the message names what is wrong with it: fix `ansible/variables.schema.json` on infra's main branch, and Canopy reads the fix within the hour.";
+
+/// How long the catalogue may go unread before the alert warns of it.
+pub const ANSIBLE_CATALOGUE_STALE_AFTER: jiff::SignedDuration =
+	jiff::SignedDuration::from_hours(24);
+
+/// Raise or recover the [`ANSIBLE_CATALOGUE_REF`] self-alert from what Canopy
+/// holds of the catalogue and its attempts to read it.
+// spec: ANSVAR#catalogue
+pub async fn sweep_ansible_catalogue(
+	conn: &mut AsyncPgConnection,
+	now: jiff::Timestamp,
+) -> Result<Option<Issue>> {
+	use crate::ansible_catalogue::{CatalogueState, Problem};
+
+	let Some(state) = CatalogueState::get(conn).await? else {
+		return recover(conn, ANSIBLE_CATALOGUE_REF, "no read has been tried yet").await;
+	};
+
+	let (title, message) = if state.problem == Some(Problem::Invalid) {
+		(
+			"Ansible catalogue does not read",
+			format!(
+				"the catalogue infra published does not read as one: {}",
+				state.problem_detail.as_deref().unwrap_or("no reason given")
+			),
+		)
+	} else {
+		// Counted from the last good read, or from the first try where there
+		// never was one.
+		let since = state.read_at.unwrap_or(state.first_checked_at);
+		if now.duration_since(since) < ANSIBLE_CATALOGUE_STALE_AFTER {
+			return recover(conn, ANSIBLE_CATALOGUE_REF, "the catalogue was read").await;
+		}
+		(
+			"Ansible catalogue not read",
+			format!(
+				"the catalogue has not been read since {since}{}",
+				state
+					.problem_detail
+					.as_deref()
+					.map(|why| format!(": {why}"))
+					.unwrap_or_default()
+			),
+		)
+	};
+
+	raise(
+		conn,
+		ANSIBLE_CATALOGUE_REF,
+		CheckResult::Warning,
+		CheckResult::Warning,
+		false,
+		Some(ANSIBLE_CATALOGUE_DOC),
+		title,
+		&message,
+	)
+	.await
+	.map(Some)
+}
+
 /// A server has been paused long enough that a certificate has gone stale
 /// underneath the pause. Coalescing: one alert lists every server and name.
 /// Recovers when every paused server's certificates are current again — which in

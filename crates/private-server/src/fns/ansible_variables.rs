@@ -16,13 +16,18 @@ use commons_servers::{
 };
 use commons_types::{Uuid, server::rank::ServerRank};
 use database::{
+	ansible_catalogue::{
+		Catalogue, CataloguePlaybook, CatalogueState, CatalogueVariable, Loaded, Problem, ScopeKind,
+	},
 	ansible_variables::{AnsibleVariable, VariableScope},
-	audit::{Action, Pending, Record, RecordKind},
+	audit::{Action, Pending},
 	machines::Machine,
 	server_groups::ServerGroup,
 };
-use serde::Deserialize;
+use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use utoipa::ToSchema;
 
 use crate::state::AppState;
@@ -30,6 +35,7 @@ use crate::state::AppState;
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(read_only, silent: for_group))
+		.routes(routes!(read_only, silent: catalogue))
 		.routes(routes!(write, audit(AnsibleVariableSet): set))
 		.routes(routes!(write, audit(AnsibleVariableRemoved): remove))
 }
@@ -97,11 +103,25 @@ pub struct VariablesForGroupArgs {
 	pub server_group_id: Uuid,
 }
 
+/// A variable, and where the catalogue disagrees with it as it stands.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct AnsibleVariableView {
+	#[serde(flatten)]
+	pub variable: AnsibleVariable,
+	/// What is wrong with the variable against the catalogue as it is now: a
+	/// value that no longer matches its type, a scope it may no longer be set
+	/// at, a name that has become reserved, or a value the catalogue calls
+	/// secret that is held in the clear. Empty where it agrees, and where no
+	/// catalogue has been read. A secret's value cannot be checked, so only
+	/// where it is set is.
+	pub problems: Vec<String>,
+}
+
 /// Everything set under a group: its own, its environments', and those of the
 /// machines in it.
 ///
-/// A secret's value is not among them; it is served only as part of an
-/// what an environment serves, and only to an administrator.
+/// A secret's value is not among them; it is served only as part of what an
+/// environment serves, and only to an administrator.
 #[utoipa::path(
 	post,
 	path = "/for_group",
@@ -110,7 +130,7 @@ pub struct VariablesForGroupArgs {
 	security(("tailscale-user" = [])),
 	request_body = VariablesForGroupArgs,
 	responses(
-		(status = 200, body = Vec<AnsibleVariable>),
+		(status = 200, body = Vec<AnsibleVariableView>),
 		(status = 404, description = "No such server group", body = ProblemDetailsSchema),
 	),
 )]
@@ -118,36 +138,93 @@ pub async fn for_group(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
 	Json(args): Json<VariablesForGroupArgs>,
-) -> Result<Json<Vec<AnsibleVariable>>> {
+) -> Result<Json<Vec<AnsibleVariableView>>> {
 	let mut conn = state.db.get().await?;
 	ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
+	let catalogue = Loaded::get(&mut conn).await?;
 	Ok(Json(
-		AnsibleVariable::list_under_group(&mut conn, args.server_group_id).await?,
+		AnsibleVariable::list_under_group(&mut conn, args.server_group_id)
+			.await?
+			.into_iter()
+			.map(|variable| AnsibleVariableView {
+				problems: catalogue
+					.as_ref()
+					.map(|loaded| problems(&loaded.catalogue, &variable))
+					.unwrap_or_default(),
+				variable,
+			})
+			.collect(),
 	))
 }
 
-/// The variable, named by where it is set and what it is called, and where it
-/// is set, as the records an entry names. A variable has the same name before
-/// and after it is set, so one that is not there yet can be named ahead of the
-/// secret store being written.
-async fn variable_records(
-	conn: &mut database::diesel_async::AsyncPgConnection,
-	scope: VariableScope,
-	name: &str,
-) -> Result<(Record, Record, Option<ServerRank>)> {
-	let (scope_record, rank) = match scope {
-		VariableScope::Group { group_id } => (Record::group(conn, group_id).await?, None),
-		VariableScope::Environment { group_id, rank } => {
-			(Record::group(conn, group_id).await?, Some(rank))
-		}
-		VariableScope::Machine { machine_id } => (Record::machine(conn, machine_id).await?, None),
+fn problems(catalogue: &Catalogue, variable: &AnsibleVariable) -> Vec<String> {
+	let scope = ScopeKind::from(variable.scope());
+	let mut problems = match &variable.value {
+		Some(value) => catalogue.violations(scope, &variable.name, value),
+		None => catalogue.placement_violations(scope, &variable.name),
 	};
-	let variable = Record::new(
-		RecordKind::Variable,
-		format!("{}:{name}", scope.secret_name()),
-		name,
-	);
-	Ok((variable, scope_record, rank))
+	if !variable.is_secret && catalogue.is_secret(&variable.name) {
+		problems.push(format!(
+			"{:?} is secret in the catalogue but held in the clear; Canopy moves it into the secret store when it next reads the catalogue",
+			variable.name
+		));
+	}
+	problems
+}
+
+/// What the catalogue says, and when it was read.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct CatalogueView {
+	/// The variables it describes, by name.
+	pub variables: Vec<CatalogueVariable>,
+	/// The playbooks a run can start.
+	pub playbooks: Vec<CataloguePlaybook>,
+	/// What it says of tags that have a documented meaning.
+	pub tags: BTreeMap<String, String>,
+	/// The infra commit it was read at.
+	pub source_commit: Option<String>,
+	/// When this copy was read.
+	#[schema(value_type = String, format = DateTime)]
+	pub read_at: Timestamp,
+	/// Why the latest attempt to read a newer one did not replace it, where it
+	/// did not.
+	pub problem: Option<Problem>,
+	/// What was wrong with it.
+	pub problem_detail: Option<String>,
+}
+
+/// The catalogue Canopy holds.
+///
+/// It shapes how a variable is entered and which playbooks a run can start.
+/// Null while Canopy has never read one.
+#[utoipa::path(
+	post,
+	path = "/catalogue",
+	operation_id = "ansible_variables_catalogue",
+	tag = "ansible",
+	security(("tailscale-user" = [])),
+	responses(
+		(status = 200, body = Option<CatalogueView>),
+	),
+)]
+pub async fn catalogue(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+) -> Result<Json<Option<CatalogueView>>> {
+	let mut conn = state.db.get().await?;
+	let Some(loaded) = Loaded::get(&mut conn).await? else {
+		return Ok(Json(None));
+	};
+	let attempt = CatalogueState::get(&mut conn).await?;
+	Ok(Json(Some(CatalogueView {
+		variables: loaded.catalogue.variables().cloned().collect(),
+		playbooks: loaded.catalogue.playbooks().to_vec(),
+		tags: loaded.catalogue.tag_notes().clone(),
+		source_commit: loaded.source_commit,
+		read_at: loaded.read_at,
+		problem: attempt.as_ref().and_then(|state| state.problem),
+		problem_detail: attempt.and_then(|state| state.problem_detail),
+	})))
 }
 
 /// Set or replace a variable.
@@ -181,7 +258,9 @@ pub async fn set(
 
 	let mut conn = audit.begin().await?;
 	check_scope(&mut conn, scope).await?;
-	let (variable, scope_record, rank) = variable_records(&mut conn, scope, &args.name).await?;
+	check_catalogue(&mut conn, scope, &args.name, &args.value, args.secret).await?;
+	let (variable, scope_record, rank) =
+		AnsibleVariable::records(&mut conn, scope, &args.name).await?;
 	let action = |secret| Action::AnsibleVariableSet {
 		variable: variable.clone(),
 		scope: scope_record.clone(),
@@ -272,7 +351,8 @@ pub async fn remove(
 			args.name
 		)));
 	};
-	let (variable, scope_record, rank) = variable_records(&mut conn, scope, &args.name).await?;
+	let (variable, scope_record, rank) =
+		AnsibleVariable::records(&mut conn, scope, &args.name).await?;
 	let action = Action::AnsibleVariableRemoved {
 		variable,
 		scope: scope_record,
@@ -355,6 +435,36 @@ fn check_name(name: &str) -> Result<()> {
 			"{name:?} is not a usable variable name: letters, digits, `-`, `.` and `_`, \
 			 at most {NAME_LIMIT} of them, and not `.` or `..`"
 		)));
+	}
+	Ok(())
+}
+
+/// Hold a variable the catalogue describes to it: its type, the scopes it may be
+/// set at, that a run's own variables are not set, and that it is secret exactly
+/// when the catalogue says so. A name the catalogue does not describe, and any
+/// name while no catalogue has been read, is not held to anything.
+// spec: ANSVAR#catalogue
+async fn check_catalogue(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	scope: VariableScope,
+	name: &str,
+	value: &Value,
+	secret: bool,
+) -> Result<()> {
+	let Some(loaded) = Loaded::get(conn).await? else {
+		return Ok(());
+	};
+	let catalogue = &loaded.catalogue;
+	let violations = catalogue.violations(ScopeKind::from(scope), name, value);
+	if !violations.is_empty() {
+		return Err(AppError::BadRequest(violations.join("; ")));
+	}
+	if catalogue.variable(name).is_some() && catalogue.is_secret(name) != secret {
+		return Err(AppError::BadRequest(if secret {
+			format!("{name:?} is not secret in the catalogue, so it is set as a plain value")
+		} else {
+			format!("{name:?} is secret in the catalogue, so it is set as a secret")
+		}));
 	}
 	Ok(())
 }

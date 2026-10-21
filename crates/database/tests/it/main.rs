@@ -5,6 +5,7 @@
 
 mod abandoned_grain_migration;
 mod admins;
+mod ansible_catalogue;
 mod ansible_variables;
 mod application_certificates;
 mod application_empty_update;

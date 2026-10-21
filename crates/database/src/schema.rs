@@ -8,6 +8,20 @@ diesel::table! {
 }
 
 diesel::table! {
+	ansible_catalogue (id) {
+		id -> Bool,
+		document -> Nullable<Jsonb>,
+		digest -> Nullable<Text>,
+		source_commit -> Nullable<Text>,
+		read_at -> Nullable<Timestamptz>,
+		first_checked_at -> Timestamptz,
+		checked_at -> Timestamptz,
+		problem -> Nullable<Text>,
+		problem_detail -> Nullable<Text>,
+	}
+}
+
+diesel::table! {
 	ansible_leases (id) {
 		id -> Uuid,
 		server_group_id -> Uuid,
@@ -1171,6 +1185,7 @@ diesel::joinable!(versions -> devices (device_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
 	admins,
+	ansible_catalogue,
 	ansible_leases,
 	ansible_variables,
 	application_certificate_names,

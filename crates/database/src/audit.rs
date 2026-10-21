@@ -488,6 +488,20 @@ actions! {
 		detail { rank: Option<ServerRank>, secret: bool }
 	}
 
+	/// The Ansible variable catalogue Canopy reads changed, by Canopy itself
+	/// reading a different one. Naming the version it was read at.
+	AnsibleCatalogueChanged = "ansible_catalogue_changed", "Read Ansible catalogue" {
+		records { }
+		detail { commit: Option<String>, digest: String }
+	}
+
+	/// A plain Ansible variable was moved into the secret store because the
+	/// catalogue came to call it secret. The value is not recorded.
+	AnsibleVariableMadeSecret = "ansible_variable_made_secret", "Move Ansible variable into the secret store" {
+		records { variable: Record, scope: Record }
+		detail { rank: Option<ServerRank>, digest: String }
+	}
+
 	/// An upgrade plan was recorded for an environment.
 	UpgradePlanRecorded = "upgrade_plan_recorded", "Record upgrade plan" {
 		records { plan: Record, group: Record }
