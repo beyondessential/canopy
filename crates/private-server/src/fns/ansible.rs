@@ -13,6 +13,8 @@
 // spec: INV
 
 mod hosts;
+mod import;
+mod inventory_file;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -64,6 +66,8 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(write, audit(AnsibleLeaseExtended): extend_lease))
 		.routes(routes!(write, audit(AnsibleLeaseReleased): release_lease))
 		.routes(routes!(read_only, silent: run_state))
+		.routes(routes!(read_only, silent: import::import_preview))
+		.routes(routes!(write, audit(AnsibleInventoryImported): import::import_apply))
 }
 
 /// Which environment to act on: exactly one of the group's identifier or its
@@ -204,7 +208,11 @@ struct Environment {
 	group: ServerGroup,
 	rank: ServerRank,
 	applications: Vec<Application>,
+	/// The machines a run is served: those at the rank that a device is bound
+	/// to or something on has reported.
 	machines: Vec<Machine>,
+	/// Every live machine at the rank, whether or not a run can be served it.
+	at_rank: Vec<Machine>,
 }
 
 async fn resolve_group(
@@ -300,7 +308,7 @@ async fn resolve_environment(
 	// environment: a run is how a bound machine's applications get there.
 	// spec: INV#what-a-run-is-served
 	let machines: Vec<Machine> = at_rank
-		.into_iter()
+		.iter()
 		.filter(|machine| {
 			machine.device_id.is_some()
 				|| applications.iter().any(|application| {
@@ -308,6 +316,7 @@ async fn resolve_environment(
 						&& application.registered_at.is_some()
 				})
 		})
+		.cloned()
 		.collect();
 
 	Ok(Environment {
@@ -315,6 +324,7 @@ async fn resolve_environment(
 		rank,
 		applications,
 		machines,
+		at_rank,
 	})
 }
 
@@ -653,6 +663,7 @@ pub async fn for_group(
 		rank,
 		applications,
 		machines,
+		..
 	} = environment;
 
 	let machine_ids: Vec<Uuid> = machines.iter().map(|machine| machine.id).collect();
@@ -716,27 +727,12 @@ pub async fn for_group(
 			.iter()
 			.filter(|application| application.machine_id == Some(machine.id))
 			.collect();
-		let (address, tailnet_named) = match effective
-			.vars
-			.0
-			.get(ANSIBLE_HOST)
-			.and_then(Value::as_str)
-			.map(str::to_owned)
-		{
-			Some(address) => (Some(address), false),
-			None => match machine
-				.device_id
-				.and_then(|device| tailnet.get(&device).cloned())
-			{
-				Some(name) => (Some(name), true),
-				None => (
-					on_machine
-						.iter()
-						.find_map(|application| host_of(application)),
-					false,
-				),
-			},
-		};
+		let (address, tailnet_named) = reach(
+			machine,
+			effective.vars.0.get(ANSIBLE_HOST).and_then(Value::as_str),
+			&tailnet,
+			&on_machine,
+		);
 		tailnet_named_by_machine.push(tailnet_named);
 
 		hosts.push(AnsibleHost {
@@ -884,6 +880,33 @@ impl Scoped {
 			}
 		}
 	}
+}
+
+/// Where a run reaches a machine, and whether that is the tailnet name of the
+/// device bound to it: the machine's `ansible_host` variable, else that
+/// tailnet name, else the recorded host of an application on it. `None` where
+/// Canopy holds none of them.
+pub(super) fn reach(
+	machine: &Machine,
+	ansible_host: Option<&str>,
+	tailnet: &std::collections::HashMap<Uuid, String>,
+	applications: &[&Application],
+) -> (Option<String>, bool) {
+	if let Some(address) = ansible_host {
+		return (Some(address.to_owned()), false);
+	}
+	if let Some(name) = machine
+		.device_id
+		.and_then(|device| tailnet.get(&device).cloned())
+	{
+		return (Some(name), true);
+	}
+	(
+		applications
+			.iter()
+			.find_map(|application| host_of(application)),
+		false,
+	)
 }
 
 fn host_of(application: &Application) -> Option<String> {

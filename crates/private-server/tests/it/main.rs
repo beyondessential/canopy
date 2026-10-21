@@ -5,6 +5,7 @@
 
 mod admin_auth;
 mod ansible;
+mod ansible_import;
 mod ansible_variables;
 mod application_host;
 mod application_paths;

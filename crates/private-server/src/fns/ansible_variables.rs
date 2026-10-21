@@ -422,7 +422,7 @@ const NAME_LIMIT: usize = 253;
 /// The name is the key a secret's value is stored under, so every name is held
 /// to what a key may be: `.` and `..` name a path rather than a key, and a key
 /// is bounded.
-fn check_name(name: &str) -> Result<()> {
+pub(super) fn check_name(name: &str) -> Result<()> {
 	if name.is_empty()
 		|| name == "."
 		|| name == ".."

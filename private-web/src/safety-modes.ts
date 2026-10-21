@@ -17,6 +17,8 @@ export const SAFETY_MODES = {
 	"ansible_variables/set": "write",
 	"ansible/extend_lease": "write",
 	"ansible/for_group": "read-only",
+	"ansible/import_apply": "write",
+	"ansible/import_preview": "read-only",
 	"ansible/release_lease": "write",
 	"ansible/run_state": "read-only",
 	"ansible/take_lease": "write",

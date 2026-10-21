@@ -205,6 +205,18 @@ impl Records for Vec<Record> {
 	}
 }
 
+/// A variable an import set, for the entry that records it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ImportedVariable {
+	/// The variable's name.
+	pub name: String,
+	/// The name of the machine it was set on, `None` where it was set on the
+	/// environment.
+	pub machine: Option<String>,
+	/// Whether it was set as a secret.
+	pub secret: bool,
+}
+
 /// Who took an action.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -486,6 +498,14 @@ actions! {
 	AnsibleVariableRemoved = "inventory_variable_removed", "Remove Ansible variable" {
 		records { variable: Record, scope: Record }
 		detail { rank: Option<ServerRank>, secret: bool }
+	}
+
+	/// An Ansible inventory file was imported into an environment: the variables
+	/// it set, with the machine each was set on, and whether it added to the
+	/// group's notes. A secret's value is not recorded.
+	AnsibleInventoryImported = "ansible_inventory_imported", "Import Ansible inventory" {
+		records { group: Record, machines: Vec<Record> }
+		detail { rank: ServerRank, variables: Vec<ImportedVariable>, notes_added: bool }
 	}
 
 	/// The Ansible variable catalogue Canopy reads changed, by Canopy itself
