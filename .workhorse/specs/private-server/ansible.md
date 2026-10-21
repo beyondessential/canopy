@@ -141,12 +141,13 @@ Taking a lease waits only on another take of the same environment. Canopy's own 
 
 Taking a lease is refused while another operator's maintenance window holds over the environment: over its group, or over any of its machines (see [MNT](../monitoring/maintenance.md)).
 A window over one machine refuses the whole environment, since a run acts on the environment as a whole.
-A window over a machine none of the environment's applications run on refuses nothing.
+A window over a machine outside the environment refuses nothing.
 
 A run's first read under its lease declares a maintenance window over the environment, as the lease's holder, noting the playbook it runs.
 Where a window of the holder's own already covers the environment, that window serves instead and nothing new is declared.
-A window a run declared ends five minutes after the lease ends, whether released or expired, so checks settle after the run before anyone is paged.
-While it is open, its declarer can hold it, giving it an expected end as a declaration does, and it then ends like any other window, when lifted or when that end passes (see [MNT](../monitoring/maintenance.md), "Ending").
+A window a run declared ends when the lease ends, whether released or expired, and settles as any window does (see [MNT](../monitoring/maintenance.md), "Settling").
+Taking over the lease passes the window to the new holder as an amendment, so suspension does not lapse partway through the work.
+While it is open, its declarer can hold it, giving it an expected end as a declaration does, and it then no longer ends with the lease but like any other window, when lifted or when that end passes (see [MNT](../monitoring/maintenance.md), "Ending").
 The window stays over the environment while the lease is held (see [MNT](../monitoring/maintenance.md), "Moving a window").
 A target holds at most one open window, so a second operator's declaration amends the first's rather than opening one of their own.
 An amendment declares the same work, so the window is the amender's as well as the declarer's: both are served the environment it covers, and everyone else is refused and told whose work is under way.
@@ -190,7 +191,7 @@ They are Tamanu's playbooks, so they are offered only where the environment hold
 The playbooks offered, and the intent each runs with, come from the catalogue.
 
 A run can be limited to some of the environment's machines.
-The limit is picked from the environment's machines and the groups a run puts them in, or typed as an Ansible host pattern, and the machines it matches are shown as it is typed.
+The limit is picked from the environment's machines and the Ansible groups a run puts them in, or typed as an Ansible host pattern, and the machines it matches are shown as it is typed.
 A run can be given tags to run and tags to skip, picked from those the catalogue lists for the playbook.
 Any further arguments for the playbook are typed as they would be on the command line.
 Tags and further arguments are collapsed until asked for, leaving the limit, which most runs use, the room a list of long host names needs.

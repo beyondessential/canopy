@@ -39,7 +39,9 @@ A target stays suspended until the last window covering it has ended: for an app
 A group's own window, and the window over each of its environments, are separate targets, so a target has at most one open window: declaring over one that already has a window amends it, recording who amended and when.
 The window is then the amender's work as well as the declarer's, which decides who may run against it (see [INV](../private-server/ansible.md), "Work under way").
 
-Canopy never opens a window by itself.
+Canopy opens a window itself only when an Ansible run starts, declaring it over the run's environment for the operator holding the run's lease, who is its declarer from then on (see [INV](../private-server/ansible.md), "Work under way").
+Such a window lasts the run rather than to an expected end, and taking over the lease passes it to the new holder as an amendment.
+Every other window is an operator's declaration.
 An environment with an open upgrade plan is offered the declaration over itself from that plan, prefilled with the plan's window and note, so declaring is one action at the moment the work starts (see [UPG](../private-server/upgrade-plans.md)).
 An hour someone typed in advance is not evidence that work began, so a planned window suspends nothing on its own.
 An open incident offers the declaration over its target too, so an operator who recognises an alert as their own work declares from where they are reading it.
@@ -96,13 +98,16 @@ Where that close is notified, the notice says maintenance was declared, so a rea
 
 Canopy-wide checks are Canopy monitoring its own operation, and are never suspended by any window (see [SELF](../private-server/self-alerts.md)).
 
-A window also holds off configuration runs by others: while it holds, no one but the operator who declared it, or the one whose amendment of it stands, can take a run lease on an environment it covers (see [INV](../private-server/ansible.md), "Work under way").
+A window also holds off Ansible runs by others: while it holds, no one but the operator who declared it, or the one whose amendment of it stands, can take a run lease on an environment it covers (see [INV](../private-server/ansible.md), "Work under way").
 
 ## Ending
 
 A window ends when an operator lifts it or when its expected end passes, and Canopy records which, with the operator and the time.
 Ending at the expected end without asking anyone is what keeps a forgotten window from leaving a target unwatched.
 Work running long extends the window by amending its end before it passes; a window that has ended is history, and suspending again is a fresh declaration.
+
+A window a run declared has no expected end, and ends when the run's lease ends, released or expired.
+Its declarer can hold it, giving it an expected end, and it then ends as any other window does, whatever becomes of the lease.
 
 Ended windows are retained as the target's maintenance history, so what was being done the last time it went quiet is readable against it.
 
@@ -117,8 +122,8 @@ When it elapses, anything still degraded on the target contributes to incidents 
 ## Notification
 
 Canopy notifies operators when a window is declared and again when its suspension ends, over the channel that carries the target's incidents, which for a machine is its group's (see [INC](incidents.md), "Notification").
-The declaration names the target, the operator, the expected end, and the note.
-The ending says whether an operator lifted the window or its expected end passed, and when watching resumes.
+The declaration names the target, the operator, the expected end, and the note, a window a run declared reading as lasting the run in place of an expected end.
+The ending says whether an operator lifted the window, its expected end passed, or the run's lease ended, and when watching resumes.
 
 ## Presentation
 
@@ -126,6 +131,7 @@ A target under a window presents its own health and reachability, and is marked 
 The mark is drawn at the grain the window is over, so an environment's window does not read as every machine in it having one of its own: an application's dot, a machine's mark, an environment's row, a group's card.
 An application's dot is hollowed rather than patterned or cut: a pattern needs room to resolve, and a cut is what marks a target nobody is watching, which at a dot's size would differ only by its angle.
 Every target the window reaches has its health muted, marked or not, and carries the window and when it ends, so a failing target under maintenance is not read as one nobody has noticed.
+A window a run declared reads as lasting until the run ends, wherever an expected end would be shown.
 A target serving out the settle period carries the mark still, distinguished from one whose window holds, so lifting a window shows on the target rather than only on the window.
 What a move leaves uncovered settles at the grain the window was over before it moved, so a group's window narrowed to one environment marks the group's card as settling and that environment's row as held.
 The two are told apart by motion as well as by weight: a holding window's mark moves and a settling one is still, so movement on the page means someone is in there now.
