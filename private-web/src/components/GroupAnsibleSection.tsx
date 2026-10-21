@@ -76,7 +76,8 @@ export default function GroupAnsibleSection({
 		{ server_group_id: groupId },
 		[groupId, tick],
 	);
-	const catalogue = useApi("ansible_variables", "catalogue", {}, [tick]);
+	// Read once for the group: it changes at most hourly, not with each edit.
+	const catalogue = useApi("ansible_variables", "catalogue", {}, [groupId]);
 
 	// A group's environments are the ranks its machines sit at, whether or not
 	// anything on them has reported. A pending machine is in none.

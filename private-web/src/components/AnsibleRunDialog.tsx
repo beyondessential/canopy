@@ -59,7 +59,7 @@ type RunState = {
 	lease: AnsibleLease | null;
 };
 
-type Stage = "configure" | "waiting" | "started" | "timeout";
+type Stage = "configure" | "waiting" | "started" | "timeout" | "gone";
 
 /// How an operator starts a run: the playbook and what it acts on, then the
 /// lease the run takes over, handed to it in the command shown.
@@ -95,7 +95,6 @@ export default function AnsibleRunDialog({
 }) {
 	const [stage, setStage] = useState<Stage>("configure");
 	const [playbookName, setPlaybookName] = useState<string>("");
-	const [intent, setIntent] = useState<"configure" | "upgrade" | null>(null);
 	const [tokens, setTokens] = useState<string[]>([]);
 	const [tags, setTags] = useState<string[]>([]);
 	const [skipTags, setSkipTags] = useState<string[]>([]);
@@ -142,7 +141,9 @@ export default function AnsibleRunDialog({
 	);
 	const playbook =
 		offered.find((candidate) => candidate.name === playbookName) ?? offered[0];
-	const effectiveIntent = intent ?? playbook?.intent ?? "configure";
+	// The catalogue says what a playbook is run as, so the run takes that and
+	// not what the operator labels it: an upgrade is not started as a configure.
+	const effectiveIntent = playbook?.intent ?? "configure";
 
 	// Reset what a previous opening left behind.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: opening is the trigger.
@@ -150,7 +151,6 @@ export default function AnsibleRunDialog({
 		if (!open) return;
 		setStage("configure");
 		setPlaybookName("");
-		setIntent(null);
 		setTokens([]);
 		setTags([]);
 		setSkipTags([]);
@@ -267,7 +267,11 @@ export default function AnsibleRunDialog({
 							onChanged();
 						}
 					} else {
-						setStage("timeout");
+						setStage(
+							Date.now() >= Date.parse(lease.taken_at) + pendingSecs * 1000
+								? "timeout"
+								: "gone",
+						);
 						onChanged();
 					}
 				})
@@ -314,12 +318,24 @@ export default function AnsibleRunDialog({
 
 	const giveUp = () => {
 		if (!lease) return;
-		release
-			.call({ lease_id: lease.id })
+		// The run may have read the lease since the last poll, in which case it
+		// is under way and releasing would end the maintenance it declared.
+		callApi("ansible", "run_state", { server_group_id: groupId, rank })
+			.then((state) => {
+				const held = (state as unknown as RunState).lease;
+				if (held && held.id === lease.id && held.started_at) {
+					setLease(held);
+					setStage("started");
+					onChanged();
+					return null;
+				}
+				return release.call({ lease_id: lease.id });
+			})
 			.catch(() => {
 				// Already gone, which is what was asked for.
 			})
-			.finally(() => {
+			.then((released) => {
+				if (released === null) return;
 				onChanged();
 				onClose();
 			});
@@ -384,7 +400,6 @@ export default function AnsibleRunDialog({
 									value={playbook?.name ?? ""}
 									onChange={(event) => {
 										setPlaybookName(event.target.value);
-										setIntent(null);
 									}}
 									sx={{ minWidth: 320 }}
 									slotProps={{ htmlInput: { style: { fontFamily: "monospace" } } }}
@@ -408,8 +423,8 @@ export default function AnsibleRunDialog({
 								<ToggleButtonGroup
 									size="small"
 									exclusive
+									disabled
 									value={effectiveIntent}
-									onChange={(_, next) => next && setIntent(next)}
 								>
 									<ToggleButton value="configure">Configure</ToggleButton>
 									<ToggleButton value="upgrade">Upgrade</ToggleButton>
@@ -672,6 +687,13 @@ export default function AnsibleRunDialog({
 					</Stack>
 				)}
 
+				{stage === "gone" && (
+					<Alert severity="warning" data-testid="run-gone">
+						The lease is no longer held: it was released, or another operator took it
+						over.
+					</Alert>
+				)}
+
 				{stage === "timeout" && (
 					<Alert severity="warning" data-testid="run-timeout">
 						The run didn't start within {formatPending(pendingSecs)}, so the lease was released.
@@ -716,7 +738,7 @@ export default function AnsibleRunDialog({
 						<Button onClick={onClose}>Close</Button>
 					</>
 				)}
-				{stage === "timeout" && (
+				{(stage === "timeout" || stage === "gone") && (
 					<>
 						<Button onClick={onClose}>Close</Button>
 						<Button

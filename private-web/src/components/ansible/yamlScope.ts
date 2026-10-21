@@ -1,4 +1,14 @@
-import { LineCounter, Scalar, isMap, isScalar, parseDocument, stringify } from "yaml";
+import {
+	LineCounter,
+	Scalar,
+	isAlias,
+	isMap,
+	isScalar,
+	isSeq,
+	parseDocument,
+	stringify,
+} from "yaml";
+import { resolvePlain } from "./pyyaml";
 import type { CatalogueView } from "../../types";
 import { type Schema, type ScopeKind, offered, problems } from "./schema";
 
@@ -31,6 +41,27 @@ export type Changes = {
 };
 
 const SECRET_TAG = "!secret";
+
+/// A node's value, with every plain scalar read as PyYAML reads it, which is
+/// how an inventory file is read, and not as the parser's own 1.1 mode does.
+function resolved(node: unknown, document: ReturnType<typeof parseDocument>): unknown {
+	if (isAlias(node)) return resolved(node.resolve(document), document);
+	if (isScalar(node)) {
+		return node.type === Scalar.PLAIN && !node.tag
+			? resolvePlain(String(node.source ?? node.value ?? ""))
+			: node.value;
+	}
+	if (isSeq(node)) return node.items.map((item) => resolved(item, document));
+	if (isMap(node)) {
+		return Object.fromEntries(
+			node.items.map((pair) => [
+				isScalar(pair.key) ? String(pair.key.value) : String(pair.key),
+				resolved(pair.value, document),
+			]),
+		);
+	}
+	return null;
+}
 
 /// A scope as text: one `name: value` per variable, YAML values, a secret as
 /// `name: !secret` so its value is never shown.
@@ -86,7 +117,7 @@ export function parseScope(text: string): Parsed {
 			: 1;
 		const value = pair.value;
 		const secret = isScalar(value) && value.tag === SECRET_TAG;
-		const plain = isScalar(value) ? value.value : value?.toJSON();
+		const plain = secret && isScalar(value) ? value.value : resolved(value, document);
 		found.entries.push({
 			name: key,
 			line,

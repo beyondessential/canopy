@@ -61,9 +61,19 @@ export default function AnsibleRuns({
 	const here = applications.filter((application) => ids.has(application.machine_id));
 	const types = new Set(here.map((application) => application.type));
 	const hasTamanu = [...types].some((type) => type.startsWith("tamanu-"));
-	const anyEmpty = machines.some(
-		(machine) => !here.some((application) => application.machine_id === machine.id),
-	);
+	// A machine nothing is on counts only where a run can be served it, which
+	// is what the run options list.
+	const options = useApi("ansible", "run_options", { server_group_id: groupId, rank }, [
+		groupId,
+		rank,
+		maintenanceTick,
+		tick,
+	]);
+	const anyEmpty =
+		options.status === "ok" &&
+		(options.data as unknown as { members: { application_types: string[] }[] }).members.some(
+			(member) => member.application_types.length === 0,
+		);
 
 	const playbooks = (catalogue?.playbooks ?? []).filter(
 		(playbook) =>
@@ -80,7 +90,9 @@ export default function AnsibleRuns({
 		state.status === "ok" ? state.data.window : null;
 	const refuses = state.status === "ok" && state.data.refuses;
 	const held = lease !== null || refuses;
-	const holder = lease?.held_by ?? (refuses ? (window?.declared_by ?? null) : null);
+	// A window speaks through its standing amendment where it has one.
+	const holder =
+		lease?.held_by ?? (refuses ? (window?.amended_by ?? window?.declared_by ?? null) : null);
 
 	const changed = () => {
 		setTick((n) => n + 1);

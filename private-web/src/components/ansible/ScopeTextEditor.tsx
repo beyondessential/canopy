@@ -66,19 +66,30 @@ export default function ScopeTextEditor({
 		if (!ready) return;
 		setSaving(true);
 		setFailure(null);
+		let applied = 0;
 		try {
 			// Removals first, so a name that moves between a plain value and a
 			// secret does not meet its own earlier form.
 			for (const name of changes.remove) {
 				await remove.call({ ...scope, name });
+				applied += 1;
 			}
 			for (const change of changes.set) {
 				await set.call({ ...scope, ...change });
+				applied += 1;
 			}
 			onSaved();
 			onClose();
 		} catch (error) {
-			setFailure(error instanceof Error ? error.message : String(error));
+			const why = error instanceof Error ? error.message : String(error);
+			// What landed stays, so the scope is read again and the editor shows
+			// what is still to apply, rather than claiming nothing happened.
+			if (applied > 0) {
+				onSaved();
+				setFailure(`${applied} of ${count} changes were applied before this failed: ${why}`);
+			} else {
+				setFailure(why);
+			}
 			setSaving(false);
 		}
 	};
