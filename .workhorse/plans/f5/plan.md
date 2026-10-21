@@ -82,3 +82,13 @@ New and widened actions in the `actions!` catalogue (stable names follow the new
 - The limit preview has to match the host names the plugin uses. Today the plugin computes them in `host_names` (`ansible/inventory_plugins/canopy.py` in infra): the address, cut to its first label for tailnet names; where that's empty or shared, Canopy's name slugged (`[^A-Za-z0-9_.-]+` → `-`); else the machine id. Canopy adds the refusal when names still collide. That rule moves into Canopy, which serves each member's host name, so the preview and the run cannot disagree. The plugin then uses the served name.
 - The pattern is the subset of Ansible host patterns that matches names and groups: `:` or `,` separated, `*` globs, `!` exclusion, `&` intersection. A pattern Canopy can't evaluate (a `~` regex) is refused rather than previewed wrongly.
 - The draft catalogue's `x-canopy.playbooks` tags came from `ansible-playbook --list-tags` against each playbook (with `always`/`never` dropped). Infra should generate that list in CI rather than keep it by hand, and fail when it's stale.
+
+## Maintenance windows for runs
+
+A run's window is bound to its lease and covers what the run acts on: the environment, or the members its limit matches. MNT gains a window over several machines of one environment for that, which operators can also declare by hand.
+
+- [ ] Window over several machines: a `maintenance_window_machines` join table (window, machine), with the one-open-window-per-machine rule enforced across single-machine and set windows. Keep `machine_id` for a single machine, or fold it into the join table, whichever keeps `Scope`-style mapping in one place
+- [ ] Suspension (`SuspendedTargets`), moves, history, and the declaration dialog's grain choices learn the set. A set left with one machine is that machine's window
+- [ ] Run-bound windows: `expected_end` nullable, with a `lease_id` binding. The window ends when the lease ends (released, expired, or unstarted), and passes to the new holder on takeover as an amendment. Holding sets `expected_end` and clears the binding
+- [ ] Notifications and presentation read "lasts the run" where an expected end would be shown
+- [ ] `for_group` (graded read-only) declares the window on a lease's first read, so check its grading and audit clause

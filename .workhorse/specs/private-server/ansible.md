@@ -97,7 +97,7 @@ A key that is the machine's tailnet name, in full or by its first label, adds no
 
 Every machine a host is imported onto has `managed_by_ansible` set, since the file names it as one a run configures.
 
-The file's comment lines are appended to the group's notes, under a heading naming the environment, since they hold what an operator needs to know before a run, such as where a key is kept or which network to join.
+The file's comment lines are appended to the group's notes (see [GRP](../servers/groups.md)), under a heading naming the environment, since they hold what an operator needs to know before a run, such as where a key is kept or which network to join.
 
 ### Matching hosts to machines
 
@@ -157,12 +157,12 @@ Taking a lease is refused while another operator's maintenance window holds over
 A window over one member refuses the whole environment, since a run acts on the environment as a whole.
 A window over a machine that is not a member refuses nothing.
 
-A run's first read under its lease declares a maintenance window over the environment, as the lease's holder, noting the playbook it runs, or its intent where a run took its own lease and named no playbook.
-Where a window of the holder's own already covers the environment, that window serves instead and nothing new is declared.
+A run's first read under its lease declares a maintenance window over what the run acts on, as the lease's holder: the environment, or the members its limit matches where that is only some of them, noting the playbook it runs, or its intent where a run took its own lease and named no playbook.
+A window of the holder's own already covering any of that serves for what it covers, and the run's window covers the rest, so nothing new is declared where the holder's own windows already cover it all.
 A window a run declared ends when the lease ends, whether released or expired, and settles as any window does (see [MNT](../monitoring/maintenance.md), "Settling").
 Taking over the lease passes the window to the new holder as an amendment, so suspension does not lapse partway through the work.
 While it is open, its declarer can hold it, giving it an expected end as a declaration does, and it then no longer ends with the lease but like any other window, when lifted or when that end passes (see [MNT](../monitoring/maintenance.md), "Ending").
-The window stays over the environment while the lease is held (see [MNT](../monitoring/maintenance.md), "Moving a window").
+The window stays over what it covers while the lease is held (see [MNT](../monitoring/maintenance.md), "Moving a window").
 A target holds at most one open window, so a second operator's declaration amends the first's rather than opening one of their own.
 An amendment declares the same work, so the window is the amender's as well as the declarer's: both are served the environment it covers, and everyone else is refused and told whose work is under way.
 An amendment a later one replaces stops speaking for the operator who made it.
@@ -204,6 +204,7 @@ The install and the upgrade name their playbooks and intents already.
 They are Tamanu's playbooks, so they are offered only where the environment holds a Tamanu application.
 The playbooks offered, and the intent each runs with, come from the catalogue.
 The run of any playbook is unavailable until Canopy has read a catalogue, and says so.
+It offers the playbooks that configure an application type the environment holds, and every playbook where the environment has a member with nothing on it.
 
 A run can be limited to some of the environment's machines.
 The limit is picked from the environment's machines and the Ansible groups a run puts them in, or typed as an Ansible host pattern, and the machines it matches are shown as it is typed.
@@ -220,9 +221,9 @@ Once the run has started, the presentation says so, and that maintenance is decl
 
 #### Machines with nothing on them
 
-A run acting on a machine with nothing on it yet assigns the machine the application type it is to carry.
-Where the environment already holds a Tamanu central, each such machine is assigned a Tamanu facility.
-Where it holds none, the operator chooses for each machine, assigning at most one a Tamanu central, or leaving it unassigned for a run that sets up no Tamanu.
+A run acting on a machine with nothing on it yet assigns the machine the application type it is to carry, chosen from those the playbook configures, or leaves it unassigned.
+Where the playbook configures Tamanu and the environment already holds a Tamanu central, each such machine starts assigned a Tamanu facility.
+An environment holds at most one Tamanu central, so at most one machine is assigned one, and none where the environment already holds one.
 The dialog shows every assignment, and the operator can change any of them before starting work.
 The assignments are held with the lease and last for that run, since a machine is grouped by its applications once they report.
 
