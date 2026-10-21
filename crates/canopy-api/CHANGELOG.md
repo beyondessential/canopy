@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2](https://github.com/beyondessential/canopy/compare/bes-canopy-api-v1.1.1...bes-canopy-api-v1.1.2) - 2026-10-21
+
+### Other
+
+- address review round 5: refuse label-spelled application types, log why nothing signs, bound discovery startup, revoke from what removal deletes
+- POST /identity-tokens: refusals in order, claims and subject, issuance and not-granted audit entries; regenerated documents and client
+- update 5 files
+- audit the in-scope handlers and device API, the log page and its endpoints, fleet query tool
+
 ## [1.1.1](https://github.com/beyondessential/canopy/compare/bes-canopy-api-v1.1.0...bes-canopy-api-v1.1.1) - 2026-10-12
 
 ### Other
