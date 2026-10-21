@@ -593,20 +593,39 @@ pub struct Loaded {
 	pub digest: String,
 	pub source_commit: Option<String>,
 	pub read_at: Timestamp,
+	/// Why the latest attempt to read a newer one did not replace it.
+	pub problem: Option<Problem>,
+	pub problem_detail: Option<String>,
 }
 
 static COMPILED: Mutex<Option<(String, Arc<Catalogue>)>> = Mutex::new(None);
 
 impl Loaded {
 	/// The catalogue Canopy holds, `None` while it has never read one. The
-	/// compiled form is kept for as long as the held copy is the same, so a
-	/// request does not recompile the schema.
+	/// compiled form is kept for as long as the held copy is the same, and the
+	/// document itself is read only when it is not, since nearly every Ansible
+	/// request asks for the catalogue.
 	pub async fn get(db: &mut AsyncPgConnection) -> Result<Option<Self>> {
-		let Some(state) = CatalogueState::get(db).await? else {
-			return Ok(None);
-		};
-		let (Some(document), Some(digest), Some(read_at)) =
-			(state.document, state.digest, state.read_at)
+		type Summary = (
+			Option<String>,
+			Option<String>,
+			Option<jiff_diesel::Timestamp>,
+			Option<String>,
+			Option<String>,
+		);
+		let summary: Option<Summary> = ansible_catalogue::table
+			.select((
+				ansible_catalogue::digest,
+				ansible_catalogue::source_commit,
+				ansible_catalogue::read_at,
+				ansible_catalogue::problem,
+				ansible_catalogue::problem_detail,
+			))
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)?;
+		let Some((Some(digest), source_commit, Some(read_at), problem, problem_detail)) = summary
 		else {
 			return Ok(None);
 		};
@@ -620,6 +639,14 @@ impl Loaded {
 		let catalogue = match cached {
 			Some(catalogue) => catalogue,
 			None => {
+				let document: Option<Value> = ansible_catalogue::table
+					.select(ansible_catalogue::document)
+					.first(db)
+					.await
+					.map_err(AppError::from)?;
+				let document = document.ok_or_else(|| {
+					AppError::custom("the held catalogue has a digest and no document")
+				})?;
 				// Only a copy that read as a catalogue is ever stored, so this
 				// failing means the stored one was not written by `record_read`.
 				let catalogue = Arc::new(Catalogue::parse(&document).map_err(|error| {
@@ -634,8 +661,10 @@ impl Loaded {
 		Ok(Some(Self {
 			catalogue,
 			digest,
-			source_commit: state.source_commit,
-			read_at,
+			source_commit,
+			read_at: read_at.to_jiff(),
+			problem: problem.as_deref().and_then(Problem::parse),
+			problem_detail,
 		}))
 	}
 }

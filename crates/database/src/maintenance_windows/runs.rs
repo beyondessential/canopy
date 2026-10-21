@@ -94,7 +94,23 @@ impl MaintenanceWindow {
 					}
 				};
 
+				// A window past its expected end is over, whether or not the sweep
+				// has stamped it yet, so it is ended here rather than left to name
+				// the machines this run acts on.
 				let open = Self::open_over(conn, group, rank, &members).await?;
+				let past: Vec<Uuid> = open
+					.iter()
+					.filter(|window| !window.holds_at(now))
+					.map(|window| window.id)
+					.collect();
+				let open: Vec<Self> = if past.is_empty() {
+					open
+				} else {
+					Self::end_expired(conn, Some(&past)).await?;
+					open.into_iter()
+						.filter(|window| !past.contains(&window.id))
+						.collect()
+				};
 				let mut covered: HashSet<Uuid> = HashSet::new();
 				let mut serving: Vec<Self> = Vec::new();
 				for window in &open {

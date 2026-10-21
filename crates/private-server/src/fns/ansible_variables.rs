@@ -215,15 +215,14 @@ pub async fn catalogue(
 	let Some(loaded) = Loaded::get(&mut conn).await? else {
 		return Ok(Json(None));
 	};
-	let attempt = CatalogueState::get(&mut conn).await?;
 	Ok(Json(Some(CatalogueView {
 		variables: loaded.catalogue.variables().cloned().collect(),
 		playbooks: loaded.catalogue.playbooks().to_vec(),
 		tags: loaded.catalogue.tag_notes().clone(),
 		source_commit: loaded.source_commit,
 		read_at: loaded.read_at,
-		problem: attempt.as_ref().and_then(|state| state.problem),
-		problem_detail: attempt.and_then(|state| state.problem_detail),
+		problem: loaded.problem,
+		problem_detail: loaded.problem_detail,
 	})))
 }
 

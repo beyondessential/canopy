@@ -1430,10 +1430,36 @@ impl MaintenanceWindow {
 	/// backdating keeps the settle period honest however late this runs.
 	/// Returns what it ended, for notification.
 	pub async fn sweep_expired(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		Self::end_expired(db, None).await
+	}
+
+	/// [`Self::sweep_expired`], over `among` alone where it is given, for a
+	/// caller about to decide something against these windows that cannot wait
+	/// for the sweep to have run.
+	pub(crate) async fn end_expired(
+		db: &mut AsyncPgConnection,
+		among: Option<&[Uuid]>,
+	) -> Result<Vec<Self>> {
 		use crate::schema::maintenance_windows::dsl;
 		let now = jiff_diesel::Timestamp::from(Timestamp::now());
+		let mut query = dsl::maintenance_windows
+			.filter(dsl::ended_at.is_null())
+			.filter(dsl::expected_end.le(now))
+			.into_boxed();
+		if let Some(ids) = among {
+			query = query.filter(dsl::id.eq_any(ids.to_vec()));
+		}
+		let ids: Vec<Uuid> = query
+			.select(dsl::id)
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		if ids.is_empty() {
+			return Ok(Vec::new());
+		}
 		let expired: Vec<Self> = diesel::update(
 			dsl::maintenance_windows
+				.filter(dsl::id.eq_any(&ids))
 				.filter(dsl::ended_at.is_null())
 				.filter(dsl::expected_end.le(now)),
 		)

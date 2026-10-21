@@ -359,6 +359,49 @@ async fn a_machine_another_operators_window_names_cannot_be_covered() {
 	.await
 }
 
+/// A window past its expected end is over whether or not the sweep has stamped
+/// it, so it neither refuses a run's declaration nor names its machines.
+// spec: MNT#ending
+#[tokio::test(flavor = "multi_thread")]
+async fn a_window_past_its_end_that_the_sweep_has_not_ended_does_not_hold_a_run_back() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let fleet = fleet(&mut conn).await;
+		let [a, b, _] = fleet.boxes;
+		let theirs = MaintenanceWindow::declare_machines(
+			&mut conn,
+			&[a, b],
+			in_hours(1),
+			None,
+			Some("someone-else"),
+		)
+		.await
+		.expect("another operator's set");
+		sql_query(
+			"UPDATE maintenance_windows SET expected_end = NOW() - interval '1 minute' WHERE id = $1",
+		)
+		.bind::<sql_types::Uuid, _>(theirs.id)
+		.execute(&mut conn)
+		.await
+		.expect("let it run past its end");
+		let lease = lease(&mut conn, fleet.group, "op").await;
+
+		let windows = MaintenanceWindow::declare_for_run(&mut conn, &lease, None, None)
+			.await
+			.expect("the run declares over the environment");
+		assert_eq!(windows.declared.len(), 1);
+
+		let ended = MaintenanceWindow::get(&mut conn, theirs.id)
+			.await
+			.expect("theirs");
+		assert_eq!(
+			ended.ended_at,
+			Some(ended.expected_end),
+			"ended as of its expected end, as the sweep would"
+		);
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn the_window_follows_the_leases_expiry() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
