@@ -33,11 +33,13 @@ Steps:
 - [x] Database crate: `inventory_variables.rs` → `ansible_variables.rs`, `inventory_leases.rs` → `ansible_leases.rs`, types `InventoryVariable` → `AnsibleVariable`, etc.
 - [x] Audit catalogue: variants `Inventory*` → `Ansible*`, with labels "Serve environment to Ansible", "Take/Take over/Extend/Release Ansible lease", "Set/Remove Ansible variable". The `AnsibleInventoryImported` action ("Import Ansible inventory") is added with the import itself
 - [x] Private server: modules `fns/inventory.rs` → `fns/ansible.rs` and `fns/inventory_variables.rs` → `fns/ansible_variables.rs`, mounted at `/api/ansible/*` and `/api/ansible_variables/*`, with the openapi tag and its description, log messages, and tests
-- [x] No aliases for the `/api/inventory/*` paths: they are the private API, which ships with the SPA, so the plugin in the infra repo moves to `/api/ansible/*` in lockstep
+- [x] No aliases for the `/api/inventory/*` paths: they are the private API, which ships with the SPA, so the plugin in the infra repo moves to `/api/ansible/*` first, and the cutover is ordered by the steps below
 - [x] `just gen-openapi`, then `safety-modes.ts` grades for the new paths
 - [x] Retag `// spec:` comments for the split: `INV#run-leases` and `INV#work-under-way` → `ANSRUN#…`, `INV#inventory-variables` → `ANSVAR#variables`, `INV#presentation` → `ANSVAR#presentation` (variables) or `ANSRUN#presentation` (runs). A bare `INV` stays where the code serves the environment
 - [x] SPA: `GroupInventorySection` → `GroupAnsibleSection`, heading "Ansible", action labels, test ids. `e2e/inventory.spec.ts` → `e2e/ansible.spec.ts`, with seed helpers
-- [ ] Infra repo, in lockstep: the plugin's `/api/inventory/*` calls move to `/api/ansible/*`. Links to `private-server/inventory.md` move: `#what-an-inventory-contains` → `ansible/overview.md#what-a-run-is-served`, `#reaching-a-machine` → `ansible/overview.md#reaching-a-machine`, `#run-leases` → `ansible/runs.md#run-leases`
+- [ ] Infra repo, ahead of the Canopy deploy: the plugin's `/api/inventory/*` calls move to `/api/ansible/*`, falling back to `/api/inventory/*` on a 404 until Canopy has shipped. Links to `private-server/inventory.md` move: `#what-an-inventory-contains` → `ansible/overview.md#what-a-run-is-served`, `#reaching-a-machine` → `ansible/overview.md#reaching-a-machine`, `#run-leases` → `ansible/runs.md#run-leases`
+- [ ] Deploy the rename while no Ansible lease is open. The callback plugin takes a 404 on `extend_lease` as a refusal and stops extending, so a run in flight across the cutover would carry on unleased once its lease runs out, and another operator could take the environment under it. A run started from a checkout that predates the plugin change is refused its lease and never starts, so only a run already under way is exposed
+- [ ] Drop the plugin's `/api/inventory/*` fallback once Canopy has shipped
 - [ ] `grep -rin inventor` over `crates`, `private-web/src`, `private-web/e2e` and `.workhorse/specs` should then turn up only the stored names above, Ansible's own inventory (the import), and the unrelated backup-repository inventory
 
 ## UI rework (mockups: ansible-section, ansible-run)
@@ -61,9 +63,13 @@ Steps:
 
 ## Environments are their machines
 
-- `resolve_environment` in `fns/inventory.rs` builds an environment from the group's live applications, refusing one with no application at the rank. GRP already defines an environment by its machines' rank, so this is a bug. Rebuild it from the group's live machines through `Machine::environment_rank` / `environment_ranks`, take the applications on those machines, and refuse only a group with nothing ranked. Serve only machines with a bound device or a reported application: a ranked machine with neither has no address, so it is left out rather than refusing the environment. The SPA's environment picker (`GroupInventorySection`) derives ranks from applications too, and needs the same fix.
+- `resolve_environment` in `fns/ansible.rs` builds an environment from the group's live applications, refusing one with no application at the rank. GRP already defines an environment by its machines' rank, so this is a bug. Rebuild it from the group's live machines through `Machine::environment_rank` / `environment_ranks`, take the applications on those machines, and refuse only a group with nothing ranked. Serve only machines with a bound device or a reported application: a ranked machine with neither has no address, so it is left out rather than refusing the environment. The SPA's environment picker (`GroupAnsibleSection`) derives ranks from applications too, and needs the same fix.
 - The empty-machine assignments the dialog makes are held on the lease, as machine id → application type. A served member with no applications carries its assigned type, and the plugin groups by it as it would by an application (the infra plugin needs the change, and LNXANS's "Inventory" grouping rule needs a sentence for it).
 - The preset run buttons appear when the environment holds a `tamanu-*` application. The facility default applies when it holds a `tamanu-central`.
+
+- [ ] Rebuild `resolve_environment` from the group's live machines (`Machine::environment_rank` / `environment_ranks`), taking the applications on them, and refuse only a group with nothing ranked
+- [ ] Serve only members with a bound device or a reported application, leaving the rest out rather than refusing the environment
+- [ ] Derive the SPA's environment picker from machine ranks too
 
 ## Audit
 

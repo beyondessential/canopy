@@ -35,8 +35,9 @@ A variable the catalogue describes is held to it.
 Its value must match its type, it can be set only at the scopes the catalogue allows, and it is secret exactly when the catalogue says so.
 A reserved variable cannot be set, since a run sets it for itself.
 A name the catalogue does not describe can be set freely, so a variable a playbook has just started reading is not held up by the catalogue.
-A value set before the catalogue described it, or before the catalogue changed, stays as it is and is marked where it no longer matches.
+A value set before the catalogue described it, or before the catalogue changed, stays as it is, secret or plain, and is marked where it no longer matches.
 The exception is a value the catalogue comes to call secret, which Canopy moves into the secret store when it reads that catalogue, so a secret is never held beside its name.
+A secret the catalogue stops calling secret stays in the secret store until an administrator sets it again.
 The application types a variable configures decide where it is offered (see "Presentation"), and are not held to, since a machine is configured before its applications arrive.
 
 ## Audit
