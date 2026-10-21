@@ -1927,14 +1927,17 @@ export async function seedMaintenanceWindow(
 		endedMinutesAgo?: number;
 		note?: string | null;
 		declaredBy?: string | null;
+		/** With `serverGroupId` and `rank`, a window over these machines of the
+		 * environment rather than all of it. At least two. */
+		machineIds?: string[];
 	},
 ): Promise<SeededMaintenanceWindow> {
 	const rows = await sql.query<{ id: string }>(
 		`INSERT INTO maintenance_windows
-		   (application_id, machine_id, server_group_id, rank, expected_end, ended_at, note, declared_by)
+		   (application_id, machine_id, server_group_id, rank, expected_end, ended_at, note, declared_by, machine_ids)
 		 VALUES ($1, $2, $3, $4, NOW() + make_interval(mins => $5),
 		         CASE WHEN $6::int IS NULL THEN NULL ELSE NOW() - make_interval(mins => $6::int) END,
-		         $7, $8)
+		         $7, $8, $9::uuid[])
 		 RETURNING id`,
 		[
 			opts.applicationId ?? null,
@@ -1947,6 +1950,7 @@ export async function seedMaintenanceWindow(
 			opts.endedMinutesAgo ?? null,
 			opts.note ?? null,
 			opts.declaredBy ?? "seed@bes.au",
+			opts.machineIds ?? [],
 		],
 	);
 	return { id: rows[0]!.id };

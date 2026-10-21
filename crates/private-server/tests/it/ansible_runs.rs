@@ -196,6 +196,16 @@ async fn refuses_what_could_not_run() {
 			.await
 			.contains("is not a tag")
 		);
+		// The catalogue lists every tag a playbook takes, so one it lists none
+		// for takes none.
+		assert!(
+			refused(
+				&private,
+				json!({ "group": "kamaka", "playbook": "base-install.yml", "tags": ["app"] }),
+			)
+			.await
+			.contains("takes no tags")
+		);
 		assert!(
 			refused(&private, json!({ "group": "kamaka", "limit": "nowhere" }))
 				.await
@@ -565,6 +575,61 @@ async fn a_limited_run_declares_maintenance_over_its_machines_alone() {
 		expected.sort();
 		assert_eq!(named, expected, "the machines the limit matched");
 		assert!(!named.contains(&env.central));
+	})
+	.await
+}
+
+/// A run names the machines it acts on among themselves, as the limit preview
+/// does, so a machine it leaves out cannot change what one it acts on is called.
+// spec: INV#reaching-a-machine
+#[tokio::test(flavor = "multi_thread")]
+async fn names_what_a_run_acts_on_as_the_limit_preview_does() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		for (name, tailnet) in [
+			("kamaka managed", "box.east.tail1234.ts.net"),
+			("kamaka other", "box.west.tail1234.ts.net"),
+		] {
+			let (application, machine) = insert_application_on_its_own_machine(
+				&mut conn,
+				group,
+				name,
+				"tamanu-facility",
+				Some("production"),
+				None,
+			)
+			.await;
+			bind_device(&mut conn, application, tailnet).await;
+			private
+				.post("/api/ansible_variables/set")
+				.json(&json!({
+					"machine_id": machine, "name": "managed_by_ansible",
+					"value": name == "kamaka managed",
+				}))
+				.await
+				.assert_status_ok();
+		}
+
+		let preview: Value = private
+			.post("/api/ansible/limit_preview")
+			.json(&json!({ "group": "kamaka", "limit": "all" }))
+			.await
+			.json();
+		assert_eq!(preview["hosts"], json!(["box"]));
+
+		let lease = take_lease(&private, json!({ "group": "kamaka" })).await;
+		let served: Value = private
+			.post("/api/ansible/for_group")
+			.json(&json!({ "lease_id": lease }))
+			.await
+			.json();
+		let managed = served["hosts"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|host| host["name"] == "kamaka managed")
+			.unwrap();
+		assert_eq!(managed["host_name"], "box", "what the preview called it");
 	})
 	.await
 }

@@ -146,10 +146,16 @@ export default function MaintenanceSection({
 	// machine presents it as its own.
 	// spec: MNT#presentation
 	const isSet = (w: MaintenanceWindow) => w.machine_ids.length > 0;
+	// A machine presents a set naming it as its own; a group presents one among
+	// its environments' windows, since it is the group's no more than they are.
 	const open =
-		windows.find((w) => w.ended_at === null && (!w.rank || isSet(w))) ?? null;
+		windows.find(
+			(w) =>
+				w.ended_at === null &&
+				(isSet(w) ? scope === "machine" : !w.rank),
+		) ?? null;
 	const environmentWindows = windows.filter(
-		(w) => w.ended_at === null && w.rank && !isSet(w),
+		(w) => w.ended_at === null && w.rank && (scope !== "machine" || !isSet(w)),
 	);
 	const fromGroup =
 		covering.status === "ok"
@@ -363,14 +369,25 @@ export default function MaintenanceSection({
 					}
 				>
 					<Typography variant="body2">
-						<Box component="span" sx={{ textTransform: "capitalize" }}>
-							{window.rank}
-						</Box>{" "}
+						{isSet(window) ? (
+							<span data-testid="window-machines">
+								{window.machine_ids
+									.map((machine) => machineNames?.[machine] ?? "a machine")
+									.join(", ")}{" "}
+								in {window.rank}
+							</span>
+						) : (
+							<Box component="span" sx={{ textTransform: "capitalize" }}>
+								{window.rank}
+							</Box>
+						)}{" "}
 						{holds(window) ? (
 							<>
 								under maintenance, ending{" "}
-								<WindowEnd window={window} />. The rest of the
-								group stays watched.
+								<WindowEnd window={window} />.{" "}
+								{isSet(window)
+									? "The rest of the environment stays watched."
+									: "The rest of the group stays watched."}
 							</>
 						) : (
 							<>

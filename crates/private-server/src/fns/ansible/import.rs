@@ -26,14 +26,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
+use super::runs::MANAGED;
 use super::{
 	ANSIBLE_HOST, Environment, EnvironmentArgs, host_of, hosts, inventory_file, reach,
 	resolve_environment,
 };
 use crate::state::AppState;
 
-/// The variable that marks a machine as one a run configures.
-const MANAGED: &str = "managed_by_ansible";
 const ANSIBLE_PORT: &str = "ansible_port";
 const CLONE: &str = "tamanu_clone";
 

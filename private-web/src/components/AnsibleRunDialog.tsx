@@ -753,8 +753,9 @@ function TagField({
 	return (
 		<Autocomplete
 			multiple
-			freeSolo={options.length === 0}
 			size="small"
+			// The catalogue lists every tag a playbook takes.
+			disabled={options.length === 0}
 			options={[...options]}
 			value={value}
 			onChange={(_, next) => onChange(next.map(String))}
@@ -774,6 +775,7 @@ function TagField({
 				<TextField
 					{...params}
 					label={label}
+					helperText={options.length === 0 ? "This playbook takes no tags" : undefined}
 					slotProps={{
 						...params.slotProps,
 						htmlInput: {

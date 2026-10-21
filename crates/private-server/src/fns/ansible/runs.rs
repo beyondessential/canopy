@@ -27,7 +27,7 @@ use utoipa::ToSchema;
 use super::{ANSIBLE_HOST, Environment, EnvironmentArgs, hosts, limit, reach, resolve_environment};
 use crate::state::AppState;
 
-const MANAGED: &str = "managed_by_ansible";
+pub(super) const MANAGED: &str = "managed_by_ansible";
 const CENTRAL: &str = "tamanu-central";
 
 /// The application type to assign a machine with nothing on it, or none.
@@ -126,7 +126,7 @@ pub struct Member {
 
 /// Whether a variable's value says its machine is one a run configures, as the
 /// plugin reads it.
-fn truthy(value: &Value) -> bool {
+pub(super) fn truthy(value: &Value) -> bool {
 	match value {
 		Value::Bool(flag) => *flag,
 		Value::String(text) => matches!(
@@ -324,15 +324,17 @@ pub async fn check(
 		}
 		_ => None,
 	};
-	if let Some(chosen) = &chosen
-		&& !chosen.tags.is_empty()
-	{
+	// The catalogue lists every tag a playbook takes, so one it lists none for
+	// takes none: `--tags` there would run only its `always` tasks and configure
+	// nothing.
+	if let Some(chosen) = &chosen {
 		for tag in tags.iter().chain(skip_tags) {
 			if !chosen.tags.contains(tag) {
-				return Err(AppError::BadRequest(format!(
-					"{:?} is not a tag {} takes",
-					tag, chosen.name
-				)));
+				return Err(AppError::BadRequest(if chosen.tags.is_empty() {
+					format!("{} takes no tags", chosen.name)
+				} else {
+					format!("{tag:?} is not a tag {} takes", chosen.name)
+				}));
 			}
 		}
 	}

@@ -305,6 +305,9 @@ export default function GroupDetail() {
 				targetLabel={group.name}
 				reloadKey={maintenanceTick}
 				onChanged={() => setMaintenanceTick((n) => n + 1)}
+				machineNames={Object.fromEntries(
+					machines.map((machine) => [machine.id, machine.name]),
+				)}
 			/>
 			<SilencedRefsSection scope="group" id={group.id} />
 		</Stack>

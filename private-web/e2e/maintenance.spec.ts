@@ -72,6 +72,35 @@ test.describe("maintenance windows", () => {
 		expect(await openWindows(sql)).toBe(1);
 	});
 
+	// A window over several machines is each machine's own, and the group
+	// presents it among its environments' windows rather than as its own.
+	// spec: MNT#presentation
+	test("a window over several machines is each machine's and not the group's", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "fiji" });
+		const a = await seedServer(sql, { name: "fj-a", groupId: group.id, rank: "production" });
+		const b = await seedServer(sql, { name: "fj-b", groupId: group.id, rank: "production" });
+		await seedMaintenanceWindow(sql, {
+			serverGroupId: group.id,
+			rank: "production",
+			machineIds: [a.machineId, b.machineId],
+			note: "patching two facilities",
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		const section = page.getByTestId("maintenance-section");
+		await expect(section.getByTestId("window-machines")).toContainText("fj-a, fj-b in production");
+		await expect(section).toContainText("The rest of the environment stays watched.");
+		await expect(section).not.toContainText("Nothing on this group alerts");
+
+		await page.goto(`/fleet/machines/${a.machineId}`);
+		const own = page.getByTestId("maintenance-section");
+		await expect(own).toContainText("Nothing on this machine alerts");
+		await expect(own.getByTestId("window-covers")).toContainText("fj-b");
+	});
+
 	test("lifting ends the window", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "back-already" });
 		const server = await seedServer(sql, { name: "done", groupId: group.id });
