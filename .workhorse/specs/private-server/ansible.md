@@ -12,6 +12,8 @@ A run reads it as it starts, so it acts on the fleet as Canopy holds it.
 A run is served one environment (see [GRP](../servers/groups.md), "Environments").
 
 Each member is a machine, and carries its identifier, its name, the address it is reached at, the applications on it with their names and types, and its effective variables.
+Every live machine at the environment's rank is a member, one with nothing on it yet included, since a run is how its applications get there.
+A member with nothing on it is served with the application type its run assigns it, if any, so the run configures it as that (see "Machines with nothing on them").
 A member names which of those variables are secret.
 The environment's own variables are served once beside the members.
 
@@ -176,6 +178,7 @@ A group presents one of its environments at a time, chosen by the operator where
 
 An environment offers three ways to start a run: an install, an upgrade, and a run of any playbook the operator chooses, with the intent it is run with.
 The install and the upgrade name their playbooks and intents already.
+They are Tamanu's playbooks, so they are offered only where the environment holds a Tamanu application.
 Each can be given extra arguments for the playbook, such as a limit or tags.
 
 Starting work takes the lease, and only then is the command shown, since it carries the lease.
@@ -183,6 +186,14 @@ The command brings the operator's checkout of the infra repository up to date wi
 Its first step, changing into the checkout, names a place only the operator knows, so it is shown but left out of what is copied.
 While the lease waits, the time left for the run to start is shown, and the operator can give it up.
 Once the run has started, the presentation says so, and that maintenance is declared.
+
+#### Machines with nothing on them
+
+A run acting on a machine with nothing on it yet assigns the machine the application type it is to carry.
+Where the environment already holds a Tamanu central, each such machine is assigned a Tamanu facility.
+Where it holds none, the operator chooses for each machine, assigning at most one a Tamanu central, or leaving it unassigned for a run that sets up no Tamanu.
+The dialog shows every assignment, and the operator can change any of them before starting work.
+The assignments are held with the lease and last for that run, since a machine is grouped by its applications once they report.
 
 A refusal to take the lease is shown before any command, naming its reason (see "Refusal").
 Where a lease or a maintenance window holds over the environment, the presentation names who holds it and what they are running, and offers taking it over.

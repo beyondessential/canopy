@@ -81,6 +81,13 @@ body { margin: 0; font-family: "Roboto", "Helvetica", "Arial", sans-serif; color
 .alert.error { background: rgb(253, 237, 237); color: rgb(95, 33, 32); }
 .alert.error svg { fill: var(--error); }
 a { color: var(--primary); }
+table.assign { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+.assign td { padding: 4px 0; border-bottom: 1px solid rgba(224,224,224,1); }
+.assign td:first-child { font-family: monospace; font-size: 0.8125rem; width: 45%; }
+.field.dense { height: 32px; font-size: 0.875rem; min-width: 200px; }
+.field.dense.select::after { top: 13px; }
+.field.error { border-color: var(--error); }
+.field.error label { color: var(--error); }
 </style>
 </head>
 <body>
@@ -90,6 +97,26 @@ a { color: var(--primary); }
 	<div class="dialog">
 		<div class="dialog-title">Install production <span class="mono secondary">tamanu-install.yml</span></div>
 		<div class="dialog-content">
+			<div class="row">
+				<span class="toggle"><span class="on">git</span><span>jj</span></span>
+				<span class="field mono wide ph"><label>Extra arguments</label>--limit, --tags…</span>
+			</div>
+		</div>
+		<div class="dialog-actions">
+			<span class="btn text">Cancel</span>
+			<span class="btn contained"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Start work</span>
+		</div>
+	</div>
+</div>
+
+<div class="frame-label">1b. Install, with a machine nothing is on yet</div>
+<div class="backdrop">
+	<div class="dialog">
+		<div class="dialog-title">Install production <span class="mono secondary">tamanu-install.yml</span></div>
+		<div class="dialog-content">
+			<table class="assign">
+				<tr><td>example-facility-c</td><td><span class="field dense select"><label>Install as</label>Tamanu facility</span></td></tr>
+			</table>
 			<div class="row">
 				<span class="toggle"><span class="on">git</span><span>jj</span></span>
 				<span class="field mono wide ph"><label>Extra arguments</label>--limit, --tags…</span>
@@ -119,6 +146,33 @@ a { color: var(--primary); }
 		<div class="dialog-actions">
 			<span class="btn text">Cancel</span>
 			<span class="btn contained"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Start work</span>
+		</div>
+	</div>
+</div>
+
+<div class="frame-label">2b. Run… on an environment with nothing installed</div>
+<div class="backdrop">
+	<div class="dialog">
+		<div class="dialog-title">Run on production</div>
+		<div class="dialog-content">
+			<div class="row">
+				<span class="field select mono"><label>Playbook</label>tamanu-install.yml</span>
+				<span class="toggle"><span class="on">Configure</span><span>Upgrade</span></span>
+			</div>
+			<table class="assign">
+				<tr><td>example-central</td><td><span class="field dense select"><label>Install as</label>Tamanu central</span></td></tr>
+				<tr><td>example-facility-a</td><td><span class="field dense select"><label>Install as</label>Tamanu facility</span></td></tr>
+				<tr><td>example-facility-b</td><td><span class="field dense select error ph"><label>Install as</label>Choose</span></td></tr>
+				<tr><td>example-backup</td><td><span class="field dense select"><label>Install as</label>Nothing</span></td></tr>
+			</table>
+			<div class="row">
+				<span class="toggle"><span class="on">git</span><span>jj</span></span>
+				<span class="field mono wide ph"><label>Extra arguments</label>--limit, --tags…</span>
+			</div>
+		</div>
+		<div class="dialog-actions">
+			<span class="btn text">Cancel</span>
+			<span class="btn contained" disabled><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Start work</span>
 		</div>
 	</div>
 </div>

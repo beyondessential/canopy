@@ -54,3 +54,9 @@ Steps:
 - The infra repo is public, so Canopy fetches `https://raw.githubusercontent.com/beyondessential/infra/main/ansible/variables.schema.json` with no credentials. It keeps the last good copy in the database, so a restart while GitHub is unreachable still has a catalogue, and refreshes it periodically.
 - Validation uses a JSON Schema 2020-12 validator with format checks for `hostname`, `ipv4`, `ipv6`, `uri` and `email`, since the schema relies on them.
 - `x-canopy.scope` generalises the hard-coded `ansible_host` rule. Keep the hard-coded rule as well, since Canopy's addressing depends on it whatever the catalogue says.
+
+## Environments are their machines
+
+- `resolve_environment` in `fns/inventory.rs` builds an environment from the group's live applications, refusing one with no application at the rank. GRP already defines an environment by its machines' rank, so this is a bug. Rebuild it from the group's live machines through `Machine::environment_rank` / `environment_ranks`, take the applications on those machines, and refuse only a group with nothing ranked. The SPA's environment picker (`GroupInventorySection`) derives ranks from applications too, and needs the same fix.
+- The empty-machine assignments the dialog makes are held on the lease, as machine id → application type. A served member with no applications carries its assigned type, and the plugin groups by it as it would by an application (the infra plugin needs the change, and LNXANS's "Inventory" grouping rule needs a sentence for it).
+- The preset run buttons appear when the environment holds a `tamanu-*` application. The facility default applies when it holds a `tamanu-central`.
