@@ -13,11 +13,13 @@ import {
 	ButtonBase,
 	Chip,
 	Collapse,
+	FormControlLabel,
 	IconButton,
 	LinearProgress,
 	MenuItem,
 	Paper,
 	Stack,
+	Switch,
 	TextField,
 	Tooltip,
 	Typography,
@@ -34,7 +36,7 @@ import TimeAgo from "./TimeAgo";
 import ScopeTextEditor from "./ansible/ScopeTextEditor";
 import VariableEditRow from "./ansible/VariableEditRow";
 import VariableEntryRow from "./ansible/VariableEntryRow";
-import type { ScopeKind } from "./ansible/schema";
+import { MANAGED, type ScopeKind, truthy } from "./ansible/schema";
 
 type Machine = {
 	id: string;
@@ -158,16 +160,26 @@ function EnvironmentAnsible({
 }) {
 	const loaded = variables !== null;
 	const all = variables ?? [];
+	// Whether a machine is managed is its switch, so it is not listed or counted
+	// as a variable.
+	const listed = all.filter((variable) => variable.name !== MANAGED);
+	const managedOn = (machineId: string) =>
+		all.some(
+			(variable) =>
+				variable.machine_id === machineId &&
+				variable.name === MANAGED &&
+				truthy(variable.value),
+		);
 	const machineIds = new Set(machines.map((machine) => machine.id));
-	const groupVars = all.filter(
+	const groupVars = listed.filter(
 		(variable) => variable.server_group_id && !variable.rank && !variable.machine_id,
 	);
-	const environmentVars = all.filter((variable) => variable.rank === rank);
+	const environmentVars = listed.filter((variable) => variable.rank === rank);
 	const machineVars = (machineId: string) =>
-		all.filter((variable) => variable.machine_id === machineId);
+		listed.filter((variable) => variable.machine_id === machineId);
 	const environmentCount =
 		environmentVars.length +
-		all.filter(
+		listed.filter(
 			(variable) => variable.machine_id && machineIds.has(variable.machine_id),
 		).length;
 	const count = groupVars.length + environmentCount;
@@ -222,6 +234,7 @@ function EnvironmentAnsible({
 					groupVars={groupVars}
 					environmentVars={environmentVars}
 					machineVars={machineVars}
+					managedOn={managedOn}
 					count={count}
 					importable={environmentCount === 0}
 					catalogue={catalogue}
@@ -246,6 +259,7 @@ function Variables({
 	groupVars,
 	environmentVars,
 	machineVars,
+	managedOn,
 	count,
 	importable,
 	catalogue,
@@ -259,6 +273,7 @@ function Variables({
 	groupVars: ReadonlyArray<AnsibleVariableView>;
 	environmentVars: ReadonlyArray<AnsibleVariableView>;
 	machineVars: (machineId: string) => ReadonlyArray<AnsibleVariableView>;
+	managedOn: (machineId: string) => boolean;
 	count: number;
 	importable: boolean;
 	catalogue: Catalogue | null;
@@ -267,7 +282,6 @@ function Variables({
 	const isAdmin = useIsAdmin() === true;
 	const [open, setOpen] = useState(count === 0);
 	const [importing, setImporting] = useState(false);
-	const [added, setAdded] = useState<ReadonlyArray<string>>([]);
 
 	const typesOn = (machineIds: ReadonlyArray<string>) => [
 		...new Set(
@@ -276,10 +290,6 @@ function Variables({
 				.map((application) => application.type),
 		),
 	];
-	const shown = machines.filter(
-		(machine) => machineVars(machine.id).length > 0 || added.includes(machine.id),
-	);
-	const unshown = machines.filter((machine) => !shown.includes(machine));
 	const environmentTypes = typesOn(machines.map((machine) => machine.id));
 
 	return (
@@ -308,69 +318,55 @@ function Variables({
 						isAdmin={isAdmin}
 						onChanged={onChanged}
 					/>
-					<Scope
-						title={rank}
-						scope={{ server_group_id: groupId, rank }}
-						kind="environment"
-						variables={environmentVars}
-						inherited={groupVars}
-						applicationTypes={environmentTypes}
-						catalogue={catalogue}
-						isAdmin={isAdmin}
-						onChanged={onChanged}
-						after={
-							isAdmin && importable ? (
-								<GradedAction
-									calls="ansible/import_apply"
-									action="Import an Ansible inventory file"
-								>
-									<Button
-										size="small"
-										variant="outlined"
-										startIcon={<UploadFileIcon />}
-										onClick={() => setImporting(true)}
-										data-testid="import-inventory"
-									>
-										Import inventory file
-									</Button>
-								</GradedAction>
-							) : null
-						}
-					/>
-					{shown.map((machine) => (
+					<Nested>
 						<Scope
-							key={machine.id}
-							title={machine.name ?? machine.id}
-							scope={{ machine_id: machine.id }}
-							kind="machine"
-							variables={machineVars(machine.id)}
-							inherited={[...groupVars, ...environmentVars]}
-							applicationTypes={typesOn([machine.id])}
+							title={rank}
+							scope={{ server_group_id: groupId, rank }}
+							kind="environment"
+							variables={environmentVars}
+							inherited={groupVars}
+							applicationTypes={environmentTypes}
 							catalogue={catalogue}
 							isAdmin={isAdmin}
 							onChanged={onChanged}
-							testId="ansible-machine"
-						/>
-					))}
-					{isAdmin && unshown.length > 0 && (
-						<TextField
-							select
-							size="small"
-							label="Add a machine"
-							value=""
-							onChange={(event) =>
-								setAdded((current) => [...current, event.target.value])
+							after={
+								isAdmin && importable ? (
+									<GradedAction
+										calls="ansible/import_apply"
+										action="Import an Ansible inventory file"
+									>
+										<Button
+											size="small"
+											variant="outlined"
+											startIcon={<UploadFileIcon />}
+											onClick={() => setImporting(true)}
+											data-testid="import-inventory"
+										>
+											Import inventory file
+										</Button>
+									</GradedAction>
+								) : null
 							}
-							sx={{ maxWidth: 320 }}
-							data-testid="add-machine"
-						>
-							{unshown.map((machine) => (
-								<MenuItem key={machine.id} value={machine.id}>
-									{machine.name}
-								</MenuItem>
+						/>
+						<Nested>
+							{machines.map((machine) => (
+								<Scope
+									key={machine.id}
+									title={machine.name ?? machine.id}
+									scope={{ machine_id: machine.id }}
+									kind="machine"
+									variables={machineVars(machine.id)}
+									inherited={[...groupVars, ...environmentVars]}
+									applicationTypes={typesOn([machine.id])}
+									catalogue={catalogue}
+									isAdmin={isAdmin}
+									onChanged={onChanged}
+									managed={managedOn(machine.id)}
+									testId="ansible-machine"
+								/>
 							))}
-						</TextField>
-					)}
+						</Nested>
+					</Nested>
 				</Stack>
 			</Collapse>
 			{isAdmin && (
@@ -386,7 +382,76 @@ function Variables({
 	);
 }
 
-/// One scope's variables, its entry row, and the way to edit it as text.
+/// What a scope holds, indented beneath it.
+function Nested({ children }: { children: React.ReactNode }) {
+	return (
+		<Stack spacing={2} sx={{ pl: 2, borderLeft: 1, borderColor: "divider" }}>
+			{children}
+		</Stack>
+	);
+}
+
+/// Whether a run acts on a machine.
+// spec: INV#managed-machines
+function ManagedSwitch({
+	machineId,
+	name,
+	managed,
+	isAdmin,
+	onChanged,
+}: {
+	machineId: string;
+	name: string;
+	managed: boolean;
+	isAdmin: boolean;
+	onChanged: () => void;
+}) {
+	const set = useApiAction("ansible_variables", "set");
+	return (
+		<>
+			<GradedAction
+				calls="ansible_variables/set"
+				action={`Change whether Ansible manages ${name}`}
+			>
+				<FormControlLabel
+					control={
+						<Switch
+							size="small"
+							checked={managed}
+							disabled={!isAdmin || set.pending}
+							onChange={(event) =>
+								set
+									.call({
+										machine_id: machineId,
+										name: MANAGED,
+										value: event.target.checked,
+										secret: false,
+									})
+									.then(onChanged)
+									.catch(() => {
+										// Surfaced by the alert beside it.
+									})
+							}
+							slotProps={{ input: { "aria-label": `${name} is managed by Ansible` } }}
+							data-testid="managed-switch"
+						/>
+					}
+					label={<Typography variant="caption">Managed by Ansible</Typography>}
+					sx={{ ml: 1 }}
+				/>
+			</GradedAction>
+			{set.error && (
+				<Typography variant="caption" color="error">
+					{set.error.message}
+				</Typography>
+			)}
+		</>
+	);
+}
+
+/// One scope's variables, its entry row, and the way to edit it as text. A
+/// machine's scope carries its managed switch, and one that is not managed is
+/// greyed and starts collapsed.
 function Scope({
 	title,
 	sub,
@@ -399,6 +464,7 @@ function Scope({
 	isAdmin,
 	onChanged,
 	after,
+	managed,
 	testId,
 }: {
 	title: string;
@@ -412,9 +478,13 @@ function Scope({
 	isAdmin: boolean;
 	onChanged: () => void;
 	after?: React.ReactNode;
+	/** Whether the machine is managed by Ansible, for a machine's scope. */
+	managed?: boolean;
 	testId?: string;
 }) {
 	const [editing, setEditing] = useState(false);
+	const [expanded, setExpanded] = useState(managed !== false);
+	const greyed = managed === false;
 	const remove = useApiAction("ansible_variables", "remove");
 	const taken = new Set(variables.map((variable) => variable.name));
 	const sorted = [...variables].sort((a, b) => a.name.localeCompare(b.name));
@@ -428,13 +498,42 @@ function Scope({
 			}
 		}}>
 			<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-				<Typography variant="subtitle2">{title}</Typography>
+				{managed !== undefined && (
+					<IconButton
+						size="small"
+						aria-expanded={expanded}
+						aria-label={expanded ? `Collapse ${title}` : `Expand ${title}`}
+						onClick={() => setExpanded((e) => !e)}
+						data-testid="scope-expand"
+					>
+						{expanded ? (
+							<ExpandLessIcon fontSize="small" />
+						) : (
+							<ExpandMoreIcon fontSize="small" />
+						)}
+					</IconButton>
+				)}
+				<Typography
+					variant="subtitle2"
+					color={greyed ? "text.disabled" : undefined}
+				>
+					{title}
+				</Typography>
 				{sub && (
 					<Typography variant="caption" color="text.secondary">
 						{sub}
 					</Typography>
 				)}
-				{isAdmin && !editing && (
+				{managed !== undefined && "machine_id" in scope && (
+					<ManagedSwitch
+						machineId={String(scope.machine_id)}
+						name={title}
+						managed={managed}
+						isAdmin={isAdmin}
+						onChanged={onChanged}
+					/>
+				)}
+				{isAdmin && !editing && expanded && (
 					<Tooltip title="Edit as text">
 						<IconButton
 							size="small"
@@ -447,66 +546,70 @@ function Scope({
 					</Tooltip>
 				)}
 			</Stack>
-			{editing ? (
-				<ScopeTextEditor
-					scope={scope}
-					kind={kind}
-					applicationTypes={applicationTypes}
-					catalogue={catalogue}
-					variables={variables.map((variable) => ({
-						name: variable.name,
-						value: variable.is_secret ? undefined : variable.value,
-						secret: variable.is_secret,
-					}))}
-					onClose={() => setEditing(false)}
-					onSaved={onChanged}
-				/>
-			) : (
-				<>
-					{sorted.length === 0 && !isAdmin && (
-						<Typography variant="body2" color="text.secondary">
-							None set
-						</Typography>
+			<Collapse in={expanded}>
+				<Box sx={greyed ? { opacity: 0.6 } : undefined}>
+					{editing ? (
+						<ScopeTextEditor
+							scope={scope}
+							kind={kind}
+							applicationTypes={applicationTypes}
+							catalogue={catalogue}
+							variables={variables.map((variable) => ({
+								name: variable.name,
+								value: variable.is_secret ? undefined : variable.value,
+								secret: variable.is_secret,
+							}))}
+							onClose={() => setEditing(false)}
+							onSaved={onChanged}
+						/>
+					) : (
+						<>
+							{sorted.length === 0 && !isAdmin && (
+								<Typography variant="body2" color="text.secondary">
+									None set
+								</Typography>
+							)}
+							<Stack spacing={0.25} sx={{ mt: 0.5 }}>
+								{sorted.map((variable) => (
+									<VariableRow
+										key={variable.id}
+										variable={variable}
+										overrides={inherited.find(
+											(other) =>
+												other.name === variable.name && other.id !== variable.id,
+										)}
+										scope={scope}
+										catalogue={catalogue}
+										onRemove={isAdmin ? remove : undefined}
+										onChanged={onChanged}
+									/>
+								))}
+							</Stack>
+							{remove.error && (
+								<Alert severity="warning" sx={{ mt: 1 }}>
+									{remove.error.message}
+								</Alert>
+							)}
+							{isAdmin && (
+								<Box sx={{ mt: 0.5 }}>
+									<VariableEntryRow
+										label={title}
+										scope={scope}
+										kind={kind}
+										applicationTypes={applicationTypes}
+										catalogue={catalogue}
+										taken={taken}
+										onSet={onChanged}
+									>
+										{after}
+									</VariableEntryRow>
+								</Box>
+							)}
+							{!isAdmin && after}
+						</>
 					)}
-					<Stack spacing={0.25} sx={{ mt: 0.5 }}>
-						{sorted.map((variable) => (
-							<VariableRow
-								key={variable.id}
-								variable={variable}
-								overrides={inherited.find(
-									(other) =>
-										other.name === variable.name && other.id !== variable.id,
-								)}
-								scope={scope}
-								catalogue={catalogue}
-								onRemove={isAdmin ? remove : undefined}
-								onChanged={onChanged}
-							/>
-						))}
-					</Stack>
-					{remove.error && (
-						<Alert severity="warning" sx={{ mt: 1 }}>
-							{remove.error.message}
-						</Alert>
-					)}
-					{isAdmin && (
-						<Box sx={{ mt: 0.5 }}>
-							<VariableEntryRow
-								label={title}
-								scope={scope}
-								kind={kind}
-								applicationTypes={applicationTypes}
-								catalogue={catalogue}
-								taken={taken}
-								onSet={onChanged}
-							>
-								{after}
-							</VariableEntryRow>
-						</Box>
-					)}
-					{!isAdmin && after}
-				</>
-			)}
+				</Box>
+			</Collapse>
 		</Box>
 	);
 }

@@ -17,14 +17,15 @@ Infra's plugin moves with this (it is being developed against this branch): with
 
 ## `managed_by_ansible` as a switch
 
-- [ ] Hold it to machine scope in `ansible_variables::set` beside `check_ansible_host` (the scope text editor saves through it too)
-- [ ] Import: drop the environment/group-wide `managed_wide` branch, which can no longer be set
-- [ ] SPA: list every member; a switch per machine sets or removes it; an unmanaged machine is greyed and collapsed by default
-- [ ] Leave it out of the variable rows, the entry row's name completion, and the scope text editor
+- [x] Hold it to machine scope in `ansible_variables::set` beside `check_ansible_host` (the scope text editor saves through it too)
+- [x] Import: drop the environment/group-wide `managed_wide` branch, which can no longer be set; a machine already switched on does not hold an import back
+- [x] Migration carrying existing wider values onto machines
+- [x] SPA: list every member; a switch per machine sets or removes it; an unmanaged machine is greyed and collapsed by default
+- [x] Leave it out of the variable rows, the entry row's name completion, and the scope text editor
 
 ## Nesting
 
-- [ ] Environment indented beneath the group, machines beneath the environment
+- [x] Environment indented beneath the group, machines beneath the environment
 
 ## History and undo
 

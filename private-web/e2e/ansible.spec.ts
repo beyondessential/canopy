@@ -59,29 +59,21 @@ test.describe("group Ansible", () => {
 		await expect(production).toBeVisible();
 		await expect(ansible.getByTestId("environment-demo")).toHaveCount(0);
 
-		// Each environment offers only the machines its own applications run on,
+		// Each environment lists only the machines its own applications run on,
 		// though both sit in the same group.
-		await production.getByTestId("add-machine").click();
-		await expect(
-			page.getByRole("option", { name: "kamaka-prod-central" }),
-		).toBeVisible();
-		await expect(
-			page.getByRole("option", { name: "kamaka-demo-central" }),
-		).toHaveCount(0);
-		await page.keyboard.press("Escape");
+		await expect(production.getByTestId("ansible-machine")).toHaveCount(1);
+		await expect(production.getByTestId("ansible-machine")).toContainText(
+			"kamaka-prod-central",
+		);
 
 		await ansible.getByLabel("Environment").click();
 		await page.getByRole("option", { name: "demo" }).click();
 
 		const demo = ansible.getByTestId("environment-demo");
-		await demo.getByTestId("add-machine").click();
-		await expect(
-			page.getByRole("option", { name: "kamaka-demo-central" }),
-		).toBeVisible();
-		await expect(
-			page.getByRole("option", { name: "kamaka-prod-central" }),
-		).toHaveCount(0);
-		await page.keyboard.press("Escape");
+		await expect(demo.getByTestId("ansible-machine")).toHaveCount(1);
+		await expect(demo.getByTestId("ansible-machine")).toContainText(
+			"kamaka-demo-central",
+		);
 		await expect(ansible.getByTestId("environment-production")).toHaveCount(0);
 	});
 
@@ -194,19 +186,15 @@ test.describe("group Ansible", () => {
 		await expect(demo.getByTestId("var")).toContainText('"trace"');
 
 		// The variable is the demo environment's, so production does not carry
-		// it, and the machine offered to add is the selected environment's.
+		// it, and the machines listed are the selected environment's.
 		await ansible.getByLabel("Environment").click();
 		await page.getByRole("option", { name: "production" }).click();
 		const production = ansible.getByTestId("environment-production");
 		await expect(production.getByTestId("var")).toHaveCount(0);
-
-		await production.getByTestId("add-machine").click();
-		await expect(
-			page.getByRole("option", { name: "kamaka-demo-central" }),
-		).toHaveCount(0);
-		await expect(
-			page.getByRole("option", { name: "kamaka-prod-central" }),
-		).toBeVisible();
+		await expect(production.getByTestId("ansible-machine")).toHaveCount(1);
+		await expect(production.getByTestId("ansible-machine")).toContainText(
+			"kamaka-prod-central",
+		);
 	});
 
 	test("sets a variable at each scope and marks the one that overrides", async ({
@@ -232,8 +220,7 @@ test.describe("group Ansible", () => {
 
 		// The same name on the machine overrides it, which is the case an
 		// operator chasing a value that isn't taking effect is looking for.
-		await production.getByTestId("add-machine").click();
-		await page.getByRole("option", { name: "kamaka-prod-central" }).click();
+		await production.getByTestId("ansible-machine").getByTestId("scope-expand").click();
 		await setVariable(production.getByTestId("ansible-machine"), "log_level", "trace");
 		await expect(production.getByTestId("overriding-var")).toContainText(
 			'"trace"',
@@ -241,6 +228,48 @@ test.describe("group Ansible", () => {
 		await expect(production.getByTestId("overriding-var")).toContainText(
 			"overrides the group",
 		);
+	});
+
+	// Whether a machine is managed is a switch on it, not a listed variable; a
+	// machine that is not managed is greyed and starts collapsed.
+	// spec: INV#managed-machines
+	test("switches a machine to managed by Ansible", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
+		await seedServer(sql, {
+			name: "kamaka-prod-central",
+			type: "tamanu-central",
+			rank: "production",
+			groupId: group.id,
+			tags: {},
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		const production = page
+			.getByTestId("group-ansible")
+			.getByTestId("environment-production");
+		const machine = production.getByTestId("ansible-machine");
+		const toggle = machine.getByTestId("scope-expand");
+		await expect(toggle).toHaveAttribute("aria-expanded", "false");
+		await expect(machine.getByTestId("variable-name")).toBeHidden();
+
+		const managed = machine.getByTestId("managed-switch").locator("input");
+		await managed.click();
+		await expect(managed).toBeChecked();
+		await expect(production.getByTestId("variables-count")).toHaveText("0");
+		await expect(production.getByTestId("var")).toHaveCount(0);
+		const [row] = await sql.query<{ value: unknown }>(
+			"SELECT value FROM ansible_variables WHERE name = 'managed_by_ansible'",
+		);
+		expect(row.value).toBe(true);
+
+		// Seen fresh, a managed machine starts expanded.
+		await page.reload();
+		await expect(
+			page
+				.getByTestId("group-ansible")
+				.getByTestId("ansible-machine")
+				.getByTestId("scope-expand"),
+		).toHaveAttribute("aria-expanded", "true");
 	});
 
 	test("shows a secret variable by name and never by value", async ({
@@ -376,9 +405,8 @@ test.describe("group Ansible", () => {
 
 		// An object is a field for each property, required ones marked, and a
 		// variable the catalogue calls secret is entered as one.
-		await production.getByTestId("add-machine").click();
-		await page.getByRole("option", { name: "kamaka-prod-central" }).click();
 		const machine = production.getByTestId("ansible-machine");
+		await machine.getByTestId("scope-expand").click();
 		await machine.getByTestId("variable-name").fill("tamanu_caddy");
 		await page.getByRole("option", { name: /tamanu_caddy_tls_dns_iam/ }).click();
 		const form = machine.getByTestId("object-field");

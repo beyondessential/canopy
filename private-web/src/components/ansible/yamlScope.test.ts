@@ -180,6 +180,12 @@ describe("checkScope", () => {
 		expect(check(`${"a".repeat(253)}: 1\n`)).toEqual([]);
 	});
 
+	it("refuses managed_by_ansible, which the machine's switch sets", () => {
+		expect(check("managed_by_ansible: true\n", "machine")[0].message).toContain(
+			"machine's switch",
+		);
+	});
+
 	it("refuses a secret tag on a variable the catalogue calls plain", () => {
 		const out = check("elastic_agent_enabled: !secret true\n");
 		expect(out.map((p) => p.message).join("\n")).toContain("not secret in the catalogue");
