@@ -314,6 +314,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ansible_variables/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A variable's history: each time it was set, restored, or removed, newest
+         *     first, as far back as the audit log's database holds.
+         */
+        post: operations["ansible_variables_history"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ansible_variables/remove": {
         parameters: {
             query?: never;
@@ -327,8 +347,51 @@ export interface paths {
          * Forget a variable, value and all.
          * @description The row and its stored value go together: when the secret store refuses,
          *     both stay, and when it does not answer the row stays for a retry to remove.
+         *     A secret's value is held for a while first, so the removal can be undone.
          */
         post: operations["ansible_variables_remove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ansible_variables/removed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The variables removed from a scope in the last week and not set there since,
+         *     newest first, so a removal can be undone after its offer has gone.
+         */
+        post: operations["ansible_variables_removed"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ansible_variables/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Undo a change to a variable, putting back what it replaced or removed.
+         * @description A plain value comes from the change's entry, and a secret from where it is
+         *     held for a week after the change. Restoring is a set like any other, so a
+         *     secret it replaces is held in turn.
+         */
+        post: operations["ansible_variables_restore"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6801,6 +6864,11 @@ export interface components {
             names: components["schemas"]["CertificateNameView"][];
             pause?: null | components["schemas"]["PauseView"];
         };
+        /**
+         * @description What a change did to a variable.
+         * @enum {string}
+         */
+        Change: "set" | "removed";
         /** @description Request body for [`check_detail`]. */
         CheckDetailArgs: {
             /**
@@ -8580,6 +8648,41 @@ export interface components {
              *     timestamps match.
              */
             id: string;
+        };
+        /** @description One change in a variable's history. */
+        HistoryEntry: {
+            /** @description Who made it. */
+            actor: components["schemas"]["Actor"];
+            /** @description Whether it set the variable or removed it. */
+            change: components["schemas"]["Change"];
+            /**
+             * Format: uuid
+             * @description The entry that records the change.
+             */
+            entry_id: string;
+            /**
+             * Format: date-time
+             * @description When it was made.
+             */
+            recorded_at: string;
+            /** @description The plain value a set replaced. */
+            replaced?: unknown;
+            /** @description Whether a set replaced a secret. */
+            replaced_secret: boolean;
+            /**
+             * Format: uuid
+             * @description The change a restore undid.
+             */
+            restored_from?: string | null;
+            /** @description Whether the value it set or removed is a secret. */
+            secret: boolean;
+            /**
+             * @description Whether the change can be undone, putting back what it replaced or
+             *     removed: a plain value its entry holds, or a secret still held.
+             */
+            undoable: boolean;
+            /** @description The plain value it set or removed. */
+            value?: unknown;
         };
         /** @description The window a run declared, and the end to give it. */
         HoldArgs: {
@@ -11657,6 +11760,13 @@ export interface components {
             /** @description The variable's name. */
             name: string;
         };
+        /** @description Name one scope, for what was removed from it. */
+        RemovedArgs: components["schemas"]["ScopeArgs"];
+        /** @description A variable removed from a scope in the last week and not set there since. */
+        RemovedVariable: components["schemas"]["HistoryEntry"] & {
+            /** @description The variable's name. */
+            name: string;
+        };
         /** @description Identifies a one-off backup or restore request for a server. */
         RequestArgs: {
             /**
@@ -11844,6 +11954,16 @@ export interface components {
             status: components["schemas"]["RunStatus"];
             /** @description The backup type restored. */
             type: string;
+        };
+        /** @description Undo one change to a variable, putting back what it replaced or removed. */
+        RestoreArgs: components["schemas"]["ScopeArgs"] & {
+            /**
+             * Format: uuid
+             * @description The entry of the change to undo, from the variable's history.
+             */
+            entry_id: string;
+            /** @description The variable's name. */
+            name: string;
         };
         /**
          * @description A restore consumer and the restore intents it currently advertises.
@@ -14178,6 +14298,11 @@ export interface components {
         VarMap: {
             [key: string]: unknown;
         };
+        /** @description Name one variable, for its history. */
+        VariableArgs: components["schemas"]["ScopeArgs"] & {
+            /** @description The variable's name. */
+            name: string;
+        };
         /** @description Which group's variables to list. */
         VariablesForGroupArgs: {
             /**
@@ -14919,6 +15044,38 @@ export interface operations {
             };
         };
     };
+    ansible_variables_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VariableArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoryEntry"][];
+                };
+            };
+            /** @description Not one scope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     ansible_variables_remove: {
         parameters: {
             query?: never;
@@ -14970,6 +15127,97 @@ export interface operations {
             };
         };
     };
+    ansible_variables_removed: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemovedArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemovedVariable"][];
+                };
+            };
+            /** @description Not one scope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    ansible_variables_restore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RestoreArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnsibleVariable"];
+                };
+            };
+            /** @description Not one scope, a change to another variable, a change that put nothing away, or a value the catalogue no longer allows there */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description No such change in the audit log's database */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The secret value it put away is no longer held */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The secret store is unavailable */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     ansible_variables_set: {
         parameters: {
             query?: never;
@@ -14991,7 +15239,7 @@ export interface operations {
                     "application/json": components["schemas"]["AnsibleVariable"];
                 };
             };
-            /** @description Not one scope, not a usable variable name, or an `ansible_host` outside machine scope or not a string */
+            /** @description Not one scope, not a usable variable name, an `ansible_host` outside machine scope or not a string, or a `managed_by_ansible` outside machine scope */
             400: {
                 headers: {
                     [name: string]: unknown;

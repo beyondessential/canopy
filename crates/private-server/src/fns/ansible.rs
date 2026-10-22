@@ -983,8 +983,7 @@ impl Scoped {
 					})?;
 					// Exposed once, into the value this serving exists to
 					// serve to the run holding the lease.
-					let held = held.expose_secret();
-					serde_json::from_str(held).unwrap_or_else(|_| Value::String(held.to_owned()))
+					super::ansible_variables::unstored(held.expose_secret())
 				}
 			};
 			scoped.vars.0.insert(variable.name.clone(), value);

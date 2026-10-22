@@ -78,6 +78,7 @@ async fn main() -> miette::Result<()> {
 	let tag_reconcile = jobs::backup::tag_reconcile::spawn();
 	let progress_prune = jobs::backup::progress_prune::spawn();
 	let ansible_catalogue = jobs::ansible::catalogue::spawn(worker.secrets.clone());
+	let ansible_held = jobs::ansible::held::spawn(worker.secrets.clone());
 	let recovery_snapshot = jobs::backup::recovery_snapshot::spawn(worker, recovery_config);
 
 	let artifact_sweep = jobs::artifact_sweep::spawn().await;
@@ -91,6 +92,7 @@ async fn main() -> miette::Result<()> {
 		tag_reconcile,
 		progress_prune,
 		ansible_catalogue,
+		ansible_held,
 		recovery_snapshot,
 		artifact_sweep
 	)

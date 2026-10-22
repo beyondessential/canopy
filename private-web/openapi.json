@@ -2174,6 +2174,14 @@
         ],
         "type": "object"
       },
+      "Change": {
+        "description": "What a change did to a variable.",
+        "enum": [
+          "set",
+          "removed"
+        ],
+        "type": "string"
+      },
       "CheckDetailArgs": {
         "description": "Request body for [`check_detail`].",
         "properties": {
@@ -5072,6 +5080,65 @@
         "required": [
           "created_at",
           "id"
+        ],
+        "type": "object"
+      },
+      "HistoryEntry": {
+        "description": "One change in a variable's history.",
+        "properties": {
+          "actor": {
+            "$ref": "#/components/schemas/Actor",
+            "description": "Who made it."
+          },
+          "change": {
+            "$ref": "#/components/schemas/Change",
+            "description": "Whether it set the variable or removed it."
+          },
+          "entry_id": {
+            "description": "The entry that records the change.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "recorded_at": {
+            "description": "When it was made.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "replaced": {
+            "description": "The plain value a set replaced."
+          },
+          "replaced_secret": {
+            "description": "Whether a set replaced a secret.",
+            "type": "boolean"
+          },
+          "restored_from": {
+            "description": "The change a restore undid.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "secret": {
+            "description": "Whether the value it set or removed is a secret.",
+            "type": "boolean"
+          },
+          "undoable": {
+            "description": "Whether the change can be undone, putting back what it replaced or\nremoved: a plain value its entry holds, or a secret still held.",
+            "type": "boolean"
+          },
+          "value": {
+            "description": "The plain value it set or removed."
+          }
+        },
+        "required": [
+          "entry_id",
+          "recorded_at",
+          "actor",
+          "change",
+          "secret",
+          "replaced_secret",
+          "undoable"
         ],
         "type": "object"
       },
@@ -10349,6 +10416,35 @@
         ],
         "description": "Name one variable to forget."
       },
+      "RemovedArgs": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ScopeArgs"
+          }
+        ],
+        "description": "Name one scope, for what was removed from it."
+      },
+      "RemovedVariable": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/HistoryEntry",
+            "description": "The removal, as its history names it."
+          },
+          {
+            "properties": {
+              "name": {
+                "description": "The variable's name.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "A variable removed from a scope in the last week and not set there since."
+      },
       "RequestArgs": {
         "description": "Identifies a one-off backup or restore request for a server.",
         "properties": {
@@ -10666,6 +10762,32 @@
           "at"
         ],
         "type": "object"
+      },
+      "RestoreArgs": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ScopeArgs"
+          },
+          {
+            "properties": {
+              "entry_id": {
+                "description": "The entry of the change to undo, from the variable's history.",
+                "format": "uuid",
+                "type": "string"
+              },
+              "name": {
+                "description": "The variable's name.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "entry_id"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "Undo one change to a variable, putting back what it replaced or removed."
       },
       "RestoreConsumerView": {
         "description": "A restore consumer and the restore intents it currently advertises.\n\nA restore consumer is a device with the `backup-restore` role: an agent\nthat restores backups onto standby replicas. Each advertised intent\ncarries a description, semantics flags, and a parameter schema, which\ntogether determine what declarations can be created for the consumer and\nwhat parameters they accept.",
@@ -14446,6 +14568,26 @@
         "description": "Variables as a JSON object.",
         "type": "object"
       },
+      "VariableArgs": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ScopeArgs"
+          },
+          {
+            "properties": {
+              "name": {
+                "description": "The variable's name.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "Name one variable, for its history."
+      },
       "VariablesForGroupArgs": {
         "description": "Which group's variables to list.",
         "properties": {
@@ -15566,9 +15708,60 @@
         "x-canopy-safety-mode": "read-only"
       }
     },
+    "/api/ansible_variables/history": {
+      "post": {
+        "operationId": "ansible_variables_history",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VariableArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HistoryEntry"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Not one scope"
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "A variable's history: each time it was set, restored, or removed, newest\nfirst, as far back as the audit log's database holds.",
+        "tags": [
+          "ansible"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
     "/api/ansible_variables/remove": {
       "post": {
-        "description": "The row and its stored value go together: when the secret store refuses,\nboth stay, and when it does not answer the row stays for a retry to remove.",
+        "description": "The row and its stored value go together: when the secret store refuses,\nboth stay, and when it does not answer the row stays for a retry to remove.\nA secret's value is held for a while first, so the removal can be undone.",
         "operationId": "ansible_variables_remove",
         "requestBody": {
           "content": {
@@ -15637,6 +15830,138 @@
         "x-canopy-safety-mode": "write"
       }
     },
+    "/api/ansible_variables/removed": {
+      "post": {
+        "operationId": "ansible_variables_removed",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemovedArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RemovedVariable"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Not one scope"
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "The variables removed from a scope in the last week and not set there since,\nnewest first, so a removal can be undone after its offer has gone.",
+        "tags": [
+          "ansible"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/ansible_variables/restore": {
+      "post": {
+        "description": "A plain value comes from the change's entry, and a secret from where it is\nheld for a week after the change. Restoring is a set like any other, so a\nsecret it replaces is held in turn.",
+        "operationId": "ansible_variables_restore",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnsibleVariable"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Not one scope, a change to another variable, a change that put nothing away, or a value the catalogue no longer allows there"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "No such change in the audit log's database"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "The secret value it put away is no longer held"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "The secret store is unavailable"
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Undo a change to a variable, putting back what it replaced or removed.",
+        "tags": [
+          "ansible"
+        ],
+        "x-canopy-audit": [
+          "inventory_variable_set"
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
     "/api/ansible_variables/set": {
       "post": {
         "description": "A secret's value goes to the secret store keyed by name, and the row holds\nno value at all. Turning a secret into a plain variable forgets the stored\nvalue, so a later switch back never resurrects a stale one.",
@@ -15670,7 +15995,7 @@
                 }
               }
             },
-            "description": "Not one scope, not a usable variable name, or an `ansible_host` outside machine scope or not a string"
+            "description": "Not one scope, not a usable variable name, an `ansible_host` outside machine scope or not a string, or a `managed_by_ansible` outside machine scope"
           },
           "404": {
             "content": {
