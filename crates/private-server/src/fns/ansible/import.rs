@@ -992,7 +992,7 @@ pub async fn import_apply(
 		}
 		match &pending {
 			Some(pending) => conn.settle_done(pending, None).await,
-			None => conn.record(action).await,
+			None => conn.record(action).await.map(drop),
 		}
 	}
 	.await;

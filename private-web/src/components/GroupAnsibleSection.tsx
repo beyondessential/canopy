@@ -4,6 +4,7 @@ import EditNoteIcon from "@mui/icons-material/EditNote";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutlined";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import HistoryIcon from "@mui/icons-material/History";
 import LockIcon from "@mui/icons-material/Lock";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import {
@@ -18,6 +19,7 @@ import {
 	LinearProgress,
 	MenuItem,
 	Paper,
+	Snackbar,
 	Stack,
 	Switch,
 	TextField,
@@ -35,6 +37,7 @@ import { GradedAction } from "./GradedAction";
 import TimeAgo from "./TimeAgo";
 import ScopeTextEditor from "./ansible/ScopeTextEditor";
 import VariableEditRow from "./ansible/VariableEditRow";
+import VariableHistory from "./ansible/VariableHistory";
 import VariableEntryRow from "./ansible/VariableEntryRow";
 import { MANAGED, type ScopeKind, truthy } from "./ansible/schema";
 
@@ -486,6 +489,35 @@ function Scope({
 	const [expanded, setExpanded] = useState(managed !== false);
 	const greyed = managed === false;
 	const remove = useApiAction("ansible_variables", "remove");
+	const restore = useApiAction("ansible_variables", "restore");
+	// The removal just made, offered to undo until the offer is dismissed.
+	const [undo, setUndo] = useState<{ name: string; entryId: string } | null>(null);
+	const [historyOf, setHistoryOf] = useState<string | null>(null);
+	const removed = useApi(
+		"ansible_variables",
+		"removed",
+		scope,
+		[
+			JSON.stringify(scope),
+			variables.map((variable) => `${variable.id}@${variable.updated_at}`).join(),
+		],
+		{ skip: !isAdmin },
+	);
+	const removeVariable = (name: string) =>
+		remove.call({ ...scope, name }).then((removal) => {
+			setUndo({ name, entryId: removal.entry_id });
+			onChanged();
+		});
+	const undoRemoval = () => {
+		if (!undo) return;
+		setUndo(null);
+		restore
+			.call({ ...scope, name: undo.name, entry_id: undo.entryId })
+			.then(onChanged)
+			.catch(() => {
+				// Surfaced by the alert on the scope.
+			});
+	};
 	const taken = new Set(variables.map((variable) => variable.name));
 	const sorted = [...variables].sort((a, b) => a.name.localeCompare(b.name));
 
@@ -580,15 +612,39 @@ function Scope({
 										)}
 										scope={scope}
 										catalogue={catalogue}
-										onRemove={isAdmin ? remove : undefined}
+										onRemove={isAdmin ? removeVariable : undefined}
+										onHistory={() => setHistoryOf(variable.name)}
 										onChanged={onChanged}
 									/>
 								))}
 							</Stack>
-							{remove.error && (
+							{(remove.error ?? restore.error) && (
 								<Alert severity="warning" sx={{ mt: 1 }}>
-									{remove.error.message}
+									{(remove.error ?? restore.error)?.message}
 								</Alert>
+							)}
+							{removed.status === "ok" && removed.data.length > 0 && (
+								<Stack
+									direction="row"
+									spacing={0.5}
+									useFlexGap
+									sx={{ flexWrap: "wrap", alignItems: "center", mt: 0.5 }}
+									data-testid="removed-variables"
+								>
+									<Typography variant="caption" color="text.secondary">
+										Removed this week
+									</Typography>
+									{removed.data.map((variable) => (
+										<Chip
+											key={variable.name}
+											size="small"
+											variant="outlined"
+											label={variable.name}
+											onClick={() => setHistoryOf(variable.name)}
+											sx={{ fontFamily: "monospace" }}
+										/>
+									))}
+								</Stack>
 							)}
 							{isAdmin && (
 								<Box sx={{ mt: 0.5 }}>
@@ -610,6 +666,27 @@ function Scope({
 					)}
 				</Box>
 			</Collapse>
+			{historyOf !== null && (
+				<VariableHistory
+					scope={scope}
+					name={historyOf}
+					onClose={() => setHistoryOf(null)}
+					onChanged={onChanged}
+				/>
+			)}
+			<Snackbar
+				open={undo !== null}
+				autoHideDuration={10000}
+				onClose={(_, reason) => {
+					if (reason !== "clickaway") setUndo(null);
+				}}
+				message={undo ? `Removed ${undo.name}` : ""}
+				action={
+					<Button size="small" color="inherit" onClick={undoRemoval} data-testid="undo-removal">
+						Undo
+					</Button>
+				}
+			/>
 		</Box>
 	);
 }
@@ -623,13 +700,16 @@ function VariableRow({
 	scope,
 	catalogue,
 	onRemove,
+	onHistory,
 	onChanged,
 }: {
 	variable: AnsibleVariableView;
 	overrides?: AnsibleVariableView;
 	scope: Record<string, unknown>;
 	catalogue: Catalogue | null;
-	onRemove?: { call: (params?: Record<string, unknown>) => Promise<unknown> };
+	/** Remove it, for an administrator. */
+	onRemove?: (name: string) => Promise<unknown>;
+	onHistory: () => void;
 	onChanged: () => void;
 }) {
 	const [editing, setEditing] = useState(false);
@@ -699,6 +779,18 @@ function VariableRow({
 				<TimeAgo timestamp={variable.updated_at} />
 			</Typography>
 			{onRemove && !editing && (
+				<Tooltip title="History">
+					<IconButton
+						size="small"
+						aria-label={`history of ${variable.name}`}
+						data-testid={`history-${variable.name}`}
+						onClick={onHistory}
+					>
+						<HistoryIcon fontSize="small" />
+					</IconButton>
+				</Tooltip>
+			)}
+			{onRemove && !editing && (
 				<GradedAction calls="ansible_variables/set" action={`Edit ${variable.name}`}>
 					<IconButton
 						size="small"
@@ -720,12 +812,9 @@ function VariableRow({
 						aria-label={`remove ${variable.name}`}
 						data-testid={`remove-${variable.name}`}
 						onClick={() =>
-							onRemove
-								.call({ ...scope, name: variable.name })
-								.then(onChanged)
-								.catch(() => {
-									// Surfaced by the alert on the scope.
-								})
+							onRemove(variable.name).catch(() => {
+								// Surfaced by the alert on the scope.
+							})
 						}
 					>
 						<DeleteIcon fontSize="small" />

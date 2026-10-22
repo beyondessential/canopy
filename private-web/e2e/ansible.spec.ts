@@ -363,6 +363,59 @@ test.describe("group Ansible", () => {
 		await expect(page.getByText("paprika")).toHaveCount(0);
 	});
 
+	// Removing asks nothing and offers to undo; a variable's history puts back
+	// an earlier value, and a removal is put back from its scope after the offer
+	// has gone.
+	// spec: ANSVAR#presentation
+	test("undoes a removal and puts back an earlier value", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
+		await seedServer(sql, {
+			name: "kamaka-prod-central",
+			type: "tamanu-central",
+			rank: "production",
+			groupId: group.id,
+			tags: {},
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		const production = page
+			.getByTestId("group-ansible")
+			.getByTestId("environment-production");
+		const scope = production.getByTestId("scope-environment");
+		await setVariable(scope, "log_level", "info");
+		await setVariable(scope, "log_level", "debug");
+		const logLevel = scope.getByTestId("var").filter({ hasText: "log_level" });
+		await expect(logLevel).toContainText('"debug"');
+
+		// The history shows each change, and undoing the last puts back "info".
+		await scope.getByTestId("history-log_level").click();
+		const history = page.getByTestId("variable-history");
+		await expect(history.getByTestId("history-entry")).toHaveCount(2);
+		await expect(history.getByTestId("history-entry").first()).toContainText(
+			'Set to "debug", was "info"',
+		);
+		await history.getByTestId("history-restore").click();
+		await expect(page.getByTestId("variable-history")).toHaveCount(0);
+		await expect(logLevel).toContainText('"info"');
+
+		// Removing offers an undo, which puts it back.
+		await scope.getByTestId("remove-log_level").click();
+		await expect(logLevel).toHaveCount(0);
+		await page.getByTestId("undo-removal").click();
+		await expect(logLevel).toContainText('"info"');
+
+		// Once the offer has gone, the scope lists the removal.
+		await scope.getByTestId("remove-log_level").click();
+		await expect(logLevel).toHaveCount(0);
+		await page.keyboard.press("Escape");
+		const removed = scope.getByTestId("removed-variables");
+		await expect(removed).toContainText("log_level");
+		await removed.getByText("log_level").click();
+		await page.getByTestId("history-restore").first().click();
+		await expect(logLevel).toContainText('"info"');
+		await expect(scope.getByTestId("removed-variables")).toHaveCount(0);
+	});
+
 	// The name completes from the catalogue, showing each variable's type, and
 	// the value is entered in a form shaped by it. A variable limited to other
 	// scopes is not offered.

@@ -46,7 +46,7 @@ Earlier secret values:
 API and SPA:
 
 - [x] `ansible_variables/history`, `ansible_variables/removed`, `ansible_variables/restore` (write grade, audited as a set)
-- [ ] Undo offer after a removal (snackbar), restoring through `restore`
-- [ ] History dialog from each row: who, when, value or "secret changed", restore where restorable
-- [ ] Per scope: removed in the last week, each opening its history
-- [ ] Rust tests (history query, restore plain, restore secret within the week, refused after, sweep), e2e for undo, history restore, removed list
+- [x] Undo offer after a removal (snackbar), restoring through `restore`
+- [x] History dialog from each row: who, when, value or "secret changed", restore where restorable
+- [x] Per scope: removed in the last week, each opening its history
+- [x] Rust tests (history query, restore plain, restore secret within the week, refused after, sweep), e2e for undo, history restore, removed list

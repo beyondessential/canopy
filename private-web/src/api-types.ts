@@ -11755,6 +11755,14 @@ export interface components {
              */
             token_lifetime_minutes: number;
         };
+        /** @description A removal, by the entry that records it, so it can be undone. */
+        Removal: {
+            /**
+             * Format: uuid
+             * @description The entry of the removal, which `restore` undoes.
+             */
+            entry_id: string;
+        };
         /** @description Name one variable to forget. */
         RemoveArgs: components["schemas"]["ScopeArgs"] & {
             /** @description The variable's name. */
@@ -15095,7 +15103,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["Removal"];
                 };
             };
             /** @description Not one scope */

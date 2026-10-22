@@ -424,7 +424,7 @@ async fn remove(
 				version: version_record(&yanked),
 				device: database::audit::Record::device(device.0.0.id),
 			})
-			.await?
+			.await?;
 		}
 		None => audit.unchanged(),
 	}

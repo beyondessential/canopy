@@ -1160,13 +1160,18 @@ async fn a_removal_is_listed_at_its_scope_and_can_be_undone() {
 			false,
 		)
 		.await;
-		for (scope, name) in [(&environment, "retries"), (&group_scope, "timezone")] {
-			private
-				.post("/api/ansible_variables/remove")
-				.json(&named(scope, name))
-				.await
-				.assert_status_ok();
-		}
+		let removal = post(
+			&private,
+			"/api/ansible_variables/remove",
+			named(&environment, "retries"),
+		)
+		.await;
+		post(
+			&private,
+			"/api/ansible_variables/remove",
+			named(&group_scope, "timezone"),
+		)
+		.await;
 
 		// Each scope lists only its own removals.
 		let removed = post(
@@ -1180,6 +1185,8 @@ async fn a_removal_is_listed_at_its_scope_and_can_be_undone() {
 		assert_eq!(removed[0]["name"], "retries");
 		assert_eq!(removed[0]["value"], 3);
 		assert_eq!(removed[0]["undoable"], true);
+		// The removal answers with the entry that undoes it.
+		assert_eq!(removed[0]["entry_id"], removal["entry_id"]);
 		let at_group = post(&private, "/api/ansible_variables/removed", group_scope).await;
 		assert_eq!(at_group[0]["name"], "timezone");
 

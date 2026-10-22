@@ -10396,6 +10396,20 @@
         ],
         "type": "object"
       },
+      "Removal": {
+        "description": "A removal, by the entry that records it, so it can be undone.",
+        "properties": {
+          "entry_id": {
+            "description": "The entry of the removal, which `restore` undoes.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_id"
+        ],
+        "type": "object"
+      },
       "RemoveArgs": {
         "allOf": [
           {
@@ -15778,7 +15792,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "default": null
+                  "$ref": "#/components/schemas/Removal"
                 }
               }
             },

@@ -99,6 +99,13 @@ pub struct RemoveArgs {
 	pub name: String,
 }
 
+/// A removal, by the entry that records it, so it can be undone.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct Removal {
+	/// The entry of the removal, which `restore` undoes.
+	pub entry_id: Uuid,
+}
+
 /// Name one variable, for its history.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct VariableArgs {
@@ -453,7 +460,7 @@ async fn set_value(
 	security(("tailscale-admin" = [])),
 	request_body = RemoveArgs,
 	responses(
-		(status = 200, description = "Removed", body = ()),
+		(status = 200, description = "Removed", body = Removal),
 		(status = 400, description = "Not one scope", body = ProblemDetailsSchema),
 		(status = 404, description = "No variable of that name in that scope", body = ProblemDetailsSchema),
 		(status = 502, description = "The secret store is unavailable", body = ProblemDetailsSchema),
@@ -464,7 +471,7 @@ pub async fn remove(
 	audit: Audit,
 	admin: TailscaleAdmin,
 	Json(args): Json<RemoveArgs>,
-) -> Result<Json<()>> {
+) -> Result<Json<Removal>> {
 	let scope = VariableScope::try_from(args.scope)?;
 	let mut conn = audit.begin().await?;
 
@@ -484,7 +491,7 @@ pub async fn remove(
 		value: removed.value.clone(),
 	};
 
-	if removed.is_secret {
+	let entry_id = if removed.is_secret {
 		// Forgetting the stored value is outside Canopy's records, so the entry
 		// stands before it, and is settled by whether it took.
 		let store = secret_store(&state)?;
@@ -510,9 +517,10 @@ pub async fn remove(
 			forget_held(store, scope, pending.id).await;
 		}
 		applied?;
+		pending.id
 	} else {
-		conn.record(action).await?;
-	}
+		conn.record(action).await?
+	};
 
 	tracing::info!(
 		login = %admin.0.login,
@@ -521,7 +529,7 @@ pub async fn remove(
 		secret = removed.is_secret,
 		"ansible variable removed"
 	);
-	Ok(Json(()))
+	Ok(Json(Removal { entry_id }))
 }
 
 const HISTORY_ACTIONS: [&str; 2] = [

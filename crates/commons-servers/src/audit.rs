@@ -440,12 +440,12 @@ impl std::ops::DerefMut for AuditTx<'_> {
 
 impl AuditTx<'_> {
 	/// Record an action in this transaction, so the entry and the change it
-	/// records stand or fall together.
-	pub async fn record(&mut self, action: Action) -> Result<()> {
+	/// records stand or fall together. Answers the entry's identifier.
+	pub async fn record(&mut self, action: Action) -> Result<uuid::Uuid> {
 		let actor = self.session.actor()?;
-		audit::record(&mut *self, &actor, &action).await?;
+		let id = audit::record(&mut *self, &actor, &action).await?;
 		self.session.note(action.name());
-		Ok(())
+		Ok(id)
 	}
 
 	/// Settle a pending entry done, in this transaction, with the rest of the
