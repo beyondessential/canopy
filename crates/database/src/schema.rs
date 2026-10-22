@@ -8,6 +8,58 @@ diesel::table! {
 }
 
 diesel::table! {
+	ansible_catalogue (id) {
+		id -> Bool,
+		document -> Nullable<Jsonb>,
+		digest -> Nullable<Text>,
+		source_commit -> Nullable<Text>,
+		read_at -> Nullable<Timestamptz>,
+		first_checked_at -> Timestamptz,
+		checked_at -> Timestamptz,
+		problem -> Nullable<Text>,
+		problem_detail -> Nullable<Text>,
+	}
+}
+
+diesel::table! {
+	ansible_leases (id) {
+		id -> Uuid,
+		server_group_id -> Uuid,
+		rank -> Text,
+		intent -> Text,
+		held_by -> Nullable<Text>,
+		note -> Nullable<Text>,
+		taken_at -> Timestamptz,
+		expires_at -> Timestamptz,
+		released_at -> Nullable<Timestamptz>,
+		released_by -> Nullable<Text>,
+		playbook -> Nullable<Text>,
+		limit_pattern -> Nullable<Text>,
+		limited_to -> Nullable<Array<Nullable<Uuid>>>,
+		tags -> Array<Nullable<Text>>,
+		skip_tags -> Array<Nullable<Text>>,
+		assignments -> Jsonb,
+		started_at -> Nullable<Timestamptz>,
+		release_reason -> Nullable<Text>,
+	}
+}
+
+diesel::table! {
+	ansible_variables (id) {
+		id -> Uuid,
+		server_group_id -> Nullable<Uuid>,
+		rank -> Nullable<Text>,
+		machine_id -> Nullable<Uuid>,
+		name -> Text,
+		value -> Nullable<Jsonb>,
+		is_secret -> Bool,
+		set_by -> Nullable<Text>,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	application_certificate_names (id) {
 		id -> Uuid,
 		application_id -> Uuid,
@@ -514,36 +566,6 @@ diesel::table! {
 }
 
 diesel::table! {
-	inventory_leases (id) {
-		id -> Uuid,
-		server_group_id -> Uuid,
-		rank -> Text,
-		intent -> Text,
-		held_by -> Nullable<Text>,
-		note -> Nullable<Text>,
-		taken_at -> Timestamptz,
-		expires_at -> Timestamptz,
-		released_at -> Nullable<Timestamptz>,
-		released_by -> Nullable<Text>,
-	}
-}
-
-diesel::table! {
-	inventory_variables (id) {
-		id -> Uuid,
-		server_group_id -> Nullable<Uuid>,
-		rank -> Nullable<Text>,
-		machine_id -> Nullable<Uuid>,
-		name -> Text,
-		value -> Nullable<Jsonb>,
-		is_secret -> Bool,
-		set_by -> Nullable<Text>,
-		created_at -> Timestamptz,
-		updated_at -> Timestamptz,
-	}
-}
-
-diesel::table! {
 	issue_notes (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -699,6 +721,7 @@ diesel::table! {
 		moved_at -> Timestamptz,
 		moved_by -> Nullable<Text>,
 		settled_at -> Nullable<Timestamptz>,
+		carried_on -> Bool,
 	}
 }
 
@@ -721,6 +744,8 @@ diesel::table! {
 		rank -> Nullable<Text>,
 		application_id -> Nullable<Uuid>,
 		upgrade_plan_id -> Nullable<Uuid>,
+		machine_ids -> Array<Nullable<Uuid>>,
+		lease_id -> Nullable<Uuid>,
 	}
 }
 
@@ -1066,6 +1091,9 @@ diesel::table! {
 	}
 }
 
+diesel::joinable!(ansible_leases -> server_groups (server_group_id));
+diesel::joinable!(ansible_variables -> machines (machine_id));
+diesel::joinable!(ansible_variables -> server_groups (server_group_id));
 diesel::joinable!(application_certificate_names -> applications (application_id));
 diesel::joinable!(application_certificates -> applications (application_id));
 diesel::joinable!(application_names -> applications (application_id));
@@ -1108,9 +1136,6 @@ diesel::joinable!(incident_issues -> issues (issue_id));
 diesel::joinable!(incident_notes -> incidents (incident_id));
 diesel::joinable!(incident_reeval_queue -> applications (application_id));
 diesel::joinable!(incidents -> server_groups (server_group_id));
-diesel::joinable!(inventory_leases -> server_groups (server_group_id));
-diesel::joinable!(inventory_variables -> machines (machine_id));
-diesel::joinable!(inventory_variables -> server_groups (server_group_id));
 diesel::joinable!(issue_notes -> issues (issue_id));
 diesel::joinable!(issues -> applications (application_id));
 diesel::joinable!(issues -> devices (device_id));
@@ -1130,6 +1155,7 @@ diesel::joinable!(maintenance_window_moves -> applications (application_id));
 diesel::joinable!(maintenance_window_moves -> machines (machine_id));
 diesel::joinable!(maintenance_window_moves -> maintenance_windows (window_id));
 diesel::joinable!(maintenance_window_moves -> server_groups (server_group_id));
+diesel::joinable!(maintenance_windows -> ansible_leases (lease_id));
 diesel::joinable!(maintenance_windows -> applications (application_id));
 diesel::joinable!(maintenance_windows -> machines (machine_id));
 diesel::joinable!(maintenance_windows -> server_groups (server_group_id));
@@ -1171,6 +1197,9 @@ diesel::joinable!(versions -> devices (device_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
 	admins,
+	ansible_catalogue,
+	ansible_leases,
+	ansible_variables,
 	application_certificate_names,
 	application_certificates,
 	application_names,
@@ -1205,8 +1234,6 @@ diesel::allow_tables_to_appear_in_same_query!(
 	incident_notes,
 	incident_reeval_queue,
 	incidents,
-	inventory_leases,
-	inventory_variables,
 	issue_notes,
 	issues,
 	kubernetes_clusters,

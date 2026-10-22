@@ -130,18 +130,18 @@ async fn an_entry_keeps_the_name_a_record_had_and_never_blocks_deleting_it() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn taking_over_and_reading_an_inventory_are_recorded_and_the_read_is_routine() {
+async fn taking_over_and_serving_an_environment_are_recorded_and_the_read_is_routine() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		seed(&mut conn).await;
 
 		let lease: Value = private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "server_group_id": GROUP, "intent": "configure", "note": "run" }))
 			.await
 			.json();
 		// A variable of the environment's own, whose value never reaches the log.
 		private
-			.post("/api/inventory_variables/set")
+			.post("/api/ansible_variables/set")
 			.json(&json!({
 				"server_group_id": GROUP,
 				"name": "ntp_server",
@@ -150,26 +150,30 @@ async fn taking_over_and_reading_an_inventory_are_recorded_and_the_read_is_routi
 			.await
 			.assert_status_ok();
 		private
-			.post("/api/inventory/for_group")
+			.post("/api/ansible/for_group")
 			.json(&json!({ "lease_id": lease["id"] }))
 			.await
 			.assert_status_ok();
 		private
-			.post("/api/inventory/release_lease")
+			.post("/api/ansible/release_lease")
 			.json(&json!({ "lease_id": lease["id"] }))
 			.await
 			.assert_status_ok();
 
 		let important = log(&mut conn, Filter::default()).await;
 		let actions: Vec<&str> = important.iter().rev().map(|e| e.action.as_str()).collect();
+		// The two a run's start records share a moment, so their order is not
+		// one to rely on.
+		let mut starting = actions[2..4].to_vec();
+		starting.sort_unstable();
 		assert_eq!(
-			actions,
-			[
-				"inventory_lease_taken",
-				"inventory_variable_set",
-				"inventory_lease_released"
-			],
-			"a read is routine and left out by default"
+			(&actions[..2], starting.as_slice(), &actions[4..]),
+			(
+				&["inventory_lease_taken", "inventory_variable_set"][..],
+				&["ansible_run_started", "maintenance_declared"][..],
+				&["inventory_lease_released"][..],
+			),
+			"a read is routine and left out by default, and the run starting is not"
 		);
 		let variable = important
 			.iter()
@@ -210,7 +214,7 @@ async fn a_secret_variable_is_recorded_ahead_of_the_store_and_settled_without_it
 	commons_tests::server::run(async |mut conn, _, private| {
 		seed(&mut conn).await;
 		private
-			.post("/api/inventory_variables/set")
+			.post("/api/ansible_variables/set")
 			.json(&json!({
 				"server_group_id": GROUP,
 				"name": "db_password",

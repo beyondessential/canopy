@@ -10,7 +10,9 @@
 //! A window over a machine covers every application on it: taking a box down
 //! to patch it stops everything running on it, so that is one declaration with
 //! N consequences. A window over one application covers that application
-//! alone, for work stopping one product on a box that serves several.
+//! alone, for work stopping one product on a box that serves several. A window
+//! over several machines of one environment covers each of them as a window
+//! over that machine alone would.
 //!
 //! Suspension outlasts the window itself by [`SETTLE`]. A machine is back
 //! before the sources on it have reported again, and a machine whose every
@@ -28,16 +30,20 @@ use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::ansible_leases::AnsibleLease;
 use crate::applications::Application;
-use crate::inventory_leases::InventoryLease;
 use crate::issues::Scope;
 use crate::machines::Machine;
 use crate::server_groups::{ServerGroup, environment_name};
 use crate::slack_outbox::{KIND_MAINTENANCE_DECLARED, KIND_MAINTENANCE_ENDED, SlackOutbox, vars};
 use crate::upgrade_plans::UpgradePlan;
 
+mod cover;
 mod descent;
-pub use descent::{Descent, DescentEntry, Grain, line_of_descent};
+mod runs;
+pub use cover::{Cover, MachineIds, environment_of_machines as environment_of_machine_set};
+pub use descent::{Descent, DescentEntry, Grain, line_of_descent, line_of_descent_for};
+pub use runs::RunWindows;
 
 /// How long suspension outlasts the window, giving the reporters on a
 /// server time to be heard from before Canopy pages for them. The same for
@@ -237,6 +243,17 @@ pub struct MaintenanceWindow {
 	/// The upgrade plan this window was declared from, which keeps it over the
 	/// plan's environment for as long as it holds.
 	pub upgrade_plan_id: Option<Uuid>,
+	/// Set for a window over several machines of one environment: the machines
+	/// it names, at least two, each covered as a window over that machine alone
+	/// would. Empty for every other window, a set having no `machine_id` of its
+	/// own: it sits at its group and rank.
+	#[diesel(deserialize_as = MachineIds)]
+	#[serde(default)]
+	pub machine_ids: Vec<Uuid>,
+	/// The run lease this window was declared for, while it lasts the run: its
+	/// expected end follows the lease's expiry, and it ends when the lease does.
+	/// Cleared when the window is held to an end of its own.
+	pub lease_id: Option<Uuid>,
 }
 
 /// A target a window covered before it moved, over the span it covered it.
@@ -268,6 +285,10 @@ pub struct MaintenanceWindowMove {
 	/// target's issues have been re-evaluated.
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	pub settled_at: Option<Timestamp>,
+	/// Set where the window dropped this machine from among several it names and
+	/// carried on over the rest, so it did not start covering anything new: it
+	/// still covers them from when it began.
+	pub carried_on: bool,
 }
 
 impl MaintenanceWindowMove {
@@ -280,7 +301,9 @@ impl MaintenanceWindowMove {
 		)
 	}
 
-	/// The most recent move of `window`, where it has moved.
+	/// The most recent move of `window` that changed what it covers, where it
+	/// has moved: a machine dropped from among several it carried on over is not
+	/// one.
 	pub async fn latest_for_window(
 		db: &mut AsyncPgConnection,
 		window: Uuid,
@@ -289,6 +312,7 @@ impl MaintenanceWindowMove {
 		dsl::maintenance_window_moves
 			.select(Self::as_select())
 			.filter(dsl::window_id.eq(window))
+			.filter(dsl::carried_on.eq(false))
 			.order(dsl::moved_at.desc())
 			.first(db)
 			.await
@@ -304,9 +328,28 @@ impl MaintenanceWindowMove {
 pub struct Amendment {
 	/// A new target, moving the window there.
 	pub target: Option<Grain>,
+	/// Several machines of the window's environment to cover instead, moving the
+	/// window there: the machines it covers are exactly these, so naming fewer
+	/// removes machines and naming more adds them. One machine is that machine's
+	/// window. Not given with `target`.
+	pub machines: Option<Vec<Uuid>>,
 	pub expected_end: Option<Timestamp>,
 	/// `Some(None)` clears the note.
 	pub note: Option<Option<String>>,
+}
+
+impl Amendment {
+	/// What the amendment moves the window to, where it moves it.
+	fn new_cover(&self) -> Result<Option<Cover>> {
+		match (self.target, &self.machines) {
+			(Some(_), Some(_)) => Err(AppError::BadRequest(
+				"a window moves to a grain or to machines, not both".into(),
+			)),
+			(Some(grain), None) => Ok(Some(Cover::Grain(grain))),
+			(None, Some(ids)) => Ok(Some(Cover::machines(ids.iter().copied())?)),
+			(None, None) => Ok(None),
+		}
+	}
 }
 
 /// What keeps a window over the target it covers.
@@ -355,8 +398,13 @@ impl TargetWindow {
 }
 
 impl MaintenanceWindow {
-	/// The grain this window covers now.
+	/// The grain this window covers now, where it covers one: a window over
+	/// several machines sits at its environment's columns but is not its
+	/// environment's window, and has none.
 	pub fn grain(&self) -> Option<Grain> {
+		if self.is_machine_set() {
+			return None;
+		}
 		Grain::from_columns(
 			self.application_id,
 			self.machine_id,
@@ -371,7 +419,8 @@ impl MaintenanceWindow {
 		latest_move.map_or(self.declared_at, |last| last.moved_at)
 	}
 
-	/// The target this window covers.
+	/// The target this window covers. For a window over several machines this is
+	/// its group, which is not what it covers: read [`Self::scopes`] for that.
 	pub fn scope(&self) -> Scope {
 		// A maintenance window never covers a cluster (see `fleet_columns`), so
 		// there is no cluster column to read back here.
@@ -392,6 +441,13 @@ impl MaintenanceWindow {
 	/// When suspension over the target ends.
 	pub fn suspension_end(&self) -> Timestamp {
 		self.window_end() + SETTLE
+	}
+
+	/// Whether the window is `login`'s work: they declared it, or theirs is the
+	/// amendment that stands.
+	pub fn is_work_of(&self, login: Option<&str>) -> bool {
+		login.is_some()
+			&& (self.declared_by.as_deref() == login || self.amended_by.as_deref() == login)
 	}
 
 	/// Is the window still holding, as opposed to settling or over?
@@ -416,7 +472,24 @@ impl MaintenanceWindow {
 		note: Option<&str>,
 		by: Option<&str>,
 	) -> Result<Self> {
-		Self::declare_inner(db, scope, rank, expected_end, note, by, None).await
+		let grain = Grain::new(scope, rank)?;
+		Self::declare_over(db, Cover::Grain(grain), expected_end, note, by, None).await
+	}
+
+	/// Declare a window over several machines of one environment, or over the
+	/// one machine where only one is named. Amends the window those machines
+	/// already have where it is exactly theirs, and refuses where another window
+	/// names any of them: a machine is named by at most one open window.
+	// spec: MNT#declaring
+	pub async fn declare_machines(
+		db: &mut AsyncPgConnection,
+		machines: &[Uuid],
+		expected_end: Timestamp,
+		note: Option<&str>,
+		by: Option<&str>,
+	) -> Result<Self> {
+		let cover = Cover::machines(machines.iter().copied())?;
+		Self::declare_over(db, cover, expected_end, note, by, None).await
 	}
 
 	/// Declare over an upgrade plan's environment from the plan's offer. A
@@ -438,10 +511,9 @@ impl MaintenanceWindow {
 				"a window declared from an upgrade plan is over the plan's environment".into(),
 			));
 		}
-		Self::declare_inner(
+		Self::declare_over(
 			db,
-			Scope::Group(plan.group_id),
-			Some(plan.rank),
+			Cover::Grain(Grain::environment(plan.group_id, plan.rank)),
 			expected_end,
 			note,
 			by,
@@ -450,91 +522,155 @@ impl MaintenanceWindow {
 		.await
 	}
 
-	async fn declare_inner(
+	async fn declare_over(
 		db: &mut AsyncPgConnection,
-		scope: Scope,
-		rank: Option<ServerRank>,
+		cover: Cover,
 		expected_end: Timestamp,
 		note: Option<&str>,
 		by: Option<&str>,
 		plan: Option<Uuid>,
 	) -> Result<Self> {
 		use crate::schema::maintenance_windows::dsl;
-		let Some((application, machine, group)) = fleet_columns(scope) else {
-			return Err(AppError::BadRequest(
-				"a maintenance window covers an application, a machine or a group".into(),
-			));
-		};
-		if rank.is_some() && group.is_none() {
-			return Err(AppError::BadRequest(
-				"an environment is a group's applications at one rank, so a window over one names the group".into(),
-			));
-		}
 		if expected_end <= Timestamp::now() {
 			return Err(AppError::BadRequest(
 				"a maintenance window ends in the future".into(),
 			));
 		}
 
-		if let Some(open) = Self::open_for(db, scope, rank).await? {
-			return diesel::update(dsl::maintenance_windows.filter(dsl::id.eq(open.id)))
-				.set((
-					dsl::expected_end.eq(jiff_diesel::Timestamp::from(expected_end)),
-					dsl::note.eq(note),
-					dsl::amended_by.eq(by),
-					dsl::amended_at.eq(jiff_diesel::Timestamp::from(Timestamp::now())),
-					dsl::updated_at.eq(jiff_diesel::Timestamp::from(Timestamp::now())),
-				))
-				.returning(Self::as_select())
-				.get_result(db)
-				.await
-				.map_err(AppError::from);
+		// A machine is named by at most one open window, which no index can hold
+		// across single and set windows, so naming one is decided under the
+		// group's row, as a take of a run lease and a move are.
+		let (window, opened) = db
+			.transaction::<_, AppError, _>(async |conn| {
+				let columns = cover_columns(conn, &cover).await?;
+				if let Some(group) = columns.lock {
+					crate::ansible_leases::lock_group(conn, group).await?;
+				}
+				if let Some(open) = Self::open_for_cover(conn, &cover).await? {
+					let amended =
+						diesel::update(dsl::maintenance_windows.filter(dsl::id.eq(open.id)))
+							.set((
+								dsl::expected_end.eq(jiff_diesel::Timestamp::from(expected_end)),
+								dsl::note.eq(note),
+								dsl::amended_by.eq(by),
+								dsl::amended_at.eq(jiff_diesel::Timestamp::from(Timestamp::now())),
+								dsl::updated_at.eq(jiff_diesel::Timestamp::from(Timestamp::now())),
+							))
+							.returning(Self::as_select())
+							.get_result(conn)
+							.await
+							.map_err(AppError::from)?;
+					return Ok((amended, false));
+				}
+
+				let window = Self::insert(
+					conn,
+					&columns,
+					expected_end,
+					note,
+					by,
+					Insert { plan, lease: None },
+				)
+				.await?;
+				Ok((window, true))
+			})
+			.await?;
+		if !opened {
+			return Ok(window);
 		}
 
-		let window: Self = diesel::insert_into(dsl::maintenance_windows)
-			.values((
-				dsl::application_id.eq(application),
-				dsl::machine_id.eq(machine),
-				dsl::server_group_id.eq(group),
-				dsl::rank.eq(rank),
-				dsl::expected_end.eq(jiff_diesel::Timestamp::from(expected_end)),
-				dsl::note.eq(note),
-				dsl::declared_by.eq(by),
-				dsl::upgrade_plan_id.eq(plan),
-			))
-			.returning(Self::as_select())
-			.get_result(db)
-			.await
-			.map_err(AppError::from)?;
-
-		let label = target_label(db, scope, rank).await?;
-		SlackOutbox::enqueue(
-			db,
-			KIND_MAINTENANCE_DECLARED,
-			None,
-			None,
-			None,
-			vars::maintenance_declared(&label, by, &format_when(expected_end), note),
-			Timestamp::now(),
-		)
-		.await?;
-
+		window.announce_declared(db).await?;
 		// The target's issues leave their incident now, rather than waiting
 		// for each check to be re-graded on its next report.
 		let closed_because = match by {
 			Some(login) => format!("maintenance declared by {login}"),
 			None => "maintenance being declared".to_string(),
 		};
-		crate::issues::reevaluate_open_issues_for_scope(db, scope, Some(&closed_because)).await?;
-
+		window.reevaluate_covered(db, Some(&closed_because)).await?;
 		Ok(window)
+	}
+
+	async fn insert(
+		conn: &mut AsyncPgConnection,
+		columns: &CoverColumns,
+		expected_end: Timestamp,
+		note: Option<&str>,
+		by: Option<&str>,
+		insert: Insert,
+	) -> Result<Self> {
+		use crate::schema::maintenance_windows::dsl;
+		diesel::insert_into(dsl::maintenance_windows)
+			.values((
+				dsl::application_id.eq(columns.application),
+				dsl::machine_id.eq(columns.machine),
+				dsl::server_group_id.eq(columns.group),
+				dsl::rank.eq(columns.rank),
+				dsl::machine_ids.eq(&columns.machines),
+				dsl::expected_end.eq(jiff_diesel::Timestamp::from(expected_end)),
+				dsl::note.eq(note),
+				dsl::declared_by.eq(by),
+				dsl::upgrade_plan_id.eq(insert.plan),
+				dsl::lease_id.eq(insert.lease),
+			))
+			.returning(Self::as_select())
+			.get_result(conn)
+			.await
+			.map_err(|err| match err {
+				diesel::result::Error::DatabaseError(
+					diesel::result::DatabaseErrorKind::UniqueViolation,
+					_,
+				) => AppError::Conflict("that target already has a window of its own".into()),
+				err => AppError::from(err),
+			})
+	}
+
+	/// Tell operators the work has begun, naming the target, who declared it,
+	/// and when it is expected to end, or that it lasts the run.
+	async fn announce_declared(&self, db: &mut AsyncPgConnection) -> Result<()> {
+		let label = window_label(db, self).await?;
+		let until = if self.lease_id.is_some() {
+			"lasting the run".to_string()
+		} else {
+			format_when(self.expected_end)
+		};
+		SlackOutbox::enqueue(
+			db,
+			KIND_MAINTENANCE_DECLARED,
+			None,
+			None,
+			None,
+			vars::maintenance_declared(
+				&label,
+				self.declared_by.as_deref(),
+				&until,
+				self.note.as_deref(),
+			),
+			Timestamp::now(),
+		)
+		.await?;
+		Ok(())
+	}
+
+	/// Re-evaluate the open issues of everything this window covers, so what it
+	/// newly suspends leaves its incident now.
+	async fn reevaluate_covered(&self, db: &mut AsyncPgConnection, by: Option<&str>) -> Result<()> {
+		match self.cover() {
+			Some(Cover::Machines(ids)) => {
+				crate::issues::reevaluate_open_issues_for_machines(db, &ids, by).await
+			}
+			Some(Cover::Grain(grain)) => {
+				crate::issues::reevaluate_open_issues_for_scope(db, grain.scope(), by).await
+			}
+			None => Ok(()),
+		}
 	}
 
 	/// Amend an open window, changing only what `amendment` names. A new
 	/// target moves the window there: it stays the same window, the target it
 	/// left settles as though the window had ended over it, and what it newly
-	/// covers is suspended from now. A move is recorded and audited like any
-	/// amendment, and notifies no one.
+	/// covers is suspended from now. Several machines of its environment are a
+	/// target too, and adding or removing machines is such a move. A move is
+	/// recorded and audited like any amendment, and notifies no one.
 	// spec: MNT#moving-a-window
 	pub async fn amend(
 		db: &mut AsyncPgConnection,
@@ -549,6 +685,7 @@ impl MaintenanceWindow {
 				"a maintenance window ends in the future".into(),
 			));
 		}
+		let new_cover = amendment.new_cover()?;
 
 		// The window is read locked, and the checks run against that read, so a
 		// concurrent amendment waits for this one rather than writing back what
@@ -569,19 +706,19 @@ impl MaintenanceWindow {
 				if window.ended_at.is_some() {
 					return Err(ended_is_history());
 				}
-				let Some(from) = window.grain() else {
+				let Some(from) = window.cover() else {
 					return Err(AppError::BadRequest(
 						"a maintenance window covers an application, a machine or a group".into(),
 					));
 				};
-				let to = amendment.target.filter(|to| *to != from);
+				let to = new_cover.clone().filter(|to| *to != from);
 				let expected_end = amendment.expected_end.unwrap_or(window.expected_end);
 				let note = amendment
 					.note
 					.clone()
 					.unwrap_or_else(|| window.note.clone());
 
-				if let Some(to) = to {
+				if let Some(to) = &to {
 					if expected_end <= now {
 						return Err(AppError::BadRequest(
 							"this window is past its expected end; extend it to move it".into(),
@@ -590,39 +727,52 @@ impl MaintenanceWindow {
 					// A run lease taken on what the window covers while it moves
 					// would be served against a window that has gone, so the move
 					// and the take queue on the group's row.
-					// spec: INV#work-under-way
-					if let Some(group) = group_of(conn, from).await? {
-						crate::inventory_leases::lock_group(conn, group).await?;
+					// spec: ANSRUN#work-under-way
+					if let Some(group) = window.group_of_cover(conn).await? {
+						crate::ansible_leases::lock_group(conn, group).await?;
 					}
-					window.check_movable(conn, from, to, now).await?;
-					let latest = MaintenanceWindowMove::latest_for_window(conn, id).await?;
-					let covered_from = window.covered_from(latest.as_ref());
-					use crate::schema::maintenance_window_moves::dsl as moves;
-					let (from_application, from_machine, from_group, from_rank) = from.columns();
-					diesel::insert_into(moves::maintenance_window_moves)
-						.values((
-							moves::window_id.eq(id),
-							moves::application_id.eq(from_application),
-							moves::machine_id.eq(from_machine),
-							moves::server_group_id.eq(from_group),
-							moves::rank.eq(from_rank),
-							moves::covered_from.eq(jiff_diesel::Timestamp::from(covered_from)),
-							moves::moved_at.eq(jiff_diesel::Timestamp::from(now)),
-							moves::moved_by.eq(by),
+					window.check_movable(conn, &from, to, now).await?;
+					window.record_move(conn, &from, to, now, by).await?;
+					let columns = cover_columns(conn, to).await?;
+					diesel::update(dsl::maintenance_windows.filter(dsl::id.eq(id)))
+						.set((
+							dsl::application_id.eq(columns.application),
+							dsl::machine_id.eq(columns.machine),
+							dsl::server_group_id.eq(columns.group),
+							dsl::rank.eq(columns.rank),
+							dsl::machine_ids.eq(&columns.machines),
 						))
 						.execute(conn)
 						.await
-						.map_err(AppError::from)?;
+						.map_err(|err| match err {
+							diesel::result::Error::DatabaseError(
+								diesel::result::DatabaseErrorKind::UniqueViolation,
+								_,
+							) => AppError::Conflict(
+								"that target already has a window of its own".into(),
+							),
+							err => AppError::from(err),
+						})?;
 				}
 
-				let (application, machine, group, rank) = to.unwrap_or(from).columns();
+				// Giving a window that lasts a run an end of its own is holding it:
+				// it no longer follows the lease, which would otherwise overwrite
+				// the end on its next extension. Only the operator whose run it is
+				// can, as through `hold`.
+				// spec: MNT#ending
+				let lease_id = match amendment.expected_end {
+					Some(_) if window.lease_id.is_some() && !window.is_work_of(by) => {
+						return Err(AppError::Conflict(
+							"only the operator whose run this is can give its window an end".into(),
+						));
+					}
+					Some(_) => None,
+					None => window.lease_id,
+				};
 				let amended = diesel::update(dsl::maintenance_windows.filter(dsl::id.eq(id)))
 					.set((
-						dsl::application_id.eq(application),
-						dsl::machine_id.eq(machine),
-						dsl::server_group_id.eq(group),
-						dsl::rank.eq(rank),
 						dsl::expected_end.eq(jiff_diesel::Timestamp::from(expected_end)),
+						dsl::lease_id.eq(lease_id),
 						dsl::note.eq(note.as_deref()),
 						dsl::amended_by.eq(by),
 						dsl::amended_at.eq(jiff_diesel::Timestamp::from(now)),
@@ -631,39 +781,93 @@ impl MaintenanceWindow {
 					.returning(Self::as_select())
 					.get_result(conn)
 					.await
-					.map_err(|err| match err {
-						diesel::result::Error::DatabaseError(
-							diesel::result::DatabaseErrorKind::UniqueViolation,
-							_,
-						) => {
-							AppError::Conflict("that target already has a window of its own".into())
-						}
-						err => AppError::from(err),
-					})?;
+					.map_err(AppError::from)?;
 				Ok((amended, to))
 			})
 			.await?;
 
-		if let Some(to) = to {
-			let scope = to.scope();
+		if to.is_some() {
 			let closed_because = match by {
 				Some(login) => format!("maintenance declared by {login}"),
 				None => "maintenance being declared".to_string(),
 			};
-			crate::issues::reevaluate_open_issues_for_scope(db, scope, Some(&closed_because))
+			amended
+				.reevaluate_covered(db, Some(&closed_because))
 				.await?;
 		}
 		Ok(amended)
 	}
 
+	/// What the move off `from` leaves uncovered, recorded as the targets it
+	/// left over the span each was covered. A machine dropped from among several
+	/// the window carries on over is marked so, since the window did not start
+	/// covering anything new.
+	async fn record_move(
+		&self,
+		db: &mut AsyncPgConnection,
+		from: &Cover,
+		to: &Cover,
+		now: Timestamp,
+		by: Option<&str>,
+	) -> Result<()> {
+		let latest = MaintenanceWindowMove::latest_for_window(db, self.id).await?;
+		let covered_from = self.covered_from(latest.as_ref());
+
+		let named = from.named_machines();
+		let kept: HashSet<Uuid> = to.named_machines().into_iter().collect();
+		let left: Vec<(Grain, bool)> = match from {
+			Cover::Grain(grain) if named.is_empty() => vec![(*grain, false)],
+			_ => {
+				let carried_on = named.iter().any(|machine| kept.contains(machine));
+				named
+					.iter()
+					.filter(|machine| !kept.contains(machine))
+					.map(|machine| (Grain::machine(*machine), carried_on))
+					.collect()
+			}
+		};
+
+		use crate::schema::maintenance_window_moves::dsl as moves;
+		for (grain, carried_on) in left {
+			let (application, machine, group, rank) = grain.columns();
+			diesel::insert_into(moves::maintenance_window_moves)
+				.values((
+					moves::window_id.eq(self.id),
+					moves::application_id.eq(application),
+					moves::machine_id.eq(machine),
+					moves::server_group_id.eq(group),
+					moves::rank.eq(rank),
+					moves::covered_from.eq(jiff_diesel::Timestamp::from(covered_from)),
+					moves::moved_at.eq(jiff_diesel::Timestamp::from(now)),
+					moves::moved_by.eq(by),
+					moves::carried_on.eq(carried_on),
+				))
+				.execute(db)
+				.await
+				.map_err(AppError::from)?;
+		}
+		Ok(())
+	}
+
+	/// The group the window's cover belongs to, where it belongs to one.
+	async fn group_of_cover(&self, db: &mut AsyncPgConnection) -> Result<Option<Uuid>> {
+		if self.is_machine_set() {
+			return Ok(self.server_group_id);
+		}
+		match self.grain() {
+			Some(grain) => group_of(db, grain).await,
+			None => Ok(None),
+		}
+	}
+
 	/// Refuse a move this window cannot make: off its target's line of descent,
-	/// onto a target holding a window of its own, for a window an upgrade plan
-	/// holds to its environment, or while a run lease is served against it.
+	/// onto a target another window holds, for a window an upgrade plan holds to
+	/// its environment, or while a run lease is served against it.
 	async fn check_movable(
 		&self,
 		db: &mut AsyncPgConnection,
-		from: Grain,
-		to: Grain,
+		from: &Cover,
+		to: &Cover,
 		now: Timestamp,
 	) -> Result<()> {
 		if self.upgrade_plan_id.is_some() {
@@ -671,31 +875,64 @@ impl MaintenanceWindow {
 				"this window was declared from an upgrade plan and stays over the plan's environment".into(),
 			));
 		}
-		if let Some(lease) = self.serving_lease(db, from, now).await? {
+		if let Some(lease) = self.serving_lease(db, now).await? {
 			return Err(AppError::Conflict(format!(
 				"a configuration run by {} is under way against this window; it stays where it is until the lease is released",
 				lease.held_by.as_deref().unwrap_or("another operator"),
 			)));
 		}
-		// A window whose target is gone from what it belonged to, such as an
-		// archived machine, has nowhere to move along; the window itself exists,
-		// so that is a refusal rather than a missing window.
-		let descent = match line_of_descent(db, from).await {
-			Ok(descent) => descent,
-			Err(AppError::NotFound(_)) => {
-				return Err(AppError::Conflict(
-					"this window's target is no longer part of its group, so it can be amended or lifted but not moved".into(),
-				));
+
+		match to {
+			Cover::Grain(to) => {
+				// A window whose target is gone from what it belonged to, such as an
+				// archived machine, has nowhere to move along; the window itself
+				// exists, so that is a refusal rather than a missing window.
+				let descent = match line_of_descent_for(db, from).await {
+					Ok(descent) => descent,
+					Err(AppError::NotFound(_)) => {
+						return Err(AppError::Conflict(
+							"this window's target is no longer part of its group, so it can be amended or lifted but not moved".into(),
+						));
+					}
+					Err(err) => return Err(err),
+				};
+				if !descent.includes(*to) {
+					return Err(AppError::BadRequest(
+						"a window moves to a grain on its target's line of descent".into(),
+					));
+				}
 			}
-			Err(err) => return Err(err),
-		};
-		if !descent.includes(to) {
-			return Err(AppError::BadRequest(
-				"a window moves to a grain on its target's line of descent".into(),
-			));
+			Cover::Machines(ids) => {
+				let from_environment = match from {
+					Cover::Machines(_) => self.server_group_id.zip(self.rank),
+					Cover::Grain(grain) => match (grain.scope(), grain.rank()) {
+						(Scope::Group(group), Some(rank)) => Some((group, rank)),
+						(Scope::Machine(machine), _) => {
+							let machine = Machine::get_by_id(db, machine).await?;
+							machine.group_id.zip(machine.environment_rank())
+						}
+						_ => None,
+					},
+				};
+				let Some(from_environment) = from_environment else {
+					return Err(AppError::BadRequest(
+						"a window moves to several machines from its environment or one of its machines".into(),
+					));
+				};
+				if cover::environment_of_machines(db, ids).await? != from_environment {
+					return Err(AppError::BadRequest(
+						"a window moves to machines of its own environment".into(),
+					));
+				}
+			}
 		}
-		let (scope, rank) = (to.scope(), to.rank());
-		if Self::open_for(db, scope, rank).await?.is_some() {
+
+		let others: Vec<Self> = Self::open_for_cover_unchecked(db, to)
+			.await?
+			.into_iter()
+			.filter(|window| window.id != self.id)
+			.collect();
+		if !others.is_empty() {
 			return Err(AppError::Conflict(
 				"that target already has a window of its own".into(),
 			));
@@ -709,11 +946,8 @@ impl MaintenanceWindow {
 		if let Some(plan_id) = self.upgrade_plan_id {
 			return Ok(Some(HeldInPlace::UpgradePlan { plan_id }));
 		}
-		let Some(grain) = self.grain() else {
-			return Ok(None);
-		};
 		Ok(self
-			.serving_lease(db, grain, Timestamp::now())
+			.serving_lease(db, Timestamp::now())
 			.await?
 			.map(|lease| HeldInPlace::RunLease {
 				held_by: lease.held_by,
@@ -722,44 +956,51 @@ impl MaintenanceWindow {
 
 	/// A live run lease on an environment this window covers, held by an
 	/// operator the window speaks for: the declarer, or the standing amender.
-	// spec: INV#work-under-way
+	// spec: ANSRUN#work-under-way
 	async fn serving_lease(
 		&self,
 		db: &mut AsyncPgConnection,
-		grain: Grain,
 		now: Timestamp,
-	) -> Result<Option<InventoryLease>> {
-		// The one environment the grain is in, or for a group's own window
+	) -> Result<Option<AnsibleLease>> {
+		let Some(cover) = self.cover() else {
+			return Ok(None);
+		};
+		// The one environment the cover is in, or for a group's own window
 		// every environment it has a lease on, whether or not anything in it is
 		// still ranked at that rank.
-		let environment: Option<(Uuid, ServerRank)> = match (grain.scope(), grain.rank()) {
-			(Scope::Group(group_id), Some(rank)) => Some((group_id, rank)),
-			(Scope::Machine(machine_id), _) => {
-				let machine = Machine::get_by_id(db, machine_id).await?;
-				machine.group_id.zip(machine.environment_rank())
-			}
-			(Scope::Application(application_id), _) => {
-				let application = Application::get_by_id(db, application_id).await?;
-				application.group_id.zip(application.rank)
-			}
-			(Scope::Group(_), None) | (Scope::Cluster(_) | Scope::Global, _) => None,
+		let environment: Option<(Uuid, ServerRank)> = match &cover {
+			Cover::Machines(_) => self.server_group_id.zip(self.rank),
+			Cover::Grain(grain) => match (grain.scope(), grain.rank()) {
+				(Scope::Group(group_id), Some(rank)) => Some((group_id, rank)),
+				(Scope::Machine(machine_id), _) => {
+					let machine = Machine::get_by_id(db, machine_id).await?;
+					machine.group_id.zip(machine.environment_rank())
+				}
+				(Scope::Application(application_id), _) => {
+					let application = Application::get_by_id(db, application_id).await?;
+					application.group_id.zip(application.rank)
+				}
+				(Scope::Group(_), None) | (Scope::Cluster(_) | Scope::Global, _) => None,
+			},
 		};
-		let leases: Vec<InventoryLease> = match (grain.scope(), grain.rank(), environment) {
-			(Scope::Group(group_id), None, _) => {
-				InventoryLease::open_for_group(db, group_id).await?
-			}
-			(_, _, Some((group, rank))) => InventoryLease::open_for(db, group, rank)
+		let whole_group = match &cover {
+			Cover::Grain(grain) => match (grain.scope(), grain.rank()) {
+				(Scope::Group(group_id), None) => Some(group_id),
+				_ => None,
+			},
+			Cover::Machines(_) => None,
+		};
+		let leases: Vec<AnsibleLease> = match (whole_group, environment) {
+			(Some(group_id), _) => AnsibleLease::open_for_group(db, group_id).await?,
+			(None, Some((group, rank))) => AnsibleLease::open_for(db, group, rank)
 				.await?
 				.into_iter()
 				.collect(),
-			_ => Vec::new(),
+			(None, None) => Vec::new(),
 		};
-		let speaks_for = [self.declared_by.as_deref(), self.amended_by.as_deref()];
-		Ok(leases.into_iter().find(|lease| {
-			lease.holds_at(now)
-				&& lease.held_by.is_some()
-				&& speaks_for.contains(&lease.held_by.as_deref())
-		}))
+		Ok(leases
+			.into_iter()
+			.find(|lease| lease.holds_at(now) && self.is_work_of(lease.held_by.as_deref())))
 	}
 
 	/// Lift a window before its expected end. A window already ended is
@@ -784,7 +1025,7 @@ impl MaintenanceWindow {
 		.map_err(AppError::from)?;
 		match lifted {
 			Some(window) => {
-				window.announce_ended(db).await?;
+				window.announce_ended(db, Ended::Lifted).await?;
 				Ok(window)
 			}
 			None => Self::get(db, id).await,
@@ -792,21 +1033,23 @@ impl MaintenanceWindow {
 	}
 
 	/// Tell operators the target is being watched again from the end of its
-	/// settle period. Whether an operator lifted the window or its expected
-	/// end passed is what `ended_by` records.
-	async fn announce_ended(&self, db: &mut AsyncPgConnection) -> Result<()> {
-		let label = target_label(db, self.scope(), self.rank).await?;
+	/// settle period, and what ended the window.
+	async fn announce_ended(&self, db: &mut AsyncPgConnection, cause: Ended) -> Result<()> {
+		let label = window_label(db, self).await?;
+		let watching_from = format_when(self.suspension_end());
+		let vars = match cause {
+			Ended::Lease => vars::maintenance_ended_with_run(&label, &watching_from),
+			Ended::Lifted | Ended::Expired => {
+				vars::maintenance_ended(&label, self.ended_by.as_deref(), &watching_from)
+			}
+		};
 		SlackOutbox::enqueue(
 			db,
 			KIND_MAINTENANCE_ENDED,
 			None,
 			None,
 			None,
-			vars::maintenance_ended(
-				&label,
-				self.ended_by.as_deref(),
-				&format_when(self.suspension_end()),
-			),
+			vars,
 			Timestamp::now(),
 		)
 		.await?;
@@ -825,7 +1068,9 @@ impl MaintenanceWindow {
 
 	/// The target's window while it holds. A settling window is over as far
 	/// as declaring goes: a fresh declaration opens a new one. A group's own
-	/// window and each of its environments' are distinct targets.
+	/// window and each of its environments' are distinct targets, and a window
+	/// over several machines is not its environment's but the window of each
+	/// machine it names.
 	pub async fn open_for(
 		db: &mut AsyncPgConnection,
 		scope: Scope,
@@ -835,28 +1080,84 @@ impl MaintenanceWindow {
 		let Some((application, machine, group)) = fleet_columns(scope) else {
 			return Ok(None);
 		};
+		let open = dsl::maintenance_windows
+			.select(Self::as_select())
+			.filter(dsl::ended_at.is_null())
+			.into_boxed();
+		let open = match machine {
+			Some(machine) => open.filter(
+				dsl::machine_id
+					.eq(machine)
+					.or(dsl::machine_ids.contains(vec![machine])),
+			),
+			None => open.filter(
+				dsl::application_id
+					.is_not_distinct_from(application)
+					.and(dsl::machine_id.is_null())
+					.and(dsl::server_group_id.is_not_distinct_from(group))
+					.and(dsl::rank.is_not_distinct_from(rank))
+					.and(dsl::machine_ids.eq(Vec::<Uuid>::new())),
+			),
+		};
+		open.first(db).await.optional().map_err(AppError::from)
+	}
+
+	/// The open windows naming any of `machines`, alone or among others.
+	pub async fn open_naming(db: &mut AsyncPgConnection, machines: &[Uuid]) -> Result<Vec<Self>> {
+		use crate::schema::maintenance_windows::dsl;
 		dsl::maintenance_windows
 			.select(Self::as_select())
+			.filter(dsl::ended_at.is_null())
 			.filter(
-				dsl::ended_at
-					.is_null()
-					.and(dsl::application_id.is_not_distinct_from(application))
-					.and(dsl::machine_id.is_not_distinct_from(machine))
-					.and(dsl::server_group_id.is_not_distinct_from(group))
-					.and(dsl::rank.is_not_distinct_from(rank)),
+				dsl::machine_id
+					.eq_any(machines)
+					.or(dsl::machine_ids.overlaps_with(machines.to_vec())),
 			)
-			.first(db)
+			.order(dsl::declared_at.asc())
+			.load(db)
 			.await
-			.optional()
 			.map_err(AppError::from)
 	}
 
+	/// The open windows over `cover`'s own target: for machines, every window
+	/// naming any of them.
+	async fn open_for_cover_unchecked(
+		db: &mut AsyncPgConnection,
+		cover: &Cover,
+	) -> Result<Vec<Self>> {
+		match cover {
+			Cover::Grain(grain) => Ok(Self::open_for(db, grain.scope(), grain.rank())
+				.await?
+				.into_iter()
+				.collect()),
+			Cover::Machines(machines) => Self::open_naming(db, machines).await,
+		}
+	}
+
+	/// The window `cover` already has, refusing a set of machines where another
+	/// window names any of them without being exactly theirs: a machine is named
+	/// by at most one open window, so declaring over it would double-name it.
+	async fn open_for_cover(db: &mut AsyncPgConnection, cover: &Cover) -> Result<Option<Self>> {
+		let mut open = Self::open_for_cover_unchecked(db, cover).await?;
+		match cover {
+			Cover::Grain(_) => Ok(open.pop()),
+			Cover::Machines(_) => match open.as_slice() {
+				[] => Ok(None),
+				[only] if only.is_window_of(cover) => Ok(open.pop()),
+				_ => Err(AppError::Conflict(
+					"another window already names one of those machines; amend that window instead"
+						.into(),
+				)),
+			},
+		}
+	}
+
 	/// The open windows over an environment: the group's own, the
-	/// environment's, and any over the given machines. A window over another of
-	/// the group's environments is not over this one. A window past its
+	/// environment's, and any naming the given machines, alone or among others. A
+	/// window over another of the group's environments is not over this one. A window past its
 	/// expected end stays open until the sweep stamps it, so pair with
 	/// [`Self::holds_at`].
-	// spec: INV#work-under-way
+	// spec: ANSRUN#work-under-way
 	pub async fn open_over(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
@@ -871,7 +1172,9 @@ impl MaintenanceWindow {
 				dsl::server_group_id
 					.eq(group_id)
 					.and(dsl::rank.is_null().or(dsl::rank.eq(rank)))
-					.or(dsl::machine_id.eq_any(machine_ids)),
+					.and(dsl::machine_ids.eq(Vec::<Uuid>::new()))
+					.or(dsl::machine_id.eq_any(machine_ids))
+					.or(dsl::machine_ids.overlaps_with(machine_ids.to_vec())),
 			)
 			.order(dsl::declared_at.asc())
 			.load(db)
@@ -883,7 +1186,7 @@ impl MaintenanceWindow {
 	/// holding over the environment that belongs to somebody else. Taking a
 	/// lease and the group page read the same windows this way, so they cannot
 	/// disagree.
-	// spec: INV#work-under-way
+	// spec: ANSRUN#work-under-way
 	pub fn refusing_run<'a>(windows: &'a [Self], login: &str, now: Timestamp) -> Option<&'a Self> {
 		windows.iter().find(|window| {
 			window.holds_at(now)
@@ -927,14 +1230,15 @@ impl MaintenanceWindow {
 		let Some((application, machine, group)) = fleet_columns(scope) else {
 			return Ok(Vec::new());
 		};
+		let own = dsl::application_id
+			.is_not_distinct_from(application)
+			.and(dsl::machine_id.is_not_distinct_from(machine))
+			.and(dsl::server_group_id.is_not_distinct_from(group));
+		// A machine's history includes the windows over several machines that
+		// name it, which are its own as much as a window over it alone.
 		let current: Vec<Self> = dsl::maintenance_windows
 			.select(Self::as_select())
-			.filter(
-				dsl::application_id
-					.is_not_distinct_from(application)
-					.and(dsl::machine_id.is_not_distinct_from(machine))
-					.and(dsl::server_group_id.is_not_distinct_from(group)),
-			)
+			.filter(own.or(dsl::machine_ids.contains(vec![machine.unwrap_or_default()])))
 			.order((dsl::ended_at.desc().nulls_first(), dsl::declared_at.desc()))
 			.limit(limit)
 			.load(db)
@@ -998,6 +1302,7 @@ impl MaintenanceWindow {
 					.or(dsl::machine_id.eq(machine_id))
 					.or(dsl::server_group_id.eq(group_id)),
 			)
+			.filter(dsl::machine_ids.eq(Vec::<Uuid>::new()))
 			.filter(window_suspending(cutoff))
 			.union_all(
 				moves::maintenance_window_moves
@@ -1009,6 +1314,17 @@ impl MaintenanceWindow {
 							.or(moves::server_group_id.eq(group_id)),
 					)
 					.filter(move_settling(cutoff)),
+			)
+			// A window over several machines naming this one covers it outright,
+			// as a rank-less row does, rather than through its environment. The
+			// nil id is named by no window.
+			.union_all(
+				dsl::maintenance_windows
+					.select(diesel::dsl::sql::<
+						diesel::sql_types::Nullable<diesel::sql_types::Text>,
+					>("NULL::text"))
+					.filter(dsl::machine_ids.contains(vec![machine_id.unwrap_or_default()]))
+					.filter(window_suspending(cutoff)),
 			)
 			.load(db)
 			.await
@@ -1057,6 +1373,7 @@ impl MaintenanceWindow {
 				dsl::ended_at,
 				dsl::expected_end,
 			))
+			.filter(dsl::machine_ids.eq(Vec::<Uuid>::new()))
 			.filter(window_suspending(cutoff))
 			.union_all(
 				moves::maintenance_window_moves
@@ -1074,6 +1391,29 @@ impl MaintenanceWindow {
 			.await
 			.map_err(AppError::from)?;
 		let mut targets = SuspendedTargets::default();
+		// A window over several machines suspends each as a window over it alone
+		// would.
+		// spec: MNT#declaring
+		let sets: Vec<(
+			MachineIds,
+			Option<jiff_diesel::Timestamp>,
+			jiff_diesel::Timestamp,
+		)> = dsl::maintenance_windows
+			.select((dsl::machine_ids, dsl::ended_at, dsl::expected_end))
+			.filter(dsl::machine_ids.ne(Vec::<Uuid>::new()))
+			.filter(window_suspending(cutoff))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		for (machines, ended_at, expected_end) in sets {
+			let holds = ended_at.is_none() && now < Timestamp::from(expected_end);
+			for machine in Vec::<Uuid>::from(machines) {
+				targets.machines.insert(machine);
+				if holds {
+					targets.holding_machines.insert(machine);
+				}
+			}
+		}
 		for (application, machine, group, rank, ended_at, expected_end) in rows {
 			let holds = ended_at.is_none() && now < Timestamp::from(expected_end);
 			if let Some(id) = application {
@@ -1114,10 +1454,36 @@ impl MaintenanceWindow {
 	/// backdating keeps the settle period honest however late this runs.
 	/// Returns what it ended, for notification.
 	pub async fn sweep_expired(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		Self::end_expired(db, None).await
+	}
+
+	/// [`Self::sweep_expired`], over `among` alone where it is given, for a
+	/// caller about to decide something against these windows that cannot wait
+	/// for the sweep to have run.
+	pub(crate) async fn end_expired(
+		db: &mut AsyncPgConnection,
+		among: Option<&[Uuid]>,
+	) -> Result<Vec<Self>> {
 		use crate::schema::maintenance_windows::dsl;
 		let now = jiff_diesel::Timestamp::from(Timestamp::now());
+		let mut query = dsl::maintenance_windows
+			.filter(dsl::ended_at.is_null())
+			.filter(dsl::expected_end.le(now))
+			.into_boxed();
+		if let Some(ids) = among {
+			query = query.filter(dsl::id.eq_any(ids.to_vec()));
+		}
+		let ids: Vec<Uuid> = query
+			.select(dsl::id)
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		if ids.is_empty() {
+			return Ok(Vec::new());
+		}
 		let expired: Vec<Self> = diesel::update(
 			dsl::maintenance_windows
+				.filter(dsl::id.eq_any(&ids))
 				.filter(dsl::ended_at.is_null())
 				.filter(dsl::expected_end.le(now)),
 		)
@@ -1130,7 +1496,12 @@ impl MaintenanceWindow {
 		.await
 		.map_err(AppError::from)?;
 		for window in &expired {
-			window.announce_ended(db).await?;
+			let cause = if window.lease_id.is_some() {
+				Ended::Lease
+			} else {
+				Ended::Expired
+			};
+			window.announce_ended(db, cause).await?;
 		}
 		Ok(expired)
 	}
@@ -1146,7 +1517,7 @@ impl MaintenanceWindow {
 		let ended = Self::sweep_expired(db).await?;
 		let settled = Self::claim_settled(db).await?;
 		for window in &settled {
-			crate::issues::reevaluate_open_issues_for_scope(db, window.scope(), None).await?;
+			window.reevaluate_covered(db, None).await?;
 		}
 		// What a move left uncovered is watched again once its settle period
 		// has passed, without a notice of its own.
@@ -1198,6 +1569,113 @@ impl MaintenanceWindow {
 		.await
 		.map_err(AppError::from)
 	}
+}
+
+/// What ended a window, for how its ending is announced.
+enum Ended {
+	Lifted,
+	Expired,
+	/// The lease the window lasted ended.
+	Lease,
+}
+
+/// What a new window records beyond where it is.
+struct Insert {
+	plan: Option<Uuid>,
+	lease: Option<Uuid>,
+}
+
+/// A cover as the columns a window stores it in, and the group whose row
+/// decides who may name it.
+struct CoverColumns {
+	application: Option<Uuid>,
+	machine: Option<Uuid>,
+	group: Option<Uuid>,
+	rank: Option<ServerRank>,
+	machines: Vec<Uuid>,
+	lock: Option<Uuid>,
+}
+
+async fn cover_columns(db: &mut AsyncPgConnection, cover: &Cover) -> Result<CoverColumns> {
+	match cover {
+		Cover::Grain(grain) => {
+			let (application, machine, group, rank) = grain.columns();
+			let lock = match group {
+				Some(group) => Some(group),
+				None => group_of(db, *grain).await?,
+			};
+			Ok(CoverColumns {
+				application,
+				machine,
+				group,
+				rank,
+				machines: Vec::new(),
+				lock,
+			})
+		}
+		Cover::Machines(machines) => {
+			let (group, rank) = cover::environment_of_machines(db, machines).await?;
+			Ok(CoverColumns {
+				application: None,
+				machine: None,
+				group: Some(group),
+				rank: Some(rank),
+				machines: machines.clone(),
+				lock: Some(group),
+			})
+		}
+	}
+}
+
+/// How each window's target reads to an operator, in one read per kind
+/// however many there are. A window over several machines reads as its
+/// environment with how many it names.
+pub async fn window_labels(
+	db: &mut AsyncPgConnection,
+	windows: &[MaintenanceWindow],
+) -> Result<HashMap<Uuid, String>> {
+	let grains: Vec<Grain> = windows
+		.iter()
+		.filter_map(MaintenanceWindow::grain)
+		.collect();
+	let labels = target_labels(db, &grains).await?;
+	let group_ids: Vec<Uuid> = windows
+		.iter()
+		.filter(|window| window.is_machine_set())
+		.filter_map(|window| window.server_group_id)
+		.collect();
+	let groups = ServerGroup::names_by_ids(db, &group_ids).await?;
+
+	let mut out = HashMap::with_capacity(windows.len());
+	for window in windows {
+		let label = match window.grain() {
+			Some(grain) => labels.get(&grain).cloned(),
+			None => window
+				.server_group_id
+				.and_then(|id| groups.get(&id))
+				.zip(window.rank)
+				.map(|(group, rank)| {
+					format!(
+						"{} {} machines",
+						environment_name(group, rank),
+						window.machine_ids.len()
+					)
+				}),
+		};
+		out.insert(window.id, label.unwrap_or_default());
+	}
+	Ok(out)
+}
+
+/// How one window's target reads to an operator.
+pub async fn window_label(
+	db: &mut AsyncPgConnection,
+	window: &MaintenanceWindow,
+) -> Result<String> {
+	Ok(window_labels(db, std::slice::from_ref(window))
+		.await?
+		.remove(&window.id)
+		.unwrap_or_default())
 }
 
 /// How a window's target reads in a notification.
@@ -1352,8 +1830,11 @@ async fn spans_over_target(
 
 	let mut out: Vec<TargetWindow> = Vec::with_capacity(current.len() + moved_off.len());
 	for window in current {
-		let covered_from =
-			window.covered_from(all_moves.iter().rfind(|moved| moved.window_id == window.id));
+		let covered_from = window.covered_from(
+			all_moves
+				.iter()
+				.rfind(|moved| moved.window_id == window.id && !moved.carried_on),
+		);
 		let rank = window.rank;
 		out.push(TargetWindow {
 			window,
@@ -1363,28 +1844,75 @@ async fn spans_over_target(
 			covered_rank: rank,
 		});
 	}
-	// Where each moved-off span went next: the target the following move
-	// left, or the window's own where that was its last move.
-	let mut next: Vec<(MaintenanceWindowMove, MaintenanceWindow, Option<Grain>)> = Vec::new();
+	// Where each moved-off span went next: what the following move left, or the
+	// window's own cover where that was its last move. A machine dropped from
+	// among several the window carried on over went to what the window covers
+	// now.
+	enum Next {
+		Grain(Grain),
+		Machines(usize),
+		Window,
+	}
+	let mut next: Vec<(MaintenanceWindowMove, MaintenanceWindow, Next)> = Vec::new();
 	for moved in moved_off {
 		let Some(window) = windows.get(&moved.window_id).cloned() else {
 			continue;
 		};
-		let to = all_moves
-			.iter()
-			.find(|later| later.window_id == moved.window_id && later.moved_at > moved.moved_at)
-			.and_then(MaintenanceWindowMove::grain)
-			.or_else(|| window.grain());
+		let later = (!moved.carried_on)
+			.then(|| {
+				all_moves
+					.iter()
+					.filter(|later| {
+						later.window_id == moved.window_id
+							&& !later.carried_on && later.moved_at > moved.moved_at
+					})
+					.map(|later| later.moved_at)
+					.min()
+			})
+			.flatten();
+		let to = match later {
+			Some(at) => {
+				let left: Vec<&MaintenanceWindowMove> = all_moves
+					.iter()
+					.filter(|later| {
+						later.window_id == moved.window_id
+							&& !later.carried_on && later.moved_at == at
+					})
+					.collect();
+				match left.as_slice() {
+					[row] => row.grain().map_or(Next::Machines(1), Next::Grain),
+					rows => Next::Machines(rows.len()),
+				}
+			}
+			None => Next::Window,
+		};
 		next.push((moved, window, to));
 	}
-	let destinations: Vec<Grain> = next.iter().filter_map(|(_, _, to)| *to).collect();
+	let destinations: Vec<Grain> = next
+		.iter()
+		.filter_map(|(_, _, to)| match to {
+			Next::Grain(grain) => Some(*grain),
+			_ => None,
+		})
+		.collect();
 	let labels = target_labels(db, &destinations).await?;
+	let window_ids: Vec<MaintenanceWindow> = next
+		.iter()
+		.filter(|(_, _, to)| matches!(to, Next::Window))
+		.map(|(_, window, _)| window.clone())
+		.collect();
+	let window_label_by_id = window_labels(db, &window_ids).await?;
 	for (moved, window, to) in next {
+		let moved_to = match to {
+			Next::Grain(grain) => labels.get(&grain).cloned(),
+			Next::Machines(count) => Some(format!("{count} machines")),
+			Next::Window => window_label_by_id.get(&window.id).cloned(),
+		};
 		out.push(TargetWindow {
 			window,
 			covered_from: moved.covered_from,
 			moved_at: Some(moved.moved_at),
-			moved_to: to.and_then(|to| labels.get(&to).cloned()),
+			moved_to,
 			covered_rank: moved.rank,
 		});
 	}

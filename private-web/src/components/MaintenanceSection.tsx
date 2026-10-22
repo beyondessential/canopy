@@ -24,6 +24,7 @@ import DeclareMaintenanceDialog from "./DeclareMaintenanceDialog";
 import { GradedAction } from "./GradedAction";
 import ServerRankChip from "./ServerRankChip";
 import TimeAgo from "./TimeAgo";
+import WindowEnd from "./WindowEnd";
 
 const HISTORY_SHOWN = 5;
 
@@ -43,6 +44,7 @@ export default function MaintenanceSection({
 	onChanged,
 	reloadKey = 0,
 	anchor,
+	machineNames,
 }: {
 	/** DOM id, so a banner elsewhere on the page can link here. */
 	anchor?: string;
@@ -69,6 +71,9 @@ export default function MaintenanceSection({
 	/** Bumped when something else on the page declares or lifts a window over
 	 * this target. */
 	reloadKey?: number;
+	/** Machine names by identifier, so a window over several machines can name
+	 * the others it covers. */
+	machineNames?: Record<string, string>;
 }) {
 	const isAdmin = useIsAdmin() === true;
 	const [tick, setTick] = useState(0);
@@ -137,8 +142,21 @@ export default function MaintenanceSection({
 		window.ended_at === null &&
 		new Date(window.expected_end).getTime() > Date.now();
 	// A group's own window, not one of its environments'.
-	const open = windows.find((w) => w.ended_at === null && !w.rank) ?? null;
-	const environmentWindows = windows.filter((w) => w.ended_at === null && w.rank);
+	// A window over several machines is the window of each of them, so a
+	// machine presents it as its own.
+	// spec: MNT#presentation
+	const isSet = (w: MaintenanceWindow) => w.machine_ids.length > 0;
+	// A machine presents a set naming it as its own; a group presents one among
+	// its environments' windows, since it is the group's no more than they are.
+	const open =
+		windows.find(
+			(w) =>
+				w.ended_at === null &&
+				(isSet(w) ? scope === "machine" : !w.rank),
+		) ?? null;
+	const environmentWindows = windows.filter(
+		(w) => w.ended_at === null && w.rank && (scope !== "machine" || !isSet(w)),
+	);
 	const fromGroup =
 		covering.status === "ok"
 			? (current(covering.data).find(
@@ -175,7 +193,7 @@ export default function MaintenanceSection({
 				>
 					<Typography variant="body2">
 						Under maintenance, ending{" "}
-						<TimeAgo timestamp={fromMachine.expected_end} />, as part of{" "}
+						<WindowEnd window={fromMachine} />, as part of{" "}
 						<MuiLink component={RouterLink} to={`/fleet/machines/${machineId}`}>
 							{heldByLabel({ kind: "machine", name: machineName })}
 						</MuiLink>
@@ -197,7 +215,7 @@ export default function MaintenanceSection({
 				>
 					<Typography variant="body2">
 						Under maintenance, ending{" "}
-						<TimeAgo timestamp={fromGroup.expected_end} />, as part of{" "}
+						<WindowEnd window={fromGroup} />, as part of{" "}
 						<MuiLink component={RouterLink} to={`/fleet/groups/${groupId}`}>
 							{fromGroup.rank
 								? heldByLabel({ kind: "environment", rank: fromGroup.rank })
@@ -256,16 +274,26 @@ export default function MaintenanceSection({
 						{holds(open) ? (
 							<>
 								Under maintenance, ending{" "}
-								<TimeAgo timestamp={open.expected_end} />. Checks are still
+								<WindowEnd window={open} />. Checks are still
 								recorded and shown. Nothing on this {scope} alerts.
 							</>
 						) : (
 							<>
-								Maintenance ended <TimeAgo timestamp={open.expected_end} />,
+								Maintenance ended <WindowEnd window={open} />,
 								watching resumes shortly.
 							</>
 						)}
 					</Typography>
+					{isSet(open) && (
+						<Typography variant="body2" sx={{ mt: 0.5 }} data-testid="window-covers">
+							Covers{" "}
+							{open.machine_ids
+								.filter((machine) => machine !== id)
+								.map((machine) => machineNames?.[machine] ?? "another machine")
+								.join(", ")}{" "}
+							too.
+						</Typography>
+					)}
 					{open.note && (
 						<Typography variant="body2" sx={{ mt: 0.5, fontStyle: "italic" }}>
 							{open.note}
@@ -341,18 +369,29 @@ export default function MaintenanceSection({
 					}
 				>
 					<Typography variant="body2">
-						<Box component="span" sx={{ textTransform: "capitalize" }}>
-							{window.rank}
-						</Box>{" "}
+						{isSet(window) ? (
+							<span data-testid="window-machines">
+								{window.machine_ids
+									.map((machine) => machineNames?.[machine] ?? "a machine")
+									.join(", ")}{" "}
+								in {window.rank}
+							</span>
+						) : (
+							<Box component="span" sx={{ textTransform: "capitalize" }}>
+								{window.rank}
+							</Box>
+						)}{" "}
 						{holds(window) ? (
 							<>
 								under maintenance, ending{" "}
-								<TimeAgo timestamp={window.expected_end} />. The rest of the
-								group stays watched.
+								<WindowEnd window={window} />.{" "}
+								{isSet(window)
+									? "The rest of the environment stays watched."
+									: "The rest of the group stays watched."}
 							</>
 						) : (
 							<>
-								maintenance ended <TimeAgo timestamp={window.expected_end} />,
+								maintenance ended <WindowEnd window={window} />,
 								watching resumes shortly.
 							</>
 						)}

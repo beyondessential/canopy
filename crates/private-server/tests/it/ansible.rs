@@ -1,4 +1,4 @@
-//! Endpoint tests for the environment inventory: the lease a run holds while
+//! Endpoint tests for what an environment serves Ansible: the lease a run holds while
 //! it runs, what it reads for one environment, and the refusals it has to be
 //! told apart from Canopy being unreachable.
 //!
@@ -67,8 +67,8 @@ pub(crate) async fn insert_application_on_its_own_machine(
 	let rank = format!("'{}'", rank.unwrap_or("dev"));
 	conn.batch_execute(&format!(
 		"INSERT INTO machines (id, name, group_id) VALUES ('{machine}', '{name}', '{group}');
-		 INSERT INTO applications (id, name, type, rank, host, group_id, machine_id)
-		 VALUES ('{id}', '{name}', '{ty}', {rank}, {host}, '{group}', '{machine}')"
+		 INSERT INTO applications (id, name, type, rank, host, group_id, machine_id, registered_at)
+		 VALUES ('{id}', '{name}', '{ty}', {rank}, {host}, '{group}', '{machine}', NOW())"
 	))
 	.await
 	.expect("insert application");
@@ -93,12 +93,12 @@ pub(crate) async fn bind_device(
 	.expect("bind device");
 }
 
-/// Take the lease and answer its identifier, which the inventory read needs.
+/// Take the lease and answer its identifier, which the read needs.
 pub(crate) async fn take_lease(
 	private: &commons_tests::axum_test::TestServer,
 	args: Value,
 ) -> Uuid {
-	let response = private.post("/api/inventory/take_lease").json(&args).await;
+	let response = private.post("/api/ansible/take_lease").json(&args).await;
 	response.assert_status_ok();
 	let body: Value = response.json();
 	body["id"]
@@ -108,14 +108,14 @@ pub(crate) async fn take_lease(
 		.expect("lease id is a uuid")
 }
 
-/// Take the lease and read the inventory under it, the whole flow a run makes.
-pub(crate) async fn read_inventory(
+/// Take the lease and read what is served under it, the whole flow a run makes.
+pub(crate) async fn read_served(
 	private: &commons_tests::axum_test::TestServer,
 	args: Value,
 ) -> Value {
 	let lease = take_lease(private, args).await;
 	let response = private
-		.post("/api/inventory/for_group")
+		.post("/api/ansible/for_group")
 		.json(&json!({ "lease_id": lease }))
 		.await;
 	response.assert_status_ok();
@@ -144,7 +144,7 @@ async fn serves_an_environments_machines_and_applications() {
 		)
 		.await;
 
-		let body = read_inventory(&private, json!({ "group": "kamaka-prod" })).await;
+		let body = read_served(&private, json!({ "group": "kamaka-prod" })).await;
 
 		assert_eq!(body["group"], "kamaka-prod");
 		// Nothing here carries a rank, so the whole group is one environment at
@@ -190,7 +190,7 @@ async fn serves_a_shared_box_whole() {
 		.await
 		.expect("seed a shared box");
 
-		let body = read_inventory(
+		let body = read_served(
 			&private,
 			json!({ "server_group_id": group, "rank": "production" }),
 		)
@@ -222,7 +222,7 @@ async fn a_group_with_nothing_ranked_has_no_environment_to_serve() {
 		.expect("seed a pending box");
 
 		let refused = private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "server_group_id": group }))
 			.await;
 		assert!(
@@ -257,7 +257,7 @@ async fn serves_the_environment_at_the_rank_asked_for() {
 		)
 		.await;
 
-		let body = read_inventory(&private, json!({ "group": "kamaka", "rank": "demo" })).await;
+		let body = read_served(&private, json!({ "group": "kamaka", "rank": "demo" })).await;
 		assert_eq!(body["rank"], "demo");
 		let hosts = body["hosts"].as_array().expect("hosts");
 		assert_eq!(hosts.len(), 1);
@@ -290,7 +290,7 @@ async fn refuses_a_group_holding_several_environments_with_no_rank_named() {
 		.await;
 
 		let response = private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "group": "kamaka" }))
 			.await;
 		response.assert_status(axum::http::StatusCode::CONFLICT);
@@ -319,7 +319,7 @@ async fn leaves_out_an_archived_application() {
 		.await
 		.expect("archive");
 
-		let body = read_inventory(&private, json!({ "group": "kamaka" })).await;
+		let body = read_served(&private, json!({ "group": "kamaka" })).await;
 		let hosts = body["hosts"].as_array().expect("hosts");
 		assert_eq!(hosts.len(), 1);
 		assert_eq!(hosts[0]["name"], "kamaka-central");
@@ -331,7 +331,7 @@ async fn leaves_out_an_archived_application() {
 async fn refuses_a_group_canopy_does_not_have() {
 	commons_tests::server::run(async move |_conn, _public, private| {
 		let response = private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "group": "nowhere" }))
 			.await;
 		response.assert_status(axum::http::StatusCode::NOT_FOUND);
@@ -351,7 +351,7 @@ async fn refuses_an_archived_group() {
 		.expect("archive");
 
 		let response = private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "group": "kamaka-gone" }))
 			.await;
 		response.assert_status(axum::http::StatusCode::CONFLICT);
@@ -372,7 +372,7 @@ async fn refuses_a_group_with_nothing_to_configure() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		insert_group(&mut conn, "kamaka-empty").await;
 		let response = private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "group": "kamaka-empty" }))
 			.await;
 		response.assert_status(axum::http::StatusCode::CONFLICT);
@@ -388,7 +388,7 @@ async fn refuses_a_name_that_answers_for_two_groups() {
 		insert_application(&mut conn, first, "kamaka-central", "tamanu-central", None).await;
 
 		let response = private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "group": "kamaka" }))
 			.await;
 		response.assert_status(axum::http::StatusCode::CONFLICT);
@@ -408,7 +408,7 @@ async fn refuses_a_name_that_answers_for_two_groups() {
 async fn refuses_a_request_naming_neither_a_group_nor_an_identifier() {
 	commons_tests::server::run(async move |_conn, _public, private| {
 		private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({}))
 			.await
 			.assert_status(axum::http::StatusCode::BAD_REQUEST);
@@ -426,7 +426,7 @@ async fn refuses_a_lease_another_operator_holds() {
 		let group = insert_group(&mut conn, "kamaka").await;
 		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
 		conn.batch_execute(&format!(
-			"INSERT INTO inventory_leases (server_group_id, rank, intent, held_by, note, expires_at)
+			"INSERT INTO ansible_leases (server_group_id, rank, intent, held_by, note, expires_at)
 			 VALUES ('{group}', 'dev', 'configure', 'someone.else@bes.au', 'rolling the certs',
 			         NOW() + INTERVAL '20 minutes')"
 		))
@@ -434,7 +434,7 @@ async fn refuses_a_lease_another_operator_holds() {
 		.expect("seed a lease");
 
 		let response = private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "server_group_id": group }))
 			.await;
 		response.assert_status(axum::http::StatusCode::CONFLICT);
@@ -455,7 +455,7 @@ async fn takes_a_lease_over_one_that_has_expired() {
 		let group = insert_group(&mut conn, "kamaka").await;
 		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
 		conn.batch_execute(&format!(
-			"INSERT INTO inventory_leases (server_group_id, rank, intent, held_by, expires_at)
+			"INSERT INTO ansible_leases (server_group_id, rank, intent, held_by, expires_at)
 			 VALUES ('{group}', 'dev', 'configure', 'someone.else@bes.au',
 			         NOW() - INTERVAL '1 minute')"
 		))
@@ -463,7 +463,7 @@ async fn takes_a_lease_over_one_that_has_expired() {
 		.expect("seed an expired lease");
 
 		private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "server_group_id": group }))
 			.await
 			.assert_status_ok();
@@ -478,7 +478,7 @@ async fn takes_a_lease_over_when_asked_to() {
 		let group = insert_group(&mut conn, "kamaka").await;
 		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
 		conn.batch_execute(&format!(
-			"INSERT INTO inventory_leases (server_group_id, rank, intent, held_by, expires_at)
+			"INSERT INTO ansible_leases (server_group_id, rank, intent, held_by, expires_at)
 			 VALUES ('{group}', 'dev', 'configure', 'someone.else@bes.au',
 			         NOW() + INTERVAL '20 minutes')"
 		))
@@ -486,7 +486,7 @@ async fn takes_a_lease_over_when_asked_to() {
 		.expect("seed a lease");
 
 		let response = private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "server_group_id": group, "take_over": true }))
 			.await;
 		response.assert_status_ok();
@@ -515,7 +515,7 @@ async fn takes_a_lease_while_another_transaction_writes_against_the_group() {
 
 		let response = tokio::time::timeout(std::time::Duration::from_secs(5), async {
 			private
-				.post("/api/inventory/take_lease")
+				.post("/api/ansible/take_lease")
 				.json(&json!({ "server_group_id": group }))
 				.await
 		})
@@ -529,13 +529,13 @@ async fn takes_a_lease_while_another_transaction_writes_against_the_group() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn refuses_the_inventory_to_someone_who_holds_no_lease() {
+async fn refuses_the_environment_to_someone_who_holds_no_lease() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka").await;
 		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
 		let lease = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO inventory_leases (id, server_group_id, rank, intent, held_by, expires_at)
+			"INSERT INTO ansible_leases (id, server_group_id, rank, intent, held_by, expires_at)
 			 VALUES ('{lease}', '{group}', 'dev', 'configure', 'someone.else@bes.au',
 			         NOW() + INTERVAL '20 minutes')"
 		))
@@ -543,7 +543,7 @@ async fn refuses_the_inventory_to_someone_who_holds_no_lease() {
 		.expect("seed a lease");
 
 		private
-			.post("/api/inventory/for_group")
+			.post("/api/ansible/for_group")
 			.json(&json!({ "lease_id": lease }))
 			.await
 			.assert_status(axum::http::StatusCode::CONFLICT);
@@ -552,20 +552,20 @@ async fn refuses_the_inventory_to_someone_who_holds_no_lease() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn refuses_the_inventory_under_an_expired_lease() {
+async fn refuses_the_environment_under_an_expired_lease() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka").await;
 		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
 		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
 		conn.batch_execute(&format!(
-			"UPDATE inventory_leases SET expires_at = NOW() - INTERVAL '1 minute'
+			"UPDATE ansible_leases SET expires_at = NOW() - INTERVAL '1 minute'
 			 WHERE id = '{lease}'"
 		))
 		.await
 		.expect("expire the lease");
 
 		let response = private
-			.post("/api/inventory/for_group")
+			.post("/api/ansible/for_group")
 			.json(&json!({ "lease_id": lease }))
 			.await;
 		response.assert_status(axum::http::StatusCode::CONFLICT);
@@ -587,25 +587,25 @@ async fn extending_keeps_the_environment_and_releasing_gives_it_back() {
 		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
 
 		conn.batch_execute(&format!(
-			"UPDATE inventory_leases SET expires_at = NOW() + INTERVAL '1 minute'
+			"UPDATE ansible_leases SET expires_at = NOW() + INTERVAL '1 minute'
 			 WHERE id = '{lease}'"
 		))
 		.await
 		.expect("bring the expiry in");
 		let extended = private
-			.post("/api/inventory/extend_lease")
+			.post("/api/ansible/extend_lease")
 			.json(&json!({ "lease_id": lease }))
 			.await;
 		extended.assert_status_ok();
 
 		private
-			.post("/api/inventory/release_lease")
+			.post("/api/ansible/release_lease")
 			.json(&json!({ "lease_id": lease }))
 			.await
 			.assert_status_ok();
 		// Released, so it is no longer the environment's open lease.
 		private
-			.post("/api/inventory/release_lease")
+			.post("/api/ansible/release_lease")
 			.json(&json!({ "lease_id": lease }))
 			.await
 			.assert_status(axum::http::StatusCode::NOT_FOUND);
@@ -622,14 +622,14 @@ async fn refuses_to_extend_a_lease_that_has_expired() {
 		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
 		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
 		conn.batch_execute(&format!(
-			"UPDATE inventory_leases SET expires_at = NOW() - INTERVAL '1 minute'
+			"UPDATE ansible_leases SET expires_at = NOW() - INTERVAL '1 minute'
 			 WHERE id = '{lease}'"
 		))
 		.await
 		.expect("expire the lease");
 
 		let response = private
-			.post("/api/inventory/extend_lease")
+			.post("/api/ansible/extend_lease")
 			.json(&json!({ "lease_id": lease }))
 			.await;
 		response.assert_status(axum::http::StatusCode::CONFLICT);
@@ -723,7 +723,7 @@ async fn reports_the_window_that_refuses_over_the_readers_own() {
 		assert_eq!(state["refuses"], true);
 
 		let response = private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "server_group_id": group }))
 			.await;
 		response.assert_status(axum::http::StatusCode::CONFLICT);
@@ -755,7 +755,7 @@ async fn reads_a_window_past_its_end_as_over() {
 
 async fn read_run_state(private: &commons_tests::axum_test::TestServer, group: Uuid) -> Value {
 	let response = private
-		.post("/api/inventory/run_state")
+		.post("/api/ansible/run_state")
 		.json(&json!({ "server_group_id": group, "rank": "dev" }))
 		.await;
 	response.assert_status_ok();
@@ -816,7 +816,7 @@ async fn refuses_a_lease_under_a_window_someone_else_declared() {
 		.await;
 
 		let response = private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "server_group_id": group }))
 			.await;
 		response.assert_status(axum::http::StatusCode::CONFLICT);
@@ -837,7 +837,7 @@ async fn takes_a_lease_under_the_readers_own_window() {
 		declare_group_window(&mut conn, group, ME, "NOW() + INTERVAL '2 hours'").await;
 
 		private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "server_group_id": group }))
 			.await
 			.assert_status_ok();
@@ -867,7 +867,7 @@ async fn takes_a_lease_under_a_window_the_reader_amended() {
 		assert_eq!(state["refuses"], false);
 
 		private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "server_group_id": group }))
 			.await
 			.assert_status_ok();
@@ -895,7 +895,7 @@ async fn refuses_a_lease_under_a_window_someone_else_amended() {
 		assert_eq!(state["refuses"], true);
 
 		let response = private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "server_group_id": group }))
 			.await;
 		response.assert_status(axum::http::StatusCode::CONFLICT);
@@ -926,7 +926,7 @@ async fn refuses_a_lease_under_a_window_over_one_machine() {
 		.await;
 
 		private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "server_group_id": group }))
 			.await
 			.assert_status(axum::http::StatusCode::CONFLICT);
@@ -967,7 +967,7 @@ async fn ignores_a_window_over_a_machine_at_another_rank() {
 		.await;
 
 		private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "server_group_id": group, "rank": "production" }))
 			.await
 			.assert_status_ok();
@@ -977,7 +977,7 @@ async fn ignores_a_window_over_a_machine_at_another_rank() {
 
 /// A window over another of the group's environments is not over this one, so
 /// it refuses nothing here, while one over this environment does.
-// spec: INV#work-under-way
+// spec: ANSRUN#work-under-way
 #[tokio::test(flavor = "multi_thread")]
 async fn only_this_environments_window_refuses_a_lease() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
@@ -1008,12 +1008,12 @@ async fn only_this_environments_window_refuses_a_lease() {
 		.expect("declare over the demo");
 
 		private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "server_group_id": group, "rank": "production" }))
 			.await
 			.assert_status_ok();
 		private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "server_group_id": group, "rank": "demo" }))
 			.await
 			.assert_status(axum::http::StatusCode::CONFLICT);
@@ -1035,7 +1035,7 @@ async fn takes_a_lease_once_a_window_has_passed_its_end() {
 		.await;
 
 		private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "server_group_id": group }))
 			.await
 			.assert_status_ok();
@@ -1077,7 +1077,7 @@ async fn refuses_an_unplanned_upgrade_of_production() {
 		.await;
 
 		let response = private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "server_group_id": group, "intent": "upgrade" }))
 			.await;
 		response.assert_status(axum::http::StatusCode::CONFLICT);
@@ -1107,7 +1107,7 @@ async fn takes_a_planned_upgrade_of_production() {
 		plan_upgrade(&mut conn, group, "", "").await;
 
 		let response = private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "server_group_id": group, "intent": "upgrade" }))
 			.await;
 		response.assert_status_ok();
@@ -1132,7 +1132,7 @@ async fn refuses_an_upgrade_whose_plan_was_withdrawn() {
 		plan_upgrade(&mut conn, group, ", withdrawn_at", ", NOW()").await;
 
 		private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "server_group_id": group, "intent": "upgrade" }))
 			.await
 			.assert_status(axum::http::StatusCode::CONFLICT);
@@ -1155,7 +1155,7 @@ async fn takes_an_unplanned_configuration_run_on_production() {
 		.await;
 
 		private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "server_group_id": group }))
 			.await
 			.assert_status_ok();
@@ -1180,7 +1180,7 @@ async fn takes_an_unplanned_upgrade_at_another_rank() {
 		.await;
 
 		private
-			.post("/api/inventory/take_lease")
+			.post("/api/ansible/take_lease")
 			.json(&json!({ "server_group_id": group, "intent": "upgrade" }))
 			.await
 			.assert_status_ok();
@@ -1197,14 +1197,14 @@ async fn says_who_took_a_lease_over_rather_than_calling_it_expired() {
 		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
 		let mine = take_lease(&private, json!({ "server_group_id": group })).await;
 		conn.batch_execute(&format!(
-			"UPDATE inventory_leases SET released_at = NOW(), released_by = 'someone.else@bes.au'
+			"UPDATE ansible_leases SET released_at = NOW(), released_by = 'someone.else@bes.au'
 			 WHERE id = '{mine}'"
 		))
 		.await
 		.expect("take the lease over");
 
 		let response = private
-			.post("/api/inventory/for_group")
+			.post("/api/ansible/for_group")
 			.json(&json!({ "lease_id": mine }))
 			.await;
 		response.assert_status(axum::http::StatusCode::CONFLICT);
@@ -1235,7 +1235,7 @@ async fn leaves_out_the_meta_application() {
 		.await
 		.expect("put the meta application in the group");
 
-		let body = read_inventory(&private, json!({ "server_group_id": group })).await;
+		let body = read_served(&private, json!({ "server_group_id": group })).await;
 		let hosts = body["hosts"].as_array().expect("hosts");
 		assert_eq!(hosts.len(), 1);
 		assert_eq!(hosts[0]["name"], "kamaka-central");
@@ -1251,7 +1251,7 @@ async fn serves_no_address_where_canopy_holds_none() {
 		let group = insert_group(&mut conn, "kamaka").await;
 		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
 
-		let body = read_inventory(&private, json!({ "server_group_id": group })).await;
+		let body = read_served(&private, json!({ "server_group_id": group })).await;
 		assert_eq!(body["hosts"][0]["address"], Value::Null);
 	})
 	.await
@@ -1266,7 +1266,7 @@ async fn refuses_to_extend_a_lease_someone_else_holds() {
 		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
 		let lease = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO inventory_leases (id, server_group_id, rank, intent, held_by, expires_at)
+			"INSERT INTO ansible_leases (id, server_group_id, rank, intent, held_by, expires_at)
 			 VALUES ('{lease}', '{group}', 'dev', 'configure', 'someone.else@bes.au',
 			         NOW() + INTERVAL '20 minutes')"
 		))
@@ -1274,10 +1274,147 @@ async fn refuses_to_extend_a_lease_someone_else_holds() {
 		.expect("seed a lease");
 
 		private
-			.post("/api/inventory/extend_lease")
+			.post("/api/ansible/extend_lease")
 			.json(&json!({ "lease_id": lease }))
 			.await
 			.assert_status(axum::http::StatusCode::CONFLICT);
+	})
+	.await
+}
+
+/// A machine ranked before anything has reported is already in its
+/// environment, and a bound device is enough for a run to reach it, so a run is
+/// how its applications get there.
+// spec: INV#what-a-run-is-served
+#[tokio::test(flavor = "multi_thread")]
+async fn serves_a_machine_with_a_bound_device_and_nothing_on_it() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		let machine = Uuid::new_v4();
+		let device = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO devices (id, role, tailscale_node_name)
+			 VALUES ('{device}', 'server', 'kamaka-new.tail1234.ts.net');
+			 INSERT INTO machines (id, name, group_id, rank, device_id)
+			 VALUES ('{machine}', 'kamaka-new', '{group}', 'production', '{device}')"
+		))
+		.await
+		.expect("seed a bare machine");
+
+		let body = read_served(&private, json!({ "group": "kamaka" })).await;
+		let hosts = body["hosts"].as_array().expect("hosts");
+		assert_eq!(hosts.len(), 1, "{body}");
+		assert_eq!(hosts[0]["id"], machine.to_string());
+		assert_eq!(hosts[0]["applications"], json!([]));
+		assert_eq!(hosts[0]["host_name"], "kamaka-new");
+	})
+	.await
+}
+
+/// A ranked machine with no device and nothing reported has no address a run
+/// could reach, so it is left out rather than refusing the environment.
+// spec: INV#what-a-run-is-served
+#[tokio::test(flavor = "multi_thread")]
+async fn leaves_out_a_machine_a_run_cannot_reach() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_ranked_application(
+			&mut conn,
+			group,
+			"kamaka-central",
+			"tamanu-central",
+			Some("production"),
+			Some("https://central.example.org"),
+		)
+		.await;
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (id, name, group_id, rank)
+			 VALUES (gen_random_uuid(), 'kamaka-waiting', '{group}', 'production');
+			 INSERT INTO machines (id, name, group_id, rank, deleted_at)
+			 VALUES (gen_random_uuid(), 'kamaka-gone', '{group}', 'production', NOW())"
+		))
+		.await
+		.expect("seed machines");
+
+		let body = read_served(&private, json!({ "group": "kamaka" })).await;
+		let hosts = body["hosts"].as_array().expect("hosts");
+		assert_eq!(hosts.len(), 1, "{body}");
+		assert_eq!(hosts[0]["name"], "kamaka-central");
+	})
+	.await
+}
+
+/// Two members whose tailnet names share a first label are each named by their
+/// Canopy name, so a run's limit can tell them apart.
+// spec: INV#reaching-a-machine
+#[tokio::test(flavor = "multi_thread")]
+async fn names_machines_apart_where_their_first_labels_match() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		for (name, tailnet) in [
+			("kamaka east", "box.east.tail1234.ts.net"),
+			("kamaka west", "box.west.tail1234.ts.net"),
+			("kamaka lone", "lone.west.tail1234.ts.net"),
+		] {
+			let application = insert_ranked_application(
+				&mut conn,
+				group,
+				name,
+				"tamanu-facility",
+				Some("production"),
+				None,
+			)
+			.await;
+			bind_device(&mut conn, application, tailnet).await;
+		}
+
+		let body = read_served(&private, json!({ "group": "kamaka" })).await;
+		let names: Vec<(&str, &str)> = body["hosts"]
+			.as_array()
+			.expect("hosts")
+			.iter()
+			.map(|host| {
+				(
+					host["name"].as_str().unwrap(),
+					host["host_name"].as_str().unwrap(),
+				)
+			})
+			.collect();
+		assert_eq!(
+			names,
+			[
+				("kamaka east", "kamaka-east"),
+				("kamaka lone", "lone"),
+				("kamaka west", "kamaka-west"),
+			]
+		);
+	})
+	.await
+}
+
+/// A rank no machine holds is no environment, so it is refused rather than
+/// served empty.
+// spec: GRP#environments
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_a_rank_no_machine_holds() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_ranked_application(
+			&mut conn,
+			group,
+			"kamaka-central",
+			"tamanu-central",
+			Some("production"),
+			None,
+		)
+		.await;
+
+		let refused = private
+			.post("/api/ansible/take_lease")
+			.json(&json!({ "group": "kamaka", "rank": "demo" }))
+			.await;
+		refused.assert_status(commons_tests::axum_test::http::StatusCode::CONFLICT);
+		assert!(refused.text().contains("no machine at rank demo"));
 	})
 	.await
 }

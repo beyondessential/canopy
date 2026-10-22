@@ -130,6 +130,11 @@ pub fn spawn() -> JoinHandle<()> {
 		// spec: IDP#signing-keys
 		jobs::identity::spawn();
 
+		// Ansible leases a run never read, and ones that ran out, so an
+		// abandoned start does not hold an environment shut and a lease that
+		// expires is on the record.
+		jobs::ansible::leases::spawn();
+
 		// Deferred incident (re-)evaluation worker. The status-ingest path
 		// enqueues applications instead of evaluating incident membership inline
 		// (which took the per-group `server_groups` lock and convoyed the

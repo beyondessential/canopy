@@ -280,13 +280,399 @@
               },
               {
                 "$ref": "#/components/schemas/MaintenanceTarget",
-                "description": "A new target, moving the window there: any grain on its target's line\nof descent that has no window of its own."
+                "description": "A new target, moving the window there: any grain on its target's line\nof descent that has no window of its own, or machines of its\nenvironment that no other window names. Naming machines adds and removes\nthe difference from those the window covers now."
               }
             ]
           }
         },
         "required": [
           "id"
+        ],
+        "type": "object"
+      },
+      "AnsibleApplication": {
+        "description": "One application on a machine, so a run knows what it is configuring there.",
+        "properties": {
+          "id": {
+            "description": "Identifier of the application.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "description": "The application's name, or its type's where nobody has named it.",
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/ApplicationType",
+            "description": "What the application is: the software and the role it plays together."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type"
+        ],
+        "type": "object"
+      },
+      "AnsibleArgs": {
+        "description": "Read what an environment serves Ansible, under a lease held on it.",
+        "properties": {
+          "lease_id": {
+            "description": "Identifier of the lease the run holds, from `take_lease`.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lease_id"
+        ],
+        "type": "object"
+      },
+      "AnsibleHost": {
+        "description": "One machine in an environment.",
+        "properties": {
+          "address": {
+            "description": "The address to reach it at: an `ansible_host` variable, the tailnet name\nof the device bound to it, or the recorded host of an application on it.\nNull where canopy holds none of those.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "applications": {
+            "description": "The applications the machine carries in this environment, by name.",
+            "items": {
+              "$ref": "#/components/schemas/AnsibleApplication"
+            },
+            "type": "array"
+          },
+          "assigned_type": {
+            "description": "The application type this run assigns the machine where nothing is on it\nyet, which a run groups it by as it would by an application.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "host_name": {
+            "description": "What a run's limit and output name the machine by: the first label of\nits tailnet name, or its address, or its Canopy name where that would\nleave two machines the same.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Identifier of the machine.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "description": "The machine's name, falling back to its identifier.",
+            "type": "string"
+          },
+          "own_vars": {
+            "$ref": "#/components/schemas/VarMap",
+            "description": "The variables the machine sets itself, so a value inherited from a wider\nscope can be told from one set here even where the two agree."
+          },
+          "secret_vars": {
+            "description": "Which of `vars` are secret.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "vars": {
+            "$ref": "#/components/schemas/VarMap",
+            "description": "The effective variables: the machine's over the environment's over the\ngroup's. This is what a run acts on."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "host_name",
+          "applications",
+          "vars",
+          "own_vars",
+          "secret_vars"
+        ],
+        "type": "object"
+      },
+      "AnsibleLease": {
+        "description": "A run's hold on one environment.",
+        "properties": {
+          "assignments": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The application type assigned to each machine with nothing on it, by\nmachine identifier.",
+            "propertyNames": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "expires_at": {
+            "description": "When it stops holding unless extended.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "held_by": {
+            "description": "The login the lease is held by.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "description": "Unique identifier of this lease, which a run names to read the\nenvironment.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "intent": {
+            "$ref": "#/components/schemas/RunIntent",
+            "description": "What the run holding it intends."
+          },
+          "limit_pattern": {
+            "description": "The limit as the operator typed it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limited_to": {
+            "description": "The machines that limit matched, null where the run acts on the whole\nenvironment.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "note": {
+            "description": "What the holder said they are doing.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "playbook": {
+            "description": "The playbook the lease was taken to run, where it was taken for one.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "rank": {
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "The rank of the environment within it."
+          },
+          "release_reason": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ReleaseReason",
+                "description": "Why the lease stopped holding, where it has."
+              }
+            ]
+          },
+          "released_at": {
+            "description": "When it was released, and `None` while it is still held.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "released_by": {
+            "description": "Who released it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "server_group_id": {
+            "description": "The group the environment belongs to.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "skip_tags": {
+            "description": "The tags the run skips.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "started_at": {
+            "description": "When the run first read the environment under this lease. A lease is\npending until then.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tags": {
+            "description": "The tags the run runs.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "taken_at": {
+            "description": "When it was taken.",
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "server_group_id",
+          "rank",
+          "intent",
+          "taken_at",
+          "expires_at",
+          "tags",
+          "skip_tags",
+          "assignments"
+        ],
+        "type": "object"
+      },
+      "AnsibleVariable": {
+        "description": "One variable: where it is set, its name, and its value where it is not a\nsecret.",
+        "properties": {
+          "created_at": {
+            "description": "When the name was first set here.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "description": "Unique identifier of this variable.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "is_secret": {
+            "description": "Whether the value is a secret. Applies to the whole value.",
+            "type": "boolean"
+          },
+          "machine_id": {
+            "description": "Set for a variable belonging to one machine.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "The variable's name, unique within its scope.",
+            "type": "string"
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "Set alongside `server_group_id` for a variable belonging to one\nenvironment rather than to the whole group."
+              }
+            ]
+          },
+          "server_group_id": {
+            "description": "Set for a variable belonging to a group or to one of its environments.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "set_by": {
+            "description": "The login that last set the value.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "description": "When its value was last replaced.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "value": {
+            "description": "The value, and `None` for a secret, whose value is in the secret store."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "is_secret",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "AnsibleVariableView": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/AnsibleVariable"
+          },
+          {
+            "properties": {
+              "problems": {
+                "description": "What is wrong with the variable against the catalogue as it is now: a\nvalue that no longer matches its type, a scope it may no longer be set\nat, a name that has become reserved, or a value the catalogue calls\nsecret that is held in the clear. Empty where it agrees, and where no\ncatalogue has been read. A secret's value cannot be checked, so only\nwhere it is set is.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "problems"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "A variable, and where the catalogue disagrees with it as it stands."
+      },
+      "AnsibleView": {
+        "description": "What an environment serves Ansible.",
+        "properties": {
+          "group": {
+            "description": "Name of the server group.",
+            "type": "string"
+          },
+          "group_id": {
+            "description": "Identifier of the server group the environment belongs to.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "hosts": {
+            "description": "The environment's machines, ordered by name.",
+            "items": {
+              "$ref": "#/components/schemas/AnsibleHost"
+            },
+            "type": "array"
+          },
+          "rank": {
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "Rank of the environment served."
+          },
+          "secret_vars": {
+            "description": "Which of `vars` are secret.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "vars": {
+            "$ref": "#/components/schemas/VarMap",
+            "description": "The group's and the environment's variables, merged. Every machine\nbelow carries these too, under its own overrides."
+          }
+        },
+        "required": [
+          "group_id",
+          "group",
+          "rank",
+          "vars",
+          "secret_vars",
+          "hosts"
         ],
         "type": "object"
       },
@@ -626,6 +1012,27 @@
         },
         "required": [
           "artifact_id"
+        ],
+        "type": "object"
+      },
+      "AssignmentArg": {
+        "description": "The application type to assign a machine with nothing on it, or none.",
+        "properties": {
+          "application_type": {
+            "description": "The application type the run carries it as, or null to leave it\nunassigned.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "machine_id": {
+            "description": "The machine, which has nothing on it.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "machine_id"
         ],
         "type": "object"
       },
@@ -1369,6 +1776,183 @@
         ],
         "type": "object"
       },
+      "CataloguePlaybook": {
+        "description": "A playbook a run can start.",
+        "properties": {
+          "applications": {
+            "description": "The application types it configures, every type where absent.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "description": {
+            "description": "What the playbook does.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "intent": {
+            "$ref": "#/components/schemas/RunIntent",
+            "description": "The intent a run of it is taken with."
+          },
+          "name": {
+            "description": "The playbook's file name.",
+            "type": "string"
+          },
+          "preset": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Preset",
+                "description": "The run button it backs, where it backs one."
+              }
+            ]
+          },
+          "tags": {
+            "description": "The tags it takes.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "intent",
+          "tags"
+        ],
+        "type": "object"
+      },
+      "CatalogueVariable": {
+        "description": "A variable the catalogue describes.",
+        "properties": {
+          "applications": {
+            "description": "The application types it configures, any where absent.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "default": {
+            "description": "The value a playbook uses where the variable is not set."
+          },
+          "description": {
+            "description": "What the variable means.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "The variable's name.",
+            "type": "string"
+          },
+          "reserved": {
+            "description": "Whether the inventory plugin sets it for itself, so it is never stored.",
+            "type": "boolean"
+          },
+          "schema": {
+            "description": "The variable's JSON Schema, as the catalogue gives it, which is what a\nform for its value is shaped by."
+          },
+          "scopes": {
+            "description": "The scopes it may be set at, every scope where absent.",
+            "items": {
+              "$ref": "#/components/schemas/ScopeKind"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "secret": {
+            "description": "Whether its value is a secret.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "schema",
+          "secret",
+          "reserved"
+        ],
+        "type": "object"
+      },
+      "CatalogueView": {
+        "description": "What the catalogue says, and when it was read.",
+        "properties": {
+          "playbooks": {
+            "description": "The playbooks a run can start.",
+            "items": {
+              "$ref": "#/components/schemas/CataloguePlaybook"
+            },
+            "type": "array"
+          },
+          "problem": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Problem",
+                "description": "Why the latest attempt to read a newer one did not replace it, where it\ndid not."
+              }
+            ]
+          },
+          "problem_detail": {
+            "description": "What was wrong with it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "read_at": {
+            "description": "When this copy was read.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "source_commit": {
+            "description": "The infra commit it was read at.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tags": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "What it says of tags that have a documented meaning.",
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "variables": {
+            "description": "The variables it describes, by name.",
+            "items": {
+              "$ref": "#/components/schemas/CatalogueVariable"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "variables",
+          "playbooks",
+          "tags",
+          "read_at"
+        ],
+        "type": "object"
+      },
       "CertificateNameView": {
         "description": "A DNS name an application holds for certificates.",
         "properties": {
@@ -2006,6 +2590,24 @@
         "required": [
           "server_group_id",
           "type"
+        ],
+        "type": "object"
+      },
+      "CloneMismatch": {
+        "description": "The file says the environment is a clone, or not, against what it is.",
+        "properties": {
+          "environment": {
+            "description": "Whether the environment is a clone.",
+            "type": "boolean"
+          },
+          "file": {
+            "description": "Whether the file sets `tamanu_clone`.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "file",
+          "environment"
         ],
         "type": "object"
       },
@@ -4457,6 +5059,58 @@
         ],
         "type": "object"
       },
+      "HoldArgs": {
+        "description": "The window a run declared, and the end to give it.",
+        "properties": {
+          "expected_end": {
+            "description": "When the work is expected to finish. The window ends itself then, whatever\nbecomes of the run's lease.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "description": "The window, as returned when it was listed.",
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "expected_end"
+        ],
+        "type": "object"
+      },
+      "HostChoice": {
+        "description": "One host's machine, chosen by the operator.",
+        "properties": {
+          "host": {
+            "description": "The host's key in the file.",
+            "type": "string"
+          },
+          "machine_id": {
+            "description": "The machine to import the host onto, or null to skip the host.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "host"
+        ],
+        "type": "object"
+      },
+      "HostState": {
+        "description": "How a host stands against the environment's machines.",
+        "enum": [
+          "matched",
+          "assigned",
+          "ambiguous",
+          "unmatched",
+          "skipped"
+        ],
+        "type": "string"
+      },
       "IdArgs": {
         "description": "Identifies the declaration to operate on.",
         "properties": {
@@ -4517,6 +5171,302 @@
         "required": [
           "issues_tokens",
           "keys"
+        ],
+        "type": "object"
+      },
+      "ImportApplied": {
+        "description": "What an applied import did.",
+        "properties": {
+          "machines": {
+            "description": "How many machines they were set on.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "notes_added": {
+            "description": "Whether the group's notes were added to.",
+            "type": "boolean"
+          },
+          "variables": {
+            "description": "How many variables were set.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "variables",
+          "machines",
+          "notes_added"
+        ],
+        "type": "object"
+      },
+      "ImportApplyArgs": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ImportArgs"
+          },
+          {
+            "properties": {
+              "members": {
+                "description": "The identifier of the environment's machines the preview was taken\nagainst, so an import is refused if they have changed since.",
+                "type": "string"
+              },
+              "notes": {
+                "description": "The notes to append to the group's, as the operator left them. Omitted\nto append what was proposed, and blank to append nothing.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "members"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "An import to apply: what was previewed, with the notes as the operator left\nthem."
+      },
+      "ImportArgs": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/EnvironmentArgs"
+          },
+          {
+            "properties": {
+              "file": {
+                "description": "The text of the inventory file.",
+                "type": "string"
+              },
+              "hosts": {
+                "description": "What the operator has chosen for hosts, by the key the file gives them.\nA host not named here takes what Canopy proposed.",
+                "items": {
+                  "$ref": "#/components/schemas/HostChoice"
+                },
+                "type": "array"
+              },
+              "secrets": {
+                "description": "Which variables the operator has marked or unmarked as secret, where the\ncatalogue does not decide.",
+                "items": {
+                  "$ref": "#/components/schemas/SecretChoice"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "file"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "What the operator has chosen about the import, with the file."
+      },
+      "ImportHost": {
+        "description": "A host in the file, and what the import would do with it.",
+        "properties": {
+          "candidates": {
+            "description": "The machines it matched, where it matched several.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "key": {
+            "description": "The host's key in the file.",
+            "type": "string"
+          },
+          "machine_id": {
+            "description": "The machine it would be imported onto, where it has one.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/HostState",
+            "description": "How the host stands against the environment's machines."
+          },
+          "variables": {
+            "description": "The variables it would set on its machine. None for a skipped host.",
+            "items": {
+              "$ref": "#/components/schemas/ImportVariable"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "state",
+          "candidates",
+          "variables"
+        ],
+        "type": "object"
+      },
+      "ImportMachine": {
+        "description": "A machine of the environment a host can be imported onto.",
+        "properties": {
+          "id": {
+            "description": "The machine's identifier.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "description": "The machine's name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "ImportPreview": {
+        "description": "Everything the import would do, for the operator to review.",
+        "properties": {
+          "can_apply": {
+            "description": "Whether it can be applied.",
+            "type": "boolean"
+          },
+          "catalogue": {
+            "description": "Whether a catalogue is held, which decides which variables are secret\nand which are reserved.",
+            "type": "boolean"
+          },
+          "clone_mismatch": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CloneMismatch",
+                "description": "Set where the file's `tamanu_clone` disagrees with the environment."
+              }
+            ]
+          },
+          "environment": {
+            "description": "The variables set on the environment itself.",
+            "items": {
+              "$ref": "#/components/schemas/ImportVariable"
+            },
+            "type": "array"
+          },
+          "group": {
+            "description": "Name of the group.",
+            "type": "string"
+          },
+          "group_id": {
+            "description": "Identifier of the group.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "hosts": {
+            "description": "The file's hosts, by key.",
+            "items": {
+              "$ref": "#/components/schemas/ImportHost"
+            },
+            "type": "array"
+          },
+          "left_out": {
+            "description": "The reserved variables the file sets, which are left out.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "machines": {
+            "description": "The environment's machines, which a host can be assigned to.",
+            "items": {
+              "$ref": "#/components/schemas/ImportMachine"
+            },
+            "type": "array"
+          },
+          "members": {
+            "description": "Identifies those machines, to send back when applying.",
+            "type": "string"
+          },
+          "notes": {
+            "description": "The file's comments as proposed notes for the group, blank where there\nare none.",
+            "type": "string"
+          },
+          "overrides": {
+            "description": "Group variables an environment variable would override.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "problems": {
+            "description": "What stops the import being applied, beyond a variable's own problems.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "rank": {
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "The environment imported into."
+          }
+        },
+        "required": [
+          "group_id",
+          "group",
+          "rank",
+          "catalogue",
+          "machines",
+          "members",
+          "hosts",
+          "environment",
+          "left_out",
+          "overrides",
+          "notes",
+          "problems",
+          "can_apply"
+        ],
+        "type": "object"
+      },
+      "ImportVariable": {
+        "description": "One variable the import would set.",
+        "properties": {
+          "locked": {
+            "description": "Whether the catalogue decides that, so the operator cannot change it.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "The variable's name.",
+            "type": "string"
+          },
+          "origin": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Origin",
+                "description": "Where it comes from, where that is not the file's own setting."
+              }
+            ]
+          },
+          "problems": {
+            "description": "What breaks the rules for setting it by hand.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "secret": {
+            "description": "Whether it would be set as a secret.",
+            "type": "boolean"
+          },
+          "value": {
+            "description": "Its value, and null where it is secret, which a preview does not show."
+          }
+        },
+        "required": [
+          "name",
+          "secret",
+          "locked",
+          "problems"
         ],
         "type": "object"
       },
@@ -4867,285 +5817,6 @@
         },
         "required": [
           "intent"
-        ],
-        "type": "object"
-      },
-      "InventoryApplication": {
-        "description": "One application on a machine, so a run knows what it is configuring there.",
-        "properties": {
-          "id": {
-            "description": "Identifier of the application.",
-            "format": "uuid",
-            "type": "string"
-          },
-          "name": {
-            "description": "The application's name, or its type's where nobody has named it.",
-            "type": "string"
-          },
-          "type": {
-            "$ref": "#/components/schemas/ApplicationType",
-            "description": "What the application is: the software and the role it plays together."
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "type"
-        ],
-        "type": "object"
-      },
-      "InventoryArgs": {
-        "description": "Read an environment's inventory under a lease held on it.",
-        "properties": {
-          "lease_id": {
-            "description": "Identifier of the lease the run holds, from `take_lease`.",
-            "format": "uuid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "lease_id"
-        ],
-        "type": "object"
-      },
-      "InventoryHost": {
-        "description": "One machine in an environment.",
-        "properties": {
-          "address": {
-            "description": "The address to reach it at: an `ansible_host` variable, the tailnet name\nof the device bound to it, or the recorded host of an application on it.\nNull where canopy holds none of those.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "applications": {
-            "description": "The applications the machine carries in this environment, by name.",
-            "items": {
-              "$ref": "#/components/schemas/InventoryApplication"
-            },
-            "type": "array"
-          },
-          "id": {
-            "description": "Identifier of the machine.",
-            "format": "uuid",
-            "type": "string"
-          },
-          "name": {
-            "description": "The machine's name, falling back to its identifier.",
-            "type": "string"
-          },
-          "own_vars": {
-            "$ref": "#/components/schemas/VarMap",
-            "description": "The variables the machine sets itself, so a value inherited from a wider\nscope can be told from one set here even where the two agree."
-          },
-          "secret_vars": {
-            "description": "Which of `vars` are secret.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "vars": {
-            "$ref": "#/components/schemas/VarMap",
-            "description": "The effective variables: the machine's over the environment's over the\ngroup's. This is what a run acts on."
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "applications",
-          "vars",
-          "own_vars",
-          "secret_vars"
-        ],
-        "type": "object"
-      },
-      "InventoryLease": {
-        "description": "A run's hold on one environment.",
-        "properties": {
-          "expires_at": {
-            "description": "When it stops holding unless extended.",
-            "format": "date-time",
-            "type": "string"
-          },
-          "held_by": {
-            "description": "The login the lease is held by.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "id": {
-            "description": "Unique identifier of this lease, which a run names to read the\ninventory.",
-            "format": "uuid",
-            "type": "string"
-          },
-          "intent": {
-            "$ref": "#/components/schemas/RunIntent",
-            "description": "What the run holding it intends."
-          },
-          "note": {
-            "description": "What the holder said they are doing.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "rank": {
-            "$ref": "#/components/schemas/ServerRank",
-            "description": "The rank of the environment within it."
-          },
-          "released_at": {
-            "description": "When it was released, and `None` while it is still held.",
-            "format": "date-time",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "released_by": {
-            "description": "Who released it.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "server_group_id": {
-            "description": "The group the environment belongs to.",
-            "format": "uuid",
-            "type": "string"
-          },
-          "taken_at": {
-            "description": "When it was taken.",
-            "format": "date-time",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "server_group_id",
-          "rank",
-          "intent",
-          "taken_at",
-          "expires_at"
-        ],
-        "type": "object"
-      },
-      "InventoryVariable": {
-        "description": "One variable: where it is set, its name, and its value where it is not a\nsecret.",
-        "properties": {
-          "created_at": {
-            "description": "When the name was first set here.",
-            "format": "date-time",
-            "type": "string"
-          },
-          "id": {
-            "description": "Unique identifier of this variable.",
-            "format": "uuid",
-            "type": "string"
-          },
-          "is_secret": {
-            "description": "Whether the value is a secret. Applies to the whole value.",
-            "type": "boolean"
-          },
-          "machine_id": {
-            "description": "Set for a variable belonging to one machine.",
-            "format": "uuid",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "name": {
-            "description": "The variable's name, unique within its scope.",
-            "type": "string"
-          },
-          "rank": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ServerRank",
-                "description": "Set alongside `server_group_id` for a variable belonging to one\nenvironment rather than to the whole group."
-              }
-            ]
-          },
-          "server_group_id": {
-            "description": "Set for a variable belonging to a group or to one of its environments.",
-            "format": "uuid",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "set_by": {
-            "description": "The login that last set the value.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "updated_at": {
-            "description": "When its value was last replaced.",
-            "format": "date-time",
-            "type": "string"
-          },
-          "value": {
-            "description": "The value, and `None` for a secret, whose value is in the secret store."
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "is_secret",
-          "created_at",
-          "updated_at"
-        ],
-        "type": "object"
-      },
-      "InventoryView": {
-        "description": "An environment's inventory.",
-        "properties": {
-          "group": {
-            "description": "Name of the server group.",
-            "type": "string"
-          },
-          "group_id": {
-            "description": "Identifier of the server group the inventory covers.",
-            "format": "uuid",
-            "type": "string"
-          },
-          "hosts": {
-            "description": "The environment's machines, ordered by name.",
-            "items": {
-              "$ref": "#/components/schemas/InventoryHost"
-            },
-            "type": "array"
-          },
-          "rank": {
-            "$ref": "#/components/schemas/ServerRank",
-            "description": "Rank of the environment served."
-          },
-          "secret_vars": {
-            "description": "Which of `vars` are secret.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "vars": {
-            "$ref": "#/components/schemas/VarMap",
-            "description": "The group's and the environment's variables, merged. Every machine\nbelow carries these too, under its own overrides."
-          }
-        },
-        "required": [
-          "group_id",
-          "group",
-          "rank",
-          "vars",
-          "secret_vars",
-          "hosts"
         ],
         "type": "object"
       },
@@ -5871,6 +6542,96 @@
           "id"
         ],
         "type": "object"
+      },
+      "LimitMatch": {
+        "description": "A machine a limit matches.",
+        "properties": {
+          "host_name": {
+            "description": "The name a run addresses it by.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Identifier of the machine.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "description": "The machine's name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "host_name"
+        ],
+        "type": "object"
+      },
+      "LimitPreview": {
+        "description": "What a limit matches.",
+        "properties": {
+          "error": {
+            "description": "Why the limit cannot be evaluated, where it cannot.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "groups": {
+            "description": "The groups a limit can name.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "hosts": {
+            "description": "The host names a limit can name.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "matches": {
+            "description": "The machines it matches.",
+            "items": {
+              "$ref": "#/components/schemas/LimitMatch"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "matches",
+          "groups",
+          "hosts"
+        ],
+        "type": "object"
+      },
+      "LimitPreviewArgs": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/EnvironmentArgs"
+          },
+          {
+            "properties": {
+              "assignments": {
+                "description": "The types assigned to machines with nothing on them, which decide the\ngroups those machines are in.",
+                "items": {
+                  "$ref": "#/components/schemas/AssignmentArg"
+                },
+                "type": "array"
+              },
+              "limit": {
+                "description": "The limit as an Ansible host pattern.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "limit"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "A limit to evaluate against an environment's machines."
       },
       "ListActiveArgs": {
         "description": "Filters for listing open incidents.",
@@ -6917,8 +7678,45 @@
         ],
         "type": "string"
       },
+      "MaintenanceMachineChoice": {
+        "description": "One machine of an environment, offered as one of several a window covers.",
+        "properties": {
+          "has_failures": {
+            "description": "Offered from an incident: whether any of its failing checks are on this\nmachine or on an application running on it, so a choice of machines can\ntell whether it covers them.",
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "machine_id": {
+            "description": "The machine.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "description": "The machine's name.",
+            "type": "string"
+          },
+          "window": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MaintenanceWindow",
+                "description": "The open window naming this machine, where one does: it cannot be chosen\ninto another window, unless that window is the one being amended."
+              }
+            ]
+          }
+        },
+        "required": [
+          "machine_id",
+          "name"
+        ],
+        "type": "object"
+      },
       "MaintenanceTarget": {
-        "description": "A target a window can cover, named the way a declaration names it: exactly\none of the ids, and with the group, optionally the rank of one of its\nenvironments.",
+        "description": "A target a window can cover, named the way a declaration names it: exactly\none of the ids, and with the group, optionally the rank of one of its\nenvironments; or several machines of one environment, named alone.",
         "properties": {
           "application_id": {
             "description": "The application, for a window over one workload.",
@@ -6933,6 +7731,17 @@
             "format": "uuid",
             "type": [
               "string",
+              "null"
+            ]
+          },
+          "machine_ids": {
+            "description": "Several machines of one environment, for a window over each of them. Named\nalone, without the other fields: the group and environment are the\nmachines'. One machine is that machine's window. Offered as a choice with\nnone or the window's own machines until the operator picks.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": [
+              "array",
               "null"
             ]
           },
@@ -6962,7 +7771,7 @@
         "description": "One grain a declaration can cover.",
         "properties": {
           "covers_failures": {
-            "description": "Offered from an incident: whether a window here would cover every one\nof its failing checks.",
+            "description": "Offered from an incident: whether a window here would cover every one\nof its failing checks. Absent for a choice of several machines, which\ncovers what the machines picked do (see `has_failures`).",
             "type": [
               "boolean",
               "null"
@@ -6977,6 +7786,16 @@
           "label": {
             "description": "The grain's own name: a group's, a machine's, an application's, or an\nenvironment's rank.",
             "type": "string"
+          },
+          "machines": {
+            "description": "Set for the choice of several machines of the environment, listed between\nthe environment and its machines: the machines to pick from, each with\nthe window that names it.",
+            "items": {
+              "$ref": "#/components/schemas/MaintenanceMachineChoice"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "target": {
             "$ref": "#/components/schemas/MaintenanceTarget",
@@ -7136,6 +7955,14 @@
             "format": "uuid",
             "type": "string"
           },
+          "lease_id": {
+            "description": "The run lease this window was declared for, while it lasts the run: its\nexpected end follows the lease's expiry, and it ends when the lease does.\nCleared when the window is held to an end of its own.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "machine_id": {
             "description": "Set for a window over one machine, covering the machine's own checks\nand those of every application running on it.",
             "format": "uuid",
@@ -7143,6 +7970,14 @@
               "string",
               "null"
             ]
+          },
+          "machine_ids": {
+            "description": "Set for a window over several machines of one environment: the machines\nit names, at least two, each covered as a window over that machine alone\nwould. Empty for every other window, a set having no `machine_id` of its\nown: it sits at its group and rank.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "type": "array"
           },
           "note": {
             "description": "What is being done, where the operator said.",
@@ -7648,6 +8483,14 @@
           "login"
         ],
         "type": "object"
+      },
+      "Origin": {
+        "description": "Where a variable comes from where it is not simply what the file sets.",
+        "enum": [
+          "added",
+          "from_host_key"
+        ],
+        "type": "string"
       },
       "Page_BestoolSnippetInfo": {
         "description": "A single page of a paginated list response.",
@@ -8521,6 +9364,14 @@
         ],
         "type": "string"
       },
+      "Preset": {
+        "description": "What a run of a playbook is started as.",
+        "enum": [
+          "install",
+          "upgrade"
+        ],
+        "type": "string"
+      },
       "PreviewMachine": {
         "description": "The next firings of a cron schedule for one machine.",
         "properties": {
@@ -8629,6 +9480,14 @@
           "object_sample"
         ],
         "type": "object"
+      },
+      "Problem": {
+        "description": "Why the latest attempt to read the catalogue did not replace it.",
+        "enum": [
+          "unreachable",
+          "invalid"
+        ],
+        "type": "string"
       },
       "ProblemDetailsSchema": {
         "description": "Standard error response body, returned for every non-2xx response.\n\nThis follows the RFC 7807 \"Problem Details\" shape: a stable machine-readable\n`type`, a short `title`, the repeated HTTP `status` code, and an optional\n`detail` string with specifics of this particular occurrence.",
@@ -9274,6 +10133,34 @@
           "changelog"
         ],
         "type": "object"
+      },
+      "ReleaseLeaseArgs": {
+        "description": "Give a lease back.",
+        "properties": {
+          "lease_id": {
+            "description": "Identifier of the lease.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "unless_started": {
+            "description": "Release only while no run has read the lease, as giving up on a run that\nnever started does, and refuse once one has.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "lease_id"
+        ],
+        "type": "object"
+      },
+      "ReleaseReason": {
+        "description": "Why a lease stopped holding.",
+        "enum": [
+          "released",
+          "taken_over",
+          "unstarted",
+          "expired"
+        ],
+        "type": "string"
       },
       "RelyingParty": {
         "description": "A service that trusts Canopy as an issuer.",
@@ -10186,6 +11073,73 @@
         ],
         "type": "string"
       },
+      "RunMember": {
+        "description": "One machine a run acts on.",
+        "properties": {
+          "application_types": {
+            "description": "The application types on the machine. Empty for one nothing is on yet.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "groups": {
+            "description": "The Ansible groups a run puts it in, besides `all`.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "host_name": {
+            "description": "The name a run's limit and output address it by.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Identifier of the machine.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "name": {
+            "description": "The machine's name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "host_name",
+          "groups",
+          "application_types"
+        ],
+        "type": "object"
+      },
+      "RunOptions": {
+        "description": "The machines a run on an environment acts on.",
+        "properties": {
+          "has_central": {
+            "description": "Whether the environment already holds a Tamanu central, of which it holds\nat most one.",
+            "type": "boolean"
+          },
+          "members": {
+            "description": "The managed members of the environment, ordered by name.",
+            "items": {
+              "$ref": "#/components/schemas/RunMember"
+            },
+            "type": "array"
+          },
+          "pending_for_secs": {
+            "description": "How long, in seconds, a lease waits for its run to start before Canopy\nreleases it.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "members",
+          "has_central",
+          "pending_for_secs"
+        ],
+        "type": "object"
+      },
       "RunOutcome": {
         "description": "Outcome of a reported backup or restore run.",
         "enum": [
@@ -10303,7 +11257,7 @@
                 "type": "null"
               },
               {
-                "$ref": "#/components/schemas/InventoryLease",
+                "$ref": "#/components/schemas/AnsibleLease",
                 "description": "The lease holding the environment, where one holds."
               }
             ]
@@ -10681,6 +11635,40 @@
             ]
           }
         },
+        "type": "object"
+      },
+      "ScopeKind": {
+        "description": "The three places a variable is set.",
+        "enum": [
+          "group",
+          "environment",
+          "machine"
+        ],
+        "type": "string"
+      },
+      "SecretChoice": {
+        "description": "One variable marked or unmarked as secret by the operator.",
+        "properties": {
+          "host": {
+            "description": "The key of the host whose variable it is, or null for one of the\nenvironment's own.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "description": "The variable's name.",
+            "type": "string"
+          },
+          "secret": {
+            "description": "Whether it is secret.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "secret"
+        ],
         "type": "object"
       },
       "SelfAlertView": {
@@ -11799,7 +12787,7 @@
                 "type": "string"
               },
               "secret": {
-                "description": "Whether the value is a secret, held in the secret store and served only\nas part of an inventory.",
+                "description": "Whether the value is a secret, held in the secret store and served only\nas part of what an environment serves.",
                 "type": "boolean"
               },
               "value": {
@@ -12750,9 +13738,23 @@
           },
           {
             "properties": {
+              "assignments": {
+                "description": "The application type each machine with nothing on it is assigned for\nthis run.",
+                "items": {
+                  "$ref": "#/components/schemas/AssignmentArg"
+                },
+                "type": "array"
+              },
               "intent": {
                 "$ref": "#/components/schemas/RunIntent",
                 "description": "What the run intends. Configuring where not named."
+              },
+              "limit": {
+                "description": "What the run is limited to, as an Ansible host pattern. The whole\nenvironment where not given.",
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "note": {
                 "description": "What the holder is doing, shown to whoever is refused meanwhile.",
@@ -12760,6 +13762,27 @@
                   "string",
                   "null"
                 ]
+              },
+              "playbook": {
+                "description": "The playbook the run is started with, from the catalogue.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "skip_tags": {
+                "description": "The tags the run skips.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "tags": {
+                "description": "The tags the run runs.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               },
               "take_over": {
                 "description": "Take over a lease another operator holds, which is audited.",
@@ -13822,6 +14845,830 @@
         ],
         "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/ansible/extend_lease": {
+      "post": {
+        "description": "Only the holder can extend, and only while the lease is unreleased: one that\nhas been released is gone, and taking a fresh one goes through the same\nrefusals a first one does.",
+        "operationId": "ansible_extend_lease",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeaseArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnsibleLease"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "No such lease"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Held by someone else, or no longer held"
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Push a held lease's expiry out, so a run still going keeps the environment.",
+        "tags": [
+          "ansible"
+        ],
+        "x-canopy-audit": [
+          "inventory_lease_extended"
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/ansible/for_group": {
+      "post": {
+        "description": "Refuses a lease that is not the caller's or no longer holds, and a secret\nvariable whose value cannot be read: a run receiving a machine that looks\nconfigured and is missing a value is worse than one that does not run.",
+        "operationId": "ansible_for_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnsibleArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnsibleView"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "No such lease"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "The lease is someone else's, no longer holds, the environment is gone, or two machines share an address"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "A secret variable could not be read"
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Serve the environment the caller holds the lease on.",
+        "tags": [
+          "ansible"
+        ],
+        "x-canopy-audit": [
+          "inventory_read",
+          "ansible_run_started",
+          "maintenance_declared"
+        ],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/ansible/import_apply": {
+      "post": {
+        "description": "The plan is worked out again against the environment as it stands. An\nimport that cannot be applied, or whose machines have changed since the\npreview, is refused whole; one that applies sets every variable, writes\nevery secret to the secret store, and appends the notes, or does none of it.",
+        "operationId": "ansible_import_apply",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportApplyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportApplied"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Not an inventory file, or an import that breaks the rules for setting variables"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "No such server group"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "The environment carries variables, its machines changed since the preview, or a host is not matched or skipped"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "The secret store is unavailable"
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Apply an import.",
+        "tags": [
+          "ansible"
+        ],
+        "x-canopy-audit": [
+          "ansible_inventory_imported"
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/ansible/import_preview": {
+      "post": {
+        "description": "Reads the file, proposes the machine each host is imported onto, and lists\nevery variable that would be set, where, and whether as a secret.",
+        "operationId": "ansible_import_preview",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportPreview"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Not an inventory file, or a machine that is not in the environment"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "No such server group"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "The environment already carries variables, is archived, or is ambiguous"
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Show what importing a file would do, changing nothing.",
+        "tags": [
+          "ansible"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/ansible/limit_preview": {
+      "post": {
+        "description": "The limit is evaluated as the subset of Ansible host patterns that names\nhosts and groups: `:` or `,` separated, `*` and `?` globs, `!` to exclude and\n`&` to intersect. A pattern outside that subset is reported rather than\npreviewed wrongly.",
+        "operationId": "ansible_limit_preview",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LimitPreviewArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LimitPreview"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "No such server group"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Archived, empty, ambiguously named, or two machines would share a host name"
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "The machines a limit matches, as typed, so an operator sees what a run would\nact on before starting it.",
+        "tags": [
+          "ansible"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/ansible/release_lease": {
+      "post": {
+        "description": "Releasing is audited with who did it, since it can be another operator\ntaking work over rather than the holder finishing.",
+        "operationId": "ansible_release_lease",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseLeaseArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "default": null
+                }
+              }
+            },
+            "description": "Released"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "No such lease, or it was already released"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Asked to release only an unstarted lease, and its run has started"
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Give the environment back when the run ends.",
+        "tags": [
+          "ansible"
+        ],
+        "x-canopy-audit": [
+          "inventory_lease_released"
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/ansible/run_options": {
+      "post": {
+        "description": "Only the members that carry `managed_by_ansible` are listed, since the\nplugin builds an inventory of those alone, each named and grouped as a run\nsees it. Says whether the environment already holds a Tamanu central, of\nwhich it holds at most one.",
+        "operationId": "ansible_run_options",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnvironmentArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunOptions"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "No such server group"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Archived, empty, ambiguously named, or two machines would share a host name"
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "The machines a run on an environment acts on.",
+        "tags": [
+          "ansible"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/ansible/run_state": {
+      "post": {
+        "description": "Available to any operator: it names who is running and until when, and\ncarries nothing a run receives.",
+        "operationId": "ansible_run_state",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnvironmentArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunState"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "No such server group"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Archived, empty, or ambiguously named"
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "What a run on this environment would meet: the lease holding it and the\nmaintenance window over it, read the way taking a lease reads them so the\ngroup page and the refusal agree.",
+        "tags": [
+          "ansible"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/ansible/take_lease": {
+      "post": {
+        "description": "Refuses a group canopy does not have, one that has been archived, one\nholding several environments with no rank named, a rank with no live\napplication to configure, an environment another operator holds or has\ndeclared maintenance over, and an upgrade of production with no plan\nrecorded, saying which it was so an operator knows what to do or who to\nwait for.",
+        "operationId": "ansible_take_lease",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TakeLeaseArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnsibleLease"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Neither or both of the group arguments"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "No such server group"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Archived, empty, ambiguously named, spanning environments, held by someone else, under someone else's maintenance, or an unplanned upgrade of production"
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Take the environment's run lease.",
+        "tags": [
+          "ansible"
+        ],
+        "x-canopy-audit": [
+          "inventory_lease_taken",
+          "inventory_lease_taken_over"
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/ansible_variables/catalogue": {
+      "post": {
+        "description": "It shapes how a variable is entered and which playbooks a run can start.\nNull while Canopy has never read one.",
+        "operationId": "ansible_variables_catalogue",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CatalogueView"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "The catalogue Canopy holds.",
+        "tags": [
+          "ansible"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/ansible_variables/for_group": {
+      "post": {
+        "description": "A secret's value is not among them; it is served only as part of what an\nenvironment serves, and only to an administrator.",
+        "operationId": "ansible_variables_for_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VariablesForGroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AnsibleVariableView"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "No such server group"
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "Everything set under a group: its own, its environments', and those of the\nmachines in it.",
+        "tags": [
+          "ansible"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/ansible_variables/remove": {
+      "post": {
+        "description": "The row and its stored value go together: when the secret store refuses,\nboth stay, and when it does not answer the row stays for a retry to remove.",
+        "operationId": "ansible_variables_remove",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "default": null
+                }
+              }
+            },
+            "description": "Removed"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Not one scope"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "No variable of that name in that scope"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "The secret store is unavailable"
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Forget a variable, value and all.",
+        "tags": [
+          "ansible"
+        ],
+        "x-canopy-audit": [
+          "inventory_variable_removed"
+        ],
+        "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/ansible_variables/set": {
+      "post": {
+        "description": "A secret's value goes to the secret store keyed by name, and the row holds\nno value at all. Turning a secret into a plain variable forgets the stored\nvalue, so a later switch back never resurrects a stale one.",
+        "operationId": "ansible_variables_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnsibleVariable"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Not one scope, not a usable variable name, or an `ansible_host` outside machine scope or not a string"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "No such server group or machine"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "The secret store is unavailable"
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Set or replace a variable.",
+        "tags": [
+          "ansible"
+        ],
+        "x-canopy-audit": [
+          "inventory_variable_set"
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/audit/filters": {
@@ -20788,514 +22635,6 @@
         "x-canopy-safety-mode": "write"
       }
     },
-    "/api/inventory/extend_lease": {
-      "post": {
-        "description": "Only the holder can extend, and only while the lease is unreleased: one that\nhas been released is gone, and taking a fresh one goes through the same\nrefusals a first one does.",
-        "operationId": "inventory_extend_lease",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LeaseArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InventoryLease"
-                }
-              }
-            },
-            "description": ""
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": "No such lease"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": "Held by someone else, or no longer held"
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ],
-        "summary": "Push a held lease's expiry out, so a run still going keeps the environment.",
-        "tags": [
-          "inventory"
-        ],
-        "x-canopy-audit": [
-          "inventory_lease_extended"
-        ],
-        "x-canopy-safety-mode": "write"
-      }
-    },
-    "/api/inventory/for_group": {
-      "post": {
-        "description": "Refuses a lease that is not the caller's or no longer holds, and a secret\nvariable whose value cannot be read: a run receiving a machine that looks\nconfigured and is missing a value is worse than one that does not run.",
-        "operationId": "inventory_for_group",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InventoryArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InventoryView"
-                }
-              }
-            },
-            "description": ""
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": "No such lease"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": "The lease is someone else's, no longer holds, the environment is gone, or two machines share an address"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": "A secret variable could not be read"
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ],
-        "summary": "Serve the inventory of the environment the caller holds the lease on.",
-        "tags": [
-          "inventory"
-        ],
-        "x-canopy-audit": [
-          "inventory_read"
-        ],
-        "x-canopy-safety-mode": "read-only"
-      }
-    },
-    "/api/inventory/release_lease": {
-      "post": {
-        "description": "Releasing is audited with who did it, since it can be another operator\ntaking work over rather than the holder finishing.",
-        "operationId": "inventory_release_lease",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LeaseArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "default": null
-                }
-              }
-            },
-            "description": "Released"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": "No such lease, or it was already released"
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ],
-        "summary": "Give the environment back when the run ends.",
-        "tags": [
-          "inventory"
-        ],
-        "x-canopy-audit": [
-          "inventory_lease_released"
-        ],
-        "x-canopy-safety-mode": "write"
-      }
-    },
-    "/api/inventory/run_state": {
-      "post": {
-        "description": "Available to any operator: it names who is running and until when, and\ncarries nothing a run receives.",
-        "operationId": "inventory_run_state",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/EnvironmentArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RunState"
-                }
-              }
-            },
-            "description": ""
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": "No such server group"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": "Archived, empty, or ambiguously named"
-          }
-        },
-        "security": [
-          {
-            "tailscale-user": []
-          }
-        ],
-        "summary": "What a run on this environment would meet: the lease holding it and the\nmaintenance window over it, read the way taking a lease reads them so the\ngroup page and the refusal agree.",
-        "tags": [
-          "inventory"
-        ],
-        "x-canopy-audit": [],
-        "x-canopy-safety-mode": "read-only"
-      }
-    },
-    "/api/inventory/take_lease": {
-      "post": {
-        "description": "Refuses a group canopy does not have, one that has been archived, one\nholding several environments with no rank named, a rank with no live\napplication to configure, an environment another operator holds or has\ndeclared maintenance over, and an upgrade of production with no plan\nrecorded, saying which it was so an operator knows what to do or who to\nwait for.",
-        "operationId": "inventory_take_lease",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TakeLeaseArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InventoryLease"
-                }
-              }
-            },
-            "description": ""
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": "Neither or both of the group arguments"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": "No such server group"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": "Archived, empty, ambiguously named, spanning environments, held by someone else, under someone else's maintenance, or an unplanned upgrade of production"
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ],
-        "summary": "Take the environment's run lease.",
-        "tags": [
-          "inventory"
-        ],
-        "x-canopy-audit": [
-          "inventory_lease_taken",
-          "inventory_lease_taken_over"
-        ],
-        "x-canopy-safety-mode": "write"
-      }
-    },
-    "/api/inventory_variables/for_group": {
-      "post": {
-        "description": "A secret's value is not among them; it is served only as part of an\ninventory, and only to an administrator.",
-        "operationId": "inventory_variables_for_group",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/VariablesForGroupArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/InventoryVariable"
-                  },
-                  "type": "array"
-                }
-              }
-            },
-            "description": ""
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": "No such server group"
-          }
-        },
-        "security": [
-          {
-            "tailscale-user": []
-          }
-        ],
-        "summary": "Everything set under a group: its own, its environments', and those of the\nmachines in it.",
-        "tags": [
-          "inventory"
-        ],
-        "x-canopy-audit": [],
-        "x-canopy-safety-mode": "read-only"
-      }
-    },
-    "/api/inventory_variables/remove": {
-      "post": {
-        "description": "The row and its stored value go together: when the secret store refuses,\nboth stay, and when it does not answer the row stays for a retry to remove.",
-        "operationId": "inventory_variables_remove",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RemoveArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "default": null
-                }
-              }
-            },
-            "description": "Removed"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": "Not one scope"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": "No variable of that name in that scope"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": "The secret store is unavailable"
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ],
-        "summary": "Forget a variable, value and all.",
-        "tags": [
-          "inventory"
-        ],
-        "x-canopy-audit": [
-          "inventory_variable_removed"
-        ],
-        "x-canopy-safety-mode": "write"
-      }
-    },
-    "/api/inventory_variables/set": {
-      "post": {
-        "description": "A secret's value goes to the secret store keyed by name, and the row holds\nno value at all. Turning a secret into a plain variable forgets the stored\nvalue, so a later switch back never resurrects a stale one.",
-        "operationId": "inventory_variables_set",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InventoryVariable"
-                }
-              }
-            },
-            "description": ""
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": "Not one scope, not a usable variable name, or an `ansible_host` outside machine scope or not a string"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": "No such server group or machine"
-          },
-          "502": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            },
-            "description": "The secret store is unavailable"
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ],
-        "summary": "Set or replace a variable.",
-        "tags": [
-          "inventory"
-        ],
-        "x-canopy-audit": [
-          "inventory_variable_set"
-        ],
-        "x-canopy-safety-mode": "write"
-      }
-    },
     "/api/issues/add_note": {
       "post": {
         "description": "Records the calling operator as the author. Returns 400 if the note\nbody is empty or whitespace-only.",
@@ -21992,7 +23331,7 @@
     },
     "/api/maintenance/amend": {
       "post": {
-        "description": "Only what the request names changes. A new target moves the window there:\nit stays the same window, the target it left settles as though the window\nhad ended over it, and what it newly covers is suspended from now. A window\ndeclared from an upgrade plan, or one a configuration run's lease is being\nserved against, cannot move.\nRequires admin access.",
+        "description": "Only what the request names changes. A new target moves the window there:\nit stays the same window, the target it left settles as though the window\nhad ended over it, and what it newly covers is suspended from now. A window\nover several machines is moved by naming the machines it should cover:\nthose it stops covering settle as though the window had ended over them. A\nwindow declared from an upgrade plan, or one a configuration run's lease is\nbeing served against, cannot move.\nRequires admin access.",
         "operationId": "amend",
         "requestBody": {
           "content": {
@@ -22063,7 +23402,7 @@
     },
     "/api/maintenance/declare": {
       "post": {
-        "description": "Every check on the target grades to skipped while the window holds and\nfor a settle period after it ends, so nothing on it opens or joins an\nincident. A window over one application leaves the rest of the box watched;\none over the machine covers everything on it. Issues already in an open\nincident leave it, closing the incident where nothing else holds it open. A\ntarget that already has an open window has that window amended rather than\na second opened.\nRequires admin access.",
+        "description": "Every check on the target grades to skipped while the window holds and\nfor a settle period after it ends, so nothing on it opens or joins an\nincident. A window over one application leaves the rest of the box watched;\none over the machine covers everything on it. Issues already in an open\nincident leave it, closing the incident where nothing else holds it open. A\ntarget that already has an open window has that window amended rather than\na second opened. Several machines of one environment are declared together\nas one window covering each of them; a machine another window names cannot\nbe named in a second.\nRequires admin access.",
         "operationId": "declare",
         "requestBody": {
           "content": {
@@ -22102,7 +23441,7 @@
             "tailscale-admin": []
           }
         ],
-        "summary": "Declare that an application, a machine, a group, or one of a group's\nenvironments is being worked on.",
+        "summary": "Declare that an application, one or several machines, a group, or one of a\ngroup's environments is being worked on.",
         "tags": [
           "maintenance"
         ],
@@ -22163,6 +23502,77 @@
         ],
         "x-canopy-audit": [],
         "x-canopy-safety-mode": "read-only"
+      }
+    },
+    "/api/maintenance/hold": {
+      "post": {
+        "description": "A window a run declared lasts the run and ends when the run's lease does.\nHolding it gives it an expected end instead, and it then ends as any window\ndoes, whatever becomes of the lease. Only the operator whose run it is can\nhold it. Recorded as an amendment.\nRequires admin access.",
+        "operationId": "hold",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HoldArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceWindow"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "The window is not the caller's, so they cannot hold it"
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "Hold the window a run declared, giving it an expected end.",
+        "tags": [
+          "maintenance"
+        ],
+        "x-canopy-audit": [
+          "maintenance_amended"
+        ],
+        "x-canopy-safety-mode": "write"
       }
     },
     "/api/maintenance/lift": {
@@ -25388,8 +26798,8 @@
       "name": "incidents"
     },
     {
-      "description": "An environment's applications and the variables that configure them, for the tooling that configures them.",
-      "name": "inventory"
+      "description": "What Ansible is served for an environment: its machines and the variables that configure them, the lease a run holds, and the run state.",
+      "name": "ansible"
     },
     {
       "description": "Per-server issues raised from device events.",

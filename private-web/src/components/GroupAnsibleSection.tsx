@@ -1,0 +1,603 @@
+import DeleteIcon from "@mui/icons-material/Delete";
+import EditNoteIcon from "@mui/icons-material/EditNote";
+import ErrorOutlineIcon from "@mui/icons-material/ErrorOutlined";
+import ExpandLessIcon from "@mui/icons-material/ExpandLess";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import LockIcon from "@mui/icons-material/Lock";
+import UploadFileIcon from "@mui/icons-material/UploadFile";
+import {
+	Alert,
+	Box,
+	Button,
+	ButtonBase,
+	Chip,
+	Collapse,
+	IconButton,
+	LinearProgress,
+	MenuItem,
+	Paper,
+	Stack,
+	TextField,
+	Tooltip,
+	Typography,
+} from "@mui/material";
+import { useState } from "react";
+import { useApi, useApiAction } from "../api";
+import { useIsAdmin } from "../hooks/useIsAdmin";
+import type { AnsibleVariableView, ServerRank } from "../types";
+import { SERVER_RANK_ORDER } from "../types";
+import AnsibleImportDialog from "./AnsibleImportDialog";
+import AnsibleRuns from "./AnsibleRuns";
+import { GradedAction } from "./GradedAction";
+import TimeAgo from "./TimeAgo";
+import ScopeTextEditor from "./ansible/ScopeTextEditor";
+import VariableEntryRow from "./ansible/VariableEntryRow";
+import type { ScopeKind } from "./ansible/schema";
+
+type Machine = {
+	id: string;
+	name?: string | null;
+	environment_rank?: ServerRank | null;
+};
+
+type Application = {
+	machine_id: string;
+	type: string;
+};
+
+/// What a configuration run would be served for one of this group's
+/// environments: the variables that configure it, with a value inherited from a
+/// wider scope told apart from one a machine sets itself. A secret appears by
+/// name and never by value.
+// spec: ANSVAR#presentation
+export default function GroupAnsibleSection({
+	groupId,
+	groupName,
+	machines,
+	applications,
+	maintenanceTick,
+	onMaintenanceChange,
+}: {
+	groupId: string;
+	groupName: string;
+	machines: ReadonlyArray<Machine>;
+	applications: ReadonlyArray<Application>;
+	/// Bumped when a window over the group is declared or lifted anywhere on
+	/// the page, since that changes whether a run here could take the lease.
+	maintenanceTick: number;
+	onMaintenanceChange: () => void;
+}) {
+	const [tick, setTick] = useState(0);
+	const [selected, setSelected] = useState<ServerRank | null>(null);
+	const reload = () => setTick((n) => n + 1);
+	const variables = useApi(
+		"ansible_variables",
+		"for_group",
+		{ server_group_id: groupId },
+		[groupId, tick],
+	);
+	// Read once for the group: it changes at most hourly, not with each edit.
+	const catalogue = useApi("ansible_variables", "catalogue", {}, [groupId]);
+
+	// A group's environments are the ranks its machines sit at, whether or not
+	// anything on them has reported. A pending machine is in none.
+	// spec: GRP#environments
+	const ranks = SERVER_RANK_ORDER.filter((rank) =>
+		machines.some((machine) => machine.environment_rank === rank),
+	);
+	const rank =
+		selected !== null && ranks.includes(selected) ? selected : ranks[0];
+
+	return (
+		<Box data-testid="group-ansible">
+			<Typography variant="h6" gutterBottom>
+				Ansible
+			</Typography>
+			{variables.status === "loading" && <LinearProgress />}
+			{variables.status === "error" && (
+				<Alert severity="warning">{variables.error.message}</Alert>
+			)}
+			{ranks.length === 0 ? (
+				<Paper variant="outlined" sx={{ p: 2 }}>
+					<Typography variant="body2" color="text.secondary">
+						Nothing is ranked yet, so there is no environment to configure.
+					</Typography>
+				</Paper>
+			) : (
+				<EnvironmentAnsible
+					groupId={groupId}
+					groupName={groupName}
+					rank={rank}
+					ranks={ranks}
+					onSelect={setSelected}
+					machines={machines.filter(
+						(machine) => machine.environment_rank === rank,
+					)}
+					applications={applications}
+					variables={variables.status === "ok" ? variables.data : []}
+					catalogue={catalogue.status === "ok" ? catalogue.data : null}
+					onChanged={reload}
+					maintenanceTick={maintenanceTick}
+					onMaintenanceChange={onMaintenanceChange}
+				/>
+			)}
+		</Box>
+	);
+}
+
+function EnvironmentAnsible({
+	groupId,
+	groupName,
+	rank,
+	ranks,
+	onSelect,
+	machines,
+	applications,
+	variables,
+	catalogue,
+	onChanged,
+	maintenanceTick,
+	onMaintenanceChange,
+}: {
+	groupId: string;
+	groupName: string;
+	rank: ServerRank;
+	ranks: ReadonlyArray<ServerRank>;
+	onSelect: (rank: ServerRank) => void;
+	machines: ReadonlyArray<Machine>;
+	applications: ReadonlyArray<Application>;
+	variables: ReadonlyArray<AnsibleVariableView>;
+	catalogue: Catalogue | null;
+	onChanged: () => void;
+	maintenanceTick: number;
+	onMaintenanceChange: () => void;
+}) {
+	const machineIds = new Set(machines.map((machine) => machine.id));
+	const groupVars = variables.filter(
+		(variable) => variable.server_group_id && !variable.rank && !variable.machine_id,
+	);
+	const environmentVars = variables.filter((variable) => variable.rank === rank);
+	const machineVars = (machineId: string) =>
+		variables.filter((variable) => variable.machine_id === machineId);
+	const environmentCount =
+		environmentVars.length +
+		variables.filter(
+			(variable) => variable.machine_id && machineIds.has(variable.machine_id),
+		).length;
+	const count = groupVars.length + environmentCount;
+
+	return (
+		<Paper variant="outlined" sx={{ p: 2 }} data-testid={`environment-${rank}`}>
+			{ranks.length > 1 ? (
+				<TextField
+					select
+					size="small"
+					label="Environment"
+					value={rank}
+					onChange={(event) => onSelect(event.target.value as ServerRank)}
+					sx={{ minWidth: 180 }}
+				>
+					{ranks.map((option) => (
+						<MenuItem key={option} value={option}>
+							{option}
+						</MenuItem>
+					))}
+				</TextField>
+			) : (
+				<Typography
+					variant="overline"
+					color="text.secondary"
+					sx={{ display: "block" }}
+				>
+					{rank}
+				</Typography>
+			)}
+
+			<Stack spacing={2} sx={{ mt: 1 }}>
+				<AnsibleRuns
+					groupId={groupId}
+					groupName={groupName}
+					rank={rank}
+					machines={machines}
+					applications={applications}
+					catalogue={catalogue}
+					maintenanceTick={maintenanceTick}
+					onChanged={onMaintenanceChange}
+				/>
+
+				<Variables
+					key={rank}
+					groupId={groupId}
+					groupName={groupName}
+					rank={rank}
+					machines={machines}
+					applications={applications}
+					groupVars={groupVars}
+					environmentVars={environmentVars}
+					machineVars={machineVars}
+					count={count}
+					importable={environmentCount === 0}
+					catalogue={catalogue}
+					onChanged={onChanged}
+				/>
+			</Stack>
+		</Paper>
+	);
+}
+
+type Catalogue = import("../types").CatalogueView;
+
+/// The variables of an environment: collapsed to a count at rest, and by scope
+/// when open.
+function Variables({
+	groupId,
+	groupName,
+	rank,
+	machines,
+	applications,
+	groupVars,
+	environmentVars,
+	machineVars,
+	count,
+	importable,
+	catalogue,
+	onChanged,
+}: {
+	groupId: string;
+	groupName: string;
+	rank: ServerRank;
+	machines: ReadonlyArray<Machine>;
+	applications: ReadonlyArray<Application>;
+	groupVars: ReadonlyArray<AnsibleVariableView>;
+	environmentVars: ReadonlyArray<AnsibleVariableView>;
+	machineVars: (machineId: string) => ReadonlyArray<AnsibleVariableView>;
+	count: number;
+	importable: boolean;
+	catalogue: Catalogue | null;
+	onChanged: () => void;
+}) {
+	const isAdmin = useIsAdmin() === true;
+	const [open, setOpen] = useState(count === 0);
+	const [importing, setImporting] = useState(false);
+	const [added, setAdded] = useState<ReadonlyArray<string>>([]);
+
+	const typesOn = (machineIds: ReadonlyArray<string>) => [
+		...new Set(
+			applications
+				.filter((application) => machineIds.includes(application.machine_id))
+				.map((application) => application.type),
+		),
+	];
+	const shown = machines.filter(
+		(machine) => machineVars(machine.id).length > 0 || added.includes(machine.id),
+	);
+	const unshown = machines.filter((machine) => !shown.includes(machine));
+	const environmentTypes = typesOn(machines.map((machine) => machine.id));
+
+	return (
+		<Box data-testid="ansible-variables">
+			<ButtonBase
+				onClick={() => setOpen((o) => !o)}
+				aria-expanded={open}
+				data-testid="variables-toggle"
+				sx={{ gap: 0.5, alignItems: "center", borderRadius: 1, pr: 1 }}
+			>
+				{open ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+				<Typography variant="subtitle2">Variables</Typography>
+				<Chip size="small" label={count} data-testid="variables-count" />
+			</ButtonBase>
+			<Collapse in={open} unmountOnExit>
+				<Stack spacing={2} sx={{ mt: 1 }}>
+					<Scope
+						title={groupName}
+						sub="all environments"
+						scope={{ server_group_id: groupId }}
+						kind="group"
+						variables={groupVars}
+						inherited={[]}
+						applicationTypes={typesOn(applications.map((a) => a.machine_id))}
+						catalogue={catalogue}
+						isAdmin={isAdmin}
+						onChanged={onChanged}
+					/>
+					<Scope
+						title={rank}
+						scope={{ server_group_id: groupId, rank }}
+						kind="environment"
+						variables={environmentVars}
+						inherited={groupVars}
+						applicationTypes={environmentTypes}
+						catalogue={catalogue}
+						isAdmin={isAdmin}
+						onChanged={onChanged}
+						after={
+							isAdmin && importable ? (
+								<GradedAction
+									calls="ansible/import_apply"
+									action="Import an Ansible inventory file"
+								>
+									<Button
+										size="small"
+										variant="outlined"
+										startIcon={<UploadFileIcon />}
+										onClick={() => setImporting(true)}
+										data-testid="import-inventory"
+									>
+										Import inventory file
+									</Button>
+								</GradedAction>
+							) : null
+						}
+					/>
+					{shown.map((machine) => (
+						<Scope
+							key={machine.id}
+							title={machine.name ?? machine.id}
+							scope={{ machine_id: machine.id }}
+							kind="machine"
+							variables={machineVars(machine.id)}
+							inherited={[...groupVars, ...environmentVars]}
+							applicationTypes={typesOn([machine.id])}
+							catalogue={catalogue}
+							isAdmin={isAdmin}
+							onChanged={onChanged}
+							testId="ansible-machine"
+						/>
+					))}
+					{isAdmin && unshown.length > 0 && (
+						<TextField
+							select
+							size="small"
+							label="Add a machine"
+							value=""
+							onChange={(event) =>
+								setAdded((current) => [...current, event.target.value])
+							}
+							sx={{ maxWidth: 320 }}
+							data-testid="add-machine"
+						>
+							{unshown.map((machine) => (
+								<MenuItem key={machine.id} value={machine.id}>
+									{machine.name}
+								</MenuItem>
+							))}
+						</TextField>
+					)}
+				</Stack>
+			</Collapse>
+			{isAdmin && (
+				<AnsibleImportDialog
+					open={importing}
+					onClose={() => setImporting(false)}
+					groupId={groupId}
+					rank={rank}
+					onImported={onChanged}
+				/>
+			)}
+		</Box>
+	);
+}
+
+/// One scope's variables, its entry row, and the way to edit it as text.
+function Scope({
+	title,
+	sub,
+	scope,
+	kind,
+	variables,
+	inherited,
+	applicationTypes,
+	catalogue,
+	isAdmin,
+	onChanged,
+	after,
+	testId,
+}: {
+	title: string;
+	sub?: string;
+	scope: Record<string, unknown>;
+	kind: ScopeKind;
+	variables: ReadonlyArray<AnsibleVariableView>;
+	inherited: ReadonlyArray<AnsibleVariableView>;
+	applicationTypes: ReadonlyArray<string>;
+	catalogue: Catalogue | null;
+	isAdmin: boolean;
+	onChanged: () => void;
+	after?: React.ReactNode;
+	testId?: string;
+}) {
+	const [editing, setEditing] = useState(false);
+	const remove = useApiAction("ansible_variables", "remove");
+	const taken = new Set(variables.map((variable) => variable.name));
+	const sorted = [...variables].sort((a, b) => a.name.localeCompare(b.name));
+
+	return (
+		<Box data-testid={testId ?? `scope-${kind}`} onKeyDown={(event) => {
+			// Ctrl+Shift+E edits the scope that holds focus as text.
+			if (isAdmin && event.ctrlKey && event.shiftKey && event.key === "E") {
+				event.preventDefault();
+				setEditing(true);
+			}
+		}}>
+			<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+				<Typography variant="subtitle2">{title}</Typography>
+				{sub && (
+					<Typography variant="caption" color="text.secondary">
+						{sub}
+					</Typography>
+				)}
+				{isAdmin && !editing && (
+					<Tooltip title="Edit as text">
+						<IconButton
+							size="small"
+							aria-label={`Edit ${title} as text`}
+							onClick={() => setEditing(true)}
+							data-testid="scope-edit"
+						>
+							<EditNoteIcon fontSize="small" />
+						</IconButton>
+					</Tooltip>
+				)}
+			</Stack>
+			{editing ? (
+				<ScopeTextEditor
+					scope={scope}
+					kind={kind}
+					applicationTypes={applicationTypes}
+					catalogue={catalogue}
+					variables={variables.map((variable) => ({
+						name: variable.name,
+						value: variable.is_secret ? undefined : variable.value,
+						secret: variable.is_secret,
+					}))}
+					onClose={() => setEditing(false)}
+					onSaved={onChanged}
+				/>
+			) : (
+				<>
+					{sorted.length === 0 && !isAdmin && (
+						<Typography variant="body2" color="text.secondary">
+							None set
+						</Typography>
+					)}
+					<Stack spacing={0.25} sx={{ mt: 0.5 }}>
+						{sorted.map((variable) => (
+							<VariableRow
+								key={variable.id}
+								variable={variable}
+								overrides={inherited.find(
+									(other) =>
+										other.name === variable.name && other.id !== variable.id,
+								)}
+								scope={scope}
+								onRemove={isAdmin ? remove : undefined}
+								onChanged={onChanged}
+							/>
+						))}
+					</Stack>
+					{remove.error && (
+						<Alert severity="warning" sx={{ mt: 1 }}>
+							{remove.error.message}
+						</Alert>
+					)}
+					{isAdmin && (
+						<Box sx={{ mt: 0.5 }}>
+							<VariableEntryRow
+								label={title}
+								scope={scope}
+								kind={kind}
+								applicationTypes={applicationTypes}
+								catalogue={catalogue}
+								taken={taken}
+								onSet={onChanged}
+							>
+								{after}
+							</VariableEntryRow>
+						</Box>
+					)}
+					{!isAdmin && after}
+				</>
+			)}
+		</Box>
+	);
+}
+
+/// One variable of a scope: its name and value, a secret by name only, what it
+/// overrides, and what the catalogue now says of it.
+function VariableRow({
+	variable,
+	overrides,
+	scope,
+	onRemove,
+	onChanged,
+}: {
+	variable: AnsibleVariableView;
+	overrides?: AnsibleVariableView;
+	scope: Record<string, unknown>;
+	onRemove?: { call: (params?: Record<string, unknown>) => Promise<unknown> };
+	onChanged: () => void;
+}) {
+	const testid = variable.is_secret
+		? "secret-var"
+		: overrides
+			? "overriding-var"
+			: "var";
+	return (
+		<Stack
+			direction="row"
+			spacing={1}
+			sx={{ alignItems: "center", minHeight: 28 }}
+			data-testid={testid}
+		>
+			<Typography
+				variant="body2"
+				sx={{ fontFamily: "monospace", width: "34%", flexShrink: 0 }}
+			>
+				{variable.name}
+			</Typography>
+			<Box sx={{ flex: 1, minWidth: 0 }}>
+				{variable.is_secret ? (
+					<Chip
+						size="small"
+						icon={<LockIcon />}
+						label="secret"
+						color="warning"
+						variant="outlined"
+					/>
+				) : (
+					<Typography
+						variant="body2"
+						sx={{ fontFamily: "monospace", wordBreak: "break-all" }}
+					>
+						{format(variable.value)}
+					</Typography>
+				)}
+			</Box>
+			{overrides && (
+				<Chip
+					size="small"
+					variant="outlined"
+					label={`overrides ${overrides.rank ?? "the group"}`}
+				/>
+			)}
+			{variable.problems.length > 0 && (
+				<Tooltip title={variable.problems.join("; ")}>
+					<ErrorOutlineIcon
+						fontSize="small"
+						color="warning"
+						data-testid="variable-problem"
+					/>
+				</Tooltip>
+			)}
+			<Typography variant="caption" color="text.secondary">
+				<TimeAgo timestamp={variable.updated_at} />
+			</Typography>
+			{onRemove && (
+				<GradedAction
+					calls="ansible_variables/remove"
+					action={`Remove ${variable.name}`}
+				>
+					<IconButton
+						size="small"
+						aria-label={`remove ${variable.name}`}
+						data-testid={`remove-${variable.name}`}
+						onClick={() =>
+							onRemove
+								.call({ ...scope, name: variable.name })
+								.then(onChanged)
+								.catch(() => {
+									// Surfaced by the alert on the scope.
+								})
+						}
+					>
+						<DeleteIcon fontSize="small" />
+					</IconButton>
+				</GradedAction>
+			)}
+		</Stack>
+	);
+}
+
+function format(value: unknown): string {
+	return JSON.stringify(value);
+}

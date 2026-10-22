@@ -16,6 +16,7 @@ use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use uuid::Uuid;
 
+use super::cover::{self, Cover};
 use crate::applications::Application;
 use crate::issues::{Issue, Scope};
 use crate::machines::Machine;
@@ -320,6 +321,30 @@ pub async fn line_of_descent(db: &mut AsyncPgConnection, start: Grain) -> Result
 		.collect();
 
 	Ok(Descent { entries, parents })
+}
+
+/// The grains a window over `cover` can be retargeted to. A window over
+/// several machines sits in its environment with them: it can move to its
+/// group, the environment, any of the environment's machines, and the
+/// applications on the machines it names.
+// spec: MNT#choosing-what-to-cover
+pub async fn line_of_descent_for(db: &mut AsyncPgConnection, cover: &Cover) -> Result<Descent> {
+	match cover {
+		Cover::Grain(grain) => line_of_descent(db, *grain).await,
+		Cover::Machines(ids) => {
+			let (group, rank) = cover::environment_of_machines(db, ids).await?;
+			let mut descent = line_of_descent(db, Grain::environment(group, rank)).await?;
+			let named: HashSet<Grain> = ids.iter().map(|id| Grain::machine(*id)).collect();
+			let parents = descent.parents.clone();
+			descent.entries.retain(|entry| match entry.grain.scope() {
+				Scope::Application(_) => parents
+					.get(&entry.grain)
+					.is_some_and(|parent| named.contains(parent)),
+				_ => true,
+			});
+			Ok(descent)
+		}
+	}
 }
 
 async fn applications_on(db: &mut AsyncPgConnection, machine: Uuid) -> Result<Vec<Application>> {

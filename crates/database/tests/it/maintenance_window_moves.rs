@@ -10,7 +10,7 @@
 use commons_errors::AppError;
 use commons_types::{server::rank::ServerRank, status::CheckResult};
 use database::{
-	inventory_leases::{InventoryLease, RunIntent},
+	ansible_leases::{AnsibleLease, ReleaseReason, RunIntent, RunSpec},
 	issues::{CheckFiling, Scope, file_check},
 	maintenance_windows::{Amendment, Grain, MaintenanceWindow, SETTLE, line_of_descent},
 	statuses::CANOPY_SOURCE,
@@ -150,6 +150,35 @@ async fn backdate_moves(conn: &mut AsyncPgConnection, window: Uuid, ago: SignedD
 		.execute(conn)
 		.await
 		.expect("backdate move");
+}
+
+/// Take the production lease as `by`, for a configuration run over `machine`.
+async fn take_lease(
+	conn: &mut AsyncPgConnection,
+	group: Uuid,
+	machine: Uuid,
+	by: &str,
+) -> commons_errors::Result<Result<AnsibleLease, MaintenanceWindow>> {
+	let assignments = std::collections::BTreeMap::new();
+	AnsibleLease::take(
+		conn,
+		group,
+		ServerRank::Production,
+		&[machine],
+		&RunSpec {
+			intent: RunIntent::Configure,
+			note: None,
+			playbook: None,
+			limit_pattern: None,
+			limited_to: None,
+			tags: &[],
+			skip_tags: &[],
+			assignments: &assignments,
+		},
+		Some(by),
+		false,
+	)
+	.await
 }
 
 fn in_hours(hours: i64) -> Timestamp {
@@ -536,19 +565,10 @@ async fn a_window_a_run_is_served_against_stays_until_the_lease_is_released() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let site = site(&mut conn).await;
 		let window = declare_group(&mut conn, site.group, Some(ServerRank::Production)).await;
-		let lease = InventoryLease::take(
-			&mut conn,
-			site.group,
-			ServerRank::Production,
-			&[site.production_box],
-			RunIntent::Configure,
-			Some("op"),
-			None,
-			false,
-		)
-		.await
-		.expect("take")
-		.expect("the declarer is served against their own window");
+		let lease = take_lease(&mut conn, site.group, site.production_box, "op")
+			.await
+			.expect("take")
+			.expect("the declarer is served against their own window");
 
 		assert!(
 			window
@@ -570,7 +590,7 @@ async fn a_window_a_run_is_served_against_stays_until_the_lease_is_released() {
 			"the run is acting on the environment the window covers: {refused:?}"
 		);
 
-		InventoryLease::release(&mut conn, lease.id, Some("op"))
+		AnsibleLease::release(&mut conn, lease.id, Some("op"), ReleaseReason::Released)
 			.await
 			.expect("release");
 		MaintenanceWindow::amend(
@@ -593,7 +613,7 @@ async fn a_lease_on_an_environment_nothing_is_ranked_in_holds_a_group_window() {
 		let site = site(&mut conn).await;
 		let window = declare_group(&mut conn, site.group, None).await;
 		sql_query(
-			"INSERT INTO inventory_leases (server_group_id, rank, intent, held_by, expires_at) \
+			"INSERT INTO ansible_leases (server_group_id, rank, intent, held_by, expires_at) \
 			 VALUES ($1, 'demo', 'configure', 'op', NOW() + INTERVAL '1 hour')",
 		)
 		.bind::<sql_types::Uuid, _>(site.group)
@@ -682,24 +702,15 @@ async fn coverage_marks_agree_with_suspension() {
 
 /// Taking a lease reads the windows over the environment under the group's
 /// lock, so another operator's window refuses it from inside the take.
-// spec: INV#work-under-way
+// spec: ANSRUN#work-under-way
 #[tokio::test(flavor = "multi_thread")]
 async fn a_take_under_another_operators_window_is_refused_inside_the_lock() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let site = site(&mut conn).await;
 		let window = declare_group(&mut conn, site.group, Some(ServerRank::Production)).await;
-		let refused = InventoryLease::take(
-			&mut conn,
-			site.group,
-			ServerRank::Production,
-			&[site.production_box],
-			RunIntent::Configure,
-			Some("someone-else"),
-			None,
-			false,
-		)
-		.await
-		.expect("take");
+		let refused = take_lease(&mut conn, site.group, site.production_box, "someone-else")
+			.await
+			.expect("take");
 		assert_eq!(
 			refused.map(|lease| lease.id).map_err(|window| window.id),
 			Err(window.id),
@@ -716,7 +727,7 @@ async fn another_operators_lease_does_not_hold_a_window_in_place() {
 		let window = declare_group(&mut conn, site.group, Some(ServerRank::Production)).await;
 		// Taken before the window, since one taken under it would be refused.
 		sql_query(
-			"INSERT INTO inventory_leases (server_group_id, rank, intent, held_by, expires_at) \
+			"INSERT INTO ansible_leases (server_group_id, rank, intent, held_by, expires_at) \
 			 VALUES ($1, 'production', 'configure', 'someone-else', NOW() + INTERVAL '1 hour')",
 		)
 		.bind::<sql_types::Uuid, _>(site.group)

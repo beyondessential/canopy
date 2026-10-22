@@ -13,7 +13,11 @@
 		"gen:api-types": "openapi-typescript openapi.json -o src/api-types.ts && node scripts/gen-safety-modes.mjs"
 	},
 	"dependencies": {
+		"@codemirror/autocomplete": "^6.20.4",
 		"@codemirror/lang-sql": "^6.10.0",
+		"@codemirror/lint": "^6.9.7",
+		"@codemirror/state": "^6.7.6",
+		"@codemirror/view": "^6.43.15",
 		"@emotion/react": "^11.14.0",
 		"@emotion/styled": "^11.14.1",
 		"@mui/icons-material": "^9.4.0",
@@ -27,7 +31,8 @@
 		"rehype-sanitize": "^6.0.0",
 		"remark-breaks": "^4.0.0",
 		"remark-gfm": "^4.0.1",
-		"semver": "^7.8.5"
+		"semver": "^7.8.5",
+		"yaml": "^2.9.1"
 	},
 	"devDependencies": {
 		"@playwright/test": "^1.63.0",

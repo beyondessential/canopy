@@ -45,6 +45,7 @@ uuid = { version = "1.23.1", features = ["serde", "v4"] }
 
 bestool-postgres = "1.0.9"
 getrandom = "0.4.2"
+jsonschema = { version = "0.59.0", default-features = false }
 
 [dev-dependencies]
 commons-tests = { path = "../commons-tests" }

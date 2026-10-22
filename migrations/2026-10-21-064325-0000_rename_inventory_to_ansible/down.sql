@@ -1,0 +1,17 @@
+ALTER INDEX ansible_leases_one_open_per_environment RENAME TO inventory_leases_one_open_per_environment;
+ALTER TABLE ansible_leases RENAME CONSTRAINT ansible_leases_intent TO inventory_leases_intent;
+ALTER TABLE ansible_leases RENAME CONSTRAINT ansible_leases_server_group_id_fkey TO inventory_leases_server_group_id_fkey;
+ALTER TABLE ansible_leases RENAME CONSTRAINT ansible_leases_pkey TO inventory_leases_pkey;
+
+ALTER INDEX ansible_variables_one_per_machine RENAME TO inventory_variables_one_per_machine;
+ALTER INDEX ansible_variables_one_per_environment RENAME TO inventory_variables_one_per_environment;
+ALTER INDEX ansible_variables_one_per_group RENAME TO inventory_variables_one_per_group;
+ALTER TABLE ansible_variables RENAME CONSTRAINT ansible_variables_name TO inventory_variables_name;
+ALTER TABLE ansible_variables RENAME CONSTRAINT ansible_variables_secret_value TO inventory_variables_secret_value;
+ALTER TABLE ansible_variables RENAME CONSTRAINT ansible_variables_one_scope TO inventory_variables_one_scope;
+ALTER TABLE ansible_variables RENAME CONSTRAINT ansible_variables_machine_id_fkey TO inventory_variables_machine_id_fkey;
+ALTER TABLE ansible_variables RENAME CONSTRAINT ansible_variables_server_group_id_fkey TO inventory_variables_server_group_id_fkey;
+ALTER TABLE ansible_variables RENAME CONSTRAINT ansible_variables_pkey TO inventory_variables_pkey;
+
+ALTER TABLE ansible_leases RENAME TO inventory_leases;
+ALTER TABLE ansible_variables RENAME TO inventory_variables;

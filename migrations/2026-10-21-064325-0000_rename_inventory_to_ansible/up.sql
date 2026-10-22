@@ -1,0 +1,18 @@
+-- In canopy the inventory is the fleet; the configuration feature is Ansible.
+ALTER TABLE inventory_variables RENAME TO ansible_variables;
+ALTER TABLE inventory_leases RENAME TO ansible_leases;
+
+ALTER TABLE ansible_variables RENAME CONSTRAINT inventory_variables_pkey TO ansible_variables_pkey;
+ALTER TABLE ansible_variables RENAME CONSTRAINT inventory_variables_server_group_id_fkey TO ansible_variables_server_group_id_fkey;
+ALTER TABLE ansible_variables RENAME CONSTRAINT inventory_variables_machine_id_fkey TO ansible_variables_machine_id_fkey;
+ALTER TABLE ansible_variables RENAME CONSTRAINT inventory_variables_one_scope TO ansible_variables_one_scope;
+ALTER TABLE ansible_variables RENAME CONSTRAINT inventory_variables_secret_value TO ansible_variables_secret_value;
+ALTER TABLE ansible_variables RENAME CONSTRAINT inventory_variables_name TO ansible_variables_name;
+ALTER INDEX inventory_variables_one_per_group RENAME TO ansible_variables_one_per_group;
+ALTER INDEX inventory_variables_one_per_environment RENAME TO ansible_variables_one_per_environment;
+ALTER INDEX inventory_variables_one_per_machine RENAME TO ansible_variables_one_per_machine;
+
+ALTER TABLE ansible_leases RENAME CONSTRAINT inventory_leases_pkey TO ansible_leases_pkey;
+ALTER TABLE ansible_leases RENAME CONSTRAINT inventory_leases_server_group_id_fkey TO ansible_leases_server_group_id_fkey;
+ALTER TABLE ansible_leases RENAME CONSTRAINT inventory_leases_intent TO ansible_leases_intent;
+ALTER INDEX inventory_leases_one_open_per_environment RENAME TO ansible_leases_one_open_per_environment;

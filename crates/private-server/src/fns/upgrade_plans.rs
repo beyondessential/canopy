@@ -183,10 +183,12 @@ pub async fn fleet(
 	let open_windows =
 		database::maintenance_windows::MaintenanceWindow::list_open(&mut conn).await?;
 	// A window over the group covers its environments, and the environment's own
-	// is the more specific of the two, so index both and prefer the specific.
+	// is the more specific of the two, so index both and prefer the specific. A
+	// window over some of an environment's machines is neither.
 	let mut holding: HashMap<(Uuid, Option<ServerRank>), &_> = HashMap::new();
 	for window in &open_windows {
 		if let Some(group) = window.server_group_id
+			&& !window.is_machine_set()
 			&& window.ended_at.is_none()
 			&& window.holds_at(now_ts)
 		{

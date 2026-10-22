@@ -118,6 +118,24 @@ impl Record {
 		Ok(Self::new(RecordKind::Machine, id, machine.name))
 	}
 
+	/// Several machines, in the order given, named as they are now, read
+	/// together.
+	pub async fn machines(conn: &mut AsyncPgConnection, ids: &[Uuid]) -> Result<Vec<Self>> {
+		let names: std::collections::HashMap<Uuid, String> = crate::Machine::get_by_ids(conn, ids)
+			.await?
+			.into_iter()
+			.map(|machine| (machine.id, machine.name))
+			.collect();
+		ids.iter()
+			.map(|id| {
+				names
+					.get(id)
+					.map(|name| Self::new(RecordKind::Machine, *id, name.clone()))
+					.ok_or_else(|| AppError::NotFound(format!("no machine {id}")))
+			})
+			.collect()
+	}
+
 	/// A group, named as it is now.
 	pub async fn group(conn: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
 		let group = crate::server_groups::ServerGroup::get_by_id(conn, id).await?;
@@ -203,6 +221,27 @@ impl Records for Vec<Record> {
 	fn extend_records(&self, out: &mut Vec<Record>) {
 		out.extend(self.iter().cloned());
 	}
+}
+
+/// A variable an import set, for the entry that records it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ImportedVariable {
+	/// The variable's name.
+	pub name: String,
+	/// The name of the machine it was set on, `None` where it was set on the
+	/// environment.
+	pub machine: Option<String>,
+	/// Whether it was set as a secret.
+	pub secret: bool,
+}
+
+/// The application type a run's lease assigned a machine with nothing on it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct LeaseAssignment {
+	/// The machine's name.
+	pub machine: String,
+	/// The application type it was assigned.
+	pub application_type: String,
 }
 
 /// Who took an action.
@@ -422,70 +461,120 @@ macro_rules! actions {
 }
 
 actions! {
-	/// A maintenance window was declared over a target.
+	/// A maintenance window was declared over a target, or over several machines,
+	/// each named among `target`. A run's start declares one for the lease
+	/// named in `lease`.
 	MaintenanceDeclared = "maintenance_declared", "Declare maintenance" {
-		records { window: Record, target: Record, upgrade_plan: Option<Record> }
+		records { window: Record, target: Vec<Record>, upgrade_plan: Option<Record>, lease: Option<Record> }
 		detail { rank: Option<ServerRank>, expected_end: Timestamp, note: Option<String> }
 	}
 
 	/// An open maintenance window was changed: its end, its note, or what it
-	/// covers. Declaring over a target that already has a window amends it.
+	/// covers, including the machines of a window over several. Declaring over a
+	/// target that already has a window amends it, and holding a window a run
+	/// declared is an amendment too.
 	MaintenanceAmended = "maintenance_amended", "Amend maintenance" {
-		records { window: Record, target: Record, moved_from: Option<Record> }
+		records { window: Record, target: Vec<Record>, moved_from: Vec<Record> }
 		detail { rank: Option<ServerRank>, expected_end: Timestamp, note: Option<String> }
 	}
 
 	/// An open maintenance window was lifted before its expected end.
 	MaintenanceLifted = "maintenance_lifted", "Lift maintenance" {
-		records { window: Record, target: Record }
+		records { window: Record, target: Vec<Record> }
 		detail { rank: Option<ServerRank>, already_ended: bool }
 	}
 
-	/// An inventory was read under a lease. Taken at the rate runs read, so it
+	/// An environment was served to Ansible under a lease. Taken at the rate runs read, so it
 	/// is routine.
-	InventoryRead = "inventory_read", "Read inventory", tier = Routine {
+	AnsibleRead = "inventory_read", "Serve environment to Ansible", tier = Routine {
 		records { group: Record, lease: Record }
 		detail { rank: ServerRank, intent: String }
 	}
 
-	/// A run lease on an environment was taken.
-	InventoryLeaseTaken = "inventory_lease_taken", "Take inventory lease" {
-		records { group: Record, lease: Record }
-		detail { rank: ServerRank, intent: String, note: Option<String>, expires_at: Timestamp }
+	/// A run lease on an environment was taken. Started from the operator
+	/// interface it records the playbook, its limit and the machines that
+	/// matched, the tags run and skipped, and the application type assigned to
+	/// each machine with nothing on it. Further arguments are never recorded.
+	AnsibleLeaseTaken = "inventory_lease_taken", "Take Ansible lease" {
+		records { group: Record, lease: Record, limited_to: Vec<Record> }
+		detail {
+			rank: ServerRank, intent: String, note: Option<String>, expires_at: Timestamp,
+			playbook: Option<String>, limit: Option<String>, tags: Vec<String>,
+			skip_tags: Vec<String>, assignments: Vec<LeaseAssignment>,
+		}
 	}
 
 	/// A run lease another operator held was taken over.
-	InventoryLeaseTakenOver = "inventory_lease_taken_over", "Take over inventory lease" {
-		records { group: Record, lease: Record }
+	AnsibleLeaseTakenOver = "inventory_lease_taken_over", "Take over Ansible lease" {
+		records { group: Record, lease: Record, limited_to: Vec<Record> }
 		detail {
 			rank: ServerRank, intent: String, note: Option<String>, expires_at: Timestamp,
 			previous_holder: Option<String>,
+			playbook: Option<String>, limit: Option<String>, tags: Vec<String>,
+			skip_tags: Vec<String>, assignments: Vec<LeaseAssignment>,
 		}
+	}
+
+	/// A run first read its environment under its lease, which is the run
+	/// starting. The reads after it are routine, so this is how a reader of the
+	/// log sees each run without asking for them.
+	AnsibleRunStarted = "ansible_run_started", "Start Ansible run" {
+		records { group: Record, lease: Record }
+		detail { rank: ServerRank, intent: String, playbook: Option<String> }
 	}
 
 	/// A held lease's expiry was pushed out. A run does it every few minutes,
 	/// so it is routine.
-	InventoryLeaseExtended = "inventory_lease_extended", "Extend inventory lease", tier = Routine {
+	AnsibleLeaseExtended = "inventory_lease_extended", "Extend Ansible lease", tier = Routine {
 		records { group: Record, lease: Record }
 		detail { rank: ServerRank, expires_at: Timestamp }
 	}
 
-	/// A lease was released, by its holder or by someone taking the work over.
-	InventoryLeaseReleased = "inventory_lease_released", "Release inventory lease" {
+	/// A lease was released: by its holder, by someone taking the work over, or
+	/// by Canopy itself where no run read it in time (`unstarted`).
+	AnsibleLeaseReleased = "inventory_lease_released", "Release Ansible lease" {
+		records { group: Record, lease: Record }
+		detail { rank: ServerRank, held_by: Option<String>, reason: String }
+	}
+
+	/// A lease ran out without being extended, noticed by Canopy itself.
+	AnsibleLeaseExpired = "ansible_lease_expired", "Expire Ansible lease" {
 		records { group: Record, lease: Record }
 		detail { rank: ServerRank, held_by: Option<String> }
 	}
 
-	/// An inventory variable was set. The value is not recorded.
-	InventoryVariableSet = "inventory_variable_set", "Set inventory variable" {
+	/// An Ansible variable was set. The value is not recorded.
+	AnsibleVariableSet = "inventory_variable_set", "Set Ansible variable" {
 		records { variable: Record, scope: Record }
 		detail { rank: Option<ServerRank>, secret: bool }
 	}
 
-	/// An inventory variable was removed.
-	InventoryVariableRemoved = "inventory_variable_removed", "Remove inventory variable" {
+	/// An Ansible variable was removed.
+	AnsibleVariableRemoved = "inventory_variable_removed", "Remove Ansible variable" {
 		records { variable: Record, scope: Record }
 		detail { rank: Option<ServerRank>, secret: bool }
+	}
+
+	/// An Ansible inventory file was imported into an environment: the variables
+	/// it set, with the machine each was set on, and whether it added to the
+	/// group's notes. A secret's value is not recorded.
+	AnsibleInventoryImported = "ansible_inventory_imported", "Import Ansible inventory" {
+		records { group: Record, machines: Vec<Record> }
+		detail { rank: ServerRank, variables: Vec<ImportedVariable>, notes_added: bool }
+	}
+
+	/// The Ansible variable catalogue Canopy reads changed, by Canopy itself
+	/// reading a different one. Naming the version it was read at.
+	AnsibleCatalogueChanged = "ansible_catalogue_changed", "Read Ansible catalogue" {
+		records { }
+		detail { commit: Option<String>, digest: String }
+	}
+
+	/// A plain Ansible variable was moved into the secret store because the
+	/// catalogue came to call it secret. The value is not recorded.
+	AnsibleVariableMadeSecret = "ansible_variable_made_secret", "Move Ansible variable into the secret store" {
+		records { variable: Record, scope: Record }
+		detail { rank: Option<ServerRank>, digest: String }
 	}
 
 	/// An upgrade plan was recorded for an environment.

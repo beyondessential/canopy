@@ -3,7 +3,7 @@
 //! Canopy owns every repo passphrase with no human copy, so it periodically
 //! snapshots its recovery-critical state — server groups, backup configs with their
 //! per-group passphrase keysets + repo coordinates, schedules, capabilities, the
-//! server list, and every inventory variable — and writes it, **`age`-encrypted to
+//! server list, and every Ansible variable — and writes it, **`age`-encrypted to
 //! recipient public keys
 //! Canopy never holds the private half of** ([`commons_servers::recovery_vault`]), to a
 //! **versioned, object-locked** S3 bucket. Canopy can write the vault but cannot
@@ -34,9 +34,9 @@ use commons_types::status::CheckResult;
 use database::{
 	BackupConfigStatus, BackupTypeDefault, MachineBackupCapability, ServerGroupBackupConfig,
 	ServerGroupBackupSchedule,
+	ansible_variables::{AnsibleVariable, VariableScope},
 	applications::Application,
 	backup::schedules::{MachineBackupSchedule, ScheduleChange},
-	inventory_variables::{InventoryVariable, VariableScope},
 	self_alerts::{self, RECOVERY_ESCROW_DOC, RECOVERY_ESCROW_REF},
 	server_groups::ServerGroup,
 };
@@ -131,13 +131,15 @@ struct RecoverySnapshot {
 	backup_type_defaults: Vec<BackupTypeDefault>,
 	machine_backup_schedules: Vec<MachineBackupSchedule>,
 	backup_schedule_history: Vec<ScheduleChange>,
-	inventory_variables: Vec<RecoveryInventoryVariables>,
+	/// Older snapshots in the vault carry the key under its earlier name.
+	#[serde(rename = "inventory_variables")]
+	ansible_variables: Vec<RecoveryAnsibleVariables>,
 }
 
 /// One scope's variables: the plain values as stored, and the secret ones read
 /// out of the Secret they live under.
 #[derive(Serialize)]
-struct RecoveryInventoryVariables {
+struct RecoveryAnsibleVariables {
 	#[serde(flatten)]
 	scope: VariableScope,
 	secret: String,
@@ -318,16 +320,16 @@ pub async fn build_snapshot(
 
 	let mut by_scope: BTreeMap<VariableScope, BTreeMap<String, Option<serde_json::Value>>> =
 		BTreeMap::new();
-	for variable in InventoryVariable::list_all(db)
+	for variable in AnsibleVariable::list_all(db)
 		.await
-		.context("list inventory variables")?
+		.context("list Ansible variables")?
 	{
 		by_scope
 			.entry(variable.scope())
 			.or_default()
 			.insert(variable.name.clone(), variable.value.clone());
 	}
-	let mut inventory_variables = Vec::with_capacity(by_scope.len());
+	let mut ansible_variables = Vec::with_capacity(by_scope.len());
 	for (scope, variables) in by_scope {
 		let secret = scope.secret_name();
 		let held: BTreeSet<&str> = variables
@@ -362,7 +364,7 @@ pub async fn build_snapshot(
 			warn!(%secret, missing = ?unreadable, "recovery-snapshot: secret variables not read; leaving them out");
 			gaps.push(format!("{secret}: {}", unreadable.join(", ")));
 		}
-		inventory_variables.push(RecoveryInventoryVariables {
+		ansible_variables.push(RecoveryAnsibleVariables {
 			scope,
 			secret,
 			values: variables
@@ -391,7 +393,7 @@ pub async fn build_snapshot(
 		backup_schedule_history: ScheduleChange::list_all(db)
 			.await
 			.context("list backup schedule history")?,
-		inventory_variables,
+		ansible_variables,
 	};
 	Ok(Snapshot {
 		json: serde_json::to_vec(&snapshot).context("serialise snapshot")?,
@@ -671,14 +673,14 @@ mod tests {
 	}
 
 	#[tokio::test(flavor = "multi_thread")]
-	async fn snapshot_includes_inventory_variables() {
+	async fn snapshot_includes_ansible_variables() {
 		TestDb::run(|mut conn, _url| async move {
 			let group_id = uuid::Uuid::new_v4();
 			conn.batch_execute(&format!(
 				"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-				 INSERT INTO inventory_variables (server_group_id, rank, name, is_secret)
+				 INSERT INTO ansible_variables (server_group_id, rank, name, is_secret)
 				 VALUES ('{group_id}', 'production', 'salt', TRUE);
-				 INSERT INTO inventory_variables (server_group_id, rank, name, value, is_secret)
+				 INSERT INTO ansible_variables (server_group_id, rank, name, value, is_secret)
 				 VALUES ('{group_id}', 'production', 'timezone', '\"Pacific/Fiji\"', FALSE);"
 			))
 			.await
@@ -824,9 +826,9 @@ mod tests {
 			conn.batch_execute(&format!(
 				"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
 				 INSERT INTO machines (id, name, group_id) VALUES ('{machine_id}', 'box', '{group_id}');
-				 INSERT INTO inventory_variables (server_group_id, rank, name, is_secret)
+				 INSERT INTO ansible_variables (server_group_id, rank, name, is_secret)
 				 VALUES ('{group_id}', 'production', 'salt', TRUE);
-				 INSERT INTO inventory_variables (machine_id, name, is_secret)
+				 INSERT INTO ansible_variables (machine_id, name, is_secret)
 				 VALUES ('{machine_id}', 'token', TRUE), ('{machine_id}', 'key', TRUE);"
 			))
 			.await

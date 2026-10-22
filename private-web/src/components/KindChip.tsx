@@ -7,7 +7,7 @@ export default function KindChip({ kind }: { kind: string }) {
 		<Chip
 			size="small"
 			variant="outlined"
-			label={kind}
+			label={kind === "machines" ? "several machines" : kind}
 			sx={{ textTransform: "capitalize" }}
 		/>
 	);

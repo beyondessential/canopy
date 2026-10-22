@@ -2,6 +2,8 @@ use canopy_utoipa_axum::router::OpenApiRouter;
 use serde::{Deserialize, Serialize};
 
 pub mod admins;
+pub mod ansible;
+pub mod ansible_variables;
 pub mod applications;
 pub mod audit;
 pub mod backups;
@@ -15,8 +17,6 @@ pub mod domains;
 pub mod healthchecks;
 pub mod identity;
 pub mod incidents;
-pub mod inventory;
-pub mod inventory_variables;
 pub mod issues;
 pub mod kubernetes_clusters;
 pub mod machines;
@@ -152,8 +152,8 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 			.nest("/healthchecks", healthchecks::routes())
 			.nest("/identity", identity::routes())
 			.nest("/incidents", incidents::routes())
-			.nest("/inventory", inventory::routes())
-			.nest("/inventory_variables", inventory_variables::routes())
+			.nest("/ansible", ansible::routes())
+			.nest("/ansible_variables", ansible_variables::routes())
 			.nest("/issues", issues::routes())
 			.nest("/kubernetes_clusters", kubernetes_clusters::routes())
 			.nest("/mcp_tokens", mcp_tokens::routes())

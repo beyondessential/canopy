@@ -89,7 +89,7 @@ The record of what an environment planned, when it planned it for, and when it a
 Pre-upgrade migration testing takes each application's target from its own environment's open plan, and an environment with no plan is not tested at all.
 Recording a plan is what asks for the testing, and no restore is spent on a version nobody intends to apply.
 
-An upgrade run on a production environment reads the open plan as its permission (see [INV](inventory.md), "Planned upgrades").
+An upgrade run on a production environment reads the open plan as its permission (see [ANSRUN](ansible/runs.md), "Planned upgrades").
 
 A plan changes what is tested, so changing one invalidates nothing already recorded: earlier verdicts stand against the versions they named, and the new target simply becomes the one that has not been tested yet.
 

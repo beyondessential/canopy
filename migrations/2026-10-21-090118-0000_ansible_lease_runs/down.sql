@@ -1,0 +1,13 @@
+DROP INDEX ansible_leases_open_by_taken;
+ALTER TABLE ansible_leases
+	DROP CONSTRAINT ansible_leases_assignments_object,
+	DROP CONSTRAINT ansible_leases_reason_needs_release,
+	DROP CONSTRAINT ansible_leases_release_reason,
+	DROP COLUMN release_reason,
+	DROP COLUMN started_at,
+	DROP COLUMN assignments,
+	DROP COLUMN skip_tags,
+	DROP COLUMN tags,
+	DROP COLUMN limited_to,
+	DROP COLUMN limit_pattern,
+	DROP COLUMN playbook;

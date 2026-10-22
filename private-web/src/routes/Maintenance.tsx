@@ -18,6 +18,7 @@ import DeclareMaintenanceDialog from "../components/DeclareMaintenanceDialog";
 import { GradedAction } from "../components/GradedAction";
 import KindChip from "../components/KindChip";
 import ServerRankChip from "../components/ServerRankChip";
+import WindowEnd from "../components/WindowEnd";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -178,7 +179,7 @@ export default function Maintenance() {
 										</Stack>
 									</TableCell>
 									<TableCell>
-										<TimeAgo timestamp={window.expected_end} />
+										<WindowEnd window={window} />
 									</TableCell>
 									<TableCell>
 										<TimeAgo timestamp={window.declared_at} />

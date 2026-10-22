@@ -15,7 +15,7 @@ fn operator() -> Actor {
 fn lifted() -> Action {
 	Action::MaintenanceLifted {
 		window: Record::new(RecordKind::MaintenanceWindow, Uuid::new_v4(), "window"),
-		target: Record::new(RecordKind::Machine, Uuid::new_v4(), "machine"),
+		target: vec![Record::new(RecordKind::Machine, Uuid::new_v4(), "machine")],
 		rank: None,
 		already_ended: false,
 	}
@@ -181,8 +181,8 @@ async fn entries_are_found_by_record_and_detail_and_counted_by_a_detail_value() 
 				&operator(),
 				&Action::MaintenanceAmended {
 					window: Record::new(RecordKind::MaintenanceWindow, window, "w"),
-					target: Record::new(RecordKind::Machine, Uuid::new_v4(), "m"),
-					moved_from: None,
+					target: vec![Record::new(RecordKind::Machine, Uuid::new_v4(), "m")],
+					moved_from: Vec::new(),
 					rank: None,
 					expected_end: jiff::Timestamp::now(),
 					note: note.map(str::to_owned),
@@ -317,7 +317,7 @@ async fn a_record_is_found_by_part_of_its_name_through_the_names_index() {
 				&operator(),
 				&Action::MaintenanceLifted {
 					window: Record::new(RecordKind::MaintenanceWindow, Uuid::new_v4(), window),
-					target: Record::new(RecordKind::Machine, Uuid::new_v4(), machine),
+					target: vec![Record::new(RecordKind::Machine, Uuid::new_v4(), machine)],
 					rank: None,
 					already_ended: false,
 				},

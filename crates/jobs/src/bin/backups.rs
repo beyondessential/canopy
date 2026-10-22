@@ -9,6 +9,9 @@
 //! - S3 CloudWatch metrics task ([`jobs::backup::s3_metrics`]),
 //! - progress-series pruning ([`jobs::backup::progress_prune`]) — fleet-wide, so
 //!   unlike the loops above it never contends with a group's own backup work,
+//! - Ansible catalogue reader ([`jobs::ansible::catalogue`]) — reads the variable
+//!   catalogue infra publishes and moves into the secret store what it calls
+//!   secret, so it sits where the secret store is reachable,
 //! - recovery vault writer ([`jobs::backup::recovery_snapshot`]) — encrypts a state snapshot
 //!   to `age` recipients and writes it to object-locked S3. Its recipients are
 //!   mandatory, so the pod refuses to start if they're unset.
@@ -74,6 +77,7 @@ async fn main() -> miette::Result<()> {
 	let s3_metrics = jobs::backup::s3_metrics::spawn();
 	let tag_reconcile = jobs::backup::tag_reconcile::spawn();
 	let progress_prune = jobs::backup::progress_prune::spawn();
+	let ansible_catalogue = jobs::ansible::catalogue::spawn(worker.secrets.clone());
 	let recovery_snapshot = jobs::backup::recovery_snapshot::spawn(worker, recovery_config);
 
 	let artifact_sweep = jobs::artifact_sweep::spawn().await;
@@ -86,6 +90,7 @@ async fn main() -> miette::Result<()> {
 		s3_metrics,
 		tag_reconcile,
 		progress_prune,
+		ansible_catalogue,
 		recovery_snapshot,
 		artifact_sweep
 	)
