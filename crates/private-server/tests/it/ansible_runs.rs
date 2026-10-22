@@ -52,14 +52,13 @@ async fn environment(conn: &mut AsyncPgConnection, private: &TestServer) -> Envi
 		bind_device(conn, application, tailnet).await;
 		machines.push(machine);
 	}
-	private
-		.post("/api/ansible_variables/set")
-		.json(&json!({
-			"server_group_id": group, "rank": "production",
-			"name": "managed_by_ansible", "value": true,
-		}))
-		.await
-		.assert_status_ok();
+	for machine in &machines {
+		private
+			.post("/api/ansible_variables/set")
+			.json(&json!({ "machine_id": machine, "name": "managed_by_ansible", "value": true }))
+			.await
+			.assert_status_ok();
+	}
 	Environment {
 		group,
 		central: machines[0],
@@ -296,14 +295,15 @@ async fn assigns_a_type_to_a_machine_with_nothing_on_it() {
 			.unwrap();
 			ids.push(id);
 		}
-		private
-			.post("/api/ansible_variables/set")
-			.json(&json!({
-				"server_group_id": group, "rank": "production",
-				"name": "managed_by_ansible", "value": true,
-			}))
-			.await
-			.assert_status_ok();
+		for machine in &ids {
+			private
+				.post("/api/ansible_variables/set")
+				.json(
+					&json!({ "machine_id": machine, "name": "managed_by_ansible", "value": true }),
+				)
+				.await
+				.assert_status_ok();
+		}
 		read_catalogue(&mut conn).await;
 
 		let options: Value = private
@@ -412,7 +412,9 @@ async fn refuses_an_assignment_that_could_not_hold() {
 			"INSERT INTO devices (id, role, tailscale_node_name)
 			 VALUES ('{device}', 'server', 'kamaka-new.tail1234.ts.net');
 			 INSERT INTO machines (id, name, group_id, rank, device_id)
-			 VALUES ('{bare}', 'kamaka-new', '{}', 'production', '{device}')",
+			 VALUES ('{bare}', 'kamaka-new', '{}', 'production', '{device}');
+			 INSERT INTO ansible_variables (machine_id, name, value)
+			 VALUES ('{bare}', 'managed_by_ansible', 'true')",
 			env.group
 		))
 		.await

@@ -29,10 +29,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
-use super::{ANSIBLE_HOST, Environment, EnvironmentArgs, hosts, limit, reach, resolve_environment};
+use super::{
+	ANSIBLE_HOST, Environment, EnvironmentArgs, MANAGED, hosts, limit, reach, resolve_environment,
+};
 use crate::state::AppState;
 
-pub(super) const MANAGED: &str = "managed_by_ansible";
 const CENTRAL: &str = "tamanu-central";
 
 /// The application type to assign a machine with nothing on it, or none.
@@ -240,7 +241,10 @@ pub async fn members(
 			machine,
 			address,
 			tailnet: tailnet_named,
-			managed: get(MANAGED).is_some_and(truthy),
+			managed: own
+				.get(&machine.id)
+				.and_then(|vars| vars.get(MANAGED))
+				.is_some_and(truthy),
 			types: on_machine
 				.iter()
 				.map(|application| application.r#type.to_string())

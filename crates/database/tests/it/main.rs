@@ -59,6 +59,7 @@ mod maintenance_window_application_migration;
 mod maintenance_window_machine_migration;
 mod maintenance_window_moves;
 mod maintenance_windows;
+mod managed_by_ansible_migration;
 mod mcp_tokens;
 mod migration_test_candidates;
 mod migration_test_reports;

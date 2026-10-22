@@ -1,0 +1,1 @@
+-- What was carried onto machines cannot be told from what was set there.

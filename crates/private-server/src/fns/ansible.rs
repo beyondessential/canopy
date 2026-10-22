@@ -61,6 +61,11 @@ const SECRET_READS_AT_ONCE: usize = 8;
 /// canopy holds for the machine.
 pub(super) const ANSIBLE_HOST: &str = "ansible_host";
 
+/// The variable saying whether a run acts on a machine, set on the machine
+/// alone.
+// spec: INV#managed-machines
+pub(super) const MANAGED: &str = "managed_by_ansible";
+
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(
@@ -870,7 +875,7 @@ pub async fn for_group(
 				name: &host.name,
 				address: host.address.as_deref(),
 				tailnet: *tailnet,
-				managed: host.vars.0.get(runs::MANAGED).is_some_and(runs::truthy),
+				managed: host.own_vars.0.get(MANAGED).is_some_and(runs::truthy),
 			})
 			.collect::<Vec<_>>(),
 	)?;

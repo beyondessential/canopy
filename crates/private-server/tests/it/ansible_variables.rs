@@ -631,6 +631,35 @@ async fn a_machines_value_reaches_only_that_machine() {
 	.await
 }
 
+/// Whether a run acts on a machine is set by a switch on the machine, so a
+/// wider value is refused.
+// spec: INV#managed-machines
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_managed_by_ansible_outside_machine_scope() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+
+		for scope in [
+			json!({ "server_group_id": group }),
+			json!({ "server_group_id": group, "rank": "dev" }),
+		] {
+			let mut args = scope;
+			args["name"] = json!("managed_by_ansible");
+			args["value"] = json!(true);
+			let response = private.post("/api/ansible_variables/set").json(&args).await;
+			response.assert_status(axum::http::StatusCode::BAD_REQUEST);
+			assert!(
+				response.json::<Value>()["detail"]
+					.as_str()
+					.expect("detail")
+					.contains("set on a machine"),
+			);
+		}
+	})
+	.await
+}
+
 /// `ansible_host` at a wider scope would give every machine in the environment
 /// one address, so it is set on a machine.
 #[tokio::test(flavor = "multi_thread")]

@@ -240,7 +240,7 @@ pub async fn catalogue(
 	request_body = SetArgs,
 	responses(
 		(status = 200, body = AnsibleVariable),
-		(status = 400, description = "Not one scope, not a usable variable name, or an `ansible_host` outside machine scope or not a string", body = ProblemDetailsSchema),
+		(status = 400, description = "Not one scope, not a usable variable name, an `ansible_host` outside machine scope or not a string, or a `managed_by_ansible` outside machine scope", body = ProblemDetailsSchema),
 		(status = 404, description = "No such server group or machine", body = ProblemDetailsSchema),
 		(status = 502, description = "The secret store is unavailable", body = ProblemDetailsSchema),
 	),
@@ -254,6 +254,7 @@ pub async fn set(
 	let scope = VariableScope::try_from(args.scope)?;
 	check_name(&args.name)?;
 	check_ansible_host(scope, &args.name, &args.value)?;
+	check_managed(scope, &args.name)?;
 
 	let mut conn = audit.begin().await?;
 	check_scope(&mut conn, scope).await?;
@@ -488,6 +489,18 @@ fn check_ansible_host(scope: VariableScope, name: &str, value: &Value) -> Result
 	if !value.is_string() {
 		return Err(AppError::BadRequest(format!(
 			"{name:?} is the address a run connects to, so it is a string"
+		)));
+	}
+	Ok(())
+}
+
+/// `managed_by_ansible` says what a run may do to one machine, and is set by a
+/// switch on the machine, so a wider value would be one no switch shows.
+// spec: INV#managed-machines
+fn check_managed(scope: VariableScope, name: &str) -> Result<()> {
+	if name == super::ansible::MANAGED && !matches!(scope, VariableScope::Machine { .. }) {
+		return Err(AppError::BadRequest(format!(
+			"{name:?} says whether a run acts on one machine, so it is set on a machine rather than on a group or an environment"
 		)));
 	}
 	Ok(())

@@ -6,6 +6,7 @@ id: ANSIMP
 
 An administrator can import an Ansible YAML inventory file into an environment, carrying across the variables it was configured with before Canopy served it to Ansible (see [INV](overview.md)).
 An import is offered only while neither the environment nor any of its machines carries a variable, so it never meets a value already set.
+Whether a machine is managed is a switch rather than a variable, and holds an import back no more than it is listed among the variables (see [INV](overview.md), "Managed machines").
 Variables set on the whole group do not hold it back, since an imported environment variable overrides one of the same name rather than clashing with it.
 
 ## Reading the file
@@ -30,6 +31,7 @@ A `:port` suffix on the key becomes the machine's `ansible_port` where the host 
 A key that is the machine's tailnet name, in full or by its first label, adds nothing.
 
 Every machine a host is imported onto has `managed_by_ansible` set, since the file names it as one a run configures.
+A `managed_by_ansible` the file sets on a group adds nothing, since it is set on machines alone (see [INV](overview.md), "Managed machines").
 
 The file's comment lines hold what an operator needs to know before a run, such as where a key is kept or which network to join, so they are carried as notes.
 A comment within a host's entry, or in the run of comment lines directly above its key, is about that host, and is appended to the notes of the machine it is matched to.
