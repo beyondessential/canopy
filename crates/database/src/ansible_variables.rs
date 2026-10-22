@@ -70,6 +70,28 @@ impl VariableScope {
 			Self::Machine { machine_id } => format!("inv-vars-m-{machine_id}"),
 		}
 	}
+
+	/// Hold the row of the group this scope is in for the rest of the
+	/// transaction, as an import into the group does, so a variable set beside
+	/// an import is decided after it or before it, never between its check that
+	/// nothing is set and its writes. A machine in no group holds nothing.
+	pub async fn lock_group(self, conn: &mut AsyncPgConnection) -> Result<()> {
+		let group = match self {
+			Self::Group { group_id } | Self::Environment { group_id, .. } => Some(group_id),
+			Self::Machine { machine_id } => crate::schema::machines::table
+				.select(crate::schema::machines::group_id)
+				.find(machine_id)
+				.first::<Option<Uuid>>(conn)
+				.await
+				.optional()
+				.map_err(AppError::from)?
+				.flatten(),
+		};
+		if let Some(group) = group {
+			crate::ansible_leases::lock_group(conn, group).await?;
+		}
+		Ok(())
+	}
 }
 
 impl AnsibleVariable {

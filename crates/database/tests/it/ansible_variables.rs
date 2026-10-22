@@ -250,3 +250,36 @@ async fn a_machines_variables_go_with_the_machine() {
 	})
 	.await
 }
+
+/// Setting a variable on a machine holds its group's row, which an import into
+/// the group holds too, so the import's check that nothing is set and its writes
+/// cannot have a variable land between them.
+// spec: ANSIMP#applying
+#[tokio::test(flavor = "multi_thread")]
+async fn a_variable_on_a_machine_holds_its_group_as_an_import_does() {
+	use commons_tests::diesel_async::{AsyncConnection, AsyncPgConnection};
+
+	commons_tests::db::TestDb::run(async |mut conn, url| {
+		let group = seed_group(&mut conn).await;
+		let machine = seed_machine(&mut conn, group).await;
+		let mut other = AsyncPgConnection::establish(&url)
+			.await
+			.expect("second connection");
+
+		conn.batch_execute("BEGIN").await.unwrap();
+		VariableScope::Machine {
+			machine_id: machine,
+		}
+		.lock_group(&mut conn)
+		.await
+		.expect("lock");
+		let held = other
+			.batch_execute(&format!(
+				"SELECT id FROM server_groups WHERE id = '{group}' FOR NO KEY UPDATE NOWAIT"
+			))
+			.await;
+		assert!(held.is_err(), "the group's row is held");
+		conn.batch_execute("ROLLBACK").await.unwrap();
+	})
+	.await
+}

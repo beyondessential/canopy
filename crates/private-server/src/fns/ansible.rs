@@ -252,6 +252,17 @@ struct Environment {
 	at_rank: Vec<Machine>,
 }
 
+impl Environment {
+	/// The machines whose maintenance windows hold over the environment: every
+	/// one at the rank, as a run's own declaration covers them, so what refuses
+	/// a take, what the page shows holding, and what the run's first read meets
+	/// are the same windows.
+	// spec: ANSRUN#work-under-way
+	fn window_machine_ids(&self) -> Vec<Uuid> {
+		self.at_rank.iter().map(|machine| machine.id).collect()
+	}
+}
+
 async fn resolve_group(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	args: &EnvironmentArgs,
@@ -438,14 +449,8 @@ pub async fn take_lease(
 	let checked = runs::check(&mut conn, &environment, &args).await?;
 
 	// A window over any member refuses the environment, since a run acts on the
-	// environment as a whole, whatever its limit leaves out. Every machine at the
-	// rank counts, as it does to the run's own declaration, so a take this lets
-	// through is not refused at the run's first read.
-	let machine_ids: Vec<Uuid> = environment
-		.at_rank
-		.iter()
-		.map(|machine| machine.id)
-		.collect();
+	// environment as a whole, whatever its limit leaves out.
+	let machine_ids = environment.window_machine_ids();
 	// The windows over the environment are read under the group's lock, which
 	// a window moving over any part of the group also takes, so a window cannot
 	// move off the environment between this check and the lease it lets through.
@@ -671,11 +676,7 @@ pub async fn run_state(
 		.await?
 		.filter(|lease| lease.holds_at(now));
 
-	let machine_ids: Vec<Uuid> = environment
-		.machines
-		.iter()
-		.map(|machine| machine.id)
-		.collect();
+	let machine_ids = environment.window_machine_ids();
 	let windows = MaintenanceWindow::open_over(
 		&mut conn,
 		environment.group.id,

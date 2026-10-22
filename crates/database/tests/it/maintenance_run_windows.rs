@@ -568,6 +568,21 @@ async fn amending_a_run_windows_end_frees_it_from_the_lease() {
 			.remove(0);
 
 		let end = in_hours(6);
+		let refused = MaintenanceWindow::amend(
+			&mut conn,
+			window.id,
+			Amendment {
+				expected_end: Some(end),
+				..Amendment::default()
+			},
+			Some("bystander"),
+		)
+		.await;
+		assert!(
+			matches!(refused, Err(AppError::Conflict(_))),
+			"only the run's operator gives its window an end: {refused:?}"
+		);
+
 		let amended = MaintenanceWindow::amend(
 			&mut conn,
 			window.id,

@@ -279,11 +279,15 @@ pub async fn set(
 			return Err(audit.effect_failed(&pending, failed).await);
 		}
 
+		scope.lock_group(&mut conn).await?;
 		let set =
 			AnsibleVariable::set(&mut conn, scope, &args.name, None, Some(&admin.0.login)).await?;
 		conn.settle_done(&pending, None).await?;
 		set
 	} else {
+		// Taken before the read, so an import into the group is not let in
+		// between it and the write.
+		scope.lock_group(&mut conn).await?;
 		let was_secret = AnsibleVariable::at(&mut conn, scope, &args.name)
 			.await?
 			.is_some_and(|prior| prior.is_secret);

@@ -770,6 +770,16 @@ async fn a_window_over_a_machine_no_run_reaches_yet_refuses_the_take() {
 				.await
 				.contains("someone.else@bes.au")
 		);
+		let state: Value = private
+			.post("/api/ansible/run_state")
+			.json(&json!({ "group": "kamaka" }))
+			.await
+			.json();
+		assert_eq!(
+			state["refuses"], true,
+			"the page shows what refuses the take"
+		);
+		assert_eq!(state["window"]["declared_by"], "someone.else@bes.au");
 	})
 	.await
 }

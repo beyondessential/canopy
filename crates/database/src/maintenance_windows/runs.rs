@@ -114,10 +114,7 @@ impl MaintenanceWindow {
 				let mut covered: HashSet<Uuid> = HashSet::new();
 				let mut serving: Vec<Self> = Vec::new();
 				for window in &open {
-					let speaks_for = holder.is_some()
-						&& (window.declared_by.as_deref() == holder
-							|| window.amended_by.as_deref() == holder);
-					if !speaks_for || !window.holds_at(now) {
+					if !window.is_work_of(holder) || !window.holds_at(now) {
 						continue;
 					}
 					let named = window.named_machines();
@@ -341,8 +338,7 @@ impl MaintenanceWindow {
 					"only a window that lasts a run is held; amend this one's end instead".into(),
 				));
 			}
-			let speaks_for = [window.declared_by.as_deref(), window.amended_by.as_deref()];
-			if by.is_none() || !speaks_for.contains(&by) {
+			if !window.is_work_of(by) {
 				return Err(AppError::Conflict(
 					"only the operator whose run this is can hold its window".into(),
 				));

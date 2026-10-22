@@ -443,6 +443,13 @@ impl MaintenanceWindow {
 		self.window_end() + SETTLE
 	}
 
+	/// Whether the window is `login`'s work: they declared it, or theirs is the
+	/// amendment that stands.
+	pub fn is_work_of(&self, login: Option<&str>) -> bool {
+		login.is_some()
+			&& (self.declared_by.as_deref() == login || self.amended_by.as_deref() == login)
+	}
+
 	/// Is the window still holding, as opposed to settling or over?
 	pub fn holds_at(&self, now: Timestamp) -> bool {
 		self.ended_at.is_none() && now < self.expected_end
@@ -750,8 +757,15 @@ impl MaintenanceWindow {
 
 				// Giving a window that lasts a run an end of its own is holding it:
 				// it no longer follows the lease, which would otherwise overwrite
-				// the end on its next extension.
+				// the end on its next extension. Only the operator whose run it is
+				// can, as through `hold`.
+				// spec: MNT#ending
 				let lease_id = match amendment.expected_end {
+					Some(_) if window.lease_id.is_some() && !window.is_work_of(by) => {
+						return Err(AppError::Conflict(
+							"only the operator whose run this is can give its window an end".into(),
+						));
+					}
 					Some(_) => None,
 					None => window.lease_id,
 				};
@@ -984,12 +998,9 @@ impl MaintenanceWindow {
 				.collect(),
 			(None, None) => Vec::new(),
 		};
-		let speaks_for = [self.declared_by.as_deref(), self.amended_by.as_deref()];
-		Ok(leases.into_iter().find(|lease| {
-			lease.holds_at(now)
-				&& lease.held_by.is_some()
-				&& speaks_for.contains(&lease.held_by.as_deref())
-		}))
+		Ok(leases
+			.into_iter()
+			.find(|lease| lease.holds_at(now) && self.is_work_of(lease.held_by.as_deref())))
 	}
 
 	/// Lift a window before its expected end. A window already ended is
