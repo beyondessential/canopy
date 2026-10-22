@@ -157,6 +157,22 @@ pub struct AnsibleArgs {
 	/// naming an intent other than the lease's is refused.
 	#[serde(default)]
 	pub intent: Option<RunIntent>,
+	/// The playbook the run was started with. Refused where the lease names
+	/// another.
+	#[serde(default)]
+	pub playbook: Option<String>,
+	/// The limit the run was started with, empty for none. Refused where it is
+	/// not the lease's.
+	#[serde(default)]
+	pub limit: Option<String>,
+	/// The tags the run was started with, empty for none. Refused where they
+	/// are not the lease's, in any order.
+	#[serde(default)]
+	pub tags: Option<Vec<String>>,
+	/// The tags the run skips, empty for none. Refused where they are not the
+	/// lease's, in any order.
+	#[serde(default)]
+	pub skip_tags: Option<Vec<String>>,
 }
 
 /// One application on a machine, so a run knows what it is configuring there.
@@ -723,7 +739,7 @@ pub async fn run_state(
 	responses(
 		(status = 200, body = AnsibleView),
 		(status = 404, description = "No such lease", body = ProblemDetailsSchema),
-		(status = 409, description = "The lease is someone else's, no longer holds, was taken for another intent, the environment is gone, or two machines share an address", body = ProblemDetailsSchema),
+		(status = 409, description = "The lease is someone else's, no longer holds, was taken for another intent, playbook, limit or tags than the run claims, the environment is gone, or two machines share an address", body = ProblemDetailsSchema),
 		(status = 502, description = "A secret variable could not be read", body = ProblemDetailsSchema),
 	),
 )]
@@ -741,15 +757,7 @@ pub async fn for_group(
 	if !lease.holds_at(Timestamp::now()) {
 		return Err(AppError::Conflict(no_longer_held(&lease, &admin.0.login)));
 	}
-	// spec: ANSRUN#starting-a-run
-	if let Some(claimed) = args.intent
-		&& claimed != lease.intent
-	{
-		return Err(AppError::Conflict(format!(
-			"this lease was taken to {}, not to {claimed}; take a lease to {claimed} for this run",
-			lease.intent
-		)));
-	}
+	check_claims(&lease, &args)?;
 	// Recorded before the read, so a read that fails is recorded as failed: the
 	// layer settles it by how the handler ends.
 	let group_for_entry = ServerGroup::get_by_id(&mut conn, lease.server_group_id).await?;
@@ -915,6 +923,72 @@ pub async fn for_group(
 		secret_vars: wide.secret.into_iter().collect(),
 		hosts,
 	}))
+}
+
+/// Hold a read to what the run claims it was started with, against what its
+/// lease was taken for, before anything starts: a mistyped command records no
+/// start and declares no maintenance.
+// spec: ANSRUN#starting-a-run
+fn check_claims(lease: &AnsibleLease, args: &AnsibleArgs) -> Result<()> {
+	let refuse = |what: &str, leased: &str, claimed: &str| {
+		Err(AppError::Conflict(format!(
+			"this lease was taken {what} {leased}, but the run was started {what} {claimed}; \
+			 start it as the lease says, or take a lease for this run"
+		)))
+	};
+	if let Some(claimed) = args.intent
+		&& claimed != lease.intent
+	{
+		return Err(AppError::Conflict(format!(
+			"this lease was taken to {}, not to {claimed}; take a lease to {claimed} for this run",
+			lease.intent
+		)));
+	}
+	// A run that took its own lease naming no playbook holds a claimed one to
+	// nothing.
+	if let (Some(claimed), Some(leased)) = (&args.playbook, &lease.playbook)
+		&& claimed != leased
+	{
+		return refuse("for", &format!("{leased:?}"), &format!("{claimed:?}"));
+	}
+	let shown = |limit: &str| {
+		if limit.is_empty() {
+			"no limit".to_owned()
+		} else {
+			format!("{limit:?}")
+		}
+	};
+	if let Some(claimed) = &args.limit {
+		let leased = lease.limit_pattern.as_deref().unwrap_or("").trim();
+		if claimed.trim() != leased {
+			return refuse("with", &shown(leased), &shown(claimed.trim()));
+		}
+	}
+	let tag_set = |tags: &[String]| -> BTreeSet<String> {
+		tags.iter()
+			.map(|tag| tag.trim().to_owned())
+			.filter(|tag| !tag.is_empty())
+			.collect()
+	};
+	let listed = |tags: &BTreeSet<String>| {
+		if tags.is_empty() {
+			"none".to_owned()
+		} else {
+			tags.iter().cloned().collect::<Vec<_>>().join(",")
+		}
+	};
+	for (what, claimed, leased) in [
+		("tags", &args.tags, &lease.tags),
+		("skipped tags", &args.skip_tags, &lease.skip_tags),
+	] {
+		if let Some(claimed) = claimed {
+			let (claimed, leased) = (tag_set(claimed), tag_set(leased));
+			if claimed != leased {
+				return refuse(&format!("with {what}"), &listed(&leased), &listed(&claimed));
+			}
+		}
+	}
+	Ok(())
 }
 
 /// The operator a window belongs to: an amendment declares the same work, so

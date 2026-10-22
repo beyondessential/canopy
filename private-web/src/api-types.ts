@@ -5778,6 +5778,26 @@ export interface components {
              * @description Identifier of the lease the run holds, from `take_lease`.
              */
             lease_id: string;
+            /**
+             * @description The limit the run was started with, empty for none. Refused where it is
+             *     not the lease's.
+             */
+            limit?: string | null;
+            /**
+             * @description The playbook the run was started with. Refused where the lease names
+             *     another.
+             */
+            playbook?: string | null;
+            /**
+             * @description The tags the run skips, empty for none. Refused where they are not the
+             *     lease's, in any order.
+             */
+            skip_tags?: string[] | null;
+            /**
+             * @description The tags the run was started with, empty for none. Refused where they
+             *     are not the lease's, in any order.
+             */
+            tags?: string[] | null;
         };
         /** @description One machine in an environment. */
         AnsibleHost: {
@@ -14660,7 +14680,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
-            /** @description The lease is someone else's, no longer holds, was taken for another intent, the environment is gone, or two machines share an address */
+            /** @description The lease is someone else's, no longer holds, was taken for another intent, playbook, limit or tags than the run claims, the environment is gone, or two machines share an address */
             409: {
                 headers: {
                     [name: string]: unknown;

@@ -23,8 +23,10 @@ A lease no run has read within a short fixed period of being taken is released b
 
 A run can also take a lease of its own when it is started without one, and is then treated as though the lease had been handed to it.
 
-A run reading its environment under a lease it was handed can name the intent it was started with.
-A read naming an intent other than the lease's is refused, naming both, since a lease taken to configure needs none of the permission an upgrade does (see "Planned upgrades").
+A run reading its environment under a lease it was handed can name the intent, playbook, limit, and tags it was started with.
+A read naming any of them other than the lease's is refused, naming both, before the run is started, so a mistyped command records no start and declares no maintenance.
+Tags are compared as a set, and no limit and an empty one are the same.
+Where a run took its own lease naming no playbook, the playbook it names is not held to anything.
 
 An attempt to take a lease another operator holds is refused, naming who holds it and when it expires.
 Taking one over is a deliberate, audited step, so a run never proceeds over another operator's work by accident.

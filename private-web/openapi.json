@@ -332,6 +332,40 @@
             "description": "Identifier of the lease the run holds, from `take_lease`.",
             "format": "uuid",
             "type": "string"
+          },
+          "limit": {
+            "description": "The limit the run was started with, empty for none. Refused where it is\nnot the lease's.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "playbook": {
+            "description": "The playbook the run was started with. Refused where the lease names\nanother.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "skip_tags": {
+            "description": "The tags the run skips, empty for none. Refused where they are not the\nlease's, in any order.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "tags": {
+            "description": "The tags the run was started with, empty for none. Refused where they\nare not the lease's, in any order.",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           }
         },
         "required": [
@@ -15144,7 +15178,7 @@
                 }
               }
             },
-            "description": "The lease is someone else's, no longer holds, was taken for another intent, the environment is gone, or two machines share an address"
+            "description": "The lease is someone else's, no longer holds, was taken for another intent, playbook, limit or tags than the run claims, the environment is gone, or two machines share an address"
           },
           "502": {
             "content": {
