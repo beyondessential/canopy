@@ -1,4 +1,5 @@
 import DeleteIcon from "@mui/icons-material/Delete";
+import EditIcon from "@mui/icons-material/Edit";
 import EditNoteIcon from "@mui/icons-material/EditNote";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutlined";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
@@ -31,6 +32,7 @@ import AnsibleRuns from "./AnsibleRuns";
 import { GradedAction } from "./GradedAction";
 import TimeAgo from "./TimeAgo";
 import ScopeTextEditor from "./ansible/ScopeTextEditor";
+import VariableEditRow from "./ansible/VariableEditRow";
 import VariableEntryRow from "./ansible/VariableEntryRow";
 import type { ScopeKind } from "./ansible/schema";
 
@@ -476,6 +478,7 @@ function Scope({
 										other.name === variable.name && other.id !== variable.id,
 								)}
 								scope={scope}
+								catalogue={catalogue}
 								onRemove={isAdmin ? remove : undefined}
 								onChanged={onChanged}
 							/>
@@ -509,20 +512,24 @@ function Scope({
 }
 
 /// One variable of a scope: its name and value, a secret by name only, what it
-/// overrides, and what the catalogue now says of it.
+/// overrides, and what the catalogue now says of it. An administrator can edit
+/// its value in place, or remove it.
 function VariableRow({
 	variable,
 	overrides,
 	scope,
+	catalogue,
 	onRemove,
 	onChanged,
 }: {
 	variable: AnsibleVariableView;
 	overrides?: AnsibleVariableView;
 	scope: Record<string, unknown>;
+	catalogue: Catalogue | null;
 	onRemove?: { call: (params?: Record<string, unknown>) => Promise<unknown> };
 	onChanged: () => void;
 }) {
+	const [editing, setEditing] = useState(false);
 	const testid = variable.is_secret
 		? "secret-var"
 		: overrides
@@ -542,7 +549,17 @@ function VariableRow({
 				{variable.name}
 			</Typography>
 			<Box sx={{ flex: 1, minWidth: 0 }}>
-				{variable.is_secret ? (
+				{editing ? (
+					<VariableEditRow
+						name={variable.name}
+						value={variable.value}
+						secret={variable.is_secret}
+						scope={scope}
+						catalogue={catalogue}
+						onClose={() => setEditing(false)}
+						onSaved={onChanged}
+					/>
+				) : variable.is_secret ? (
 					<Chip
 						size="small"
 						icon={<LockIcon />}
@@ -578,6 +595,18 @@ function VariableRow({
 			<Typography variant="caption" color="text.secondary">
 				<TimeAgo timestamp={variable.updated_at} />
 			</Typography>
+			{onRemove && !editing && (
+				<GradedAction calls="ansible_variables/set" action={`Edit ${variable.name}`}>
+					<IconButton
+						size="small"
+						aria-label={`edit ${variable.name}`}
+						data-testid={`edit-${variable.name}`}
+						onClick={() => setEditing(true)}
+					>
+						<EditIcon fontSize="small" />
+					</IconButton>
+				</GradedAction>
+			)}
 			{onRemove && (
 				<GradedAction
 					calls="ansible_variables/remove"

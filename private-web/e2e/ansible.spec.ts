@@ -275,6 +275,65 @@ test.describe("group Ansible", () => {
 		await expect(production.getByTestId("secret-var")).toHaveCount(0);
 	});
 
+	// A variable's value is edited in its row, holding the value it has; a
+	// secret's field opens empty, and leaving the row keeps the value.
+	// spec: ANSVAR#presentation
+	test("edits a variable's value in its row", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
+		await seedServer(sql, {
+			name: "kamaka-prod-central",
+			type: "tamanu-central",
+			rank: "production",
+			groupId: group.id,
+			tags: {},
+		});
+		await seedAnsibleVariable(sql, {
+			serverGroupId: group.id,
+			rank: "production",
+			name: "log_level",
+			value: "info",
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		const production = page
+			.getByTestId("group-ansible")
+			.getByTestId("environment-production");
+		await production.getByTestId("variables-toggle").click();
+		const scope = production.getByTestId("scope-environment");
+		const logLevel = scope.getByTestId("var").filter({ hasText: "log_level" });
+
+		await scope.getByTestId("edit-log_level").click();
+		const field = scope.getByTestId("edit-variable").getByLabel("Value");
+		// Undescribed by any catalogue, so its value is JSON.
+		await expect(field).toHaveValue('"info"');
+		await field.fill("debug");
+		await field.press("Enter");
+		await expect(scope.getByTestId("edit-variable")).toHaveCount(0);
+		await expect(logLevel).toContainText('"debug"');
+
+		// Leaving without saving keeps the value.
+		await scope.getByTestId("edit-log_level").click();
+		await scope.getByTestId("edit-variable").getByLabel("Value").fill("trace");
+		await page.keyboard.press("Escape");
+		await expect(scope.getByTestId("edit-variable")).toHaveCount(0);
+		await expect(logLevel).toContainText('"debug"');
+
+		// A secret opens empty, and needs a new value to save.
+		await scope.getByTestId("variable-name").fill("salt");
+		await scope.getByTestId("value-is-secret").click();
+		await scope.getByTestId("set-variable").getByLabel("Value").fill("pepper");
+		await scope.getByRole("button", { name: "Set", exact: true }).click();
+		await scope.getByTestId("edit-salt").click();
+		const secret = scope.getByTestId("edit-variable");
+		await expect(secret.getByLabel("Value")).toHaveValue("");
+		await expect(secret.getByRole("button", { name: "Save" })).toBeDisabled();
+		await secret.getByLabel("Value").fill("paprika");
+		await secret.getByRole("button", { name: "Save" }).click();
+		await expect(scope.getByTestId("edit-variable")).toHaveCount(0);
+		await expect(scope.getByTestId("secret-var")).toContainText("salt");
+		await expect(page.getByText("paprika")).toHaveCount(0);
+	});
+
 	// The name completes from the catalogue, showing each variable's type, and
 	// the value is entered in a form shaped by it. A variable limited to other
 	// scopes is not offered.
