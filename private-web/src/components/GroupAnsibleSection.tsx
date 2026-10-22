@@ -114,7 +114,7 @@ export default function GroupAnsibleSection({
 						(machine) => machine.environment_rank === rank,
 					)}
 					applications={applications}
-					variables={variables.status === "ok" ? variables.data : []}
+					variables={variables.status === "ok" ? variables.data : null}
 					catalogue={catalogue.status === "ok" ? catalogue.data : null}
 					onChanged={reload}
 					maintenanceTick={maintenanceTick}
@@ -146,22 +146,26 @@ function EnvironmentAnsible({
 	onSelect: (rank: ServerRank) => void;
 	machines: ReadonlyArray<Machine>;
 	applications: ReadonlyArray<Application>;
-	variables: ReadonlyArray<AnsibleVariableView>;
+	/** Null until they have loaded, since whether they start collapsed turns on
+	 * how many there are. */
+	variables: ReadonlyArray<AnsibleVariableView> | null;
 	catalogue: Catalogue | null;
 	onChanged: () => void;
 	maintenanceTick: number;
 	onMaintenanceChange: () => void;
 }) {
+	const loaded = variables !== null;
+	const all = variables ?? [];
 	const machineIds = new Set(machines.map((machine) => machine.id));
-	const groupVars = variables.filter(
+	const groupVars = all.filter(
 		(variable) => variable.server_group_id && !variable.rank && !variable.machine_id,
 	);
-	const environmentVars = variables.filter((variable) => variable.rank === rank);
+	const environmentVars = all.filter((variable) => variable.rank === rank);
 	const machineVars = (machineId: string) =>
-		variables.filter((variable) => variable.machine_id === machineId);
+		all.filter((variable) => variable.machine_id === machineId);
 	const environmentCount =
 		environmentVars.length +
-		variables.filter(
+		all.filter(
 			(variable) => variable.machine_id && machineIds.has(variable.machine_id),
 		).length;
 	const count = groupVars.length + environmentCount;
@@ -205,6 +209,7 @@ function EnvironmentAnsible({
 					onChanged={onMaintenanceChange}
 				/>
 
+				{loaded && (
 				<Variables
 					key={rank}
 					groupId={groupId}
@@ -220,6 +225,7 @@ function EnvironmentAnsible({
 					catalogue={catalogue}
 					onChanged={onChanged}
 				/>
+				)}
 			</Stack>
 		</Paper>
 	);
