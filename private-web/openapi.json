@@ -5177,6 +5177,11 @@
       "ImportApplied": {
         "description": "What an applied import did.",
         "properties": {
+          "machine_notes_added": {
+            "description": "How many machines' notes were added to.",
+            "minimum": 0,
+            "type": "integer"
+          },
           "machines": {
             "description": "How many machines they were set on.",
             "minimum": 0,
@@ -5195,7 +5200,8 @@
         "required": [
           "variables",
           "machines",
-          "notes_added"
+          "notes_added",
+          "machine_notes_added"
         ],
         "type": "object"
       },
@@ -5206,6 +5212,16 @@
           },
           {
             "properties": {
+              "host_notes": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "The notes to append to each host's machine, by the host's key, as the\noperator left them. A host not named appends what was proposed, and a\nblank one appends nothing.",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
               "members": {
                 "description": "The identifier of the environment's machines the preview was taken\nagainst, so an import is refused if they have changed since.",
                 "type": "string"
@@ -5283,6 +5299,10 @@
               "null"
             ]
           },
+          "notes": {
+            "description": "The file's comments about the host as proposed notes for its machine,\nblank where there are none or the host is skipped.",
+            "type": "string"
+          },
           "state": {
             "$ref": "#/components/schemas/HostState",
             "description": "How the host stands against the environment's machines."
@@ -5299,7 +5319,8 @@
           "key",
           "state",
           "candidates",
-          "variables"
+          "variables",
+          "notes"
         ],
         "type": "object"
       },

@@ -65,6 +65,10 @@ Fields of a secret value are masked as they are typed.
 A known variable that is secret is entered as one.
 One the catalogue limits to other scopes is not offered, nor one limited to application types the scope holds none of, a machine with nothing on it being offered every type.
 
+Each variable can be edited in its row, its value opening in the same form as adding one, holding the value it has.
+A secret's field opens empty, since its value is never shown, and saving it needs a new value.
+Saving replaces the value, and leaving the row without saving keeps it as it was.
+
 A scope can instead be edited as text, one variable per line as YAML, with names completing from the catalogue as they do in a row.
 A value is read as it would be in an inventory file (see [ANSIMP](import.md), "Reading the file").
 A secret appears as a placeholder that is kept unless a new value is typed over it, and a value tagged as secret is set as one.

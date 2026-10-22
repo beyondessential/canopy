@@ -1,4 +1,5 @@
 import DeleteIcon from "@mui/icons-material/Delete";
+import EditIcon from "@mui/icons-material/Edit";
 import EditNoteIcon from "@mui/icons-material/EditNote";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutlined";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
@@ -31,6 +32,7 @@ import AnsibleRuns from "./AnsibleRuns";
 import { GradedAction } from "./GradedAction";
 import TimeAgo from "./TimeAgo";
 import ScopeTextEditor from "./ansible/ScopeTextEditor";
+import VariableEditRow from "./ansible/VariableEditRow";
 import VariableEntryRow from "./ansible/VariableEntryRow";
 import type { ScopeKind } from "./ansible/schema";
 
@@ -114,7 +116,7 @@ export default function GroupAnsibleSection({
 						(machine) => machine.environment_rank === rank,
 					)}
 					applications={applications}
-					variables={variables.status === "ok" ? variables.data : []}
+					variables={variables.status === "ok" ? variables.data : null}
 					catalogue={catalogue.status === "ok" ? catalogue.data : null}
 					onChanged={reload}
 					maintenanceTick={maintenanceTick}
@@ -146,22 +148,26 @@ function EnvironmentAnsible({
 	onSelect: (rank: ServerRank) => void;
 	machines: ReadonlyArray<Machine>;
 	applications: ReadonlyArray<Application>;
-	variables: ReadonlyArray<AnsibleVariableView>;
+	/** Null until they have loaded, since whether they start collapsed turns on
+	 * how many there are. */
+	variables: ReadonlyArray<AnsibleVariableView> | null;
 	catalogue: Catalogue | null;
 	onChanged: () => void;
 	maintenanceTick: number;
 	onMaintenanceChange: () => void;
 }) {
+	const loaded = variables !== null;
+	const all = variables ?? [];
 	const machineIds = new Set(machines.map((machine) => machine.id));
-	const groupVars = variables.filter(
+	const groupVars = all.filter(
 		(variable) => variable.server_group_id && !variable.rank && !variable.machine_id,
 	);
-	const environmentVars = variables.filter((variable) => variable.rank === rank);
+	const environmentVars = all.filter((variable) => variable.rank === rank);
 	const machineVars = (machineId: string) =>
-		variables.filter((variable) => variable.machine_id === machineId);
+		all.filter((variable) => variable.machine_id === machineId);
 	const environmentCount =
 		environmentVars.length +
-		variables.filter(
+		all.filter(
 			(variable) => variable.machine_id && machineIds.has(variable.machine_id),
 		).length;
 	const count = groupVars.length + environmentCount;
@@ -205,6 +211,7 @@ function EnvironmentAnsible({
 					onChanged={onMaintenanceChange}
 				/>
 
+				{loaded && (
 				<Variables
 					key={rank}
 					groupId={groupId}
@@ -220,6 +227,7 @@ function EnvironmentAnsible({
 					catalogue={catalogue}
 					onChanged={onChanged}
 				/>
+				)}
 			</Stack>
 		</Paper>
 	);
@@ -470,6 +478,7 @@ function Scope({
 										other.name === variable.name && other.id !== variable.id,
 								)}
 								scope={scope}
+								catalogue={catalogue}
 								onRemove={isAdmin ? remove : undefined}
 								onChanged={onChanged}
 							/>
@@ -503,20 +512,24 @@ function Scope({
 }
 
 /// One variable of a scope: its name and value, a secret by name only, what it
-/// overrides, and what the catalogue now says of it.
+/// overrides, and what the catalogue now says of it. An administrator can edit
+/// its value in place, or remove it.
 function VariableRow({
 	variable,
 	overrides,
 	scope,
+	catalogue,
 	onRemove,
 	onChanged,
 }: {
 	variable: AnsibleVariableView;
 	overrides?: AnsibleVariableView;
 	scope: Record<string, unknown>;
+	catalogue: Catalogue | null;
 	onRemove?: { call: (params?: Record<string, unknown>) => Promise<unknown> };
 	onChanged: () => void;
 }) {
+	const [editing, setEditing] = useState(false);
 	const testid = variable.is_secret
 		? "secret-var"
 		: overrides
@@ -536,7 +549,17 @@ function VariableRow({
 				{variable.name}
 			</Typography>
 			<Box sx={{ flex: 1, minWidth: 0 }}>
-				{variable.is_secret ? (
+				{editing ? (
+					<VariableEditRow
+						name={variable.name}
+						value={variable.value}
+						secret={variable.is_secret}
+						scope={scope}
+						catalogue={catalogue}
+						onClose={() => setEditing(false)}
+						onSaved={onChanged}
+					/>
+				) : variable.is_secret ? (
 					<Chip
 						size="small"
 						icon={<LockIcon />}
@@ -572,6 +595,18 @@ function VariableRow({
 			<Typography variant="caption" color="text.secondary">
 				<TimeAgo timestamp={variable.updated_at} />
 			</Typography>
+			{onRemove && !editing && (
+				<GradedAction calls="ansible_variables/set" action={`Edit ${variable.name}`}>
+					<IconButton
+						size="small"
+						aria-label={`edit ${variable.name}`}
+						data-testid={`edit-${variable.name}`}
+						onClick={() => setEditing(true)}
+					>
+						<EditIcon fontSize="small" />
+					</IconButton>
+				</GradedAction>
+			)}
 			{onRemove && (
 				<GradedAction
 					calls="ansible_variables/remove"

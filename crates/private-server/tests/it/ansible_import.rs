@@ -28,6 +28,7 @@ all:
       secret_access_key: xyz
     tamanu_version: v2.64.3
   hosts:
+    # Central is in the cloud
     kamaka-central:
       public_hostname: central.example.org
       tailscale_name: kamaka-central
@@ -40,6 +41,7 @@ all:
           public_hostname: facility-a.example.org
           tamanu_facility_id: facility-a
         10.20.30.40:223:
+          # Behind the site VPN
           ansible_user: siteadmin
           tamanu_facility_id: office
 ";
@@ -417,6 +419,7 @@ async fn applies_once_every_host_is_matched_or_skipped() {
 		.await;
 		assert_eq!(host(&skipped, "10.20.30.40:223")["state"], "skipped");
 		assert_eq!(host(&skipped, "10.20.30.40:223")["variables"], json!([]));
+		assert_eq!(host(&skipped, "10.20.30.40:223")["notes"], "");
 		assert_eq!(skipped["can_apply"], true, "{skipped}");
 
 		let assigned = preview(
@@ -521,8 +524,9 @@ async fn refuses_a_file_that_is_not_an_inventory() {
 }
 
 /// Applying sets every variable where the preview said, writes a secret to the
-/// secret store and not beside its name, appends the notes, and records one
-/// entry that holds no secret.
+/// secret store and not beside its name, appends the notes to the group and to
+/// each machine a host's comments are about, and records one entry that holds
+/// no secret.
 // spec: ANSIMP#applying
 #[tokio::test(flavor = "multi_thread")]
 async fn applying_sets_the_variables_and_notes_and_records_one_entry() {
@@ -542,14 +546,52 @@ async fn applying_sets_the_variables_and_notes_and_records_one_entry() {
 		});
 		let previewed = preview(&private, request.clone()).await;
 		assert_eq!(previewed["can_apply"], true, "{previewed}");
+		let proposed = |key: &str| {
+			previewed["hosts"]
+				.as_array()
+				.unwrap()
+				.iter()
+				.find(|host| host["key"] == key)
+				.unwrap()["notes"]
+				.clone()
+		};
+		assert_eq!(proposed("kamaka-central"), "Central is in the cloud");
+		assert_eq!(proposed("10.20.30.40:223"), "Behind the site VPN");
+		assert_eq!(proposed("kamaka-facility-a"), "");
 
+		conn.batch_execute(&format!(
+			"UPDATE machines SET notes = 'Racked in the server room.' WHERE id = '{}'",
+			env.office
+		))
+		.await
+		.unwrap();
 		let mut apply = request.clone();
 		apply["members"] = previewed["members"].clone();
+		apply["host_notes"] = json!({ "10.20.30.40:223": "  Behind the site VPN, ask the site lead  " });
 		let response = private.post("/api/ansible/import_apply").json(&apply).await;
 		response.assert_status_ok();
 		let applied: Value = response.json();
 		assert_eq!(applied["machines"], 3);
 		assert_eq!(applied["notes_added"], true);
+		assert_eq!(applied["machine_notes_added"], 2);
+
+		// A host's comments go on its machine, as the operator left them, after
+		// what was there.
+		let central = database::machines::Machine::get_by_id(&mut conn, env.central)
+			.await
+			.unwrap();
+		assert_eq!(central.notes, "Central is in the cloud");
+		let office = database::machines::Machine::get_by_id(&mut conn, env.office)
+			.await
+			.unwrap();
+		assert_eq!(
+			office.notes,
+			"Racked in the server room.\n\nBehind the site VPN, ask the site lead"
+		);
+		let facility = database::machines::Machine::get_by_id(&mut conn, env.facility)
+			.await
+			.unwrap();
+		assert_eq!(facility.notes, "");
 
 		// What a run is served: the environment's variables everywhere, each
 		// machine's own, and a secret's value from the store.
@@ -612,6 +654,10 @@ async fn applying_sets_the_variables_and_notes_and_records_one_entry() {
 		let entry = &entries[0];
 		let detail = &entry.detail;
 		assert_eq!(detail["notes_added"], true);
+		assert_eq!(
+			detail["machine_notes"],
+			json!(["kamaka-office", "kamaka-central"])
+		);
 		assert_eq!(detail["rank"], "production");
 		let variables = detail["variables"].as_array().unwrap();
 		assert!(

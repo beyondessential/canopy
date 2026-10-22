@@ -31,7 +31,11 @@ A key that is the machine's tailnet name, in full or by its first label, adds no
 
 Every machine a host is imported onto has `managed_by_ansible` set, since the file names it as one a run configures.
 
-The file's comment lines are appended to the group's notes (see [GRP](../../servers/groups.md)), under a heading naming the environment, since they hold what an operator needs to know before a run, such as where a key is kept or which network to join.
+The file's comment lines hold what an operator needs to know before a run, such as where a key is kept or which network to join, so they are carried as notes.
+A comment within a host's entry, or in the run of comment lines directly above its key, is about that host, and is appended to the notes of the machine it is matched to.
+A host listed in several groups gathers the comments from each place it is listed.
+A skipped host's comments are not imported.
+Every other comment is appended to the group's notes (see [GRP](../../servers/groups.md)), under a heading naming the environment.
 
 ## Matching hosts to machines
 
@@ -45,7 +49,7 @@ A host that matches exactly one machine is proposed for it, and one that matches
 Nothing is applied until the operator has reviewed a preview of the import.
 It lists each host beside the machine it is matched to, and every variable that would be set, with its value and where it would be set.
 It lists the reserved variables left out, and any group variable an imported environment variable would override.
-It shows the comments that would be added to the group's notes, which the operator can edit or remove before applying.
+It shows the comments that would be added to the group's notes and to each machine's, which the operator can edit or remove before applying.
 The operator can assign any host to a different member of the environment, or skip it, and a skipped host's variables are not imported.
 The import cannot be applied while a host is neither matched nor skipped, or while two hosts are matched to one machine.
 
@@ -65,5 +69,5 @@ The environment's presentation shows the imported variables as soon as it is app
 
 ## Audit
 
-Importing a file is audited as one entry naming the environment and the variables it set, with the machine each was set on, and whether it added to the group's notes (see [AUD](../../platform/audit-log.md)).
+Importing a file is audited as one entry naming the environment and the variables it set, with the machine each was set on, and the notes it added to, the group's and each machine's (see [AUD](../../platform/audit-log.md)).
 A secret's value never appears in a log.

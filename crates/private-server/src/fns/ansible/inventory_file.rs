@@ -44,6 +44,10 @@ pub struct FileHost {
 	/// name that sorts later. A host's own value wins over all of it, so a name
 	/// the host sets is not here.
 	pub inherited: BTreeMap<String, Value>,
+	/// The comment lines about the host, without their `#`, in order: those
+	/// within its entry, and the run directly above its key, from every place
+	/// it is listed.
+	pub comments: Vec<String>,
 }
 
 impl FileHost {
@@ -61,7 +65,8 @@ pub struct InventoryFile {
 	pub environment: BTreeMap<String, Value>,
 	/// Every host, by the key the file gives it.
 	pub hosts: BTreeMap<String, FileHost>,
-	/// The file's comment lines, without their `#`, in order.
+	/// The file's comment lines that are about no host, without their `#`, in
+	/// order.
 	pub comments: Vec<String>,
 }
 
@@ -99,6 +104,8 @@ struct Builder {
 	/// Lines that hold the text of a block scalar, which a `#` on does not
 	/// begin a comment.
 	block_lines: BTreeSet<usize>,
+	/// Where each host's key is written: the key, its line, and its column.
+	host_keys: Vec<HostKey>,
 	/// How many nodes aliases have copied in, which a document that nests them
 	/// can make grow exponentially.
 	aliased: usize,
@@ -129,7 +136,41 @@ impl Node {
 	}
 }
 
+/// Where a host's key is written in the file.
+struct HostKey {
+	key: String,
+	/// Its line, counting from one.
+	line: usize,
+	/// Its column, counting from zero.
+	column: usize,
+}
+
+/// Whether a key at `path` names a host: the keys above it are a group,
+/// any number of `children` and a group beneath, then `hosts`.
+fn is_host_path(path: &[String]) -> bool {
+	path.len() >= 2
+		&& path.len().is_multiple_of(2)
+		&& path.last().is_some_and(|key| key == "hosts")
+		&& path[1..path.len() - 1]
+			.iter()
+			.step_by(2)
+			.all(|key| key == "children")
+}
+
 impl Builder {
+	/// The keys whose values hold what comes next, from the top, where every
+	/// one of them is a scalar key of a mapping.
+	fn path(&self) -> Option<Vec<String>> {
+		let (_, above) = self.stack.split_last()?;
+		above
+			.iter()
+			.map(|frame| match frame {
+				Frame::Map { key: Some(key), .. } => key_text(key, &[]).ok(),
+				_ => None,
+			})
+			.collect()
+	}
+
 	/// Place a node of `height` levels in what is open.
 	fn push(&mut self, node: Node, height: usize) {
 		if let Some(held) = self.heights.last_mut() {
@@ -177,6 +218,17 @@ impl MarkedEventReceiver for Builder {
 						.extend(mark.line()..mark.line() + text.lines().count().max(1));
 				}
 				let node = Node::Scalar { text, style, tag };
+				if matches!(self.stack.last(), Some(Frame::Map { key: None, .. }))
+					&& let Some(path) = self.path()
+					&& is_host_path(&path)
+					&& let Ok(key) = key_text(&node, &path)
+				{
+					self.host_keys.push(HostKey {
+						key,
+						line: mark.line(),
+						column: mark.col(),
+					});
+				}
 				self.anchor(id, &node, 1);
 				self.push(node, 1);
 			}
@@ -575,6 +627,8 @@ pub fn parse(text: &str) -> Result<InventoryFile, ParseError> {
 			.unwrap_or(1)
 	};
 
+	let (comments, mut host_comments) = comments(text, &builder.block_lines, &builder.host_keys);
+
 	let mut hosts = BTreeMap::new();
 	for (key, own) in host_vars {
 		let mut layers: Vec<(&String, usize, i64)> = membership[&key]
@@ -595,11 +649,13 @@ pub fn parse(text: &str) -> Result<InventoryFile, ParseError> {
 		for name in own.keys() {
 			inherited.remove(name);
 		}
+		let comments = host_comments.remove(&key).unwrap_or_default();
 		hosts.insert(
 			key,
 			FileHost {
 				own: own.into_iter().collect(),
 				inherited,
+				comments,
 			},
 		);
 	}
@@ -618,20 +674,77 @@ pub fn parse(text: &str) -> Result<InventoryFile, ParseError> {
 	Ok(InventoryFile {
 		environment,
 		hosts,
-		comments: comments(text, &builder.block_lines),
+		comments,
 	})
 }
 
-/// The comment lines: those whose first character is `#`, outside block
-/// scalars, without the `#` and the space after it.
-fn comments(text: &str, block_lines: &BTreeSet<usize>) -> Vec<String> {
-	text.lines()
-		.enumerate()
-		.filter(|(index, _)| !block_lines.contains(&(index + 1)))
-		.filter_map(|(_, line)| line.trim_start().strip_prefix('#'))
-		.map(|comment| comment.trim_start_matches('#').trim().to_owned())
-		.filter(|comment| !comment.is_empty())
-		.collect()
+/// The comment lines, those whose first character is `#` outside block
+/// scalars, without the `#` and the space after it: those about no host, and
+/// those about each host by its key.
+///
+/// A comment is about a host when it sits within the host's entry, indented
+/// beneath its key, or in the run of comment lines directly above its key
+/// that no host's entry holds.
+// spec: ANSIMP#reading-the-file
+fn comments(
+	text: &str,
+	block_lines: &BTreeSet<usize>,
+	host_keys: &[HostKey],
+) -> (Vec<String>, BTreeMap<String, Vec<String>>) {
+	let lines: Vec<&str> = text.lines().collect();
+	let indent = |line: &str| line.chars().count() - line.trim_start().chars().count();
+	// The comment on a line, by index, with the column its `#` is at.
+	let comment = |index: usize| -> Option<(usize, &str)> {
+		if block_lines.contains(&(index + 1)) {
+			return None;
+		}
+		let line = lines[index];
+		line.trim_start()
+			.strip_prefix('#')
+			.map(|comment| (indent(line), comment))
+	};
+
+	let mut owner: Vec<Option<&str>> = vec![None; lines.len()];
+	for host in host_keys {
+		// Its entry runs on until a line that is not indented beneath its key.
+		for index in host.line.min(lines.len())..lines.len() {
+			if let Some((column, _)) = comment(index) {
+				if column > host.column && owner[index].is_none() {
+					owner[index] = Some(&host.key);
+				}
+			} else if !lines[index].trim().is_empty() && indent(lines[index]) <= host.column {
+				break;
+			}
+		}
+	}
+	for host in host_keys {
+		for index in (0..host.line.saturating_sub(1).min(lines.len())).rev() {
+			if comment(index).is_none() || owner[index].is_some() {
+				break;
+			}
+			owner[index] = Some(&host.key);
+		}
+	}
+
+	let mut unowned = Vec::new();
+	let mut by_host: BTreeMap<String, Vec<String>> = BTreeMap::new();
+	for (index, owner) in owner.iter().enumerate() {
+		let Some((_, comment)) = comment(index) else {
+			continue;
+		};
+		let comment = comment.trim_start_matches('#').trim();
+		if comment.is_empty() {
+			continue;
+		}
+		match owner {
+			Some(host) => by_host
+				.entry((*host).to_owned())
+				.or_default()
+				.push(comment.to_owned()),
+			None => unowned.push(comment.to_owned()),
+		}
+	}
+	(unowned, by_host)
 }
 
 #[cfg(test)]
@@ -975,6 +1088,73 @@ all:
 			]
 		);
 		assert_eq!(file.environment["banner"], json!("# not a comment\ntext\n"));
+	}
+
+	#[test]
+	fn a_comment_within_a_hosts_entry_or_directly_above_it_is_about_that_host() {
+		let file = parse(
+			"# About the environment
+all:
+  hosts:
+    # Office box, behind the site VPN
+    # Ask the site lead for access
+    office:
+      # Key is in the password manager
+      ansible_user: ubuntu
+      # Rotated yearly
+    # Central is in the cloud
+    central:
+      public_hostname: central.example.org
+
+    # Spare, not about any host
+  children:
+    facilities:
+      hosts:
+        office:
+          # Listed again beneath a group
+          tamanu_facility_id: office
+      # About the facilities group
+      vars:
+        timezone: Pacific/Auckland
+",
+		)
+		.unwrap();
+		assert_eq!(
+			host(&file, "office").comments,
+			[
+				"Office box, behind the site VPN",
+				"Ask the site lead for access",
+				"Key is in the password manager",
+				"Rotated yearly",
+				"Listed again beneath a group",
+			]
+		);
+		assert_eq!(host(&file, "central").comments, ["Central is in the cloud"]);
+		assert_eq!(
+			file.comments,
+			[
+				"About the environment",
+				"Spare, not about any host",
+				"About the facilities group",
+			]
+		);
+	}
+
+	#[test]
+	fn a_variable_named_hosts_does_not_make_its_keys_hosts() {
+		let file = parse(
+			"all:
+  vars:
+    hosts:
+      # About a variable
+      office: 1
+  hosts:
+    office: {}
+",
+		)
+		.unwrap();
+		assert!(host(&file, "office").comments.is_empty());
+		assert_eq!(file.comments, ["About a variable"]);
 	}
 
 	#[test]
