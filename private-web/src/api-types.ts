@@ -324,8 +324,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * A variable's history: each time it was set, restored, or removed, newest
-         *     first, as far back as the audit log's database holds.
+         * A variable's history.
+         * @description Each time it was set, restored, or removed, newest first, as far back as the
+         *     audit log's database holds. A plain value is shown as set or removed; a
+         *     secret's never is, only whether what it put away can still be put back.
          */
         post: operations["ansible_variables_history"];
         delete?: never;
@@ -366,8 +368,9 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * The variables removed from a scope in the last week and not set there since,
-         *     newest first, so a removal can be undone after its offer has gone.
+         * The variables recently removed from a scope.
+         * @description Those removed in the last week and not set there since, newest first, so a
+         *     removal can be undone after its offer has gone.
          */
         post: operations["ansible_variables_removed"];
         delete?: never;

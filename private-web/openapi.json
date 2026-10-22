@@ -15724,6 +15724,7 @@
     },
     "/api/ansible_variables/history": {
       "post": {
+        "description": "Each time it was set, restored, or removed, newest first, as far back as the\naudit log's database holds. A plain value is shown as set or removed; a\nsecret's never is, only whether what it put away can still be put back.",
         "operationId": "ansible_variables_history",
         "requestBody": {
           "content": {
@@ -15765,7 +15766,7 @@
             "tailscale-admin": []
           }
         ],
-        "summary": "A variable's history: each time it was set, restored, or removed, newest\nfirst, as far back as the audit log's database holds.",
+        "summary": "A variable's history.",
         "tags": [
           "ansible"
         ],
@@ -15846,6 +15847,7 @@
     },
     "/api/ansible_variables/removed": {
       "post": {
+        "description": "Those removed in the last week and not set there since, newest first, so a\nremoval can be undone after its offer has gone.",
         "operationId": "ansible_variables_removed",
         "requestBody": {
           "content": {
@@ -15887,7 +15889,7 @@
             "tailscale-admin": []
           }
         ],
-        "summary": "The variables removed from a scope in the last week and not set there since,\nnewest first, so a removal can be undone after its offer has gone.",
+        "summary": "The variables recently removed from a scope.",
         "tags": [
           "ansible"
         ],

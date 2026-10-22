@@ -583,8 +583,11 @@ async fn history_entry(
 	})
 }
 
-/// A variable's history: each time it was set, restored, or removed, newest
-/// first, as far back as the audit log's database holds.
+/// A variable's history.
+///
+/// Each time it was set, restored, or removed, newest first, as far back as the
+/// audit log's database holds. A plain value is shown as set or removed; a
+/// secret's never is, only whether what it put away can still be put back.
 // spec: ANSVAR#history
 #[utoipa::path(
 	post,
@@ -620,8 +623,10 @@ pub async fn history(
 	Ok(Json(out))
 }
 
-/// The variables removed from a scope in the last week and not set there since,
-/// newest first, so a removal can be undone after its offer has gone.
+/// The variables recently removed from a scope.
+///
+/// Those removed in the last week and not set there since, newest first, so a
+/// removal can be undone after its offer has gone.
 // spec: ANSVAR#presentation
 #[utoipa::path(
 	post,
