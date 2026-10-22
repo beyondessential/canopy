@@ -10,7 +10,7 @@ import {
 } from "yaml";
 import { resolvePlain } from "./pyyaml";
 import type { CatalogueView } from "../../types";
-import { type Schema, type ScopeKind, offered, problems } from "./schema";
+import { MANAGED, type Schema, type ScopeKind, offered, problems } from "./schema";
 
 /** The longest variable name the server accepts. */
 const NAME_LIMIT = 253;
@@ -190,6 +190,13 @@ export function checkScope(
 			out.push({
 				line: entry.line,
 				message: `${entry.name} is not a usable variable name`,
+			});
+			continue;
+		}
+		if (entry.name === MANAGED) {
+			out.push({
+				line: entry.line,
+				message: `${entry.name} is set by the machine's switch`,
 			});
 			continue;
 		}

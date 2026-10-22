@@ -20,10 +20,22 @@ A member with nothing on it is served with the application type its run assigns 
 A member names which of those variables are secret.
 The environment's own variables are served once beside the members.
 
+A member is managed by Ansible, or not, and a run acts only on the members that are (see "Managed machines").
+A member that is not managed is still served, and a run leaves it alone.
+
+What a run is served carries the lease it is served under: the intent, playbook, limit, and tags it was taken with (see [ANSRUN](runs.md), "Run leases").
+A run takes those from Canopy, rather than from how it was started, so a lease taken for one purpose cannot be put to another.
+
 Canopy serves the environment's shape and the caller renders it into Ansible's inventory, so no Ansible format appears in the response.
 
 What a run is served carries secret values, so it is served to an administrator (see [ADM](../admin-access.md)), and a run reads it as the administrator running it.
 It is served only to the holder of the environment's lease (see [ANSRUN](runs.md), "Run leases").
+
+## Managed machines
+
+Whether a machine is managed by Ansible is the `managed_by_ansible` variable, set at machine scope alone, since it says what a run may do to that one machine.
+It is set by a switch on the machine rather than as a variable, and is not listed among the machine's variables.
+A machine with it unset is not managed.
 
 ## Reaching a machine
 

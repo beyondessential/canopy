@@ -45,6 +45,18 @@ diesel::table! {
 }
 
 diesel::table! {
+	ansible_secret_values_held (entry_id) {
+		entry_id -> Uuid,
+		server_group_id -> Nullable<Uuid>,
+		rank -> Nullable<Text>,
+		machine_id -> Nullable<Uuid>,
+		name -> Text,
+		held_until -> Timestamptz,
+		created_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	ansible_variables (id) {
 		id -> Uuid,
 		server_group_id -> Nullable<Uuid>,
@@ -1199,6 +1211,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	admins,
 	ansible_catalogue,
 	ansible_leases,
+	ansible_secret_values_held,
 	ansible_variables,
 	application_certificate_names,
 	application_certificates,

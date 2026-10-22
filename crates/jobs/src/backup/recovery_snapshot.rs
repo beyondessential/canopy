@@ -34,7 +34,7 @@ use commons_types::status::CheckResult;
 use database::{
 	BackupConfigStatus, BackupTypeDefault, MachineBackupCapability, ServerGroupBackupConfig,
 	ServerGroupBackupSchedule,
-	ansible_variables::{AnsibleVariable, VariableScope},
+	ansible_variables::{AnsibleVariable, HeldSecretValue, VariableScope},
 	applications::Application,
 	backup::schedules::{MachineBackupSchedule, ScheduleChange},
 	self_alerts::{self, RECOVERY_ESCROW_DOC, RECOVERY_ESCROW_REF},
@@ -57,6 +57,10 @@ const DEFAULT_SNAPSHOT_HOURS: u64 = 24;
 /// How soon an escrow that wasn't written whole is tried again, when that is
 /// sooner than the configured period.
 const RETRY_PERIOD: Duration = Duration::from_secs(3600);
+/// How often, between writes, the escrow looks for a secret variable changed
+/// since the last, which brings the next write forward.
+// spec: ANSVAR#history
+const SECRET_CHECK: Duration = Duration::from_secs(3600);
 /// How many times in a row an escrow may be rewritten with the very same values
 /// left out before it goes back to the configured period: each write is a new
 /// object-locked version, and a fault that has outlasted this many retries isn't
@@ -72,7 +76,9 @@ const REPO_PASSWORD_KEY: &str = "password";
 /// Version 4 names what a snapshot left out: a keyset that couldn't be read is
 /// null with an `unreadable` reason, and a scope's secret variables that couldn't
 /// be read are listed under `unreadable`.
-const SCHEMA_VERSION: u32 = 4;
+/// Version 5 adds each scope's `held` secret values: earlier values a change
+/// replaced or removed, each named by its variable and the change.
+const SCHEMA_VERSION: u32 = 5;
 
 /// Where + how the recovery vault is written. Recipients are mandatory; the rest
 /// comes from `CANOPY_RECOVERY_VAULT_*`.
@@ -147,9 +153,32 @@ struct RecoveryAnsibleVariables {
 	#[serde(serialize_with = "expose")]
 	keys: BTreeMap<String, SecretString>,
 	/// Secret variables whose value isn't in `keys`, because the Secret couldn't
-	/// be read or doesn't hold them.
+	/// be read or doesn't hold them, and held values not in `held`.
 	#[serde(skip_serializing_if = "Vec::is_empty")]
 	unreadable: Vec<String>,
+	/// Earlier secret values still held after the change that replaced or
+	/// removed them.
+	// spec: ANSVAR#history
+	#[serde(skip_serializing_if = "Vec::is_empty")]
+	held: Vec<RecoveryHeldValue>,
+}
+
+/// A secret's earlier value, held after the change that replaced or removed it.
+#[derive(Serialize)]
+struct RecoveryHeldValue {
+	/// The variable it was the value of.
+	name: String,
+	/// The audit entry of the change that replaced or removed it.
+	replaced_by: uuid::Uuid,
+	#[serde(serialize_with = "expose_one")]
+	value: SecretString,
+}
+
+fn expose_one<S: serde::Serializer>(
+	value: &SecretString,
+	serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+	serializer.serialize_str(value.expose_secret())
 }
 
 #[derive(Serialize)]
@@ -329,6 +358,15 @@ pub async fn build_snapshot(
 			.or_default()
 			.insert(variable.name.clone(), variable.value.clone());
 	}
+	let mut held_by_scope: BTreeMap<VariableScope, Vec<HeldSecretValue>> = BTreeMap::new();
+	for held in HeldSecretValue::list_all(db)
+		.await
+		.context("list held Ansible secret values")?
+	{
+		// A scope holding nothing now may still hold what was removed from it.
+		by_scope.entry(held.scope()).or_default();
+		held_by_scope.entry(held.scope()).or_default().push(held);
+	}
 	let mut ansible_variables = Vec::with_capacity(by_scope.len());
 	for (scope, variables) in by_scope {
 		let secret = scope.secret_name();
@@ -355,11 +393,34 @@ pub async fn build_snapshot(
 				}
 			}
 		};
-		let unreadable: Vec<String> = held
+		let mut unreadable: Vec<String> = held
 			.iter()
 			.filter(|name| !keys.contains_key(**name))
 			.map(|name| name.to_string())
 			.collect();
+		let mut held_values = Vec::new();
+		if let Some(noted) = held_by_scope.remove(&scope) {
+			let held_secret = scope.held_secret_name();
+			let mut stored = match secrets.try_read_secret_keys_partial(&held_secret).await {
+				Ok(found) => found.map(|(keys, _)| keys).unwrap_or_default(),
+				Err(e) => {
+					warn!(secret = %held_secret, "recovery-snapshot: held secret values unreadable ({e}); leaving them out");
+					BTreeMap::new()
+				}
+			};
+			for noted in noted {
+				match stored.remove(&noted.entry_id.to_string()) {
+					Some(value) => held_values.push(RecoveryHeldValue {
+						name: noted.name,
+						replaced_by: noted.entry_id,
+						value,
+					}),
+					None => {
+						unreadable.push(format!("{} (held for {})", noted.name, noted.entry_id))
+					}
+				}
+			}
+		}
 		if !unreadable.is_empty() {
 			warn!(%secret, missing = ?unreadable, "recovery-snapshot: secret variables not read; leaving them out");
 			gaps.push(format!("{secret}: {}", unreadable.join(", ")));
@@ -373,6 +434,7 @@ pub async fn build_snapshot(
 				.collect(),
 			keys,
 			unreadable,
+			held: held_values,
 		});
 	}
 
@@ -556,6 +618,7 @@ pub fn spawn(worker: Worker, config: RecoveryVaultConfig) -> JoinHandle<()> {
 		);
 		let mut backoff = Backoff::default();
 		loop {
+			let taken = Timestamp::now();
 			let outcome = tick(&worker, &config).await;
 			if let Err(e) = &outcome {
 				error!("recovery-snapshot tick failed: {e:#}");
@@ -568,9 +631,33 @@ pub fn spawn(worker: Worker, config: RecoveryVaultConfig) -> JoinHandle<()> {
 				}
 				Err(e) => error!("recovery-snapshot: failed to report escrow state: db: {e}"),
 			}
-			sleep(backoff.after(config.period, &outcome)).await;
+			wait(&worker, backoff.after(config.period, &outcome), taken).await;
 		}
 	})
+}
+
+/// Wait out `period`, or until a secret variable has changed since `since`,
+/// looked for every [`SECRET_CHECK`].
+async fn wait(worker: &Worker, period: Duration, since: Timestamp) {
+	let deadline = tokio::time::Instant::now() + period;
+	loop {
+		let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+		if left.is_zero() {
+			return;
+		}
+		sleep(left.min(SECRET_CHECK)).await;
+		match worker.pool.get().await {
+			Ok(mut db) => match AnsibleVariable::latest_secret_change(&mut db).await {
+				Ok(Some(changed)) if changed > since => {
+					info!("recovery-snapshot: a secret variable changed; writing the escrow early");
+					return;
+				}
+				Ok(_) => {}
+				Err(e) => warn!("recovery-snapshot: could not look for changed secrets: {e}"),
+			},
+			Err(e) => warn!("recovery-snapshot: could not look for changed secrets: db: {e}"),
+		}
+	}
 }
 
 #[cfg(test)]
@@ -668,6 +755,105 @@ mod tests {
 			let group = &value["groups"][0]["config"]["schedules"][0];
 			assert_eq!(group["expected_cron"], "0 2 * * *");
 			assert_eq!(group["schedule_zone"], "Pacific/Auckland");
+		})
+		.await;
+	}
+
+	/// A secret's earlier value held after a change is escrowed beside the
+	/// scope's variables, even where the scope now sets nothing.
+	// spec: ANSVAR#history
+	#[tokio::test(flavor = "multi_thread")]
+	async fn snapshot_includes_held_secret_values() {
+		TestDb::run(|mut conn, _url| async move {
+			let group_id = uuid::Uuid::new_v4();
+			conn.batch_execute(&format!(
+				"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');"
+			))
+			.await
+			.unwrap();
+			let scope = VariableScope::Environment {
+				group_id,
+				rank: commons_types::server::rank::ServerRank::Production,
+			};
+			let secrets = BackupSecrets::memory();
+			let (kept, lost) = (uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+			secrets
+				.put_keys(
+					&scope.held_secret_name(),
+					&BTreeMap::from([(kept.to_string(), "\"pepper\"".to_string())]),
+				)
+				.await
+				.unwrap();
+			for entry in [kept, lost] {
+				HeldSecretValue::hold(&mut conn, entry, scope, "salt")
+					.await
+					.unwrap();
+			}
+
+			let snapshot = build_snapshot(&mut conn, &secrets, Timestamp::now())
+				.await
+				.unwrap();
+			let value: serde_json::Value = serde_json::from_slice(&snapshot.json).unwrap();
+			let entry = &value["inventory_variables"][0];
+			assert_eq!(entry["rank"], "production");
+			assert_eq!(entry["held"][0]["name"], "salt");
+			assert_eq!(entry["held"][0]["replaced_by"], kept.to_string());
+			assert_eq!(entry["held"][0]["value"], "\"pepper\"");
+			// A held value the store has lost is named, as a missing secret is.
+			assert_eq!(entry["held"].as_array().unwrap().len(), 1);
+			assert!(
+				entry["unreadable"][0]
+					.as_str()
+					.unwrap()
+					.contains(&lost.to_string())
+			);
+			assert_eq!(snapshot.gaps.len(), 1, "{:?}", snapshot.gaps);
+		})
+		.await;
+	}
+
+	/// The escrow is written early once a secret changes, and a secret changing
+	/// is a secret variable set or a value beginning to be held.
+	// spec: ANSVAR#history
+	#[tokio::test(flavor = "multi_thread")]
+	async fn notices_when_a_secret_last_changed() {
+		TestDb::run(|mut conn, _url| async move {
+			assert_eq!(
+				AnsibleVariable::latest_secret_change(&mut conn)
+					.await
+					.unwrap(),
+				None
+			);
+			let group_id = uuid::Uuid::new_v4();
+			conn.batch_execute(&format!(
+				"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
+				 INSERT INTO ansible_variables (server_group_id, name, value, is_secret)
+				 VALUES ('{group_id}', 'timezone', '\"Pacific/Fiji\"', FALSE);"
+			))
+			.await
+			.unwrap();
+			assert_eq!(
+				AnsibleVariable::latest_secret_change(&mut conn)
+					.await
+					.unwrap(),
+				None,
+				"a plain value is not a secret changing"
+			);
+
+			let before = Timestamp::now();
+			HeldSecretValue::hold(
+				&mut conn,
+				uuid::Uuid::new_v4(),
+				VariableScope::Group { group_id },
+				"salt",
+			)
+			.await
+			.unwrap();
+			let changed = AnsibleVariable::latest_secret_change(&mut conn)
+				.await
+				.unwrap()
+				.expect("a held value is a change");
+			assert!(changed >= before - SignedDuration::from_secs(1));
 		})
 		.await;
 	}

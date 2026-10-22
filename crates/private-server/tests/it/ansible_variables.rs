@@ -631,6 +631,35 @@ async fn a_machines_value_reaches_only_that_machine() {
 	.await
 }
 
+/// Whether a run acts on a machine is set by a switch on the machine, so a
+/// wider value is refused.
+// spec: INV#managed-machines
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_managed_by_ansible_outside_machine_scope() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+
+		for scope in [
+			json!({ "server_group_id": group }),
+			json!({ "server_group_id": group, "rank": "dev" }),
+		] {
+			let mut args = scope;
+			args["name"] = json!("managed_by_ansible");
+			args["value"] = json!(true);
+			let response = private.post("/api/ansible_variables/set").json(&args).await;
+			response.assert_status(axum::http::StatusCode::BAD_REQUEST);
+			assert!(
+				response.json::<Value>()["detail"]
+					.as_str()
+					.expect("detail")
+					.contains("set on a machine"),
+			);
+		}
+	})
+	.await
+}
+
 /// `ansible_host` at a wider scope would give every machine in the environment
 /// one address, so it is set on a machine.
 #[tokio::test(flavor = "multi_thread")]
@@ -1020,6 +1049,225 @@ async fn offers_the_catalogue_it_holds() {
 			.find(|variable| variable["name"] == "salt")
 			.unwrap();
 		assert_eq!(salt["secret"], true);
+	})
+	.await
+}
+
+async fn post(private: &commons_tests::axum_test::TestServer, path: &str, args: Value) -> Value {
+	let response = private.post(path).json(&args).await;
+	response.assert_status_ok();
+	response.json()
+}
+
+fn named(scope: &Value, name: &str) -> Value {
+	let mut args = scope.clone();
+	args["name"] = json!(name);
+	args
+}
+
+/// A variable's history is its audit entries, newest first, with the plain
+/// value each set and the one it replaced, and a set can be undone, putting
+/// back what it replaced.
+// spec: ANSVAR#history
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plain_change_is_in_the_history_and_can_be_undone() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		let scope = json!({ "server_group_id": group, "rank": "dev" });
+		set_var(&private, scope.clone(), "log_level", json!("info"), false).await;
+		set_var(&private, scope.clone(), "log_level", json!("debug"), false).await;
+		// Another variable's changes are not in this one's history.
+		set_var(&private, scope.clone(), "log_level_extra", json!(1), false).await;
+
+		let history = post(
+			&private,
+			"/api/ansible_variables/history",
+			named(&scope, "log_level"),
+		)
+		.await;
+		let history = history.as_array().unwrap();
+		assert_eq!(history.len(), 2, "{history:?}");
+		assert_eq!(history[0]["change"], "set");
+		assert_eq!(history[0]["value"], "debug");
+		assert_eq!(history[0]["replaced"], "info");
+		assert_eq!(history[0]["undoable"], true);
+		assert_eq!(history[0]["actor"]["login"], "admin@localhost");
+		// The first set replaced nothing, so there is nothing to put back.
+		assert_eq!(history[1]["value"], "info");
+		assert_eq!(history[1]["undoable"], false);
+
+		let mut restore = named(&scope, "log_level");
+		restore["entry_id"] = history[0]["entry_id"].clone();
+		post(&private, "/api/ansible_variables/restore", restore).await;
+		let body = read_served(&private, json!({ "server_group_id": group })).await;
+		assert_eq!(body["vars"]["log_level"], "info");
+
+		// The restore is a set of its own, naming the change it undid.
+		let history = post(
+			&private,
+			"/api/ansible_variables/history",
+			named(&scope, "log_level"),
+		)
+		.await;
+		assert_eq!(history[0]["value"], "info");
+		assert_eq!(history[0]["replaced"], "debug");
+		assert_eq!(history[0]["restored_from"], history[1]["entry_id"]);
+
+		let mut first = named(&scope, "log_level");
+		first["entry_id"] = history[2]["entry_id"].clone();
+		private
+			.post("/api/ansible_variables/restore")
+			.json(&first)
+			.await
+			.assert_status(axum::http::StatusCode::BAD_REQUEST);
+
+		// A change to another variable is not restored as this one.
+		let other = post(
+			&private,
+			"/api/ansible_variables/history",
+			named(&scope, "log_level_extra"),
+		)
+		.await;
+		let mut wrong = named(&scope, "log_level");
+		wrong["entry_id"] = other[0]["entry_id"].clone();
+		private
+			.post("/api/ansible_variables/restore")
+			.json(&wrong)
+			.await
+			.assert_status(axum::http::StatusCode::BAD_REQUEST);
+	})
+	.await
+}
+
+/// A removal is listed at its scope for a week, and undoing it puts back the
+/// value it removed.
+// spec: ANSVAR#presentation
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removal_is_listed_at_its_scope_and_can_be_undone() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		let environment = json!({ "server_group_id": group, "rank": "dev" });
+		let group_scope = json!({ "server_group_id": group });
+		set_var(&private, environment.clone(), "retries", json!(3), false).await;
+		set_var(&private, environment.clone(), "kept", json!(true), false).await;
+		set_var(
+			&private,
+			group_scope.clone(),
+			"timezone",
+			json!("Pacific/Fiji"),
+			false,
+		)
+		.await;
+		let removal = post(
+			&private,
+			"/api/ansible_variables/remove",
+			named(&environment, "retries"),
+		)
+		.await;
+		post(
+			&private,
+			"/api/ansible_variables/remove",
+			named(&group_scope, "timezone"),
+		)
+		.await;
+
+		// Each scope lists only its own removals.
+		let removed = post(
+			&private,
+			"/api/ansible_variables/removed",
+			environment.clone(),
+		)
+		.await;
+		let removed = removed.as_array().unwrap();
+		assert_eq!(removed.len(), 1, "{removed:?}");
+		assert_eq!(removed[0]["name"], "retries");
+		assert_eq!(removed[0]["value"], 3);
+		assert_eq!(removed[0]["undoable"], true);
+		// The removal answers with the entry that undoes it.
+		assert_eq!(removed[0]["entry_id"], removal["entry_id"]);
+		let at_group = post(&private, "/api/ansible_variables/removed", group_scope).await;
+		assert_eq!(at_group[0]["name"], "timezone");
+
+		let mut restore = named(&environment, "retries");
+		restore["entry_id"] = removed[0]["entry_id"].clone();
+		post(&private, "/api/ansible_variables/restore", restore).await;
+		let body = read_served(&private, json!({ "server_group_id": group })).await;
+		assert_eq!(body["vars"]["retries"], 3);
+
+		// Set again, it is no longer listed as removed.
+		let removed = post(&private, "/api/ansible_variables/removed", environment).await;
+		assert_eq!(removed, json!([]));
+	})
+	.await
+}
+
+/// A secret's value a change replaced or removed is held for a week, so the
+/// change can be undone, and after it the value is forgotten.
+// spec: ANSVAR#history
+#[tokio::test(flavor = "multi_thread")]
+async fn a_secret_change_is_undone_while_its_value_is_held() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		let scope = json!({ "server_group_id": group, "rank": "dev" });
+		set_var(&private, scope.clone(), "salt", json!("pepper"), true).await;
+		set_var(&private, scope.clone(), "salt", json!("paprika"), true).await;
+
+		let history = post(
+			&private,
+			"/api/ansible_variables/history",
+			named(&scope, "salt"),
+		)
+		.await;
+		assert_eq!(history[0]["secret"], true);
+		assert!(history[0]["value"].is_null());
+		assert_eq!(history[0]["replaced_secret"], true);
+		assert_eq!(history[0]["undoable"], true);
+		assert!(
+			!history.to_string().contains("pepper"),
+			"no secret in the history"
+		);
+
+		let mut restore = named(&scope, "salt");
+		restore["entry_id"] = history[0]["entry_id"].clone();
+		post(&private, "/api/ansible_variables/restore", restore).await;
+		let body = read_served(&private, json!({ "server_group_id": group })).await;
+		assert_eq!(body["vars"]["salt"], "pepper");
+		assert_eq!(body["secret_vars"], json!(["salt"]));
+
+		// Removed, its value is held too.
+		private
+			.post("/api/ansible_variables/remove")
+			.json(&named(&scope, "salt"))
+			.await
+			.assert_status_ok();
+		let removed = post(&private, "/api/ansible_variables/removed", scope.clone()).await;
+		assert_eq!(removed[0]["undoable"], true);
+
+		// Once its week has passed, the value is forgotten and the change can no
+		// longer be undone.
+		conn.batch_execute(
+			"UPDATE ansible_secret_values_held SET held_until = now() - interval '1 minute'",
+		)
+		.await
+		.unwrap();
+		let removed = post(&private, "/api/ansible_variables/removed", scope.clone()).await;
+		assert_eq!(removed[0]["undoable"], false);
+		let mut restore = named(&scope, "salt");
+		restore["entry_id"] = removed[0]["entry_id"].clone();
+		let refused = private
+			.post("/api/ansible_variables/restore")
+			.json(&restore)
+			.await;
+		refused.assert_status(axum::http::StatusCode::CONFLICT);
+		assert!(
+			refused.json::<Value>()["detail"]
+				.as_str()
+				.unwrap()
+				.contains("escrow")
+		);
 	})
 	.await
 }

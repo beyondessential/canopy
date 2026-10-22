@@ -679,6 +679,32 @@ async fn applying_sets_the_variables_and_notes_and_records_one_entry() {
 	.await
 }
 
+/// Whether a machine is managed is a switch, not a variable, so a machine
+/// switched on before the import holds it back no more than one left alone.
+// spec: ANSIMP
+#[tokio::test(flavor = "multi_thread")]
+async fn a_machine_already_managed_does_not_hold_the_import_back() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let env = environment(&mut conn).await;
+		private
+			.post("/api/ansible_variables/set")
+			.json(&json!({ "machine_id": env.office, "name": "managed_by_ansible", "value": true }))
+			.await
+			.assert_status_ok();
+
+		let previewed = preview(
+			&private,
+			json!({
+				"group": "kamaka", "file": FILE,
+				"hosts": [{ "host": "10.20.30.40:223", "machine_id": env.office }],
+			}),
+		)
+		.await;
+		assert_eq!(previewed["can_apply"], true, "{previewed}");
+	})
+	.await
+}
+
 /// An import is offered only to an environment that carries no variables, and
 /// is refused once its machines have changed since the preview.
 // spec: ANSIMP#applying

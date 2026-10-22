@@ -80,6 +80,19 @@ function describeItems(items: Schema | undefined): string {
 	return kind === "object" ? "objects" : kind === "string" ? "strings" : `${kind}s`;
 }
 
+/// Whether a run acts on a machine: set by a switch on the machine, never as
+/// a variable.
+// spec: INV#managed-machines
+export const MANAGED = "managed_by_ansible";
+
+/// Whether a value says its machine is managed, as the plugin reads it.
+export function truthy(value: unknown): boolean {
+	if (typeof value === "boolean") return value;
+	if (typeof value === "string")
+		return ["yes", "true", "on", "1", "y", "t"].includes(value.toLowerCase());
+	return value === 1;
+}
+
 /// Whether a catalogue variable is offered where a value is set: at a scope the
 /// catalogue allows, and for application types the scope holds any of. A scope
 /// holding nothing yet, such as a machine nothing is on, is offered every type.
@@ -88,6 +101,7 @@ export function offered(
 	scope: ScopeKind,
 	applicationTypes: ReadonlyArray<string>,
 ): boolean {
+	if (variable.name === MANAGED) return false;
 	if (variable.reserved) return false;
 	if (variable.scopes && !variable.scopes.includes(scope)) return false;
 	if (

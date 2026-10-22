@@ -71,6 +71,13 @@ impl VariableScope {
 		}
 	}
 
+	/// The identifier of the record an entry names a variable here by, the same
+	/// before and after it is set and after it is removed, so it is what a
+	/// variable's history is found by.
+	pub fn variable_record_id(self, name: &str) -> String {
+		format!("{}:{name}", self.secret_name())
+	}
+
 	/// Hold the row of the group this scope is in for the rest of the
 	/// transaction, as an import into the group does, so a variable set beside
 	/// an import is decided after it or before it, never between its check that
@@ -124,12 +131,30 @@ impl AnsibleVariable {
 				(Record::machine(conn, machine_id).await?, None)
 			}
 		};
-		let variable = Record::new(
-			RecordKind::Variable,
-			format!("{}:{name}", scope.secret_name()),
-			name,
-		);
+		let variable = Record::new(RecordKind::Variable, scope.variable_record_id(name), name);
 		Ok((variable, scope_record, rank))
+	}
+
+	/// When a secret value last changed: a secret variable set, or a value
+	/// beginning to be held after a change replaced or removed it. What the
+	/// escrow watches for, so every value a secret has had reaches it.
+	// spec: ANSVAR#history
+	pub async fn latest_secret_change(conn: &mut AsyncPgConnection) -> Result<Option<Timestamp>> {
+		#[derive(QueryableByName)]
+		struct Latest {
+			#[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>)]
+			at: Option<jiff_diesel::Timestamp>,
+		}
+		let latest: Latest = diesel::sql_query(
+			"SELECT GREATEST(
+				(SELECT max(updated_at) FROM ansible_variables WHERE is_secret),
+				(SELECT max(created_at) FROM ansible_secret_values_held)
+			) AS at",
+		)
+		.get_result(conn)
+		.await
+		.map_err(AppError::from)?;
+		Ok(latest.at.map(Into::into))
 	}
 
 	/// Every variable canopy holds, sorted by name.
@@ -349,5 +374,126 @@ fn columns(scope: VariableScope) -> (Option<Uuid>, Option<String>, Option<Uuid>)
 			(Some(group_id), Some(rank.to_string()), None)
 		}
 		VariableScope::Machine { machine_id } => (None, None, Some(machine_id)),
+	}
+}
+
+/// How long a secret's earlier value is held after the entry that replaced or
+/// removed it, so the change can be undone.
+// spec: ANSVAR#history
+pub const HELD_FOR: jiff::SignedDuration = jiff::SignedDuration::from_hours(7 * 24);
+
+impl VariableScope {
+	/// The Secret this scope's earlier secret values are held under, each keyed
+	/// by the entry that replaced or removed it.
+	pub fn held_secret_name(self) -> String {
+		format!("{}-held", self.secret_name())
+	}
+}
+
+/// A secret's earlier value held for a while: which entry replaced or removed
+/// it, and where. The value is in the scope's held Secret, keyed by the entry.
+#[derive(Clone, Debug, Queryable, Selectable)]
+#[diesel(table_name = crate::schema::ansible_secret_values_held)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct HeldSecretValue {
+	/// The entry that replaced or removed it.
+	pub entry_id: Uuid,
+	server_group_id: Option<Uuid>,
+	rank: Option<ServerRank>,
+	machine_id: Option<Uuid>,
+	/// The variable's name.
+	pub name: String,
+	/// When it is forgotten.
+	#[diesel(deserialize_as = jiff_diesel::Timestamp)]
+	pub held_until: Timestamp,
+	/// When it began to be held.
+	#[diesel(deserialize_as = jiff_diesel::Timestamp)]
+	pub created_at: Timestamp,
+}
+
+impl HeldSecretValue {
+	pub fn scope(&self) -> VariableScope {
+		match (self.server_group_id, self.rank, self.machine_id) {
+			(Some(group_id), None, None) => VariableScope::Group { group_id },
+			(Some(group_id), Some(rank), None) => VariableScope::Environment { group_id, rank },
+			(None, None, Some(machine_id)) => VariableScope::Machine { machine_id },
+			_ => unreachable!("ansible_secret_values_held_one_scope admits no other shape"),
+		}
+	}
+
+	/// Note a value now held under `entry_id`, until [`HELD_FOR`] from now.
+	pub async fn hold(
+		conn: &mut AsyncPgConnection,
+		entry_id: Uuid,
+		scope: VariableScope,
+		name: &str,
+	) -> Result<Self> {
+		use crate::schema::ansible_secret_values_held::dsl;
+
+		let (group_id, rank, machine_id) = columns(scope);
+		let until = jiff_diesel::Timestamp::from(Timestamp::now() + HELD_FOR);
+		diesel::insert_into(dsl::ansible_secret_values_held)
+			.values((
+				dsl::entry_id.eq(entry_id),
+				dsl::server_group_id.eq(group_id),
+				dsl::rank.eq(rank),
+				dsl::machine_id.eq(machine_id),
+				dsl::name.eq(name),
+				dsl::held_until.eq(until),
+			))
+			.returning(Self::as_select())
+			.get_result(conn)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// The value held under an entry, while it is still held.
+	pub async fn get(conn: &mut AsyncPgConnection, entry_id: Uuid) -> Result<Option<Self>> {
+		use crate::schema::ansible_secret_values_held::dsl;
+
+		dsl::ansible_secret_values_held
+			.find(entry_id)
+			.filter(dsl::held_until.gt(diesel::dsl::now))
+			.select(Self::as_select())
+			.first(conn)
+			.await
+			.optional()
+			.map_err(AppError::from)
+	}
+
+	/// Every value still held, for the escrow.
+	pub async fn list_all(conn: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		use crate::schema::ansible_secret_values_held::dsl;
+
+		dsl::ansible_secret_values_held
+			.order(dsl::created_at.asc())
+			.select(Self::as_select())
+			.get_results(conn)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// The values whose hold has run out, to be forgotten.
+	pub async fn due(conn: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		use crate::schema::ansible_secret_values_held::dsl;
+
+		dsl::ansible_secret_values_held
+			.filter(dsl::held_until.le(diesel::dsl::now))
+			.order(dsl::held_until.asc())
+			.select(Self::as_select())
+			.get_results(conn)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Stop noting a value, once it has been forgotten.
+	pub async fn release(conn: &mut AsyncPgConnection, entry_id: Uuid) -> Result<()> {
+		use crate::schema::ansible_secret_values_held::dsl;
+
+		diesel::delete(dsl::ansible_secret_values_held.find(entry_id))
+			.execute(conn)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
 	}
 }

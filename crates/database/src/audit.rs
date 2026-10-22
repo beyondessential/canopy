@@ -543,16 +543,31 @@ actions! {
 		detail { rank: ServerRank, held_by: Option<String> }
 	}
 
-	/// An Ansible variable was set. The value is not recorded.
+	/// An Ansible variable was set, or restored from an earlier entry: the plain
+	/// value set, the plain value it replaced, and whether what it replaced was a
+	/// secret, whose value is then held for a while. A secret's value is not
+	/// recorded.
 	AnsibleVariableSet = "inventory_variable_set", "Set Ansible variable" {
 		records { variable: Record, scope: Record }
-		detail { rank: Option<ServerRank>, secret: bool }
+		detail {
+			rank: Option<ServerRank>, secret: bool, value: Option<Value>,
+			replaced: Option<Value>, replaced_secret: bool, restored_from: Option<Uuid>,
+		}
 	}
 
-	/// An Ansible variable was removed.
+	/// An Ansible variable was removed, with the plain value it took away. A
+	/// secret's value is not recorded; it is held for a while instead.
 	AnsibleVariableRemoved = "inventory_variable_removed", "Remove Ansible variable" {
 		records { variable: Record, scope: Record }
-		detail { rank: Option<ServerRank>, secret: bool }
+		detail { rank: Option<ServerRank>, secret: bool, value: Option<Value> }
+	}
+
+	/// A secret's earlier value, held since the entry that replaced or removed
+	/// it, was forgotten by Canopy once its hold ran out. The value is not
+	/// recorded.
+	AnsibleSecretValueForgotten = "ansible_secret_value_forgotten", "Forget earlier Ansible secret" {
+		records { variable: Record, scope: Record }
+		detail { rank: Option<ServerRank>, replaced_by: Uuid }
 	}
 
 	/// An Ansible inventory file was imported into an environment: the variables
@@ -1133,6 +1148,54 @@ pub async fn find(conn: &mut AsyncPgConnection, filter: &Filter) -> Result<Vec<E
 		.await
 		.map_err(AppError::from)?;
 	Ok(rows.into_iter().map(EntryRow::into_entry).collect())
+}
+
+/// The entries of the given actions that name a record, by its exact
+/// identifier, newest first: those that took place, leaving out any that failed
+/// or are not yet settled. From the database alone, so within its retention.
+pub async fn naming(
+	conn: &mut AsyncPgConnection,
+	record_id: &str,
+	actions: &[&str],
+	since: Option<Timestamp>,
+	limit: i64,
+) -> Result<Vec<Entry>> {
+	use crate::schema::audit_entries::dsl;
+
+	let mut query = dsl::audit_entries
+		.filter(dsl::records.contains(json!([{ "id": record_id }])))
+		.filter(dsl::action.eq_any(actions))
+		.filter(dsl::outcome.is_distinct_from("failed"))
+		.filter(dsl::outcome.is_distinct_from("pending"))
+		.into_boxed();
+	if let Some(since) = since {
+		query = query.filter(dsl::recorded_at.ge(jiff_diesel::Timestamp::from(since)));
+	}
+	let rows: Vec<EntryRow> = query
+		.order((dsl::recorded_at.desc(), dsl::id.desc()))
+		.limit(limit.clamp(1, 500))
+		.select(EntryRow::as_select())
+		.load(conn)
+		.await
+		.map_err(AppError::from)?;
+	Ok(rows.into_iter().map(EntryRow::into_entry).collect())
+}
+
+/// One entry, by its identifier, where it took place: one that failed or is
+/// not yet settled is none.
+pub async fn get_done(conn: &mut AsyncPgConnection, id: Uuid) -> Result<Option<Entry>> {
+	use crate::schema::audit_entries::dsl;
+
+	let row: Option<EntryRow> = dsl::audit_entries
+		.filter(dsl::id.eq(id))
+		.filter(dsl::outcome.is_distinct_from("failed"))
+		.filter(dsl::outcome.is_distinct_from("pending"))
+		.select(EntryRow::as_select())
+		.first(conn)
+		.await
+		.optional()
+		.map_err(AppError::from)?;
+	Ok(row.map(EntryRow::into_entry))
 }
 
 /// Fill in each operator's profile picture from the cache of what Tailscale last

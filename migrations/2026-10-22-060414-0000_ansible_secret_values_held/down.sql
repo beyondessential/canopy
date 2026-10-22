@@ -1,0 +1,1 @@
+DROP TABLE ansible_secret_values_held;

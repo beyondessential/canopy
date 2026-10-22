@@ -29,10 +29,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
-use super::{ANSIBLE_HOST, Environment, EnvironmentArgs, hosts, limit, reach, resolve_environment};
+use super::{
+	ANSIBLE_HOST, Environment, EnvironmentArgs, MANAGED, hosts, limit, reach, resolve_environment,
+};
 use crate::state::AppState;
 
-pub(super) const MANAGED: &str = "managed_by_ansible";
 const CENTRAL: &str = "tamanu-central";
 
 /// The application type to assign a machine with nothing on it, or none.
@@ -240,7 +241,10 @@ pub async fn members(
 			machine,
 			address,
 			tailnet: tailnet_named,
-			managed: get(MANAGED).is_some_and(truthy),
+			managed: own
+				.get(&machine.id)
+				.and_then(|vars| vars.get(MANAGED))
+				.is_some_and(truthy),
 			types: on_machine
 				.iter()
 				.map(|application| application.r#type.to_string())
@@ -289,15 +293,16 @@ pub async fn members(
 
 /// Start the run a lease is for, where this is its first read: stamp the lease,
 /// declare maintenance over what the run acts on for the holder, and record
-/// both. Does nothing where the lease had started already.
+/// both. Answers with the lease as it now stands, unchanged where it had
+/// started already.
 // spec: ANSRUN#work-under-way
 pub async fn start(
 	conn: &mut AuditTx<'_>,
-	lease: &AnsibleLease,
+	lease: AnsibleLease,
 	group: &ServerGroup,
-) -> Result<()> {
+) -> Result<AnsibleLease> {
 	let Some(started) = AnsibleLease::start(conn, lease.id).await? else {
-		return Ok(());
+		return Ok(lease);
 	};
 	let note = started
 		.playbook
@@ -332,7 +337,8 @@ pub async fn start(
 		intent: started.intent.to_string(),
 		playbook: started.playbook.clone(),
 	})
-	.await
+	.await?;
+	Ok(started)
 }
 
 fn assignments_of(args: &[AssignmentArg]) -> BTreeMap<Uuid, String> {

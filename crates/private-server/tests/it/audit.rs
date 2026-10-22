@@ -139,13 +139,14 @@ async fn taking_over_and_serving_an_environment_are_recorded_and_the_read_is_rou
 			.json(&json!({ "server_group_id": GROUP, "intent": "configure", "note": "run" }))
 			.await
 			.json();
-		// A variable of the environment's own, whose value never reaches the log.
+		// A secret of the environment's own, whose value never reaches the log.
 		private
 			.post("/api/ansible_variables/set")
 			.json(&json!({
 				"server_group_id": GROUP,
 				"name": "ntp_server",
 				"value": "ntp.example.org",
+				"secret": true,
 			}))
 			.await
 			.assert_status_ok();

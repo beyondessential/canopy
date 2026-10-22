@@ -52,14 +52,13 @@ async fn environment(conn: &mut AsyncPgConnection, private: &TestServer) -> Envi
 		bind_device(conn, application, tailnet).await;
 		machines.push(machine);
 	}
-	private
-		.post("/api/ansible_variables/set")
-		.json(&json!({
-			"server_group_id": group, "rank": "production",
-			"name": "managed_by_ansible", "value": true,
-		}))
-		.await
-		.assert_status_ok();
+	for machine in &machines {
+		private
+			.post("/api/ansible_variables/set")
+			.json(&json!({ "machine_id": machine, "name": "managed_by_ansible", "value": true }))
+			.await
+			.assert_status_ok();
+	}
 	Environment {
 		group,
 		central: machines[0],
@@ -171,6 +170,46 @@ async fn a_lease_records_the_run_it_was_taken_for() {
 	.await
 }
 
+/// A run is served the lease it holds, so it takes the intent, playbook,
+/// limit and tags from Canopy rather than from how it was started.
+// spec: INV#what-a-run-is-served
+#[tokio::test(flavor = "multi_thread")]
+async fn serves_the_lease_it_is_read_under() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let env = environment(&mut conn, &private).await;
+		read_catalogue(&mut conn).await;
+		let lease = take(
+			&private,
+			json!({
+				"server_group_id": env.group,
+				"playbook": "tamanu-install.yml",
+				"limit": "kamaka-central",
+				"tags": ["app"],
+				"skip_tags": ["tailscale"],
+			}),
+		)
+		.await;
+
+		let response = private
+			.post("/api/ansible/for_group")
+			.json(&json!({ "lease_id": lease["id"] }))
+			.await;
+		response.assert_status_ok();
+		let served = &response.json::<Value>()["lease"];
+		assert_eq!(served["id"], lease["id"]);
+		assert_eq!(served["intent"], "configure");
+		assert_eq!(served["playbook"], "tamanu-install.yml");
+		assert_eq!(served["limit_pattern"], "kamaka-central");
+		assert_eq!(served["tags"], json!(["app"]));
+		assert_eq!(served["skip_tags"], json!(["tailscale"]));
+		assert!(
+			served["started_at"].is_string(),
+			"the read started the run: {served}"
+		);
+	})
+	.await
+}
+
 /// A playbook the catalogue does not list, a tag it does not take, and a limit
 /// that matches nothing or that cannot be read, are refused.
 // spec: ANSRUN#presentation
@@ -256,14 +295,15 @@ async fn assigns_a_type_to_a_machine_with_nothing_on_it() {
 			.unwrap();
 			ids.push(id);
 		}
-		private
-			.post("/api/ansible_variables/set")
-			.json(&json!({
-				"server_group_id": group, "rank": "production",
-				"name": "managed_by_ansible", "value": true,
-			}))
-			.await
-			.assert_status_ok();
+		for machine in &ids {
+			private
+				.post("/api/ansible_variables/set")
+				.json(
+					&json!({ "machine_id": machine, "name": "managed_by_ansible", "value": true }),
+				)
+				.await
+				.assert_status_ok();
+		}
 		read_catalogue(&mut conn).await;
 
 		let options: Value = private
@@ -372,7 +412,9 @@ async fn refuses_an_assignment_that_could_not_hold() {
 			"INSERT INTO devices (id, role, tailscale_node_name)
 			 VALUES ('{device}', 'server', 'kamaka-new.tail1234.ts.net');
 			 INSERT INTO machines (id, name, group_id, rank, device_id)
-			 VALUES ('{bare}', 'kamaka-new', '{}', 'production', '{device}')",
+			 VALUES ('{bare}', 'kamaka-new', '{}', 'production', '{device}');
+			 INSERT INTO ansible_variables (machine_id, name, value)
+			 VALUES ('{bare}', 'managed_by_ansible', 'true')",
 			env.group
 		))
 		.await

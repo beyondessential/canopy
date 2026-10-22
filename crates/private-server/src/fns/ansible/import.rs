@@ -27,9 +27,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
-use super::runs::{MANAGED, truthy};
+use super::runs::truthy;
 use super::{
-	ANSIBLE_HOST, Environment, EnvironmentArgs, host_of, hosts, inventory_file, reach,
+	ANSIBLE_HOST, Environment, EnvironmentArgs, MANAGED, host_of, hosts, inventory_file, reach,
 	resolve_environment,
 };
 use crate::state::AppState;
@@ -332,16 +332,22 @@ async fn plan(conn: &mut AsyncPgConnection, args: &ImportArgs) -> Result<Plan> {
 	let catalogue_loaded = Loaded::get(conn).await?;
 	let catalogue: Option<&Catalogue> = catalogue_loaded.as_ref().map(|l| &*l.catalogue);
 
-	// An import never meets a value already set.
+	// An import never meets a value already set. Whether a machine is managed
+	// is a switch rather than a variable, so it holds nothing back.
 	let machine_ids: Vec<Uuid> = at_rank.iter().map(|machine| machine.id).collect();
 	let scope = VariableScope::Environment {
 		group_id: group.id,
 		rank: *rank,
 	};
+	let on_machines = AnsibleVariable::list_for_machines(conn, &machine_ids).await?;
+	let managed_already: BTreeSet<Uuid> = on_machines
+		.iter()
+		.filter(|variable| variable.name == MANAGED)
+		.filter(|variable| variable.value.as_ref().is_some_and(truthy))
+		.filter_map(|variable| variable.machine_id)
+		.collect();
 	if !AnsibleVariable::list_at(conn, scope).await?.is_empty()
-		|| !AnsibleVariable::list_for_machines(conn, &machine_ids)
-			.await?
-			.is_empty()
+		|| on_machines.iter().any(|variable| variable.name != MANAGED)
 	{
 		return Err(AppError::Conflict(format!(
 			"the {rank} environment of {:?} already carries variables, so an inventory file \
@@ -486,6 +492,11 @@ async fn plan(conn: &mut AsyncPgConnection, args: &ImportArgs) -> Result<Plan> {
 
 	let mut environment_variables = Vec::new();
 	for (name, value) in &file.environment {
+		// Every machine a host is imported onto is managed, and it is set on
+		// machines alone, so the environment's own adds nothing.
+		if name == MANAGED {
+			continue;
+		}
 		if is_reserved(name) {
 			left_out.insert(name.clone());
 			continue;
@@ -697,20 +708,8 @@ async fn plan(conn: &mut AsyncPgConnection, args: &ImportArgs) -> Result<Plan> {
 	let group_scope = VariableScope::Group { group_id: group.id };
 	let group_variables = AnsibleVariable::list_at(conn, group_scope).await?;
 
-	// A machine a host is imported onto is managed; any other member is only
-	// where the environment's variables or the group's make it so, since the
-	// import is offered only while no machine carries a variable of its own.
-	let managed_wide = file
-		.environment
-		.get(MANAGED)
-		.filter(|_| !is_reserved(MANAGED))
-		.or_else(|| {
-			group_variables
-				.iter()
-				.find(|variable| variable.name == MANAGED)
-				.and_then(|variable| variable.value.as_ref())
-		})
-		.is_some_and(truthy);
+	// A machine a host is imported onto is managed, and any other member only
+	// where its switch already says so.
 	if let Err(error) = hosts::host_names(
 		&served
 			.iter()
@@ -720,7 +719,7 @@ async fn plan(conn: &mut AsyncPgConnection, args: &ImportArgs) -> Result<Plan> {
 				name: &machine.name,
 				address: address.as_deref(),
 				tailnet: *tailnet,
-				managed: taken.contains_key(&machine.id) || managed_wide,
+				managed: taken.contains_key(&machine.id) || managed_already.contains(&machine.id),
 			})
 			.collect::<Vec<_>>(),
 	) {
@@ -993,7 +992,7 @@ pub async fn import_apply(
 		}
 		match &pending {
 			Some(pending) => conn.settle_done(pending, None).await,
-			None => conn.record(action).await,
+			None => conn.record(action).await.map(drop),
 		}
 	}
 	.await;

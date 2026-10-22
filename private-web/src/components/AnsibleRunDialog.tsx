@@ -52,7 +52,6 @@ export default function AnsibleRunDialog({
 	open,
 	onClose,
 	groupId,
-	groupName,
 	rank,
 	catalogue,
 	preset,
@@ -64,7 +63,6 @@ export default function AnsibleRunDialog({
 	open: boolean;
 	onClose: () => void;
 	groupId: string;
-	groupName: string;
 	rank: ServerRank;
 	catalogue: CatalogueView;
 	/** The playbook run button this dialog was opened from, or null for Run…. */
@@ -275,9 +273,6 @@ export default function AnsibleRunDialog({
 				? buildCommand({
 						vcs,
 						origin: window.location.origin,
-						groupName,
-						rank,
-						intent: effectiveIntent,
 						leaseId: lease.id,
 						playbook: playbook.name,
 						limit,
@@ -286,7 +281,7 @@ export default function AnsibleRunDialog({
 						extra,
 					})
 				: null,
-		[lease, playbook, vcs, groupName, rank, effectiveIntent, limit, tags, skipTags, extra],
+		[lease, playbook, vcs, limit, tags, skipTags, extra],
 	);
 
 	const copy = async () => {
@@ -856,13 +851,12 @@ export function shellArg(value: string): string {
 
 /// The command a run is started with. The first line changes into the
 /// operator's own checkout, which only they know, so it is shown and left out of
-/// what is copied.
+/// what is copied. The lease names the environment and the intent, so the run
+/// is handed nothing else of them.
+// spec: ANSRUN#presentation
 export function buildCommand(args: {
 	vcs: "git" | "jj";
 	origin: string;
-	groupName: string;
-	rank: string;
-	intent: "configure" | "upgrade";
 	leaseId: string;
 	playbook: string;
 	limit: string;
@@ -874,13 +868,7 @@ export function buildCommand(args: {
 		args.vcs === "git"
 			? "git switch main && git pull --ff-only"
 			: "jj git fetch && jj new main@origin";
-	const environment = [
-		`CANOPY_URL=${args.origin}`,
-		`CANOPY_GROUP=${shellArg(args.groupName)}`,
-		`CANOPY_RANK=${args.rank}`,
-		...(args.intent === "upgrade" ? ["CANOPY_INTENT=upgrade"] : []),
-		`CANOPY_LEASE=${args.leaseId}`,
-	];
+	const environment = [`CANOPY_URL=${args.origin}`, `CANOPY_LEASE=${args.leaseId}`];
 	const run = [
 		"uv run ansible-playbook -i inventory/canopy.yml",
 		shellArg(args.playbook),
