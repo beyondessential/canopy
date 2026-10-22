@@ -331,7 +331,13 @@ function Review({
 												select: {
 													displayEmpty: true,
 													renderValue: (value) =>
-														value === "" ? "Assign or skip" : undefined,
+														value === ""
+															? "Assign or skip"
+															: value === SKIP
+																? "Skip this host"
+																: preview.machines.find(
+																		(machine) => machine.id === value,
+																	)?.name,
 												},
 												inputLabel: { shrink: true },
 											}}

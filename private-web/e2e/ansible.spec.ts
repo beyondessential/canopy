@@ -478,7 +478,11 @@ test.describe("group Ansible", () => {
 		});
 
 		// One host has no machine, so nothing can be imported yet.
-		await expect(dialog.getByTestId("import-host-10.20.30.40:223")).toBeVisible();
+		const office = dialog.getByTestId("import-host-10.20.30.40:223");
+		await expect(office.getByRole("combobox")).toHaveText("Assign or skip");
+		await expect(
+			dialog.getByTestId("import-host-kamaka-prod-central").getByRole("combobox"),
+		).toHaveText("kamaka-prod-central");
 		await expect(page.getByTestId("import-apply")).toBeDisabled();
 		await expect(dialog.getByTestId("import-var-salt")).toContainText("••••••••");
 		await expect(dialog.getByTestId("import-var-salt")).not.toContainText("pepper");
@@ -486,11 +490,9 @@ test.describe("group Ansible", () => {
 			"## production\nConnect to the site VPN first",
 		);
 
-		await dialog
-			.getByTestId("import-host-10.20.30.40:223")
-			.getByLabel("Machine")
-			.click();
+		await office.getByLabel("Machine").click();
 		await page.getByRole("option", { name: "kamaka-prod-office" }).click();
+		await expect(office.getByRole("combobox")).toHaveText("kamaka-prod-office");
 		await expect(page.getByTestId("import-apply")).toBeEnabled();
 		await page.getByTestId("import-apply").click();
 
