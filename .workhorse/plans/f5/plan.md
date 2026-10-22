@@ -11,8 +11,9 @@ The plugin takes a handed-over lease's intent from `CANOPY_INTENT` on its own co
 - [ ] `AnsibleArgs` takes an optional `intent`; `for_group` refuses one that is not the lease's (409, naming both)
 - [ ] `AnsibleView` carries the lease: id, intent, playbook, limit, tags, skip tags
 - [ ] Rust tests for both; `just gen-openapi`
+- [ ] The run command stops passing `CANOPY_INTENT`, since a handed-over lease's intent comes from Canopy (`buildCommand` and its test)
 
-The run command keeps `CANOPY_INTENT` until infra's plugin reads the intent from Canopy, since today's plugin needs it. Infra's side (send the claimed intent, take intent/playbook/limit/tags from the served lease) is on the card's open list.
+Infra's plugin moves with this (it is being developed against this branch): take intent, playbook, limit and tags from the served lease, and send `CANOPY_INTENT` as the claimed intent only where one is given.
 
 ## `managed_by_ansible` as a switch
 
