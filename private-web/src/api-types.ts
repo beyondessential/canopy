@@ -5706,6 +5706,7 @@ export interface components {
         };
         /** @description Read what an environment serves Ansible, under a lease held on it. */
         AnsibleArgs: {
+            intent?: null | components["schemas"]["RunIntent"];
             /**
              * Format: uuid
              * @description Identifier of the lease the run holds, from `take_lease`.
@@ -5882,6 +5883,11 @@ export interface components {
             group_id: string;
             /** @description The environment's machines, ordered by name. */
             hosts: components["schemas"]["AnsibleHost"][];
+            /**
+             * @description The lease it is served under, whose intent, playbook, limit and tags the
+             *     run takes rather than how it was started.
+             */
+            lease: components["schemas"]["AnsibleLease"];
             /** @description Rank of the environment served. */
             rank: components["schemas"]["ServerRank"];
             /** @description Which of `vars` are secret. */
@@ -14518,7 +14524,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
-            /** @description The lease is someone else's, no longer holds, the environment is gone, or two machines share an address */
+            /** @description The lease is someone else's, no longer holds, was taken for another intent, the environment is gone, or two machines share an address */
             409: {
                 headers: {
                     [name: string]: unknown;

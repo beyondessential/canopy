@@ -201,7 +201,6 @@ export default function AnsibleRuns({
 					open
 					onClose={() => setDialog(null)}
 					groupId={groupId}
-					groupName={groupName}
 					rank={rank}
 					catalogue={catalogue}
 					preset={dialog.preset}

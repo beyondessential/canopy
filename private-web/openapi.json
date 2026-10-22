@@ -317,6 +317,17 @@
       "AnsibleArgs": {
         "description": "Read what an environment serves Ansible, under a lease held on it.",
         "properties": {
+          "intent": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RunIntent",
+                "description": "The intent the run was started with, where it was given one. A read\nnaming an intent other than the lease's is refused."
+              }
+            ]
+          },
           "lease_id": {
             "description": "Identifier of the lease the run holds, from `take_lease`.",
             "format": "uuid",
@@ -650,6 +661,10 @@
             },
             "type": "array"
           },
+          "lease": {
+            "$ref": "#/components/schemas/AnsibleLease",
+            "description": "The lease it is served under, whose intent, playbook, limit and tags the\nrun takes rather than how it was started."
+          },
           "rank": {
             "$ref": "#/components/schemas/ServerRank",
             "description": "Rank of the environment served."
@@ -670,6 +685,7 @@
           "group_id",
           "group",
           "rank",
+          "lease",
           "vars",
           "secret_vars",
           "hosts"
@@ -14972,7 +14988,7 @@
                 }
               }
             },
-            "description": "The lease is someone else's, no longer holds, the environment is gone, or two machines share an address"
+            "description": "The lease is someone else's, no longer holds, was taken for another intent, the environment is gone, or two machines share an address"
           },
           "502": {
             "content": {

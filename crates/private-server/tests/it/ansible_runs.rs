@@ -171,6 +171,46 @@ async fn a_lease_records_the_run_it_was_taken_for() {
 	.await
 }
 
+/// A run is served the lease it holds, so it takes the intent, playbook,
+/// limit and tags from Canopy rather than from how it was started.
+// spec: INV#what-a-run-is-served
+#[tokio::test(flavor = "multi_thread")]
+async fn serves_the_lease_it_is_read_under() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let env = environment(&mut conn, &private).await;
+		read_catalogue(&mut conn).await;
+		let lease = take(
+			&private,
+			json!({
+				"server_group_id": env.group,
+				"playbook": "tamanu-install.yml",
+				"limit": "kamaka-central",
+				"tags": ["app"],
+				"skip_tags": ["tailscale"],
+			}),
+		)
+		.await;
+
+		let response = private
+			.post("/api/ansible/for_group")
+			.json(&json!({ "lease_id": lease["id"] }))
+			.await;
+		response.assert_status_ok();
+		let served = &response.json::<Value>()["lease"];
+		assert_eq!(served["id"], lease["id"]);
+		assert_eq!(served["intent"], "configure");
+		assert_eq!(served["playbook"], "tamanu-install.yml");
+		assert_eq!(served["limit_pattern"], "kamaka-central");
+		assert_eq!(served["tags"], json!(["app"]));
+		assert_eq!(served["skip_tags"], json!(["tailscale"]));
+		assert!(
+			served["started_at"].is_string(),
+			"the read started the run: {served}"
+		);
+	})
+	.await
+}
+
 /// A playbook the catalogue does not list, a tag it does not take, and a limit
 /// that matches nothing or that cannot be read, are refused.
 // spec: ANSRUN#presentation

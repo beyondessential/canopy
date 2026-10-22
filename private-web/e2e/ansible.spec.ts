@@ -708,7 +708,7 @@ test.describe("group Ansible", () => {
 		page,
 		sql,
 	}) => {
-		const group = await seedServerGroup(sql, { name: "kamaka south", tags: {} });
+		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
 		const central = await seedServer(sql, {
 			name: "kamaka-prod-central",
 			host: "https://central.kamaka.e2e.invalid",
@@ -740,9 +740,10 @@ test.describe("group Ansible", () => {
 		await page.getByTestId("run-start").click();
 
 		const copied = dialog.getByTestId("run-command-copied");
-		await expect(copied).toContainText("CANOPY_GROUP='kamaka south'");
-		await expect(copied).toContainText("CANOPY_RANK=production");
 		await expect(copied).toContainText(/CANOPY_LEASE=[0-9a-f-]{36}/);
+		// The lease names the environment, so the run is handed nothing else of it.
+		await expect(copied).not.toContainText("CANOPY_GROUP");
+		await expect(copied).not.toContainText("CANOPY_RANK");
 		await expect(copied).toContainText(
 			"uv run ansible-playbook -i inventory/canopy.yml tamanu-install.yml",
 		);

@@ -148,6 +148,10 @@ pub struct ReleaseLeaseArgs {
 pub struct AnsibleArgs {
 	/// Identifier of the lease the run holds, from `take_lease`.
 	pub lease_id: Uuid,
+	/// The intent the run was started with, where it was given one. A read
+	/// naming an intent other than the lease's is refused.
+	#[serde(default)]
+	pub intent: Option<RunIntent>,
 }
 
 /// One application on a machine, so a run knows what it is configuring there.
@@ -213,6 +217,10 @@ pub struct AnsibleView {
 	pub group: String,
 	/// Rank of the environment served.
 	pub rank: ServerRank,
+	/// The lease it is served under, whose intent, playbook, limit and tags the
+	/// run takes rather than how it was started.
+	// spec: INV#what-a-run-is-served
+	pub lease: AnsibleLease,
 	/// The group's and the environment's variables, merged. Every machine
 	/// below carries these too, under its own overrides.
 	pub vars: VarMap,
@@ -710,7 +718,7 @@ pub async fn run_state(
 	responses(
 		(status = 200, body = AnsibleView),
 		(status = 404, description = "No such lease", body = ProblemDetailsSchema),
-		(status = 409, description = "The lease is someone else's, no longer holds, the environment is gone, or two machines share an address", body = ProblemDetailsSchema),
+		(status = 409, description = "The lease is someone else's, no longer holds, was taken for another intent, the environment is gone, or two machines share an address", body = ProblemDetailsSchema),
 		(status = 502, description = "A secret variable could not be read", body = ProblemDetailsSchema),
 	),
 )]
@@ -727,6 +735,15 @@ pub async fn for_group(
 	held_by_caller(&lease, &admin.0.login)?;
 	if !lease.holds_at(Timestamp::now()) {
 		return Err(AppError::Conflict(no_longer_held(&lease, &admin.0.login)));
+	}
+	// spec: ANSRUN#starting-a-run
+	if let Some(claimed) = args.intent
+		&& claimed != lease.intent
+	{
+		return Err(AppError::Conflict(format!(
+			"this lease was taken to {}, not to {claimed}; take a lease to {claimed} for this run",
+			lease.intent
+		)));
 	}
 	// Recorded before the read, so a read that fails is recorded as failed: the
 	// layer settles it by how the handler ends.
@@ -873,7 +890,7 @@ pub async fn for_group(
 	if !lease.holds_at(Timestamp::now()) {
 		return Err(AppError::Conflict(no_longer_held(&lease, &admin.0.login)));
 	}
-	runs::start(&mut conn, &lease, &group_for_entry).await?;
+	let lease = runs::start(&mut conn, lease, &group_for_entry).await?;
 
 	tracing::info!(
 		login = %admin.0.login,
@@ -888,6 +905,7 @@ pub async fn for_group(
 		group_id: group.id,
 		group: group.name,
 		rank,
+		lease,
 		vars: wide.vars,
 		secret_vars: wide.secret.into_iter().collect(),
 		hosts,

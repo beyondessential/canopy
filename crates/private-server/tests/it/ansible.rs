@@ -1163,6 +1163,47 @@ async fn takes_an_unplanned_configuration_run_on_production() {
 	.await
 }
 
+/// A lease taken to configure needs no upgrade plan, so a run claiming to
+/// upgrade under one is refused rather than served.
+// spec: ANSRUN#starting-a-run
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_a_read_claiming_another_intent_than_the_leases() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-claimed-intent").await;
+		insert_ranked_application(
+			&mut conn,
+			group,
+			"kamaka-central",
+			"tamanu-central",
+			Some("production"),
+			None,
+		)
+		.await;
+		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
+
+		let refused = private
+			.post("/api/ansible/for_group")
+			.json(&json!({ "lease_id": lease, "intent": "upgrade" }))
+			.await;
+		refused.assert_status(axum::http::StatusCode::CONFLICT);
+		let detail = refused.json::<Value>()["detail"]
+			.as_str()
+			.unwrap()
+			.to_owned();
+		assert!(
+			detail.contains("configure") && detail.contains("upgrade"),
+			"{detail}"
+		);
+
+		private
+			.post("/api/ansible/for_group")
+			.json(&json!({ "lease_id": lease, "intent": "configure" }))
+			.await
+			.assert_status_ok();
+	})
+	.await
+}
+
 /// A plan is for where a deployment's real users are, so another rank needs
 /// none.
 #[tokio::test(flavor = "multi_thread")]
