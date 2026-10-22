@@ -21,7 +21,23 @@ A secret's value is held in Canopy's secret store (see [BKO](../backup.md)) rath
 Only an administrator can read, set, or replace the value of a secret variable, or remove one.
 Non-admins can list secret variables by name only.
 Variables must expose whether they are secret over the API; consumers should avoid caching or displaying them if so.
-Variables are backed up in the escrow store (see [ESC](../../jobs/escrow.md)) to survive the loss of the secret store.
+
+## History
+
+A variable's history is its entries in the audit log: each value it was set to, its removal, who did each and when (see [AUD](../../platform/audit-log.md)).
+A plain value is recorded in the entry that set it, and the value a removal took away in the entry that removed it.
+A secret's entries record that it changed, never its value.
+
+An administrator can restore a variable to any earlier value its history holds, which sets it again and is audited as a set.
+A removed variable is restored the same way, at the scope it was removed from.
+
+A secret's earlier value, the one a set replaced or a removal took away, is held in the secret store for a week after it was replaced, so a change found wanting after a run can be undone.
+Within that week the secret can be restored to it, and after it the value is forgotten.
+Restoring a secret holds the value it replaces for a week in turn.
+
+Variables, with the earlier secret values still held, are backed up in the escrow store (see [ESC](../../jobs/escrow.md)) to survive the loss of the secret store.
+The escrow is written again within the hour after a secret variable changes, rather than waiting for its cadence, so every value a secret has had reaches it.
+Once its week has passed, a secret's earlier value is recovered from the escrow alone.
 
 ## Catalogue
 
@@ -42,7 +58,8 @@ The application types a variable configures decide where it is offered (see "Pre
 
 ## Audit
 
-Setting or removing a variable is audited (see [AUD](../../platform/audit-log.md)).
+Setting, restoring, or removing a variable is audited (see [AUD](../../platform/audit-log.md)), with the plain value set or removed (see "History").
+Canopy forgetting a secret's earlier value once its week has passed is audited as Canopy's own action.
 A change in the catalogue Canopy reads is audited as Canopy's own action, naming the version read, since it changes what a variable is held to, and so is each value it moves into the secret store.
 A secret's value never appears in a log.
 
@@ -51,8 +68,9 @@ A secret's value never appears in a log.
 An environment with variables set presents them collapsed, by count, so they take no room until asked for.
 An environment with none, on itself or its machines, offers adding its first beside an import (see [ANSIMP](import.md)).
 
-Expanded, the variables are listed by scope: the group's, the environment's, then each machine that sets anything of its own.
-A last row adds a scope for a member that sets nothing yet.
+Expanded, the variables are listed by scope, each nested within the one it narrows: the group's, the environment's indented beneath it, and each of the environment's machines indented beneath that.
+Every member is listed, with a switch for whether it is managed by Ansible (see [INV](overview.md), "Managed machines").
+A machine that is not managed is greyed, and its variables are collapsed until asked for.
 A value overriding one from a wider scope is marked with the scope it overrides.
 A secret variable appears by name, with when it last changed, and never its value.
 
@@ -68,6 +86,10 @@ One the catalogue limits to other scopes is not offered, nor one limited to appl
 Each variable can be edited in its row, its value opening in the same form as adding one, holding the value it has.
 A secret's field opens empty, since its value is never shown, and saving it needs a new value.
 Saving replaces the value, and leaving the row without saving keeps it as it was.
+
+Removing a variable takes no confirmation, and is followed by an offer to undo it, which restores the value it had.
+Each variable opens its history, newest first, offering to restore each earlier value it can be restored to.
+Each scope lists the variables removed from it in the last week, each opening its history, so a removal is undone after the offer has gone.
 
 A scope can instead be edited as text, one variable per line as YAML, with names completing from the catalogue as they do in a row.
 A value is read as it would be in an inventory file (see [ANSIMP](import.md), "Reading the file").
