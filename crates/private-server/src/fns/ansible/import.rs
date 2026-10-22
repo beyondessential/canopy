@@ -20,7 +20,7 @@ use database::{
 	applications::Application,
 	audit::{Action, ImportedVariable, Record, RecordKind},
 	diesel_async::AsyncPgConnection,
-	machines::Machine,
+	machines::{Machine, MachineUpdate},
 	server_groups::{PartialServerGroup, ServerGroup},
 };
 use serde::{Deserialize, Serialize};
@@ -93,6 +93,11 @@ pub struct ImportApplyArgs {
 	/// to append what was proposed, and blank to append nothing.
 	#[serde(default)]
 	pub notes: Option<String>,
+	/// The notes to append to each host's machine, by the host's key, as the
+	/// operator left them. A host not named appends what was proposed, and a
+	/// blank one appends nothing.
+	#[serde(default)]
+	pub host_notes: BTreeMap<String, String>,
 	/// The identifier of the environment's machines the preview was taken
 	/// against, so an import is refused if they have changed since.
 	pub members: String,
@@ -155,6 +160,9 @@ pub struct ImportHost {
 	pub candidates: Vec<Uuid>,
 	/// The variables it would set on its machine. None for a skipped host.
 	pub variables: Vec<ImportVariable>,
+	/// The file's comments about the host as proposed notes for its machine,
+	/// blank where there are none or the host is skipped.
+	pub notes: String,
 }
 
 /// A machine of the environment a host can be imported onto.
@@ -219,6 +227,8 @@ pub struct ImportApplied {
 	pub machines: usize,
 	/// Whether the group's notes were added to.
 	pub notes_added: bool,
+	/// How many machines' notes were added to.
+	pub machine_notes_added: usize,
 }
 
 /// A variable to write.
@@ -231,10 +241,19 @@ struct Write {
 	secret: bool,
 }
 
+/// Notes proposed for the machine a host is imported onto.
+struct HostNotes {
+	host: String,
+	machine: Uuid,
+	name: String,
+	notes: String,
+}
+
 struct Plan {
 	preview: ImportPreview,
 	writes: Vec<Write>,
 	notes: String,
+	host_notes: Vec<HostNotes>,
 }
 
 /// One machine, as far as matching a host to it goes.
@@ -498,6 +517,7 @@ async fn plan(conn: &mut AsyncPgConnection, args: &ImportArgs) -> Result<Plan> {
 		environment: environment_is_clone,
 	});
 	let mut hosts_out = Vec::new();
+	let mut host_notes: Vec<HostNotes> = Vec::new();
 	let mut taken: BTreeMap<Uuid, Vec<&str>> = BTreeMap::new();
 	// What each machine would be reached at, where the file says.
 	let mut ansible_host_of: HashMap<Uuid, String> = HashMap::new();
@@ -536,6 +556,7 @@ async fn plan(conn: &mut AsyncPgConnection, args: &ImportArgs) -> Result<Plan> {
 				machine_id: None,
 				candidates: Vec::new(),
 				variables: Vec::new(),
+				notes: String::new(),
 			});
 			continue;
 		}
@@ -603,12 +624,24 @@ async fn plan(conn: &mut AsyncPgConnection, args: &ImportArgs) -> Result<Plan> {
 				}
 			}
 		}
+		let notes = host.comments.join("\n");
+		if let Some(candidate) = target
+			&& !notes.is_empty()
+		{
+			host_notes.push(HostNotes {
+				host: key.clone(),
+				machine: candidate.machine.id,
+				name: candidate.machine.name.clone(),
+				notes: notes.clone(),
+			});
+		}
 		hosts_out.push(ImportHost {
 			key: key.clone(),
 			state,
 			machine_id: machine,
 			candidates: found,
 			variables: shown_vars,
+			notes,
 		});
 	}
 
@@ -741,6 +774,7 @@ async fn plan(conn: &mut AsyncPgConnection, args: &ImportArgs) -> Result<Plan> {
 		},
 		writes,
 		notes,
+		host_notes,
 	})
 }
 
@@ -819,6 +853,7 @@ pub async fn import_apply(
 		preview,
 		writes,
 		notes,
+		host_notes,
 	} = plan(&mut conn, &args.import).await?;
 
 	if preview.members != args.members {
@@ -851,6 +886,18 @@ pub async fn import_apply(
 		.map(str::to_owned)
 		.unwrap_or(notes);
 	let notes_added = !notes.is_empty();
+	let machine_notes: Vec<HostNotes> = host_notes
+		.into_iter()
+		.map(|proposed| HostNotes {
+			notes: args
+				.host_notes
+				.get(&proposed.host)
+				.map(|notes| notes.trim().to_owned())
+				.unwrap_or_else(|| proposed.notes.clone()),
+			..proposed
+		})
+		.filter(|noted| !noted.notes.is_empty())
+		.collect();
 
 	let group = ServerGroup::get_by_id(&mut conn, preview.group_id).await?;
 	let mut machine_records: Vec<Record> = Vec::new();
@@ -875,6 +922,10 @@ pub async fn import_apply(
 			})
 			.collect(),
 		notes_added,
+		machine_notes: machine_notes
+			.iter()
+			.map(|noted| noted.name.clone())
+			.collect(),
 	};
 
 	let secrets: Vec<&Write> = writes.iter().filter(|write| write.secret).collect();
@@ -915,20 +966,27 @@ pub async fn import_apply(
 			.await?;
 		}
 		if notes_added {
-			let joined = if group.notes.trim().is_empty() {
-				notes.clone()
-			} else {
-				format!("{}\n\n{notes}", group.notes.trim_end())
-			};
 			ServerGroup::update(
 				&mut conn,
 				group.id,
 				PartialServerGroup {
 					name: None,
-					notes: Some(joined),
+					notes: Some(append_notes(&group.notes, &notes)),
 					tags: None,
 					slack_open_delay: None,
 					slack_close_delay: None,
+				},
+			)
+			.await?;
+		}
+		for noted in &machine_notes {
+			let machine = Machine::get_by_id(&mut conn, noted.machine).await?;
+			Machine::update(
+				&mut conn,
+				noted.machine,
+				MachineUpdate {
+					notes: Some(append_notes(&machine.notes, &noted.notes)),
+					..Default::default()
 				},
 			)
 			.await?;
@@ -965,7 +1023,17 @@ pub async fn import_apply(
 		variables: writes.len(),
 		machines: seen.len(),
 		notes_added,
+		machine_notes_added: machine_notes.len(),
 	}))
+}
+
+/// Notes with more appended, after a blank line where there were any.
+fn append_notes(existing: &str, more: &str) -> String {
+	if existing.trim().is_empty() {
+		more.to_owned()
+	} else {
+		format!("{}\n\n{more}", existing.trim_end())
+	}
 }
 
 /// Forget secrets an import wrote, so a failed import leaves nothing in the

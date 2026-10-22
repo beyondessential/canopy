@@ -54,6 +54,8 @@ export default function AnsibleImportDialog({
 	const [file, setFile] = useState<string | null>(null);
 	const [choices, setChoices] = useState<Choices>({ hosts: {}, secrets: {} });
 	const [notes, setNotes] = useState<string | null>(null);
+	// The notes for each host's machine the operator has edited, by host key.
+	const [hostNotes, setHostNotes] = useState<Record<string, string>>({});
 	const [preview, setPreview] = useState<ImportPreview | null>(null);
 	const picker = useRef<HTMLInputElement>(null);
 	const previewing = useApiAction("ansible", "import_preview");
@@ -83,6 +85,7 @@ export default function AnsibleImportDialog({
 		setFile(null);
 		setChoices({ hosts: {}, secrets: {} });
 		setNotes(null);
+		setHostNotes({});
 		setPreview(null);
 		previewing.reset();
 		applying.reset();
@@ -97,6 +100,7 @@ export default function AnsibleImportDialog({
 		setFileName(chosen.name);
 		setChoices({ hosts: {}, secrets: {} });
 		setNotes(null);
+		setHostNotes({});
 		setPreview(null);
 		setFile(await chosen.text());
 	};
@@ -108,6 +112,7 @@ export default function AnsibleImportDialog({
 				...request(groupId, rank, file, choices),
 				members: preview.members,
 				...(notes === null ? {} : { notes }),
+				host_notes: hostNotes,
 			})
 			.then(() => {
 				reset();
@@ -175,6 +180,10 @@ export default function AnsibleImportDialog({
 						onChoices={setChoices}
 						notes={notes ?? preview.notes}
 						onNotes={setNotes}
+						hostNotes={hostNotes}
+						onHostNotes={(host, text) =>
+							setHostNotes((edited) => ({ ...edited, [host]: text }))
+						}
 					/>
 				)}
 			</DialogContent>
@@ -236,13 +245,23 @@ function Review({
 	onChoices,
 	notes,
 	onNotes,
+	hostNotes,
+	onHostNotes,
 }: {
 	preview: ImportPreview;
 	choices: Choices;
 	onChoices: (choices: Choices) => void;
 	notes: string;
 	onNotes: (notes: string) => void;
+	hostNotes: Record<string, string>;
+	onHostNotes: (host: string, notes: string) => void;
 }) {
+	const machineName = (host: ImportPreview["hosts"][number]) =>
+		host.machine_id
+			? (preview.machines.find((machine) => machine.id === host.machine_id)
+					?.name ?? host.key)
+			: null;
+
 	const chooseHost = (host: string, value: string) =>
 		onChoices({
 			...choices,
@@ -382,13 +401,7 @@ function Review({
 							.map((host) => (
 								<VariableGroup
 									key={host.key}
-									title={
-										host.machine_id
-											? (preview.machines.find(
-													(machine) => machine.id === host.machine_id,
-												)?.name ?? host.key)
-											: `${host.key}, not yet assigned`
-									}
+									title={machineName(host) ?? `${host.key}, not yet assigned`}
 									host={host.key}
 									variables={host.variables}
 									onMark={mark}
@@ -406,6 +419,25 @@ function Review({
 				onChange={(event) => onNotes(event.target.value)}
 				slotProps={{ htmlInput: { "data-testid": "import-notes" } }}
 			/>
+			{preview.hosts
+				.filter(
+					(host) =>
+						host.state !== "skipped" &&
+						(host.notes !== "" || host.key in hostNotes),
+				)
+				.map((host) => (
+					<TextField
+						key={host.key}
+						label={`Added to the notes of ${machineName(host) ?? `${host.key}'s machine`}`}
+						multiline
+						minRows={2}
+						value={hostNotes[host.key] ?? host.notes}
+						onChange={(event) => onHostNotes(host.key, event.target.value)}
+						slotProps={{
+							htmlInput: { "data-testid": `import-host-notes-${host.key}` },
+						}}
+					/>
+				))}
 		</>
 	);
 }

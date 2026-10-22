@@ -93,7 +93,7 @@ A machine can be ranked before anything on it has reported, so the applications 
 
 ## What each carries
 
-A **machine** carries the name its operator gave it, its identity, its group, its rank, where it is (whether it is cloud-hosted and its geolocation), and how long it may be silent before it is considered unreachable.
+A **machine** carries the name its operator gave it, its identity, its group, its rank, its notes, where it is (whether it is cloud-hosted and its geolocation), and how long it may be silent before it is considered unreachable.
 
 An **application** carries its type, its rank, its optional name, its public name, the URL it is reached at, the DNS names it serves at and the DNS name grants and pause state that work from them, its notes and tags, and how long it may be silent before it is considered unreachable.
 

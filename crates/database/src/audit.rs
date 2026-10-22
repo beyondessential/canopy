@@ -556,11 +556,12 @@ actions! {
 	}
 
 	/// An Ansible inventory file was imported into an environment: the variables
-	/// it set, with the machine each was set on, and whether it added to the
-	/// group's notes. A secret's value is not recorded.
+	/// it set, with the machine each was set on, whether it added to the
+	/// group's notes, and the machines whose notes it added to. A secret's value
+	/// is not recorded.
 	AnsibleInventoryImported = "ansible_inventory_imported", "Import Ansible inventory" {
 		records { group: Record, machines: Vec<Record> }
-		detail { rank: ServerRank, variables: Vec<ImportedVariable>, notes_added: bool }
+		detail { rank: ServerRank, variables: Vec<ImportedVariable>, notes_added: bool, machine_notes: Vec<String> }
 	}
 
 	/// The Ansible variable catalogue Canopy reads changed, by Canopy itself

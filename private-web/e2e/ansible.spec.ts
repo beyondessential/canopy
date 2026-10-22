@@ -471,6 +471,7 @@ test.describe("group Ansible", () => {
 					"    kamaka-prod-central:",
 					"      public_hostname: central.example.org",
 					"    10.20.30.40:223:",
+					"      # Behind the office firewall",
 					"      tamanu_facility_id: office",
 					"",
 				].join("\n"),
@@ -493,10 +494,19 @@ test.describe("group Ansible", () => {
 		await office.getByLabel("Machine").click();
 		await page.getByRole("option", { name: "kamaka-prod-office" }).click();
 		await expect(office.getByRole("combobox")).toHaveText("kamaka-prod-office");
+		// The comment within the host's entry goes on its machine's notes.
+		const officeNotes = dialog.getByTestId("import-host-notes-10.20.30.40:223");
+		await expect(officeNotes).toHaveValue("Behind the office firewall");
+		await expect(dialog.getByLabel("Added to the notes of kamaka-prod-office")).toBeVisible();
+		await officeNotes.fill("Behind the office firewall, ask the site lead");
 		await expect(page.getByTestId("import-apply")).toBeEnabled();
 		await page.getByTestId("import-apply").click();
 
 		await expect(page.getByTestId("import-dialog")).toHaveCount(0);
+		const [noted] = await sql.query<{ notes: string }>(
+			"SELECT notes FROM machines WHERE name = 'kamaka-prod-office'",
+		);
+		expect(noted.notes).toBe("Behind the office firewall, ask the site lead");
 		const scopes = production.getByTestId("ansible-variables");
 		await expect(scopes.getByTestId("var").filter({ hasText: "timezone" })).toHaveCount(1);
 		await expect(scopes.getByTestId("secret-var").filter({ hasText: "salt" })).toHaveCount(1);

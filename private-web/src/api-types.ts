@@ -8633,6 +8633,8 @@ export interface components {
         };
         /** @description What an applied import did. */
         ImportApplied: {
+            /** @description How many machines' notes were added to. */
+            machine_notes_added: number;
             /** @description How many machines they were set on. */
             machines: number;
             /** @description Whether the group's notes were added to. */
@@ -8645,6 +8647,14 @@ export interface components {
          *     them.
          */
         ImportApplyArgs: components["schemas"]["ImportArgs"] & {
+            /**
+             * @description The notes to append to each host's machine, by the host's key, as the
+             *     operator left them. A host not named appends what was proposed, and a
+             *     blank one appends nothing.
+             */
+            host_notes?: {
+                [key: string]: string;
+            };
             /**
              * @description The identifier of the environment's machines the preview was taken
              *     against, so an import is refused if they have changed since.
@@ -8682,6 +8692,11 @@ export interface components {
              * @description The machine it would be imported onto, where it has one.
              */
             machine_id?: string | null;
+            /**
+             * @description The file's comments about the host as proposed notes for its machine,
+             *     blank where there are none or the host is skipped.
+             */
+            notes: string;
             /** @description How the host stands against the environment's machines. */
             state: components["schemas"]["HostState"];
             /** @description The variables it would set on its machine. None for a skipped host. */
