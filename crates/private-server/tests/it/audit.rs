@@ -180,7 +180,18 @@ async fn taking_over_and_serving_an_environment_are_recorded_and_the_read_is_rou
 			.iter()
 			.find(|e| e.action == "inventory_variable_set")
 			.unwrap();
-		assert!(!variable.detail.to_string().contains("ntp.example.org"));
+		assert_eq!(
+			variable.status,
+			Status::Done,
+			"the secret's entry is settled once the store holds it"
+		);
+		assert_eq!(variable.detail["secret"], true);
+		assert!(
+			!serde_json::to_string(variable)
+				.unwrap()
+				.contains("ntp.example.org"),
+			"the secret's value is nowhere in the entry"
+		);
 
 		let everything = log(
 			&mut conn,
@@ -206,35 +217,6 @@ async fn taking_over_and_serving_an_environment_are_recorded_and_the_read_is_rou
 		)
 		.await;
 		assert_eq!(named.len(), 1, "naming a routine action shows it");
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_secret_variable_is_recorded_ahead_of_the_store_and_settled_without_its_value() {
-	commons_tests::server::run(async |mut conn, _, private| {
-		seed(&mut conn).await;
-		private
-			.post("/api/ansible_variables/set")
-			.json(&json!({
-				"server_group_id": GROUP,
-				"name": "db_password",
-				"value": "hunter2",
-				"secret": true,
-			}))
-			.await
-			.assert_status_ok();
-
-		let entries = log(&mut conn, Filter::default()).await;
-		assert_eq!(entries.len(), 1);
-		assert_eq!(entries[0].action, "inventory_variable_set");
-		assert_eq!(entries[0].status, Status::Done);
-		assert_eq!(entries[0].detail["secret"], true);
-		assert!(
-			!serde_json::to_string(&entries[0])
-				.unwrap()
-				.contains("hunter2")
-		);
 	})
 	.await
 }

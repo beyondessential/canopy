@@ -339,6 +339,17 @@ Final check of the round: 1509 Rust tests pass, Vitest 499, typecheck and `just 
 
 Process note: compare covered functions by name (`FNDA` in the LCOV file) once production code has been edited; a line diff then reports shifted lines as lost.
 
+### First application, not the steady state
+
+This was the first time the process ran on this codebase, and the card's tests sit beside older ones nobody had reviewed, so some of what it found is a one-off bootstrap cost.
+Round 2 found about 10 folds in F5's own tests and about 15 in older maintenance, audit and e2e tests beside them; later runs should not expect that bleed.
+Consequences for the skill:
+
+- Tag every finding as own (a test the card added) or neighbour (an older test next to it). Apply own by default; report neighbours for their owners unless the user asks for them.
+- Judge the stopping rule on own-test findings only.
+- Put the per-test lenses (A, B, E) in the guidance read before writing tests, so C and D mostly meet what an incremental build leaves behind and not what a first pass missed.
+- Keep this run's numbers as the reference: 190 tests added, about 40 folded in round 1 of lens D, about 10 more of F5's own in round 2, one coverage baseline and a function-level diff to check each apply.
+
 ## Signal to noise
 
 For each lens, once run: how many findings, how many accepted, how many rejected and why, and a verdict on whether the lens belongs in the skill, as a separate pass, or as guidance only.

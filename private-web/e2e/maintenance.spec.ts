@@ -25,53 +25,6 @@ test.describe("maintenance windows", () => {
 		await resetSeededTables(sql);
 	});
 
-	test("a server under a window says so, and its health is marked", async ({
-		page,
-		sql,
-	}) => {
-		const group = await seedServerGroup(sql, { name: "under-the-knife" });
-		const server = await seedServer(sql, {
-			name: "being-upgraded",
-			groupId: group.id,
-		});
-		await seedStatus(sql, { serverId: server.id, healthy: true });
-		await seedMaintenanceWindow(sql, {
-			machineId: server.machineId,
-			note: "Upgrading to 2.62",
-			declaredBy: "daniel@bes.au",
-		});
-
-		await page.goto(`/fleet/applications/${server.id}`);
-		const section = page.getByTestId("maintenance-section");
-		await expect(section).toContainText("Under maintenance, ending");
-		await expect(section).toContainText("Upgrading to 2.62");
-		await expect(page.getByTestId("maintenance-marker")).toContainText(
-			"Under maintenance",
-		);
-	});
-
-	test("declaring from the server page opens a window", async ({
-		page,
-		sql,
-	}) => {
-		const group = await seedServerGroup(sql, { name: "about-to-move" });
-		const server = await seedServer(sql, {
-			name: "going-down",
-			groupId: group.id,
-		});
-		await seedStatus(sql, { serverId: server.id, healthy: true });
-
-		await page.goto(`/fleet/applications/${server.id}`);
-		await page.getByRole("button", { name: "Declare maintenance" }).click();
-		await page.getByLabel("What's being done").fill("Swapping the disk");
-		await page.getByRole("button", { name: "Declare", exact: true }).click();
-
-		await expect(
-			page.getByTestId("maintenance-section"),
-		).toContainText("Swapping the disk");
-		expect(await openWindows(sql)).toBe(1);
-	});
-
 	// A window over several machines is each machine's own, and the group
 	// presents it among its environments' windows rather than as its own.
 	// spec: MNT#presentation
@@ -101,21 +54,6 @@ test.describe("maintenance windows", () => {
 		await expect(own.getByTestId("window-covers")).toContainText("fj-b");
 	});
 
-	test("lifting ends the window", async ({ page, sql }) => {
-		const group = await seedServerGroup(sql, { name: "back-already" });
-		const server = await seedServer(sql, { name: "done", groupId: group.id });
-		await seedStatus(sql, { serverId: server.id, healthy: true });
-		await seedMaintenanceWindow(sql, { applicationId: server.id, note: "Rebooting" });
-
-		await page.goto(`/fleet/applications/${server.id}`);
-		await page.getByRole("button", { name: "Lift" }).click();
-
-		await expect(
-			page.getByRole("button", { name: "Declare maintenance" }),
-		).toBeVisible();
-		expect(await openWindows(sql)).toBe(0);
-	});
-
 	test("an application under its box's window says so and points at the box", async ({
 		page,
 		sql,
@@ -134,12 +72,20 @@ test.describe("maintenance windows", () => {
 		await page.goto(`/fleet/applications/${server.id}`);
 		const covering = page.getByTestId("covering-machine-window");
 		// Named as the machine it is, so the target is not read as a sibling.
+		await expect(
+			covering,
+			"covering alert says the application is under maintenance",
+		).toContainText("Under maintenance, ending");
 		await expect(covering).toContainText("as part of the machine");
 		await expect(covering).toContainText("Patching the host");
 		await expect(covering.getByRole("link")).toHaveAttribute(
 			"href",
 			`/fleet/machines/${server.machineId}`,
 		);
+		await expect(
+			page.getByTestId("maintenance-marker"),
+			"the application's health chip carries the maintenance marker",
+		).toContainText("Under maintenance");
 		// The window is the box's, so it is amended and lifted there.
 		await expect(page.getByRole("button", { name: "Lift" })).toHaveCount(0);
 	});
@@ -437,43 +383,6 @@ test.describe("maintenance windows", () => {
 		await expect(
 			page.getByText("Nothing is under maintenance"),
 		).toBeVisible();
-	});
-
-	test("amending prefills the open window and keeps it the same window", async ({
-		page,
-		sql,
-	}) => {
-		const group = await seedServerGroup(sql, { name: "running-long" });
-		const server = await seedServer(sql, {
-			name: "not-done-yet",
-			groupId: group.id,
-		});
-		await seedStatus(sql, { serverId: server.id, healthy: true });
-		await seedMaintenanceWindow(sql, {
-			applicationId: server.id,
-			note: "Rebooting",
-		});
-
-		await page.goto(`/fleet/applications/${server.id}`);
-		await page.getByRole("button", { name: "Amend" }).click();
-		await expect(
-			page.getByRole("heading", { name: /Amend maintenance/ }),
-		).toBeVisible();
-		const note = page.getByLabel("What's being done");
-		await expect(note).toHaveValue("Rebooting");
-		await note.fill("Rebooting, running long");
-		await page.getByRole("button", { name: "Amend", exact: true }).click();
-
-		await expect(
-			page.getByTestId("maintenance-section"),
-		).toContainText("Rebooting, running long");
-		const rows = await sql.query<{ n: string; amended: string | null }>(
-			"SELECT COUNT(*) AS n, MAX(amended_at::text) AS amended \
-			 FROM maintenance_windows WHERE application_id = $1 AND ended_at IS NULL",
-			[server.id],
-		);
-		expect(Number(rows[0]!.n)).toBe(1);
-		expect(rows[0]!.amended).not.toBeNull();
 	});
 
 	test("an open incident offers the declaration over its target", async ({
@@ -811,6 +720,57 @@ test.describe("maintenance windows", () => {
 				];
 			})
 			.toEqual(["replacing the disk", true, true]);
+	});
+
+	test("an application's page declares, amends and lifts its own window", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "about-to-move" });
+		const server = await seedServer(sql, {
+			name: "going-down",
+			groupId: group.id,
+		});
+		await seedStatus(sql, { serverId: server.id, healthy: true });
+		const section = page.getByTestId("maintenance-section");
+
+		await page.goto(`/fleet/applications/${server.id}`);
+		await page.getByRole("button", { name: "Declare maintenance" }).click();
+		await page.getByLabel("What's being done").fill("Swapping the disk");
+		await page.getByRole("button", { name: "Declare", exact: true }).click();
+		await expect(section, "declared: the section shows the note").toContainText(
+			"Swapping the disk",
+		);
+		expect(await openWindows(sql), "declared: one window is open").toBe(1);
+
+		await page.getByRole("button", { name: "Amend" }).click();
+		await expect(
+			page.getByRole("heading", { name: /Amend maintenance/ }),
+			"amending: the dialog opens as an amendment",
+		).toBeVisible();
+		const note = page.getByLabel("What's being done");
+		await expect(note, "amending: the note is prefilled").toHaveValue(
+			"Swapping the disk",
+		);
+		await note.fill("Swapping the disk, running long");
+		await page.getByRole("button", { name: "Amend", exact: true }).click();
+		await expect(section, "amended: the section shows the new note").toContainText(
+			"Swapping the disk, running long",
+		);
+		const rows = await sql.query<{ n: string; amended: string | null }>(
+			"SELECT COUNT(*) AS n, MAX(amended_at::text) AS amended \
+			 FROM maintenance_windows WHERE application_id = $1 AND ended_at IS NULL",
+			[server.id],
+		);
+		expect(Number(rows[0]!.n), "amended: still the one open window").toBe(1);
+		expect(rows[0]!.amended, "amended: the window records the amendment").not.toBeNull();
+
+		await page.getByRole("button", { name: "Lift" }).click();
+		await expect(
+			page.getByRole("button", { name: "Declare maintenance" }),
+			"lifted: declaring is offered again",
+		).toBeVisible();
+		expect(await openWindows(sql), "lifted: no window is open").toBe(0);
 	});
 
 	/// spec: MNT#declaring
