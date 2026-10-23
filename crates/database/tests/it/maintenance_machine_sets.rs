@@ -213,12 +213,34 @@ async fn a_window_over_several_machines_covers_each_as_one_over_it_alone() {
 	.await
 }
 
+/// A set is not its environment's own window. A take reads the windows that
+/// name any of the environment's machines: another operator's set refuses it,
+/// and one over machines in another environment does not.
+// spec: ANSRUN#work-under-way
 #[tokio::test(flavor = "multi_thread")]
 async fn a_set_is_not_its_environments_own_window() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let fleet = fleet(&mut conn).await;
 		let [a, b, _] = fleet.boxes;
 		let set = declare_machines(&mut conn, &[a, b]).await.expect("declare");
+
+		let now = Timestamp::now();
+		let sole = MaintenanceWindow::open_over(
+			&mut conn,
+			fleet.group,
+			ServerRank::Production,
+			&fleet.boxes,
+		)
+		.await
+		.expect("open over");
+		assert!(
+			MaintenanceWindow::refusing_run(&sole, "someone-else", now).is_some(),
+			"another operator's window holds the environment"
+		);
+		assert!(
+			MaintenanceWindow::refusing_run(&sole, "op", now).is_none(),
+			"the declarer is served"
+		);
 
 		assert!(
 			MaintenanceWindow::open_for(
@@ -275,6 +297,10 @@ async fn a_set_is_not_its_environments_own_window() {
 		assert!(
 			elsewhere.iter().all(|window| window.id != set.id),
 			"a set naming none of them is not"
+		);
+		assert!(
+			MaintenanceWindow::refusing_run(&elsewhere, "someone-else", now).is_none(),
+			"a window over machines of another environment refuses nothing"
 		);
 	})
 	.await
@@ -736,51 +762,6 @@ async fn a_set_can_be_moved_only_along_its_own_environment() {
 		assert!(
 			matches!(machines_from_app, Err(AppError::BadRequest(_))),
 			"several machines are chosen from an environment or its machines: {machines_from_app:?}"
-		);
-	})
-	.await
-}
-
-/// Another operator's set over the environment refuses a take on it, and one
-/// over machines in another environment does not: a take reads the windows that
-/// name any of the environment's machines.
-// spec: ANSRUN#work-under-way
-#[tokio::test(flavor = "multi_thread")]
-async fn a_set_naming_a_member_refuses_a_take_by_another_operator() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
-		let [a, b, _] = fleet.boxes;
-		declare_machines(&mut conn, &[a, b]).await.expect("declare");
-		let now = Timestamp::now();
-
-		let over = MaintenanceWindow::open_over(
-			&mut conn,
-			fleet.group,
-			ServerRank::Production,
-			&fleet.boxes,
-		)
-		.await
-		.expect("open over");
-		assert!(
-			MaintenanceWindow::refusing_run(&over, "someone-else", now).is_some(),
-			"another operator's window holds the environment"
-		);
-		assert!(
-			MaintenanceWindow::refusing_run(&over, "op", now).is_none(),
-			"the declarer is served"
-		);
-
-		let clone = MaintenanceWindow::open_over(
-			&mut conn,
-			fleet.group,
-			ServerRank::Clone,
-			&[fleet.clone_box],
-		)
-		.await
-		.expect("open over");
-		assert!(
-			MaintenanceWindow::refusing_run(&clone, "someone-else", now).is_none(),
-			"a window over machines of another environment refuses nothing"
 		);
 	})
 	.await

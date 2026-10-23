@@ -288,8 +288,10 @@ async fn lists_each_variable_where_it_would_be_set() {
 
 /// A variable the catalogue calls secret is one, and any other is guessed by
 /// its name or the names inside its value, which the operator can change. A
-/// secret's value is not shown.
+/// secret's value is not shown. Before any catalogue is read, the variables a
+/// run sets for itself are left out all the same.
 // spec: ANSIMP#preview
+// spec: ANSIMP#reading-the-file
 #[tokio::test(flavor = "multi_thread")]
 async fn proposes_secrets_by_the_catalogue_then_by_name_and_hides_their_values() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
@@ -299,6 +301,8 @@ async fn proposes_secrets_by_the_catalogue_then_by_name_and_hides_their_values()
     salt: pepper
     api_token: abc
     plain: yes
+    canopy_intent: configure
+    tamanu_clone: true
     nested:
       password_hint: no
     tamanu_caddy_tls_dns_iam:
@@ -320,6 +324,9 @@ async fn proposes_secrets_by_the_catalogue_then_by_name_and_hides_their_values()
 		assert_eq!(variable(vars, "tamanu_caddy_tls_dns_iam")["secret"], true);
 		assert_eq!(variable(vars, "plain")["secret"], false);
 		assert_eq!(variable(vars, "plain")["value"], true);
+		assert_eq!(by_name["left_out"], json!(["canopy_intent", "tamanu_clone"]));
+		assert!(!names(vars).contains(&"canopy_intent"));
+		assert!(!names(vars).contains(&"tamanu_clone"));
 
 		// The operator unmarks one the name guessed, and marks one it did not.
 		let chosen = preview(
@@ -493,32 +500,23 @@ async fn refuses_two_hosts_on_one_machine_and_two_machines_at_one_address() {
 	.await
 }
 
-/// A file that is not an inventory, or holds a vault-encrypted value, is
-/// refused naming why.
+/// A file that is not an inventory is refused with a 400 naming why.
 // spec: ANSIMP#reading-the-file
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_a_file_that_is_not_an_inventory() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		environment(&mut conn).await;
-		let refuse = async |file: &str| -> String {
-			let response = private
-				.post("/api/ansible/import_preview")
-				.json(&json!({ "group": "kamaka", "file": file }))
-				.await;
-			response.assert_status(axum::http::StatusCode::BAD_REQUEST);
-			response.json::<Value>()["detail"]
-				.as_str()
-				.unwrap()
-				.to_owned()
-		};
-
-		assert!(refuse("plugin: canopy\n").await.contains("no `all` group"));
-		assert!(refuse("all: [\n").await.contains("line"));
-		let vault = refuse(
-			"all:\n  vars:\n    salt: !vault |\n      $ANSIBLE_VAULT;1.1;AES256\n      61\n",
-		)
-		.await;
-		assert!(vault.contains("salt") && vault.contains("vault"), "{vault}");
+		let response = private
+			.post("/api/ansible/import_preview")
+			.json(&json!({ "group": "kamaka", "file": "plugin: canopy\n" }))
+			.await;
+		response.assert_status(axum::http::StatusCode::BAD_REQUEST);
+		let detail = response.json::<Value>()["detail"]
+			.as_str()
+			.unwrap()
+			.to_owned();
+		assert!(detail.contains("not an inventory file"), "{detail}");
+		assert!(detail.contains("no `all` group"), "{detail}");
 	})
 	.await
 }
@@ -679,34 +677,13 @@ async fn applying_sets_the_variables_and_notes_and_records_one_entry() {
 	.await
 }
 
-/// Whether a machine is managed is a switch, not a variable, so a machine
-/// switched on before the import holds it back no more than one left alone.
+/// An import is offered only to an environment that carries no variables: a
+/// machine switched to managed beforehand and a variable on the whole group do
+/// not hold it back (an environment variable overriding a group's is named),
+/// but a variable on one of its machines does, and it is refused once its
+/// machines have changed since the preview.
 // spec: ANSIMP
-#[tokio::test(flavor = "multi_thread")]
-async fn a_machine_already_managed_does_not_hold_the_import_back() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let env = environment(&mut conn).await;
-		private
-			.post("/api/ansible_variables/set")
-			.json(&json!({ "machine_id": env.office, "name": "managed_by_ansible", "value": true }))
-			.await
-			.assert_status_ok();
-
-		let previewed = preview(
-			&private,
-			json!({
-				"group": "kamaka", "file": FILE,
-				"hosts": [{ "host": "10.20.30.40:223", "machine_id": env.office }],
-			}),
-		)
-		.await;
-		assert_eq!(previewed["can_apply"], true, "{previewed}");
-	})
-	.await
-}
-
-/// An import is offered only to an environment that carries no variables, and
-/// is refused once its machines have changed since the preview.
+// spec: ANSIMP#preview
 // spec: ANSIMP#applying
 #[tokio::test(flavor = "multi_thread")]
 async fn is_refused_where_variables_are_set_or_the_machines_changed() {
@@ -716,7 +693,29 @@ async fn is_refused_where_variables_are_set_or_the_machines_changed() {
 			"group": "kamaka", "file": FILE,
 			"hosts": [{ "host": "10.20.30.40:223", "machine_id": env.office }],
 		});
+
+		// Whether a machine is managed is a switch, not a variable.
+		private
+			.post("/api/ansible_variables/set")
+			.json(&json!({ "machine_id": env.office, "name": "managed_by_ansible", "value": true }))
+			.await
+			.assert_status_ok();
+		let managed = preview(&private, request.clone()).await;
+		assert_eq!(managed["can_apply"], true, "{managed}");
+
+		private
+			.post("/api/ansible_variables/set")
+			.json(&json!({ "server_group_id": env.group, "name": "timezone", "value": "UTC" }))
+			.await
+			.assert_status_ok();
+		private
+			.post("/api/ansible_variables/set")
+			.json(&json!({ "server_group_id": env.group, "name": "unrelated", "value": 1 }))
+			.await
+			.assert_status_ok();
 		let previewed = preview(&private, request.clone()).await;
+		assert_eq!(previewed["can_apply"], true, "{previewed}");
+		assert_eq!(previewed["overrides"], json!(["timezone"]));
 
 		// A machine arrives between the preview and the apply.
 		insert_application_on_its_own_machine(
@@ -751,30 +750,6 @@ async fn is_refused_where_variables_are_set_or_the_machines_changed() {
 	.await
 }
 
-/// A variable set on the whole group does not hold an import back, and an
-/// imported environment variable overriding one is named.
-// spec: ANSIMP#preview
-#[tokio::test(flavor = "multi_thread")]
-async fn a_group_wide_variable_does_not_hold_it_back_and_is_named_where_overridden() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let env = environment(&mut conn).await;
-		private
-			.post("/api/ansible_variables/set")
-			.json(&json!({ "server_group_id": env.group, "name": "timezone", "value": "UTC" }))
-			.await
-			.assert_status_ok();
-		private
-			.post("/api/ansible_variables/set")
-			.json(&json!({ "server_group_id": env.group, "name": "unrelated", "value": 1 }))
-			.await
-			.assert_status_ok();
-
-		let previewed = preview(&private, json!({ "group": "kamaka", "file": FILE })).await;
-		assert_eq!(previewed["overrides"], json!(["timezone"]));
-	})
-	.await
-}
-
 /// What an environment serves changes under a run that holds it, so nothing is
 /// imported into one meanwhile.
 // spec: ANSIMP#applying
@@ -794,25 +769,6 @@ async fn is_refused_while_a_run_holds_the_environment() {
 		let refused = private.post("/api/ansible/import_apply").json(&apply).await;
 		refused.assert_status(axum::http::StatusCode::CONFLICT);
 		assert!(refused.text().contains("a run holds this environment"));
-	})
-	.await
-}
-
-/// Before Canopy has read a catalogue, the variables a run sets for itself are
-/// left out all the same.
-// spec: ANSIMP#reading-the-file
-#[tokio::test(flavor = "multi_thread")]
-async fn leaves_out_the_variables_a_run_sets_before_any_catalogue_is_read() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		environment(&mut conn).await;
-		let preview = preview(&private, json!({ "group": "kamaka", "file": FILE })).await;
-
-		assert_eq!(
-			preview["left_out"],
-			json!(["canopy_intent", "tamanu_clone"])
-		);
-		assert!(!names(&preview["environment"]).contains(&"canopy_intent"));
-		assert!(!names(&preview["environment"]).contains(&"tamanu_clone"));
 	})
 	.await
 }

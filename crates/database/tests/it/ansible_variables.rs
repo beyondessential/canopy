@@ -5,7 +5,8 @@
 
 use commons_tests::diesel_async::SimpleAsyncConnection;
 use commons_types::server::rank::ServerRank;
-use database::ansible_variables::{AnsibleVariable, VariableScope};
+use database::ansible_variables::{AnsibleVariable, HeldSecretValue, VariableScope};
+use jiff::{SignedDuration, Timestamp};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -280,6 +281,63 @@ async fn a_variable_on_a_machine_holds_its_group_as_an_import_does() {
 			.await;
 		assert!(held.is_err(), "the group's row is held");
 		conn.batch_execute("ROLLBACK").await.unwrap();
+	})
+	.await
+}
+
+/// A secret changing is a secret variable set or a value beginning to be held,
+/// and a plain variable is neither.
+// spec: ANSVAR#history
+#[tokio::test(flavor = "multi_thread")]
+async fn notices_when_a_secret_last_changed() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		assert_eq!(
+			AnsibleVariable::latest_secret_change(&mut conn)
+				.await
+				.unwrap(),
+			None
+		);
+		let group = seed_group(&mut conn).await;
+		conn.batch_execute(&format!(
+			"INSERT INTO ansible_variables (server_group_id, name, value, is_secret)
+			 VALUES ('{group}', 'timezone', '\"Pacific/Fiji\"', FALSE);"
+		))
+		.await
+		.unwrap();
+		assert_eq!(
+			AnsibleVariable::latest_secret_change(&mut conn)
+				.await
+				.unwrap(),
+			None,
+			"a plain value is not a secret changing"
+		);
+
+		let before_held = Timestamp::now();
+		HeldSecretValue::hold(
+			&mut conn,
+			Uuid::new_v4(),
+			VariableScope::Group { group_id: group },
+			"salt",
+		)
+		.await
+		.unwrap();
+		let held = AnsibleVariable::latest_secret_change(&mut conn)
+			.await
+			.unwrap()
+			.expect("a held value is a change");
+		assert!(held >= before_held - SignedDuration::from_secs(1));
+
+		conn.batch_execute(&format!(
+			"INSERT INTO ansible_variables (server_group_id, rank, name, is_secret)
+			 VALUES ('{group}', 'production', 'salt', TRUE);"
+		))
+		.await
+		.unwrap();
+		let set = AnsibleVariable::latest_secret_change(&mut conn)
+			.await
+			.unwrap()
+			.expect("a secret variable set is a change");
+		assert!(set > held, "a secret variable set is the latest change");
 	})
 	.await
 }
