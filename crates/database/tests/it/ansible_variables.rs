@@ -34,11 +34,15 @@ async fn seed_machine(
 }
 
 /// One name per scope, so setting it again replaces the value rather than
-/// leaving two rows for a merge to pick between.
+/// leaving two rows for a merge to pick between. A row at two scopes at once,
+/// or at none, would make the merge order undefined. A secret's value lives in
+/// the secret store, so a row holding both, or a plain variable holding
+/// neither, is refused.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_name_is_unique_within_its_scope() {
+async fn the_table_holds_names_scopes_and_secrets_to_its_rules() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group = seed_group(&mut conn).await;
+		let machine = seed_machine(&mut conn, group).await;
 		let scope = VariableScope::Environment {
 			group_id: group,
 			rank: ServerRank::Production,
@@ -52,7 +56,7 @@ async fn a_name_is_unique_within_its_scope() {
 			Some("me"),
 		)
 		.await
-		.expect("first set");
+		.expect("unique within a scope: first set");
 		let replaced = AnsibleVariable::set(
 			&mut conn,
 			scope,
@@ -61,13 +65,13 @@ async fn a_name_is_unique_within_its_scope() {
 			Some("me"),
 		)
 		.await
-		.expect("second set");
+		.expect("unique within a scope: second set");
 		assert_eq!(replaced.value, Some(json!("trace")));
 
 		let held = AnsibleVariable::list_at(&mut conn, scope)
 			.await
-			.expect("list");
-		assert_eq!(held.len(), 1, "no duplicate row");
+			.expect("unique within a scope: list");
+		assert_eq!(held.len(), 1, "unique within a scope: no duplicate row");
 
 		// And the index behind that is the database's, not the code's: a row
 		// inserted around `set` is refused too.
@@ -77,11 +81,59 @@ async fn a_name_is_unique_within_its_scope() {
 				 VALUES ('{group}', 'production', 'log_level', '\"warn\"')"
 			))
 			.await;
-		assert!(straight_in.is_err(), "the unique index admits a second row");
+		assert!(
+			straight_in.is_err(),
+			"unique within a scope: the unique index admits a second row"
+		);
+
+		for values in [
+			format!("'{group}', 'production', '{machine}'"),
+			"NULL, 'production', NULL".to_string(),
+			"NULL, NULL, NULL".to_string(),
+		] {
+			let bad = conn
+				.batch_execute(&format!(
+					"INSERT INTO ansible_variables (server_group_id, rank, machine_id, name, value)
+					 VALUES ({values}, 'misplaced', '\"info\"')"
+				))
+				.await;
+			assert!(bad.is_err(), "exactly one scope: admitted {values}");
+		}
+
+		for columns in [
+			"name, value, is_secret) VALUES ('salt', '\"pepper\"', TRUE",
+			"name, is_secret) VALUES ('salt', FALSE",
+		] {
+			let bad = conn
+				.batch_execute(&format!(
+					"INSERT INTO ansible_variables (server_group_id, {columns})"
+				))
+				.await;
+			assert!(bad.is_err(), "secret and value: admitted {columns}");
+		}
+
+		// And the code's own two paths land on the right side of it.
+		let scope = VariableScope::Group { group_id: group };
+		let secret = AnsibleVariable::set(&mut conn, scope, "salt", None, Some("me"))
+			.await
+			.expect("secret and value: set a secret");
+		assert!(secret.is_secret);
+		assert_eq!(secret.value, None);
+
+		let plain = AnsibleVariable::set(
+			&mut conn,
+			scope,
+			"salt",
+			Some(&json!("visible")),
+			Some("me"),
+		)
+		.await
+		.expect("secret and value: set it plain");
+		assert!(!plain.is_secret);
+		assert_eq!(plain.value, Some(json!("visible")));
 	})
 	.await
 }
-
 /// The same name at three scopes is three rows, since that is what a merge
 /// exists to resolve.
 #[tokio::test(flavor = "multi_thread")]
@@ -118,73 +170,20 @@ async fn the_same_name_sits_at_every_scope_at_once() {
 			.await
 			.expect("list under group");
 		assert_eq!(under.len(), 3, "the group page sees all three");
-	})
-	.await
-}
 
-/// A row at two scopes at once, or at none, would make the merge order
-/// undefined.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_row_sits_at_exactly_one_scope() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let group = seed_group(&mut conn).await;
-		let machine = seed_machine(&mut conn, group).await;
-
-		for values in [
-			format!("'{group}', 'production', '{machine}'"),
-			"NULL, 'production', NULL".to_string(),
-			"NULL, NULL, NULL".to_string(),
-		] {
-			let bad = conn
-				.batch_execute(&format!(
-					"INSERT INTO ansible_variables (server_group_id, rank, machine_id, name, value)
-					 VALUES ({values}, 'log_level', '\"info\"')"
-				))
-				.await;
-			assert!(bad.is_err(), "admitted {values}");
-		}
-	})
-	.await
-}
-
-/// A secret's value lives in the secret store, so a row holding both, or a
-/// plain variable holding neither, is refused.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_secret_carries_no_value_and_a_plain_one_must() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let group = seed_group(&mut conn).await;
-
-		for columns in [
-			"name, value, is_secret) VALUES ('salt', '\"pepper\"', TRUE",
-			"name, is_secret) VALUES ('salt', FALSE",
-		] {
-			let bad = conn
-				.batch_execute(&format!(
-					"INSERT INTO ansible_variables (server_group_id, {columns})"
-				))
-				.await;
-			assert!(bad.is_err(), "admitted {columns}");
-		}
-
-		// And the code's own two paths land on the right side of it.
-		let scope = VariableScope::Group { group_id: group };
-		let secret = AnsibleVariable::set(&mut conn, scope, "salt", None, Some("me"))
+		// Dropping a machine takes its variables with it, so a name cannot
+		// outlive the box it configured.
+		conn.batch_execute(&format!("DELETE FROM machines WHERE id = '{machine}'"))
 			.await
-			.expect("set a secret");
-		assert!(secret.is_secret);
-		assert_eq!(secret.value, None);
-
-		let plain = AnsibleVariable::set(
-			&mut conn,
-			scope,
-			"salt",
-			Some(&json!("visible")),
-			Some("me"),
-		)
-		.await
-		.expect("set it plain");
-		assert!(!plain.is_secret);
-		assert_eq!(plain.value, Some(json!("visible")));
+			.expect("delete the machine");
+		let left = AnsibleVariable::list_all(&mut conn).await.expect("list");
+		assert_eq!(left.len(), 2, "only the machine's row goes: {left:?}");
+		for scope in &scopes[..2] {
+			assert!(
+				left.iter().any(|row| row.scope() == *scope),
+				"{scope:?} stays: {left:?}"
+			);
+		}
 	})
 	.await
 }
@@ -227,30 +226,6 @@ async fn each_scope_keys_its_own_secret() {
 			"{name}"
 		);
 	}
-}
-
-/// Dropping a machine takes its variables with it, so a name cannot outlive
-/// the box it configured.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_machines_variables_go_with_the_machine() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let group = seed_group(&mut conn).await;
-		let machine = seed_machine(&mut conn, group).await;
-		let scope = VariableScope::Machine {
-			machine_id: machine,
-		};
-		AnsibleVariable::set(&mut conn, scope, "log_level", Some(&json!("info")), None)
-			.await
-			.expect("set");
-
-		conn.batch_execute(&format!("DELETE FROM machines WHERE id = '{machine}'"))
-			.await
-			.expect("delete the machine");
-
-		let left = AnsibleVariable::list_all(&mut conn).await.expect("list");
-		assert!(left.is_empty(), "{left:?}");
-	})
-	.await
 }
 
 /// Setting a variable on a machine holds its group's row, which an import into
