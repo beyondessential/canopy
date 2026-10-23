@@ -34,6 +34,8 @@ pub enum ScopeKind {
 	Machine,
 }
 
+commons_types::all_variants!(ScopeKind: Group, Environment, Machine);
+
 impl ScopeKind {
 	fn parse(name: &str) -> Option<Self> {
 		match name {
@@ -96,6 +98,8 @@ pub enum Preset {
 	Install,
 	Upgrade,
 }
+
+commons_types::all_variants!(Preset: Install, Upgrade);
 
 /// A playbook a run can start.
 #[derive(Clone, Debug, Serialize, utoipa::ToSchema)]
@@ -438,6 +442,8 @@ pub enum Problem {
 	/// What it published does not read as a catalogue.
 	Invalid,
 }
+
+commons_types::all_variants!(Problem: Unreachable, Invalid);
 
 impl Problem {
 	fn as_str(self) -> &'static str {
