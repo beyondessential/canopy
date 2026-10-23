@@ -1086,6 +1086,14 @@
         ],
         "type": "object"
       },
+      "AtScopeArgs": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ScopeArgs"
+          }
+        ],
+        "description": "Name one scope, for its history or what was removed from it."
+      },
       "AttachTailscaleArgs": {
         "description": "Request to attach a device to a Tailscale network node.",
         "properties": {
@@ -10464,35 +10472,6 @@
         ],
         "description": "Name one variable to forget."
       },
-      "RemovedArgs": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/ScopeArgs"
-          }
-        ],
-        "description": "Name one scope, for what was removed from it."
-      },
-      "RemovedVariable": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/HistoryEntry",
-            "description": "The removal, as its history names it."
-          },
-          {
-            "properties": {
-              "name": {
-                "description": "The variable's name.",
-                "type": "string"
-              }
-            },
-            "required": [
-              "name"
-            ],
-            "type": "object"
-          }
-        ],
-        "description": "A variable removed from a scope in the last week and not set there since."
-      },
       "RequestArgs": {
         "description": "Identifies a one-off backup or restore request for a server.",
         "properties": {
@@ -11843,6 +11822,27 @@
           }
         },
         "type": "object"
+      },
+      "ScopeChange": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/HistoryEntry",
+            "description": "The change, as the variable's history names it."
+          },
+          {
+            "properties": {
+              "name": {
+                "description": "The variable's name.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          }
+        ],
+        "description": "A change to one of a scope's variables, naming the variable: a removal in\nthe list of what was removed, or any change in the scope's history."
       },
       "ScopeKind": {
         "description": "The three places a variable is set.",
@@ -15887,7 +15887,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RemovedArgs"
+                "$ref": "#/components/schemas/AtScopeArgs"
               }
             }
           },
@@ -15899,7 +15899,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/RemovedVariable"
+                    "$ref": "#/components/schemas/ScopeChange"
                   },
                   "type": "array"
                 }
@@ -16010,6 +16010,58 @@
           "inventory_variable_set"
         ],
         "x-canopy-safety-mode": "write"
+      }
+    },
+    "/api/ansible_variables/scope_history": {
+      "post": {
+        "description": "Every change to a variable set there, removed ones among them, newest first,\nas far back as the audit log's database holds, each naming its variable.",
+        "operationId": "ansible_variables_scope_history",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AtScopeArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ScopeChange"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": "Not one scope"
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ],
+        "summary": "A scope's history.",
+        "tags": [
+          "ansible"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
       }
     },
     "/api/ansible_variables/set": {

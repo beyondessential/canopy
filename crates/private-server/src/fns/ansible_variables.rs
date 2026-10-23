@@ -40,6 +40,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(write, audit(AnsibleVariableRemoved): remove))
 		.routes(routes!(read_only, silent: history))
 		.routes(routes!(read_only, silent: removed))
+		.routes(routes!(read_only, silent: scope_history))
 		.routes(routes!(write, audit(AnsibleVariableSet): restore))
 }
 
@@ -115,9 +116,9 @@ pub struct VariableArgs {
 	pub name: String,
 }
 
-/// Name one scope, for what was removed from it.
+/// Name one scope, for its history or what was removed from it.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
-pub struct RemovedArgs {
+pub struct AtScopeArgs {
 	#[serde(flatten)]
 	pub scope: ScopeArgs,
 }
@@ -172,14 +173,15 @@ pub struct HistoryEntry {
 	pub undoable: bool,
 }
 
-/// A variable removed from a scope in the last week and not set there since.
+/// A change to one of a scope's variables, naming the variable: a removal in
+/// the list of what was removed, or any change in the scope's history.
 #[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct RemovedVariable {
+pub struct ScopeChange {
 	/// The variable's name.
 	pub name: String,
-	/// The removal, as its history names it.
+	/// The change, as the variable's history names it.
 	#[serde(flatten)]
-	pub removal: HistoryEntry,
+	pub change: HistoryEntry,
 }
 
 /// Which group's variables to list.
@@ -634,61 +636,105 @@ pub async fn history(
 	operation_id = "ansible_variables_removed",
 	tag = "ansible",
 	security(("tailscale-admin" = [])),
-	request_body = RemovedArgs,
+	request_body = AtScopeArgs,
 	responses(
-		(status = 200, body = Vec<RemovedVariable>),
+		(status = 200, body = Vec<ScopeChange>),
 		(status = 400, description = "Not one scope", body = ProblemDetailsSchema),
 	),
 )]
 pub async fn removed(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
-	Json(args): Json<RemovedArgs>,
-) -> Result<Json<Vec<RemovedVariable>>> {
+	Json(args): Json<AtScopeArgs>,
+) -> Result<Json<Vec<ScopeChange>>> {
 	let scope = VariableScope::try_from(args.scope)?;
 	let mut conn = state.db.get().await?;
-	let scope_id = match scope {
-		VariableScope::Group { group_id } | VariableScope::Environment { group_id, .. } => group_id,
-		VariableScope::Machine { machine_id } => machine_id,
-	};
 	let set_here: std::collections::BTreeSet<String> = AnsibleVariable::list_at(&mut conn, scope)
 		.await?
 		.into_iter()
 		.map(|variable| variable.name)
 		.collect();
 	let since = Timestamp::now() - database::ansible_variables::HELD_FOR;
-	let entries = database::audit::naming(
-		&mut conn,
-		&scope_id.to_string(),
-		&[audit_names::AnsibleVariableRemoved],
-		Some(since),
-		500,
-	)
-	.await?;
-
-	// The scope's group record also names its environments' variables, so the
-	// variable's own record says which scope each removal was at.
-	let prefix = format!("{}:", scope.secret_name());
 	let mut seen = std::collections::BTreeSet::new();
 	let mut out = Vec::new();
-	for entry in entries {
-		let Some(name) = entry
-			.records
-			.iter()
-			.find_map(|record| record.id.strip_prefix(&prefix))
-			.map(str::to_owned)
-		else {
-			continue;
-		};
+	for (name, entry) in scope_entries(
+		&mut conn,
+		scope,
+		&[audit_names::AnsibleVariableRemoved],
+		Some(since),
+	)
+	.await?
+	{
 		if set_here.contains(&name) || !seen.insert(name.clone()) {
 			continue;
 		}
-		out.push(RemovedVariable {
+		out.push(ScopeChange {
 			name,
-			removal: history_entry(&mut conn, entry).await?,
+			change: history_entry(&mut conn, entry).await?,
 		});
 	}
 	Ok(Json(out))
+}
+
+/// A scope's history.
+///
+/// Every change to a variable set there, removed ones among them, newest first,
+/// as far back as the audit log's database holds, each naming its variable.
+// spec: ANSVAR#presentation
+#[utoipa::path(
+	post,
+	path = "/scope_history",
+	operation_id = "ansible_variables_scope_history",
+	tag = "ansible",
+	security(("tailscale-admin" = [])),
+	request_body = AtScopeArgs,
+	responses(
+		(status = 200, body = Vec<ScopeChange>),
+		(status = 400, description = "Not one scope", body = ProblemDetailsSchema),
+	),
+)]
+pub async fn scope_history(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<AtScopeArgs>,
+) -> Result<Json<Vec<ScopeChange>>> {
+	let scope = VariableScope::try_from(args.scope)?;
+	let mut conn = state.db.get().await?;
+	let mut out = Vec::new();
+	for (name, entry) in scope_entries(&mut conn, scope, &HISTORY_ACTIONS, None).await? {
+		out.push(ScopeChange {
+			name,
+			change: history_entry(&mut conn, entry).await?,
+		});
+	}
+	Ok(Json(out))
+}
+
+/// The entries of the given actions about any variable at a scope, newest
+/// first, each with the name of its variable. The group's record also names its
+/// environments' variables, so the variable's own record says which scope each
+/// was at.
+async fn scope_entries(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	scope: VariableScope,
+	actions: &[&str],
+	since: Option<Timestamp>,
+) -> Result<Vec<(String, Entry)>> {
+	let prefix = scope.variable_record_prefix();
+	Ok(
+		database::audit::naming_prefixed(conn, &scope.record_id(), &prefix, actions, since, 500)
+			.await?
+			.into_iter()
+			.filter_map(|entry| {
+				let name = entry
+					.records
+					.iter()
+					.find_map(|record| record.id.strip_prefix(&prefix))?
+					.to_owned();
+				Some((name, entry))
+			})
+			.collect(),
+	)
 }
 
 /// Undo a change to a variable, putting back what it replaced or removed.

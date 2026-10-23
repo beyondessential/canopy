@@ -75,7 +75,22 @@ impl VariableScope {
 	/// before and after it is set and after it is removed, so it is what a
 	/// variable's history is found by.
 	pub fn variable_record_id(self, name: &str) -> String {
-		format!("{}:{name}", self.secret_name())
+		format!("{}{name}", self.variable_record_prefix())
+	}
+
+	/// What every variable record here begins with, so the entries of a whole
+	/// scope can be found.
+	pub fn variable_record_prefix(self) -> String {
+		format!("{}:", self.secret_name())
+	}
+
+	/// The record every entry about a variable here names besides the variable:
+	/// the group, for a group or one of its environments, or the machine.
+	pub fn record_id(self) -> String {
+		match self {
+			Self::Group { group_id } | Self::Environment { group_id, .. } => group_id.to_string(),
+			Self::Machine { machine_id } => machine_id.to_string(),
+		}
 	}
 
 	/// Hold the row of the group this scope is in for the rest of the

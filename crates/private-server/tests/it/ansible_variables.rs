@@ -1271,3 +1271,89 @@ async fn a_secret_change_is_undone_while_its_value_is_held() {
 	})
 	.await
 }
+
+/// A scope's history holds every change to a variable set there, removed ones
+/// among them and however long ago within the log, and nothing of another
+/// scope's, though the group's record names its environments' too.
+// spec: ANSVAR#presentation
+#[tokio::test(flavor = "multi_thread")]
+async fn a_scopes_history_holds_its_removed_variables_and_no_other_scopes() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		let environment = json!({ "server_group_id": group, "rank": "dev" });
+		let group_scope = json!({ "server_group_id": group });
+		set_var(&private, environment.clone(), "retries", json!(3), false).await;
+		set_var(&private, environment.clone(), "kept", json!(true), false).await;
+		set_var(
+			&private,
+			group_scope.clone(),
+			"timezone",
+			json!("Pacific/Fiji"),
+			false,
+		)
+		.await;
+		post(
+			&private,
+			"/api/ansible_variables/remove",
+			named(&environment, "retries"),
+		)
+		.await;
+		// Removed long enough ago to be off the list of recent removals.
+		conn.batch_execute(
+			"UPDATE audit_entries SET recorded_at = recorded_at - interval '30 days'
+			 WHERE action = 'inventory_variable_removed'",
+		)
+		.await
+		.unwrap();
+		let recent = post(
+			&private,
+			"/api/ansible_variables/removed",
+			environment.clone(),
+		)
+		.await;
+		assert_eq!(recent, json!([]));
+
+		let history = post(
+			&private,
+			"/api/ansible_variables/scope_history",
+			environment.clone(),
+		)
+		.await;
+		let changes: Vec<(&str, &str)> = history
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|change| {
+				(
+					change["name"].as_str().unwrap(),
+					change["change"].as_str().unwrap(),
+				)
+			})
+			.collect();
+		assert_eq!(
+			changes,
+			[("kept", "set"), ("retries", "set"), ("retries", "removed")],
+			"newest first, the group's own changes left out"
+		);
+		let removal = &history[2];
+		assert_eq!(removal["value"], 3);
+		assert_eq!(removal["undoable"], true);
+
+		let mut restore = named(&environment, "retries");
+		restore["entry_id"] = removal["entry_id"].clone();
+		post(&private, "/api/ansible_variables/restore", restore).await;
+		let body = read_served(&private, json!({ "server_group_id": group })).await;
+		assert_eq!(body["vars"]["retries"], 3);
+
+		let at_group = post(
+			&private,
+			"/api/ansible_variables/scope_history",
+			group_scope,
+		)
+		.await;
+		assert_eq!(at_group.as_array().unwrap().len(), 1);
+		assert_eq!(at_group[0]["name"], "timezone");
+	})
+	.await
+}

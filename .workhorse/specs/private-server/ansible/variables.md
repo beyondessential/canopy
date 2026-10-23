@@ -90,6 +90,7 @@ Saving replaces the value, and leaving the row without saving keeps it as it was
 Removing a variable takes no confirmation, and is followed by an offer to undo it, which restores the value it had.
 Each variable opens its history, newest first, offering to restore each earlier value it can be restored to.
 Each scope lists the variables removed from it in the last week, each opening its history, so a removal is undone after the offer has gone.
+Each scope also opens its own history: every change to a variable set there, removed ones among them, newest first, each naming its variable and offering the same restores.
 
 A scope can instead be edited as text, one variable per line as YAML, with names completing from the catalogue as they do in a row.
 A value is read as it would be in an inventory file (see [ANSIMP](import.md), "Reading the file").

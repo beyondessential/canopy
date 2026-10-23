@@ -401,6 +401,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/ansible_variables/scope_history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A scope's history.
+         * @description Every change to a variable set there, removed ones among them, newest first,
+         *     as far back as the audit log's database holds, each naming its variable.
+         */
+        post: operations["ansible_variables_scope_history"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ansible_variables/set": {
         parameters: {
             query?: never;
@@ -6239,6 +6260,8 @@ export interface components {
              */
             machine_id: string;
         };
+        /** @description Name one scope, for its history or what was removed from it. */
+        AtScopeArgs: components["schemas"]["ScopeArgs"];
         /** @description Request to attach a device to a Tailscale network node. */
         AttachTailscaleArgs: {
             /**
@@ -11791,13 +11814,6 @@ export interface components {
             /** @description The variable's name. */
             name: string;
         };
-        /** @description Name one scope, for what was removed from it. */
-        RemovedArgs: components["schemas"]["ScopeArgs"];
-        /** @description A variable removed from a scope in the last week and not set there since. */
-        RemovedVariable: components["schemas"]["HistoryEntry"] & {
-            /** @description The variable's name. */
-            name: string;
-        };
         /** @description Identifies a one-off backup or restore request for a server. */
         RequestArgs: {
             /**
@@ -12634,6 +12650,14 @@ export interface components {
              *     or one of its environments does.
              */
             server_group_id?: string | null;
+        };
+        /**
+         * @description A change to one of a scope's variables, naming the variable: a removal in
+         *     the list of what was removed, or any change in the scope's history.
+         */
+        ScopeChange: components["schemas"]["HistoryEntry"] & {
+            /** @description The variable's name. */
+            name: string;
         };
         /**
          * @description The three places a variable is set.
@@ -15167,7 +15191,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RemovedArgs"];
+                "application/json": components["schemas"]["AtScopeArgs"];
             };
         };
         responses: {
@@ -15176,7 +15200,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RemovedVariable"][];
+                    "application/json": components["schemas"]["ScopeChange"][];
                 };
             };
             /** @description Not one scope */
@@ -15240,6 +15264,38 @@ export interface operations {
             };
             /** @description The secret store is unavailable */
             502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    ansible_variables_scope_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AtScopeArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScopeChange"][];
+                };
+            };
+            /** @description Not one scope */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };
