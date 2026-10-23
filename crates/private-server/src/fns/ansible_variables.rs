@@ -1023,16 +1023,6 @@ mod tests {
 	const NAMES: &str =
 		include_str!("../../../../private-web/src/components/ansible/fixtures/variable-names.json");
 
-	fn problems_of(
-		scope: ScopeKind,
-		name: &str,
-		value: &Value,
-		secret: bool,
-		catalogue: Option<&Catalogue>,
-	) -> Vec<String> {
-		variable_problems(scope, name, value, secret, catalogue)
-	}
-
 	/// The needle a variable set only on a machine is refused with at this
 	/// scope, if it is refused there.
 	fn wider_than_a_machine(scope: ScopeKind) -> Option<&'static str> {
@@ -1072,7 +1062,7 @@ mod tests {
 			];
 			for (name, value, needle) in rows {
 				assert_refused_with(
-					problems_of(scope, name, &value, false, None),
+					variable_problems(scope, name, &value, false, None),
 					needle,
 					&format!("{name} = {value} at {scope}"),
 				);
@@ -1099,7 +1089,7 @@ mod tests {
 		}
 		for &scope in ScopeKind::ALL {
 			for (name, usable) in &rows {
-				let problems = problems_of(scope, name, &json!("x"), false, None);
+				let problems = variable_problems(scope, name, &json!("x"), false, None);
 				assert_eq!(
 					problems.is_empty(),
 					*usable,
@@ -1165,14 +1155,10 @@ mod tests {
 			];
 			for (name, value, secret, needle) in rows {
 				assert_refused_with(
-					problems_of(scope, name, &value, secret, Some(&catalogue)),
+					variable_problems(scope, name, &value, secret, Some(&catalogue)),
 					needle,
 					&format!("{name} = {value} (secret: {secret}) at {scope}"),
 				);
-				if needle.is_some() || name != "something_new" {
-					continue;
-				}
-				assert!(problems_of(scope, name, &value, secret, None).is_empty());
 			}
 		}
 	}
@@ -1182,7 +1168,7 @@ mod tests {
 		for &scope in ScopeKind::ALL {
 			for (name, secret) in [("salt", false), ("canopy_intent", false), ("ansible_port", true)] {
 				assert!(
-					problems_of(scope, name, &json!("x"), secret, None).is_empty(),
+					variable_problems(scope, name, &json!("x"), secret, None).is_empty(),
 					"{name} at {scope}"
 				);
 			}

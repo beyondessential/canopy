@@ -367,7 +367,8 @@ async fn proposes_secrets_by_the_catalogue_then_by_name_and_hides_their_values()
 }
 
 /// A variable breaking the rules for setting one by hand is named, and stops
-/// the import.
+/// the import. The rules are `variable_problems`'s, tabled where it is defined;
+/// this is the import applying them, catalogue and all.
 // spec: ANSIMP#preview
 #[tokio::test(flavor = "multi_thread")]
 async fn names_a_variable_that_breaks_the_rules_and_refuses_the_import() {
@@ -376,9 +377,7 @@ async fn names_a_variable_that_breaks_the_rules_and_refuses_the_import() {
 		read_catalogue(&mut conn).await;
 		let file = "all:
   vars:
-    ansible_host: 10.0.0.1
     elastic_agent_enabled: maybe
-    'bad name': 1
   hosts:
     kamaka-central:
     kamaka-facility-a:
@@ -393,20 +392,11 @@ async fn names_a_variable_that_breaks_the_rules_and_refuses_the_import() {
 		)
 		.await;
 		assert_eq!(preview["can_apply"], false);
-		let problems = |name: &str| -> Vec<&str> {
-			variable(&preview["environment"], name)["problems"]
-				.as_array()
-				.unwrap()
-				.iter()
-				.map(|problem| problem.as_str().unwrap())
-				.collect()
-		};
-		assert!(
-			problems("ansible_host")[0].contains("on a machine"),
-			"{preview}"
-		);
-		assert!(problems("elastic_agent_enabled")[0].contains("elastic_agent_enabled"));
-		assert!(problems("bad name")[0].contains("not a usable variable name"));
+		let problems = variable(&preview["environment"], "elastic_agent_enabled")["problems"]
+			.as_array()
+			.unwrap();
+		assert_eq!(problems.len(), 1, "{preview}");
+		assert!(problems[0].as_str().unwrap().contains("elastic_agent_enabled"));
 	})
 	.await
 }

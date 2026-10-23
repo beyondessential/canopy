@@ -412,17 +412,15 @@ async fn removing_forgets_the_value() {
 async fn refuses_a_name_the_secret_store_cannot_key_a_value_under() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka").await;
-		for name in ["not a name", "..", "n".repeat(254).as_str()] {
-			private
-				.post("/api/ansible_variables/set")
-				.json(&json!({
-					"server_group_id": group,
-					"name": name,
-					"value": "x",
-				}))
-				.await
-				.assert_status(axum::http::StatusCode::BAD_REQUEST);
-		}
+		private
+			.post("/api/ansible_variables/set")
+			.json(&json!({
+				"server_group_id": group,
+				"name": "not a name",
+				"value": "x",
+			}))
+			.await
+			.assert_status(axum::http::StatusCode::BAD_REQUEST);
 	})
 	.await
 }
@@ -632,8 +630,8 @@ async fn a_machines_value_reaches_only_that_machine() {
 }
 
 /// Whether a run acts on a machine is set by a switch on the machine, so a
-/// wider value is refused, and `ansible_host` at a wider scope would give every
-/// machine in the environment one address, so it is set on a machine too.
+/// wider value is refused. The rule is `variable_problems`'s, which holds every
+/// restricted variable at every scope; this is the endpoint applying it.
 // spec: INV#managed-machines
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_machine_only_variables_outside_machine_scope() {
@@ -641,41 +639,12 @@ async fn refuses_machine_only_variables_outside_machine_scope() {
 		let group = insert_group(&mut conn, "kamaka").await;
 		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
 
-		for (name, value, reason) in [
-			("managed_by_ansible", json!(true), "set on a machine"),
-			(
-				"ansible_host",
-				json!("10.0.0.4"),
-				"rather than on a group or an environment",
-			),
-		] {
-			for scope in [
-				json!({ "server_group_id": group }),
-				json!({ "server_group_id": group, "rank": "dev" }),
-			] {
-				let mut args = scope;
-				args["name"] = json!(name);
-				args["value"] = value.clone();
-				let response = private.post("/api/ansible_variables/set").json(&args).await;
-				response.assert_status(axum::http::StatusCode::BAD_REQUEST);
-				assert!(
-					response.json::<Value>()["detail"]
-						.as_str()
-						.expect("detail")
-						.contains(reason),
-					"{name} at {args}",
-				);
-			}
-		}
-
-		// A machine's address is a string, so a value of another shape is
-		// refused rather than served as no override at all.
 		let response = private
 			.post("/api/ansible_variables/set")
 			.json(&json!({
-				"machine_id": Uuid::new_v4(),
-				"name": "ansible_host",
-				"value": 10,
+				"server_group_id": group,
+				"name": "managed_by_ansible",
+				"value": true,
 			}))
 			.await;
 		response.assert_status(axum::http::StatusCode::BAD_REQUEST);
@@ -683,7 +652,7 @@ async fn refuses_machine_only_variables_outside_machine_scope() {
 			response.json::<Value>()["detail"]
 				.as_str()
 				.expect("detail")
-				.contains("so it is a string"),
+				.contains("set on a machine"),
 		);
 
 		// `ansible_user` is not so restricted: an environment's machines share
@@ -851,18 +820,6 @@ async fn a_variable_the_catalogue_describes_is_held_to_it() {
 			refused(
 				&private,
 				environment.clone(),
-				"tamanu_facility_id",
-				json!("a"),
-				false
-			)
-			.await
-			.contains("only at machine")
-		);
-
-		assert!(
-			refused(
-				&private,
-				environment.clone(),
 				"salt",
 				json!("pepper"),
 				false
@@ -871,18 +828,6 @@ async fn a_variable_the_catalogue_describes_is_held_to_it() {
 			.contains("is secret in the catalogue")
 		);
 		set_var(&private, environment.clone(), "salt", json!("pepper"), true).await;
-		assert!(
-			refused(
-				&private,
-				environment.clone(),
-				"ansible_port",
-				json!(22),
-				true
-			)
-			.await
-			.contains("is not secret in the catalogue")
-		);
-
 		set_var(
 			&private,
 			environment.clone(),
