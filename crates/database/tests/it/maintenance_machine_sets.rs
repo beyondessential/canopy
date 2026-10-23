@@ -168,20 +168,25 @@ async fn backdate_moves(conn: &mut AsyncPgConnection, window: Uuid, ago: SignedD
 		.expect("backdate moves");
 }
 
+/// A window over several machines covers each as one over it alone would. It
+/// is not its environment's own window: a take reads the windows that name any
+/// of the environment's machines, so another operator's set refuses it and one
+/// over machines in another environment does not.
+// spec: ANSRUN#work-under-way
 #[tokio::test(flavor = "multi_thread")]
-async fn a_window_over_several_machines_covers_each_as_one_over_it_alone() {
+async fn a_window_over_several_machines_covers_each_and_is_not_its_environments_own() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let fleet = fleet(&mut conn).await;
 		let [a, b, c] = fleet.boxes;
-		let window = declare_machines(&mut conn, &[b, a]).await.expect("declare");
+		let set = declare_machines(&mut conn, &[b, a]).await.expect("declare");
 
 		let mut named = vec![a, b];
 		named.sort();
-		assert_eq!(window.machine_ids, named, "it names its machines in order");
-		assert_eq!(window.machine_id, None);
-		assert_eq!(window.server_group_id, Some(fleet.group));
-		assert_eq!(window.rank, Some(ServerRank::Production));
-		assert_eq!(window.grain(), None, "it is not any one grain");
+		assert_eq!(set.machine_ids, named, "it names its machines in order");
+		assert_eq!(set.machine_id, None);
+		assert_eq!(set.server_group_id, Some(fleet.group));
+		assert_eq!(set.rank, Some(ServerRank::Production));
+		assert_eq!(set.grain(), None, "it is not any one grain");
 
 		for machine in [a, b] {
 			assert!(machine_suspended(&mut conn, fleet.group, machine).await);
@@ -223,20 +228,6 @@ async fn a_window_over_several_machines_covers_each_as_one_over_it_alone() {
 			!targets.environment_window(fleet.group, ServerRank::Production),
 			"the environment itself is not marked"
 		);
-	})
-	.await
-}
-
-/// A set is not its environment's own window. A take reads the windows that
-/// name any of the environment's machines: another operator's set refuses it,
-/// and one over machines in another environment does not.
-// spec: ANSRUN#work-under-way
-#[tokio::test(flavor = "multi_thread")]
-async fn a_set_is_not_its_environments_own_window() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
-		let [a, b, _] = fleet.boxes;
-		let set = declare_machines(&mut conn, &[a, b]).await.expect("declare");
 
 		let now = Timestamp::now();
 		let sole = MaintenanceWindow::open_over(
@@ -457,7 +448,7 @@ async fn a_machine_is_named_by_at_most_one_open_window() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn adding_a_machine_suspends_it_from_the_amendment() {
+async fn a_machine_a_set_stops_covering_settles_as_though_the_window_ended() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let fleet = fleet(&mut conn).await;
 		let [a, b, c] = fleet.boxes;
@@ -473,19 +464,18 @@ async fn adding_a_machine_suspends_it_from_the_amendment() {
 			"c is not covered, so its incident stands"
 		);
 
-		let grown =
+		let widened =
 			MaintenanceWindow::amend(&mut conn, set.id, machines(&[a, b, c]), Some("other"))
 				.await
 				.expect("add c");
-		assert_eq!(grown.machine_ids.len(), 3);
-		assert_eq!(grown.amended_by.as_deref(), Some("other"));
+		assert_eq!(widened.machine_ids.len(), 3);
+		assert_eq!(widened.amended_by.as_deref(), Some("other"));
 		assert!(machine_suspended(&mut conn, fleet.group, c).await);
 		assert_eq!(
 			open_incidents(&mut conn, fleet.group).await,
 			0,
 			"its open issues are re-evaluated at once"
 		);
-
 		let targets = MaintenanceWindow::suspended_targets(&mut conn)
 			.await
 			.expect("targets");
@@ -493,18 +483,6 @@ async fn adding_a_machine_suspends_it_from_the_amendment() {
 			!targets.settling(c, Some(fleet.group)),
 			"it is held, not settling"
 		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_machine_a_set_stops_covering_settles_as_though_the_window_ended() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
-		let [a, b, c] = fleet.boxes;
-		let set = declare_machines(&mut conn, &[a, b, c])
-			.await
-			.expect("declare");
 		file_check(&mut conn, filing(Scope::Machine(c)))
 			.await
 			.expect("file under the window");

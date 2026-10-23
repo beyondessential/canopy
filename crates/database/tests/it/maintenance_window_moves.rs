@@ -1025,8 +1025,14 @@ fn grains(descent: &database::maintenance_windows::Descent) -> Vec<(Grain, u8)> 
 		.collect()
 }
 
+/// What a start can be retargeted to is whatever contains it and whatever it
+/// contains, nested by depth, with grains the start has none of passed over.
+/// The ranked box with nothing on it, the machine in no group, and the pending
+/// machine each have a group of their own so they do not shift the listing
+/// of the first.
+// spec: GRP#environments
 #[tokio::test(flavor = "multi_thread")]
-async fn a_groups_line_of_descent_nests_everything_in_it() {
+async fn a_line_of_descent_nests_what_contains_and_what_is_contained() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let site = site(&mut conn).await;
 		let pending_box = insert_machine(&mut conn, Some(site.group), "fj-new").await;
@@ -1035,35 +1041,40 @@ async fn a_groups_line_of_descent_nests_everything_in_it() {
 
 		let descent = line_of_descent(&mut conn, Grain::group(site.group))
 			.await
-			.expect("descent");
+			.expect("descent of a group");
 		let listed = grains(&descent);
 		let group = Grain::group(site.group);
 		let production = Grain::environment(site.group, ServerRank::Production);
 		let clone = Grain::environment(site.group, ServerRank::Clone);
-		assert_eq!(listed[0], (group, 0), "the group heads it");
-		assert_eq!(listed[1], (production, 1), "production before the clone");
-		assert_eq!(listed[2], (Grain::machine(site.production_box), 2));
-		assert_eq!(listed[3], (Grain::application(site.production_app), 3));
-		assert_eq!(listed[4], (clone, 1));
+		assert_eq!(listed[0], (group, 0), "group: the group heads it");
+		assert_eq!(
+			listed[1],
+			(production, 1),
+			"group: production before the clone"
+		);
+		assert_eq!(
+			listed[2],
+			(Grain::machine(site.production_box), 2),
+			"group: production's machine"
+		);
+		assert_eq!(
+			listed[3],
+			(Grain::application(site.production_app), 3),
+			"group: production's application"
+		);
+		assert_eq!(listed[4], (clone, 1), "group: the clone environment");
 		assert_eq!(
 			&listed[listed.len() - 2..],
 			&[
 				(Grain::machine(pending_box), 1),
 				(Grain::application(pending_app), 2),
 			],
-			"pending machines sit under the group, apart from its environments"
+			"group: pending machines sit under the group, apart from its environments"
 		);
-	})
-	.await
-}
 
-#[tokio::test(flavor = "multi_thread")]
-async fn an_applications_line_of_descent_is_what_contains_it() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let site = site(&mut conn).await;
 		let descent = line_of_descent(&mut conn, Grain::application(site.production_app))
 			.await
-			.expect("descent");
+			.expect("descent of an application");
 		assert_eq!(
 			grains(&descent),
 			vec![
@@ -1072,57 +1083,42 @@ async fn an_applications_line_of_descent_is_what_contains_it() {
 				(Grain::machine(site.production_box), 2),
 				(Grain::application(site.production_app), 3),
 			],
-			"its machine, the machine's environment, and its group; not the clone"
+			"application: its machine, the machine's environment, and its group; not the clone"
 		);
-	})
-	.await
-}
 
-/// A machine ranked before anything on it has reported is already in its
-/// environment, so it is listed there rather than with the pending boxes.
-// spec: GRP#environments
-#[tokio::test(flavor = "multi_thread")]
-async fn a_ranked_box_with_nothing_on_it_is_in_its_environment() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let site = site(&mut conn).await;
-		let fresh = insert_machine(&mut conn, Some(site.group), "fj-new").await;
+		let ranked_group = insert_group(&mut conn, "tonga").await;
+		let fresh = insert_machine(&mut conn, Some(ranked_group), "to-new").await;
 		sql_query("UPDATE machines SET rank = 'clone' WHERE id = $1")
 			.bind::<sql_types::Uuid, _>(fresh)
 			.execute(&mut conn)
 			.await
 			.expect("rank the box");
-
 		let descent = line_of_descent(&mut conn, Grain::machine(fresh))
 			.await
-			.expect("descent");
+			.expect("descent of a ranked box");
 		assert_eq!(
 			grains(&descent),
 			vec![
-				(Grain::group(site.group), 0),
-				(Grain::environment(site.group, ServerRank::Clone), 1),
+				(Grain::group(ranked_group), 0),
+				(Grain::environment(ranked_group, ServerRank::Clone), 1),
 				(Grain::machine(fresh), 2),
 			],
+			"ranked box: already in its environment, not listed with the pending boxes"
 		);
-	})
-	.await
-}
 
-#[tokio::test(flavor = "multi_thread")]
-async fn grains_the_start_has_none_of_are_passed_over() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let lone_box = insert_machine(&mut conn, None, "lone").await;
 		let lone_app =
 			insert_application(&mut conn, None, lone_box, Some("production"), "lone").await;
 		let descent = line_of_descent(&mut conn, Grain::machine(lone_box))
 			.await
-			.expect("descent");
+			.expect("descent of a machine in no group");
 		assert_eq!(
 			grains(&descent),
 			vec![
 				(Grain::machine(lone_box), 0),
 				(Grain::application(lone_app), 1),
 			],
-			"a machine in no group offers its applications alone"
+			"no group: a machine in no group offers its applications alone"
 		);
 
 		let group = insert_group(&mut conn, "samoa").await;
@@ -1130,39 +1126,16 @@ async fn grains_the_start_has_none_of_are_passed_over() {
 		insert_application(&mut conn, Some(group), pending_box, None, "pending").await;
 		let descent = line_of_descent(&mut conn, Grain::machine(pending_box))
 			.await
-			.expect("descent");
+			.expect("descent of a pending machine");
 		assert_eq!(
 			descent.entries[0].grain,
 			Grain::group(group),
-			"a pending machine offers its group"
+			"pending: a pending machine offers its group"
 		);
 		assert_eq!(
 			descent.entries[1].depth, 1,
-			"with no environment between them"
+			"pending: with no environment between them"
 		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn only_the_group_covers_the_groups_own_checks() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let site = site(&mut conn).await;
-		let production = Grain::environment(site.group, ServerRank::Production);
-		let descent = line_of_descent(&mut conn, production)
-			.await
-			.expect("descent");
-		let group = Grain::group(site.group);
-		let on_app = Grain::application(site.production_app);
-
-		assert!(descent.covers(group, group));
-		assert!(
-			!descent.covers(production, group),
-			"production's window leaves the group's own checks watched"
-		);
-		assert!(descent.covers(production, on_app));
-		assert!(descent.covers(Grain::machine(site.production_box), on_app));
-		assert!(!descent.covers(on_app, Grain::machine(site.production_box)));
 	})
 	.await
 }

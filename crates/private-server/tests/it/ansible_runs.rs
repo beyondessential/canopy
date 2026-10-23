@@ -703,8 +703,9 @@ async fn assigns_a_type_to_a_machine_with_nothing_on_it() {
 /// A limit preview names what the pattern matches, the groups and hosts a limit
 /// can be picked from, and says why a pattern cannot be read. Only a machine a
 /// run configures is offered: the plugin builds an inventory of the machines
-/// that carry `managed_by_ansible`. The pattern language itself is covered by the
-/// unit tests of `fns::ansible::limit`.
+/// that carry `managed_by_ansible`. A run names the machines it acts on among
+/// themselves, as the preview does, in a group of its own. The pattern language
+/// itself is covered by the unit tests of `fns::ansible::limit`.
 // spec: ANSRUN#presentation, INV#reaching-a-machine
 #[tokio::test(flavor = "multi_thread")]
 async fn previews_the_machines_a_limit_matches() {
@@ -760,17 +761,11 @@ async fn previews_the_machines_a_limit_matches() {
 			.collect();
 		assert_eq!(offered, ["kamaka-central", "kamaka-facility-a"]);
 		assert_eq!(options["has_central"], true);
-	})
-	.await
-}
 
-/// A run names the machines it acts on among themselves, as the limit preview
-/// does, so a machine it leaves out cannot change what one it acts on is called.
-// spec: INV#reaching-a-machine
-#[tokio::test(flavor = "multi_thread")]
-async fn names_what_a_run_acts_on_as_the_limit_preview_does() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
+		// A run names the machines it acts on among themselves, as the limit
+		// preview does, so a machine it leaves out cannot change what one it acts
+		// on is called.
+		let group = insert_group(&mut conn, "kamaka-naming").await;
 		for (name, tailnet) in [
 			("kamaka managed", "box.east.tail1234.ts.net"),
 			("kamaka other", "box.west.tail1234.ts.net"),
@@ -797,12 +792,16 @@ async fn names_what_a_run_acts_on_as_the_limit_preview_does() {
 
 		let preview: Value = private
 			.post("/api/ansible/limit_preview")
-			.json(&json!({ "group": "kamaka", "limit": "all" }))
+			.json(&json!({ "group": "kamaka-naming", "limit": "all" }))
 			.await
 			.json();
-		assert_eq!(preview["hosts"], json!(["box"]));
+		assert_eq!(
+			preview["hosts"],
+			json!(["box"]),
+			"the preview calls the managed machine by its label"
+		);
 
-		let lease = take_lease(&private, json!({ "group": "kamaka" })).await;
+		let lease = take_lease(&private, json!({ "group": "kamaka-naming" })).await;
 		let served: Value = private
 			.post("/api/ansible/for_group")
 			.json(&json!({ "lease_id": lease }))
@@ -814,7 +813,10 @@ async fn names_what_a_run_acts_on_as_the_limit_preview_does() {
 			.iter()
 			.find(|host| host["name"] == "kamaka managed")
 			.unwrap();
-		assert_eq!(managed["host_name"], "box", "what the preview called it");
+		assert_eq!(
+			managed["host_name"], "box",
+			"a run names the machine as the preview did"
+		);
 	})
 	.await
 }

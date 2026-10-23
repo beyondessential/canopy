@@ -150,83 +150,13 @@ mod tests {
 
 	use super::*;
 
-	#[tokio::test(flavor = "multi_thread")]
-	async fn forgets_a_value_once_its_week_has_passed() {
-		commons_tests::db::TestDb::run(async |mut conn, _| {
-			let group = Uuid::new_v4();
-			conn.batch_execute(&format!(
-				"INSERT INTO server_groups (id, name) VALUES ('{group}', 'kamaka');"
-			))
-			.await
-			.unwrap();
-			let scope = VariableScope::Environment {
-				group_id: group,
-				rank: ServerRank::Production,
-			};
-			let secrets = BackupSecrets::memory();
-			let (due, kept) = (Uuid::new_v4(), Uuid::new_v4());
-			for entry in [due, kept] {
-				secrets
-					.put_secret_key(
-						&scope.held_secret_name(),
-						&entry.to_string(),
-						&SecretString::from("\"pepper\"".to_owned()),
-					)
-					.await
-					.unwrap();
-				HeldSecretValue::hold(&mut conn, entry, scope, "salt")
-					.await
-					.unwrap();
-			}
-			conn.batch_execute(&format!(
-				"UPDATE ansible_secret_values_held SET held_until = now() - interval '1 minute'
-				 WHERE entry_id = '{due}'"
-			))
-			.await
-			.unwrap();
-
-			assert_eq!(tick(&mut conn, &secrets).await, 1);
-
-			let left = secrets
-				.try_read_secret_keys(&scope.held_secret_name())
-				.await
-				.unwrap()
-				.unwrap_or_default();
-			assert!(!left.contains_key(&due.to_string()));
-			assert_eq!(left[&kept.to_string()].expose_secret(), "\"pepper\"");
-			assert!(
-				HeldSecretValue::get(&mut conn, kept)
-					.await
-					.unwrap()
-					.is_some()
-			);
-			assert_eq!(HeldSecretValue::list_all(&mut conn).await.unwrap().len(), 1);
-
-			let entries = audit::find(
-				&mut conn,
-				&Filter {
-					action: Some("ansible_secret_value_forgotten".into()),
-					limit: 10,
-					..Default::default()
-				},
-			)
-			.await
-			.unwrap();
-			assert_eq!(entries.len(), 1);
-			assert_eq!(entries[0].status, Status::Done);
-			assert_eq!(entries[0].detail["replaced_by"], due.to_string());
-
-			assert_eq!(tick(&mut conn, &secrets).await, 0, "nothing more is due");
-		})
-		.await
-	}
-
+	/// A value is forgotten once its week has passed, and one not yet due is kept.
 	/// A value whose scope has gone since it began to be held is still forgotten,
 	/// and its entry names the scope by identifier alone, with the rank for an
 	/// environment.
 	// spec: ANSVAR#history
 	#[tokio::test(flavor = "multi_thread")]
-	async fn forgets_a_value_whose_scope_has_gone_naming_it_by_identifier() {
+	async fn forgets_a_value_once_its_week_has_passed() {
 		fn named_as(scope: VariableScope) -> (RecordKind, Uuid, Option<ServerRank>) {
 			match scope {
 				VariableScope::Group { group_id } => (RecordKind::Group, group_id, None),
@@ -238,8 +168,17 @@ mod tests {
 		}
 
 		commons_tests::db::TestDb::run(async |mut conn, _| {
-			let secrets = BackupSecrets::memory();
-			let scopes = [
+			let group = Uuid::new_v4();
+			conn.batch_execute(&format!(
+				"INSERT INTO server_groups (id, name) VALUES ('{group}', 'kamaka');"
+			))
+			.await
+			.unwrap();
+			let scope = VariableScope::Environment {
+				group_id: group,
+				rank: ServerRank::Production,
+			};
+			let gone = [
 				VariableScope::Group {
 					group_id: Uuid::new_v4(),
 				},
@@ -251,9 +190,13 @@ mod tests {
 					machine_id: Uuid::new_v4(),
 				},
 			];
-			let mut entries = Vec::new();
-			for scope in scopes {
-				let entry = Uuid::new_v4();
+			let secrets = BackupSecrets::memory();
+			let (due, kept) = (Uuid::new_v4(), Uuid::new_v4());
+			let mut orphans = Vec::new();
+			let held = [(due, scope), (kept, scope)]
+				.into_iter()
+				.chain(gone.into_iter().map(|scope| (Uuid::new_v4(), scope)));
+			for (entry, scope) in held {
 				secrets
 					.put_secret_key(
 						&scope.held_secret_name(),
@@ -265,15 +208,49 @@ mod tests {
 				HeldSecretValue::hold(&mut conn, entry, scope, "salt")
 					.await
 					.unwrap();
-				entries.push((scope, entry));
+				if entry != due && entry != kept {
+					orphans.push((scope, entry));
+				}
 			}
-			conn.batch_execute(
-				"UPDATE ansible_secret_values_held SET held_until = now() - interval '1 minute'",
-			)
+			conn.batch_execute(&format!(
+				"UPDATE ansible_secret_values_held SET held_until = now() - interval '1 minute'
+				 WHERE entry_id <> '{kept}'"
+			))
 			.await
 			.unwrap();
 
-			assert_eq!(tick(&mut conn, &secrets).await, entries.len());
+			assert_eq!(
+				tick(&mut conn, &secrets).await,
+				1 + orphans.len(),
+				"the due value and the three whose scopes have gone are forgotten"
+			);
+
+			let left = secrets
+				.try_read_secret_keys(&scope.held_secret_name())
+				.await
+				.unwrap()
+				.unwrap_or_default();
+			assert!(
+				!left.contains_key(&due.to_string()),
+				"the due value is forgotten from the store"
+			);
+			assert_eq!(
+				left[&kept.to_string()].expose_secret(),
+				"\"pepper\"",
+				"the value not yet due is kept in the store"
+			);
+			assert!(
+				HeldSecretValue::get(&mut conn, kept)
+					.await
+					.unwrap()
+					.is_some(),
+				"the value not yet due keeps its row"
+			);
+			assert_eq!(
+				HeldSecretValue::list_all(&mut conn).await.unwrap().len(),
+				1,
+				"only the value not yet due is still held"
+			);
 
 			let logged = audit::find(
 				&mut conn,
@@ -285,14 +262,30 @@ mod tests {
 			)
 			.await
 			.unwrap();
-			assert_eq!(logged.len(), entries.len());
-			for (scope, entry) in entries {
+			assert_eq!(
+				logged.len(),
+				1 + orphans.len(),
+				"one entry for each value forgotten, none for the one kept"
+			);
+			assert!(
+				!logged
+					.iter()
+					.any(|logged| logged.detail["replaced_by"] == kept.to_string()),
+				"no entry for the value not yet due"
+			);
+			let entry_for = logged
+				.iter()
+				.find(|logged| logged.detail["replaced_by"] == due.to_string())
+				.expect("an entry for the due value");
+			assert_eq!(entry_for.status, Status::Done, "the due value's entry");
+
+			for (scope, entry) in orphans {
 				let (kind, id, rank) = named_as(scope);
 				let logged = logged
 					.iter()
 					.find(|logged| logged.detail["replaced_by"] == entry.to_string())
 					.unwrap_or_else(|| panic!("no entry for {scope:?}"));
-				assert_eq!(logged.status, Status::Done);
+				assert_eq!(logged.status, Status::Done, "{scope:?}");
 				assert_eq!(
 					logged.records,
 					vec![
@@ -305,21 +298,24 @@ mod tests {
 					],
 					"{scope:?}"
 				);
-				assert_eq!(logged.detail["rank"], serde_json::to_value(rank).unwrap());
+				assert_eq!(
+					logged.detail["rank"],
+					serde_json::to_value(rank).unwrap(),
+					"{scope:?}"
+				);
 
 				let left = secrets
 					.try_read_secret_keys(&scope.held_secret_name())
 					.await
 					.unwrap()
 					.unwrap_or_default();
-				assert!(!left.contains_key(&entry.to_string()), "{scope:?}");
+				assert!(
+					!left.contains_key(&entry.to_string()),
+					"{scope:?}: forgotten from the store"
+				);
 			}
-			assert!(
-				HeldSecretValue::list_all(&mut conn)
-					.await
-					.unwrap()
-					.is_empty()
-			);
+
+			assert_eq!(tick(&mut conn, &secrets).await, 0, "nothing more is due");
 		})
 		.await
 	}
