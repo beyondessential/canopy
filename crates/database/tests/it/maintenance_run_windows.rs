@@ -202,7 +202,7 @@ async fn a_limited_run_declares_over_only_what_its_limit_matches() {
 		assert_eq!(declared[0].target, "fiji 2 machines");
 		reset_leases_and_windows(&mut conn).await;
 
-		let lease_one = lease(&mut conn, fleet.group, "op").await;
+		let lease_one = self::lease(&mut conn, fleet.group, "op").await;
 		let one = MaintenanceWindow::declare_for_run(&mut conn, &lease_one, Some(&[b]), None)
 			.await
 			.expect("declare the one-machine limit");
@@ -213,7 +213,7 @@ async fn a_limited_run_declares_over_only_what_its_limit_matches() {
 		);
 		reset_leases_and_windows(&mut conn).await;
 
-		let lease_all = lease(&mut conn, fleet.group, "op").await;
+		let lease_all = self::lease(&mut conn, fleet.group, "op").await;
 		let all =
 			MaintenanceWindow::declare_for_run(&mut conn, &lease_all, Some(&fleet.boxes), None)
 				.await
