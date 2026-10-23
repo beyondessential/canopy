@@ -441,7 +441,8 @@ mod tests {
 	}
 
 	/// Publishing something that is not a catalogue leaves the last copy in
-	/// use and warns at once.
+	/// use and warns at once. An unreachable repository leaves the copy too,
+	/// and is not yet a fault.
 	// spec: ANSVAR#catalogue
 	#[tokio::test(flavor = "multi_thread")]
 	async fn a_publication_that_does_not_read_leaves_the_last_copy_and_warns() {
@@ -470,27 +471,20 @@ mod tests {
 			stub.publish(&catalogue_document().to_string());
 			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
 			assert!(!alert_active(&mut conn).await, "a good read clears it");
-		})
-		.await
-	}
-
-	/// An unreachable repository leaves the copy, and is not yet a fault.
-	// spec: ANSVAR#catalogue
-	#[tokio::test(flavor = "multi_thread")]
-	async fn an_unreachable_repository_leaves_the_last_copy_without_an_alert_yet() {
-		commons_tests::db::TestDb::run(async |mut conn, _| {
-			let stub = Stub::serving(&catalogue_document());
-			let source = stub.start().await;
-			let (client, secrets) = (reqwest::Client::new(), BackupSecrets::memory());
-			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
 
 			stub.break_down();
 			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
-
 			let state = CatalogueState::get(&mut conn).await.unwrap().unwrap();
 			assert_eq!(state.problem, Some(Problem::Unreachable));
-			assert_eq!(state.document, Some(catalogue_document()));
-			assert!(!alert_active(&mut conn).await);
+			assert_eq!(
+				state.document,
+				Some(catalogue_document()),
+				"an unreachable repository leaves the last copy"
+			);
+			assert!(
+				!alert_active(&mut conn).await,
+				"and is not yet a fault"
+			);
 		})
 		.await
 	}

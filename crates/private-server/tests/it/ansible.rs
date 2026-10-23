@@ -122,9 +122,79 @@ pub(crate) async fn read_served(
 	response.json()
 }
 
+/// What the scenarios of a folded test found wrong, each naming its scenario so
+/// a failing one says so instead of stopping the rest.
+#[derive(Default)]
+pub(crate) struct Failures(Vec<String>);
+
+impl Failures {
+	pub(crate) fn check(&mut self, scenario: &str, ok: bool, what: impl std::fmt::Display) {
+		if !ok {
+			self.0.push(format!("{scenario}: {what}"));
+		}
+	}
+
+	pub(crate) fn eq(
+		&mut self,
+		scenario: &str,
+		what: &str,
+		actual: &Value,
+		expected: impl Into<Value>,
+	) {
+		let expected = expected.into();
+		if *actual != expected {
+			self.0
+				.push(format!("{scenario}: {what} was {actual}, not {expected}"));
+		}
+	}
+
+	pub(crate) fn ok<T>(&mut self, scenario: &str, result: Result<T, String>) -> Option<T> {
+		match result {
+			Ok(value) => Some(value),
+			Err(error) => {
+				self.0.push(format!("{scenario}: {error}"));
+				None
+			}
+		}
+	}
+
+	pub(crate) fn assert_none(self) {
+		assert!(self.0.is_empty(), "{}", self.0.join("\n"));
+	}
+}
+
+/// `read_served` that reports a refusal rather than panicking.
+async fn try_read_served(
+	private: &commons_tests::axum_test::TestServer,
+	args: Value,
+) -> Result<Value, String> {
+	let taken = private.post("/api/ansible/take_lease").json(&args).await;
+	if !taken.status_code().is_success() {
+		return Err(format!("take_lease answered {}", taken.text()));
+	}
+	let lease = taken.json::<Value>()["id"].clone();
+	let read = private
+		.post("/api/ansible/for_group")
+		.json(&json!({ "lease_id": lease }))
+		.await;
+	if !read.status_code().is_success() {
+		return Err(format!("for_group answered {}", read.text()));
+	}
+	Ok(read.json())
+}
+
+/// What an environment serves a run, each scenario in a group of its own and read
+/// by that group's identifier: its machines and the applications on them, a
+/// shared box whole, the rank asked for, and what is left out (an archived
+/// application, Canopy's own, a machine nothing can reach) or served without an
+/// address.
+// spec: INV#what-a-run-is-served
 #[tokio::test(flavor = "multi_thread")]
-async fn serves_an_environments_machines_and_applications() {
+async fn serves_each_environment_what_a_run_configures() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
+		let mut failures = Failures::default();
+
+		let scenario = "an environment's machines and applications";
 		let group = insert_group(&mut conn, "kamaka-prod").await;
 		let central = insert_application(
 			&mut conn,
@@ -143,36 +213,52 @@ async fn serves_an_environments_machines_and_applications() {
 			Some("https://facility.kamaka.example/"),
 		)
 		.await;
+		if let Some(body) = failures.ok(
+			scenario,
+			try_read_served(&private, json!({ "server_group_id": group })).await,
+		) {
+			failures.eq(scenario, "the group", &body["group"], "kamaka-prod");
+			// Nothing here carries a rank, so the whole group is one environment at
+			// the default rank.
+			failures.eq(scenario, "the rank", &body["rank"], "dev");
+			let hosts = &body["hosts"];
+			failures.check(
+				scenario,
+				hosts.as_array().map(Vec::len) == Some(2),
+				format!("two hosts: {body}"),
+			);
+			// A bound device's tailnet name is the address, and the machine carries
+			// the applications a run configures on it.
+			failures.eq(scenario, "the first host", &hosts[0]["name"], "kamaka-prod-central");
+			failures.eq(
+				scenario,
+				"the first address",
+				&hosts[0]["address"],
+				"kamaka-prod-central",
+			);
+			failures.eq(
+				scenario,
+				"the first application's type",
+				&hosts[0]["applications"][0]["type"],
+				"tamanu-central",
+			);
+			failures.eq(
+				scenario,
+				"the first application's id",
+				&hosts[0]["applications"][0]["id"],
+				central.to_string(),
+			);
+			// No device on the box, so the address is the recorded host of an
+			// application on it, as a bare name.
+			failures.eq(
+				scenario,
+				"the second address",
+				&hosts[1]["address"],
+				"facility.kamaka.example",
+			);
+		}
 
-		let body = read_served(&private, json!({ "group": "kamaka-prod" })).await;
-
-		assert_eq!(body["group"], "kamaka-prod");
-		// Nothing here carries a rank, so the whole group is one environment at
-		// the default rank.
-		assert_eq!(body["rank"], "dev");
-
-		let hosts = body["hosts"].as_array().expect("hosts");
-		assert_eq!(hosts.len(), 2);
-
-		// A bound device's tailnet name is the address, and the machine carries
-		// the applications a run configures on it.
-		assert_eq!(hosts[0]["name"], "kamaka-prod-central");
-		assert_eq!(hosts[0]["address"], "kamaka-prod-central");
-		assert_eq!(hosts[0]["applications"][0]["type"], "tamanu-central");
-		assert_eq!(hosts[0]["applications"][0]["id"], central.to_string());
-
-		// No device on the box, so the address is the recorded host of an
-		// application on it, as a bare name.
-		assert_eq!(hosts[1]["address"], "facility.kamaka.example");
-	})
-	.await
-}
-
-/// A box serves one environment, so both workloads on a shared box sit in it and
-/// the box is one host carrying both.
-#[tokio::test(flavor = "multi_thread")]
-async fn serves_a_shared_box_whole() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
+		let scenario = "a shared box";
 		let group = insert_group(&mut conn, "kamaka-shared").await;
 		let machine = Uuid::new_v4();
 		let device = Uuid::new_v4();
@@ -189,59 +275,42 @@ async fn serves_a_shared_box_whole() {
 		))
 		.await
 		.expect("seed a shared box");
+		// A box serves one environment, so both workloads on it sit in it and the
+		// box is one host carrying both.
+		if let Some(body) = failures.ok(
+			scenario,
+			try_read_served(
+				&private,
+				json!({ "server_group_id": group, "rank": "production" }),
+			)
+			.await,
+		) {
+			let hosts = &body["hosts"];
+			failures.check(
+				scenario,
+				hosts.as_array().map(Vec::len) == Some(1),
+				format!("one host: {body}"),
+			);
+			failures.eq(scenario, "the host", &hosts[0]["id"], machine.to_string());
+			failures.eq(
+				scenario,
+				"the address",
+				&hosts[0]["address"],
+				"kamaka-shared-box",
+			);
+			failures.check(
+				scenario,
+				hosts[0]["applications"].as_array().map(Vec::len) == Some(2),
+				format!("the whole box is in the environment: {body}"),
+			);
+		}
 
-		let body = read_served(
-			&private,
-			json!({ "server_group_id": group, "rank": "production" }),
-		)
-		.await;
-		let hosts = body["hosts"].as_array().expect("hosts");
-		assert_eq!(hosts.len(), 1);
-		assert_eq!(hosts[0]["id"], machine.to_string());
-		assert_eq!(hosts[0]["address"], "kamaka-shared-box");
-		let applications = hosts[0]["applications"].as_array().expect("applications");
-		assert_eq!(applications.len(), 2, "the whole box is in the environment");
-	})
-	.await
-}
-
-/// A group with nothing ranked has no environment, so there is nothing to serve
-/// and no run to take a lease for.
-// spec: GRP#environments
-#[tokio::test(flavor = "multi_thread")]
-async fn a_group_with_nothing_ranked_has_no_environment_to_serve() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-pending").await;
-		let machine = Uuid::new_v4();
-		conn.batch_execute(&format!(
-			"INSERT INTO machines (id, name, group_id) VALUES ('{machine}', 'kamaka-box', '{group}');
-			 INSERT INTO applications (id, name, type, group_id, machine_id)
-			 VALUES (gen_random_uuid(), 'kamaka-central', 'tamanu-central', '{group}', '{machine}')"
-		))
-		.await
-		.expect("seed a pending box");
-
-		let refused = private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "server_group_id": group }))
-			.await;
-		assert!(
-			refused.status_code().is_client_error(),
-			"{}",
-			refused.text()
-		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn serves_the_environment_at_the_rank_asked_for() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
+		let scenario = "the rank asked for";
+		let group = insert_group(&mut conn, "kamaka-ranks").await;
 		insert_ranked_application(
 			&mut conn,
 			group,
-			"kamaka-central",
+			"kamaka-ranks-central",
 			"tamanu-central",
 			Some("production"),
 			None,
@@ -250,168 +319,308 @@ async fn serves_the_environment_at_the_rank_asked_for() {
 		insert_ranked_application(
 			&mut conn,
 			group,
-			"kamaka-demo",
+			"kamaka-ranks-demo",
 			"tamanu-central",
 			Some("demo"),
 			None,
 		)
 		.await;
+		if let Some(body) = failures.ok(
+			scenario,
+			try_read_served(&private, json!({ "server_group_id": group, "rank": "demo" })).await,
+		) {
+			failures.eq(scenario, "the rank", &body["rank"], "demo");
+			failures.check(
+				scenario,
+				body["hosts"].as_array().map(Vec::len) == Some(1),
+				format!("one host: {body}"),
+			);
+			failures.eq(scenario, "the host", &body["hosts"][0]["name"], "kamaka-ranks-demo");
+		}
 
-		let body = read_served(&private, json!({ "group": "kamaka", "rank": "demo" })).await;
-		assert_eq!(body["rank"], "demo");
-		let hosts = body["hosts"].as_array().expect("hosts");
-		assert_eq!(hosts.len(), 1);
-		assert_eq!(hosts[0]["name"], "kamaka-demo");
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_a_group_holding_several_environments_with_no_rank_named() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_ranked_application(
+		let scenario = "an archived application";
+		let group = insert_group(&mut conn, "kamaka-archived").await;
+		insert_application(
 			&mut conn,
 			group,
-			"kamaka-central",
+			"kamaka-archived-central",
 			"tamanu-central",
-			Some("production"),
 			None,
 		)
 		.await;
-		insert_ranked_application(
+		let gone = insert_application(
 			&mut conn,
 			group,
-			"kamaka-demo",
-			"tamanu-central",
-			Some("demo"),
+			"kamaka-archived-old",
+			"tamanu-facility",
 			None,
 		)
 		.await;
-
-		let response = private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "group": "kamaka" }))
-			.await;
-		response.assert_status(axum::http::StatusCode::CONFLICT);
-		let body: Value = response.json();
-		assert!(
-			body["detail"]
-				.as_str()
-				.expect("detail")
-				.contains("name the rank"),
-			"{body}"
-		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn leaves_out_an_archived_application() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		let gone =
-			insert_application(&mut conn, group, "kamaka-old", "tamanu-facility", None).await;
 		conn.batch_execute(&format!(
 			"UPDATE applications SET deleted_at = NOW() WHERE id = '{gone}'"
 		))
 		.await
 		.expect("archive");
+		if let Some(body) = failures.ok(
+			scenario,
+			try_read_served(&private, json!({ "server_group_id": group })).await,
+		) {
+			failures.check(
+				scenario,
+				body["hosts"].as_array().map(Vec::len) == Some(1),
+				format!("one host: {body}"),
+			);
+			failures.eq(
+				scenario,
+				"the host",
+				&body["hosts"][0]["name"],
+				"kamaka-archived-central",
+			);
+		}
 
-		let body = read_served(&private, json!({ "group": "kamaka" })).await;
-		let hosts = body["hosts"].as_array().expect("hosts");
-		assert_eq!(hosts.len(), 1);
-		assert_eq!(hosts[0]["name"], "kamaka-central");
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_a_group_canopy_does_not_have() {
-	commons_tests::server::run(async move |_conn, _public, private| {
-		let response = private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "group": "nowhere" }))
-			.await;
-		response.assert_status(axum::http::StatusCode::NOT_FOUND);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_an_archived_group() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-gone").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		let scenario = "Canopy's own application";
+		let group = insert_group(&mut conn, "kamaka-meta").await;
+		insert_application(&mut conn, group, "kamaka-meta-central", "tamanu-central", None).await;
 		conn.batch_execute(&format!(
-			"UPDATE server_groups SET deleted_at = NOW() WHERE id = '{group}'"
+			"UPDATE machines SET group_id = '{group}'
+			 WHERE id = '00000000-0000-0000-0000-000000000000';
+			 UPDATE applications SET group_id = '{group}'
+			 WHERE id = '00000000-0000-0000-0000-000000000000'"
+		))
+		.await
+		.expect("put the meta application in the group");
+		if let Some(body) = failures.ok(
+			scenario,
+			try_read_served(&private, json!({ "server_group_id": group })).await,
+		) {
+			failures.check(
+				scenario,
+				body["hosts"].as_array().map(Vec::len) == Some(1),
+				format!("one host: {body}"),
+			);
+			failures.eq(
+				scenario,
+				"the host",
+				&body["hosts"][0]["name"],
+				"kamaka-meta-central",
+			);
+		}
+
+		let scenario = "no address held";
+		let group = insert_group(&mut conn, "kamaka-nowhere").await;
+		insert_application(
+			&mut conn,
+			group,
+			"kamaka-nowhere-central",
+			"tamanu-central",
+			None,
+		)
+		.await;
+		if let Some(body) = failures.ok(
+			scenario,
+			try_read_served(&private, json!({ "server_group_id": group })).await,
+		) {
+			failures.eq(scenario, "the address", &body["hosts"][0]["address"], Value::Null);
+		}
+
+		let scenario = "a machine with a bound device and nothing on it";
+		let group = insert_group(&mut conn, "kamaka-bare").await;
+		let machine = Uuid::new_v4();
+		let device = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO devices (id, role, tailscale_node_name)
+			 VALUES ('{device}', 'server', 'kamaka-new.tail1234.ts.net');
+			 INSERT INTO machines (id, name, group_id, rank, device_id)
+			 VALUES ('{machine}', 'kamaka-new', '{group}', 'production', '{device}')"
+		))
+		.await
+		.expect("seed a bare machine");
+		if let Some(body) = failures.ok(
+			scenario,
+			try_read_served(&private, json!({ "server_group_id": group })).await,
+		) {
+			failures.check(
+				scenario,
+				body["hosts"].as_array().map(Vec::len) == Some(1),
+				format!("one host: {body}"),
+			);
+			failures.eq(scenario, "the host", &body["hosts"][0]["id"], machine.to_string());
+			failures.eq(
+				scenario,
+				"its applications",
+				&body["hosts"][0]["applications"],
+				json!([]),
+			);
+			failures.eq(
+				scenario,
+				"its host name",
+				&body["hosts"][0]["host_name"],
+				"kamaka-new",
+			);
+		}
+
+		let scenario = "a machine a run cannot reach";
+		let group = insert_group(&mut conn, "kamaka-unreachable").await;
+		insert_ranked_application(
+			&mut conn,
+			group,
+			"kamaka-unreachable-central",
+			"tamanu-central",
+			Some("production"),
+			Some("https://central.example.org"),
+		)
+		.await;
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (id, name, group_id, rank)
+			 VALUES (gen_random_uuid(), 'kamaka-waiting', '{group}', 'production');
+			 INSERT INTO machines (id, name, group_id, rank, deleted_at)
+			 VALUES (gen_random_uuid(), 'kamaka-gone', '{group}', 'production', NOW())"
+		))
+		.await
+		.expect("seed machines");
+		if let Some(body) = failures.ok(
+			scenario,
+			try_read_served(&private, json!({ "server_group_id": group })).await,
+		) {
+			failures.check(
+				scenario,
+				body["hosts"].as_array().map(Vec::len) == Some(1),
+				format!("one host: {body}"),
+			);
+			failures.eq(
+				scenario,
+				"the host",
+				&body["hosts"][0]["name"],
+				"kamaka-unreachable-central",
+			);
+		}
+
+		failures.assert_none();
+	})
+	.await
+}
+
+/// A request that names no environment is refused with no lease taken, and each
+/// refusal says what is wrong: nothing ranked yet (a group with no machine, or
+/// with only a pending one), several environments with no rank named, a rank no
+/// machine holds, a group Canopy does not have or has archived or that a name
+/// does not settle, and no group asked for at all.
+// spec: GRP#environments
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_a_request_that_names_no_environment() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let pending = insert_group(&mut conn, "kamaka-pending").await;
+		let machine = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (id, name, group_id) VALUES ('{machine}', 'kamaka-box', '{pending}');
+			 INSERT INTO applications (id, name, type, group_id, machine_id)
+			 VALUES (gen_random_uuid(), 'kamaka-pending-central', 'tamanu-central', '{pending}', '{machine}')"
+		))
+		.await
+		.expect("seed a pending box");
+
+		insert_group(&mut conn, "kamaka-empty").await;
+
+		let several = insert_group(&mut conn, "kamaka-several").await;
+		for (name, rank) in [("kamaka-several-central", "production"), ("kamaka-several-demo", "demo")] {
+			insert_ranked_application(&mut conn, several, name, "tamanu-central", Some(rank), None)
+				.await;
+		}
+
+		let ranked = insert_group(&mut conn, "kamaka-ranked").await;
+		insert_ranked_application(
+			&mut conn,
+			ranked,
+			"kamaka-ranked-central",
+			"tamanu-central",
+			Some("production"),
+			None,
+		)
+		.await;
+
+		let archived = insert_group(&mut conn, "kamaka-gone").await;
+		insert_application(
+			&mut conn,
+			archived,
+			"kamaka-gone-central",
+			"tamanu-central",
+			None,
+		)
+		.await;
+		conn.batch_execute(&format!(
+			"UPDATE server_groups SET deleted_at = NOW() WHERE id = '{archived}'"
 		))
 		.await
 		.expect("archive");
 
-		let response = private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "group": "kamaka-gone" }))
-			.await;
-		response.assert_status(axum::http::StatusCode::CONFLICT);
-		let body: Value = response.json();
-		assert!(
-			body["detail"]
-				.as_str()
-				.expect("detail")
-				.contains("archived"),
-			"{body}"
-		);
-	})
-	.await
-}
+		let twin = insert_group(&mut conn, "kamaka-twin").await;
+		insert_group(&mut conn, "kamaka-twin").await;
+		insert_application(&mut conn, twin, "kamaka-twin-central", "tamanu-central", None).await;
 
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_a_group_with_nothing_to_configure() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		insert_group(&mut conn, "kamaka-empty").await;
-		let response = private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "group": "kamaka-empty" }))
-			.await;
-		response.assert_status(axum::http::StatusCode::CONFLICT);
-	})
-	.await
-}
+		use axum::http::StatusCode;
+		let rows: Vec<(&str, Value, StatusCode, &str)> = vec![
+			(
+				"a group with only a pending box",
+				json!({ "server_group_id": pending }),
+				StatusCode::CONFLICT,
+				"nothing ranked yet",
+			),
+			(
+				"a group with nothing in it",
+				json!({ "group": "kamaka-empty" }),
+				StatusCode::CONFLICT,
+				"nothing ranked yet",
+			),
+			(
+				"several environments with no rank named",
+				json!({ "group": "kamaka-several" }),
+				StatusCode::CONFLICT,
+				"name the rank",
+			),
+			(
+				"a rank no machine holds",
+				json!({ "group": "kamaka-ranked", "rank": "demo" }),
+				StatusCode::CONFLICT,
+				"no machine at rank demo",
+			),
+			(
+				"a group Canopy does not have",
+				json!({ "group": "nowhere" }),
+				StatusCode::NOT_FOUND,
+				"no server group named",
+			),
+			(
+				"an archived group",
+				json!({ "group": "kamaka-gone" }),
+				StatusCode::CONFLICT,
+				"archived",
+			),
+			(
+				"a name that answers for two groups",
+				json!({ "group": "kamaka-twin" }),
+				StatusCode::CONFLICT,
+				"ask by identifier",
+			),
+			(
+				"neither a group nor an identifier",
+				json!({}),
+				StatusCode::BAD_REQUEST,
+				"exactly one of",
+			),
+		];
 
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_a_name_that_answers_for_two_groups() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let first = insert_group(&mut conn, "kamaka").await;
-		insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, first, "kamaka-central", "tamanu-central", None).await;
-
-		let response = private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "group": "kamaka" }))
-			.await;
-		response.assert_status(axum::http::StatusCode::CONFLICT);
-		let body: Value = response.json();
-		assert!(
-			body["detail"]
-				.as_str()
-				.expect("detail")
-				.contains("ask by identifier"),
-			"{body}"
-		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_a_request_naming_neither_a_group_nor_an_identifier() {
-	commons_tests::server::run(async move |_conn, _public, private| {
-		private
-			.post("/api/ansible/take_lease")
-			.json(&json!({}))
-			.await
-			.assert_status(axum::http::StatusCode::BAD_REQUEST);
+		let mut failures = Failures::default();
+		for (row, args, status, needle) in rows {
+			let response = private.post("/api/ansible/take_lease").json(&args).await;
+			failures.check(
+				row,
+				response.status_code() == status,
+				format!("take_lease answered {}, not {status}", response.status_code()),
+			);
+			let text = response.text();
+			failures.check(row, text.contains(needle), format!("refusal does not say {needle}: {text}"));
+		}
+		failures.assert_none();
 	})
 	.await
 }
@@ -1161,43 +1370,6 @@ async fn says_why_a_lease_no_longer_holds_rather_than_calling_it_expired() {
 	.await
 }
 
-/// Canopy's own nil application is not a machine a run configures.
-#[tokio::test(flavor = "multi_thread")]
-async fn leaves_out_the_meta_application() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		conn.batch_execute(&format!(
-			"UPDATE machines SET group_id = '{group}'
-			 WHERE id = '00000000-0000-0000-0000-000000000000';
-			 UPDATE applications SET group_id = '{group}'
-			 WHERE id = '00000000-0000-0000-0000-000000000000'"
-		))
-		.await
-		.expect("put the meta application in the group");
-
-		let body = read_served(&private, json!({ "server_group_id": group })).await;
-		let hosts = body["hosts"].as_array().expect("hosts");
-		assert_eq!(hosts.len(), 1);
-		assert_eq!(hosts[0]["name"], "kamaka-central");
-	})
-	.await
-}
-
-/// Canopy holding no address is served as none rather than as a guess, which
-/// is what a variable has to supply.
-#[tokio::test(flavor = "multi_thread")]
-async fn serves_no_address_where_canopy_holds_none() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-
-		let body = read_served(&private, json!({ "server_group_id": group })).await;
-		assert_eq!(body["hosts"][0]["address"], Value::Null);
-	})
-	.await
-}
-
 /// Extending is the holder's, so a lease cannot be kept alive by whoever is
 /// waiting for it.
 #[tokio::test(flavor = "multi_thread")]
@@ -1219,95 +1391,6 @@ async fn refuses_to_extend_a_lease_someone_else_holds() {
 			.json(&json!({ "lease_id": lease }))
 			.await
 			.assert_status(axum::http::StatusCode::CONFLICT);
-	})
-	.await
-}
-
-/// A machine ranked before anything has reported is already in its
-/// environment, and a bound device is enough for a run to reach it, so a run is
-/// how its applications get there.
-// spec: INV#what-a-run-is-served
-#[tokio::test(flavor = "multi_thread")]
-async fn serves_a_machine_with_a_bound_device_and_nothing_on_it() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		let machine = Uuid::new_v4();
-		let device = Uuid::new_v4();
-		conn.batch_execute(&format!(
-			"INSERT INTO devices (id, role, tailscale_node_name)
-			 VALUES ('{device}', 'server', 'kamaka-new.tail1234.ts.net');
-			 INSERT INTO machines (id, name, group_id, rank, device_id)
-			 VALUES ('{machine}', 'kamaka-new', '{group}', 'production', '{device}')"
-		))
-		.await
-		.expect("seed a bare machine");
-
-		let body = read_served(&private, json!({ "group": "kamaka" })).await;
-		let hosts = body["hosts"].as_array().expect("hosts");
-		assert_eq!(hosts.len(), 1, "{body}");
-		assert_eq!(hosts[0]["id"], machine.to_string());
-		assert_eq!(hosts[0]["applications"], json!([]));
-		assert_eq!(hosts[0]["host_name"], "kamaka-new");
-	})
-	.await
-}
-
-/// A ranked machine with no device and nothing reported has no address a run
-/// could reach, so it is left out rather than refusing the environment.
-// spec: INV#what-a-run-is-served
-#[tokio::test(flavor = "multi_thread")]
-async fn leaves_out_a_machine_a_run_cannot_reach() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_ranked_application(
-			&mut conn,
-			group,
-			"kamaka-central",
-			"tamanu-central",
-			Some("production"),
-			Some("https://central.example.org"),
-		)
-		.await;
-		conn.batch_execute(&format!(
-			"INSERT INTO machines (id, name, group_id, rank)
-			 VALUES (gen_random_uuid(), 'kamaka-waiting', '{group}', 'production');
-			 INSERT INTO machines (id, name, group_id, rank, deleted_at)
-			 VALUES (gen_random_uuid(), 'kamaka-gone', '{group}', 'production', NOW())"
-		))
-		.await
-		.expect("seed machines");
-
-		let body = read_served(&private, json!({ "group": "kamaka" })).await;
-		let hosts = body["hosts"].as_array().expect("hosts");
-		assert_eq!(hosts.len(), 1, "{body}");
-		assert_eq!(hosts[0]["name"], "kamaka-central");
-	})
-	.await
-}
-
-/// A rank no machine holds is no environment, so it is refused rather than
-/// served empty.
-// spec: GRP#environments
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_a_rank_no_machine_holds() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_ranked_application(
-			&mut conn,
-			group,
-			"kamaka-central",
-			"tamanu-central",
-			Some("production"),
-			None,
-		)
-		.await;
-
-		let refused = private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "group": "kamaka", "rank": "demo" }))
-			.await;
-		refused.assert_status(commons_tests::axum_test::http::StatusCode::CONFLICT);
-		assert!(refused.text().contains("no machine at rank demo"));
 	})
 	.await
 }
