@@ -16,7 +16,7 @@ Lenses, inventory and the running findings live in `.workhorse/working-docs/f5/w
 - [ ] Lens C: incremental sprawl, with drift-proof replacements where the type system or a macro can force full coverage
 - [ ] Lens D: open-ended consolidation against the existing tests around each area, two rounds
 - [x] Apply the Rust findings of lenses A and B and run the affected tests (all passing)
-- [ ] Apply the Vitest and Playwright findings, including the vacuous assertions, and run the affected tests
+- [x] Apply the Vitest and Playwright findings, including the vacuous assertions, and run the affected tests
 - [ ] Walk the remaining lenses' findings with the user, apply the accepted ones, run affected tests by filter
 - [ ] Fill in the signal-to-noise table and decide which lenses the skill keeps
 - [ ] Write the skill at `.agents/skills/<name>/SKILL.md`: guidance, a review pass, a review loop
