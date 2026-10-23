@@ -250,6 +250,31 @@ What round 2 showed about the process:
 - Applying in parallel needs file ownership stated in each brief; the agents' compile errors in each other's files cleared on their own, but only because each was told to wait and not touch them.
 - Reporting a test count hides the effect. Report cost classes (database or server backed versus pure) and cases walked.
 
+### Round 3: lens D, first round (analysis)
+
+Four read-only agents (database and maintenance model, private-server endpoints, inline unit and job tests, Vitest and Playwright), each reading the current tests next to their neighbours and building a behaviour map by layer.
+Each suggestion had to name the surviving test and a coverage claim that can be checked.
+Nothing applied yet. A `just coverage` recipe (cargo-llvm-cov over the contained RAM Postgres) was added so the Rust claims can be checked by diffing line coverage of the F5 source files before and after; Vitest has no coverage provider and Playwright has none, so web claims rest on mutation checks.
+
+What came back:
+
+- The agents agree on the small folds (DB and jobs): the three direct window hook tests into the lease wiring test, `says_why_a_lease_was_released` into the wiring test (its `Released` half repeats the enum round trip), the two catalogue alert tests into one sequence, three constraint tests into one, two `maintenance_run_windows` pairs, `maintenance_machine_sets` merges (a, b, c), the two enum store tests, the jobs catalogue stub tests. About 15 tests, each saving a database spin, none dropping an assertion.
+- Web: delete the machine-window run-holder e2e test (the SPA reads the window and `refuses`, never its kind; the endpoint table owns the kinds), move one text assertion into `groups.spec.ts`, fold the one-environment picker test into the ranked-machine test, fold the secret tail of the row-edit test into the secret test, drop a redundant Vitest name assertion. Folding the round-trip `it.each` pair and the three one-assertion `checkScope` tests is optional.
+- The endpoint tests are the large remaining cost, and the agents propose scenario tests: several groups in one database, each scenario a row, failures collected (the precedent is `a_window_refuses_a_lease_exactly_where_the_page_reports_it`).
+  Read-only families are safe to fold: import previews (11 to 2), environment-resolution refusals (8 to 1), served-hosts reads (8 to 1).
+  Stateful families need care and give a bigger blast radius: lease-state refusals (11 to about 3), upgrade plans (5 to 1, the `versions` row is UNIQUE), the variable serve and secret family (13 to about 3), `ansible_runs` (11 to 5), `maintenance_machines` (4 to 2).
+  Estimated saving about 50 endpoint tests and as many server spins, at the cost of failure isolation and, for the stateful ones, ordering coupling.
+- Much of this overlaps the lens C medium tier (lease matrix, membership and resolution tables, import gates); the two lists should be decided together.
+- Suggestions the agents themselves rated weak: moving the database sweep test into the jobs lease test (leaves the database crate with no direct test of `AnsibleLease::sweep`), count-only merges of the pure `hosts.rs`, `limit.rs` and `inventory_file.rs` tests, merging the two environment-picker e2e tests, and folding the catalogue-missing e2e test into the install test.
+- Looked redundant but not, so not to be re-proposed: the window refusal table (the only owner of the `run_state` and `take_lease` agreement), `takes_a_lease_while_another_transaction_writes…` (the only owner of the lock behaviour), `names_what_a_run_acts_on…` (wiring across two handlers), the DB lease tests against the endpoint ones (different branches), `forgets_a_value_once_its_week_has_passed` (the only caller of `forget_due`), `managed_by_ansible_migration.rs`, and the one-test web cases that own a branch (null-rank machine, aria-expanded reload, run polling gate).
+- Gaps seen, not redundancies: the `Some(_)` branch of `no_longer_held` (released by the same operator) is unasserted, `release_unstarted` has no database or unit test, and one e2e column of the map was inferred from titles.
+
+Process notes from this round:
+
+- Lens D and the C medium tier are the same work seen from two sides (by structure and by overlap); the skill should run them as one pass.
+- The useful unit of a D suggestion is "behaviour, owning layer, what each other layer keeps"; the agents that built the behaviour map first produced the best-defended merges.
+- Every merge among stateful tests needs its ordering and shared state stated (global `list_open`, UNIQUE rows, the open-lease limit); the claims that failed to verify were all of this kind.
+
 ## Signal to noise
 
 For each lens, once run: how many findings, how many accepted, how many rejected and why, and a verdict on whether the lens belongs in the skill, as a separate pass, or as guidance only.
