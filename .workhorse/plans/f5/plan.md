@@ -25,8 +25,8 @@ Lenses, inventory and the running findings live in `.workhorse/working-docs/f5/w
 - [x] Apply the Vitest and Playwright findings, including the vacuous assertions, and run the affected tests
 - [x] Walk the lenses' findings with the user, apply the accepted ones, run affected tests by filter
 - [x] Fill in the signal-to-noise table (all five lenses scored in the working doc)
-- [ ] Settle the skill's shape with the user
-- [ ] Write the skill at `.agents/skills/<name>/SKILL.md`: guidance, a review pass, a review loop
+- [x] Settle the skill's shape with the user: two skills, one reference doc, a committed coverage-diff script
+- [x] Write the skills (`write-good-tests`, `review-tests`), the reference doc `.agents/docs/test-quality.md` and `just coverage-diff`
 - [ ] Trial the skill on a later card, adjust, then unplan
 
 ## Notes

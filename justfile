@@ -66,6 +66,12 @@ coverage *args:
     mkdir -p target/coverage
     scripts/contain.sh scripts/ramdisk-pg.sh cargo llvm-cov nextest --no-fail-fast --lcov --output-path target/coverage/lcov.info {{ args }}
 
+# List production functions one `just coverage` run reached and another does
+# not, by function name so edits that move lines do not matter. Take the base
+# before editing tests. `just coverage-diff /tmp/base.info target/coverage/lcov.info`
+coverage-diff base new *args:
+    scripts/coverage-fn-diff.sh {{ base }} {{ new }} {{ args }}
+
 # Run tests for a specific package (RAM-backed; see `test`)
 test-package package:
     scripts/contain.sh scripts/ramdisk-pg.sh cargo nextest run --no-fail-fast -p {{ package }}
