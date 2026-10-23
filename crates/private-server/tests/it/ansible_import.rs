@@ -193,7 +193,12 @@ async fn previews_what_an_import_would_do() {
 				env.central.to_string(),
 			);
 			let facility = find(&preview["hosts"], "key", "kamaka-facility-a");
-			failures.eq(scenario, "the facility's state", &facility["state"], "matched");
+			failures.eq(
+				scenario,
+				"the facility's state",
+				&facility["state"],
+				"matched",
+			);
 			failures.eq(
 				scenario,
 				"the facility's machine",
@@ -201,7 +206,12 @@ async fn previews_what_an_import_would_do() {
 				env.facility.to_string(),
 			);
 			let office = find(&preview["hosts"], "key", "10.20.30.40:223");
-			failures.eq(scenario, "the office's state", &office["state"], "unmatched");
+			failures.eq(
+				scenario,
+				"the office's state",
+				&office["state"],
+				"unmatched",
+			);
 			failures.check(
 				scenario,
 				office["machine_id"].is_null(),
@@ -242,7 +252,12 @@ async fn previews_what_an_import_would_do() {
 			// By a host recorded for an application, which it names, but the
 			// machine is also named by the first host, so it is ambiguous.
 			let stranger = find(&preview["hosts"], "key", "stranger");
-			failures.eq(scenario, "the stranger's state", &stranger["state"], "matched");
+			failures.eq(
+				scenario,
+				"the stranger's state",
+				&stranger["state"],
+				"matched",
+			);
 			failures.eq(
 				scenario,
 				"the stranger's machine",
@@ -258,9 +273,11 @@ async fn previews_what_an_import_would_do() {
 			failures.check(
 				scenario,
 				preview["problems"].as_array().is_some_and(|problems| {
-					problems
-						.iter()
-						.any(|problem| problem.as_str().is_some_and(|p| p.contains("kamaka-office")))
+					problems.iter().any(|problem| {
+						problem
+							.as_str()
+							.is_some_and(|p| p.contains("kamaka-office"))
+					})
 				}),
 				format!("a problem names kamaka-office: {preview}"),
 			);
@@ -280,7 +297,12 @@ async fn previews_what_an_import_would_do() {
 		) {
 			let office = find(&skipped["hosts"], "key", "10.20.30.40:223");
 			failures.eq(scenario, "the skipped state", &office["state"], "skipped");
-			failures.eq(scenario, "the skipped variables", &office["variables"], json!([]));
+			failures.eq(
+				scenario,
+				"the skipped variables",
+				&office["variables"],
+				json!([]),
+			);
 			failures.eq(scenario, "the skipped notes", &office["notes"], "");
 			failures.eq(
 				scenario,
@@ -323,7 +345,10 @@ async fn previews_what_an_import_would_do() {
 		failures.check(
 			scenario,
 			outside.status_code() == axum::http::StatusCode::BAD_REQUEST,
-			format!("a machine outside the group answered {}", outside.status_code()),
+			format!(
+				"a machine outside the group answered {}",
+				outside.status_code()
+			),
 		);
 
 		let scenario = "two hosts to one machine, or two machines at one address";
@@ -341,7 +366,12 @@ async fn previews_what_an_import_would_do() {
 			)
 			.await,
 		) {
-			failures.eq(scenario, "can_apply for two hosts", &both["can_apply"], false);
+			failures.eq(
+				scenario,
+				"can_apply for two hosts",
+				&both["can_apply"],
+				false,
+			);
 			failures.check(
 				scenario,
 				both["problems"][0]
@@ -361,7 +391,12 @@ async fn previews_what_an_import_would_do() {
 			scenario,
 			try_preview(&private, json!({ "group": "kamaka", "file": file })).await,
 		) {
-			failures.eq(scenario, "can_apply for a shared address", &shared["can_apply"], false);
+			failures.eq(
+				scenario,
+				"can_apply for a shared address",
+				&shared["can_apply"],
+				false,
+			);
 			failures.check(
 				scenario,
 				shared["problems"].as_array().is_some_and(|problems| {
@@ -419,7 +454,12 @@ async fn previews_what_an_import_would_do() {
 			try_preview(&private, json!({ "group": "kamaka", "file": secrets_file })).await,
 		) {
 			let vars = &by_name["environment"];
-			failures.eq(scenario, "salt is secret", &find(vars, "name", "salt")["secret"], true);
+			failures.eq(
+				scenario,
+				"salt is secret",
+				&find(vars, "name", "salt")["secret"],
+				true,
+			);
 			failures.eq(
 				scenario,
 				"salt is unlocked",
@@ -627,10 +667,11 @@ async fn previews_what_an_import_would_do() {
 			.await,
 		) {
 			failures.eq(scenario, "can_apply", &preview["can_apply"], false);
-			let problems = find(&preview["environment"], "name", "elastic_agent_enabled")["problems"]
-				.as_array()
-				.cloned()
-				.unwrap_or_default();
+			let problems =
+				find(&preview["environment"], "name", "elastic_agent_enabled")["problems"]
+					.as_array()
+					.cloned()
+					.unwrap_or_default();
 			failures.check(
 				scenario,
 				problems.len() == 1,

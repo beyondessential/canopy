@@ -229,7 +229,12 @@ async fn serves_each_environment_what_a_run_configures() {
 			);
 			// A bound device's tailnet name is the address, and the machine carries
 			// the applications a run configures on it.
-			failures.eq(scenario, "the first host", &hosts[0]["name"], "kamaka-prod-central");
+			failures.eq(
+				scenario,
+				"the first host",
+				&hosts[0]["name"],
+				"kamaka-prod-central",
+			);
 			failures.eq(
 				scenario,
 				"the first address",
@@ -327,7 +332,11 @@ async fn serves_each_environment_what_a_run_configures() {
 		.await;
 		if let Some(body) = failures.ok(
 			scenario,
-			try_read_served(&private, json!({ "server_group_id": group, "rank": "demo" })).await,
+			try_read_served(
+				&private,
+				json!({ "server_group_id": group, "rank": "demo" }),
+			)
+			.await,
 		) {
 			failures.eq(scenario, "the rank", &body["rank"], "demo");
 			failures.check(
@@ -335,7 +344,12 @@ async fn serves_each_environment_what_a_run_configures() {
 				body["hosts"].as_array().map(Vec::len) == Some(1),
 				format!("one host: {body}"),
 			);
-			failures.eq(scenario, "the host", &body["hosts"][0]["name"], "kamaka-ranks-demo");
+			failures.eq(
+				scenario,
+				"the host",
+				&body["hosts"][0]["name"],
+				"kamaka-ranks-demo",
+			);
 		}
 
 		let scenario = "an archived application";
@@ -380,7 +394,14 @@ async fn serves_each_environment_what_a_run_configures() {
 
 		let scenario = "Canopy's own application";
 		let group = insert_group(&mut conn, "kamaka-meta").await;
-		insert_application(&mut conn, group, "kamaka-meta-central", "tamanu-central", None).await;
+		insert_application(
+			&mut conn,
+			group,
+			"kamaka-meta-central",
+			"tamanu-central",
+			None,
+		)
+		.await;
 		conn.batch_execute(&format!(
 			"UPDATE machines SET group_id = '{group}'
 			 WHERE id = '00000000-0000-0000-0000-000000000000';
@@ -420,7 +441,12 @@ async fn serves_each_environment_what_a_run_configures() {
 			scenario,
 			try_read_served(&private, json!({ "server_group_id": group })).await,
 		) {
-			failures.eq(scenario, "the address", &body["hosts"][0]["address"], Value::Null);
+			failures.eq(
+				scenario,
+				"the address",
+				&body["hosts"][0]["address"],
+				Value::Null,
+			);
 		}
 
 		let scenario = "a machine with a bound device and nothing on it";
@@ -444,7 +470,12 @@ async fn serves_each_environment_what_a_run_configures() {
 				body["hosts"].as_array().map(Vec::len) == Some(1),
 				format!("one host: {body}"),
 			);
-			failures.eq(scenario, "the host", &body["hosts"][0]["id"], machine.to_string());
+			failures.eq(
+				scenario,
+				"the host",
+				&body["hosts"][0]["id"],
+				machine.to_string(),
+			);
 			failures.eq(
 				scenario,
 				"its applications",

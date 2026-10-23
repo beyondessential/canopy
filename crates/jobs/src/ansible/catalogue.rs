@@ -481,10 +481,7 @@ mod tests {
 				Some(catalogue_document()),
 				"an unreachable repository leaves the last copy"
 			);
-			assert!(
-				!alert_active(&mut conn).await,
-				"and is not yet a fault"
-			);
+			assert!(!alert_active(&mut conn).await, "and is not yet a fault");
 		})
 		.await
 	}
