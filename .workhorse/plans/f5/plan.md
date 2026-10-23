@@ -7,7 +7,8 @@ Lenses, inventory and the running findings live in `.workhorse/working-docs/f5/w
 
 - [x] Inventory the tests F5 added across #666, #670, #671, #672
 - [x] Record the lenses, process and inventory in the working doc
-- [ ] Settle the open questions in the working doc that block the walkthrough (coverage check, how wide lens D reads)
+- [x] Settle the open questions that block the walkthrough: coverage is wanted but absent, lens D reads the tests and their neighbours only
+- [ ] Add coverage tooling for the Rust crates and for `private-web` (Vitest), as a way to check a deletion or merge, with a `just` recipe for each
 - [ ] Lens A over the inventory: trivial or over-built tests
 - [ ] Lens B: tests of dependency behaviour, noting which dependency kinds produce hits
 - [ ] Lens C: incremental sprawl, with drift-proof replacements where the type system or a macro can force full coverage
