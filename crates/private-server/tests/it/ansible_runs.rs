@@ -81,7 +81,8 @@ async fn read_catalogue(conn: &mut AsyncPgConnection) {
 					"applications": ["tamanu-central", "tamanu-facility"],
 					"tags": ["app", "base", "tailscale"]
 				},
-				"base-install.yml": { "intent": "configure", "tags": [] }
+				"base-install.yml": { "intent": "configure", "tags": [] },
+				"tamanu-upgrade.yml": { "intent": "upgrade", "tags": [] }
 			} }
 		}),
 		None,
@@ -111,8 +112,11 @@ async fn refused(private: &TestServer, body: Value) -> String {
 }
 
 /// A lease keeps the playbook, the limit and what it matched, the tags and the
-/// assignments, and the entry that records it names them.
-// spec: ANSRUN#audit
+/// assignments, and the entry that records it names them. A run read under it is
+/// served the lease, so it takes the intent, playbook, limit and tags from
+/// Canopy rather than from how it was started, and its maintenance covers only
+/// the machines the limit matched.
+// spec: ANSRUN#audit, INV#what-a-run-is-served, ANSRUN#work-under-way
 #[tokio::test(flavor = "multi_thread")]
 async fn a_lease_records_the_run_it_was_taken_for() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
@@ -129,11 +133,11 @@ async fn a_lease_records_the_run_it_was_taken_for() {
 		.await;
 		assert_eq!(lease["playbook"], "tamanu-install.yml");
 		assert_eq!(lease["limit_pattern"], "facility");
-		let mut limited: Vec<String> = serde_json::from_value(lease["limited_to"].clone()).unwrap();
+		let mut limited: Vec<Uuid> = serde_json::from_value(lease["limited_to"].clone()).unwrap();
 		limited.sort();
-		let mut expected = vec![env.facility_a.to_string(), env.facility_b.to_string()];
-		expected.sort();
-		assert_eq!(limited, expected);
+		let mut facilities = vec![env.facility_a, env.facility_b];
+		facilities.sort();
+		assert_eq!(limited, facilities);
 		assert_eq!(lease["tags"], json!(["app"]));
 		assert_eq!(lease["skip_tags"], json!(["tailscale"]));
 		assert!(
@@ -166,29 +170,6 @@ async fn a_lease_records_the_run_it_was_taken_for() {
 			2,
 			"the machines the limit matched"
 		);
-	})
-	.await
-}
-
-/// A run is served the lease it holds, so it takes the intent, playbook,
-/// limit and tags from Canopy rather than from how it was started.
-// spec: INV#what-a-run-is-served
-#[tokio::test(flavor = "multi_thread")]
-async fn serves_the_lease_it_is_read_under() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let env = environment(&mut conn, &private).await;
-		read_catalogue(&mut conn).await;
-		let lease = take(
-			&private,
-			json!({
-				"server_group_id": env.group,
-				"playbook": "tamanu-install.yml",
-				"limit": "kamaka-central",
-				"tags": ["app"],
-				"skip_tags": ["tailscale"],
-			}),
-		)
-		.await;
 
 		let response = private
 			.post("/api/ansible/for_group")
@@ -199,19 +180,29 @@ async fn serves_the_lease_it_is_read_under() {
 		assert_eq!(served["id"], lease["id"]);
 		assert_eq!(served["intent"], "configure");
 		assert_eq!(served["playbook"], "tamanu-install.yml");
-		assert_eq!(served["limit_pattern"], "kamaka-central");
+		assert_eq!(served["limit_pattern"], "facility");
 		assert_eq!(served["tags"], json!(["app"]));
 		assert_eq!(served["skip_tags"], json!(["tailscale"]));
 		assert!(
 			served["started_at"].is_string(),
 			"the read started the run: {served}"
 		);
+
+		let windows = database::maintenance_windows::MaintenanceWindow::list_open(&mut conn)
+			.await
+			.unwrap();
+		assert_eq!(windows.len(), 1);
+		let mut named = windows[0].machine_ids.clone();
+		named.sort();
+		assert_eq!(named, facilities, "the machines the limit matched");
+		assert!(!named.contains(&env.central));
 	})
 	.await
 }
 
-/// A run started other than as its lease says is refused before anything
-/// starts: no run is recorded and no maintenance declared.
+/// A run started other than as its lease says, in intent, playbook, limit or
+/// tags, is refused before anything starts: no run is recorded and no
+/// maintenance declared.
 // spec: ANSRUN#starting-a-run
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_a_read_started_otherwise_than_the_lease_says() {
@@ -236,14 +227,18 @@ async fn refuses_a_read_started_otherwise_than_the_lease_says() {
 		};
 
 		for (claims, says) in [
+			(json!({ "intent": "upgrade" }), &["configure", "upgrade"][..]),
 			(
 				json!({ "playbook": "base-install.yml" }),
-				"base-install.yml",
+				&["base-install.yml"],
 			),
-			(json!({ "limit": "" }), "no limit"),
-			(json!({ "limit": "kamaka-facility-a" }), "kamaka-facility-a"),
-			(json!({ "tags": ["app"] }), "app"),
-			(json!({ "skip_tags": [] }), "none"),
+			(json!({ "limit": "" }), &["no limit"]),
+			(
+				json!({ "limit": "kamaka-facility-a" }),
+				&["kamaka-facility-a"],
+			),
+			(json!({ "tags": ["app"] }), &["app"]),
+			(json!({ "skip_tags": [] }), &["none"]),
 		] {
 			let refused = read(claims.clone()).await;
 			refused.assert_status(axum::http::StatusCode::CONFLICT);
@@ -251,7 +246,9 @@ async fn refuses_a_read_started_otherwise_than_the_lease_says() {
 				.as_str()
 				.unwrap()
 				.to_owned();
-			assert!(detail.contains(says), "{claims}: {detail}");
+			for says in says {
+				assert!(detail.contains(says), "{claims}: {detail}");
+			}
 		}
 
 		let id: Uuid = lease["id"].as_str().unwrap().parse().unwrap();
@@ -286,9 +283,10 @@ async fn refuses_a_read_started_otherwise_than_the_lease_says() {
 	.await
 }
 
-/// A playbook the catalogue does not list, a tag it does not take, and a limit
-/// that matches nothing or that cannot be read, are refused.
-// spec: ANSRUN#presentation
+/// A playbook the catalogue does not list, one it runs as an upgrade started as
+/// a configure to go around the upgrade plan, a tag it does not take, and a
+/// limit that matches nothing or that cannot be read, are refused.
+// spec: ANSRUN#presentation, ANSRUN#planned-upgrades
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_what_could_not_run() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
@@ -312,6 +310,14 @@ async fn refuses_what_could_not_run() {
 			)
 			.await
 			.contains("lists no playbook")
+		);
+		assert!(
+			refused(
+				&private,
+				json!({ "group": "kamaka", "playbook": "tamanu-upgrade.yml", "intent": "configure" }),
+			)
+			.await
+			.contains("is run as upgrade")
 		);
 		assert!(
 			refused(
@@ -512,8 +518,9 @@ async fn refuses_an_assignment_that_could_not_hold() {
 	.await
 }
 
-/// A limit is evaluated as an Ansible host pattern, with the groups a run puts
-/// machines in, and says why it cannot be.
+/// A limit preview names what the pattern matches, the groups and hosts a limit
+/// can be picked from, and says why a pattern cannot be read. The pattern
+/// language itself is covered by the unit tests of `fns::ansible::limit`.
 // spec: ANSRUN#presentation
 #[tokio::test(flavor = "multi_thread")]
 async fn previews_the_machines_a_limit_matches() {
@@ -526,28 +533,21 @@ async fn previews_the_machines_a_limit_matches() {
 				.await
 				.json()
 		};
-		let names = |preview: &Value| -> Vec<String> {
-			preview["matches"]
-				.as_array()
-				.unwrap()
-				.iter()
-				.map(|m| m["name"].as_str().unwrap().to_owned())
-				.collect()
-		};
 
-		let all = preview("all").await;
-		assert_eq!(names(&all).len(), 3);
-		assert_eq!(all["groups"], json!(["central", "facility", "tamanu"]));
+		let matched = preview("facility:!kamaka-facility-b").await;
+		let names: Vec<&str> = matched["matches"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|m| m["name"].as_str().unwrap())
+			.collect();
+		assert_eq!(names, ["kamaka-facility-a"]);
+		assert_eq!(matched["groups"], json!(["central", "facility", "tamanu"]));
 		assert_eq!(
-			all["hosts"],
+			matched["hosts"],
 			json!(["kamaka-central", "kamaka-facility-a", "kamaka-facility-b"])
 		);
-		assert_eq!(
-			names(&preview("facility:!kamaka-facility-b").await),
-			["kamaka-facility-a"]
-		);
-		assert_eq!(names(&preview("kamaka-facility-*").await).len(), 2);
-		assert!(names(&preview("nowhere").await).is_empty());
+
 		let unreadable = preview("~kamaka").await;
 		assert!(
 			unreadable["error"]
@@ -684,33 +684,6 @@ async fn the_first_read_starts_the_run_and_declares_its_maintenance() {
 	.await
 }
 
-/// A run limited to some machines declares maintenance over those alone.
-// spec: ANSRUN#work-under-way
-#[tokio::test(flavor = "multi_thread")]
-async fn a_limited_run_declares_maintenance_over_its_machines_alone() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let env = environment(&mut conn, &private).await;
-		let lease = take(&private, json!({ "group": "kamaka", "limit": "facility" })).await;
-		private
-			.post("/api/ansible/for_group")
-			.json(&json!({ "lease_id": lease["id"] }))
-			.await
-			.assert_status_ok();
-
-		let windows = database::maintenance_windows::MaintenanceWindow::list_open(&mut conn)
-			.await
-			.unwrap();
-		assert_eq!(windows.len(), 1);
-		let mut named = windows[0].machine_ids.clone();
-		named.sort();
-		let mut expected = vec![env.facility_a, env.facility_b];
-		expected.sort();
-		assert_eq!(named, expected, "the machines the limit matched");
-		assert!(!named.contains(&env.central));
-	})
-	.await
-}
-
 /// A run names the machines it acts on among themselves, as the limit preview
 /// does, so a machine it leaves out cannot change what one it acts on is called.
 // spec: INV#reaching-a-machine
@@ -762,39 +735,6 @@ async fn names_what_a_run_acts_on_as_the_limit_preview_does() {
 			.find(|host| host["name"] == "kamaka managed")
 			.unwrap();
 		assert_eq!(managed["host_name"], "box", "what the preview called it");
-	})
-	.await
-}
-
-/// An upgrade is gated on a plan, so a playbook the catalogue runs as an upgrade
-/// cannot be started as a configure to go around it.
-// spec: ANSRUN#planned-upgrades
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_an_intent_that_disagrees_with_the_playbook() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		environment(&mut conn, &private).await;
-		database::ansible_catalogue::CatalogueState::record_read(
-			&mut conn,
-			&json!({
-				"$schema": "https://json-schema.org/draft/2020-12/schema",
-				"type": "object",
-				"properties": {},
-				"x-canopy": { "playbooks": {
-					"tamanu-upgrade.yml": { "intent": "upgrade", "tags": [] }
-				} }
-			}),
-			None,
-			jiff::Timestamp::now(),
-		)
-		.await
-		.unwrap();
-
-		let refusal = refused(
-			&private,
-			json!({ "group": "kamaka", "playbook": "tamanu-upgrade.yml", "intent": "configure" }),
-		)
-		.await;
-		assert!(refusal.contains("is run as upgrade"), "{refusal}");
 	})
 	.await
 }

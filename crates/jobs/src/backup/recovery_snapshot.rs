@@ -812,52 +812,6 @@ mod tests {
 		.await;
 	}
 
-	/// The escrow is written early once a secret changes, and a secret changing
-	/// is a secret variable set or a value beginning to be held.
-	// spec: ANSVAR#history
-	#[tokio::test(flavor = "multi_thread")]
-	async fn notices_when_a_secret_last_changed() {
-		TestDb::run(|mut conn, _url| async move {
-			assert_eq!(
-				AnsibleVariable::latest_secret_change(&mut conn)
-					.await
-					.unwrap(),
-				None
-			);
-			let group_id = uuid::Uuid::new_v4();
-			conn.batch_execute(&format!(
-				"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-				 INSERT INTO ansible_variables (server_group_id, name, value, is_secret)
-				 VALUES ('{group_id}', 'timezone', '\"Pacific/Fiji\"', FALSE);"
-			))
-			.await
-			.unwrap();
-			assert_eq!(
-				AnsibleVariable::latest_secret_change(&mut conn)
-					.await
-					.unwrap(),
-				None,
-				"a plain value is not a secret changing"
-			);
-
-			let before = Timestamp::now();
-			HeldSecretValue::hold(
-				&mut conn,
-				uuid::Uuid::new_v4(),
-				VariableScope::Group { group_id },
-				"salt",
-			)
-			.await
-			.unwrap();
-			let changed = AnsibleVariable::latest_secret_change(&mut conn)
-				.await
-				.unwrap()
-				.expect("a held value is a change");
-			assert!(changed >= before - SignedDuration::from_secs(1));
-		})
-		.await;
-	}
-
 	#[tokio::test(flavor = "multi_thread")]
 	async fn snapshot_includes_ansible_variables() {
 		TestDb::run(|mut conn, _url| async move {

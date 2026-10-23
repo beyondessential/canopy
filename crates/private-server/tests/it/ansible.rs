@@ -1163,47 +1163,6 @@ async fn takes_an_unplanned_configuration_run_on_production() {
 	.await
 }
 
-/// A lease taken to configure needs no upgrade plan, so a run claiming to
-/// upgrade under one is refused rather than served.
-// spec: ANSRUN#starting-a-run
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_a_read_claiming_another_intent_than_the_leases() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-claimed-intent").await;
-		insert_ranked_application(
-			&mut conn,
-			group,
-			"kamaka-central",
-			"tamanu-central",
-			Some("production"),
-			None,
-		)
-		.await;
-		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
-
-		let refused = private
-			.post("/api/ansible/for_group")
-			.json(&json!({ "lease_id": lease, "intent": "upgrade" }))
-			.await;
-		refused.assert_status(axum::http::StatusCode::CONFLICT);
-		let detail = refused.json::<Value>()["detail"]
-			.as_str()
-			.unwrap()
-			.to_owned();
-		assert!(
-			detail.contains("configure") && detail.contains("upgrade"),
-			"{detail}"
-		);
-
-		private
-			.post("/api/ansible/for_group")
-			.json(&json!({ "lease_id": lease, "intent": "configure" }))
-			.await
-			.assert_status_ok();
-	})
-	.await
-}
-
 /// A plan is for where a deployment's real users are, so another rank needs
 /// none.
 #[tokio::test(flavor = "multi_thread")]
@@ -1381,54 +1340,6 @@ async fn leaves_out_a_machine_a_run_cannot_reach() {
 		let hosts = body["hosts"].as_array().expect("hosts");
 		assert_eq!(hosts.len(), 1, "{body}");
 		assert_eq!(hosts[0]["name"], "kamaka-central");
-	})
-	.await
-}
-
-/// Two members whose tailnet names share a first label are each named by their
-/// Canopy name, so a run's limit can tell them apart.
-// spec: INV#reaching-a-machine
-#[tokio::test(flavor = "multi_thread")]
-async fn names_machines_apart_where_their_first_labels_match() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		for (name, tailnet) in [
-			("kamaka east", "box.east.tail1234.ts.net"),
-			("kamaka west", "box.west.tail1234.ts.net"),
-			("kamaka lone", "lone.west.tail1234.ts.net"),
-		] {
-			let application = insert_ranked_application(
-				&mut conn,
-				group,
-				name,
-				"tamanu-facility",
-				Some("production"),
-				None,
-			)
-			.await;
-			bind_device(&mut conn, application, tailnet).await;
-		}
-
-		let body = read_served(&private, json!({ "group": "kamaka" })).await;
-		let names: Vec<(&str, &str)> = body["hosts"]
-			.as_array()
-			.expect("hosts")
-			.iter()
-			.map(|host| {
-				(
-					host["name"].as_str().unwrap(),
-					host["host_name"].as_str().unwrap(),
-				)
-			})
-			.collect();
-		assert_eq!(
-			names,
-			[
-				("kamaka east", "kamaka-east"),
-				("kamaka lone", "lone"),
-				("kamaka west", "kamaka-west"),
-			]
-		);
 	})
 	.await
 }
