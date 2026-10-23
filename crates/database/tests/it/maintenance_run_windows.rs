@@ -10,9 +10,9 @@
 use commons_errors::AppError;
 use commons_types::server::rank::ServerRank;
 use database::{
-	ansible_leases::AnsibleLease,
+	ansible_leases::{AnsibleLease, ReleaseReason},
 	issues::Scope,
-	maintenance_windows::{Amendment, Grain, HeldInPlace, MaintenanceWindow},
+	maintenance_windows::{Amendment, Grain, MaintenanceWindow},
 };
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -417,26 +417,150 @@ async fn an_expired_lease_ends_the_window_at_its_expiry() {
 	.await
 }
 
-/// Giving a run's window an end by amending it is holding it: the lease no
-/// longer overwrites the end when it is extended.
-// spec: MNT#ending
+/// A lease that no longer holds has no run to declare maintenance for, whether
+/// it was released or ran out.
 #[tokio::test(flavor = "multi_thread")]
-async fn amending_a_run_windows_end_frees_it_from_the_lease() {
+async fn a_lease_that_no_longer_holds_declares_nothing() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let fleet = fleet(&mut conn).await;
-		let lease = lease(&mut conn, fleet.group, "op").await;
-		let window = MaintenanceWindow::declare_for_run(&mut conn, &lease, None, None)
+
+		let released = lease(&mut conn, fleet.group, "op").await;
+		AnsibleLease::release(&mut conn, released.id, Some("op"), ReleaseReason::Released)
 			.await
-			.expect("declared")
+			.expect("release");
+		let released = AnsibleLease::get(&mut conn, released.id)
+			.await
+			.expect("lease");
+		let refused = MaintenanceWindow::declare_for_run(&mut conn, &released, None, None).await;
+		assert!(
+			matches!(&refused, Err(AppError::BadRequest(message)) if message.contains("no longer holds")),
+			"a released lease: {refused:?}"
+		);
+
+		let expired = lease(&mut conn, fleet.group, "op").await;
+		sql_query("UPDATE ansible_leases SET expires_at = NOW() - INTERVAL '1 minute' WHERE id = $1")
+			.bind::<sql_types::Uuid, _>(expired.id)
+			.execute(&mut conn)
+			.await
+			.expect("let it run out");
+		let expired = AnsibleLease::get(&mut conn, expired.id).await.expect("lease");
+		let refused = MaintenanceWindow::declare_for_run(&mut conn, &expired, None, None).await;
+		assert!(
+			matches!(&refused, Err(AppError::BadRequest(message)) if message.contains("no longer holds")),
+			"a lease past its expiry: {refused:?}"
+		);
+
+		for lease in [released.id, expired.id] {
+			assert!(
+				MaintenanceWindow::bound_to_lease(&mut conn, lease)
+					.await
+					.expect("bound")
+					.is_empty(),
+				"nothing was declared"
+			);
+		}
+		assert!(
+			notices(&mut conn, "maintenance_declared").await.is_empty(),
+			"and nobody was told"
+		);
+	})
+	.await
+}
+
+/// Giving a run's window an end of its own frees it from the lease, whether by
+/// holding it or by amending its end: the lease no longer overwrites the end
+/// when it is extended, and ending the lease no longer ends the window. Only the
+/// operator whose run it is can. A limited run followed by a whole-environment
+/// one gives two windows, one to give an end each way.
+// spec: MNT#ending
+#[tokio::test(flavor = "multi_thread")]
+async fn giving_a_run_windows_an_end_frees_them_from_the_lease() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let fleet = fleet(&mut conn).await;
+		let [a, b, c] = fleet.boxes;
+		let lease = lease(&mut conn, fleet.group, "op").await;
+
+		let limited = MaintenanceWindow::declare_for_run(&mut conn, &lease, Some(&[a, b]), None)
+			.await
+			.expect("declare over a and b")
 			.declared
 			.remove(0);
+		let rest = MaintenanceWindow::declare_for_run(&mut conn, &lease, None, None)
+			.await
+			.expect("declare over the rest");
+		assert_eq!(
+			rest.serving
+				.iter()
+				.map(|window| window.id)
+				.collect::<Vec<_>>(),
+			vec![limited.id],
+			"the first window serves a and b"
+		);
+		let [rest] = rest.declared.as_slice() else {
+			panic!("one window for the rest: {rest:?}");
+		};
+		assert_eq!(
+			rest.machine_id,
+			Some(c),
+			"the second window covers only the rest"
+		);
+		assert_eq!(
+			MaintenanceWindow::bound_to_lease(&mut conn, lease.id)
+				.await
+				.expect("bound")
+				.len(),
+			2,
+			"both follow the lease"
+		);
 
-		let end = in_hours(6);
+		let refused =
+			MaintenanceWindow::hold(&mut conn, limited.id, in_hours(3), Some("bystander")).await;
+		assert!(
+			matches!(refused, Err(AppError::Conflict(_))),
+			"hold by a bystander: {refused:?}"
+		);
+		let past = MaintenanceWindow::hold(
+			&mut conn,
+			limited.id,
+			Timestamp::now() - SignedDuration::from_mins(1),
+			Some("op"),
+		)
+		.await;
+		assert!(
+			matches!(past, Err(AppError::BadRequest(_))),
+			"hold to a past end: {past:?}"
+		);
+
+		let held_end = in_hours(3);
+		let held = MaintenanceWindow::hold(&mut conn, limited.id, held_end, Some("op"))
+			.await
+			.expect("hold");
+		assert_eq!(held.id, limited.id);
+		assert_eq!(held.lease_id, None, "hold frees it from the lease");
+		assert_eq!(
+			held.expected_end.as_microsecond(),
+			held_end.as_microsecond()
+		);
+		assert_eq!(
+			held.amended_by.as_deref(),
+			Some("op"),
+			"hold is recorded as an amendment"
+		);
+		assert!(held.amended_at.is_some());
+
+		let again =
+			MaintenanceWindow::hold(&mut conn, limited.id, in_hours(4), Some("op")).await;
+		assert!(
+			matches!(again, Err(AppError::BadRequest(_))),
+			"hold twice: only a window that lasts a run is held: {again:?}"
+		);
+
+		let amend_end = in_hours(6);
 		let refused = MaintenanceWindow::amend(
 			&mut conn,
-			window.id,
+			rest.id,
 			Amendment {
-				expected_end: Some(end),
+				expected_end: Some(amend_end),
 				..Amendment::default()
 			},
 			Some("bystander"),
@@ -444,166 +568,58 @@ async fn amending_a_run_windows_end_frees_it_from_the_lease() {
 		.await;
 		assert!(
 			matches!(refused, Err(AppError::Conflict(_))),
-			"only the run's operator gives its window an end: {refused:?}"
+			"amend by a bystander: only the run's operator gives its window an end: {refused:?}"
 		);
-
 		let amended = MaintenanceWindow::amend(
 			&mut conn,
-			window.id,
+			rest.id,
 			Amendment {
-				expected_end: Some(end),
+				expected_end: Some(amend_end),
 				..Amendment::default()
 			},
 			Some("op"),
 		)
 		.await
 		.expect("amended");
-		assert!(amended.lease_id.is_none(), "no longer follows the lease");
-
-		AnsibleLease::extend(&mut conn, lease.id)
-			.await
-			.expect("extended");
-		let after = MaintenanceWindow::get(&mut conn, window.id)
-			.await
-			.expect("window");
-		assert_eq!(
-			after.expected_end.as_microsecond(),
-			end.as_microsecond(),
-			"the lease does not overwrite it"
+		assert!(
+			amended.lease_id.is_none(),
+			"amending its end frees it from the lease"
 		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn holding_a_window_frees_it_from_the_lease() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
-		let lease = lease(&mut conn, fleet.group, "op").await;
-		let window = MaintenanceWindow::declare_for_run(&mut conn, &lease, None, None)
-			.await
-			.expect("declare")
-			.declared
-			.remove(0);
-
-		let refused =
-			MaintenanceWindow::hold(&mut conn, window.id, in_hours(3), Some("bystander")).await;
-		assert!(matches!(refused, Err(AppError::Conflict(_))), "{refused:?}");
-		let past = MaintenanceWindow::hold(
-			&mut conn,
-			window.id,
-			Timestamp::now() - SignedDuration::from_mins(1),
-			Some("op"),
-		)
-		.await;
-		assert!(matches!(past, Err(AppError::BadRequest(_))), "{past:?}");
-
-		let end = in_hours(3);
-		let held = MaintenanceWindow::hold(&mut conn, window.id, end, Some("op"))
-			.await
-			.expect("hold");
-		assert_eq!(held.id, window.id);
-		assert_eq!(held.lease_id, None);
-		assert_eq!(held.expected_end.as_microsecond(), end.as_microsecond());
-		assert_eq!(
-			held.amended_by.as_deref(),
-			Some("op"),
-			"recorded as an amendment"
-		);
-		assert!(held.amended_at.is_some());
 
 		assert!(
 			MaintenanceWindow::end_for_lease(&mut conn, lease.id, Some("op"))
 				.await
 				.expect("end")
 				.is_empty(),
-			"the lease ending no longer ends it"
+			"the lease ending no longer ends either window"
+		);
+		assert!(
+			MaintenanceWindow::bound_to_lease(&mut conn, lease.id)
+				.await
+				.expect("bound")
+				.is_empty(),
+			"neither follows the lease"
 		);
 		MaintenanceWindow::track_lease(&mut conn, lease.id, in_hours(1))
 			.await
 			.expect("track");
-		assert_eq!(
-			MaintenanceWindow::get(&mut conn, window.id)
-				.await
-				.expect("get")
-				.expected_end
-				.as_microsecond(),
-			end.as_microsecond(),
-			"nor does the lease's expiry move its end"
-		);
-
-		let again = MaintenanceWindow::hold(&mut conn, window.id, in_hours(4), Some("op")).await;
-		assert!(
-			matches!(again, Err(AppError::BadRequest(_))),
-			"only a window that lasts a run is held: {again:?}"
-		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_window_stays_where_it_is_while_its_lease_is_held() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
-		let [a, b, _] = fleet.boxes;
-		let lease = lease(&mut conn, fleet.group, "op").await;
-		let window = MaintenanceWindow::declare_for_run(&mut conn, &lease, Some(&[a, b]), None)
+		AnsibleLease::extend(&mut conn, lease.id)
 			.await
-			.expect("declare")
-			.declared
-			.remove(0);
-
-		assert!(
-			matches!(
-				window.held_in_place(&mut conn).await.expect("held"),
-				Some(HeldInPlace::RunLease { .. })
-			),
-			"the operator interface is told why it cannot move"
-		);
-		for amendment in [
-			Amendment {
-				machines: Some(vec![a]),
-				..Amendment::default()
-			},
-			Amendment {
-				target: Some(Grain::group(fleet.group)),
-				..Amendment::default()
-			},
+			.expect("extended");
+		for (window, end, way) in [
+			(limited.id, held_end, "held"),
+			(rest.id, amend_end, "amended"),
 		] {
-			let refused =
-				MaintenanceWindow::amend(&mut conn, window.id, amendment, Some("op")).await;
-			assert!(matches!(refused, Err(AppError::Conflict(_))), "{refused:?}");
+			assert_eq!(
+				MaintenanceWindow::get(&mut conn, window)
+					.await
+					.expect("window")
+					.expected_end
+					.as_microsecond(),
+				end.as_microsecond(),
+				"neither the lease's expiry nor its extension moves the {way} window's end"
+			);
 		}
-
-		let extended = MaintenanceWindow::amend(
-			&mut conn,
-			window.id,
-			Amendment {
-				note: Some(Some("still going".into())),
-				..Amendment::default()
-			},
-			Some("op"),
-		)
-		.await
-		.expect("its note can still change");
-		assert_eq!(extended.lease_id, Some(lease.id));
-
-		sql_query("UPDATE ansible_leases SET released_at = NOW() WHERE id = $1")
-			.bind::<sql_types::Uuid, _>(lease.id)
-			.execute(&mut conn)
-			.await
-			.expect("release");
-		MaintenanceWindow::amend(
-			&mut conn,
-			window.id,
-			Amendment {
-				machines: Some(vec![a]),
-				..Amendment::default()
-			},
-			Some("op"),
-		)
-		.await
-		.expect("it moves like any other once the lease is released");
 	})
 	.await
 }
