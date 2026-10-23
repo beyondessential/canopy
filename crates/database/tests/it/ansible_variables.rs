@@ -202,10 +202,14 @@ async fn each_scope_keys_its_own_secret() {
 			machine_id: machine,
 		},
 	];
-	scopes.extend(ServerRank::ALL.iter().map(|rank| VariableScope::Environment {
-		group_id: group,
-		rank: *rank,
-	}));
+	scopes.extend(
+		ServerRank::ALL
+			.iter()
+			.map(|rank| VariableScope::Environment {
+				group_id: group,
+				rank: *rank,
+			}),
+	);
 
 	let names: Vec<String> = scopes
 		.iter()

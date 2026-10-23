@@ -396,7 +396,12 @@ async fn names_a_variable_that_breaks_the_rules_and_refuses_the_import() {
 			.as_array()
 			.unwrap();
 		assert_eq!(problems.len(), 1, "{preview}");
-		assert!(problems[0].as_str().unwrap().contains("elastic_agent_enabled"));
+		assert!(
+			problems[0]
+				.as_str()
+				.unwrap()
+				.contains("elastic_agent_enabled")
+		);
 	})
 	.await
 }

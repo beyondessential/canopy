@@ -254,10 +254,7 @@ async fn refuses_a_read_started_otherwise_than_the_lease_says() {
 		refusals(
 			&lease,
 			vec![
-				(
-					json!({ "intent": "upgrade" }),
-					vec!["configure", "upgrade"],
-				),
+				(json!({ "intent": "upgrade" }), vec!["configure", "upgrade"]),
 				(
 					json!({ "playbook": "base-install.yml" }),
 					vec!["base-install.yml"],
@@ -270,7 +267,10 @@ async fn refuses_a_read_started_otherwise_than_the_lease_says() {
 				(json!({ "tags": ["app"] }), vec!["app"]),
 				(json!({ "tags": [" app "] }), vec!["app,base"]),
 				(json!({ "skip_tags": [] }), vec!["none"]),
-				(json!({ "skip_tags": ["tailscale"] }), vec!["packages,tailscale"]),
+				(
+					json!({ "skip_tags": ["tailscale"] }),
+					vec!["packages,tailscale"],
+				),
 			],
 		)
 		.await;
@@ -369,10 +369,7 @@ async fn refuses_what_could_not_run() {
 		.unwrap();
 
 		let table = [
-			(
-				json!({ "playbook": "nope.yml" }),
-				"lists no playbook",
-			),
+			(json!({ "playbook": "nope.yml" }), "lists no playbook"),
 			(
 				json!({ "playbook": "tamanu-upgrade.yml", "intent": "configure" }),
 				"is run as upgrade",
@@ -414,10 +411,7 @@ async fn refuses_what_could_not_run() {
 			json!({ "group": "kamaka", "playbook": "tamanu-install.yml", "intent": "upgrade" }),
 		)
 		.await;
-		assert!(
-			mislabelled.contains("is run as configure"),
-			"{mislabelled}"
-		);
+		assert!(mislabelled.contains("is run as configure"), "{mislabelled}");
 	})
 	.await
 }
