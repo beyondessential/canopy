@@ -210,6 +210,82 @@ async fn serves_the_lease_it_is_read_under() {
 	.await
 }
 
+/// A run started other than as its lease says is refused before anything
+/// starts: no run is recorded and no maintenance declared.
+// spec: ANSRUN#starting-a-run
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_a_read_started_otherwise_than_the_lease_says() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let env = environment(&mut conn, &private).await;
+		read_catalogue(&mut conn).await;
+		let lease = take(
+			&private,
+			json!({
+				"server_group_id": env.group,
+				"playbook": "tamanu-install.yml",
+				"limit": "kamaka-central",
+				"tags": ["app", "base"],
+				"skip_tags": ["tailscale"],
+			}),
+		)
+		.await;
+		let read = |claims: Value| {
+			let mut args = claims;
+			args["lease_id"] = lease["id"].clone();
+			private.post("/api/ansible/for_group").json(&args)
+		};
+
+		for (claims, says) in [
+			(
+				json!({ "playbook": "base-install.yml" }),
+				"base-install.yml",
+			),
+			(json!({ "limit": "" }), "no limit"),
+			(json!({ "limit": "kamaka-facility-a" }), "kamaka-facility-a"),
+			(json!({ "tags": ["app"] }), "app"),
+			(json!({ "skip_tags": [] }), "none"),
+		] {
+			let refused = read(claims.clone()).await;
+			refused.assert_status(axum::http::StatusCode::CONFLICT);
+			let detail = refused.json::<Value>()["detail"]
+				.as_str()
+				.unwrap()
+				.to_owned();
+			assert!(detail.contains(says), "{claims}: {detail}");
+		}
+
+		let id: Uuid = lease["id"].as_str().unwrap().parse().unwrap();
+		let started = database::ansible_leases::AnsibleLease::get(&mut conn, id)
+			.await
+			.unwrap()
+			.started_at;
+		assert_eq!(started, None, "nothing started");
+		let runs = database::audit::find(
+			&mut conn,
+			&database::audit::Filter {
+				action: Some("ansible_run_started".into()),
+				limit: 10,
+				..Default::default()
+			},
+		)
+		.await
+		.unwrap();
+		assert!(runs.is_empty(), "no run recorded");
+
+		// As the lease says, tags in any order and the limit untrimmed.
+		read(json!({
+			"intent": "configure",
+			"playbook": "tamanu-install.yml",
+			"limit": " kamaka-central ",
+			"tags": ["base", "app"],
+			"skip_tags": ["tailscale"],
+		}))
+		.await
+		.assert_status_ok();
+	})
+	.await
+}
+
 /// A playbook the catalogue does not list, a tag it does not take, and a limit
 /// that matches nothing or that cannot be read, are refused.
 // spec: ANSRUN#presentation

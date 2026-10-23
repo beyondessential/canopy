@@ -492,7 +492,8 @@ function Scope({
 	const restore = useApiAction("ansible_variables", "restore");
 	// The removal just made, offered to undo until the offer is dismissed.
 	const [undo, setUndo] = useState<{ name: string; entryId: string } | null>(null);
-	const [historyOf, setHistoryOf] = useState<string | null>(null);
+	// The history open: of one variable, or of the whole scope where null.
+	const [historyOf, setHistoryOf] = useState<{ name: string | null } | null>(null);
 	const removed = useApi(
 		"ansible_variables",
 		"removed",
@@ -565,6 +566,18 @@ function Scope({
 						onChanged={onChanged}
 					/>
 				)}
+				{isAdmin && (
+					<Tooltip title="History">
+						<IconButton
+							size="small"
+							aria-label={`History of ${title}`}
+							onClick={() => setHistoryOf({ name: null })}
+							data-testid="scope-history"
+						>
+							<HistoryIcon fontSize="small" />
+						</IconButton>
+					</Tooltip>
+				)}
 				{isAdmin && !editing && expanded && (
 					<Tooltip title="Edit as text">
 						<IconButton
@@ -613,7 +626,7 @@ function Scope({
 										scope={scope}
 										catalogue={catalogue}
 										onRemove={isAdmin ? removeVariable : undefined}
-										onHistory={() => setHistoryOf(variable.name)}
+										onHistory={() => setHistoryOf({ name: variable.name })}
 										onChanged={onChanged}
 									/>
 								))}
@@ -640,7 +653,7 @@ function Scope({
 											size="small"
 											variant="outlined"
 											label={variable.name}
-											onClick={() => setHistoryOf(variable.name)}
+											onClick={() => setHistoryOf({ name: variable.name })}
 											sx={{ fontFamily: "monospace" }}
 										/>
 									))}
@@ -669,7 +682,8 @@ function Scope({
 			{historyOf !== null && (
 				<VariableHistory
 					scope={scope}
-					name={historyOf}
+					name={historyOf.name}
+					title={title}
 					onClose={() => setHistoryOf(null)}
 					onChanged={onChanged}
 				/>

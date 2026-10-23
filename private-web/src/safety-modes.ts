@@ -17,6 +17,7 @@ export const SAFETY_MODES = {
 	"ansible_variables/remove": "write",
 	"ansible_variables/removed": "read-only",
 	"ansible_variables/restore": "write",
+	"ansible_variables/scope_history": "read-only",
 	"ansible_variables/set": "write",
 	"ansible/extend_lease": "write",
 	"ansible/for_group": "read-only",

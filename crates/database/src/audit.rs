@@ -1181,6 +1181,46 @@ pub async fn naming(
 	Ok(rows.into_iter().map(EntryRow::into_entry).collect())
 }
 
+/// [`naming`], for every record whose identifier begins with `prefix`: the
+/// entries naming any of a family of records, such as every variable at one
+/// scope. `within` is a record each of them also names, whose exact identifier
+/// narrows the search before the prefix is looked for.
+pub async fn naming_prefixed(
+	conn: &mut AsyncPgConnection,
+	within: &str,
+	prefix: &str,
+	actions: &[&str],
+	since: Option<Timestamp>,
+	limit: i64,
+) -> Result<Vec<Entry>> {
+	use crate::schema::audit_entries::dsl;
+
+	let mut query = dsl::audit_entries
+		.filter(dsl::records.contains(json!([{ "id": within }])))
+		.filter(
+			diesel::dsl::sql::<sql_types::Bool>(
+				"EXISTS (SELECT 1 FROM jsonb_array_elements(records) AS r WHERE starts_with(r->>'id', ",
+			)
+			.bind::<sql_types::Text, _>(prefix.to_owned())
+			.sql("))"),
+		)
+		.filter(dsl::action.eq_any(actions))
+		.filter(dsl::outcome.is_distinct_from("failed"))
+		.filter(dsl::outcome.is_distinct_from("pending"))
+		.into_boxed();
+	if let Some(since) = since {
+		query = query.filter(dsl::recorded_at.ge(jiff_diesel::Timestamp::from(since)));
+	}
+	let rows: Vec<EntryRow> = query
+		.order((dsl::recorded_at.desc(), dsl::id.desc()))
+		.limit(limit.clamp(1, 500))
+		.select(EntryRow::as_select())
+		.load(conn)
+		.await
+		.map_err(AppError::from)?;
+	Ok(rows.into_iter().map(EntryRow::into_entry).collect())
+}
+
 /// One entry, by its identifier, where it took place: one that failed or is
 /// not yet settled is none.
 pub async fn get_done(conn: &mut AsyncPgConnection, id: Uuid) -> Result<Option<Entry>> {
