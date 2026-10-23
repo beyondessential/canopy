@@ -128,39 +128,6 @@ async fn records_what_the_run_is() {
 	.await
 }
 
-/// The first read starts the lease, once.
-// spec: ANSRUN#starting-a-run
-#[tokio::test(flavor = "multi_thread")]
-async fn the_first_read_starts_it_once() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let (group, machines) = group_with_machines(&mut conn, 1).await;
-		let lease = take(
-			&mut conn,
-			group,
-			&machines,
-			&spec(&BTreeMap::new()),
-			"a",
-			false,
-		)
-		.await;
-
-		let started = AnsibleLease::start(&mut conn, lease.id).await.unwrap();
-		assert!(
-			started
-				.as_ref()
-				.is_some_and(|l| l.started_at.is_some() && !l.pending())
-		);
-		assert!(
-			AnsibleLease::start(&mut conn, lease.id)
-				.await
-				.unwrap()
-				.is_none(),
-			"only the first read starts it"
-		);
-	})
-	.await
-}
-
 /// A lease no run read within the pending period is released by Canopy, and a
 /// started one is left alone.
 // spec: ANSRUN#starting-a-run
@@ -253,10 +220,10 @@ async fn says_why_a_lease_was_released() {
 	.await
 }
 
-/// The windows a lease's run declares end with the lease, follow its expiry as
-/// it is extended, and go on to the new holder, bound to the new lease, when it
-/// is taken over.
-// spec: ANSRUN#work-under-way
+/// Only the first read starts a lease. The windows its run declares end with
+/// the lease, follow its expiry as it is extended, and go on to the new holder,
+/// bound to the new lease, when it is taken over.
+// spec: ANSRUN#work-under-way, ANSRUN#starting-a-run
 #[tokio::test(flavor = "multi_thread")]
 async fn keeps_the_windows_its_run_declared() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
@@ -268,6 +235,14 @@ async fn keeps_the_windows_its_run_declared() {
 			.await
 			.unwrap()
 			.unwrap();
+		assert!(started.started_at.is_some() && !started.pending());
+		assert!(
+			AnsibleLease::start(&mut conn, lease.id)
+				.await
+				.unwrap()
+				.is_none(),
+			"only the first read starts it"
+		);
 		MaintenanceWindow::declare_for_run(&mut conn, &started, None, Some("tamanu-install.yml"))
 			.await
 			.unwrap();

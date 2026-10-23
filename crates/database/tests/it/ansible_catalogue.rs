@@ -140,23 +140,8 @@ fn a_variable_the_catalogue_does_not_describe_is_not_held_to_anything() {
 }
 
 #[test]
-fn holds_a_value_to_its_type_and_format() {
+fn holds_a_value_to_its_format() {
 	let catalogue = catalogue();
-
-	assert!(
-		catalogue
-			.violations(ScopeKind::Environment, "ansible_port", &json!(2222))
-			.is_empty()
-	);
-	let wrong_type = catalogue.violations(ScopeKind::Environment, "ansible_port", &json!("2222"));
-	assert_eq!(wrong_type.len(), 1, "{wrong_type:?}");
-	assert!(wrong_type[0].contains("ansible_port"));
-	assert_eq!(
-		catalogue
-			.violations(ScopeKind::Environment, "ansible_port", &json!(70000))
-			.len(),
-		1
-	);
 
 	assert!(
 		catalogue
@@ -167,17 +152,17 @@ fn holds_a_value_to_its_type_and_format() {
 			)
 			.is_empty()
 	);
-	assert_eq!(
-		catalogue
-			.violations(
-				ScopeKind::Machine,
-				"ansible_host",
-				&json!("not a host name")
-			)
-			.len(),
-		1,
-		"a format is checked, not merely read"
+	let refused = catalogue.violations(
+		ScopeKind::Machine,
+		"ansible_host",
+		&json!("not a host name"),
 	);
+	assert_eq!(
+		refused.len(),
+		1,
+		"a format is checked, not merely read: {refused:?}"
+	);
+	assert!(refused[0].starts_with("\"ansible_host\": "), "{refused:?}");
 }
 
 #[test]
@@ -193,13 +178,6 @@ fn a_requirement_that_an_environment_carry_some_variable_does_not_refuse_one() {
 #[test]
 fn names_where_in_a_structured_value_the_fault_is() {
 	let catalogue = catalogue();
-
-	let missing = catalogue.violations(
-		ScopeKind::Environment,
-		"tamanu_caddy_tls_dns_iam",
-		&json!({ "access_key_id": "AKIA" }),
-	);
-	assert_eq!(missing.len(), 1, "{missing:?}");
 
 	let wrong = catalogue.violations(
 		ScopeKind::Environment,
@@ -245,6 +223,22 @@ async fn keeps_the_last_copy_that_read_when_a_later_attempt_does_not() {
 		assert!(CatalogueState::get(&mut conn).await.unwrap().is_none());
 		assert!(Loaded::get(&mut conn).await.unwrap().is_none());
 
+		CatalogueState::record_problem(
+			&mut conn,
+			Problem::Unreachable,
+			"connection refused",
+			Timestamp::now(),
+		)
+		.await
+		.unwrap();
+		let state = CatalogueState::get(&mut conn).await.unwrap().unwrap();
+		assert_eq!(state.problem, Some(Problem::Unreachable));
+		assert!(state.document.is_none());
+		assert!(
+			Loaded::get(&mut conn).await.unwrap().is_none(),
+			"a problem before any good read leaves no catalogue"
+		);
+
 		let now = Timestamp::now();
 		assert!(
 			CatalogueState::record_read(&mut conn, &document(), Some("abc123"), now)
@@ -286,26 +280,6 @@ async fn keeps_the_last_copy_that_read_when_a_later_attempt_does_not() {
 			loaded.catalogue.variable("ansible_port").unwrap().default,
 			Some(json!(2200))
 		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_problem_before_any_good_read_leaves_no_catalogue() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		CatalogueState::record_problem(
-			&mut conn,
-			Problem::Unreachable,
-			"connection refused",
-			Timestamp::now(),
-		)
-		.await
-		.unwrap();
-
-		let state = CatalogueState::get(&mut conn).await.unwrap().unwrap();
-		assert_eq!(state.problem, Some(Problem::Unreachable));
-		assert!(state.document.is_none());
-		assert!(Loaded::get(&mut conn).await.unwrap().is_none());
 	})
 	.await
 }

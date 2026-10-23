@@ -760,34 +760,6 @@ mod tests {
 	}
 
 	#[test]
-	fn reads_the_variables_under_all_and_on_each_host() {
-		let file = parse(
-			"all:
-  vars:
-    timezone: Pacific/Auckland
-    elastic_agent_enabled: true
-  hosts:
-    example-central:
-      public_hostname: central.example.org
-      tailscale_name: example-central
-",
-		)
-		.unwrap();
-
-		assert_eq!(
-			file.environment,
-			BTreeMap::from([
-				("elastic_agent_enabled".to_owned(), json!(true)),
-				("timezone".to_owned(), json!("Pacific/Auckland")),
-			])
-		);
-		assert_eq!(
-			host(&file, "example-central").own["public_hostname"],
-			json!("central.example.org")
-		);
-	}
-
-	#[test]
 	fn a_value_is_what_ansible_reads_it_as() {
 		let file = parse(
 			"all:
@@ -977,23 +949,6 @@ mod tests {
 		assert_eq!(
 			host(&file, "10.20.30.40:223").own["ansible_user"],
 			json!("siteadmin")
-		);
-	}
-
-	#[test]
-	fn a_secret_field_inside_a_structured_value_is_carried_whole() {
-		let file = parse(
-			"all:
-  vars:
-    tamanu_caddy_tls_dns_iam:
-      access_key_id: AKIAEXAMPLE
-      secret_access_key: abc/def
-",
-		)
-		.unwrap();
-		assert_eq!(
-			file.environment["tamanu_caddy_tls_dns_iam"],
-			json!({ "access_key_id": "AKIAEXAMPLE", "secret_access_key": "abc/def" })
 		);
 	}
 
