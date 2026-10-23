@@ -33,6 +33,55 @@ async fn seed_machine(
 	id
 }
 
+/// A machine in no group.
+async fn seed_orphan_machine(conn: &mut commons_tests::diesel_async::AsyncPgConnection) -> Uuid {
+	let id = Uuid::new_v4();
+	conn.batch_execute(&format!(
+		"INSERT INTO machines (id, name) VALUES ('{id}', 'kamaka-orphan')"
+	))
+	.await
+	.expect("seed orphan machine");
+	id
+}
+
+/// How many kinds of scope there are, held to the match in [`kind_of`].
+const SCOPE_KINDS: usize = 3;
+
+/// The match has no wildcard, so a new kind of scope stops this compiling until
+/// it has an index here and, with it, a representative in
+/// [`scopes_of_every_kind`].
+fn kind_of(scope: VariableScope) -> usize {
+	match scope {
+		VariableScope::Group { .. } => 0,
+		VariableScope::Environment { .. } => 1,
+		VariableScope::Machine { .. } => 2,
+	}
+}
+
+/// A scope of every kind, with an environment at every rank.
+fn scopes_of_every_kind(group: Uuid, machine: Uuid) -> Vec<VariableScope> {
+	let mut scopes = vec![
+		VariableScope::Group { group_id: group },
+		VariableScope::Machine {
+			machine_id: machine,
+		},
+	];
+	scopes.extend(
+		ServerRank::ALL
+			.iter()
+			.map(|rank| VariableScope::Environment {
+				group_id: group,
+				rank: *rank,
+			}),
+	);
+	let mut seen = [false; SCOPE_KINDS];
+	for scope in &scopes {
+		seen[kind_of(*scope)] = true;
+	}
+	assert!(seen.iter().all(|seen| *seen), "a scope of every kind");
+	scopes
+}
+
 /// One name per scope, so setting it again replaces the value rather than
 /// leaving two rows for a merge to pick between. A row at two scopes at once,
 /// or at none, would make the merge order undefined. A secret's value lives in
@@ -228,35 +277,46 @@ async fn each_scope_keys_its_own_secret() {
 	}
 }
 
-/// Setting a variable on a machine holds its group's row, which an import into
+/// Setting a variable at any scope holds its group's row, which an import into
 /// the group holds too, so the import's check that nothing is set and its writes
-/// cannot have a variable land between them.
+/// cannot have a variable land between them. A machine in no group holds nothing.
 // spec: ANSIMP#applying
 #[tokio::test(flavor = "multi_thread")]
-async fn a_variable_on_a_machine_holds_its_group_as_an_import_does() {
+async fn a_variable_holds_its_group_as_an_import_does() {
 	use commons_tests::diesel_async::{AsyncConnection, AsyncPgConnection};
 
 	commons_tests::db::TestDb::run(async |mut conn, url| {
 		let group = seed_group(&mut conn).await;
 		let machine = seed_machine(&mut conn, group).await;
+		let orphan = seed_orphan_machine(&mut conn).await;
 		let mut other = AsyncPgConnection::establish(&url)
 			.await
 			.expect("second connection");
+		let try_group = format!(
+			"SELECT id FROM server_groups WHERE id = '{group}' FOR NO KEY UPDATE NOWAIT"
+		);
 
-		conn.batch_execute("BEGIN").await.unwrap();
-		VariableScope::Machine {
-			machine_id: machine,
+		for scope in scopes_of_every_kind(group, machine) {
+			conn.batch_execute("BEGIN").await.unwrap();
+			scope.lock_group(&mut conn).await.expect("lock");
+			let held = other.batch_execute(&try_group).await;
+			assert!(held.is_err(), "the group's row is held by {scope:?}");
+			conn.batch_execute("ROLLBACK").await.unwrap();
 		}
-		.lock_group(&mut conn)
-		.await
-		.expect("lock");
-		let held = other
-			.batch_execute(&format!(
-				"SELECT id FROM server_groups WHERE id = '{group}' FOR NO KEY UPDATE NOWAIT"
-			))
-			.await;
-		assert!(held.is_err(), "the group's row is held");
-		conn.batch_execute("ROLLBACK").await.unwrap();
+
+		for (what, machine_id) in [
+			("a machine in no group", orphan),
+			("a machine there is none of", Uuid::new_v4()),
+		] {
+			conn.batch_execute("BEGIN").await.unwrap();
+			VariableScope::Machine { machine_id }
+				.lock_group(&mut conn)
+				.await
+				.expect("lock");
+			let free = other.batch_execute(&try_group).await;
+			assert!(free.is_ok(), "{what} holds no group's row: {free:?}");
+			conn.batch_execute("ROLLBACK").await.unwrap();
+		}
 	})
 	.await
 }
@@ -289,14 +349,19 @@ async fn notices_when_a_secret_last_changed() {
 		);
 
 		let before_held = Timestamp::now();
-		HeldSecretValue::hold(
-			&mut conn,
-			Uuid::new_v4(),
-			VariableScope::Group { group_id: group },
-			"salt",
-		)
-		.await
-		.unwrap();
+		let machine = seed_machine(&mut conn, group).await;
+		for scope in scopes_of_every_kind(group, machine) {
+			let entry = Uuid::new_v4();
+			let held = HeldSecretValue::hold(&mut conn, entry, scope, "salt")
+				.await
+				.unwrap();
+			assert_eq!(held.scope(), scope, "a held value reads back at its scope");
+			let read = HeldSecretValue::get(&mut conn, entry)
+				.await
+				.unwrap()
+				.expect("still held");
+			assert_eq!(read.scope(), scope, "and so does the one read by its entry");
+		}
 		let held = AnsibleVariable::latest_secret_change(&mut conn)
 			.await
 			.unwrap()

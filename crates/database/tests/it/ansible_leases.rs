@@ -162,7 +162,7 @@ async fn records_what_the_run_is() {
 		assert_eq!(read_limit_pattern.as_deref(), Some("facility"));
 		assert_eq!(read_limit_pattern.as_deref(), limit_pattern);
 		assert_eq!(read_limited_to.as_deref(), limited_to);
-		assert_eq!(read_limited_to, Some(limited));
+		assert_eq!(read_limited_to, Some(limited.clone()));
 		assert_eq!(read_tags, tags);
 		assert_eq!(read_tags, run_tags);
 		assert_eq!(read_skip, skip);

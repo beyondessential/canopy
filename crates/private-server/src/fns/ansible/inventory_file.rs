@@ -1244,28 +1244,32 @@ all:
 
 	#[test]
 	fn refuses_a_vault_encrypted_value_naming_the_variable() {
-		let vault = "!vault |\n      $ANSIBLE_VAULT;1.1;AES256\n      6162636465\n";
+		let vault = |pad: usize| {
+			let pad = " ".repeat(pad);
+			format!("!vault |\n{pad}$ANSIBLE_VAULT;1.1;AES256\n{pad}6162636465\n")
+		};
 		let rows: &[(&str, String, &[&str])] = &[
 			(
 				"a group variable",
-				format!("all:\n  vars:\n    salt: {vault}"),
+				format!("all:\n  vars:\n    salt: {}", vault(6)),
 				&["all", "salt", "vault", "all.vars.salt"],
 			),
 			(
 				"a host variable",
-				format!("all:\n  hosts:\n    h:\n      secret: {vault}"),
+				format!("all:\n  hosts:\n    h:\n      secret: {}", vault(8)),
 				&["secret", "vault", "all.hosts.h.secret"],
 			),
 			(
 				"a variable of a nested group",
 				format!(
-					"all:\n  children:\n    g:\n      vars:\n        salt: {vault}"
+					"all:\n  children:\n    g:\n      vars:\n        salt: {}",
+					vault(10)
 				),
 				&["salt", "vault", "all.children.g.vars.salt"],
 			),
 			(
 				"a list item",
-				format!("all:\n  vars:\n    keys:\n      - plain\n      - {vault}"),
+				format!("all:\n  vars:\n    keys:\n      - plain\n      - {}", vault(8)),
 				&["keys", "vault", "all.vars.keys.1"],
 			),
 		];
