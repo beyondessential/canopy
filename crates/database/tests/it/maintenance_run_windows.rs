@@ -224,9 +224,13 @@ async fn a_limited_run_declares_over_only_what_its_limit_matches() {
 			"a limit matching every member is the environment"
 		);
 
-		let stray =
-			MaintenanceWindow::declare_for_run(&mut conn, &lease_all, Some(&[Uuid::new_v4()]), None)
-				.await;
+		let stray = MaintenanceWindow::declare_for_run(
+			&mut conn,
+			&lease_all,
+			Some(&[Uuid::new_v4()]),
+			None,
+		)
+		.await;
 		assert!(matches!(stray, Err(AppError::BadRequest(_))), "{stray:?}");
 	})
 	.await
