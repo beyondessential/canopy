@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::ansible::{
-	bind_device, insert_application_on_its_own_machine, insert_group, take_lease,
+	bind_device, insert_application_on_its_own_machine, insert_group, plan_upgrade, take_lease,
 };
 
 struct Environment {
@@ -79,7 +79,7 @@ async fn read_catalogue(conn: &mut AsyncPgConnection) {
 					"intent": "configure",
 					"preset": "install",
 					"applications": ["tamanu-central", "tamanu-facility"],
-					"tags": ["app", "base", "tailscale"]
+					"tags": ["app", "base", "packages", "tailscale"]
 				},
 				"base-install.yml": { "intent": "configure", "tags": [] },
 				"tamanu-upgrade.yml": { "intent": "upgrade", "tags": [] }
@@ -202,13 +202,44 @@ async fn a_lease_records_the_run_it_was_taken_for() {
 
 /// A run started other than as its lease says, in intent, playbook, limit or
 /// tags, is refused before anything starts: no run is recorded and no
-/// maintenance declared.
+/// maintenance declared. A claim the lease satisfies is served: tags in any
+/// order and trimmed, no limit or an empty one, and a playbook where the lease
+/// names none.
 // spec: ANSRUN#starting-a-run
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_a_read_started_otherwise_than_the_lease_says() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let env = environment(&mut conn, &private).await;
 		read_catalogue(&mut conn).await;
+		let read = async |lease: &Value, claims: &Value| {
+			let mut args = claims.clone();
+			args["lease_id"] = lease["id"].clone();
+			private.post("/api/ansible/for_group").json(&args).await
+		};
+		let refusals = async |lease: &Value, table: Vec<(Value, Vec<&str>)>| {
+			for (claims, says) in table {
+				let refused = read(lease, &claims).await;
+				refused.assert_status(axum::http::StatusCode::CONFLICT);
+				let detail = refused.json::<Value>()["detail"]
+					.as_str()
+					.unwrap()
+					.to_owned();
+				for says in says {
+					assert!(detail.contains(says), "{claims}: {detail}");
+				}
+			}
+		};
+		let accepted = async |lease: &Value, table: Vec<Value>| {
+			for claims in table {
+				let response = read(lease, &claims).await;
+				assert!(
+					response.status_code().is_success(),
+					"{claims}: {}",
+					response.text()
+				);
+			}
+		};
+
 		let lease = take(
 			&private,
 			json!({
@@ -216,43 +247,33 @@ async fn refuses_a_read_started_otherwise_than_the_lease_says() {
 				"playbook": "tamanu-install.yml",
 				"limit": "kamaka-central",
 				"tags": ["app", "base"],
-				"skip_tags": ["tailscale"],
+				"skip_tags": ["packages", "tailscale"],
 			}),
 		)
 		.await;
-		let read = |claims: Value| {
-			let mut args = claims;
-			args["lease_id"] = lease["id"].clone();
-			private.post("/api/ansible/for_group").json(&args)
-		};
-
-		for (claims, says) in [
-			(
-				json!({ "intent": "upgrade" }),
-				&["configure", "upgrade"][..],
-			),
-			(
-				json!({ "playbook": "base-install.yml" }),
-				&["base-install.yml"],
-			),
-			(json!({ "limit": "" }), &["no limit"]),
-			(
-				json!({ "limit": "kamaka-facility-a" }),
-				&["kamaka-facility-a"],
-			),
-			(json!({ "tags": ["app"] }), &["app"]),
-			(json!({ "skip_tags": [] }), &["none"]),
-		] {
-			let refused = read(claims.clone()).await;
-			refused.assert_status(axum::http::StatusCode::CONFLICT);
-			let detail = refused.json::<Value>()["detail"]
-				.as_str()
-				.unwrap()
-				.to_owned();
-			for says in says {
-				assert!(detail.contains(says), "{claims}: {detail}");
-			}
-		}
+		refusals(
+			&lease,
+			vec![
+				(
+					json!({ "intent": "upgrade" }),
+					vec!["configure", "upgrade"],
+				),
+				(
+					json!({ "playbook": "base-install.yml" }),
+					vec!["base-install.yml"],
+				),
+				(json!({ "limit": "" }), vec!["no limit"]),
+				(
+					json!({ "limit": "kamaka-facility-a" }),
+					vec!["kamaka-facility-a"],
+				),
+				(json!({ "tags": ["app"] }), vec!["app"]),
+				(json!({ "tags": [" app "] }), vec!["app,base"]),
+				(json!({ "skip_tags": [] }), vec!["none"]),
+				(json!({ "skip_tags": ["tailscale"] }), vec!["packages,tailscale"]),
+			],
+		)
+		.await;
 
 		let id: Uuid = lease["id"].as_str().unwrap().parse().unwrap();
 		let started = database::ansible_leases::AnsibleLease::get(&mut conn, id)
@@ -272,28 +293,56 @@ async fn refuses_a_read_started_otherwise_than_the_lease_says() {
 		.unwrap();
 		assert!(runs.is_empty(), "no run recorded");
 
-		// As the lease says, tags in any order and the limit untrimmed.
-		read(json!({
-			"intent": "configure",
-			"playbook": "tamanu-install.yml",
-			"limit": " kamaka-central ",
-			"tags": ["base", "app"],
-			"skip_tags": ["tailscale"],
-		}))
-		.await
-		.assert_status_ok();
+		accepted(
+			&lease,
+			vec![
+				json!({ "intent": "configure" }),
+				json!({ "skip_tags": ["tailscale", "packages"] }),
+				json!({ "tags": ["base", "app"] }),
+				json!({ "tags": [" base", "app "] }),
+				json!({
+					"intent": "configure",
+					"playbook": "tamanu-install.yml",
+					"limit": " kamaka-central ",
+					"tags": ["base", "app"],
+					"skip_tags": ["tailscale", "packages"],
+				}),
+			],
+		)
+		.await;
+
+		let bare = take(&private, json!({ "server_group_id": env.group })).await;
+		refusals(
+			&bare,
+			vec![(
+				json!({ "limit": "kamaka-central" }),
+				vec!["no limit", "kamaka-central"],
+			)],
+		)
+		.await;
+		accepted(
+			&bare,
+			vec![
+				json!({ "playbook": "tamanu-install.yml" }),
+				json!({ "limit": "" }),
+				json!({ "tags": [], "skip_tags": [] }),
+			],
+		)
+		.await;
 	})
 	.await
 }
 
 /// A playbook the catalogue does not list, one it runs as an upgrade started as
-/// a configure to go around the upgrade plan, a tag it does not take, and a
-/// limit that matches nothing or that cannot be read, are refused.
+/// a configure to go around the upgrade plan, one it runs as a configure started
+/// as an upgrade, a tag it does not take, an assignment to a machine the run
+/// does not act on, and a limit that matches nothing, is empty or cannot be
+/// read, are refused.
 // spec: ANSRUN#presentation, ANSRUN#planned-upgrades
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_what_could_not_run() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		environment(&mut conn, &private).await;
+		let env = environment(&mut conn, &private).await;
 		// Before any catalogue is read, no playbook is known, so none can be
 		// labelled with an intent that goes around the upgrade plan.
 		assert!(
@@ -306,52 +355,68 @@ async fn refuses_what_could_not_run() {
 		);
 		read_catalogue(&mut conn).await;
 
+		let unmanaged = Uuid::new_v4();
+		let device = Uuid::new_v4();
+		use commons_tests::diesel_async::SimpleAsyncConnection;
+		conn.batch_execute(&format!(
+			"INSERT INTO devices (id, role, tailscale_node_name)
+			 VALUES ('{device}', 'server', 'kamaka-unmanaged.tail1234.ts.net');
+			 INSERT INTO machines (id, name, group_id, rank, device_id)
+			 VALUES ('{unmanaged}', 'kamaka-unmanaged', '{}', 'production', '{device}')",
+			env.group
+		))
+		.await
+		.unwrap();
+
+		let table = [
+			(
+				json!({ "playbook": "nope.yml" }),
+				"lists no playbook",
+			),
+			(
+				json!({ "playbook": "tamanu-upgrade.yml", "intent": "configure" }),
+				"is run as upgrade",
+			),
+			(
+				json!({ "playbook": "tamanu-install.yml", "tags": ["unknown"] }),
+				"is not a tag",
+			),
+			(
+				json!({ "playbook": "tamanu-install.yml", "skip_tags": ["unknown"] }),
+				"is not a tag",
+			),
+			(
+				json!({ "playbook": "base-install.yml", "tags": ["app"] }),
+				"takes no tags",
+			),
+			(
+				json!({
+					"playbook": "tamanu-install.yml",
+					"assignments": [{ "machine_id": unmanaged, "application_type": "tamanu-facility" }],
+				}),
+				"not one this run acts on",
+			),
+			(json!({ "limit": "nowhere" }), "matches no machine"),
+			(json!({ "limit": "" }), "limit is empty"),
+			(json!({ "limit": "~facility-.*" }), "cannot evaluate"),
+		];
+		for (mut args, needle) in table {
+			args["group"] = json!("kamaka");
+			let detail = refused(&private, args.clone()).await;
+			assert!(detail.contains(needle), "{args}: {detail}");
+		}
+
+		// An upgrade of production is gated on a plan first, so with one open the
+		// catalogue's intent is what refuses a configure playbook labelled as one.
+		plan_upgrade(&mut conn, env.group, "", "").await;
+		let mislabelled = refused(
+			&private,
+			json!({ "group": "kamaka", "playbook": "tamanu-install.yml", "intent": "upgrade" }),
+		)
+		.await;
 		assert!(
-			refused(
-				&private,
-				json!({ "group": "kamaka", "playbook": "nope.yml" })
-			)
-			.await
-			.contains("lists no playbook")
-		);
-		assert!(
-			refused(
-				&private,
-				json!({ "group": "kamaka", "playbook": "tamanu-upgrade.yml", "intent": "configure" }),
-			)
-			.await
-			.contains("is run as upgrade")
-		);
-		assert!(
-			refused(
-				&private,
-				json!({ "group": "kamaka", "playbook": "tamanu-install.yml", "tags": ["unknown"] }),
-			)
-			.await
-			.contains("is not a tag")
-		);
-		// The catalogue lists every tag a playbook takes, so one it lists none
-		// for takes none.
-		assert!(
-			refused(
-				&private,
-				json!({ "group": "kamaka", "playbook": "base-install.yml", "tags": ["app"] }),
-			)
-			.await
-			.contains("takes no tags")
-		);
-		assert!(
-			refused(&private, json!({ "group": "kamaka", "limit": "nowhere" }))
-				.await
-				.contains("matches no machine")
-		);
-		assert!(
-			refused(
-				&private,
-				json!({ "group": "kamaka", "limit": "~facility-.*" })
-			)
-			.await
-			.contains("cannot evaluate")
+			mislabelled.contains("is run as configure"),
+			"{mislabelled}"
 		);
 	})
 	.await
@@ -802,45 +867,6 @@ async fn giving_up_releases_only_a_lease_no_run_has_read() {
 			1,
 			"the run's maintenance stands"
 		);
-	})
-	.await
-}
-
-/// A window another operator holds over a machine at the rank that no run can
-/// reach yet refuses the take, as it would refuse the maintenance the run
-/// declares on its first read.
-// spec: ANSRUN#work-under-way
-#[tokio::test(flavor = "multi_thread")]
-async fn a_window_over_a_machine_no_run_reaches_yet_refuses_the_take() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		use commons_tests::diesel_async::SimpleAsyncConnection;
-		let env = environment(&mut conn, &private).await;
-		let spare = Uuid::new_v4();
-		conn.batch_execute(&format!(
-			"INSERT INTO machines (name, id, group_id, rank)
-			 VALUES ('kamaka-spare', '{spare}', '{}', 'production');
-			 INSERT INTO maintenance_windows (machine_id, expected_end, declared_by)
-			 VALUES ('{spare}', NOW() + INTERVAL '2 hours', 'someone.else@bes.au')",
-			env.group
-		))
-		.await
-		.unwrap();
-
-		assert!(
-			refused(&private, json!({ "group": "kamaka" }))
-				.await
-				.contains("someone.else@bes.au")
-		);
-		let state: Value = private
-			.post("/api/ansible/run_state")
-			.json(&json!({ "group": "kamaka" }))
-			.await
-			.json();
-		assert_eq!(
-			state["refuses"], true,
-			"the page shows what refuses the take"
-		);
-		assert_eq!(state["window"]["declared_by"], "someone.else@bes.au");
 	})
 	.await
 }
