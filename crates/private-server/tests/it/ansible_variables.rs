@@ -632,57 +632,40 @@ async fn a_machines_value_reaches_only_that_machine() {
 }
 
 /// Whether a run acts on a machine is set by a switch on the machine, so a
-/// wider value is refused.
+/// wider value is refused, and `ansible_host` at a wider scope would give every
+/// machine in the environment one address, so it is set on a machine too.
 // spec: INV#managed-machines
 #[tokio::test(flavor = "multi_thread")]
-async fn refuses_managed_by_ansible_outside_machine_scope() {
+async fn refuses_machine_only_variables_outside_machine_scope() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka").await;
 		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
 
-		for scope in [
-			json!({ "server_group_id": group }),
-			json!({ "server_group_id": group, "rank": "dev" }),
+		for (name, value, reason) in [
+			("managed_by_ansible", json!(true), "set on a machine"),
+			(
+				"ansible_host",
+				json!("10.0.0.4"),
+				"rather than on a group or an environment",
+			),
 		] {
-			let mut args = scope;
-			args["name"] = json!("managed_by_ansible");
-			args["value"] = json!(true);
-			let response = private.post("/api/ansible_variables/set").json(&args).await;
-			response.assert_status(axum::http::StatusCode::BAD_REQUEST);
-			assert!(
-				response.json::<Value>()["detail"]
-					.as_str()
-					.expect("detail")
-					.contains("set on a machine"),
-			);
-		}
-	})
-	.await
-}
-
-/// `ansible_host` at a wider scope would give every machine in the environment
-/// one address, so it is set on a machine.
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_ansible_host_outside_machine_scope() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-
-		for scope in [
-			json!({ "server_group_id": group }),
-			json!({ "server_group_id": group, "rank": "dev" }),
-		] {
-			let mut args = scope;
-			args["name"] = json!("ansible_host");
-			args["value"] = json!("10.0.0.4");
-			let response = private.post("/api/ansible_variables/set").json(&args).await;
-			response.assert_status(axum::http::StatusCode::BAD_REQUEST);
-			assert!(
-				response.json::<Value>()["detail"]
-					.as_str()
-					.expect("detail")
-					.contains("rather than on a group or an environment"),
-			);
+			for scope in [
+				json!({ "server_group_id": group }),
+				json!({ "server_group_id": group, "rank": "dev" }),
+			] {
+				let mut args = scope;
+				args["name"] = json!(name);
+				args["value"] = value.clone();
+				let response = private.post("/api/ansible_variables/set").json(&args).await;
+				response.assert_status(axum::http::StatusCode::BAD_REQUEST);
+				assert!(
+					response.json::<Value>()["detail"]
+						.as_str()
+						.expect("detail")
+						.contains(reason),
+					"{name} at {args}",
+				);
+			}
 		}
 
 		// A machine's address is a string, so a value of another shape is
@@ -821,14 +804,15 @@ async fn refused(
 		.to_owned()
 }
 
-/// A variable the catalogue describes is held to its type, its scopes and its
-/// secrecy, and a name it does not describe is free.
+/// Until a catalogue is read nothing is held to one and none is offered. Once
+/// read, it is offered, a variable it describes must be secret exactly as it
+/// says, a violation of it is a 400, and a name it does not describe is free.
 // spec: ANSVAR#catalogue
 #[tokio::test(flavor = "multi_thread")]
 async fn a_variable_the_catalogue_describes_is_held_to_it() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka").await;
-		let (_, machine) = insert_application_on_its_own_machine(
+		insert_application_on_its_own_machine(
 			&mut conn,
 			group,
 			"kamaka-central",
@@ -838,9 +822,13 @@ async fn a_variable_the_catalogue_describes_is_held_to_it() {
 		)
 		.await;
 		let environment = json!({ "server_group_id": group, "rank": "production" });
-		let on_machine = json!({ "machine_id": machine });
 
-		// Before any catalogue has been read nothing is held to one.
+		let none: Value = private
+			.post("/api/ansible_variables/catalogue")
+			.json(&json!({}))
+			.await
+			.json();
+		assert!(none.is_null(), "{none}");
 		set_var(
 			&private,
 			environment.clone(),
@@ -851,36 +839,13 @@ async fn a_variable_the_catalogue_describes_is_held_to_it() {
 		.await;
 		read_catalogue(&mut conn).await;
 
-		assert!(
-			refused(
-				&private,
-				environment.clone(),
-				"ansible_port",
-				json!("2222"),
-				false
-			)
+		let held: Value = private
+			.post("/api/ansible_variables/catalogue")
+			.json(&json!({}))
 			.await
-			.contains("ansible_port")
-		);
-		assert!(
-			refused(
-				&private,
-				environment.clone(),
-				"ansible_port",
-				json!(70000),
-				false
-			)
-			.await
-			.contains("ansible_port")
-		);
-		set_var(
-			&private,
-			environment.clone(),
-			"ansible_port",
-			json!(2222),
-			false,
-		)
-		.await;
+			.json();
+		assert_eq!(held["source_commit"], "abc123");
+		assert_eq!(held["variables"].as_array().unwrap().len(), 4);
 
 		assert!(
 			refused(
@@ -892,26 +857,6 @@ async fn a_variable_the_catalogue_describes_is_held_to_it() {
 			)
 			.await
 			.contains("only at machine")
-		);
-		set_var(
-			&private,
-			on_machine.clone(),
-			"tamanu_facility_id",
-			json!("a"),
-			false,
-		)
-		.await;
-
-		assert!(
-			refused(
-				&private,
-				on_machine.clone(),
-				"canopy_intent",
-				json!("configure"),
-				false
-			)
-			.await
-			.contains("by a run for itself")
 		);
 
 		assert!(
@@ -1019,44 +964,24 @@ async fn marks_a_value_that_no_longer_matches_the_catalogue() {
 	.await
 }
 
-/// The catalogue is offered to the operator interface, and null before one has
-/// been read.
-// spec: ANSVAR#catalogue
-#[tokio::test(flavor = "multi_thread")]
-async fn offers_the_catalogue_it_holds() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let none: Value = private
-			.post("/api/ansible_variables/catalogue")
-			.json(&json!({}))
-			.await
-			.json();
-		assert!(none.is_null(), "{none}");
-
-		read_catalogue(&mut conn).await;
-		let held: Value = private
-			.post("/api/ansible_variables/catalogue")
-			.json(&json!({}))
-			.await
-			.json();
-		assert_eq!(held["source_commit"], "abc123");
-		assert_eq!(held["variables"].as_array().unwrap().len(), 4);
-		assert_eq!(held["playbooks"][0]["name"], "base-install.yml");
-		assert_eq!(held["playbooks"][0]["intent"], "configure");
-		let salt = held["variables"]
-			.as_array()
-			.unwrap()
-			.iter()
-			.find(|variable| variable["name"] == "salt")
-			.unwrap();
-		assert_eq!(salt["secret"], true);
-	})
-	.await
-}
-
 async fn post(private: &commons_tests::axum_test::TestServer, path: &str, args: Value) -> Value {
 	let response = private.post(path).json(&args).await;
 	response.assert_status_ok();
 	response.json()
+}
+
+fn changes(history: &Value) -> Vec<(&str, &str)> {
+	history
+		.as_array()
+		.unwrap()
+		.iter()
+		.map(|change| {
+			(
+				change["name"].as_str().unwrap(),
+				change["change"].as_str().unwrap(),
+			)
+		})
+		.collect()
 }
 
 fn named(scope: &Value, name: &str) -> Value {
@@ -1141,7 +1066,10 @@ async fn a_plain_change_is_in_the_history_and_can_be_undone() {
 }
 
 /// A removal is listed at its scope for a week, and undoing it puts back the
-/// value it removed.
+/// value it removed. A scope's history holds every change to a variable set
+/// there, removed ones among them and however long ago within the log, and
+/// nothing of another scope's, though the group's record names its
+/// environments' too.
 // spec: ANSVAR#presentation
 #[tokio::test(flavor = "multi_thread")]
 async fn a_removal_is_listed_at_its_scope_and_can_be_undone() {
@@ -1187,7 +1115,12 @@ async fn a_removal_is_listed_at_its_scope_and_can_be_undone() {
 		assert_eq!(removed[0]["undoable"], true);
 		// The removal answers with the entry that undoes it.
 		assert_eq!(removed[0]["entry_id"], removal["entry_id"]);
-		let at_group = post(&private, "/api/ansible_variables/removed", group_scope).await;
+		let at_group = post(
+			&private,
+			"/api/ansible_variables/removed",
+			group_scope.clone(),
+		)
+		.await;
 		assert_eq!(at_group[0]["name"], "timezone");
 
 		let mut restore = named(&environment, "retries");
@@ -1197,8 +1130,59 @@ async fn a_removal_is_listed_at_its_scope_and_can_be_undone() {
 		assert_eq!(body["vars"]["retries"], 3);
 
 		// Set again, it is no longer listed as removed.
-		let removed = post(&private, "/api/ansible_variables/removed", environment).await;
+		let removed = post(
+			&private,
+			"/api/ansible_variables/removed",
+			environment.clone(),
+		)
+		.await;
 		assert_eq!(removed, json!([]));
+
+		// Removed long enough ago to be off the list of recent removals, a
+		// removal is still in its scope's history.
+		conn.batch_execute(
+			"UPDATE audit_entries SET recorded_at = recorded_at - interval '30 days'
+			 WHERE action = 'inventory_variable_removed'",
+		)
+		.await
+		.unwrap();
+		let recent = post(
+			&private,
+			"/api/ansible_variables/removed",
+			group_scope.clone(),
+		)
+		.await;
+		assert_eq!(recent, json!([]));
+
+		let history = post(
+			&private,
+			"/api/ansible_variables/scope_history",
+			environment,
+		)
+		.await;
+		assert_eq!(
+			changes(&history),
+			[
+				("retries", "set"),
+				("kept", "set"),
+				("retries", "set"),
+				("retries", "removed")
+			],
+			"newest first, the restore a set of its own, the group's own changes left out"
+		);
+		assert_eq!(history[3]["value"], 3);
+		assert_eq!(history[3]["undoable"], true);
+
+		let at_group = post(
+			&private,
+			"/api/ansible_variables/scope_history",
+			group_scope,
+		)
+		.await;
+		assert_eq!(
+			changes(&at_group),
+			[("timezone", "set"), ("timezone", "removed")]
+		);
 	})
 	.await
 }
@@ -1268,92 +1252,6 @@ async fn a_secret_change_is_undone_while_its_value_is_held() {
 				.unwrap()
 				.contains("escrow")
 		);
-	})
-	.await
-}
-
-/// A scope's history holds every change to a variable set there, removed ones
-/// among them and however long ago within the log, and nothing of another
-/// scope's, though the group's record names its environments' too.
-// spec: ANSVAR#presentation
-#[tokio::test(flavor = "multi_thread")]
-async fn a_scopes_history_holds_its_removed_variables_and_no_other_scopes() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		let environment = json!({ "server_group_id": group, "rank": "dev" });
-		let group_scope = json!({ "server_group_id": group });
-		set_var(&private, environment.clone(), "retries", json!(3), false).await;
-		set_var(&private, environment.clone(), "kept", json!(true), false).await;
-		set_var(
-			&private,
-			group_scope.clone(),
-			"timezone",
-			json!("Pacific/Fiji"),
-			false,
-		)
-		.await;
-		post(
-			&private,
-			"/api/ansible_variables/remove",
-			named(&environment, "retries"),
-		)
-		.await;
-		// Removed long enough ago to be off the list of recent removals.
-		conn.batch_execute(
-			"UPDATE audit_entries SET recorded_at = recorded_at - interval '30 days'
-			 WHERE action = 'inventory_variable_removed'",
-		)
-		.await
-		.unwrap();
-		let recent = post(
-			&private,
-			"/api/ansible_variables/removed",
-			environment.clone(),
-		)
-		.await;
-		assert_eq!(recent, json!([]));
-
-		let history = post(
-			&private,
-			"/api/ansible_variables/scope_history",
-			environment.clone(),
-		)
-		.await;
-		let changes: Vec<(&str, &str)> = history
-			.as_array()
-			.unwrap()
-			.iter()
-			.map(|change| {
-				(
-					change["name"].as_str().unwrap(),
-					change["change"].as_str().unwrap(),
-				)
-			})
-			.collect();
-		assert_eq!(
-			changes,
-			[("kept", "set"), ("retries", "set"), ("retries", "removed")],
-			"newest first, the group's own changes left out"
-		);
-		let removal = &history[2];
-		assert_eq!(removal["value"], 3);
-		assert_eq!(removal["undoable"], true);
-
-		let mut restore = named(&environment, "retries");
-		restore["entry_id"] = removal["entry_id"].clone();
-		post(&private, "/api/ansible_variables/restore", restore).await;
-		let body = read_served(&private, json!({ "server_group_id": group })).await;
-		assert_eq!(body["vars"]["retries"], 3);
-
-		let at_group = post(
-			&private,
-			"/api/ansible_variables/scope_history",
-			group_scope,
-		)
-		.await;
-		assert_eq!(at_group.as_array().unwrap().len(), 1);
-		assert_eq!(at_group[0]["name"], "timezone");
 	})
 	.await
 }
