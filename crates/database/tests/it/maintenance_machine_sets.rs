@@ -311,17 +311,31 @@ async fn a_machine_is_named_by_at_most_one_open_window() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let fleet = fleet(&mut conn).await;
 		let [a, b, c] = fleet.boxes;
+		let other_group = insert_group(&mut conn, "samoa").await;
+		let (elsewhere, _) = insert_box(&mut conn, other_group, "production", "ws-a").await;
 
-		let alone = MaintenanceWindow::declare(
-			&mut conn,
-			Scope::Machine(a),
-			None,
-			in_hours(1),
-			None,
-			Some("op"),
-		)
-		.await
-		.expect("declare alone");
+		for machines in [vec![a, fleet.clone_box], vec![a, elsewhere]] {
+			let refused = declare_machines(&mut conn, &machines).await;
+			assert!(
+				matches!(refused, Err(AppError::BadRequest(_))),
+				"machines of one environment only, {machines:?}: {refused:?}"
+			);
+		}
+		let none = declare_machines(&mut conn, &[]).await;
+		assert!(matches!(none, Err(AppError::BadRequest(_))), "{none:?}");
+		let missing = declare_machines(&mut conn, &[a, Uuid::new_v4()]).await;
+		assert!(matches!(missing, Err(AppError::NotFound(_))), "{missing:?}");
+
+		let alone = declare_machines(&mut conn, &[a, a])
+			.await
+			.expect("one machine");
+		assert_eq!(
+			alone.machine_id,
+			Some(a),
+			"one machine is that machine's window"
+		);
+		assert!(alone.machine_ids.is_empty());
+
 		let refused = declare_machines(&mut conn, &[a, b]).await;
 		assert!(
 			matches!(refused, Err(AppError::Conflict(_))),
@@ -381,75 +395,6 @@ async fn a_machine_is_named_by_at_most_one_open_window() {
 			matches!(moved_into, Err(AppError::Conflict(_))),
 			"nor can an amendment name a machine another window names: {moved_into:?}"
 		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn machines_of_one_environment_only() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
-		let [a, ..] = fleet.boxes;
-		let other_group = insert_group(&mut conn, "samoa").await;
-		let (elsewhere, _) = insert_box(&mut conn, other_group, "production", "ws-a").await;
-
-		for machines in [vec![a, fleet.clone_box], vec![a, elsewhere]] {
-			let refused = declare_machines(&mut conn, &machines).await;
-			assert!(
-				matches!(refused, Err(AppError::BadRequest(_))),
-				"{machines:?}: {refused:?}"
-			);
-		}
-		let none = declare_machines(&mut conn, &[]).await;
-		assert!(matches!(none, Err(AppError::BadRequest(_))), "{none:?}");
-		let missing = declare_machines(&mut conn, &[a, Uuid::new_v4()]).await;
-		assert!(matches!(missing, Err(AppError::NotFound(_))), "{missing:?}");
-
-		let one = declare_machines(&mut conn, &[a, a])
-			.await
-			.expect("one machine");
-		assert_eq!(
-			one.machine_id,
-			Some(a),
-			"one machine is that machine's window"
-		);
-		assert!(one.machine_ids.is_empty());
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_set_left_with_one_machine_is_that_machines_window() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
-		let [a, b, _] = fleet.boxes;
-		let set = declare_machines(&mut conn, &[a, b]).await.expect("declare");
-
-		let left = MaintenanceWindow::amend(&mut conn, set.id, machines(&[a]), Some("op"))
-			.await
-			.expect("remove a machine");
-		assert_eq!(left.id, set.id, "it is the same window");
-		assert_eq!(left.machine_id, Some(a));
-		assert!(left.machine_ids.is_empty());
-		assert_eq!(
-			left.server_group_id, None,
-			"a machine's window sits at the machine"
-		);
-		assert_eq!(left.rank, None);
-		assert_eq!(left.grain(), Some(Grain::machine(a)));
-		assert_eq!(
-			MaintenanceWindow::open_for(&mut conn, Scope::Machine(a), None)
-				.await
-				.expect("open")
-				.map(|window| window.id),
-			Some(set.id)
-		);
-
-		let grown = MaintenanceWindow::amend(&mut conn, set.id, machines(&[a, b]), Some("op"))
-			.await
-			.expect("add one back");
-		assert_eq!(grown.machine_id, None);
-		assert_eq!(grown.machine_ids.len(), 2, "and it is a set again");
 	})
 	.await
 }
@@ -539,6 +484,32 @@ async fn a_machine_a_set_stops_covering_settles_as_though_the_window_ended() {
 			1,
 			"what is still failing contributes once the settle period has passed"
 		);
+
+		let left = MaintenanceWindow::amend(&mut conn, set.id, machines(&[a]), Some("op"))
+			.await
+			.expect("remove a machine, leaving one");
+		assert_eq!(left.id, set.id, "it is the same window");
+		assert_eq!(left.machine_id, Some(a));
+		assert!(left.machine_ids.is_empty());
+		assert_eq!(
+			left.server_group_id, None,
+			"a machine's window sits at the machine"
+		);
+		assert_eq!(left.rank, None);
+		assert_eq!(left.grain(), Some(Grain::machine(a)));
+		assert_eq!(
+			MaintenanceWindow::open_for(&mut conn, Scope::Machine(a), None)
+				.await
+				.expect("open")
+				.map(|window| window.id),
+			Some(set.id)
+		);
+
+		let grown = MaintenanceWindow::amend(&mut conn, set.id, machines(&[a, b]), Some("op"))
+			.await
+			.expect("add one back");
+		assert_eq!(grown.machine_id, None);
+		assert_eq!(grown.machine_ids.len(), 2, "and it is a set again");
 	})
 	.await
 }
@@ -651,11 +622,12 @@ async fn a_machines_history_includes_the_sets_that_name_it() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_set_moved_off_its_machines_leaves_each_in_its_history() {
+async fn a_set_can_be_moved_only_along_its_own_environment() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let fleet = fleet(&mut conn).await;
-		let [a, b, _] = fleet.boxes;
+		let [a, b, c] = fleet.boxes;
 		let set = declare_machines(&mut conn, &[a, b]).await.expect("declare");
+
 		let moved = MaintenanceWindow::amend(
 			&mut conn,
 			set.id,
@@ -701,16 +673,6 @@ async fn a_set_moved_off_its_machines_leaves_each_in_its_history() {
 			matches!(both, Err(AppError::BadRequest(_))),
 			"a grain and machines are not both a target: {both:?}"
 		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_set_can_be_moved_only_along_its_own_environment() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
-		let [a, b, c] = fleet.boxes;
-		let set = declare_machines(&mut conn, &[a, b]).await.expect("declare");
 
 		let descent = line_of_descent_for(&mut conn, &Cover::Machines(set.machine_ids.clone()))
 			.await

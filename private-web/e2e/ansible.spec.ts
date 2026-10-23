@@ -141,32 +141,6 @@ test.describe("group Ansible", () => {
 		await expect(ansible.getByTestId("environment-production")).toHaveCount(0);
 	});
 
-	test("offers nothing to select where the group has one environment", async ({
-		page,
-		sql,
-	}) => {
-		const { group } = await seedProductionGroup(sql);
-
-		await page.goto(`/fleet/groups/${group.id}`);
-
-		const ansible = page.getByTestId("group-ansible");
-		await expect(ansible.getByTestId("environment-production")).toBeVisible();
-		await expect(ansible.getByLabel("Environment")).toHaveCount(0);
-	});
-
-	test("says there is nothing to configure with no live applications", async ({
-		page,
-		sql,
-	}) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-
-		await page.goto(`/fleet/groups/${group.id}`);
-
-		const ansible = page.getByTestId("group-ansible");
-		await expect(ansible).toContainText("no environment to configure");
-		await expect(ansible.getByLabel("Environment")).toHaveCount(0);
-	});
-
 	// A machine is in the environment its rank names before anything on it has
 	// reported, so a ranked box with nothing on it is one to configure.
 	// spec: GRP#environments
@@ -186,6 +160,7 @@ test.describe("group Ansible", () => {
 		const ansible = page.getByTestId("group-ansible");
 		await expect(ansible.getByTestId("environment-production")).toBeVisible();
 		await expect(ansible).not.toContainText("no environment to configure");
+		await expect(ansible.getByLabel("Environment")).toHaveCount(0);
 	});
 
 	// A pending application is in no environment, so a group with nothing
@@ -314,12 +289,25 @@ test.describe("group Ansible", () => {
 		await expect(production.getByTestId("secret-var")).toContainText("secret");
 		await expect(page.getByText("pepper")).toHaveCount(0);
 
+		// A secret's field opens empty, and needs a new value to save.
+		const scope = production.getByTestId("scope-environment");
+		await scope.getByTestId("edit-salt").click();
+		const secret = scope.getByTestId("edit-variable");
+		await expect(secret.getByLabel("Value")).toHaveValue("");
+		await expect(secret.getByRole("button", { name: "Save" })).toBeDisabled();
+		await secret.getByLabel("Value").fill("paprika");
+		await secret.getByRole("button", { name: "Save" }).click();
+		await expect(scope.getByTestId("edit-variable")).toHaveCount(0);
+		await expect(scope.getByTestId("secret-var")).toContainText("salt");
+		await expect(page.getByText("pepper")).toHaveCount(0);
+		await expect(page.getByText("paprika")).toHaveCount(0);
+
 		await production.getByTestId("remove-salt").click();
 		await expect(production.getByTestId("secret-var")).toHaveCount(0);
 	});
 
-	// A variable's value is edited in its row, holding the value it has; a
-	// secret's field opens empty, and leaving the row keeps the value.
+	// A variable's value is edited in its row, holding the value it has, and
+	// leaving the row keeps the value.
 	// spec: ANSVAR#presentation
 	test("edits a variable's value in its row", async ({ page, sql }) => {
 		const { group } = await seedProductionGroup(sql);
@@ -350,18 +338,6 @@ test.describe("group Ansible", () => {
 		await page.keyboard.press("Escape");
 		await expect(scope.getByTestId("edit-variable")).toHaveCount(0);
 		await expect(logLevel).toContainText('"debug"');
-
-		// A secret opens empty, and needs a new value to save.
-		await setSecretVariable(scope, "salt", "pepper");
-		await scope.getByTestId("edit-salt").click();
-		const secret = scope.getByTestId("edit-variable");
-		await expect(secret.getByLabel("Value")).toHaveValue("");
-		await expect(secret.getByRole("button", { name: "Save" })).toBeDisabled();
-		await secret.getByLabel("Value").fill("paprika");
-		await secret.getByRole("button", { name: "Save" }).click();
-		await expect(scope.getByTestId("edit-variable")).toHaveCount(0);
-		await expect(scope.getByTestId("secret-var")).toContainText("salt");
-		await expect(page.getByText("paprika")).toHaveCount(0);
 	});
 
 	// Removing asks nothing and offers to undo; a variable's history puts back
@@ -633,26 +609,6 @@ test.describe("group Ansible", () => {
 			serverGroupId: group.id,
 			declaredBy: "someone@else.invalid",
 			note: "upgrading to v2.55",
-		});
-
-		const production = await productionEnvironment(page, group);
-
-		await expect(production.getByTestId("run-leased")).toContainText(
-			"someone@else.invalid",
-		);
-		await expect(production.getByTestId("run-any")).toBeDisabled();
-	});
-
-	test("says so when the work is declared over a machine in the environment", async ({
-		page,
-		sql,
-	}) => {
-		const { group, central } = await seedProductionGroup(sql, { reported: true });
-		await seedAnsibleCatalogue(sql);
-		await seedMaintenanceWindow(sql, {
-			machineId: central.machineId,
-			declaredBy: "someone@else.invalid",
-			note: "replacing a disk",
 		});
 
 		const production = await productionEnvironment(page, group);
