@@ -14,4 +14,5 @@ pub mod source;
 pub mod status;
 pub mod subject;
 pub mod units;
+pub mod variants;
 pub mod version;

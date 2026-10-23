@@ -1189,9 +1189,10 @@ async fn takes_an_unplanned_upgrade_at_another_rank() {
 }
 
 /// An operator whose lease was taken over is walking into work somebody else
-/// has started, which the refusal has to say rather than reading as an expiry.
+/// has started, which the refusal has to say rather than reading as an expiry,
+/// and one whose lease was released unread is told that, not that it expired.
 #[tokio::test(flavor = "multi_thread")]
-async fn says_who_took_a_lease_over_rather_than_calling_it_expired() {
+async fn says_why_a_lease_no_longer_holds_rather_than_calling_it_expired() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka").await;
 		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
@@ -1216,6 +1217,25 @@ async fn says_who_took_a_lease_over_rather_than_calling_it_expired() {
 			detail.contains("taken over by someone.else@bes.au"),
 			"{detail}"
 		);
+
+		let unread = take_lease(&private, json!({ "server_group_id": group })).await;
+		conn.batch_execute(&format!(
+			"UPDATE ansible_leases SET released_at = NOW(), release_reason = 'unstarted'
+			 WHERE id = '{unread}'"
+		))
+		.await
+		.expect("release the lease unread");
+		let response = private
+			.post("/api/ansible/for_group")
+			.json(&json!({ "lease_id": unread }))
+			.await;
+		response.assert_status(axum::http::StatusCode::CONFLICT);
+		let detail = response.json::<Value>()["detail"]
+			.as_str()
+			.expect("detail")
+			.to_owned();
+		assert!(detail.contains("no run read the environment"), "{detail}");
+		assert!(!detail.contains("expired"), "{detail}");
 	})
 	.await
 }

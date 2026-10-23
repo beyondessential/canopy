@@ -1134,6 +1134,9 @@ fn held_by_caller(lease: &AnsibleLease, login: &str) -> Result<()> {
 /// whole answer: an operator whose lease was taken over is walking into work
 /// somebody else has started.
 fn no_longer_held(lease: &AnsibleLease, login: &str) -> String {
+	if lease.release_reason == Some(ReleaseReason::Unstarted) {
+		return "that lease was released because no run read the environment in time; take one again before reading it".into();
+	}
 	match lease.released_by.as_deref() {
 		Some(who) if who != login => {
 			format!("that lease was taken over by {who}; talk to them before taking another")

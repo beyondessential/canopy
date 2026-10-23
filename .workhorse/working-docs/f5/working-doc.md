@@ -179,6 +179,54 @@ What this showed:
 - A repair to a test that could not fail is not proven by the test passing; mutate the code under test and watch it fail.
 - Applying changes finds defects reading does not: the unrun test above only showed itself when its test was run.
 
+### Round 1: lens C (incremental sprawl), analysis only
+
+Four read-only agents (Rust unit and job tests, private-server integration, database, Vitest and Playwright), about 40 proposals in all.
+Nothing applied; three design decisions come first (below).
+
+What lens C turned out to be here:
+
+- Almost none of F5's structures is an enum a test can iterate. Most are strings, inline conditionals, or data-carrying enums, so "fails to compile when it grows" needs a small change before the test can exist: a variant list for the plain enums (`ScopeKind`, `Problem`, `ReleaseReason`, `RunIntent`, `Preset`, `ServerRank`), or a pure function extracted from a handler so it can be tested as a table.
+- The repo has no variant-list mechanism. `actions!` exposes names only (`audit::CATALOGUE`, `names::*`), and its variants carry data. Two ways to add one without a dependency: a 12-line `macro_rules!` in `commons-types` emitting `ALL` plus an exhaustive-match guard, or a hand-written `ALL` beside the guard. The guard stops a forgotten variant at compile time; it does not stop a forgotten `ALL` entry unless the macro generates both.
+- Most proposals add coverage rather than cut the count: tables that carry the rows nobody wrote, round-trip tests, destructuring a struct without `..`. The count falls mainly where integration tests with identical setup become rows of one table (roughly 25 server or database spins into a handful, many in tests that pre-date F5), and in pure tables over the pattern language and job scaffold.
+
+High value (new drift protection or new coverage, low cost):
+
+- A shared fixture for the two PyYAML scalar tables and the variable-name rules, read by both the Rust tests and Vitest. Today the TS test says "the same cases as the server's" and is not; the Rust table lacks `0b101`, `-12`, `02:30`, `1:30.5`, `1:30:99`, `1:60`, `2.64.3` and the `Yes`/`ON` spellings.
+- A `formatScope` then `parseScope` round trip, so opening a scope and saving it unedited changes nothing (may expose a real defect; untested).
+- Round-trip tests over the string-coded enums and their SQL CHECKs (`ReleaseReason`, `Problem`, `ScopeKind`), driven by the variant list.
+- `check_claims` and `runs::check` split into pure functions that destructure their argument struct without `..`, with a named-row table; endpoint tests keep one refusal each as wiring. The `runs::check` table also gains rows nobody wrote (unknown skip tag, assignment outside the run, configure labelled upgrade).
+- The maintenance-window refusal cluster (13 tests, mostly pre-F5) as one table that also asserts `run_state.refuses == (take_lease is 409)` per row, the stated invariant that only 4 of the 13 check.
+- Variable-setting rules shared between `set` and the import's inline copy of them (real duplication, different message text), with one unit table over `ScopeKind` and the restricted names.
+- Playwright helper extraction (`seedProductionGroup`, `startRun`, and similar): no merging, so no loss of failure isolation. The group-plus-central seed block appears about 19 times.
+
+Medium: a catalogue read compared whole (serde to a JSON literal), which also covers the never-parsed `upgrade` intent and preset; the placement checks over `ScopeKind::ALL`; the lease-state by operation matrix with a `require_held` extracted; environment-resolution and membership tables in `ansible.rs`; import cannot-apply gates as one table; the `schema.test.ts` kinds table via `satisfies Record<...>`; the catalogue job refusals as named rows; lens C for window lifecycle tests (`a_runs_window_over_its_leases_life`, hold and amend as one test with two ways).
+
+Low, or leave alone (agents agreed, with reasons): the `inventory_file.rs` inheritance and comment tests, the `hosts.rs` partition tests, `maintenance_machines.rs` (one endpoint each), the three run-dialog e2e tests (helpers only), the history tests with exact per-machine spans, `managed_by_ansible_migration.rs`, and `refuses_what_is_not_a_catalogue` (add rows, do not restructure).
+
+Possible defects the review surfaced (all unverified until read and run):
+
+- `no_longer_held` keys on `released_by`, not the release reason: a lease the sweeper released as unstarted has `released_by = None`, so a late read or extend is told it expired. No test reads or extends a swept lease.
+- `held_secret_name` adds `-held` to a name already near the 63-character limit (61 for an environment at `production`), and the test hard-codes "production is the longest rank".
+- Whether `format` in a catalogue schema is declared but never enforced by the SPA (declared in `Schema`, excluded from the keyword table).
+- `AnsibleLeaseTakenOver` and `AnsibleLeaseExtended` audit entries are never asserted.
+
+Decisions (settled): a `macro_rules!` in `commons-types` emits each enum's `ALL` and an exhaustive-match guard together; extract a pure function from a handler only where it removes duplication (so the shared set and import variable rules, not `runs::check` or `check_claims`); one JSON fixture shared by the Rust and TS PyYAML and variable-name tests; verify the suspected defects, then apply the high tier, then revisit the medium tier after lens D.
+
+Suspected defects, checked:
+
+- Confirmed and fixed: a lease released unread by the sweeper has no `released_by`, so a late read was told it had expired. The refusal now names the reason; the existing take-over test also covers it, and fails without the fix.
+- Not a defect: `held_secret_name` is 61 characters at `production` (limit 63). Only the test is thin: it covers `secret_name` alone and hard-codes the longest rank. Fixed by looping `ServerRank::ALL` over both names.
+- Not a defect: `format` is declared in the SPA's `Schema` but not pre-checked; the server enforces it on set, so a bad value is refused with its message.
+- A gap, not a defect: the take-over and extend audit entries are never asserted.
+
+Lessons for the skill:
+
+- Lens C needs the code under test, not just the tests: the drift-proof form depends on whether the structure is a value, a type, or a string, and the review has to say which.
+- Judge a merge by whether the tests share a structure, not a setup. The agents kept splitting "same setup" (fold them) from "same structure" (table them), and refused to merge ordered state sequences.
+- Lens C generates findings about production code (duplicated rules, a mismatched error check, a length limit); the skill needs a place to hand those off rather than burying them in test edits.
+- Cost is overstated for Playwright here: the stack is worker-scoped and CI runs one worker, so a test costs its seed, table reset and page load. Prefer helper extraction to merging.
+
 ## Signal to noise
 
 For each lens, once run: how many findings, how many accepted, how many rejected and why, and a verdict on whether the lens belongs in the skill, as a separate pass, or as guidance only.
@@ -187,6 +235,7 @@ For each lens, once run: how many findings, how many accepted, how many rejected
 |---|---|---|---|---|
 | A. Trivial or over-built | Rust 25 (4 delete, 6 rewrite, 15 merge); Vitest 3; Playwright 5 | Rust 24 of 25, 17 fewer tests net | 1 (spec made the assertion necessary) | Provisional: finds few truly trivial tests, mostly folds that blur into D |
 | B. Tests the dependency | Rust 3 (jsonschema, yaml-rust2); Vitest 0; Playwright 0 | 2 of 3 | 1 (spec) | Provisional: rare, only validation and parsing libraries, worth keeping as a short checklist |
+| C. Incremental sprawl | about 40 proposals; roughly 12 high, 14 medium, rest low or leave alone | | | Provisional: mostly adds coverage and drift protection, cuts fewer tests than A; needs code under test and often a helper |
 | E. Cannot fail | 4 in Playwright, 1 in Vitest | not yet | | New lens from round 1; found by reading assertions, not counting tests |
 | C. Incremental sprawl | | | | |
 | D. Open-ended consolidation | | | | |
