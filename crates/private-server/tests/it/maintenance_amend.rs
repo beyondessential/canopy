@@ -214,7 +214,9 @@ async fn a_failure_no_window_reaches_marks_every_choice() {
 }
 
 /// The declaration amends the window it starts over, so a window named from
-/// elsewhere is refused rather than read.
+/// elsewhere is refused rather than read, and amending a window that does not
+/// exist is a 404. Where a move cannot go is the database test's
+/// `a_move_is_refused_where_it_cannot_go`, and a held window's 409 is below.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_window_not_over_the_start_is_refused() {
 	commons_tests::server::run(async |mut conn, _, private| {
@@ -237,6 +239,11 @@ async fn a_window_not_over_the_start_is_refused() {
 			.json(&json!({ "server_group_id": GROUP, "rank": "clone" }))
 			.await
 			.assert_status_bad_request();
+		private
+			.post("/api/maintenance/amend")
+			.json(&json!({ "id": Uuid::new_v4(), "note": "x" }))
+			.await
+			.assert_status_not_found();
 	})
 	.await
 }
@@ -290,43 +297,6 @@ async fn amending_changes_only_what_it_names_and_can_move_the_window() {
 			"that span was the group's own"
 		);
 		assert_eq!(left["moved_to"], "kamaka clone");
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_move_is_refused_where_it_cannot_go() {
-	commons_tests::server::run(async |mut conn, _, private| {
-		seed(&mut conn).await;
-		let window: Value = private
-			.post("/api/maintenance/declare")
-			.json(&json!({ "machine_id": PRODUCTION_BOX, "expected_end": in_hours(1) }))
-			.await
-			.json();
-		let id = window["id"].as_str().unwrap();
-
-		private
-			.post("/api/maintenance/amend")
-			.json(&json!({ "id": id, "target": { "server_group_id": OTHER_GROUP } }))
-			.await
-			.assert_status_bad_request();
-
-		private
-			.post("/api/maintenance/declare")
-			.json(&json!({ "server_group_id": GROUP, "expected_end": in_hours(1) }))
-			.await
-			.assert_status_ok();
-		private
-			.post("/api/maintenance/amend")
-			.json(&json!({ "id": id, "target": { "server_group_id": GROUP } }))
-			.await
-			.assert_status(axum::http::StatusCode::CONFLICT);
-
-		private
-			.post("/api/maintenance/amend")
-			.json(&json!({ "id": Uuid::new_v4(), "note": "x" }))
-			.await
-			.assert_status_not_found();
 	})
 	.await
 }

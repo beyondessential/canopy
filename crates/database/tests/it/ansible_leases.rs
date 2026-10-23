@@ -5,14 +5,34 @@
 
 use std::collections::BTreeMap;
 
-use commons_tests::diesel_async::SimpleAsyncConnection;
+use commons_tests::diesel_async::{RunQueryDsl, SimpleAsyncConnection};
 use commons_types::server::rank::ServerRank;
 use database::{
 	ansible_leases::{AnsibleLease, PENDING_FOR, ReleaseReason, RunIntent, RunSpec},
 	maintenance_windows::MaintenanceWindow,
 };
+use diesel::{QueryableByName, sql_query, sql_types};
 use jiff::{SignedDuration, Timestamp};
 use uuid::Uuid;
+
+#[derive(QueryableByName)]
+struct EndedBy {
+	#[diesel(sql_type = sql_types::Text)]
+	by: String,
+}
+
+async fn ended_notices(conn: &mut commons_tests::diesel_async::AsyncPgConnection) -> Vec<String> {
+	sql_query(
+		"SELECT payload->>'by' AS by FROM slack_outbox \
+		 WHERE kind = 'maintenance_ended' ORDER BY created_at",
+	)
+	.get_results::<EndedBy>(conn)
+	.await
+	.unwrap()
+	.into_iter()
+	.map(|notice| notice.by)
+	.collect()
+}
 
 async fn group_with_machines(
 	conn: &mut commons_tests::diesel_async::AsyncPgConnection,
@@ -84,34 +104,74 @@ async fn records_what_the_run_is() {
 		let assignments = BTreeMap::from([(machines[2], "tamanu-facility".to_owned())]);
 		let limited = vec![machines[0], machines[1]];
 
-		let lease = take(
-			&mut conn,
-			group,
-			&machines,
-			&RunSpec {
-				intent: RunIntent::Upgrade,
-				note: Some("rolling out"),
-				playbook: Some("tamanu-upgrade.yml"),
-				limit_pattern: Some("facility"),
-				limited_to: Some(&limited),
-				tags: &tags,
-				skip_tags: &skip,
-				assignments: &assignments,
-			},
-			"sam@example.org",
-			false,
-		)
-		.await;
+		let run = RunSpec {
+			intent: RunIntent::Upgrade,
+			note: Some("rolling out"),
+			playbook: Some("tamanu-upgrade.yml"),
+			limit_pattern: Some("facility"),
+			limited_to: Some(&limited),
+			tags: &tags,
+			skip_tags: &skip,
+			assignments: &assignments,
+		};
+		let lease = take(&mut conn, group, &machines, &run, "sam@example.org", false).await;
 
 		let read = AnsibleLease::get(&mut conn, lease.id).await.unwrap();
-		assert_eq!(read.playbook.as_deref(), Some("tamanu-upgrade.yml"));
-		assert_eq!(read.limit_pattern.as_deref(), Some("facility"));
-		assert_eq!(read.limited_to, Some(limited));
-		assert_eq!(read.tags, tags);
-		assert_eq!(read.skip_tags, skip);
-		assert_eq!(read.assignments, assignments);
 		assert!(read.pending(), "pending until a run reads it");
-		assert!(read.release_reason.is_none());
+		let RunSpec {
+			intent,
+			note,
+			playbook,
+			limit_pattern,
+			limited_to,
+			tags: run_tags,
+			skip_tags: run_skip,
+			assignments: run_assignments,
+		} = run;
+		let AnsibleLease {
+			id,
+			server_group_id,
+			rank,
+			intent: read_intent,
+			held_by,
+			note: read_note,
+			taken_at,
+			expires_at,
+			released_at,
+			released_by,
+			playbook: read_playbook,
+			limit_pattern: read_limit_pattern,
+			limited_to: read_limited_to,
+			tags: read_tags,
+			skip_tags: read_skip,
+			assignments: read_assignments,
+			started_at,
+			release_reason,
+		} = read;
+		assert_eq!(id, lease.id);
+		assert_eq!(server_group_id, group);
+		assert_eq!(rank, ServerRank::Production);
+		assert_eq!(read_intent, RunIntent::Upgrade, "the intent reads back");
+		assert_eq!(read_intent, intent);
+		assert_eq!(held_by.as_deref(), Some("sam@example.org"));
+		assert_eq!(read_note.as_deref(), Some("rolling out"));
+		assert_eq!(read_note.as_deref(), note);
+		assert!(expires_at > taken_at, "it holds from when it is taken");
+		assert_eq!(read_playbook.as_deref(), Some("tamanu-upgrade.yml"));
+		assert_eq!(read_playbook.as_deref(), playbook);
+		assert_eq!(read_limit_pattern.as_deref(), Some("facility"));
+		assert_eq!(read_limit_pattern.as_deref(), limit_pattern);
+		assert_eq!(read_limited_to.as_deref(), limited_to);
+		assert_eq!(read_limited_to, Some(limited.clone()));
+		assert_eq!(read_tags, tags);
+		assert_eq!(read_tags, run_tags);
+		assert_eq!(read_skip, skip);
+		assert_eq!(read_skip, run_skip);
+		assert_eq!(read_assignments, assignments);
+		assert_eq!(&read_assignments, run_assignments);
+		assert!(started_at.is_none(), "no run has read it");
+		assert!(released_at.is_none() && released_by.is_none());
+		assert!(release_reason.is_none());
 
 		let whole = take(
 			&mut conn,
@@ -128,41 +188,9 @@ async fn records_what_the_run_is() {
 	.await
 }
 
-/// The first read starts the lease, once.
-// spec: ANSRUN#starting-a-run
-#[tokio::test(flavor = "multi_thread")]
-async fn the_first_read_starts_it_once() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let (group, machines) = group_with_machines(&mut conn, 1).await;
-		let lease = take(
-			&mut conn,
-			group,
-			&machines,
-			&spec(&BTreeMap::new()),
-			"a",
-			false,
-		)
-		.await;
-
-		let started = AnsibleLease::start(&mut conn, lease.id).await.unwrap();
-		assert!(
-			started
-				.as_ref()
-				.is_some_and(|l| l.started_at.is_some() && !l.pending())
-		);
-		assert!(
-			AnsibleLease::start(&mut conn, lease.id)
-				.await
-				.unwrap()
-				.is_none(),
-			"only the first read starts it"
-		);
-	})
-	.await
-}
-
 /// A lease no run read within the pending period is released by Canopy, and a
-/// started one is left alone.
+/// started one is left alone. An operator can give up on an unread lease, but
+/// not on a started one.
 // spec: ANSRUN#starting-a-run
 #[tokio::test(flavor = "multi_thread")]
 async fn sweeps_an_unread_lease_and_an_expired_one() {
@@ -196,7 +224,37 @@ async fn sweeps_an_unread_lease_and_an_expired_one() {
 
 		// A started lease is not unread, and runs out only at its expiry.
 		let started = take(&mut conn, group, &machines, &spec(&none), "a", false).await;
-		AnsibleLease::start(&mut conn, started.id).await.unwrap();
+		let running = AnsibleLease::start(&mut conn, started.id)
+			.await
+			.unwrap()
+			.expect("the first read starts it");
+		MaintenanceWindow::declare_for_run(&mut conn, &running, None, Some("tamanu-install.yml"))
+			.await
+			.unwrap();
+		assert!(
+			!AnsibleLease::release_unstarted(&mut conn, started.id, Some("a"))
+				.await
+				.unwrap(),
+			"release_unstarted leaves a lease its run has read"
+		);
+		let read = AnsibleLease::get(&mut conn, started.id).await.unwrap();
+		assert!(
+			read.released_at.is_none() && read.release_reason.is_none(),
+			"release_unstarted: the started lease is still held"
+		);
+		assert!(
+			!AnsibleLease::release_unstarted(&mut conn, unread.id, Some("a"))
+				.await
+				.unwrap(),
+			"release_unstarted: a lease already released is not released again"
+		);
+		let read = AnsibleLease::get(&mut conn, unread.id).await.unwrap();
+		assert_eq!(
+			read.release_reason,
+			Some(ReleaseReason::Unstarted),
+			"release_unstarted: the sweep's reason is kept"
+		);
+		assert!(read.released_by.is_none());
 		let later = Timestamp::now() + PENDING_FOR + SignedDuration::from_mins(2);
 		let nothing = AnsibleLease::sweep(&mut conn, later).await.unwrap();
 		assert!(nothing.unstarted.is_empty() && nothing.expired.is_empty());
@@ -206,6 +264,18 @@ async fn sweeps_an_unread_lease_and_an_expired_one() {
 				.await
 				.unwrap();
 		assert_eq!(ran_out.expired.len(), 1);
+		assert!(
+			MaintenanceWindow::bound_to_lease(&mut conn, started.id)
+				.await
+				.unwrap()
+				.is_empty(),
+			"a lease the sweep ends takes the window it declared with it"
+		);
+		assert_eq!(
+			ended_notices(&mut conn).await.len(),
+			1,
+			"the window's ending is notified once"
+		);
 		let read = AnsibleLease::get(&mut conn, started.id).await.unwrap();
 		assert_eq!(read.release_reason, Some(ReleaseReason::Expired));
 		assert_eq!(
@@ -213,50 +283,46 @@ async fn sweeps_an_unread_lease_and_an_expired_one() {
 			Some(started.expires_at),
 			"as of its expiry"
 		);
-	})
-	.await
-}
 
-/// Releasing says why, and taking over says it was taken over.
-// spec: ANSRUN#audit
-#[tokio::test(flavor = "multi_thread")]
-async fn says_why_a_lease_was_released() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let (group, machines) = group_with_machines(&mut conn, 1).await;
-		let none = BTreeMap::new();
-
-		let first = take(&mut conn, group, &machines, &spec(&none), "a", false).await;
+		// An operator giving up on a lease no run has read records the same reason
+		// the sweep does, with the operator named.
+		let pending = take(&mut conn, group, &machines, &spec(&none), "b", false).await;
 		assert!(
-			AnsibleLease::release(&mut conn, first.id, Some("a"), ReleaseReason::Released)
+			AnsibleLease::release_unstarted(&mut conn, pending.id, Some("b"))
 				.await
-				.unwrap()
+				.unwrap(),
+			"release_unstarted releases a lease no run has read"
 		);
+		let read = AnsibleLease::get(&mut conn, pending.id).await.unwrap();
 		assert_eq!(
-			AnsibleLease::get(&mut conn, first.id)
-				.await
-				.unwrap()
-				.release_reason,
-			Some(ReleaseReason::Released)
+			read.release_reason,
+			Some(ReleaseReason::Unstarted),
+			"release_unstarted: an unread lease released, by the holder rather than the sweep"
 		);
-
-		let second = take(&mut conn, group, &machines, &spec(&none), "a", false).await;
-		let over = take(&mut conn, group, &machines, &spec(&none), "b", true).await;
-		assert_ne!(over.id, second.id);
-		assert_eq!(
-			AnsibleLease::get(&mut conn, second.id)
+		assert_eq!(read.released_by.as_deref(), Some("b"));
+		assert!(read.released_at.is_some());
+		assert!(
+			AnsibleLease::open_for(&mut conn, group, ServerRank::Production)
 				.await
 				.unwrap()
-				.release_reason,
-			Some(ReleaseReason::TakenOver)
+				.is_none(),
+			"release_unstarted: nothing holds the environment"
+		);
+		assert!(
+			!AnsibleLease::release_unstarted(&mut conn, pending.id, Some("b"))
+				.await
+				.unwrap(),
+			"release_unstarted: released once"
 		);
 	})
 	.await
 }
 
-/// The windows a lease's run declares end with the lease, follow its expiry as
-/// it is extended, and go on to the new holder, bound to the new lease, when it
-/// is taken over.
-// spec: ANSRUN#work-under-way
+/// Only the first read starts a lease. The windows its run declares end with
+/// the lease, follow its expiry as it is extended, and go on to the new holder,
+/// bound to the new lease, when it is taken over. A lease records why it was
+/// released, and that it was taken over.
+// spec: ANSRUN#work-under-way, ANSRUN#starting-a-run, ANSRUN#audit
 #[tokio::test(flavor = "multi_thread")]
 async fn keeps_the_windows_its_run_declared() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
@@ -268,6 +334,14 @@ async fn keeps_the_windows_its_run_declared() {
 			.await
 			.unwrap()
 			.unwrap();
+		assert!(started.started_at.is_some() && !started.pending());
+		assert!(
+			AnsibleLease::start(&mut conn, lease.id)
+				.await
+				.unwrap()
+				.is_none(),
+			"only the first read starts it"
+		);
 		MaintenanceWindow::declare_for_run(&mut conn, &started, None, Some("tamanu-install.yml"))
 			.await
 			.unwrap();
@@ -283,10 +357,22 @@ async fn keeps_the_windows_its_run_declared() {
 			.await
 			.unwrap();
 		assert_eq!(bound[0].expected_end, extended.expires_at);
+		assert_eq!(
+			bound[0].amended_at, None,
+			"following the lease is not an amendment"
+		);
 
 		// Taking the lease over passes the window to the new holder, bound to the
 		// lease that took it over.
 		let over = take(&mut conn, group, &machines, &spec(&none), "b", true).await;
+		assert_eq!(
+			AnsibleLease::get(&mut conn, lease.id)
+				.await
+				.unwrap()
+				.release_reason,
+			Some(ReleaseReason::TakenOver),
+			"the lease taken over says so"
+		);
 		assert!(
 			MaintenanceWindow::bound_to_lease(&mut conn, lease.id)
 				.await
@@ -298,13 +384,33 @@ async fn keeps_the_windows_its_run_declared() {
 			.unwrap();
 		assert_eq!(passed.len(), 1);
 		assert_eq!(passed[0].amended_by.as_deref(), Some("b"));
+		assert!(passed[0].amended_at.is_some());
 		assert_eq!(passed[0].declared_by.as_deref(), Some("a"));
 		assert!(passed[0].ended_at.is_none(), "suspension does not lapse");
+		let now = Timestamp::now();
+		assert!(
+			MaintenanceWindow::refusing_run(&passed, "b", now).is_none(),
+			"the new holder is served the environment the window covers"
+		);
+		assert!(
+			MaintenanceWindow::refusing_run(&passed, "stranger", now).is_some(),
+			"anyone else is refused"
+		);
 
 		// Releasing the lease ends the window.
-		AnsibleLease::release(&mut conn, over.id, Some("b"), ReleaseReason::Released)
-			.await
-			.unwrap();
+		assert!(
+			AnsibleLease::release(&mut conn, over.id, Some("b"), ReleaseReason::Released)
+				.await
+				.unwrap(),
+			"the lease was still held"
+		);
+		assert_eq!(
+			AnsibleLease::get(&mut conn, over.id)
+				.await
+				.unwrap()
+				.release_reason,
+			Some(ReleaseReason::Released)
+		);
 		assert!(
 			MaintenanceWindow::bound_to_lease(&mut conn, over.id)
 				.await
@@ -315,6 +421,24 @@ async fn keeps_the_windows_its_run_declared() {
 			.await
 			.unwrap();
 		assert!(ended.ended_at.is_some());
+		assert_eq!(
+			ended_notices(&mut conn).await,
+			vec!["the run's lease ending".to_owned()],
+			"the run's own release is not an operator lifting a window"
+		);
+		let targets = MaintenanceWindow::suspended_targets(&mut conn)
+			.await
+			.unwrap();
+		assert!(
+			targets.settling(machines[0], Some(group)),
+			"it settles as any window does"
+		);
+
+		let again = MaintenanceWindow::end_for_lease(&mut conn, over.id, Some("b"))
+			.await
+			.unwrap();
+		assert!(again.is_empty(), "ending is idempotent");
+		assert_eq!(ended_notices(&mut conn).await.len(), 1);
 	})
 	.await
 }

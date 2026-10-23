@@ -10,9 +10,9 @@
 use commons_errors::AppError;
 use commons_types::server::rank::ServerRank;
 use database::{
-	ansible_leases::AnsibleLease,
+	ansible_leases::{AnsibleLease, ReleaseReason},
 	issues::Scope,
-	maintenance_windows::{Amendment, Grain, HeldInPlace, MaintenanceWindow},
+	maintenance_windows::{Amendment, Grain, MaintenanceWindow},
 };
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -200,34 +200,24 @@ async fn a_limited_run_declares_over_only_what_its_limit_matches() {
 		);
 		let declared = notices(&mut conn, "maintenance_declared").await;
 		assert_eq!(declared[0].target, "fiji 2 machines");
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_limit_of_one_machine_is_that_machines_window_and_all_of_them_the_environments() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
-		let lease_one = lease(&mut conn, fleet.group, "op").await;
-		let one = MaintenanceWindow::declare_for_run(
-			&mut conn,
-			&lease_one,
-			Some(&[fleet.boxes[1]]),
-			None,
-		)
-		.await
-		.expect("declare");
-		assert_eq!(one.declared[0].machine_id, Some(fleet.boxes[1]));
-		MaintenanceWindow::end_for_lease(&mut conn, lease_one.id, Some("op"))
-			.await
-			.expect("end");
 		reset_leases_and_windows(&mut conn).await;
 
-		let lease_all = lease(&mut conn, fleet.group, "op").await;
+		let lease_one = self::lease(&mut conn, fleet.group, "op").await;
+		let one = MaintenanceWindow::declare_for_run(&mut conn, &lease_one, Some(&[b]), None)
+			.await
+			.expect("declare the one-machine limit");
+		assert_eq!(
+			one.declared[0].machine_id,
+			Some(b),
+			"a limit of one machine is that machine's window"
+		);
+		reset_leases_and_windows(&mut conn).await;
+
+		let lease_all = self::lease(&mut conn, fleet.group, "op").await;
 		let all =
 			MaintenanceWindow::declare_for_run(&mut conn, &lease_all, Some(&fleet.boxes), None)
 				.await
-				.expect("declare");
+				.expect("declare the all-machines limit");
 		assert_eq!(
 			all.declared[0].grain(),
 			Some(Grain::environment(fleet.group, ServerRank::Production)),
@@ -328,12 +318,17 @@ async fn the_holders_own_windows_serve_for_what_they_cover() {
 	.await
 }
 
+/// A machine another operator's window names cannot be covered by a run, until
+/// that window is past its end: a window past its expected end is over whether
+/// or not the sweep has stamped it, so it neither refuses a run's declaration
+/// nor names its machines.
+// spec: MNT#ending
 #[tokio::test(flavor = "multi_thread")]
-async fn a_machine_another_operators_window_names_cannot_be_covered() {
+async fn a_machine_another_operators_window_names_cannot_be_covered_until_it_is_past_its_end() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let fleet = fleet(&mut conn).await;
 		let [a, b, _] = fleet.boxes;
-		MaintenanceWindow::declare_machines(
+		let theirs = MaintenanceWindow::declare_machines(
 			&mut conn,
 			&[a, b],
 			in_hours(1),
@@ -355,27 +350,7 @@ async fn a_machine_another_operators_window_names_cannot_be_covered() {
 				.is_empty(),
 			"nothing was declared"
 		);
-	})
-	.await
-}
 
-/// A window past its expected end is over whether or not the sweep has stamped
-/// it, so it neither refuses a run's declaration nor names its machines.
-// spec: MNT#ending
-#[tokio::test(flavor = "multi_thread")]
-async fn a_window_past_its_end_that_the_sweep_has_not_ended_does_not_hold_a_run_back() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
-		let [a, b, _] = fleet.boxes;
-		let theirs = MaintenanceWindow::declare_machines(
-			&mut conn,
-			&[a, b],
-			in_hours(1),
-			None,
-			Some("someone-else"),
-		)
-		.await
-		.expect("another operator's set");
 		sql_query(
 			"UPDATE maintenance_windows SET expected_end = NOW() - interval '1 minute' WHERE id = $1",
 		)
@@ -383,7 +358,6 @@ async fn a_window_past_its_end_that_the_sweep_has_not_ended_does_not_hold_a_run_
 		.execute(&mut conn)
 		.await
 		.expect("let it run past its end");
-		let lease = lease(&mut conn, fleet.group, "op").await;
 
 		let windows = MaintenanceWindow::declare_for_run(&mut conn, &lease, None, None)
 			.await
@@ -398,83 +372,6 @@ async fn a_window_past_its_end_that_the_sweep_has_not_ended_does_not_hold_a_run_
 			Some(ended.expected_end),
 			"ended as of its expected end, as the sweep would"
 		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn the_window_follows_the_leases_expiry() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
-		let lease = lease(&mut conn, fleet.group, "op").await;
-		MaintenanceWindow::declare_for_run(&mut conn, &lease, None, None)
-			.await
-			.expect("declare");
-
-		let extended = in_hours(2);
-		MaintenanceWindow::track_lease(&mut conn, lease.id, extended)
-			.await
-			.expect("track");
-		let [window] = MaintenanceWindow::bound_to_lease(&mut conn, lease.id)
-			.await
-			.expect("bound")
-			.try_into()
-			.expect("one");
-		assert_eq!(
-			window.expected_end.as_microsecond(),
-			extended.as_microsecond(),
-			"the database keeps microseconds"
-		);
-		assert_eq!(
-			window.amended_at, None,
-			"following the lease is not an amendment"
-		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn the_window_ends_with_the_lease() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
-		let lease = lease(&mut conn, fleet.group, "op").await;
-		MaintenanceWindow::declare_for_run(&mut conn, &lease, None, None)
-			.await
-			.expect("declare");
-
-		let ended = MaintenanceWindow::end_for_lease(&mut conn, lease.id, Some("op"))
-			.await
-			.expect("end");
-		let [window] = ended.as_slice() else {
-			panic!("one ended: {ended:?}");
-		};
-		assert!(window.ended_at.is_some());
-		assert!(
-			MaintenanceWindow::bound_to_lease(&mut conn, lease.id)
-				.await
-				.expect("bound")
-				.is_empty()
-		);
-		let ended_notices = notices(&mut conn, "maintenance_ended").await;
-		assert_eq!(ended_notices.len(), 1);
-		assert_eq!(
-			ended_notices[0].by, "the run's lease ending",
-			"the run's own release is not an operator lifting a window"
-		);
-
-		let targets = MaintenanceWindow::suspended_targets(&mut conn)
-			.await
-			.expect("targets");
-		assert!(
-			targets.settling(fleet.boxes[0], Some(fleet.group)),
-			"it settles as any window does"
-		);
-
-		let again = MaintenanceWindow::end_for_lease(&mut conn, lease.id, Some("op"))
-			.await
-			.expect("end again");
-		assert!(again.is_empty(), "ending is idempotent");
-		assert_eq!(notices(&mut conn, "maintenance_ended").await.len(), 1);
 	})
 	.await
 }
@@ -510,69 +407,153 @@ async fn an_expired_lease_ends_the_window_at_its_expiry() {
 	.await
 }
 
+/// A lease that no longer holds has no run to declare maintenance for, whether
+/// it was released or ran out.
 #[tokio::test(flavor = "multi_thread")]
-async fn taking_the_lease_over_passes_the_window_to_the_new_holder() {
+async fn a_lease_that_no_longer_holds_declares_nothing() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let fleet = fleet(&mut conn).await;
-		let lease = lease(&mut conn, fleet.group, "op").await;
-		MaintenanceWindow::declare_for_run(&mut conn, &lease, None, None)
-			.await
-			.expect("declare");
 
-		let passed = MaintenanceWindow::pass_lease(&mut conn, lease.id, "new-holder")
+		let released = lease(&mut conn, fleet.group, "op").await;
+		AnsibleLease::release(&mut conn, released.id, Some("op"), ReleaseReason::Released)
 			.await
-			.expect("pass");
-		let [window] = passed.as_slice() else {
-			panic!("one passed: {passed:?}");
-		};
-		assert_eq!(window.amended_by.as_deref(), Some("new-holder"));
-		assert!(window.amended_at.is_some());
-		assert_eq!(
-			window.declared_by.as_deref(),
-			Some("op"),
-			"the declarer stays on record"
-		);
-		assert_eq!(
-			window.lease_id,
-			Some(lease.id),
-			"and it still lasts the run"
+			.expect("release");
+		let released = AnsibleLease::get(&mut conn, released.id)
+			.await
+			.expect("lease");
+		let refused = MaintenanceWindow::declare_for_run(&mut conn, &released, None, None).await;
+		assert!(
+			matches!(&refused, Err(AppError::BadRequest(message)) if message.contains("no longer holds")),
+			"a released lease: {refused:?}"
 		);
 
-		let now = Timestamp::now();
+		let expired = lease(&mut conn, fleet.group, "op").await;
+		sql_query(
+			"UPDATE ansible_leases SET expires_at = NOW() - INTERVAL '1 minute' WHERE id = $1",
+		)
+		.bind::<sql_types::Uuid, _>(expired.id)
+		.execute(&mut conn)
+		.await
+		.expect("let it run out");
+		let expired = AnsibleLease::get(&mut conn, expired.id)
+			.await
+			.expect("lease");
+		let refused = MaintenanceWindow::declare_for_run(&mut conn, &expired, None, None).await;
 		assert!(
-			MaintenanceWindow::refusing_run(std::slice::from_ref(window), "new-holder", now)
-				.is_none(),
-			"the new holder is served the environment the window covers"
+			matches!(&refused, Err(AppError::BadRequest(message)) if message.contains("no longer holds")),
+			"a lease past its expiry: {refused:?}"
 		);
+
+		for lease in [released.id, expired.id] {
+			assert!(
+				MaintenanceWindow::bound_to_lease(&mut conn, lease)
+					.await
+					.expect("bound")
+					.is_empty(),
+				"nothing was declared"
+			);
+		}
 		assert!(
-			MaintenanceWindow::refusing_run(std::slice::from_ref(window), "bystander", now)
-				.is_some(),
-			"anyone else is refused"
+			notices(&mut conn, "maintenance_declared").await.is_empty(),
+			"and nobody was told"
 		);
 	})
 	.await
 }
 
-/// Giving a run's window an end by amending it is holding it: the lease no
-/// longer overwrites the end when it is extended.
+/// Giving a run's window an end of its own frees it from the lease, whether by
+/// holding it or by amending its end: the lease no longer overwrites the end
+/// when it is extended, and ending the lease no longer ends the window. Only the
+/// operator whose run it is can. A limited run followed by a whole-environment
+/// one gives two windows, one to give an end each way.
 // spec: MNT#ending
 #[tokio::test(flavor = "multi_thread")]
-async fn amending_a_run_windows_end_frees_it_from_the_lease() {
+async fn giving_a_run_windows_an_end_frees_them_from_the_lease() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let fleet = fleet(&mut conn).await;
+		let [a, b, c] = fleet.boxes;
 		let lease = lease(&mut conn, fleet.group, "op").await;
-		let window = MaintenanceWindow::declare_for_run(&mut conn, &lease, None, None)
+
+		let limited = MaintenanceWindow::declare_for_run(&mut conn, &lease, Some(&[a, b]), None)
 			.await
-			.expect("declared")
+			.expect("declare over a and b")
 			.declared
 			.remove(0);
+		let rest = MaintenanceWindow::declare_for_run(&mut conn, &lease, None, None)
+			.await
+			.expect("declare over the rest");
+		assert_eq!(
+			rest.serving
+				.iter()
+				.map(|window| window.id)
+				.collect::<Vec<_>>(),
+			vec![limited.id],
+			"the first window serves a and b"
+		);
+		let [rest] = rest.declared.as_slice() else {
+			panic!("one window for the rest: {rest:?}");
+		};
+		assert_eq!(
+			rest.machine_id,
+			Some(c),
+			"the second window covers only the rest"
+		);
+		assert_eq!(
+			MaintenanceWindow::bound_to_lease(&mut conn, lease.id)
+				.await
+				.expect("bound")
+				.len(),
+			2,
+			"both follow the lease"
+		);
 
-		let end = in_hours(6);
+		let refused =
+			MaintenanceWindow::hold(&mut conn, limited.id, in_hours(3), Some("bystander")).await;
+		assert!(
+			matches!(refused, Err(AppError::Conflict(_))),
+			"hold by a bystander: {refused:?}"
+		);
+		let past = MaintenanceWindow::hold(
+			&mut conn,
+			limited.id,
+			Timestamp::now() - SignedDuration::from_mins(1),
+			Some("op"),
+		)
+		.await;
+		assert!(
+			matches!(past, Err(AppError::BadRequest(_))),
+			"hold to a past end: {past:?}"
+		);
+
+		let held_end = in_hours(3);
+		let held = MaintenanceWindow::hold(&mut conn, limited.id, held_end, Some("op"))
+			.await
+			.expect("hold");
+		assert_eq!(held.id, limited.id);
+		assert_eq!(held.lease_id, None, "hold frees it from the lease");
+		assert_eq!(
+			held.expected_end.as_microsecond(),
+			held_end.as_microsecond()
+		);
+		assert_eq!(
+			held.amended_by.as_deref(),
+			Some("op"),
+			"hold is recorded as an amendment"
+		);
+		assert!(held.amended_at.is_some());
+
+		let again = MaintenanceWindow::hold(&mut conn, limited.id, in_hours(4), Some("op")).await;
+		assert!(
+			matches!(again, Err(AppError::BadRequest(_))),
+			"hold twice: only a window that lasts a run is held: {again:?}"
+		);
+
+		let amend_end = in_hours(6);
 		let refused = MaintenanceWindow::amend(
 			&mut conn,
-			window.id,
+			rest.id,
 			Amendment {
-				expected_end: Some(end),
+				expected_end: Some(amend_end),
 				..Amendment::default()
 			},
 			Some("bystander"),
@@ -580,166 +561,58 @@ async fn amending_a_run_windows_end_frees_it_from_the_lease() {
 		.await;
 		assert!(
 			matches!(refused, Err(AppError::Conflict(_))),
-			"only the run's operator gives its window an end: {refused:?}"
+			"amend by a bystander: only the run's operator gives its window an end: {refused:?}"
 		);
-
 		let amended = MaintenanceWindow::amend(
 			&mut conn,
-			window.id,
+			rest.id,
 			Amendment {
-				expected_end: Some(end),
+				expected_end: Some(amend_end),
 				..Amendment::default()
 			},
 			Some("op"),
 		)
 		.await
 		.expect("amended");
-		assert!(amended.lease_id.is_none(), "no longer follows the lease");
-
-		AnsibleLease::extend(&mut conn, lease.id)
-			.await
-			.expect("extended");
-		let after = MaintenanceWindow::get(&mut conn, window.id)
-			.await
-			.expect("window");
-		assert_eq!(
-			after.expected_end.as_microsecond(),
-			end.as_microsecond(),
-			"the lease does not overwrite it"
+		assert!(
+			amended.lease_id.is_none(),
+			"amending its end frees it from the lease"
 		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn holding_a_window_frees_it_from_the_lease() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
-		let lease = lease(&mut conn, fleet.group, "op").await;
-		let window = MaintenanceWindow::declare_for_run(&mut conn, &lease, None, None)
-			.await
-			.expect("declare")
-			.declared
-			.remove(0);
-
-		let refused =
-			MaintenanceWindow::hold(&mut conn, window.id, in_hours(3), Some("bystander")).await;
-		assert!(matches!(refused, Err(AppError::Conflict(_))), "{refused:?}");
-		let past = MaintenanceWindow::hold(
-			&mut conn,
-			window.id,
-			Timestamp::now() - SignedDuration::from_mins(1),
-			Some("op"),
-		)
-		.await;
-		assert!(matches!(past, Err(AppError::BadRequest(_))), "{past:?}");
-
-		let end = in_hours(3);
-		let held = MaintenanceWindow::hold(&mut conn, window.id, end, Some("op"))
-			.await
-			.expect("hold");
-		assert_eq!(held.id, window.id);
-		assert_eq!(held.lease_id, None);
-		assert_eq!(held.expected_end.as_microsecond(), end.as_microsecond());
-		assert_eq!(
-			held.amended_by.as_deref(),
-			Some("op"),
-			"recorded as an amendment"
-		);
-		assert!(held.amended_at.is_some());
 
 		assert!(
 			MaintenanceWindow::end_for_lease(&mut conn, lease.id, Some("op"))
 				.await
 				.expect("end")
 				.is_empty(),
-			"the lease ending no longer ends it"
+			"the lease ending no longer ends either window"
+		);
+		assert!(
+			MaintenanceWindow::bound_to_lease(&mut conn, lease.id)
+				.await
+				.expect("bound")
+				.is_empty(),
+			"neither follows the lease"
 		);
 		MaintenanceWindow::track_lease(&mut conn, lease.id, in_hours(1))
 			.await
 			.expect("track");
-		assert_eq!(
-			MaintenanceWindow::get(&mut conn, window.id)
-				.await
-				.expect("get")
-				.expected_end
-				.as_microsecond(),
-			end.as_microsecond(),
-			"nor does the lease's expiry move its end"
-		);
-
-		let again = MaintenanceWindow::hold(&mut conn, window.id, in_hours(4), Some("op")).await;
-		assert!(
-			matches!(again, Err(AppError::BadRequest(_))),
-			"only a window that lasts a run is held: {again:?}"
-		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_window_stays_where_it_is_while_its_lease_is_held() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
-		let [a, b, _] = fleet.boxes;
-		let lease = lease(&mut conn, fleet.group, "op").await;
-		let window = MaintenanceWindow::declare_for_run(&mut conn, &lease, Some(&[a, b]), None)
+		AnsibleLease::extend(&mut conn, lease.id)
 			.await
-			.expect("declare")
-			.declared
-			.remove(0);
-
-		assert!(
-			matches!(
-				window.held_in_place(&mut conn).await.expect("held"),
-				Some(HeldInPlace::RunLease { .. })
-			),
-			"the operator interface is told why it cannot move"
-		);
-		for amendment in [
-			Amendment {
-				machines: Some(vec![a]),
-				..Amendment::default()
-			},
-			Amendment {
-				target: Some(Grain::group(fleet.group)),
-				..Amendment::default()
-			},
+			.expect("extended");
+		for (window, end, way) in [
+			(limited.id, held_end, "held"),
+			(rest.id, amend_end, "amended"),
 		] {
-			let refused =
-				MaintenanceWindow::amend(&mut conn, window.id, amendment, Some("op")).await;
-			assert!(matches!(refused, Err(AppError::Conflict(_))), "{refused:?}");
+			assert_eq!(
+				MaintenanceWindow::get(&mut conn, window)
+					.await
+					.expect("window")
+					.expected_end
+					.as_microsecond(),
+				end.as_microsecond(),
+				"neither the lease's expiry nor its extension moves the {way} window's end"
+			);
 		}
-
-		let extended = MaintenanceWindow::amend(
-			&mut conn,
-			window.id,
-			Amendment {
-				note: Some(Some("still going".into())),
-				..Amendment::default()
-			},
-			Some("op"),
-		)
-		.await
-		.expect("its note can still change");
-		assert_eq!(extended.lease_id, Some(lease.id));
-
-		sql_query("UPDATE ansible_leases SET released_at = NOW() WHERE id = $1")
-			.bind::<sql_types::Uuid, _>(lease.id)
-			.execute(&mut conn)
-			.await
-			.expect("release");
-		MaintenanceWindow::amend(
-			&mut conn,
-			window.id,
-			Amendment {
-				machines: Some(vec![a]),
-				..Amendment::default()
-			},
-			Some("op"),
-		)
-		.await
-		.expect("it moves like any other once the lease is released");
 	})
 	.await
 }

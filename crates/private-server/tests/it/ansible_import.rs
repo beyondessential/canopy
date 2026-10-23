@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::ansible::{
-	bind_device, insert_application_on_its_own_machine, insert_group, read_served,
+	Failures, bind_device, insert_application_on_its_own_machine, insert_group, read_served,
 };
 
 const FILE: &str = "# Use: --key-file /path/to/ssh-key
@@ -125,314 +125,216 @@ async fn read_catalogue(conn: &mut AsyncPgConnection) {
 	.expect("read a catalogue");
 }
 
-async fn preview(private: &TestServer, body: Value) -> Value {
+async fn try_preview(private: &TestServer, body: Value) -> Result<Value, String> {
 	let response = private
 		.post("/api/ansible/import_preview")
 		.json(&body)
 		.await;
-	response.assert_status_ok();
-	response.json()
+	if !response.status_code().is_success() {
+		return Err(format!("import_preview answered {}", response.text()));
+	}
+	Ok(response.json())
 }
 
-fn host<'a>(preview: &'a Value, key: &str) -> &'a Value {
-	preview["hosts"]
-		.as_array()
-		.unwrap()
-		.iter()
-		.find(|host| host["key"] == key)
-		.unwrap_or_else(|| panic!("{key} is in the preview: {preview}"))
+async fn preview(private: &TestServer, body: Value) -> Value {
+	try_preview(private, body)
+		.await
+		.unwrap_or_else(|error| panic!("{error}"))
 }
 
-fn variable<'a>(variables: &'a Value, name: &str) -> &'a Value {
-	variables
+/// The entry of a list whose `field` is `key`, or null where it has none.
+fn find<'a>(items: &'a Value, field: &str, key: &str) -> &'a Value {
+	static MISSING: Value = Value::Null;
+	items
 		.as_array()
-		.unwrap()
-		.iter()
-		.find(|variable| variable["name"] == name)
-		.unwrap_or_else(|| panic!("{name} is among the variables: {variables}"))
+		.into_iter()
+		.flatten()
+		.find(|item| item[field] == key)
+		.unwrap_or(&MISSING)
 }
 
 fn names(variables: &Value) -> Vec<&str> {
 	variables
 		.as_array()
-		.unwrap()
-		.iter()
-		.map(|variable| variable["name"].as_str().unwrap())
+		.into_iter()
+		.flatten()
+		.filter_map(|variable| variable["name"].as_str())
 		.collect()
 }
 
-/// A host is proposed for the one machine it matches by the names it gives, and
-/// is left for the operator where it matches none.
+/// The preview proposes and refuses without writing anything, so each scenario
+/// previews the one environment and stands on its own file: the machine each
+/// host matches (by the names it gives, by a machine's applications' hosts, and
+/// left for the operator where none), hosts skipped or assigned by hand, two
+/// hosts on one machine or two machines at one address, a file that is not an
+/// inventory, secrets by name and then by the catalogue with their values hidden,
+/// where each variable would be set, and a variable that breaks the rules. The
+/// catalogue is read part way, so the scenarios that must see none come first.
 // spec: ANSIMP#matching-hosts-to-machines
+// spec: ANSIMP#preview
+// spec: ANSIMP#reading-the-file
 #[tokio::test(flavor = "multi_thread")]
-async fn proposes_the_machine_each_host_matches() {
+async fn previews_what_an_import_would_do() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let env = environment(&mut conn).await;
-		let preview = preview(&private, json!({ "group": "kamaka", "file": FILE })).await;
+		let mut failures = Failures::default();
 
-		let central = host(&preview, "kamaka-central");
-		assert_eq!(central["state"], "matched");
-		assert_eq!(central["machine_id"], env.central.to_string());
+		let scenario = "a host is proposed the one machine it matches";
+		if let Some(preview) = failures.ok(
+			scenario,
+			try_preview(&private, json!({ "group": "kamaka", "file": FILE })).await,
+		) {
+			let central = find(&preview["hosts"], "key", "kamaka-central");
+			failures.eq(scenario, "central's state", &central["state"], "matched");
+			failures.eq(
+				scenario,
+				"central's machine",
+				&central["machine_id"],
+				env.central.to_string(),
+			);
+			let facility = find(&preview["hosts"], "key", "kamaka-facility-a");
+			failures.eq(
+				scenario,
+				"the facility's state",
+				&facility["state"],
+				"matched",
+			);
+			failures.eq(
+				scenario,
+				"the facility's machine",
+				&facility["machine_id"],
+				env.facility.to_string(),
+			);
+			let office = find(&preview["hosts"], "key", "10.20.30.40:223");
+			failures.eq(
+				scenario,
+				"the office's state",
+				&office["state"],
+				"unmatched",
+			);
+			failures.check(
+				scenario,
+				office["machine_id"].is_null(),
+				format!("the office has no machine: {preview}"),
+			);
+			failures.eq(scenario, "can_apply", &preview["can_apply"], false);
+			failures.check(
+				scenario,
+				preview["problems"][0]
+					.as_str()
+					.is_some_and(|problem| problem.contains("10.20.30.40:223")),
+				format!("the first problem names the office: {preview}"),
+			);
+			failures.check(
+				scenario,
+				preview["machines"].as_array().map(Vec::len) == Some(3),
+				format!("three machines: {preview}"),
+			);
+		}
 
-		let facility = host(&preview, "kamaka-facility-a");
-		assert_eq!(facility["state"], "matched");
-		assert_eq!(facility["machine_id"], env.facility.to_string());
-
-		let office = host(&preview, "10.20.30.40:223");
-		assert_eq!(office["state"], "unmatched");
-		assert!(office["machine_id"].is_null());
-
-		assert_eq!(preview["can_apply"], false);
-		assert!(
-			preview["problems"][0]
-				.as_str()
-				.unwrap()
-				.contains("10.20.30.40:223"),
-			"{preview}"
-		);
-		assert_eq!(preview["machines"].as_array().unwrap().len(), 3);
-	})
-	.await
-}
-
-/// A machine need not be on the tailnet to be matched: one with no device
-/// matches by its name and its applications' hosts.
-// spec: ANSIMP#matching-hosts-to-machines
-#[tokio::test(flavor = "multi_thread")]
-async fn matches_a_machine_with_no_device_by_its_name_and_its_applications_hosts() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let env = environment(&mut conn).await;
+		let scenario = "a machine with no device matches by its name and its applications' hosts";
 		let file = "all:
   hosts:
     kamaka-office:
     stranger:
       public_hostname: office.example.internal
 ";
-		let preview = preview(&private, json!({ "group": "kamaka", "file": file })).await;
-		assert_eq!(
-			host(&preview, "kamaka-office")["machine_id"],
-			env.office.to_string()
-		);
-		// By a host recorded for an application, which it names, but the
-		// machine is also named by the first host, so it is ambiguous.
-		assert_eq!(host(&preview, "stranger")["state"], "matched");
-		assert_eq!(
-			host(&preview, "stranger")["machine_id"],
-			env.office.to_string()
-		);
-		assert_eq!(preview["can_apply"], false, "two hosts, one machine");
-		assert!(
-			preview["problems"]
-				.as_array()
-				.unwrap()
-				.iter()
-				.any(|problem| problem.as_str().unwrap().contains("kamaka-office")),
-			"{preview}"
-		);
-	})
-	.await
-}
+		if let Some(preview) = failures.ok(
+			scenario,
+			try_preview(&private, json!({ "group": "kamaka", "file": file })).await,
+		) {
+			failures.eq(
+				scenario,
+				"the office by its name",
+				&find(&preview["hosts"], "key", "kamaka-office")["machine_id"],
+				env.office.to_string(),
+			);
+			// By a host recorded for an application, which it names, but the
+			// machine is also named by the first host, so it is ambiguous.
+			let stranger = find(&preview["hosts"], "key", "stranger");
+			failures.eq(
+				scenario,
+				"the stranger's state",
+				&stranger["state"],
+				"matched",
+			);
+			failures.eq(
+				scenario,
+				"the stranger's machine",
+				&stranger["machine_id"],
+				env.office.to_string(),
+			);
+			failures.eq(
+				scenario,
+				"can_apply with two hosts on one machine",
+				&preview["can_apply"],
+				false,
+			);
+			failures.check(
+				scenario,
+				preview["problems"].as_array().is_some_and(|problems| {
+					problems.iter().any(|problem| {
+						problem
+							.as_str()
+							.is_some_and(|p| p.contains("kamaka-office"))
+					})
+				}),
+				format!("a problem names kamaka-office: {preview}"),
+			);
+		}
 
-/// Variables on `all` are the environment's, a host's own are its machine's, a
-/// group's go to each machine in it, and a run's own are left out.
-// spec: ANSIMP#reading-the-file
-#[tokio::test(flavor = "multi_thread")]
-async fn lists_each_variable_where_it_would_be_set() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		environment(&mut conn).await;
-		read_catalogue(&mut conn).await;
-		let preview = preview(&private, json!({ "group": "kamaka", "file": FILE })).await;
-
-		assert_eq!(
-			names(&preview["environment"]),
-			[
-				"elastic_agent_enrollment_token",
-				"salt",
-				"tamanu_caddy_tls_dns_iam",
-				"tamanu_version",
-				"timezone"
-			]
-		);
-		assert_eq!(
-			preview["left_out"],
-			json!(["canopy_intent", "tamanu_clone"])
-		);
-		assert_eq!(
-			preview["clone_mismatch"],
-			json!({ "file": true, "environment": false })
-		);
-
-		let facility = host(&preview, "kamaka-facility-a");
-		let vars = &facility["variables"];
-		assert_eq!(variable(vars, "tamanu_facility_id")["value"], "facility-a");
-		assert_eq!(
-			variable(vars, "elastic_agent_enabled")["value"],
-			true,
-			"a group's variable reaches the machines in it"
-		);
-		assert_eq!(variable(vars, "managed_by_ansible")["origin"], "added");
-		assert!(
-			!names(vars).contains(&"ansible_host"),
-			"the key is the machine's tailnet name by its first label, which adds nothing"
-		);
-
-		let office = host(&preview, "10.20.30.40:223");
-		let vars = &office["variables"];
-		assert_eq!(variable(vars, "ansible_host")["value"], "10.20.30.40");
-		assert_eq!(variable(vars, "ansible_host")["origin"], "from_host_key");
-		assert_eq!(variable(vars, "ansible_port")["value"], 223);
-		assert_eq!(variable(vars, "ansible_port")["origin"], "from_host_key");
-	})
-	.await
-}
-
-/// A variable the catalogue calls secret is one, and any other is guessed by
-/// its name or the names inside its value, which the operator can change. A
-/// secret's value is not shown.
-// spec: ANSIMP#preview
-#[tokio::test(flavor = "multi_thread")]
-async fn proposes_secrets_by_the_catalogue_then_by_name_and_hides_their_values() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		environment(&mut conn).await;
-		let file = "all:
-  vars:
-    salt: pepper
-    api_token: abc
-    plain: yes
-    nested:
-      password_hint: no
-    tamanu_caddy_tls_dns_iam:
-      access_key_id: AKIA
-      secret_access_key: xyz
-";
-		// No catalogue: all by name.
-		let by_name = preview(&private, json!({ "group": "kamaka", "file": file })).await;
-		let vars = &by_name["environment"];
-		assert_eq!(variable(vars, "salt")["secret"], true);
-		assert_eq!(variable(vars, "salt")["locked"], false);
-		assert!(variable(vars, "salt")["value"].is_null(), "masked");
-		assert_eq!(variable(vars, "api_token")["secret"], true);
-		assert_eq!(
-			variable(vars, "nested")["secret"],
-			true,
-			"a key inside the value"
-		);
-		assert_eq!(variable(vars, "tamanu_caddy_tls_dns_iam")["secret"], true);
-		assert_eq!(variable(vars, "plain")["secret"], false);
-		assert_eq!(variable(vars, "plain")["value"], true);
-
-		// The operator unmarks one the name guessed, and marks one it did not.
-		let chosen = preview(
-			&private,
-			json!({
-				"group": "kamaka", "file": file,
-				"secrets": [
-					{ "name": "api_token", "secret": false },
-					{ "name": "plain", "secret": true },
-				]
-			}),
-		)
-		.await;
-		assert_eq!(
-			variable(&chosen["environment"], "api_token")["secret"],
-			false
-		);
-		assert_eq!(variable(&chosen["environment"], "plain")["secret"], true);
-
-		// With a catalogue, what it describes is decided by it.
-		read_catalogue(&mut conn).await;
-		let decided = preview(
-			&private,
-			json!({
-				"group": "kamaka", "file": file,
-				"secrets": [{ "name": "salt", "secret": false }]
-			}),
-		)
-		.await;
-		let salt = variable(&decided["environment"], "salt");
-		assert_eq!(salt["secret"], true, "the catalogue decides");
-		assert_eq!(salt["locked"], true);
-	})
-	.await
-}
-
-/// A variable breaking the rules for setting one by hand is named, and stops
-/// the import.
-// spec: ANSIMP#preview
-#[tokio::test(flavor = "multi_thread")]
-async fn names_a_variable_that_breaks_the_rules_and_refuses_the_import() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let env = environment(&mut conn).await;
-		read_catalogue(&mut conn).await;
-		let file = "all:
-  vars:
-    ansible_host: 10.0.0.1
-    elastic_agent_enabled: maybe
-    'bad name': 1
-  hosts:
-    kamaka-central:
-    kamaka-facility-a:
-    kamaka-office:
-";
-		let preview = preview(
-			&private,
-			json!({
-				"group": "kamaka", "file": file,
-				"hosts": [{ "host": "kamaka-office", "machine_id": env.office }],
-			}),
-		)
-		.await;
-		assert_eq!(preview["can_apply"], false);
-		let problems = |name: &str| -> Vec<&str> {
-			variable(&preview["environment"], name)["problems"]
-				.as_array()
-				.unwrap()
-				.iter()
-				.map(|problem| problem.as_str().unwrap())
-				.collect()
-		};
-		assert!(
-			problems("ansible_host")[0].contains("on a machine"),
-			"{preview}"
-		);
-		assert!(problems("elastic_agent_enabled")[0].contains("elastic_agent_enabled"));
-		assert!(problems("bad name")[0].contains("not a usable variable name"));
-	})
-	.await
-}
-
-/// A skipped host carries no variables, and the import applies once every host
-/// is matched or skipped.
-// spec: ANSIMP#preview
-#[tokio::test(flavor = "multi_thread")]
-async fn applies_once_every_host_is_matched_or_skipped() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let env = environment(&mut conn).await;
-
-		let skipped = preview(
-			&private,
-			json!({
-				"group": "kamaka", "file": FILE,
-				"hosts": [{ "host": "10.20.30.40:223", "machine_id": null }],
-			}),
-		)
-		.await;
-		assert_eq!(host(&skipped, "10.20.30.40:223")["state"], "skipped");
-		assert_eq!(host(&skipped, "10.20.30.40:223")["variables"], json!([]));
-		assert_eq!(host(&skipped, "10.20.30.40:223")["notes"], "");
-		assert_eq!(skipped["can_apply"], true, "{skipped}");
-
-		let assigned = preview(
-			&private,
-			json!({
-				"group": "kamaka", "file": FILE,
-				"hosts": [{ "host": "10.20.30.40:223", "machine_id": env.office }],
-			}),
-		)
-		.await;
-		assert_eq!(host(&assigned, "10.20.30.40:223")["state"], "assigned");
-		assert_eq!(assigned["can_apply"], true, "{assigned}");
-
+		let scenario = "a skipped host carries nothing and an assigned one applies";
+		if let Some(skipped) = failures.ok(
+			scenario,
+			try_preview(
+				&private,
+				json!({
+					"group": "kamaka", "file": FILE,
+					"hosts": [{ "host": "10.20.30.40:223", "machine_id": null }],
+				}),
+			)
+			.await,
+		) {
+			let office = find(&skipped["hosts"], "key", "10.20.30.40:223");
+			failures.eq(scenario, "the skipped state", &office["state"], "skipped");
+			failures.eq(
+				scenario,
+				"the skipped variables",
+				&office["variables"],
+				json!([]),
+			);
+			failures.eq(scenario, "the skipped notes", &office["notes"], "");
+			failures.eq(
+				scenario,
+				"can_apply once skipped",
+				&skipped["can_apply"],
+				true,
+			);
+		}
+		if let Some(assigned) = failures.ok(
+			scenario,
+			try_preview(
+				&private,
+				json!({
+					"group": "kamaka", "file": FILE,
+					"hosts": [{ "host": "10.20.30.40:223", "machine_id": env.office }],
+				}),
+			)
+			.await,
+		) {
+			failures.eq(
+				scenario,
+				"the assigned state",
+				&find(&assigned["hosts"], "key", "10.20.30.40:223")["state"],
+				"assigned",
+			);
+			failures.eq(
+				scenario,
+				"can_apply once assigned",
+				&assigned["can_apply"],
+				true,
+			);
+		}
 		let outside = private
 			.post("/api/ansible/import_preview")
 			.json(&json!({
@@ -440,38 +342,44 @@ async fn applies_once_every_host_is_matched_or_skipped() {
 				"hosts": [{ "host": "10.20.30.40:223", "machine_id": Uuid::new_v4() }],
 			}))
 			.await;
-		outside.assert_status(axum::http::StatusCode::BAD_REQUEST);
-	})
-	.await
-}
-
-/// Two hosts to one machine, or an import giving two members one address, is
-/// refused.
-// spec: ANSIMP#preview
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_two_hosts_on_one_machine_and_two_machines_at_one_address() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let env = environment(&mut conn).await;
-		let both = preview(
-			&private,
-			json!({
-				"group": "kamaka", "file": FILE,
-				"hosts": [
-					{ "host": "kamaka-facility-a", "machine_id": env.central },
-					{ "host": "10.20.30.40:223", "machine_id": null },
-				],
-			}),
-		)
-		.await;
-		assert_eq!(both["can_apply"], false);
-		assert!(
-			both["problems"][0]
-				.as_str()
-				.unwrap()
-				.contains("are all matched to machine"),
-			"{both}"
+		failures.check(
+			scenario,
+			outside.status_code() == axum::http::StatusCode::BAD_REQUEST,
+			format!(
+				"a machine outside the group answered {}",
+				outside.status_code()
+			),
 		);
 
+		let scenario = "two hosts to one machine, or two machines at one address";
+		if let Some(both) = failures.ok(
+			scenario,
+			try_preview(
+				&private,
+				json!({
+					"group": "kamaka", "file": FILE,
+					"hosts": [
+						{ "host": "kamaka-facility-a", "machine_id": env.central },
+						{ "host": "10.20.30.40:223", "machine_id": null },
+					],
+				}),
+			)
+			.await,
+		) {
+			failures.eq(
+				scenario,
+				"can_apply for two hosts",
+				&both["can_apply"],
+				false,
+			);
+			failures.check(
+				scenario,
+				both["problems"][0]
+					.as_str()
+					.is_some_and(|problem| problem.contains("are all matched to machine")),
+				format!("the first problem says the hosts share a machine: {both}"),
+			);
+		}
 		let file = "all:
   hosts:
     kamaka-central:
@@ -479,46 +387,307 @@ async fn refuses_two_hosts_on_one_machine_and_two_machines_at_one_address() {
     kamaka-facility-a:
       ansible_host: shared.example.org
 ";
-		let shared = preview(&private, json!({ "group": "kamaka", "file": file })).await;
-		assert_eq!(shared["can_apply"], false);
-		assert!(
-			shared["problems"]
-				.as_array()
-				.unwrap()
-				.iter()
-				.any(|problem| problem.as_str().unwrap().contains("shared.example.org")),
-			"{shared}"
+		if let Some(shared) = failures.ok(
+			scenario,
+			try_preview(&private, json!({ "group": "kamaka", "file": file })).await,
+		) {
+			failures.eq(
+				scenario,
+				"can_apply for a shared address",
+				&shared["can_apply"],
+				false,
+			);
+			failures.check(
+				scenario,
+				shared["problems"].as_array().is_some_and(|problems| {
+					problems.iter().any(|problem| {
+						problem
+							.as_str()
+							.is_some_and(|p| p.contains("shared.example.org"))
+					})
+				}),
+				format!("a problem names the shared address: {shared}"),
+			);
+		}
+
+		let scenario = "a file that is not an inventory";
+		let response = private
+			.post("/api/ansible/import_preview")
+			.json(&json!({ "group": "kamaka", "file": "plugin: canopy\n" }))
+			.await;
+		failures.check(
+			scenario,
+			response.status_code() == axum::http::StatusCode::BAD_REQUEST,
+			format!("answered {}", response.status_code()),
 		);
-	})
-	.await
-}
+		let detail = response.json::<Value>()["detail"]
+			.as_str()
+			.unwrap_or_default()
+			.to_owned();
+		failures.check(
+			scenario,
+			detail.contains("not an inventory file"),
+			format!("the detail does not say so: {detail}"),
+		);
+		failures.check(
+			scenario,
+			detail.contains("no `all` group"),
+			format!("the detail does not name the missing group: {detail}"),
+		);
 
-/// A file that is not an inventory, or holds a vault-encrypted value, is
-/// refused naming why.
-// spec: ANSIMP#reading-the-file
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_a_file_that_is_not_an_inventory() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		environment(&mut conn).await;
-		let refuse = async |file: &str| -> String {
-			let response = private
-				.post("/api/ansible/import_preview")
-				.json(&json!({ "group": "kamaka", "file": file }))
-				.await;
-			response.assert_status(axum::http::StatusCode::BAD_REQUEST);
-			response.json::<Value>()["detail"]
-				.as_str()
-				.unwrap()
-				.to_owned()
-		};
+		let scenario = "secrets by name, with no catalogue";
+		let secrets_file = "all:
+  vars:
+    salt: pepper
+    api_token: abc
+    plain: yes
+    canopy_intent: configure
+    tamanu_clone: true
+    nested:
+      password_hint: no
+    tamanu_caddy_tls_dns_iam:
+      access_key_id: AKIA
+      secret_access_key: xyz
+";
+		if let Some(by_name) = failures.ok(
+			scenario,
+			try_preview(&private, json!({ "group": "kamaka", "file": secrets_file })).await,
+		) {
+			let vars = &by_name["environment"];
+			failures.eq(
+				scenario,
+				"salt is secret",
+				&find(vars, "name", "salt")["secret"],
+				true,
+			);
+			failures.eq(
+				scenario,
+				"salt is unlocked",
+				&find(vars, "name", "salt")["locked"],
+				false,
+			);
+			failures.check(
+				scenario,
+				find(vars, "name", "salt")["value"].is_null(),
+				format!("salt's value is masked: {by_name}"),
+			);
+			failures.eq(
+				scenario,
+				"api_token is secret",
+				&find(vars, "name", "api_token")["secret"],
+				true,
+			);
+			failures.eq(
+				scenario,
+				"a key inside the value makes it secret",
+				&find(vars, "name", "nested")["secret"],
+				true,
+			);
+			failures.eq(
+				scenario,
+				"the credentials are secret",
+				&find(vars, "name", "tamanu_caddy_tls_dns_iam")["secret"],
+				true,
+			);
+			failures.eq(
+				scenario,
+				"plain is not secret",
+				&find(vars, "name", "plain")["secret"],
+				false,
+			);
+			failures.eq(
+				scenario,
+				"plain's value is shown",
+				&find(vars, "name", "plain")["value"],
+				true,
+			);
+			failures.eq(
+				scenario,
+				"what is left out",
+				&by_name["left_out"],
+				json!(["canopy_intent", "tamanu_clone"]),
+			);
+			failures.check(
+				scenario,
+				!names(vars).contains(&"canopy_intent") && !names(vars).contains(&"tamanu_clone"),
+				format!("a run's own variables are not proposed: {by_name}"),
+			);
+		}
 
-		assert!(refuse("plugin: canopy\n").await.contains("no `all` group"));
-		assert!(refuse("all: [\n").await.contains("line"));
-		let vault = refuse(
-			"all:\n  vars:\n    salt: !vault |\n      $ANSIBLE_VAULT;1.1;AES256\n      61\n",
-		)
-		.await;
-		assert!(vault.contains("salt") && vault.contains("vault"), "{vault}");
+		let scenario = "the operator marks secrets, with no catalogue";
+		if let Some(chosen) = failures.ok(
+			scenario,
+			try_preview(
+				&private,
+				json!({
+					"group": "kamaka", "file": secrets_file,
+					"secrets": [
+						{ "name": "api_token", "secret": false },
+						{ "name": "plain", "secret": true },
+					]
+				}),
+			)
+			.await,
+		) {
+			failures.eq(
+				scenario,
+				"api_token is unmarked",
+				&find(&chosen["environment"], "name", "api_token")["secret"],
+				false,
+			);
+			failures.eq(
+				scenario,
+				"plain is marked",
+				&find(&chosen["environment"], "name", "plain")["secret"],
+				true,
+			);
+		}
+
+		read_catalogue(&mut conn).await;
+
+		let scenario = "the catalogue decides what it describes";
+		if let Some(decided) = failures.ok(
+			scenario,
+			try_preview(
+				&private,
+				json!({
+					"group": "kamaka", "file": secrets_file,
+					"secrets": [{ "name": "salt", "secret": false }]
+				}),
+			)
+			.await,
+		) {
+			let salt = find(&decided["environment"], "name", "salt");
+			failures.eq(scenario, "salt is secret", &salt["secret"], true);
+			failures.eq(scenario, "salt is locked", &salt["locked"], true);
+		}
+
+		let scenario = "each variable is listed where it would be set";
+		if let Some(preview) = failures.ok(
+			scenario,
+			try_preview(&private, json!({ "group": "kamaka", "file": FILE })).await,
+		) {
+			failures.eq(
+				scenario,
+				"the environment's variables",
+				&json!(names(&preview["environment"])),
+				json!([
+					"elastic_agent_enrollment_token",
+					"salt",
+					"tamanu_caddy_tls_dns_iam",
+					"tamanu_version",
+					"timezone"
+				]),
+			);
+			failures.eq(
+				scenario,
+				"what is left out",
+				&preview["left_out"],
+				json!(["canopy_intent", "tamanu_clone"]),
+			);
+			failures.eq(
+				scenario,
+				"the clone mismatch",
+				&preview["clone_mismatch"],
+				json!({ "file": true, "environment": false }),
+			);
+
+			let vars = &find(&preview["hosts"], "key", "kamaka-facility-a")["variables"];
+			failures.eq(
+				scenario,
+				"the facility's own variable",
+				&find(vars, "name", "tamanu_facility_id")["value"],
+				"facility-a",
+			);
+			failures.eq(
+				scenario,
+				"a group's variable reaches the machines in it",
+				&find(vars, "name", "elastic_agent_enabled")["value"],
+				true,
+			);
+			failures.eq(
+				scenario,
+				"managed_by_ansible's origin",
+				&find(vars, "name", "managed_by_ansible")["origin"],
+				"added",
+			);
+			failures.check(
+				scenario,
+				!names(vars).contains(&"ansible_host"),
+				format!(
+					"the key is the machine's tailnet name by its first label, which adds nothing: {vars}"
+				),
+			);
+
+			let vars = &find(&preview["hosts"], "key", "10.20.30.40:223")["variables"];
+			failures.eq(
+				scenario,
+				"the office's address",
+				&find(vars, "name", "ansible_host")["value"],
+				"10.20.30.40",
+			);
+			failures.eq(
+				scenario,
+				"the address's origin",
+				&find(vars, "name", "ansible_host")["origin"],
+				"from_host_key",
+			);
+			failures.eq(
+				scenario,
+				"the office's port",
+				&find(vars, "name", "ansible_port")["value"],
+				223,
+			);
+			failures.eq(
+				scenario,
+				"the port's origin",
+				&find(vars, "name", "ansible_port")["origin"],
+				"from_host_key",
+			);
+		}
+
+		let scenario = "a variable that breaks the rules stops the import";
+		let file = "all:
+  vars:
+    elastic_agent_enabled: maybe
+  hosts:
+    kamaka-central:
+    kamaka-facility-a:
+    kamaka-office:
+";
+		if let Some(preview) = failures.ok(
+			scenario,
+			try_preview(
+				&private,
+				json!({
+					"group": "kamaka", "file": file,
+					"hosts": [{ "host": "kamaka-office", "machine_id": env.office }],
+				}),
+			)
+			.await,
+		) {
+			failures.eq(scenario, "can_apply", &preview["can_apply"], false);
+			let problems =
+				find(&preview["environment"], "name", "elastic_agent_enabled")["problems"]
+					.as_array()
+					.cloned()
+					.unwrap_or_default();
+			failures.check(
+				scenario,
+				problems.len() == 1,
+				format!("one problem: {preview}"),
+			);
+			failures.check(
+				scenario,
+				problems
+					.first()
+					.and_then(Value::as_str)
+					.is_some_and(|problem| problem.contains("elastic_agent_enabled")),
+				format!("the problem names the variable: {preview}"),
+			);
+		}
+
+		failures.assert_none();
 	})
 	.await
 }
@@ -679,34 +848,15 @@ async fn applying_sets_the_variables_and_notes_and_records_one_entry() {
 	.await
 }
 
-/// Whether a machine is managed is a switch, not a variable, so a machine
-/// switched on before the import holds it back no more than one left alone.
+/// An import is offered only to an environment that carries no variables: a
+/// machine switched to managed beforehand and a variable on the whole group do
+/// not hold it back (an environment variable overriding a group's is named),
+/// but a variable on one of its machines does, and it is refused once its
+/// machines have changed since the preview, or where its preview cannot be
+/// applied, setting nothing. What an environment serves changes under a run
+/// that holds it, so nothing is imported into one meanwhile.
 // spec: ANSIMP
-#[tokio::test(flavor = "multi_thread")]
-async fn a_machine_already_managed_does_not_hold_the_import_back() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let env = environment(&mut conn).await;
-		private
-			.post("/api/ansible_variables/set")
-			.json(&json!({ "machine_id": env.office, "name": "managed_by_ansible", "value": true }))
-			.await
-			.assert_status_ok();
-
-		let previewed = preview(
-			&private,
-			json!({
-				"group": "kamaka", "file": FILE,
-				"hosts": [{ "host": "10.20.30.40:223", "machine_id": env.office }],
-			}),
-		)
-		.await;
-		assert_eq!(previewed["can_apply"], true, "{previewed}");
-	})
-	.await
-}
-
-/// An import is offered only to an environment that carries no variables, and
-/// is refused once its machines have changed since the preview.
+// spec: ANSIMP#preview
 // spec: ANSIMP#applying
 #[tokio::test(flavor = "multi_thread")]
 async fn is_refused_where_variables_are_set_or_the_machines_changed() {
@@ -716,7 +866,71 @@ async fn is_refused_where_variables_are_set_or_the_machines_changed() {
 			"group": "kamaka", "file": FILE,
 			"hosts": [{ "host": "10.20.30.40:223", "machine_id": env.office }],
 		});
+
+		// The lease is checked before anything else, so it is released before the
+		// steps that follow, which would otherwise see its message.
+		{
+			let previewed = preview(&private, request.clone()).await;
+			let lease = crate::ansible::take_lease(&private, json!({ "group": "kamaka" })).await;
+			let mut apply = request.clone();
+			apply["members"] = previewed["members"].clone();
+			let held = private.post("/api/ansible/import_apply").json(&apply).await;
+			held.assert_status(axum::http::StatusCode::CONFLICT);
+			assert!(
+				held.text().contains("a run holds this environment"),
+				"while a run holds the environment: {}",
+				held.text()
+			);
+			private
+				.post("/api/ansible/release_lease")
+				.json(&json!({ "lease_id": lease }))
+				.await
+				.assert_status_ok();
+		}
+
+		// A preview that cannot be applied, here for a host matched to no machine,
+		// is refused whole by the apply, which sets nothing.
+		let unmatched = json!({ "group": "kamaka", "file": FILE });
+		let cannot = preview(&private, unmatched.clone()).await;
+		assert_eq!(cannot["can_apply"], false, "{cannot}");
+		let mut apply = unmatched;
+		apply["members"] = cannot["members"].clone();
+		let refused = private.post("/api/ansible/import_apply").json(&apply).await;
+		refused.assert_status(axum::http::StatusCode::CONFLICT);
+		assert!(
+			refused.text().contains("the import cannot be applied"),
+			"{}",
+			refused.text()
+		);
+		let written = private
+			.post("/api/ansible_variables/for_group")
+			.json(&json!({ "server_group_id": env.group }))
+			.await;
+		written.assert_status_ok();
+		assert_eq!(written.json::<Value>(), json!([]), "nothing was set");
+
+		// Whether a machine is managed is a switch, not a variable.
+		private
+			.post("/api/ansible_variables/set")
+			.json(&json!({ "machine_id": env.office, "name": "managed_by_ansible", "value": true }))
+			.await
+			.assert_status_ok();
+		let managed = preview(&private, request.clone()).await;
+		assert_eq!(managed["can_apply"], true, "{managed}");
+
+		private
+			.post("/api/ansible_variables/set")
+			.json(&json!({ "server_group_id": env.group, "name": "timezone", "value": "UTC" }))
+			.await
+			.assert_status_ok();
+		private
+			.post("/api/ansible_variables/set")
+			.json(&json!({ "server_group_id": env.group, "name": "unrelated", "value": 1 }))
+			.await
+			.assert_status_ok();
 		let previewed = preview(&private, request.clone()).await;
+		assert_eq!(previewed["can_apply"], true, "{previewed}");
+		assert_eq!(previewed["overrides"], json!(["timezone"]));
 
 		// A machine arrives between the preview and the apply.
 		insert_application_on_its_own_machine(
@@ -747,72 +961,6 @@ async fn is_refused_where_variables_are_set_or_the_machines_changed() {
 			.await;
 		held.assert_status(axum::http::StatusCode::CONFLICT);
 		assert!(held.text().contains("already carries variables"));
-	})
-	.await
-}
-
-/// A variable set on the whole group does not hold an import back, and an
-/// imported environment variable overriding one is named.
-// spec: ANSIMP#preview
-#[tokio::test(flavor = "multi_thread")]
-async fn a_group_wide_variable_does_not_hold_it_back_and_is_named_where_overridden() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let env = environment(&mut conn).await;
-		private
-			.post("/api/ansible_variables/set")
-			.json(&json!({ "server_group_id": env.group, "name": "timezone", "value": "UTC" }))
-			.await
-			.assert_status_ok();
-		private
-			.post("/api/ansible_variables/set")
-			.json(&json!({ "server_group_id": env.group, "name": "unrelated", "value": 1 }))
-			.await
-			.assert_status_ok();
-
-		let previewed = preview(&private, json!({ "group": "kamaka", "file": FILE })).await;
-		assert_eq!(previewed["overrides"], json!(["timezone"]));
-	})
-	.await
-}
-
-/// What an environment serves changes under a run that holds it, so nothing is
-/// imported into one meanwhile.
-// spec: ANSIMP#applying
-#[tokio::test(flavor = "multi_thread")]
-async fn is_refused_while_a_run_holds_the_environment() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let env = environment(&mut conn).await;
-		let request = json!({
-			"group": "kamaka", "file": FILE,
-			"hosts": [{ "host": "10.20.30.40:223", "machine_id": env.office }],
-		});
-		let previewed = preview(&private, request.clone()).await;
-		crate::ansible::take_lease(&private, json!({ "group": "kamaka" })).await;
-
-		let mut apply = request;
-		apply["members"] = previewed["members"].clone();
-		let refused = private.post("/api/ansible/import_apply").json(&apply).await;
-		refused.assert_status(axum::http::StatusCode::CONFLICT);
-		assert!(refused.text().contains("a run holds this environment"));
-	})
-	.await
-}
-
-/// Before Canopy has read a catalogue, the variables a run sets for itself are
-/// left out all the same.
-// spec: ANSIMP#reading-the-file
-#[tokio::test(flavor = "multi_thread")]
-async fn leaves_out_the_variables_a_run_sets_before_any_catalogue_is_read() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		environment(&mut conn).await;
-		let preview = preview(&private, json!({ "group": "kamaka", "file": FILE })).await;
-
-		assert_eq!(
-			preview["left_out"],
-			json!(["canopy_intent", "tamanu_clone"])
-		);
-		assert!(!names(&preview["environment"]).contains(&"canopy_intent"));
-		assert!(!names(&preview["environment"]).contains(&"tamanu_clone"));
 	})
 	.await
 }

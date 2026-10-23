@@ -11,6 +11,7 @@ use commons_errors::AppError;
 use commons_types::{server::rank::ServerRank, status::CheckResult};
 use database::{
 	issues::{CheckFiling, Scope, file_check},
+	machines::Machine,
 	maintenance_windows::{
 		Amendment, Cover, Grain, MaintenanceWindow, SETTLE, line_of_descent_for,
 	},
@@ -69,6 +70,19 @@ async fn insert_box(
 	.await
 	.expect("insert application");
 	(machine.id, application.id)
+}
+
+/// A machine in `group` that no application has ranked, so it is in no
+/// environment.
+async fn insert_pending(conn: &mut AsyncPgConnection, group: Uuid, name: &str) -> Uuid {
+	let machine: RowId =
+		sql_query("INSERT INTO machines (name, group_id) VALUES ($1, $2) RETURNING id")
+			.bind::<sql_types::Text, _>(name)
+			.bind::<sql_types::Uuid, _>(group)
+			.get_result(conn)
+			.await
+			.expect("insert machine");
+	machine.id
 }
 
 /// A group whose production environment is three boxes, with a clone box.
@@ -154,20 +168,25 @@ async fn backdate_moves(conn: &mut AsyncPgConnection, window: Uuid, ago: SignedD
 		.expect("backdate moves");
 }
 
+/// A window over several machines covers each as one over it alone would. It
+/// is not its environment's own window: a take reads the windows that name any
+/// of the environment's machines, so another operator's set refuses it and one
+/// over machines in another environment does not.
+// spec: ANSRUN#work-under-way
 #[tokio::test(flavor = "multi_thread")]
-async fn a_window_over_several_machines_covers_each_as_one_over_it_alone() {
+async fn a_window_over_several_machines_covers_each_and_is_not_its_environments_own() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let fleet = fleet(&mut conn).await;
 		let [a, b, c] = fleet.boxes;
-		let window = declare_machines(&mut conn, &[b, a]).await.expect("declare");
+		let set = declare_machines(&mut conn, &[b, a]).await.expect("declare");
 
 		let mut named = vec![a, b];
 		named.sort();
-		assert_eq!(window.machine_ids, named, "it names its machines in order");
-		assert_eq!(window.machine_id, None);
-		assert_eq!(window.server_group_id, Some(fleet.group));
-		assert_eq!(window.rank, Some(ServerRank::Production));
-		assert_eq!(window.grain(), None, "it is not any one grain");
+		assert_eq!(set.machine_ids, named, "it names its machines in order");
+		assert_eq!(set.machine_id, None);
+		assert_eq!(set.server_group_id, Some(fleet.group));
+		assert_eq!(set.rank, Some(ServerRank::Production));
+		assert_eq!(set.grain(), None, "it is not any one grain");
 
 		for machine in [a, b] {
 			assert!(machine_suspended(&mut conn, fleet.group, machine).await);
@@ -209,16 +228,24 @@ async fn a_window_over_several_machines_covers_each_as_one_over_it_alone() {
 			!targets.environment_window(fleet.group, ServerRank::Production),
 			"the environment itself is not marked"
 		);
-	})
-	.await
-}
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_set_is_not_its_environments_own_window() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
-		let [a, b, _] = fleet.boxes;
-		let set = declare_machines(&mut conn, &[a, b]).await.expect("declare");
+		let now = Timestamp::now();
+		let sole = MaintenanceWindow::open_over(
+			&mut conn,
+			fleet.group,
+			ServerRank::Production,
+			&fleet.boxes,
+		)
+		.await
+		.expect("open over");
+		assert!(
+			MaintenanceWindow::refusing_run(&sole, "someone-else", now).is_some(),
+			"another operator's window holds the environment"
+		);
+		assert!(
+			MaintenanceWindow::refusing_run(&sole, "op", now).is_none(),
+			"the declarer is served"
+		);
 
 		assert!(
 			MaintenanceWindow::open_for(
@@ -276,6 +303,10 @@ async fn a_set_is_not_its_environments_own_window() {
 			elsewhere.iter().all(|window| window.id != set.id),
 			"a set naming none of them is not"
 		);
+		assert!(
+			MaintenanceWindow::refusing_run(&elsewhere, "someone-else", now).is_none(),
+			"a window over machines of another environment refuses nothing"
+		);
 	})
 	.await
 }
@@ -285,17 +316,57 @@ async fn a_machine_is_named_by_at_most_one_open_window() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let fleet = fleet(&mut conn).await;
 		let [a, b, c] = fleet.boxes;
+		let other_group = insert_group(&mut conn, "samoa").await;
+		let (elsewhere, _) = insert_box(&mut conn, other_group, "production", "ws-a").await;
 
-		let alone = MaintenanceWindow::declare(
+		for machines in [vec![a, fleet.clone_box], vec![a, elsewhere]] {
+			let refused = declare_machines(&mut conn, &machines).await;
+			assert!(
+				matches!(refused, Err(AppError::BadRequest(_))),
+				"machines of one environment only, {machines:?}: {refused:?}"
+			);
+		}
+		let none = declare_machines(&mut conn, &[]).await;
+		assert!(matches!(none, Err(AppError::BadRequest(_))), "{none:?}");
+		let missing = declare_machines(&mut conn, &[a, Uuid::new_v4()]).await;
+		assert!(matches!(missing, Err(AppError::NotFound(_))), "{missing:?}");
+
+		let (gone, _) = insert_box(&mut conn, fleet.group, "production", "fj-gone").await;
+		Machine::archive(&mut conn, gone).await.expect("archive");
+		let archived = declare_machines(&mut conn, &[a, gone]).await;
+		assert!(
+			matches!(&archived, Err(AppError::BadRequest(message)) if message.contains("in no environment")),
+			"an archived machine serves no environment: {archived:?}"
+		);
+		let pending = insert_pending(&mut conn, fleet.group, "fj-new").await;
+		let unranked = declare_machines(&mut conn, &[a, pending]).await;
+		assert!(
+			matches!(&unranked, Err(AppError::BadRequest(message)) if message.contains("in no environment")),
+			"a pending machine serves no environment: {unranked:?}"
+		);
+		let past = MaintenanceWindow::declare_machines(
 			&mut conn,
-			Scope::Machine(a),
-			None,
-			in_hours(1),
+			&[a, b],
+			Timestamp::now() - SignedDuration::from_mins(1),
 			None,
 			Some("op"),
 		)
-		.await
-		.expect("declare alone");
+		.await;
+		assert!(
+			matches!(past, Err(AppError::BadRequest(_))),
+			"a window ends in the future: {past:?}"
+		);
+
+		let alone = declare_machines(&mut conn, &[a, a])
+			.await
+			.expect("one machine");
+		assert_eq!(
+			alone.machine_id,
+			Some(a),
+			"one machine is that machine's window"
+		);
+		assert!(alone.machine_ids.is_empty());
+
 		let refused = declare_machines(&mut conn, &[a, b]).await;
 		assert!(
 			matches!(refused, Err(AppError::Conflict(_))),
@@ -355,81 +426,29 @@ async fn a_machine_is_named_by_at_most_one_open_window() {
 			matches!(moved_into, Err(AppError::Conflict(_))),
 			"nor can an amendment name a machine another window names: {moved_into:?}"
 		);
-	})
-	.await
-}
 
-#[tokio::test(flavor = "multi_thread")]
-async fn machines_of_one_environment_only() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
-		let [a, ..] = fleet.boxes;
-		let other_group = insert_group(&mut conn, "samoa").await;
-		let (elsewhere, _) = insert_box(&mut conn, other_group, "production", "ws-a").await;
-
-		for machines in [vec![a, fleet.clone_box], vec![a, elsewhere]] {
-			let refused = declare_machines(&mut conn, &machines).await;
+		MaintenanceWindow::lift(&mut conn, set.id, Some("op"))
+			.await
+			.expect("lift the set");
+		for amendment in [
+			machines(&[b, c]),
+			Amendment {
+				expected_end: Some(in_hours(3)),
+				..Amendment::default()
+			},
+		] {
+			let ended = MaintenanceWindow::amend(&mut conn, set.id, amendment, Some("op")).await;
 			assert!(
-				matches!(refused, Err(AppError::BadRequest(_))),
-				"{machines:?}: {refused:?}"
+				matches!(ended, Err(AppError::BadRequest(_))),
+				"a set that has been lifted is history: {ended:?}"
 			);
 		}
-		let none = declare_machines(&mut conn, &[]).await;
-		assert!(matches!(none, Err(AppError::BadRequest(_))), "{none:?}");
-		let missing = declare_machines(&mut conn, &[a, Uuid::new_v4()]).await;
-		assert!(matches!(missing, Err(AppError::NotFound(_))), "{missing:?}");
-
-		let one = declare_machines(&mut conn, &[a, a])
-			.await
-			.expect("one machine");
-		assert_eq!(
-			one.machine_id,
-			Some(a),
-			"one machine is that machine's window"
-		);
-		assert!(one.machine_ids.is_empty());
 	})
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_set_left_with_one_machine_is_that_machines_window() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
-		let [a, b, _] = fleet.boxes;
-		let set = declare_machines(&mut conn, &[a, b]).await.expect("declare");
-
-		let left = MaintenanceWindow::amend(&mut conn, set.id, machines(&[a]), Some("op"))
-			.await
-			.expect("remove a machine");
-		assert_eq!(left.id, set.id, "it is the same window");
-		assert_eq!(left.machine_id, Some(a));
-		assert!(left.machine_ids.is_empty());
-		assert_eq!(
-			left.server_group_id, None,
-			"a machine's window sits at the machine"
-		);
-		assert_eq!(left.rank, None);
-		assert_eq!(left.grain(), Some(Grain::machine(a)));
-		assert_eq!(
-			MaintenanceWindow::open_for(&mut conn, Scope::Machine(a), None)
-				.await
-				.expect("open")
-				.map(|window| window.id),
-			Some(set.id)
-		);
-
-		let grown = MaintenanceWindow::amend(&mut conn, set.id, machines(&[a, b]), Some("op"))
-			.await
-			.expect("add one back");
-		assert_eq!(grown.machine_id, None);
-		assert_eq!(grown.machine_ids.len(), 2, "and it is a set again");
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn adding_a_machine_suspends_it_from_the_amendment() {
+async fn a_machine_a_set_stops_covering_settles_as_though_the_window_ended() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let fleet = fleet(&mut conn).await;
 		let [a, b, c] = fleet.boxes;
@@ -445,19 +464,18 @@ async fn adding_a_machine_suspends_it_from_the_amendment() {
 			"c is not covered, so its incident stands"
 		);
 
-		let grown =
+		let widened =
 			MaintenanceWindow::amend(&mut conn, set.id, machines(&[a, b, c]), Some("other"))
 				.await
 				.expect("add c");
-		assert_eq!(grown.machine_ids.len(), 3);
-		assert_eq!(grown.amended_by.as_deref(), Some("other"));
+		assert_eq!(widened.machine_ids.len(), 3);
+		assert_eq!(widened.amended_by.as_deref(), Some("other"));
 		assert!(machine_suspended(&mut conn, fleet.group, c).await);
 		assert_eq!(
 			open_incidents(&mut conn, fleet.group).await,
 			0,
 			"its open issues are re-evaluated at once"
 		);
-
 		let targets = MaintenanceWindow::suspended_targets(&mut conn)
 			.await
 			.expect("targets");
@@ -465,18 +483,6 @@ async fn adding_a_machine_suspends_it_from_the_amendment() {
 			!targets.settling(c, Some(fleet.group)),
 			"it is held, not settling"
 		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_machine_a_set_stops_covering_settles_as_though_the_window_ended() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
-		let [a, b, c] = fleet.boxes;
-		let set = declare_machines(&mut conn, &[a, b, c])
-			.await
-			.expect("declare");
 		file_check(&mut conn, filing(Scope::Machine(c)))
 			.await
 			.expect("file under the window");
@@ -513,6 +519,32 @@ async fn a_machine_a_set_stops_covering_settles_as_though_the_window_ended() {
 			1,
 			"what is still failing contributes once the settle period has passed"
 		);
+
+		let left = MaintenanceWindow::amend(&mut conn, set.id, machines(&[a]), Some("op"))
+			.await
+			.expect("remove a machine, leaving one");
+		assert_eq!(left.id, set.id, "it is the same window");
+		assert_eq!(left.machine_id, Some(a));
+		assert!(left.machine_ids.is_empty());
+		assert_eq!(
+			left.server_group_id, None,
+			"a machine's window sits at the machine"
+		);
+		assert_eq!(left.rank, None);
+		assert_eq!(left.grain(), Some(Grain::machine(a)));
+		assert_eq!(
+			MaintenanceWindow::open_for(&mut conn, Scope::Machine(a), None)
+				.await
+				.expect("open")
+				.map(|window| window.id),
+			Some(set.id)
+		);
+
+		let grown = MaintenanceWindow::amend(&mut conn, set.id, machines(&[a, b]), Some("op"))
+			.await
+			.expect("add one back");
+		assert_eq!(grown.machine_id, None);
+		assert_eq!(grown.machine_ids.len(), 2, "and it is a set again");
 	})
 	.await
 }
@@ -625,11 +657,12 @@ async fn a_machines_history_includes_the_sets_that_name_it() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_set_moved_off_its_machines_leaves_each_in_its_history() {
+async fn a_set_can_be_moved_only_along_its_own_environment() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let fleet = fleet(&mut conn).await;
-		let [a, b, _] = fleet.boxes;
+		let [a, b, c] = fleet.boxes;
 		let set = declare_machines(&mut conn, &[a, b]).await.expect("declare");
+
 		let moved = MaintenanceWindow::amend(
 			&mut conn,
 			set.id,
@@ -675,16 +708,6 @@ async fn a_set_moved_off_its_machines_leaves_each_in_its_history() {
 			matches!(both, Err(AppError::BadRequest(_))),
 			"a grain and machines are not both a target: {both:?}"
 		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_set_can_be_moved_only_along_its_own_environment() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
-		let [a, b, c] = fleet.boxes;
-		let set = declare_machines(&mut conn, &[a, b]).await.expect("declare");
 
 		let descent = line_of_descent_for(&mut conn, &Cover::Machines(set.machine_ids.clone()))
 			.await
@@ -736,51 +759,6 @@ async fn a_set_can_be_moved_only_along_its_own_environment() {
 		assert!(
 			matches!(machines_from_app, Err(AppError::BadRequest(_))),
 			"several machines are chosen from an environment or its machines: {machines_from_app:?}"
-		);
-	})
-	.await
-}
-
-/// Another operator's set over the environment refuses a take on it, and one
-/// over machines in another environment does not: a take reads the windows that
-/// name any of the environment's machines.
-// spec: ANSRUN#work-under-way
-#[tokio::test(flavor = "multi_thread")]
-async fn a_set_naming_a_member_refuses_a_take_by_another_operator() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
-		let [a, b, _] = fleet.boxes;
-		declare_machines(&mut conn, &[a, b]).await.expect("declare");
-		let now = Timestamp::now();
-
-		let over = MaintenanceWindow::open_over(
-			&mut conn,
-			fleet.group,
-			ServerRank::Production,
-			&fleet.boxes,
-		)
-		.await
-		.expect("open over");
-		assert!(
-			MaintenanceWindow::refusing_run(&over, "someone-else", now).is_some(),
-			"another operator's window holds the environment"
-		);
-		assert!(
-			MaintenanceWindow::refusing_run(&over, "op", now).is_none(),
-			"the declarer is served"
-		);
-
-		let clone = MaintenanceWindow::open_over(
-			&mut conn,
-			fleet.group,
-			ServerRank::Clone,
-			&[fleet.clone_box],
-		)
-		.await
-		.expect("open over");
-		assert!(
-			MaintenanceWindow::refusing_run(&clone, "someone-else", now).is_none(),
-			"a window over machines of another environment refuses nothing"
 		);
 	})
 	.await

@@ -759,33 +759,78 @@ mod tests {
 		.await;
 	}
 
-	/// A secret's earlier value held after a change is escrowed beside the
-	/// scope's variables, even where the scope now sets nothing.
-	// spec: ANSVAR#history
+	/// The `inventory_variables` section carries each scope's plain values and
+	/// readable secret variables; secret variables whose values can't be read
+	/// are named, so the snapshot still says they exist, and so is a Secret that
+	/// reads but lacks one. A secret's earlier value held after a change is
+	/// escrowed beside the scope's variables, even where the scope now sets
+	/// nothing, and a held value the store has lost is named as a missing secret
+	/// is.
+	// spec: ESC#what-a-recovery-needs, ANSVAR#history
 	#[tokio::test(flavor = "multi_thread")]
-	async fn snapshot_includes_held_secret_values() {
+	async fn snapshot_includes_ansible_variables() {
 		TestDb::run(|mut conn, _url| async move {
-			let group_id = uuid::Uuid::new_v4();
+			let (readable, unreadable, held_only) = (
+				uuid::Uuid::new_v4(),
+				uuid::Uuid::new_v4(),
+				uuid::Uuid::new_v4(),
+			);
+			let machine_id = uuid::Uuid::new_v4();
 			conn.batch_execute(&format!(
-				"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');"
+				"INSERT INTO server_groups (id, name)
+				 VALUES ('{readable}', 'g1'), ('{unreadable}', 'g2'), ('{held_only}', 'g3');
+				 INSERT INTO machines (id, name, group_id) VALUES ('{machine_id}', 'box', '{unreadable}');
+				 INSERT INTO ansible_variables (server_group_id, rank, name, is_secret)
+				 VALUES ('{readable}', 'production', 'salt', TRUE),
+				        ('{unreadable}', 'production', 'salt', TRUE);
+				 INSERT INTO ansible_variables (server_group_id, rank, name, value, is_secret)
+				 VALUES ('{readable}', 'production', 'timezone', '\"Pacific/Fiji\"', FALSE);
+				 INSERT INTO ansible_variables (machine_id, name, is_secret)
+				 VALUES ('{machine_id}', 'token', TRUE), ('{machine_id}', 'key', TRUE);"
 			))
 			.await
 			.unwrap();
-			let scope = VariableScope::Environment {
-				group_id,
-				rank: commons_types::server::rank::ServerRank::Production,
+
+			let production = commons_types::server::rank::ServerRank::Production;
+			let readable_scope = VariableScope::Environment {
+				group_id: readable,
+				rank: production,
 			};
+			let unreadable_scope = VariableScope::Environment {
+				group_id: unreadable,
+				rank: production,
+			};
+			let machine_scope = VariableScope::Machine { machine_id };
+			let held_scope = VariableScope::Environment {
+				group_id: held_only,
+				rank: production,
+			};
+
 			let secrets = BackupSecrets::memory();
+			secrets
+				.put_keys(
+					&readable_scope.secret_name(),
+					&BTreeMap::from([("salt".to_string(), "\"pepper\"".to_string())]),
+				)
+				.await
+				.unwrap();
+			secrets
+				.put_keys(
+					&machine_scope.secret_name(),
+					&BTreeMap::from([("token".to_string(), "\"t\"".to_string())]),
+				)
+				.await
+				.unwrap();
 			let (kept, lost) = (uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
 			secrets
 				.put_keys(
-					&scope.held_secret_name(),
+					&held_scope.held_secret_name(),
 					&BTreeMap::from([(kept.to_string(), "\"pepper\"".to_string())]),
 				)
 				.await
 				.unwrap();
 			for entry in [kept, lost] {
-				HeldSecretValue::hold(&mut conn, entry, scope, "salt")
+				HeldSecretValue::hold(&mut conn, entry, held_scope, "salt")
 					.await
 					.unwrap();
 			}
@@ -794,107 +839,115 @@ mod tests {
 				.await
 				.unwrap();
 			let value: serde_json::Value = serde_json::from_slice(&snapshot.json).unwrap();
-			let entry = &value["inventory_variables"][0];
-			assert_eq!(entry["rank"], "production");
-			assert_eq!(entry["held"][0]["name"], "salt");
-			assert_eq!(entry["held"][0]["replaced_by"], kept.to_string());
-			assert_eq!(entry["held"][0]["value"], "\"pepper\"");
-			// A held value the store has lost is named, as a missing secret is.
-			assert_eq!(entry["held"].as_array().unwrap().len(), 1);
+			let entries = value["inventory_variables"].as_array().unwrap();
+			assert_eq!(entries.len(), 4, "one entry per scope: {entries:?}");
+			let in_group = |group: uuid::Uuid| {
+				entries
+					.iter()
+					.find(|e| e["group_id"] == group.to_string() && e["rank"] == "production")
+					.unwrap_or_else(|| panic!("no entry for group {group}"))
+			};
+
+			let entry = in_group(readable);
+			assert_eq!(
+				entry["secret"],
+				readable_scope.secret_name(),
+				"readable scope"
+			);
+			assert_eq!(
+				entry["keys"]["salt"], "\"pepper\"",
+				"readable scope: secret value"
+			);
+			assert_eq!(
+				entry["values"]["timezone"], "Pacific/Fiji",
+				"readable scope: plain value"
+			);
+			assert!(
+				entry.get("unreadable").is_none(),
+				"readable scope: nothing unreadable"
+			);
+
+			let entry = in_group(unreadable);
+			assert_eq!(
+				entry["unreadable"],
+				serde_json::json!(["salt"]),
+				"absent Secret: the variable is named"
+			);
+			assert_eq!(
+				entry["keys"],
+				serde_json::json!({}),
+				"absent Secret: no keys"
+			);
+			let machine = entries
+				.iter()
+				.find(|e| e["machine_id"] == machine_id.to_string())
+				.expect("an entry for the machine");
+			assert_eq!(
+				machine["keys"]["token"], "\"t\"",
+				"machine Secret: the key it holds"
+			);
+			assert_eq!(
+				machine["unreadable"],
+				serde_json::json!(["key"]),
+				"machine Secret: the key it lacks is named"
+			);
+
+			let entry = in_group(held_only);
+			assert_eq!(entry["held"][0]["name"], "salt", "held value");
+			assert_eq!(
+				entry["held"][0]["replaced_by"],
+				kept.to_string(),
+				"held value: the entry that replaced it"
+			);
+			assert_eq!(
+				entry["held"][0]["value"], "\"pepper\"",
+				"held value: its value"
+			);
+			assert_eq!(
+				entry["held"].as_array().unwrap().len(),
+				1,
+				"held value: the lost one is not escrowed"
+			);
 			assert!(
 				entry["unreadable"][0]
 					.as_str()
 					.unwrap()
-					.contains(&lost.to_string())
+					.contains(&lost.to_string()),
+				"held value: the lost one is named as a missing secret is"
 			);
-			assert_eq!(snapshot.gaps.len(), 1, "{:?}", snapshot.gaps);
-		})
-		.await;
-	}
 
-	/// The escrow is written early once a secret changes, and a secret changing
-	/// is a secret variable set or a value beginning to be held.
-	// spec: ANSVAR#history
-	#[tokio::test(flavor = "multi_thread")]
-	async fn notices_when_a_secret_last_changed() {
-		TestDb::run(|mut conn, _url| async move {
+			let gaps_naming = |secret: String| {
+				snapshot
+					.gaps
+					.iter()
+					.filter(|gap| gap.starts_with(&secret))
+					.count()
+			};
 			assert_eq!(
-				AnsibleVariable::latest_secret_change(&mut conn)
-					.await
-					.unwrap(),
-				None
+				gaps_naming(readable_scope.secret_name()),
+				0,
+				"no gap for the readable scope: {:?}",
+				snapshot.gaps
 			);
-			let group_id = uuid::Uuid::new_v4();
-			conn.batch_execute(&format!(
-				"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-				 INSERT INTO ansible_variables (server_group_id, name, value, is_secret)
-				 VALUES ('{group_id}', 'timezone', '\"Pacific/Fiji\"', FALSE);"
-			))
-			.await
-			.unwrap();
 			assert_eq!(
-				AnsibleVariable::latest_secret_change(&mut conn)
-					.await
-					.unwrap(),
-				None,
-				"a plain value is not a secret changing"
+				gaps_naming(unreadable_scope.secret_name()),
+				1,
+				"a gap for the absent Secret: {:?}",
+				snapshot.gaps
 			);
-
-			let before = Timestamp::now();
-			HeldSecretValue::hold(
-				&mut conn,
-				uuid::Uuid::new_v4(),
-				VariableScope::Group { group_id },
-				"salt",
-			)
-			.await
-			.unwrap();
-			let changed = AnsibleVariable::latest_secret_change(&mut conn)
-				.await
-				.unwrap()
-				.expect("a held value is a change");
-			assert!(changed >= before - SignedDuration::from_secs(1));
-		})
-		.await;
-	}
-
-	#[tokio::test(flavor = "multi_thread")]
-	async fn snapshot_includes_ansible_variables() {
-		TestDb::run(|mut conn, _url| async move {
-			let group_id = uuid::Uuid::new_v4();
-			conn.batch_execute(&format!(
-				"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-				 INSERT INTO ansible_variables (server_group_id, rank, name, is_secret)
-				 VALUES ('{group_id}', 'production', 'salt', TRUE);
-				 INSERT INTO ansible_variables (server_group_id, rank, name, value, is_secret)
-				 VALUES ('{group_id}', 'production', 'timezone', '\"Pacific/Fiji\"', FALSE);"
-			))
-			.await
-			.unwrap();
-
-			let secrets = BackupSecrets::memory();
-			let secret = format!("inv-vars-production-{group_id}");
-			secrets
-				.put_keys(
-					&secret,
-					&BTreeMap::from([("salt".to_string(), "\"pepper\"".to_string())]),
-				)
-				.await
-				.unwrap();
-
-			let snapshot = build_snapshot(&mut conn, &secrets, Timestamp::now())
-				.await
-				.unwrap();
-			assert!(snapshot.gaps.is_empty(), "{:?}", snapshot.gaps);
-			let value: serde_json::Value = serde_json::from_slice(&snapshot.json).unwrap();
-
-			let entry = &value["inventory_variables"][0];
-			assert_eq!(entry["group_id"], group_id.to_string());
-			assert_eq!(entry["rank"], "production");
-			assert_eq!(entry["secret"], secret);
-			assert_eq!(entry["keys"]["salt"], "\"pepper\"");
-			assert_eq!(entry["values"]["timezone"], "Pacific/Fiji");
-			assert!(entry.get("unreadable").is_none());
+			assert_eq!(
+				gaps_naming(machine_scope.secret_name()),
+				1,
+				"a gap for the machine's missing key: {:?}",
+				snapshot.gaps
+			);
+			assert_eq!(
+				gaps_naming(held_scope.secret_name()),
+				1,
+				"a gap for the lost held value: {:?}",
+				snapshot.gaps
+			);
+			assert_eq!(snapshot.gaps.len(), 3, "no other gaps: {:?}", snapshot.gaps);
 		})
 		.await;
 	}
@@ -997,56 +1050,6 @@ mod tests {
 			assert_eq!(config["keys"]["password_next"], "nxt");
 			assert!(config["unreadable"].as_str().unwrap().contains("password"));
 			assert_eq!(snapshot.gaps.len(), 1);
-		})
-		.await;
-	}
-
-	/// Secret variables whose values can't be read are named, so the snapshot
-	/// still says they exist; a Secret that reads but lacks one is the same.
-	// spec: ESC#what-a-recovery-needs
-	#[tokio::test(flavor = "multi_thread")]
-	async fn unreadable_secret_variables_are_named() {
-		TestDb::run(|mut conn, _url| async move {
-			let group_id = uuid::Uuid::new_v4();
-			let machine_id = uuid::Uuid::new_v4();
-			conn.batch_execute(&format!(
-				"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-				 INSERT INTO machines (id, name, group_id) VALUES ('{machine_id}', 'box', '{group_id}');
-				 INSERT INTO ansible_variables (server_group_id, rank, name, is_secret)
-				 VALUES ('{group_id}', 'production', 'salt', TRUE);
-				 INSERT INTO ansible_variables (machine_id, name, is_secret)
-				 VALUES ('{machine_id}', 'token', TRUE), ('{machine_id}', 'key', TRUE);"
-			))
-			.await
-			.unwrap();
-
-			// The environment's Secret is absent; the machine's lacks `key`.
-			let secrets = BackupSecrets::memory();
-			let machine_secret = format!("inv-vars-m-{machine_id}");
-			secrets
-				.put_keys(
-					&machine_secret,
-					&BTreeMap::from([("token".to_string(), "\"t\"".to_string())]),
-				)
-				.await
-				.unwrap();
-
-			let snapshot = build_snapshot(&mut conn, &secrets, Timestamp::now())
-				.await
-				.unwrap();
-			let value: serde_json::Value = serde_json::from_slice(&snapshot.json).unwrap();
-
-			let entries = value["inventory_variables"].as_array().unwrap();
-			let env = entries.iter().find(|e| e["rank"] == "production").unwrap();
-			assert_eq!(env["unreadable"], serde_json::json!(["salt"]));
-			assert_eq!(env["keys"], serde_json::json!({}));
-			let machine = entries
-				.iter()
-				.find(|e| e["machine_id"] == machine_id.to_string())
-				.unwrap();
-			assert_eq!(machine["keys"]["token"], "\"t\"");
-			assert_eq!(machine["unreadable"], serde_json::json!(["key"]));
-			assert_eq!(snapshot.gaps.len(), 2, "{:?}", snapshot.gaps);
 		})
 		.await;
 	}

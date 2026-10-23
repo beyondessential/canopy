@@ -428,7 +428,11 @@ fn key_text(node: &Node, path: &[String]) -> Result<String, ParseError> {
 		},
 		_ => Err(error(format!(
 			"{} has a key that is not a scalar",
-			path.join(".")
+			if path.is_empty() {
+				"the top level".to_owned()
+			} else {
+				path.join(".")
+			}
 		))),
 	}
 }
@@ -760,30 +764,30 @@ mod tests {
 	}
 
 	#[test]
-	fn reads_the_variables_under_all_and_on_each_host() {
-		let file = parse(
-			"all:
-  vars:
-    timezone: Pacific/Auckland
-    elastic_agent_enabled: true
-  hosts:
-    example-central:
-      public_hostname: central.example.org
-      tailscale_name: example-central
-",
-		)
+	fn plain_scalars_are_read_as_pyyaml_reads_them() {
+		#[derive(serde::Deserialize)]
+		struct Row {
+			text: String,
+			value: Value,
+		}
+		let rows: Vec<Row> = serde_json::from_str(include_str!(
+			"../../../../../private-web/src/components/ansible/fixtures/pyyaml-scalars.json"
+		))
 		.unwrap();
 
-		assert_eq!(
-			file.environment,
-			BTreeMap::from([
-				("elastic_agent_enabled".to_owned(), json!(true)),
-				("timezone".to_owned(), json!("Pacific/Auckland")),
-			])
-		);
-		assert_eq!(
-			host(&file, "example-central").own["public_hostname"],
-			json!("central.example.org")
+		let failures: Vec<String> = rows
+			.iter()
+			.filter_map(|Row { text, value }| {
+				let read = resolve_plain(text);
+				(read != *value).then(|| format!("{text:?} read as {read}, expected {value}"))
+			})
+			.collect();
+		assert!(
+			failures.is_empty(),
+			"{} of {} rows differ:\n{}",
+			failures.len(),
+			rows.len(),
+			failures.join("\n")
 		);
 	}
 
@@ -792,50 +796,22 @@ mod tests {
 		let file = parse(
 			"all:
   vars:
-    a: yes
-    b: no
-    c: 'yes'
-    d: 0644
-    e: 1_000
-    f: 2.5
-    g: 1e3
-    h: 1:30
-    i: null
-    j: ~
-    k: .inf
-    l: 0x1F
-    m: 12345678901234567890123
-    n: 9007199254740991
-    o: 9007199254740993
+    quoted: 'yes'
+    bare: yes
+    octal: 0644
   hosts:
     h1:
-      list: [1, two, {three: 3}]
+      list: [1, two, {three: 3}, yes, '1']
 ",
 		)
 		.unwrap();
 		let vars = &file.environment;
-		assert_eq!(vars["a"], json!(true));
-		assert_eq!(vars["b"], json!(false));
-		assert_eq!(vars["c"], json!("yes"), "quoted is a string");
-		assert_eq!(vars["d"], json!(420), "a leading zero is octal");
-		assert_eq!(vars["e"], json!(1000));
-		assert_eq!(vars["f"], json!(2.5));
-		assert_eq!(vars["g"], json!("1e3"), "no dot, so it is a string");
-		assert_eq!(vars["h"], json!(90), "sexagesimal");
-		assert_eq!(vars["i"], Value::Null);
-		assert_eq!(vars["j"], Value::Null);
-		assert_eq!(vars["k"], json!(".inf"), "no JSON form, so its text");
-		assert_eq!(vars["l"], json!(31));
-		assert_eq!(vars["m"], json!("12345678901234567890123"));
-		assert_eq!(vars["n"], json!(9007199254740991_i64));
-		assert_eq!(
-			vars["o"],
-			json!("9007199254740993"),
-			"past what the browser holds exactly, so its text"
-		);
+		assert_eq!(vars["quoted"], json!("yes"), "quoted is a string");
+		assert_eq!(vars["bare"], json!(true));
+		assert_eq!(vars["octal"], json!(420));
 		assert_eq!(
 			host(&file, "h1").own["list"],
-			json!([1, "two", { "three": 3 }])
+			json!([1, "two", { "three": 3 }, true, "1"])
 		);
 	}
 
@@ -977,23 +953,6 @@ mod tests {
 		assert_eq!(
 			host(&file, "10.20.30.40:223").own["ansible_user"],
 			json!("siteadmin")
-		);
-	}
-
-	#[test]
-	fn a_secret_field_inside_a_structured_value_is_carried_whole() {
-		let file = parse(
-			"all:
-  vars:
-    tamanu_caddy_tls_dns_iam:
-      access_key_id: AKIAEXAMPLE
-      secret_access_key: abc/def
-",
-		)
-		.unwrap();
-		assert_eq!(
-			file.environment["tamanu_caddy_tls_dns_iam"],
-			json!({ "access_key_id": "AKIAEXAMPLE", "secret_access_key": "abc/def" })
 		);
 	}
 
@@ -1159,29 +1118,404 @@ all:
 
 	#[test]
 	fn refuses_what_is_not_an_inventory_naming_where() {
-		let error = |text: &str| parse(text).unwrap_err().0;
+		let rows: &[(&str, &str, &[&str])] = &[
+			("an empty file", "", &["empty"]),
+			("a sequence", "- a\n- b\n", &["not a mapping of groups"]),
+			("no all group", "plugin: canopy\n", &["no `all` group"]),
+			(
+				"vars that are a list",
+				"all:\n  vars: [1, 2]\n",
+				&["`vars` of group \"all\""],
+			),
+			(
+				"vars of a nested group that are a scalar",
+				"all:\n  children:\n    g:\n      vars: 3\n",
+				&["`vars` of group \"g\"", "not a mapping"],
+			),
+			(
+				"a host that is a scalar",
+				"all:\n  hosts:\n    h: 3\n",
+				&["host \"h\""],
+			),
+			(
+				"a host of a nested group that is a list",
+				"all:\n  children:\n    g:\n      hosts:\n        h: [a]\n",
+				&["host \"h\" of group \"g\"", "not a mapping"],
+			),
+			("invalid yaml", "all:\n  vars: {a: [b\n", &["line"]),
+			(
+				"all that is a scalar",
+				"all: 3\n",
+				&["group \"all\"", "not a mapping"],
+			),
+			(
+				"a child group that is a scalar",
+				"all:\n  children:\n    g: 3\n",
+				&["group \"g\"", "not a mapping"],
+			),
+			(
+				"a child group that is a list",
+				"all:\n  children:\n    g: [a, b]\n",
+				&["group \"g\"", "not a mapping"],
+			),
+			(
+				"a group beside all that is a scalar",
+				"all: {}\nstray: 3\n",
+				&["group \"stray\"", "not a mapping"],
+			),
+			(
+				"children that are a list",
+				"all:\n  children: [a, b]\n",
+				&["`children` of group \"all\"", "not a mapping"],
+			),
+			(
+				"children of a nested group that are a scalar",
+				"all:\n  children:\n    g:\n      children: x\n",
+				&["`children` of group \"g\"", "not a mapping"],
+			),
+			(
+				"hosts that are a list",
+				"all:\n  hosts: [h1, h2]\n",
+				&["`hosts` of group \"all\"", "not a mapping"],
+			),
+			(
+				"hosts of a nested group that are a scalar",
+				"all:\n  children:\n    g:\n      hosts: h1\n",
+				&["`hosts` of group \"g\"", "not a mapping"],
+			),
+			(
+				"a top-level key that is a list",
+				"? [a, b]\n: 1\n",
+				&["the top level", "key that is not a scalar"],
+			),
+			(
+				"a key that is a list",
+				"all:\n  vars:\n    ? [a, b]\n    : 1\n",
+				&["all.vars", "key that is not a scalar"],
+			),
+			(
+				"a key that is a mapping",
+				"all:\n  vars:\n    ? {a: 1}\n    : 1\n",
+				&["all.vars", "key that is not a scalar"],
+			),
+			(
+				"a host key that is a list",
+				"all:\n  hosts:\n    ? [h]\n    : {}\n",
+				&["all.hosts", "key that is not a scalar"],
+			),
+			(
+				"a merge of a scalar",
+				"all:\n  vars:\n    derived:\n      <<: 3\n",
+				&["all.vars.derived", "`<<`", "not a mapping"],
+			),
+			(
+				"a merge of a null",
+				"all:\n  vars:\n    derived:\n      <<:\n",
+				&["all.vars.derived", "`<<`", "not a mapping"],
+			),
+			(
+				"a merge of a list holding a scalar",
+				"all:\n  vars:\n    base: &base {x: 1}\n    derived:\n      <<: [*base, 3]\n",
+				&["all.vars.derived", "`<<`", "not a mapping"],
+			),
+		];
 
-		assert!(error("").contains("empty"));
-		assert!(error("- a\n- b\n").contains("not a mapping of groups"));
-		assert!(error("plugin: canopy\n").contains("no `all` group"));
-		assert!(error("all:\n  vars: [1, 2]\n").contains("`vars` of group \"all\""));
-		assert!(error("all:\n  hosts:\n    h: 3\n").contains("host \"h\""));
-		assert!(error("all:\n  vars: {a: [b\n").contains("line"));
+		let failures: Vec<String> = rows
+			.iter()
+			.filter_map(|(name, yaml, needles)| match parse(yaml) {
+				Ok(file) => Some(format!("{name}: {yaml:?} was read as {file:?}")),
+				Err(refused) => {
+					let missing: Vec<_> = needles
+						.iter()
+						.filter(|needle| !refused.0.contains(**needle))
+						.collect();
+					(!missing.is_empty()).then(|| {
+						format!(
+							"{name}: {yaml:?} refused as {:?}, missing {missing:?}",
+							refused.0
+						)
+					})
+				}
+			})
+			.collect();
+		assert!(
+			failures.is_empty(),
+			"{} of {} rows differ:\n{}",
+			failures.len(),
+			rows.len(),
+			failures.join("\n")
+		);
 	}
 
 	#[test]
 	fn refuses_a_vault_encrypted_value_naming_the_variable() {
-		let refused = parse(
-			"all:
+		let vault = |pad: usize| {
+			let pad = " ".repeat(pad);
+			format!("!vault |\n{pad}$ANSIBLE_VAULT;1.1;AES256\n{pad}6162636465\n")
+		};
+		let rows: &[(&str, String, &[&str])] = &[
+			(
+				"a group variable",
+				format!("all:\n  vars:\n    salt: {}", vault(6)),
+				&["all", "salt", "vault", "all.vars.salt"],
+			),
+			(
+				"a host variable",
+				format!("all:\n  hosts:\n    h:\n      secret: {}", vault(8)),
+				&["secret", "vault", "all.hosts.h.secret"],
+			),
+			(
+				"a variable of a nested group",
+				format!(
+					"all:\n  children:\n    g:\n      vars:\n        salt: {}",
+					vault(10)
+				),
+				&["salt", "vault", "all.children.g.vars.salt"],
+			),
+			(
+				"a list item",
+				format!(
+					"all:\n  vars:\n    keys:\n      - plain\n      - {}",
+					vault(8)
+				),
+				&["keys", "vault", "all.vars.keys.1"],
+			),
+		];
+
+		let failures: Vec<String> = rows
+			.iter()
+			.filter_map(|(name, yaml, needles)| match parse(yaml) {
+				Ok(file) => Some(format!("{name}: {yaml:?} was read as {file:?}")),
+				Err(refused) => {
+					let missing: Vec<_> = needles
+						.iter()
+						.filter(|needle| !refused.0.contains(**needle))
+						.collect();
+					(!missing.is_empty())
+						.then(|| format!("{name}: refused as {:?}, missing {missing:?}", refused.0))
+				}
+			})
+			.collect();
+		assert!(
+			failures.is_empty(),
+			"{} of {} rows differ:\n{}",
+			failures.len(),
+			rows.len(),
+			failures.join("\n")
+		);
+	}
+
+	#[test]
+	fn a_small_file_is_read_into_exactly_these_fields() {
+		let file = parse(
+			"# Top note
+all:
   vars:
-    salt: !vault |
-      $ANSIBLE_VAULT;1.1;AES256
-      6162636465
+    env: staging
+    ansible_group_priority: 3
+  hosts:
+    # About h1
+    h1:
+      ansible_user: root
+  children:
+    g:
+      vars: { colour: blue, ansible_group_priority: 7 }
+      hosts:
+        h1:
+        h2:
+          colour: red
 ",
 		)
-		.unwrap_err();
-		assert!(refused.0.contains("all"), "{refused}");
-		assert!(refused.0.contains("salt"), "{refused}");
-		assert!(refused.0.contains("vault"), "{refused}");
+		.unwrap();
+
+		assert_eq!(
+			file,
+			InventoryFile {
+				environment: BTreeMap::from([("env".to_owned(), json!("staging"))]),
+				hosts: BTreeMap::from([
+					(
+						"h1".to_owned(),
+						FileHost {
+							own: BTreeMap::from([("ansible_user".to_owned(), json!("root"))]),
+							inherited: BTreeMap::from([("colour".to_owned(), json!("blue"))]),
+							comments: vec!["About h1".to_owned()],
+						}
+					),
+					(
+						"h2".to_owned(),
+						FileHost {
+							own: BTreeMap::from([("colour".to_owned(), json!("red"))]),
+							inherited: BTreeMap::new(),
+							comments: Vec::new(),
+						}
+					),
+				]),
+				comments: vec!["Top note".to_owned()],
+			}
+		);
+	}
+
+	#[test]
+	fn a_deeper_group_beats_a_shallower_one_of_higher_priority() {
+		let file = parse(
+			"all:
+  children:
+    zz-shallow:
+      vars: { v: shallow, ansible_group_priority: 100 }
+      hosts: { h: }
+    outer:
+      children:
+        aa-deep:
+          vars: { v: deep }
+          hosts: { h: }
+",
+		)
+		.unwrap();
+		assert_eq!(host(&file, "h").inherited["v"], json!("deep"));
+	}
+
+	#[test]
+	fn a_group_reached_by_two_paths_takes_its_greater_depth() {
+		let file = parse(
+			"all:
+  children:
+    aa-shared:
+      vars: { v: shared }
+      hosts: { h: }
+    mid:
+      children:
+        inner:
+          children:
+            aa-shared:
+    zz-rival:
+      vars: { v: rival }
+      hosts: { h: }
+",
+		)
+		.unwrap();
+		assert_eq!(
+			host(&file, "h").inherited["v"],
+			json!("shared"),
+			"at depth one the later name would win, so only the deeper path lets it"
+		);
+	}
+
+	#[test]
+	fn only_the_keys_beneath_hosts_of_a_group_or_its_descendants_are_hosts() {
+		let rows: &[(&str, &[&str], bool)] = &[
+			("nothing above", &[], false),
+			("hosts alone", &["hosts"], false),
+			("hosts of all", &["all", "hosts"], true),
+			("hosts of a group beside all", &["staging", "hosts"], true),
+			(
+				"hosts of a child of a group beside all",
+				&["staging", "children", "site", "hosts"],
+				true,
+			),
+			("hosts of a child", &["all", "children", "g", "hosts"], true),
+			(
+				"hosts of a grandchild",
+				&["all", "children", "g", "children", "h", "hosts"],
+				true,
+			),
+			(
+				"hosts of a great-great-grandchild",
+				&[
+					"all", "children", "g", "children", "h", "children", "i", "children", "j",
+					"hosts",
+				],
+				true,
+			),
+			(
+				"a group named hosts",
+				&["all", "children", "hosts", "hosts"],
+				true,
+			),
+			(
+				"a group named children",
+				&["all", "children", "children", "hosts"],
+				true,
+			),
+			(
+				"children without a group",
+				&["all", "children", "hosts"],
+				false,
+			),
+			(
+				"hosts beneath hosts",
+				&["all", "hosts", "h", "hosts"],
+				false,
+			),
+			(
+				"hosts beneath a host of a child",
+				&["all", "children", "g", "hosts", "h", "hosts"],
+				false,
+			),
+			("a variable named hosts", &["all", "vars", "hosts"], false),
+			(
+				"a variable of a variable named hosts",
+				&["all", "vars", "x", "hosts"],
+				false,
+			),
+			(
+				"an odd path ending in hosts",
+				&["all", "hosts", "hosts"],
+				false,
+			),
+			("a group's children", &["all", "children"], false),
+			("a child group's name", &["all", "children", "g"], false),
+			(
+				"a longer odd path",
+				&["all", "children", "g", "children", "h"],
+				false,
+			),
+			(
+				"the vars of a child",
+				&["all", "children", "g", "vars"],
+				false,
+			),
+		];
+
+		let failures: Vec<String> = rows
+			.iter()
+			.filter_map(|(name, path, expected)| {
+				let path: Vec<String> = path.iter().map(|key| (*key).to_owned()).collect();
+				let got = is_host_path(&path);
+				(got != *expected)
+					.then(|| format!("{name}: {path:?} gave {got}, expected {expected}"))
+			})
+			.collect();
+		assert!(
+			failures.is_empty(),
+			"{} of {} rows differ:\n{}",
+			failures.len(),
+			rows.len(),
+			failures.join("\n")
+		);
+	}
+
+	#[test]
+	fn a_comment_is_about_a_host_of_a_group_beside_all_or_deep_beneath_it() {
+		let file = parse(
+			"all: {}
+staging:
+  hosts:
+    # About s1
+    s1:
+  children:
+    a:
+      children:
+        b:
+          children:
+            c:
+              hosts:
+                # About deep
+                d:
+",
+		)
+		.unwrap();
+		assert_eq!(host(&file, "s1").comments, ["About s1"]);
+		assert_eq!(host(&file, "d").comments, ["About deep"]);
+		assert!(file.comments.is_empty());
 	}
 }

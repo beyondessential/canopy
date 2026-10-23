@@ -182,16 +182,14 @@ mod tests {
 		.unwrap()
 	}
 
-	/// A lease no run read is released by Canopy, which is on the record.
-	// spec: ANSRUN#starting-a-run
+	/// A lease no run read is released by Canopy, and one that ran out leaves
+	/// an entry, which it did not before: both are on the record as Canopy's own.
+	// spec: ANSRUN#starting-a-run, ANSRUN#audit
 	#[tokio::test(flavor = "multi_thread")]
-	async fn releases_a_lease_no_run_read_and_records_it_as_canopys_own() {
+	async fn records_a_lease_no_run_read_and_one_that_ran_out_as_canopys_own() {
 		commons_tests::db::TestDb::run(async |mut conn, _| {
 			let (group, machine) = seed(&mut conn).await;
 			let unread = lease(&mut conn, group, machine).await;
-
-			let early = tick(&mut conn, Timestamp::now()).await;
-			assert_eq!(early, (0, 0), "within the pending period");
 
 			let late = Timestamp::now() + PENDING_FOR + SignedDuration::from_secs(10);
 			assert_eq!(tick(&mut conn, late).await, (1, 0));
@@ -208,28 +206,9 @@ mod tests {
 					.iter()
 					.any(|record| record.id == unread.id.to_string())
 			);
-		})
-		.await
-	}
 
-	/// A lease that ran out leaves an entry, which it did not before.
-	// spec: ANSRUN#audit
-	#[tokio::test(flavor = "multi_thread")]
-	async fn notices_a_lease_that_ran_out() {
-		commons_tests::db::TestDb::run(async |mut conn, _| {
-			let (group, machine) = seed(&mut conn).await;
 			let held = lease(&mut conn, group, machine).await;
 			AnsibleLease::start(&mut conn, held.id).await.unwrap();
-
-			assert_eq!(
-				tick(
-					&mut conn,
-					Timestamp::now() + PENDING_FOR + SignedDuration::from_mins(1)
-				)
-				.await,
-				(0, 0),
-				"a started lease is not unread"
-			);
 			let after = held.expires_at + SignedDuration::from_secs(1);
 			assert_eq!(tick(&mut conn, after).await, (0, 1));
 

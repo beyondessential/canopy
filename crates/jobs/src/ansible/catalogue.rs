@@ -347,6 +347,22 @@ mod tests {
 			*self.commits.lock().unwrap() = (StatusCode::BAD_GATEWAY, json!({}));
 		}
 
+		fn name_the_head_again(&self) {
+			*self.commits.lock().unwrap() = (StatusCode::OK, json!([{ "sha": COMMIT }]));
+		}
+
+		fn name_no_commit(&self) {
+			*self.commits.lock().unwrap() = (StatusCode::OK, json!([]));
+		}
+
+		fn lose_the_file(&self) {
+			*self.file.lock().unwrap() = (StatusCode::NOT_FOUND, String::new());
+		}
+
+		fn fail_the_file(&self) {
+			*self.file.lock().unwrap() = (StatusCode::SERVICE_UNAVAILABLE, String::new());
+		}
+
 		/// Start answering as GitHub would, and say where.
 		async fn start(&self) -> Source {
 			async fn commits(State(stub): State<Stub>) -> (StatusCode, Json<Value>) {
@@ -414,34 +430,19 @@ mod tests {
 			.is_some_and(|issue| issue.active)
 	}
 
-	/// Reading a catalogue keeps it and says so in the log, once.
-	// spec: ANSVAR#catalogue
-	#[tokio::test(flavor = "multi_thread")]
-	async fn a_catalogue_that_reads_is_kept_and_audited_once() {
-		commons_tests::db::TestDb::run(async |mut conn, _| {
-			let stub = Stub::serving(&catalogue_document());
-			let source = stub.start().await;
-			let (client, secrets) = (reqwest::Client::new(), BackupSecrets::memory());
-
-			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
-			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
-
-			let state = CatalogueState::get(&mut conn).await.unwrap().unwrap();
-			assert_eq!(state.document, Some(catalogue_document()));
-			assert_eq!(state.source_commit.as_deref(), Some(COMMIT));
-			assert_eq!(state.problem, None);
-
-			let log = audit_actions(&mut conn).await;
-			assert_eq!(log.len(), 1, "{log:?}");
-			assert_eq!(log[0].0, "ansible_catalogue_changed");
-			assert_eq!(log[0].1, Actor::canopy(JOB));
-			assert!(!alert_active(&mut conn).await);
-		})
-		.await
+	/// Whether a read that fails this way raises the self-alert on that read,
+	/// rather than waiting out the time the catalogue may go unread.
+	fn alerts_at_once(problem: Problem) -> bool {
+		match problem {
+			Problem::Invalid => true,
+			Problem::Unreachable => false,
+		}
 	}
 
-	/// Publishing something that is not a catalogue leaves the last copy in
-	/// use and warns at once.
+	/// Reading a catalogue keeps it and says so in the log, once. Publishing
+	/// something that is not a catalogue leaves the last copy in use and warns
+	/// at once. An unreachable repository leaves the copy too, and is not yet a
+	/// fault.
 	// spec: ANSVAR#catalogue
 	#[tokio::test(flavor = "multi_thread")]
 	async fn a_publication_that_does_not_read_leaves_the_last_copy_and_warns() {
@@ -450,6 +451,28 @@ mod tests {
 			let source = stub.start().await;
 			let (client, secrets) = (reqwest::Client::new(), BackupSecrets::memory());
 			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
+			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
+
+			let state = CatalogueState::get(&mut conn).await.unwrap().unwrap();
+			assert_eq!(
+				state.document,
+				Some(catalogue_document()),
+				"a good read: the catalogue is kept"
+			);
+			assert_eq!(
+				state.source_commit.as_deref(),
+				Some(COMMIT),
+				"a good read: the commit is recorded"
+			);
+			assert_eq!(state.problem, None, "a good read: no problem");
+			let log = audit_actions(&mut conn).await;
+			assert_eq!(log.len(), 1, "a repeat read audits once: {log:?}");
+			assert_eq!(log[0].0, "ansible_catalogue_changed", "a repeat read");
+			assert_eq!(log[0].1, Actor::canopy(JOB), "a repeat read: the actor");
+			assert!(
+				!alert_active(&mut conn).await,
+				"a good read raises no alert"
+			);
 
 			stub.publish("{ not json");
 			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
@@ -470,26 +493,70 @@ mod tests {
 			stub.publish(&catalogue_document().to_string());
 			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
 			assert!(!alert_active(&mut conn).await, "a good read clears it");
-		})
-		.await
-	}
-
-	/// An unreachable repository leaves the copy, and is not yet a fault.
-	// spec: ANSVAR#catalogue
-	#[tokio::test(flavor = "multi_thread")]
-	async fn an_unreachable_repository_leaves_the_last_copy_without_an_alert_yet() {
-		commons_tests::db::TestDb::run(async |mut conn, _| {
-			let stub = Stub::serving(&catalogue_document());
-			let source = stub.start().await;
-			let (client, secrets) = (reqwest::Client::new(), BackupSecrets::memory());
-			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
 
 			stub.break_down();
 			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
-
 			let state = CatalogueState::get(&mut conn).await.unwrap().unwrap();
 			assert_eq!(state.problem, Some(Problem::Unreachable));
-			assert_eq!(state.document, Some(catalogue_document()));
+			assert_eq!(
+				state.document,
+				Some(catalogue_document()),
+				"an unreachable repository leaves the last copy"
+			);
+			assert!(!alert_active(&mut conn).await, "and is not yet a fault");
+
+			let failures: [(&str, fn(&Stub), Problem, &str); 3] = [
+				(
+					"no commit touches the file",
+					Stub::name_no_commit,
+					Problem::Invalid,
+					"has no",
+				),
+				(
+					"the file is not at the head commit",
+					Stub::lose_the_file,
+					Problem::Invalid,
+					"is not in",
+				),
+				(
+					"the file cannot be served",
+					Stub::fail_the_file,
+					Problem::Unreachable,
+					"503",
+				),
+			];
+			for (row, fail, problem, detail) in failures {
+				stub.name_the_head_again();
+				stub.publish(&catalogue_document().to_string());
+				refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
+				fail(&stub);
+				refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
+				let state = CatalogueState::get(&mut conn).await.unwrap().unwrap();
+				assert_eq!(state.problem, Some(problem), "{row}");
+				assert!(
+					state.problem_detail.as_deref().unwrap().contains(detail),
+					"{row}: {:?}",
+					state.problem_detail
+				);
+				assert_eq!(
+					state.document,
+					Some(catalogue_document()),
+					"{row}: the last copy is kept"
+				);
+				assert_eq!(state.source_commit.as_deref(), Some(COMMIT), "{row}");
+				assert_eq!(
+					alert_active(&mut conn).await,
+					alerts_at_once(problem),
+					"{row}"
+				);
+			}
+
+			stub.name_the_head_again();
+			stub.publish(&catalogue_document().to_string());
+			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
+			let state = CatalogueState::get(&mut conn).await.unwrap().unwrap();
+			assert_eq!(state.problem, None, "a good read after an unreachable one");
+			assert_eq!(state.problem_detail, None);
 			assert!(!alert_active(&mut conn).await);
 		})
 		.await

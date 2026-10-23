@@ -20,6 +20,7 @@ Its holder extends it while the run is still going and releases it when the run 
 An operator usually starts a run from the operator interface, which takes the lease for the playbook they choose and hands it to the run in the command it gives them.
 The lease then waits for the run: it is pending until the run first reads its environment under it.
 A lease no run has read within a short fixed period of being taken is released by Canopy, and the operator is told to start again, so an abandoned start does not hold the environment.
+An operator giving up a lease no run has read releases it as an abandoned start is released, and the record says so.
 
 A run can also take a lease of its own when it is started without one, and is then treated as though the lease had been handed to it.
 
@@ -78,6 +79,7 @@ It offers the playbooks that configure an application type the environment holds
 A run can be limited to some of the environment's machines.
 The limit is picked from the environment's machines and the Ansible groups a run puts them in, or typed as an Ansible host pattern, and the machines it matches are shown as it is typed.
 Work cannot be started under a limit that matches no member, or a pattern Canopy cannot evaluate, and the limit says which.
+A pattern Canopy cannot evaluate is refused wherever it sits in the limit, including after an exclusion or intersection mark, rather than matching nothing.
 A run can be given tags to run and tags to skip, picked from those the catalogue lists for the playbook.
 Any further arguments for the playbook are typed as they would be on the command line.
 Tags and further arguments are collapsed until asked for, leaving the limit, which most runs use, the room a list of long host names needs.

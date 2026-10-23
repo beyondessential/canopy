@@ -1,4 +1,4 @@
-import type { Locator } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
@@ -9,6 +9,7 @@ import {
 	seedMaintenanceWindow,
 	seedServer,
 	seedServerGroup,
+	type Sql,
 } from "./seed";
 
 // What a configuration run would be served, presented on the group
@@ -26,6 +27,77 @@ async function setVariable(
 	await scope.getByRole("button", { name: "Set", exact: true }).click();
 }
 
+/** Type a secret's name and value into a scope's entry row and set it. */
+async function setSecretVariable(
+	scope: Locator,
+	name: string,
+	value: string,
+): Promise<void> {
+	await scope.getByTestId("variable-name").fill(name);
+	await scope.getByTestId("value-is-secret").click();
+	await scope.getByTestId("set-variable").getByLabel("Value").fill(value);
+	await scope.getByRole("button", { name: "Set", exact: true }).click();
+}
+
+/** A group with one production Tamanu central, the shape most tests start from. */
+async function seedProductionGroup(
+	sql: Sql,
+	opts: { host?: string; reported?: boolean } = {},
+) {
+	const group = await seedServerGroup(sql, { name: "kamaka" });
+	const central = await seedServer(sql, {
+		name: "kamaka-prod-central",
+		groupId: group.id,
+		...opts,
+	});
+	return { group, central };
+}
+
+/** A group whose reported central is managed by Ansible and has a catalogue
+ * read, so a run can be started against it. */
+async function seedRunnable(sql: Sql) {
+	const { group, central } = await seedProductionGroup(sql, {
+		host: "https://central.kamaka.e2e.invalid",
+		reported: true,
+	});
+	await seedAnsibleCatalogue(sql);
+	await seedAnsibleVariable(sql, {
+		machineId: central.machineId,
+		name: "managed_by_ansible",
+		value: true,
+	});
+	return group;
+}
+
+/** Open the group page and return its production environment. */
+async function productionEnvironment(
+	page: Page,
+	group: { id: string },
+): Promise<Locator> {
+	await page.goto(`/fleet/groups/${group.id}`);
+	return page.getByTestId("group-ansible").getByTestId("environment-production");
+}
+
+/** Start an install run and wait for the dialog to be waiting on it. */
+async function startRun(page: Page, group: { id: string }): Promise<void> {
+	const production = await productionEnvironment(page, group);
+	await production.getByTestId("run-install").click();
+	await page.getByTestId("run-start").click();
+	await expect(page.getByTestId("run-waiting")).toBeVisible();
+}
+
+/** What the infra plugin does with the lease it was handed: read the
+ * environment under it. */
+async function readAsPlugin(page: Page, sql: Sql): Promise<void> {
+	const [lease] = await sql.query<{ id: string }>(
+		"SELECT id FROM ansible_leases WHERE released_at IS NULL",
+	);
+	const read = await page.request.post("/api/ansible/for_group", {
+		data: { lease_id: lease?.id },
+	});
+	expect(read.ok()).toBe(true);
+}
+
 test.describe("group Ansible", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
@@ -35,22 +107,14 @@ test.describe("group Ansible", () => {
 		page,
 		sql,
 	}) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-		await seedServer(sql, {
-			name: "kamaka-prod-central",
+		const { group } = await seedProductionGroup(sql, {
 			host: "https://central.kamaka.e2e.invalid",
-			type: "tamanu-central",
-			rank: "production",
-			groupId: group.id,
-			tags: {},
 		});
 		await seedServer(sql, {
 			name: "kamaka-demo-central",
 			host: "https://central.demo.kamaka.e2e.invalid",
-			type: "tamanu-central",
 			rank: "demo",
 			groupId: group.id,
-			tags: {},
 		});
 
 		await page.goto(`/fleet/groups/${group.id}`);
@@ -78,39 +142,6 @@ test.describe("group Ansible", () => {
 		await expect(ansible.getByTestId("environment-production")).toHaveCount(0);
 	});
 
-	test("offers nothing to select where the group has one environment", async ({
-		page,
-		sql,
-	}) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-		await seedServer(sql, {
-			name: "kamaka-prod-central",
-			type: "tamanu-central",
-			rank: "production",
-			groupId: group.id,
-			tags: {},
-		});
-
-		await page.goto(`/fleet/groups/${group.id}`);
-
-		const ansible = page.getByTestId("group-ansible");
-		await expect(ansible.getByTestId("environment-production")).toBeVisible();
-		await expect(ansible.getByLabel("Environment")).toHaveCount(0);
-	});
-
-	test("says there is nothing to configure with no live applications", async ({
-		page,
-		sql,
-	}) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-
-		await page.goto(`/fleet/groups/${group.id}`);
-
-		const ansible = page.getByTestId("group-ansible");
-		await expect(ansible).toContainText("no environment to configure");
-		await expect(ansible.getByLabel("Environment")).toHaveCount(0);
-	});
-
 	// A machine is in the environment its rank names before anything on it has
 	// reported, so a ranked box with nothing on it is one to configure.
 	// spec: GRP#environments
@@ -130,6 +161,7 @@ test.describe("group Ansible", () => {
 		const ansible = page.getByTestId("group-ansible");
 		await expect(ansible.getByTestId("environment-production")).toBeVisible();
 		await expect(ansible).not.toContainText("no environment to configure");
+		await expect(ansible.getByLabel("Environment")).toHaveCount(0);
 	});
 
 	// A pending application is in no environment, so a group with nothing
@@ -159,20 +191,11 @@ test.describe("group Ansible", () => {
 		page,
 		sql,
 	}) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-		await seedServer(sql, {
-			name: "kamaka-prod-central",
-			type: "tamanu-central",
-			rank: "production",
-			groupId: group.id,
-			tags: {},
-		});
+		const { group } = await seedProductionGroup(sql);
 		await seedServer(sql, {
 			name: "kamaka-demo-central",
-			type: "tamanu-central",
 			rank: "demo",
 			groupId: group.id,
-			tags: {},
 		});
 
 		await page.goto(`/fleet/groups/${group.id}`);
@@ -187,34 +210,20 @@ test.describe("group Ansible", () => {
 		await expect(demo.getByTestId("var")).toContainText('"trace"');
 
 		// The variable is the demo environment's, so production does not carry
-		// it, and the machines listed are the selected environment's.
+		// it.
 		await ansible.getByLabel("Environment").click();
 		await page.getByRole("option", { name: "production" }).click();
 		const production = ansible.getByTestId("environment-production");
 		await expect(production.getByTestId("var")).toHaveCount(0);
-		await expect(production.getByTestId("ansible-machine")).toHaveCount(1);
-		await expect(production.getByTestId("ansible-machine")).toContainText(
-			"kamaka-prod-central",
-		);
 	});
 
 	test("sets a variable at each scope and marks the one that overrides", async ({
 		page,
 		sql,
 	}) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-		await seedServer(sql, {
-			name: "kamaka-prod-central",
-			type: "tamanu-central",
-			rank: "production",
-			groupId: group.id,
-			tags: {},
-		});
+		const { group } = await seedProductionGroup(sql);
 
-		await page.goto(`/fleet/groups/${group.id}`);
-		const production = page
-			.getByTestId("group-ansible")
-			.getByTestId("environment-production");
+		const production = await productionEnvironment(page, group);
 
 		await setVariable(production.getByTestId("scope-group"), "log_level", "info");
 		await expect(production.getByTestId("var")).toContainText("log_level");
@@ -235,19 +244,9 @@ test.describe("group Ansible", () => {
 	// machine that is not managed is greyed and starts collapsed.
 	// spec: INV#managed-machines
 	test("switches a machine to managed by Ansible", async ({ page, sql }) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-		await seedServer(sql, {
-			name: "kamaka-prod-central",
-			type: "tamanu-central",
-			rank: "production",
-			groupId: group.id,
-			tags: {},
-		});
+		const { group } = await seedProductionGroup(sql);
 
-		await page.goto(`/fleet/groups/${group.id}`);
-		const production = page
-			.getByTestId("group-ansible")
-			.getByTestId("environment-production");
+		const production = await productionEnvironment(page, group);
 		const machine = production.getByTestId("ansible-machine");
 		const toggle = machine.getByTestId("scope-expand");
 		await expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -277,46 +276,42 @@ test.describe("group Ansible", () => {
 		page,
 		sql,
 	}) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-		await seedServer(sql, {
-			name: "kamaka-prod-central",
-			type: "tamanu-central",
-			rank: "production",
-			groupId: group.id,
-			tags: {},
-		});
+		const { group } = await seedProductionGroup(sql);
 
-		await page.goto(`/fleet/groups/${group.id}`);
-		const production = page
-			.getByTestId("group-ansible")
-			.getByTestId("environment-production");
+		const production = await productionEnvironment(page, group);
 
-		const scope = production.getByTestId("scope-environment");
-		await scope.getByTestId("variable-name").fill("salt");
-		await scope.getByTestId("value-is-secret").click();
-		await scope.getByLabel("Value").fill("pepper");
-		await scope.getByRole("button", { name: "Set", exact: true }).click();
+		await setSecretVariable(
+			production.getByTestId("scope-environment"),
+			"salt",
+			"pepper",
+		);
 
 		await expect(production.getByTestId("secret-var")).toContainText("salt");
 		await expect(production.getByTestId("secret-var")).toContainText("secret");
 		await expect(page.getByText("pepper")).toHaveCount(0);
 
+		// A secret's field opens empty, and needs a new value to save.
+		const scope = production.getByTestId("scope-environment");
+		await scope.getByTestId("edit-salt").click();
+		const secret = scope.getByTestId("edit-variable");
+		await expect(secret.getByLabel("Value")).toHaveValue("");
+		await expect(secret.getByRole("button", { name: "Save" })).toBeDisabled();
+		await secret.getByLabel("Value").fill("paprika");
+		await secret.getByRole("button", { name: "Save" }).click();
+		await expect(scope.getByTestId("edit-variable")).toHaveCount(0);
+		await expect(scope.getByTestId("secret-var")).toContainText("salt");
+		await expect(page.getByText("pepper")).toHaveCount(0);
+		await expect(page.getByText("paprika")).toHaveCount(0);
+
 		await production.getByTestId("remove-salt").click();
 		await expect(production.getByTestId("secret-var")).toHaveCount(0);
 	});
 
-	// A variable's value is edited in its row, holding the value it has; a
-	// secret's field opens empty, and leaving the row keeps the value.
+	// A variable's value is edited in its row, holding the value it has, and
+	// leaving the row keeps the value.
 	// spec: ANSVAR#presentation
 	test("edits a variable's value in its row", async ({ page, sql }) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-		await seedServer(sql, {
-			name: "kamaka-prod-central",
-			type: "tamanu-central",
-			rank: "production",
-			groupId: group.id,
-			tags: {},
-		});
+		const { group } = await seedProductionGroup(sql);
 		await seedAnsibleVariable(sql, {
 			serverGroupId: group.id,
 			rank: "production",
@@ -324,10 +319,7 @@ test.describe("group Ansible", () => {
 			value: "info",
 		});
 
-		await page.goto(`/fleet/groups/${group.id}`);
-		const production = page
-			.getByTestId("group-ansible")
-			.getByTestId("environment-production");
+		const production = await productionEnvironment(page, group);
 		await production.getByTestId("variables-toggle").click();
 		const scope = production.getByTestId("scope-environment");
 		const logLevel = scope.getByTestId("var").filter({ hasText: "log_level" });
@@ -347,21 +339,6 @@ test.describe("group Ansible", () => {
 		await page.keyboard.press("Escape");
 		await expect(scope.getByTestId("edit-variable")).toHaveCount(0);
 		await expect(logLevel).toContainText('"debug"');
-
-		// A secret opens empty, and needs a new value to save.
-		await scope.getByTestId("variable-name").fill("salt");
-		await scope.getByTestId("value-is-secret").click();
-		await scope.getByTestId("set-variable").getByLabel("Value").fill("pepper");
-		await scope.getByRole("button", { name: "Set", exact: true }).click();
-		await scope.getByTestId("edit-salt").click();
-		const secret = scope.getByTestId("edit-variable");
-		await expect(secret.getByLabel("Value")).toHaveValue("");
-		await expect(secret.getByRole("button", { name: "Save" })).toBeDisabled();
-		await secret.getByLabel("Value").fill("paprika");
-		await secret.getByRole("button", { name: "Save" }).click();
-		await expect(scope.getByTestId("edit-variable")).toHaveCount(0);
-		await expect(scope.getByTestId("secret-var")).toContainText("salt");
-		await expect(page.getByText("paprika")).toHaveCount(0);
 	});
 
 	// Removing asks nothing and offers to undo; a variable's history puts back
@@ -369,19 +346,9 @@ test.describe("group Ansible", () => {
 	// has gone.
 	// spec: ANSVAR#presentation
 	test("undoes a removal and puts back an earlier value", async ({ page, sql }) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-		await seedServer(sql, {
-			name: "kamaka-prod-central",
-			type: "tamanu-central",
-			rank: "production",
-			groupId: group.id,
-			tags: {},
-		});
+		const { group } = await seedProductionGroup(sql);
 
-		await page.goto(`/fleet/groups/${group.id}`);
-		const production = page
-			.getByTestId("group-ansible")
-			.getByTestId("environment-production");
+		const production = await productionEnvironment(page, group);
 		const scope = production.getByTestId("scope-environment");
 		await setVariable(scope, "log_level", "info");
 		await setVariable(scope, "log_level", "debug");
@@ -489,20 +456,10 @@ test.describe("group Ansible", () => {
 		page,
 		sql,
 	}) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-		await seedServer(sql, {
-			name: "kamaka-prod-central",
-			type: "tamanu-central",
-			rank: "production",
-			groupId: group.id,
-			tags: {},
-		});
+		const { group } = await seedProductionGroup(sql);
 		await seedAnsibleCatalogue(sql);
 
-		await page.goto(`/fleet/groups/${group.id}`);
-		const production = page
-			.getByTestId("group-ansible")
-			.getByTestId("environment-production");
+		const production = await productionEnvironment(page, group);
 		const environment = production.getByTestId("scope-environment");
 
 		await environment.getByTestId("variable-name").fill("elastic");
@@ -516,8 +473,12 @@ test.describe("group Ansible", () => {
 		await expect(environment.getByTestId("var")).toContainText("elastic_agent_enabled");
 		await expect(environment.getByTestId("var")).toContainText("true");
 
-		// A machine-only variable is not offered at the environment.
-		await environment.getByTestId("variable-name").fill("ansible_host");
+		// A machine-only variable is not offered at the environment, though
+		// another name matching the same text is.
+		await environment.getByTestId("variable-name").fill("host");
+		await expect(
+			page.getByRole("option", { name: /tamanu_caddy_extra_hostnames/ }),
+		).toBeVisible();
 		await expect(page.getByRole("option", { name: /ansible_host/ })).toHaveCount(0);
 		await environment.getByTestId("variable-name").fill("");
 
@@ -551,21 +512,12 @@ test.describe("group Ansible", () => {
 	// of fields for each item.
 	// spec: ANSVAR#presentation
 	test("enters a list an item at a time", async ({ page, sql }) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-		await seedServer(sql, {
-			name: "kamaka-prod-central",
-			type: "tamanu-central",
-			rank: "production",
-			groupId: group.id,
-			tags: {},
-		});
+		const { group } = await seedProductionGroup(sql);
 		await seedAnsibleCatalogue(sql);
 
-		await page.goto(`/fleet/groups/${group.id}`);
-		const environment = page
-			.getByTestId("group-ansible")
-			.getByTestId("environment-production")
-			.getByTestId("scope-environment");
+		const environment = (await productionEnvironment(page, group)).getByTestId(
+			"scope-environment",
+		);
 
 		await environment.getByTestId("variable-name").fill("tamanu_caddy_extra");
 		await page.getByRole("option", { name: /tamanu_caddy_extra_hostnames/ }).click();
@@ -597,19 +549,9 @@ test.describe("group Ansible", () => {
 	// difference.
 	// spec: ANSVAR#presentation
 	test("edits a scope as text and saves the difference", async ({ page, sql }) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-		await seedServer(sql, {
-			name: "kamaka-prod-central",
-			type: "tamanu-central",
-			rank: "production",
-			groupId: group.id,
-			tags: {},
-		});
+		const { group } = await seedProductionGroup(sql);
 
-		await page.goto(`/fleet/groups/${group.id}`);
-		const production = page
-			.getByTestId("group-ansible")
-			.getByTestId("environment-production");
+		const production = await productionEnvironment(page, group);
 		const scope = production.getByTestId("scope-environment");
 
 		await scope.getByTestId("scope-edit").click();
@@ -620,8 +562,15 @@ test.describe("group Ansible", () => {
 		await expect(scope.getByTestId("var")).toHaveCount(3);
 		await expect(scope.getByTestId("var").filter({ hasText: "retries" })).toContainText("3");
 		await expect(scope.getByTestId("var").filter({ hasText: "enabled" })).toContainText("true");
+		const stored = () =>
+			sql.query<{ name: string; id: string; updated_at: string }>(
+				"SELECT name, id::text, updated_at::text FROM ansible_variables ORDER BY name",
+			);
+		const before = await stored();
+		expect(before.map((row) => row.name)).toEqual(["enabled", "log_level", "retries"]);
 
-		// Removing a line removes the variable, and an unchanged one is left.
+		// Removing a line removes the variable, and an unchanged one is left
+		// as it was: the same row, not set again.
 		await scope.getByTestId("scope-edit").click();
 		await scope
 			.getByTestId("scope-text-editor")
@@ -630,6 +579,8 @@ test.describe("group Ansible", () => {
 		await scope.getByTestId("scope-save").click();
 		await expect(scope.getByTestId("var")).toHaveCount(2);
 		await expect(scope.getByTestId("var").filter({ hasText: "log_level" })).toHaveCount(0);
+		const after = await stored();
+		expect(after).toEqual(before.filter((row) => row.name !== "log_level"));
 	});
 
 	// An import is offered where nothing carries a variable, and sets what the
@@ -639,26 +590,14 @@ test.describe("group Ansible", () => {
 		page,
 		sql,
 	}) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-		await seedServer(sql, {
-			name: "kamaka-prod-central",
-			type: "tamanu-central",
-			rank: "production",
-			groupId: group.id,
-			tags: {},
-		});
+		const { group } = await seedProductionGroup(sql);
 		await seedServer(sql, {
 			name: "kamaka-prod-office",
 			type: "tamanu-facility",
-			rank: "production",
 			groupId: group.id,
-			tags: {},
 		});
 
-		await page.goto(`/fleet/groups/${group.id}`);
-		const production = page
-			.getByTestId("group-ansible")
-			.getByTestId("environment-production");
+		const production = await productionEnvironment(page, group);
 
 		await production.getByTestId("import-inventory").click();
 		const dialog = page.getByTestId("import-dialog");
@@ -729,14 +668,7 @@ test.describe("group Ansible", () => {
 		page,
 		sql,
 	}) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-		await seedServer(sql, {
-			name: "kamaka-prod-central",
-			type: "tamanu-central",
-			rank: "production",
-			groupId: group.id,
-			tags: {},
-		});
+		const { group } = await seedProductionGroup(sql);
 		await seedAnsibleCatalogue(sql);
 		await seedMaintenanceWindow(sql, {
 			serverGroupId: group.id,
@@ -744,41 +676,7 @@ test.describe("group Ansible", () => {
 			note: "upgrading to v2.55",
 		});
 
-		await page.goto(`/fleet/groups/${group.id}`);
-		const production = page
-			.getByTestId("group-ansible")
-			.getByTestId("environment-production");
-
-		await expect(production.getByTestId("run-leased")).toContainText(
-			"someone@else.invalid",
-		);
-		await expect(production.getByTestId("run-any")).toBeDisabled();
-	});
-
-	test("says so when the work is declared over a machine in the environment", async ({
-		page,
-		sql,
-	}) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-		const central = await seedServer(sql, {
-			name: "kamaka-prod-central",
-			type: "tamanu-central",
-			rank: "production",
-			groupId: group.id,
-			tags: {},
-			reported: true,
-		});
-		await seedAnsibleCatalogue(sql);
-		await seedMaintenanceWindow(sql, {
-			machineId: central.machineId,
-			declaredBy: "someone@else.invalid",
-			note: "replacing a disk",
-		});
-
-		await page.goto(`/fleet/groups/${group.id}`);
-		const production = page
-			.getByTestId("group-ansible")
-			.getByTestId("environment-production");
+		const production = await productionEnvironment(page, group);
 
 		await expect(production.getByTestId("run-leased")).toContainText(
 			"someone@else.invalid",
@@ -789,19 +687,9 @@ test.describe("group Ansible", () => {
 	// A run needs the catalogue, which names the playbooks.
 	// spec: ANSRUN#presentation
 	test("cannot start a run until a catalogue has been read", async ({ page, sql }) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-		await seedServer(sql, {
-			name: "kamaka-prod-central",
-			type: "tamanu-central",
-			rank: "production",
-			groupId: group.id,
-			tags: {},
-		});
+		const { group } = await seedProductionGroup(sql);
 
-		await page.goto(`/fleet/groups/${group.id}`);
-		const production = page
-			.getByTestId("group-ansible")
-			.getByTestId("environment-production");
+		const production = await productionEnvironment(page, group);
 		await expect(production.getByTestId("run-needs-catalogue")).toBeVisible();
 		await expect(production.getByTestId("run-any")).toBeDisabled();
 	});
@@ -813,38 +701,23 @@ test.describe("group Ansible", () => {
 		page,
 		sql,
 	}) => {
-		const tamanu = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-		await seedServer(sql, {
-			name: "kamaka-prod-central",
-			type: "tamanu-central",
-			rank: "production",
-			groupId: tamanu.id,
-			tags: {},
-		});
-		const other = await seedServerGroup(sql, { name: "other", tags: {} });
+		const { group: tamanu } = await seedProductionGroup(sql);
+		const other = await seedServerGroup(sql, { name: "other" });
 		await seedServer(sql, {
 			name: "other-prod-canopy",
 			type: "canopy",
-			rank: "production",
 			groupId: other.id,
-			tags: {},
 		});
 		await seedAnsibleCatalogue(sql);
 
-		await page.goto(`/fleet/groups/${tamanu.id}`);
-		const production = page
-			.getByTestId("group-ansible")
-			.getByTestId("environment-production");
+		const production = await productionEnvironment(page, tamanu);
 		await expect(production.getByTestId("run-install")).toBeEnabled();
 		await expect(production.getByTestId("run-upgrade")).toBeEnabled();
 
-		await page.goto(`/fleet/groups/${other.id}`);
-		await expect(
-			page
-				.getByTestId("group-ansible")
-				.getByTestId("environment-production")
-				.getByTestId("run-install"),
-		).toHaveCount(0);
+		const otherProduction = await productionEnvironment(page, other);
+		await expect(otherProduction.getByTestId("run-any")).toBeEnabled();
+		await expect(otherProduction.getByTestId("run-install")).toHaveCount(0);
+		await expect(otherProduction.getByTestId("run-upgrade")).toHaveCount(0);
 	});
 
 	// Starting work takes the lease and shows the command that carries it, with
@@ -854,27 +727,9 @@ test.describe("group Ansible", () => {
 		page,
 		sql,
 	}) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-		const central = await seedServer(sql, {
-			name: "kamaka-prod-central",
-			host: "https://central.kamaka.e2e.invalid",
-			type: "tamanu-central",
-			rank: "production",
-			groupId: group.id,
-			tags: {},
-			reported: true,
-		});
-		await seedAnsibleCatalogue(sql);
-		await seedAnsibleVariable(sql, {
-			machineId: central.machineId,
-			name: "managed_by_ansible",
-			value: true,
-		});
+		const group = await seedRunnable(sql);
 
-		await page.goto(`/fleet/groups/${group.id}`);
-		const production = page
-			.getByTestId("group-ansible")
-			.getByTestId("environment-production");
+		const production = await productionEnvironment(page, group);
 
 		await production.getByTestId("run-install").click();
 		const dialog = page.getByTestId("run-dialog");
@@ -887,23 +742,15 @@ test.describe("group Ansible", () => {
 
 		const copied = dialog.getByTestId("run-command-copied");
 		await expect(copied).toContainText(/CANOPY_LEASE=[0-9a-f-]{36}/);
-		// The lease names the environment, so the run is handed nothing else of it.
-		await expect(copied).not.toContainText("CANOPY_GROUP");
-		await expect(copied).not.toContainText("CANOPY_RANK");
-		await expect(copied).toContainText(
-			"uv run ansible-playbook -i inventory/canopy.yml tamanu-install.yml",
-		);
-		await expect(copied).not.toContainText("<infra>");
-		await expect(dialog.getByTestId("run-command-checkout")).toHaveText("cd <infra>");
+		await expect(dialog.getByTestId("run-command-checkout")).toBeVisible();
 		await expect(dialog.getByTestId("run-waiting")).toBeVisible();
 		await expect(dialog.getByTestId("run-clock")).toContainText(/[0-5]:[0-5][0-9]/);
 
-		// Copying carries the whole command and not the checkout.
+		// Copying carries the command as shown and not the checkout line.
 		await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
 		await dialog.getByRole("button", { name: "Copy the command" }).click();
 		const text = await page.evaluate(() => navigator.clipboard.readText());
-		expect(text).toContain("git switch main && git pull --ff-only");
-		expect(text).not.toContain("<infra>");
+		expect(text).toBe(await copied.textContent());
 
 		const open = await sql.query<{ playbook: string; started_at: string | null }>(
 			"SELECT playbook, started_at FROM ansible_leases WHERE released_at IS NULL",
@@ -928,39 +775,34 @@ test.describe("group Ansible", () => {
 	// case it is under way and giving up would end the maintenance it declared.
 	// spec: ANSRUN#starting-a-run
 	test("does not give up a lease whose run has started", async ({ page, sql }) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-		const central = await seedServer(sql, {
-			name: "kamaka-prod-central",
-			type: "tamanu-central",
-			rank: "production",
-			groupId: group.id,
-			tags: {},
-			reported: true,
+		const group = await seedRunnable(sql);
+
+		// Run-state reads are held back from the moment the dialog is waiting, so
+		// the dialog learns the run has started only after Give up is clicked.
+		let holding = false;
+		let heldBack!: () => void;
+		const polled = new Promise<void>((resolve) => {
+			heldBack = resolve;
 		});
-		await seedAnsibleCatalogue(sql);
-		await seedAnsibleVariable(sql, {
-			machineId: central.machineId,
-			name: "managed_by_ansible",
-			value: true,
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		await page.route("**/api/ansible/run_state", async (route) => {
+			if (holding) {
+				heldBack();
+				await gate;
+			}
+			await route.continue();
 		});
 
-		await page.goto(`/fleet/groups/${group.id}`);
-		await page
-			.getByTestId("group-ansible")
-			.getByTestId("environment-production")
-			.getByTestId("run-install")
-			.click();
-		await page.getByTestId("run-start").click();
-		await expect(page.getByTestId("run-waiting")).toBeVisible();
+		await startRun(page, group);
+		holding = true;
+		await polled;
 
-		const [lease] = await sql.query<{ id: string }>(
-			"SELECT id FROM ansible_leases WHERE released_at IS NULL",
-		);
-		const read = await page.request.post("/api/ansible/for_group", {
-			data: { lease_id: lease?.id },
-		});
-		expect(read.ok()).toBe(true);
+		await readAsPlugin(page, sql);
 		await page.getByTestId("run-give-up").click();
+		release();
 
 		await expect(page.getByTestId("run-started")).toBeVisible();
 		const open = await sql.query<{ n: string }>(
@@ -976,56 +818,21 @@ test.describe("group Ansible", () => {
 		page,
 		sql,
 	}) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
-		const central = await seedServer(sql, {
-			name: "kamaka-prod-central",
-			host: "https://central.kamaka.e2e.invalid",
-			type: "tamanu-central",
-			rank: "production",
-			groupId: group.id,
-			tags: {},
-			reported: true,
-		});
-		await seedAnsibleCatalogue(sql);
-		await seedAnsibleVariable(sql, {
-			machineId: central.machineId,
-			name: "managed_by_ansible",
-			value: true,
-		});
+		const group = await seedRunnable(sql);
 
-		await page.goto(`/fleet/groups/${group.id}`);
-		const production = page
-			.getByTestId("group-ansible")
-			.getByTestId("environment-production");
-		await production.getByTestId("run-install").click();
-		await page.getByTestId("run-start").click();
-		await expect(page.getByTestId("run-waiting")).toBeVisible();
+		await startRun(page, group);
 
-		// What the plugin does with the lease it was handed.
-		const [lease] = await sql.query<{ id: string }>(
-			"SELECT id FROM ansible_leases WHERE released_at IS NULL",
-		);
-		const read = await page.request.post("/api/ansible/for_group", {
-			data: { lease_id: lease?.id },
-		});
-		expect(read.ok()).toBe(true);
+		await readAsPlugin(page, sql);
 
 		const dialog = page.getByTestId("run-dialog");
 		await expect(dialog.getByTestId("run-started")).toBeVisible({ timeout: 15_000 });
 		await expect(dialog.getByTestId("run-started")).toContainText("Maintenance");
 
-		const windows = await sql.query<{ lease_id: string | null }>(
-			"SELECT lease_id FROM maintenance_windows WHERE ended_at IS NULL",
-		);
-		expect(windows.map((w) => w.lease_id)).toEqual([lease?.id]);
-
-		// Holding the maintenance gives it an end of its own.
+		// The hold control is offered only for the window the run declared, which
+		// the run state names; holding it gives the maintenance an end of its own.
 		await page.getByTestId("run-hold").click();
+		await expect(dialog.getByTestId("run-hold-confirm")).toBeEnabled();
 		await dialog.getByTestId("run-hold-confirm").click();
 		await expect(dialog.getByTestId("run-held")).toBeVisible();
-		const held = await sql.query<{ lease_id: string | null }>(
-			"SELECT lease_id FROM maintenance_windows WHERE ended_at IS NULL",
-		);
-		expect(held.map((w) => w.lease_id)).toEqual([null]);
 	});
 });

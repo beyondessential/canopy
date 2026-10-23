@@ -233,18 +233,6 @@ async fn entries_are_found_by_record_and_detail_and_counted_by_a_detail_value() 
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_job_records_as_canopy_through_the_same_recorder() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		audit::record(&mut conn, &Actor::canopy("sweeper"), &lifted())
-			.await
-			.unwrap();
-		let entries = find(&mut conn).await;
-		assert!(matches!(&entries[0].actor, Actor::Canopy { job } if job == "sweeper"));
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn every_action_in_the_catalogue_is_unique_and_labelled() {
 	let mut names: Vec<_> = audit::CATALOGUE.to_vec();
 	names.sort();

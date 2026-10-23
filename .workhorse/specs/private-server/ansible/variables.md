@@ -46,6 +46,7 @@ It is a JSON Schema of an environment's variables, each with its type, its defau
 The same file lists the playbooks a run can start, each with the intent it is run with, the application types it configures, and the tags it takes (see [ANSRUN](runs.md)).
 Canopy reads it from the main branch, and keeps using the last copy that read as a catalogue while the repository cannot be reached or publishes one that does not.
 Either lasting raises a self-alert (see [SELF](../self-alerts.md)).
+A repository that cannot be reached does not replace a verdict that the copy last published does not read: that verdict, and its self-alert, stand until a good read.
 
 A variable the catalogue describes is held to it.
 Its value must match its type, it can be set only at the scopes the catalogue allows, and it is secret exactly when the catalogue says so.

@@ -53,6 +53,8 @@ pub enum RunIntent {
 	Upgrade,
 }
 
+commons_types::all_variants!(RunIntent: Configure, Upgrade);
+
 impl Display for RunIntent {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
@@ -114,6 +116,8 @@ pub enum ReleaseReason {
 	/// It ran out without being extended.
 	Expired,
 }
+
+commons_types::all_variants!(ReleaseReason: Released, TakenOver, Unstarted, Expired);
 
 impl Display for ReleaseReason {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -529,7 +533,7 @@ impl AnsibleLease {
 		id: Uuid,
 		by: Option<&str>,
 	) -> Result<bool> {
-		Self::release_inner(db, id, by, ReleaseReason::Released, true, Guard::Unread).await
+		Self::release_inner(db, id, by, ReleaseReason::Unstarted, true, Guard::Unread).await
 	}
 
 	async fn release_inner(

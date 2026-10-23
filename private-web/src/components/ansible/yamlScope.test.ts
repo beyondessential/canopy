@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CatalogueView } from "../../types";
+import names from "./fixtures/variable-names.json";
 import { checkScope, diffScope, formatScope, parseScope } from "./yamlScope";
 
 const catalogue = {
@@ -68,23 +69,17 @@ describe("formatScope", () => {
 });
 
 describe("parseScope", () => {
-	it("reads values as an inventory file would", () => {
-		const { entries, problems } = parseScope("a: yes\nb: no\nc: 3\nd: x y\n");
-		expect(problems).toEqual([]);
-		expect(entries.map((e) => [e.name, e.value])).toEqual([
-			["a", true],
-			["b", false],
-			["c", 3],
-			["d", "x y"],
-		]);
-	});
-
 	it("reads a scalar as PyYAML does, at any depth, so it is stored as an import would store it", () => {
-		const { entries } = parseScope("a: 1:30\nb: 0644\nc:\n  d: [1:30, yes, 1e3]\n");
+		const { entries, problems } = parseScope(
+			"a: 1:30\nb: 0644\nc: 3\nd: x y\ne:\n  f: [1:30, yes, 1e3]\n",
+		);
+		expect(problems).toEqual([]);
 		expect(entries.map((e) => [e.name, e.value])).toEqual([
 			["a", 90],
 			["b", 420],
-			["c", { d: [90, true, "1e3"] }],
+			["c", 3],
+			["d", "x y"],
+			["e", { f: [90, true, "1e3"] }],
 		]);
 	});
 
@@ -168,17 +163,20 @@ describe("checkScope", () => {
 		expect(check("ansible_host: h\n", "machine")).toEqual([]);
 	});
 
-	it("refuses a name that is not usable and a secret with nothing to keep", () => {
-		expect(check("'bad name': 1\n")[0].message).toContain("not a usable variable name");
+	it("refuses a secret with nothing to keep", () => {
 		expect(check("other: !secret\n")[0].message).toContain("no secret value to keep");
 	});
 
-	it("refuses the names the server refuses", () => {
-		expect(check(".: 1\n")[0].message).toContain("not a usable variable name");
-		expect(check("..: 1\n")[0].message).toContain("not a usable variable name");
-		expect(check(`${"a".repeat(254)}: 1\n`)[0].message).toContain("not a usable variable name");
-		expect(check(`${"a".repeat(253)}: 1\n`)).toEqual([]);
-	});
+	it.each(names as [string, boolean][])(
+		"holds the name %j to what the server holds it to (usable: %s)",
+		(name, usable) => {
+			const out = check(`${JSON.stringify(name)}: 1\n`);
+			expect(out.filter((p) => p.message.includes("not a usable variable name"))).toHaveLength(
+				usable ? 0 : 1,
+			);
+			if (usable) expect(out).toEqual([]);
+		},
+	);
 
 	it("refuses managed_by_ansible, which the machine's switch sets", () => {
 		expect(check("managed_by_ansible: true\n", "machine")[0].message).toContain(

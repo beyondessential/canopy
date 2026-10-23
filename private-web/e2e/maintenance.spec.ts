@@ -25,53 +25,6 @@ test.describe("maintenance windows", () => {
 		await resetSeededTables(sql);
 	});
 
-	test("a server under a window says so, and its health is marked", async ({
-		page,
-		sql,
-	}) => {
-		const group = await seedServerGroup(sql, { name: "under-the-knife" });
-		const server = await seedServer(sql, {
-			name: "being-upgraded",
-			groupId: group.id,
-		});
-		await seedStatus(sql, { serverId: server.id, healthy: true });
-		await seedMaintenanceWindow(sql, {
-			machineId: server.machineId,
-			note: "Upgrading to 2.62",
-			declaredBy: "daniel@bes.au",
-		});
-
-		await page.goto(`/fleet/applications/${server.id}`);
-		const section = page.getByTestId("maintenance-section");
-		await expect(section).toContainText("Under maintenance, ending");
-		await expect(section).toContainText("Upgrading to 2.62");
-		await expect(page.getByTestId("maintenance-marker")).toContainText(
-			"Under maintenance",
-		);
-	});
-
-	test("declaring from the server page opens a window", async ({
-		page,
-		sql,
-	}) => {
-		const group = await seedServerGroup(sql, { name: "about-to-move" });
-		const server = await seedServer(sql, {
-			name: "going-down",
-			groupId: group.id,
-		});
-		await seedStatus(sql, { serverId: server.id, healthy: true });
-
-		await page.goto(`/fleet/applications/${server.id}`);
-		await page.getByRole("button", { name: "Declare maintenance" }).click();
-		await page.getByLabel("What's being done").fill("Swapping the disk");
-		await page.getByRole("button", { name: "Declare", exact: true }).click();
-
-		await expect(
-			page.getByTestId("maintenance-section"),
-		).toContainText("Swapping the disk");
-		expect(await openWindows(sql)).toBe(1);
-	});
-
 	// A window over several machines is each machine's own, and the group
 	// presents it among its environments' windows rather than as its own.
 	// spec: MNT#presentation
@@ -101,21 +54,6 @@ test.describe("maintenance windows", () => {
 		await expect(own.getByTestId("window-covers")).toContainText("fj-b");
 	});
 
-	test("lifting ends the window", async ({ page, sql }) => {
-		const group = await seedServerGroup(sql, { name: "back-already" });
-		const server = await seedServer(sql, { name: "done", groupId: group.id });
-		await seedStatus(sql, { serverId: server.id, healthy: true });
-		await seedMaintenanceWindow(sql, { applicationId: server.id, note: "Rebooting" });
-
-		await page.goto(`/fleet/applications/${server.id}`);
-		await page.getByRole("button", { name: "Lift" }).click();
-
-		await expect(
-			page.getByRole("button", { name: "Declare maintenance" }),
-		).toBeVisible();
-		expect(await openWindows(sql)).toBe(0);
-	});
-
 	test("an application under its box's window says so and points at the box", async ({
 		page,
 		sql,
@@ -134,12 +72,20 @@ test.describe("maintenance windows", () => {
 		await page.goto(`/fleet/applications/${server.id}`);
 		const covering = page.getByTestId("covering-machine-window");
 		// Named as the machine it is, so the target is not read as a sibling.
+		await expect(
+			covering,
+			"covering alert says the application is under maintenance",
+		).toContainText("Under maintenance, ending");
 		await expect(covering).toContainText("as part of the machine");
 		await expect(covering).toContainText("Patching the host");
 		await expect(covering.getByRole("link")).toHaveAttribute(
 			"href",
 			`/fleet/machines/${server.machineId}`,
 		);
+		await expect(
+			page.getByTestId("maintenance-marker"),
+			"the application's health chip carries the maintenance marker",
+		).toContainText("Under maintenance");
 		// The window is the box's, so it is amended and lifted there.
 		await expect(page.getByRole("button", { name: "Lift" })).toHaveCount(0);
 	});
@@ -396,40 +342,37 @@ test.describe("maintenance windows", () => {
 			serverGroupId: group.id,
 			rank: "production",
 		});
-
-		await page.goto("/maintenance");
-		const rows = page.getByRole("row", { name: /kamaka/ });
-		await expect(rows).toHaveCount(2);
-		await expect(rows.filter({ hasText: "group" })).toHaveCount(1);
-		const environment = rows.filter({ hasText: "environment" });
-		await expect(environment).toHaveCount(1);
-		await expect(environment).toContainText("production");
-	});
-
-	/// A window over a box names the box, and the name is the way to it: the
-	/// fleet view is where an operator finds work in progress they did not
-	/// declare, so every target it lists reaches its own page.
-	/// spec: MNT#presentation
-	test("the maintenance page links a machine target to its detail page", async ({
-		page,
-		sql,
-	}) => {
-		const group = await seedServerGroup(sql, { name: "island-group" });
-		const server = await seedServer(sql, {
+		const islandGroup = await seedServerGroup(sql, { name: "island-group" });
+		const island = await seedServer(sql, {
 			name: "island-box",
-			groupId: group.id,
+			groupId: islandGroup.id,
 		});
 		await seedMaintenanceWindow(sql, {
-			machineId: server.machineId,
+			machineId: island.machineId,
 			note: "Replacing the disk",
 		});
 
 		await page.goto("/maintenance");
-		const row = page.getByRole("row", { name: /island-box/ });
-		await expect(row).toContainText("Replacing the disk");
+		const rows = page.getByRole("row", { name: /kamaka/ });
+		await expect(rows, "the group's and the environment's rows").toHaveCount(2);
 		await expect(
-			row.getByRole("link", { name: /island-box/ }),
-		).toHaveAttribute("href", `/fleet/machines/${server.machineId}`);
+			rows.filter({ hasText: "group" }),
+			"one row is the group's own window",
+		).toHaveCount(1);
+		const environment = rows.filter({ hasText: "environment" });
+		await expect(environment, "one row is the environment's window").toHaveCount(1);
+		await expect(environment).toContainText("production");
+
+		// A window over a box names the box, and the name is the way to it: every
+		// target the fleet view lists reaches its own page.
+		const machine = page.getByRole("row", { name: /island-box/ });
+		await expect(machine, "the machine row carries its note").toContainText(
+			"Replacing the disk",
+		);
+		await expect(
+			machine.getByRole("link", { name: /island-box/ }),
+			"the machine row links to the machine's page",
+		).toHaveAttribute("href", `/fleet/machines/${island.machineId}`);
 	});
 
 	test("nothing under maintenance says so", async ({ page }) => {
@@ -437,43 +380,6 @@ test.describe("maintenance windows", () => {
 		await expect(
 			page.getByText("Nothing is under maintenance"),
 		).toBeVisible();
-	});
-
-	test("amending prefills the open window and keeps it the same window", async ({
-		page,
-		sql,
-	}) => {
-		const group = await seedServerGroup(sql, { name: "running-long" });
-		const server = await seedServer(sql, {
-			name: "not-done-yet",
-			groupId: group.id,
-		});
-		await seedStatus(sql, { serverId: server.id, healthy: true });
-		await seedMaintenanceWindow(sql, {
-			applicationId: server.id,
-			note: "Rebooting",
-		});
-
-		await page.goto(`/fleet/applications/${server.id}`);
-		await page.getByRole("button", { name: "Amend" }).click();
-		await expect(
-			page.getByRole("heading", { name: /Amend maintenance/ }),
-		).toBeVisible();
-		const note = page.getByLabel("What's being done");
-		await expect(note).toHaveValue("Rebooting");
-		await note.fill("Rebooting, running long");
-		await page.getByRole("button", { name: "Amend", exact: true }).click();
-
-		await expect(
-			page.getByTestId("maintenance-section"),
-		).toContainText("Rebooting, running long");
-		const rows = await sql.query<{ n: string; amended: string | null }>(
-			"SELECT COUNT(*) AS n, MAX(amended_at::text) AS amended \
-			 FROM maintenance_windows WHERE application_id = $1 AND ended_at IS NULL",
-			[server.id],
-		);
-		expect(Number(rows[0]!.n)).toBe(1);
-		expect(rows[0]!.amended).not.toBeNull();
 	});
 
 	test("an open incident offers the declaration over its target", async ({
@@ -813,6 +719,57 @@ test.describe("maintenance windows", () => {
 			.toEqual(["replacing the disk", true, true]);
 	});
 
+	test("an application's page declares, amends and lifts its own window", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "about-to-move" });
+		const server = await seedServer(sql, {
+			name: "going-down",
+			groupId: group.id,
+		});
+		await seedStatus(sql, { serverId: server.id, healthy: true });
+		const section = page.getByTestId("maintenance-section");
+
+		await page.goto(`/fleet/applications/${server.id}`);
+		await page.getByRole("button", { name: "Declare maintenance" }).click();
+		await page.getByLabel("What's being done").fill("Swapping the disk");
+		await page.getByRole("button", { name: "Declare", exact: true }).click();
+		await expect(section, "declared: the section shows the note").toContainText(
+			"Swapping the disk",
+		);
+		expect(await openWindows(sql), "declared: one window is open").toBe(1);
+
+		await page.getByRole("button", { name: "Amend" }).click();
+		await expect(
+			page.getByRole("heading", { name: /Amend maintenance/ }),
+			"amending: the dialog opens as an amendment",
+		).toBeVisible();
+		const note = page.getByLabel("What's being done");
+		await expect(note, "amending: the note is prefilled").toHaveValue(
+			"Swapping the disk",
+		);
+		await note.fill("Swapping the disk, running long");
+		await page.getByRole("button", { name: "Amend", exact: true }).click();
+		await expect(section, "amended: the section shows the new note").toContainText(
+			"Swapping the disk, running long",
+		);
+		const rows = await sql.query<{ n: string; amended: string | null }>(
+			"SELECT COUNT(*) AS n, MAX(amended_at::text) AS amended \
+			 FROM maintenance_windows WHERE application_id = $1 AND ended_at IS NULL",
+			[server.id],
+		);
+		expect(Number(rows[0]!.n), "amended: still the one open window").toBe(1);
+		expect(rows[0]!.amended, "amended: the window records the amendment").not.toBeNull();
+
+		await page.getByRole("button", { name: "Lift" }).click();
+		await expect(
+			page.getByRole("button", { name: "Declare maintenance" }),
+			"lifted: declaring is offered again",
+		).toBeVisible();
+		expect(await openWindows(sql), "lifted: no window is open").toBe(0);
+	});
+
 	/// spec: MNT#declaring
 	test("a machine's page offers maintenance at its head", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
@@ -1095,41 +1052,6 @@ test.describe("maintenance windows", () => {
 		await expect(page.getByTestId("environment-window")).toContainText("clone");
 	});
 
-	/// A window stops alerting rather than grading, so an operator working
-	/// through one watches the check they are fixing go green.
-	///
-	// spec: MNT#presentation
-	test("a check under a window keeps its result and says it raises nothing", async ({
-		page,
-		sql,
-	}) => {
-		const group = await seedServerGroup(sql, { name: "mid-cutover" });
-		const server = await seedServer(sql, {
-			name: "failing-on-purpose",
-			groupId: group.id,
-		});
-		await seedMaintenanceWindow(sql, {
-			machineId: server.machineId,
-			note: "Cutting over the database",
-		});
-		await seedStatus(sql, {
-			serverId: server.id,
-			healthy: false,
-			health: [
-				{ check: "database", healthy: false, message: "connection refused" },
-			],
-		});
-
-		await page.goto(`/fleet/applications/${server.id}`);
-		await expect(page.getByTestId("maintenance-marker")).toContainText(
-			"Under maintenance",
-		);
-		// The failure is graded and presented as it stands, so the operator
-		// can see the check they are working on.
-		await expect(page.getByText("connection refused")).toBeVisible();
-		await expect(page.getByText("Unhealthy")).toBeVisible();
-	});
-
 	/// An operator mid-cutover moves between four surfaces, and the property is
 	/// that each one carries the failure and the maintenance mark together: a
 	/// page showing only the failure reads as an alert nobody has answered, and
@@ -1197,5 +1119,22 @@ test.describe("maintenance windows", () => {
 			card.locator("[data-maintenance='holding'][aria-label]"),
 		).toHaveCount(1);
 		await expect(card.getByTestId("status-dot")).toHaveCount(2);
+
+		// The application itself: the window stops alerting rather than
+		// grading, so the operator watches the check they are fixing and the
+		// failure is presented as it stands beside the mark.
+		await page.goto(`/fleet/applications/${failing.id}`);
+		await expect(
+			page.getByTestId("maintenance-marker"),
+			"application page: the maintenance mark",
+		).toContainText("Under maintenance");
+		await expect(
+			page.getByText("connection refused"),
+			"application page: the failing check's message",
+		).toBeVisible();
+		await expect(
+			page.getByText("Unhealthy"),
+			"application page: the unhealthy chip",
+		).toBeVisible();
 	});
 });
