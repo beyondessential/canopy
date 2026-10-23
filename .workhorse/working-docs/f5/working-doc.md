@@ -4,7 +4,7 @@ status: draft
 
 # Test review process (F5 as test bed)
 
-F5 and its stack of PRs added 189 tests.
+F5 and its stack of PRs added 190 tests (as of `a476f366`).
 This doc records what we want from a test-quality review pass and loop, runs the process over F5's tests, and collects what worked, so the process can be turned into a repo skill.
 
 ## Why
@@ -75,14 +75,14 @@ A test counts as new only if its function or `test(...)` line is new; tests that
 | #666 | merged | `73c085a8^1..73c085a8` | 170 |
 | #670 | merged | `652be820^..46c077e2` | 3 |
 | #671 | merged | `a64d7ed5^..d7147f9e` | 15 |
-| #672 | open | `af82ff3c^..af82ff3c` | 1 |
+| #672 | open | `af82ff3c^..a476f366` | 2 |
 
-By level: 40 Rust unit (inline in `src/`), 89 Rust integration (`tests/it/`), 37 Vitest, 23 Playwright.
+By level: 40 Rust unit (inline in `src/`), 90 Rust integration (`tests/it/`), 37 Vitest, 23 Playwright.
 
 By file (added counts):
 
 - `crates/database/tests/it`: `ansible_catalogue.rs` 12, `ansible_leases.rs` 5, `ansible_variables.rs` 1, `maintenance_machine_sets.rs` 12, `maintenance_run_windows.rs` 13, `managed_by_ansible_migration.rs` 1
-- `crates/private-server/tests/it`: `ansible.rs` 5, `ansible_import.rs` 14, `ansible_runs.rs` 15, `ansible_variables.rs` 7, `maintenance_machines.rs` 4
+- `crates/private-server/tests/it`: `ansible.rs` 5, `ansible_import.rs` 14, `ansible_runs.rs` 15, `ansible_variables.rs` 8, `maintenance_machines.rs` 4
 - `crates/private-server/src/fns/ansible` (inline unit): `inventory_file.rs` 17, `hosts.rs` 7, `limit.rs` 7
 - `crates/jobs/src` (inline unit): `ansible/catalogue.rs` 4, `ansible/leases.rs` 2, `ansible/held.rs` 1, `backup/recovery_snapshot.rs` 2
 - `private-web/src/components`: `ansible/yamlScope.test.ts` 16, `ansible/schema.test.ts` 11, `ansible/pyyaml.test.ts` 4, `AnsibleRunDialog.test.ts` 5
@@ -91,11 +91,53 @@ By file (added counts):
 Renames in #666 are not new tests: five Rust tests changed their inventory vocabulary, and nine e2e tests moved from `inventory.spec.ts` to `ansible.spec.ts` under the same names.
 Two e2e tests from `inventory.spec.ts` were dropped.
 
+The open PR kept taking commits while the review ran, so re-derive the inventory against the current tip before each lens rather than trusting a saved count.
+
 Test names are not copied here; regenerate them from the diff ranges above when running a lens.
 
 ## Findings
 
 Filled in as the walkthrough runs. One subsection per round, per lens.
+
+### Round 1: lenses A and B over the Rust tests (130 tests)
+
+Run as three read-only agents split by area (database crate, private-server integration, inline unit and job tests), each given the lens definitions above and the diff ranges.
+Result: 25 of 130 flagged (4 delete, 6 rewrite, 15 merge into another test), 105 kept.
+Nothing applied yet; each item needs the user's accept or reject.
+
+Lens B (3 findings, all high confidence, two dependencies):
+
+- `jsonschema` validation: the type and range assertions (`"2222"` as a string, `70000` over a maximum, a missing `required` property) are the library's. Our choices are format validation being on, the `{name: value}` wrapping, the path-prefix stripping and the message shape.
+  - `database/tests/it/ansible_catalogue.rs`: `holds_a_value_to_its_type_and_format` (rewrite, drop the type and range rows), `names_where_in_a_structured_value_the_fault_is` (rewrite, drop the `missing` half)
+  - `private-server/tests/it/ansible_variables.rs`: `a_variable_the_catalogue_describes_is_held_to_it` (rewrite to what is ours: no catalogue means no check, secrecy mismatch both ways, an undescribed name stays free, a violation maps to 400; the rest duplicates the database tests)
+- `yaml-rust2`: `inventory_file.rs::refuses_what_is_not_an_inventory_naming_where` asserts the parser's own error text contains "line" (rewrite to `is_err`, unless the spec requires a position).
+  `ansible_import.rs::refuses_a_file_that_is_not_an_inventory` repeats the unit tests for the same inputs through the endpoint (delete, keep one assertion that a parse error maps to 400).
+
+Lens A, delete or rewrite:
+
+- `inventory_file.rs::reads_the_variables_under_all_and_on_each_host`: plain happy path, each value asserted in a more specific test (delete, medium confidence)
+- `inventory_file.rs::a_secret_field_inside_a_structured_value_is_carried_whole`: `parse` has no secrecy logic, so it only checks a nested mapping becomes JSON (delete; check for a `// spec:` annotation to move first)
+- `private-server/tests/it/ansible.rs::names_machines_apart_where_their_first_labels_match`: same shape as the `hosts.rs` unit test, wiring covered by `ansible_runs::names_what_a_run_acts_on_as_the_limit_preview_does` (delete; confirm every `host_names` call site derives the tailnet flag the same way)
+- `ansible_runs.rs::previews_the_machines_a_limit_matches`: re-tests the pattern language that `limit.rs` unit tests cover (rewrite to one pattern plus the response shape and error field)
+- `jobs/src/backup/recovery_snapshot.rs::notices_when_a_secret_last_changed`: tests a database-crate query from the jobs crate, and only one branch of it; the secret-variable branch is never exercised (rewrite: move to the database crate tests and add that case). This one raises coverage rather than cutting it.
+
+Lens A, merge into another test (15, all "same setup and same gate, one extra assertion"):
+
+- database: `ansible_leases::the_first_read_starts_it_once` into `keeps_the_windows_its_run_declared`; `ansible_catalogue::a_problem_before_any_good_read_leaves_no_catalogue` into `keeps_the_last_copy_that_read_when_a_later_attempt_does_not`; `maintenance_machine_sets::a_set_naming_a_member_refuses_a_take_by_another_operator` into `a_set_is_not_its_environments_own_window`
+- jobs: `leases.rs` `releases_a_lease_no_run_read_and_records_it_as_canopys_own` with `notices_a_lease_that_ran_out` (one database, both audit entries)
+- private-server: `ansible.rs::refuses_a_read_claiming_another_intent_than_the_leases` as a row in `ansible_runs::refuses_a_read_started_otherwise_than_the_lease_says`; `ansible_import.rs` three tests (`a_machine_already_managed…`, `a_group_wide_variable…`, `leaves_out_the_variables_a_run_sets…`) into their neighbours; `ansible_runs.rs` `a_limited_run_declares_maintenance…` and `serves_the_lease_it_is_read_under` into `a_lease_records_the_run_it_was_taken_for`, and `refuses_an_intent_that_disagrees_with_the_playbook` into the shared refusal helper; `ansible_variables.rs` `refuses_managed_by_ansible_outside_machine_scope` tabled with its sibling, `offers_the_catalogue_it_holds` and `a_scopes_history_holds_its_removed_variables…` folded into neighbouring tests
+
+Groupings the agents noticed for lens C (not analysed yet): `hosts.rs` (all 7 are members in, names or refusal out), `limit.rs` pattern cases, `inventory_file.rs` refusals and comment tests, the `take_lease` refusals and `check_claims` rows in `ansible_runs.rs`, import preview gates, the four variable-history tests, the three stub-driven `catalogue.rs` job tests.
+
+What round 1 showed about the process:
+
+- No test was the "mock everything for one tiny property" shape; these tests do not mock.
+  The over-building here is cost: a throwaway migrated database per small property.
+  Lens A's useful form is "fold this into the test that already has the setup", which is close to lens D.
+- Lens B was rare but decisive, and only for validation and parsing libraries.
+- Agents named tests by reading both levels; there is no cheap way to see which lower-level test covers a property. Coverage tooling would answer the "is anything lost" question directly.
+- Agents did not check `// spec:` annotations on tests. A deletion or merge must carry the annotation to the surviving test, or the spec loses its trace.
+- Three claims were inferred, not checked: `jsonschema` rejecting a bad hostname with format validation on, `ScanError`'s display always including the line, and the `host_names` tailnet flag. Verify before applying the related change.
 
 ## Signal to noise
 
@@ -103,8 +145,8 @@ For each lens, once run: how many findings, how many accepted, how many rejected
 
 | Lens | Findings | Accepted | Rejected | Verdict |
 |---|---|---|---|---|
-| A. Trivial or over-built | | | | |
-| B. Tests the dependency | | | | |
+| A. Trivial or over-built | 25 across Rust (4 delete, 6 rewrite, 15 merge) | | | Provisional: finds few truly trivial tests, mostly folds that blur into D |
+| B. Tests the dependency | 3 across Rust (jsonschema, yaml-rust2) | | | Provisional: rare, high confidence |
 | C. Incremental sprawl | | | | |
 | D. Open-ended consolidation | | | | |
 
