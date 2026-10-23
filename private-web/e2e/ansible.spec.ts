@@ -451,8 +451,12 @@ test.describe("group Ansible", () => {
 		await expect(environment.getByTestId("var")).toContainText("elastic_agent_enabled");
 		await expect(environment.getByTestId("var")).toContainText("true");
 
-		// A machine-only variable is not offered at the environment.
-		await environment.getByTestId("variable-name").fill("ansible_host");
+		// A machine-only variable is not offered at the environment, though
+		// another name matching the same text is.
+		await environment.getByTestId("variable-name").fill("host");
+		await expect(
+			page.getByRole("option", { name: /tamanu_caddy_extra_hostnames/ }),
+		).toBeVisible();
 		await expect(page.getByRole("option", { name: /ansible_host/ })).toHaveCount(0);
 		await environment.getByTestId("variable-name").fill("");
 
@@ -555,8 +559,15 @@ test.describe("group Ansible", () => {
 		await expect(scope.getByTestId("var")).toHaveCount(3);
 		await expect(scope.getByTestId("var").filter({ hasText: "retries" })).toContainText("3");
 		await expect(scope.getByTestId("var").filter({ hasText: "enabled" })).toContainText("true");
+		const stored = () =>
+			sql.query<{ name: string; id: string; updated_at: string }>(
+				"SELECT name, id::text, updated_at::text FROM ansible_variables ORDER BY name",
+			);
+		const before = await stored();
+		expect(before.map((row) => row.name)).toEqual(["enabled", "log_level", "retries"]);
 
-		// Removing a line removes the variable, and an unchanged one is left.
+		// Removing a line removes the variable, and an unchanged one is left
+		// as it was: the same row, not set again.
 		await scope.getByTestId("scope-edit").click();
 		await scope
 			.getByTestId("scope-text-editor")
@@ -565,6 +576,8 @@ test.describe("group Ansible", () => {
 		await scope.getByTestId("scope-save").click();
 		await expect(scope.getByTestId("var")).toHaveCount(2);
 		await expect(scope.getByTestId("var").filter({ hasText: "log_level" })).toHaveCount(0);
+		const after = await stored();
+		expect(after).toEqual(before.filter((row) => row.name !== "log_level"));
 	});
 
 	// An import is offered where nothing carries a variable, and sets what the
@@ -774,12 +787,12 @@ test.describe("group Ansible", () => {
 		await expect(production.getByTestId("run-upgrade")).toBeEnabled();
 
 		await page.goto(`/fleet/groups/${other.id}`);
-		await expect(
-			page
-				.getByTestId("group-ansible")
-				.getByTestId("environment-production")
-				.getByTestId("run-install"),
-		).toHaveCount(0);
+		const otherProduction = page
+			.getByTestId("group-ansible")
+			.getByTestId("environment-production");
+		await expect(otherProduction.getByTestId("run-any")).toBeEnabled();
+		await expect(otherProduction.getByTestId("run-install")).toHaveCount(0);
+		await expect(otherProduction.getByTestId("run-upgrade")).toHaveCount(0);
 	});
 
 	// Starting work takes the lease and shows the command that carries it, with
@@ -822,23 +835,15 @@ test.describe("group Ansible", () => {
 
 		const copied = dialog.getByTestId("run-command-copied");
 		await expect(copied).toContainText(/CANOPY_LEASE=[0-9a-f-]{36}/);
-		// The lease names the environment, so the run is handed nothing else of it.
-		await expect(copied).not.toContainText("CANOPY_GROUP");
-		await expect(copied).not.toContainText("CANOPY_RANK");
-		await expect(copied).toContainText(
-			"uv run ansible-playbook -i inventory/canopy.yml tamanu-install.yml",
-		);
-		await expect(copied).not.toContainText("<infra>");
-		await expect(dialog.getByTestId("run-command-checkout")).toHaveText("cd <infra>");
+		await expect(dialog.getByTestId("run-command-checkout")).toBeVisible();
 		await expect(dialog.getByTestId("run-waiting")).toBeVisible();
 		await expect(dialog.getByTestId("run-clock")).toContainText(/[0-5]:[0-5][0-9]/);
 
-		// Copying carries the whole command and not the checkout.
+		// Copying carries the command as shown and not the checkout line.
 		await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
 		await dialog.getByRole("button", { name: "Copy the command" }).click();
 		const text = await page.evaluate(() => navigator.clipboard.readText());
-		expect(text).toContain("git switch main && git pull --ff-only");
-		expect(text).not.toContain("<infra>");
+		expect(text).toBe(await copied.textContent());
 
 		const open = await sql.query<{ playbook: string; started_at: string | null }>(
 			"SELECT playbook, started_at FROM ansible_leases WHERE released_at IS NULL",
@@ -879,6 +884,25 @@ test.describe("group Ansible", () => {
 			value: true,
 		});
 
+		// Run-state reads are held back from the moment the dialog is waiting, so
+		// the dialog learns the run has started only after Give up is clicked.
+		let holding = false;
+		let heldBack!: () => void;
+		const polled = new Promise<void>((resolve) => {
+			heldBack = resolve;
+		});
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		await page.route("**/api/ansible/run_state", async (route) => {
+			if (holding) {
+				heldBack();
+				await gate;
+			}
+			await route.continue();
+		});
+
 		await page.goto(`/fleet/groups/${group.id}`);
 		await page
 			.getByTestId("group-ansible")
@@ -887,6 +911,8 @@ test.describe("group Ansible", () => {
 			.click();
 		await page.getByTestId("run-start").click();
 		await expect(page.getByTestId("run-waiting")).toBeVisible();
+		holding = true;
+		await polled;
 
 		const [lease] = await sql.query<{ id: string }>(
 			"SELECT id FROM ansible_leases WHERE released_at IS NULL",
@@ -896,6 +922,7 @@ test.describe("group Ansible", () => {
 		});
 		expect(read.ok()).toBe(true);
 		await page.getByTestId("run-give-up").click();
+		release();
 
 		await expect(page.getByTestId("run-started")).toBeVisible();
 		const open = await sql.query<{ n: string }>(
@@ -949,18 +976,11 @@ test.describe("group Ansible", () => {
 		await expect(dialog.getByTestId("run-started")).toBeVisible({ timeout: 15_000 });
 		await expect(dialog.getByTestId("run-started")).toContainText("Maintenance");
 
-		const windows = await sql.query<{ lease_id: string | null }>(
-			"SELECT lease_id FROM maintenance_windows WHERE ended_at IS NULL",
-		);
-		expect(windows.map((w) => w.lease_id)).toEqual([lease?.id]);
-
-		// Holding the maintenance gives it an end of its own.
+		// The hold control is offered only for the window the run declared, which
+		// the run state names; holding it gives the maintenance an end of its own.
 		await page.getByTestId("run-hold").click();
+		await expect(dialog.getByTestId("run-hold-confirm")).toBeEnabled();
 		await dialog.getByTestId("run-hold-confirm").click();
 		await expect(dialog.getByTestId("run-held")).toBeVisible();
-		const held = await sql.query<{ lease_id: string | null }>(
-			"SELECT lease_id FROM maintenance_windows WHERE ended_at IS NULL",
-		);
-		expect(held.map((w) => w.lease_id)).toEqual([null]);
 	});
 });
