@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { buildCommand, shellArg, typeLabel } from "./AnsibleRunDialog";
 
@@ -48,6 +49,32 @@ describe("shellArg", () => {
 		expect(shellArg("tamanu-install.yml")).toBe("tamanu-install.yml");
 		expect(shellArg("a b")).toBe("'a b'");
 		expect(shellArg("it's")).toBe("'it'\\''s'");
+	});
+
+	const metacharacters: [string, string, string][] = [
+		["a dollar", "a$HOME", "'a$HOME'"],
+		["a backtick", "a`id`", "'a`id`'"],
+		["a semicolon", "a;b", "'a;b'"],
+		["an ampersand", "a&b", "'a&b'"],
+		["a pipe", "a|b", "'a|b'"],
+		["a bang", "a!b", "'a!b'"],
+		["a space", "a b", "'a b'"],
+		["a single quote", "it's", "'it'\\''s'"],
+		["a double quote", 'a"b', `'a"b'`],
+		["a backslash", "a\\b", "'a\\b'"],
+		["a newline", "a\nb", "'a\nb'"],
+		["nothing", "", "''"],
+	];
+
+	it.each(metacharacters)("quotes %s", (_name, value, quoted) => {
+		expect(shellArg(value)).toBe(quoted);
+	});
+
+	it.each(metacharacters)("hands %s to a shell as it was", (_name, value) => {
+		const read = execFileSync("sh", ["-c", `printf %s ${shellArg(value)}`], {
+			encoding: "utf8",
+		});
+		expect(read).toBe(value);
 	});
 });
 

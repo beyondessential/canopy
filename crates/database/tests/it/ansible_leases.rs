@@ -104,34 +104,74 @@ async fn records_what_the_run_is() {
 		let assignments = BTreeMap::from([(machines[2], "tamanu-facility".to_owned())]);
 		let limited = vec![machines[0], machines[1]];
 
-		let lease = take(
-			&mut conn,
-			group,
-			&machines,
-			&RunSpec {
-				intent: RunIntent::Upgrade,
-				note: Some("rolling out"),
-				playbook: Some("tamanu-upgrade.yml"),
-				limit_pattern: Some("facility"),
-				limited_to: Some(&limited),
-				tags: &tags,
-				skip_tags: &skip,
-				assignments: &assignments,
-			},
-			"sam@example.org",
-			false,
-		)
-		.await;
+		let run = RunSpec {
+			intent: RunIntent::Upgrade,
+			note: Some("rolling out"),
+			playbook: Some("tamanu-upgrade.yml"),
+			limit_pattern: Some("facility"),
+			limited_to: Some(&limited),
+			tags: &tags,
+			skip_tags: &skip,
+			assignments: &assignments,
+		};
+		let lease = take(&mut conn, group, &machines, &run, "sam@example.org", false).await;
 
 		let read = AnsibleLease::get(&mut conn, lease.id).await.unwrap();
-		assert_eq!(read.playbook.as_deref(), Some("tamanu-upgrade.yml"));
-		assert_eq!(read.limit_pattern.as_deref(), Some("facility"));
-		assert_eq!(read.limited_to, Some(limited));
-		assert_eq!(read.tags, tags);
-		assert_eq!(read.skip_tags, skip);
-		assert_eq!(read.assignments, assignments);
 		assert!(read.pending(), "pending until a run reads it");
-		assert!(read.release_reason.is_none());
+		let RunSpec {
+			intent,
+			note,
+			playbook,
+			limit_pattern,
+			limited_to,
+			tags: run_tags,
+			skip_tags: run_skip,
+			assignments: run_assignments,
+		} = run;
+		let AnsibleLease {
+			id,
+			server_group_id,
+			rank,
+			intent: read_intent,
+			held_by,
+			note: read_note,
+			taken_at,
+			expires_at,
+			released_at,
+			released_by,
+			playbook: read_playbook,
+			limit_pattern: read_limit_pattern,
+			limited_to: read_limited_to,
+			tags: read_tags,
+			skip_tags: read_skip,
+			assignments: read_assignments,
+			started_at,
+			release_reason,
+		} = read;
+		assert_eq!(id, lease.id);
+		assert_eq!(server_group_id, group);
+		assert_eq!(rank, ServerRank::Production);
+		assert_eq!(read_intent, RunIntent::Upgrade, "the intent reads back");
+		assert_eq!(read_intent, intent);
+		assert_eq!(held_by.as_deref(), Some("sam@example.org"));
+		assert_eq!(read_note.as_deref(), Some("rolling out"));
+		assert_eq!(read_note.as_deref(), note);
+		assert!(expires_at > taken_at, "it holds from when it is taken");
+		assert_eq!(read_playbook.as_deref(), Some("tamanu-upgrade.yml"));
+		assert_eq!(read_playbook.as_deref(), playbook);
+		assert_eq!(read_limit_pattern.as_deref(), Some("facility"));
+		assert_eq!(read_limit_pattern.as_deref(), limit_pattern);
+		assert_eq!(read_limited_to.as_deref(), limited_to);
+		assert_eq!(read_limited_to, Some(limited));
+		assert_eq!(read_tags, tags);
+		assert_eq!(read_tags, run_tags);
+		assert_eq!(read_skip, skip);
+		assert_eq!(read_skip, run_skip);
+		assert_eq!(read_assignments, assignments);
+		assert_eq!(&read_assignments, run_assignments);
+		assert!(started_at.is_none(), "no run has read it");
+		assert!(released_at.is_none() && released_by.is_none());
+		assert!(release_reason.is_none());
 
 		let whole = take(
 			&mut conn,
@@ -149,7 +189,8 @@ async fn records_what_the_run_is() {
 }
 
 /// A lease no run read within the pending period is released by Canopy, and a
-/// started one is left alone.
+/// started one is left alone. An operator can give up on an unread lease, but
+/// not on a started one.
 // spec: ANSRUN#starting-a-run
 #[tokio::test(flavor = "multi_thread")]
 async fn sweeps_an_unread_lease_and_an_expired_one() {
@@ -184,6 +225,30 @@ async fn sweeps_an_unread_lease_and_an_expired_one() {
 		// A started lease is not unread, and runs out only at its expiry.
 		let started = take(&mut conn, group, &machines, &spec(&none), "a", false).await;
 		AnsibleLease::start(&mut conn, started.id).await.unwrap();
+		assert!(
+			!AnsibleLease::release_unstarted(&mut conn, started.id, Some("a"))
+				.await
+				.unwrap(),
+			"release_unstarted leaves a lease its run has read"
+		);
+		let read = AnsibleLease::get(&mut conn, started.id).await.unwrap();
+		assert!(
+			read.released_at.is_none() && read.release_reason.is_none(),
+			"release_unstarted: the started lease is still held"
+		);
+		assert!(
+			!AnsibleLease::release_unstarted(&mut conn, unread.id, Some("a"))
+				.await
+				.unwrap(),
+			"release_unstarted: a lease already released is not released again"
+		);
+		let read = AnsibleLease::get(&mut conn, unread.id).await.unwrap();
+		assert_eq!(
+			read.release_reason,
+			Some(ReleaseReason::Unstarted),
+			"release_unstarted: the sweep's reason is kept"
+		);
+		assert!(read.released_by.is_none());
 		let later = Timestamp::now() + PENDING_FOR + SignedDuration::from_mins(2);
 		let nothing = AnsibleLease::sweep(&mut conn, later).await.unwrap();
 		assert!(nothing.unstarted.is_empty() && nothing.expired.is_empty());
@@ -199,6 +264,37 @@ async fn sweeps_an_unread_lease_and_an_expired_one() {
 			read.released_at,
 			Some(started.expires_at),
 			"as of its expiry"
+		);
+
+		// An operator giving up on a lease no run has read releases it as an
+		// operator does, not as Canopy's sweep does.
+		let pending = take(&mut conn, group, &machines, &spec(&none), "b", false).await;
+		assert!(
+			AnsibleLease::release_unstarted(&mut conn, pending.id, Some("b"))
+				.await
+				.unwrap(),
+			"release_unstarted releases a lease no run has read"
+		);
+		let read = AnsibleLease::get(&mut conn, pending.id).await.unwrap();
+		assert_eq!(
+			read.release_reason,
+			Some(ReleaseReason::Released),
+			"release_unstarted: recorded as the holder releasing, not the sweep's unstarted"
+		);
+		assert_eq!(read.released_by.as_deref(), Some("b"));
+		assert!(read.released_at.is_some());
+		assert!(
+			AnsibleLease::open_for(&mut conn, group, ServerRank::Production)
+				.await
+				.unwrap()
+				.is_none(),
+			"release_unstarted: nothing holds the environment"
+		);
+		assert!(
+			!AnsibleLease::release_unstarted(&mut conn, pending.id, Some("b"))
+				.await
+				.unwrap(),
+			"release_unstarted: released once"
 		);
 	})
 	.await
