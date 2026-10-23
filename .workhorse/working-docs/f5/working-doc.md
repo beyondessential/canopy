@@ -382,21 +382,21 @@ For each lens, once run: how many findings, how many accepted, how many rejected
 
 Defects found while applying changes, none of them by a lens as such: a test added the same day that had never passed (it aged audit entries in a way the guard forbids); a late read of an unread lease called "expired"; a limit exclusion with a regular expression silently matching nothing; an unreachable catalogue read silencing an invalid-catalogue alert; the unread give-up recording a different reason from the sweep. The common cause was running the tests while applying, and writing each new expectation from the code and not from a guess; both should be rules in the skill.
 
-## Skill shape (to settle from the walkthrough)
+## Skill shape (settled)
 
-The user wants a repo-specific skill that carries the whole process: guidance for writing tests, a review pass, and a review loop focused on making tests better, in the spirit of the existing review skills.
-Candidate parts:
+Decided with the user at the end of the walkthrough:
 
-- Guidance read before writing tests (what is worth a test, what is the dependency's job, prefer a drift-proof test over a pile).
-- A single review pass that applies lenses A to D to a card's added tests and reports keep, delete, merge and rewrite findings.
-- A loop that applies accepted findings and reruns until a round is quiet.
+- Two skills, with Workhorse metadata (`name`, `description`, `label`, `pill-order` by card state, `jockey-hint`, `workhorse-version`): `write-good-tests` (write-time guidance, pill under implementing) and `review-tests` (the review pass and the apply-and-verify loop, pill under reviewing and complete).
+- One reference doc, `.agents/docs/test-quality.md`, cited by both: the write-time rules, the five lenses with their yield, own versus neighbour findings, the evidence rules, the loop and stopping rule, and condensed review and edit brief templates.
+- The coverage check is committed: `scripts/coverage-fn-diff.sh` (bash and awk, like the other scripts) behind `just coverage-diff BASE NEW`, next to `just coverage`.
+- Not done, by choice: no line added to AGENTS.md pointing at the doc (the user chose two skills over a doc plus a pointer).
 
 ## Open questions
 
-- [ ] Add lens E (a test that cannot fail) to the lenses and to the skill's checklist.
-- [ ] Skill name and whether it is one skill (guidance plus pass plus loop) or a pass and a loop kept apart. Decided to settle at the end, from the walkthrough.
-- [ ] Where it lives: workspace skills go in `.agents/skills/<name>/SKILL.md`; check the Workhorse smart-merge leaves a non-shipped skill alone.
-- [ ] Whether lens C's drift-proof tests need shared helpers per crate (a variant-list macro, say) that do not exist yet.
+- [x] Add lens E (a test that cannot fail) to the lenses and to the skill's checklist.
+- [x] Skill names and shape: `write-good-tests` and `review-tests`, one reference doc.
+- [ ] Check that the Workhorse smart-merge leaves the two non-shipped skills and the doc alone when it next updates the shipped ones.
+- [x] Lens C's helper: `all_variants!` in `commons-types`; the shared JSON fixtures live beside the SPA tests.
 
 ## Decisions
 
