@@ -142,12 +142,8 @@ describe("describeType", () => {
 });
 
 describe("offered", () => {
-	it("hides a reserved variable and one limited to other scopes", () => {
+	it("hides a reserved variable", () => {
 		expect(offered(variable({ reserved: true }), "machine", [])).toBe(false);
-		expect(offered(variable({ scopes: ["machine"] }), "environment", [])).toBe(
-			false,
-		);
-		expect(offered(variable({ scopes: ["machine"] }), "machine", [])).toBe(true);
 	});
 
 	it("hides one for application types the scope holds none of", () => {

@@ -86,7 +86,8 @@ fn scopes_of_every_kind(group: Uuid, machine: Uuid) -> Vec<VariableScope> {
 /// leaving two rows for a merge to pick between. A row at two scopes at once,
 /// or at none, would make the merge order undefined. A secret's value lives in
 /// the secret store, so a row holding both, or a plain variable holding
-/// neither, is refused.
+/// neither, is refused. The same name at three scopes is nonetheless three
+/// rows.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_table_holds_names_scopes_and_secrets_to_its_rules() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
@@ -180,16 +181,9 @@ async fn the_table_holds_names_scopes_and_secrets_to_its_rules() {
 		.expect("secret and value: set it plain");
 		assert!(!plain.is_secret);
 		assert_eq!(plain.value, Some(json!("visible")));
-	})
-	.await
-}
-/// The same name at three scopes is three rows, since that is what a merge
-/// exists to resolve.
-#[tokio::test(flavor = "multi_thread")]
-async fn the_same_name_sits_at_every_scope_at_once() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let group = seed_group(&mut conn).await;
-		let machine = seed_machine(&mut conn, group).await;
+
+		// The same name at three scopes is three rows, since that is what a
+		// merge exists to resolve.
 		let scopes = [
 			VariableScope::Group { group_id: group },
 			VariableScope::Environment {
@@ -200,32 +194,46 @@ async fn the_same_name_sits_at_every_scope_at_once() {
 				machine_id: machine,
 			},
 		];
-
 		for scope in scopes {
 			AnsibleVariable::set(&mut conn, scope, "log_level", Some(&json!("info")), None)
 				.await
-				.expect("set");
+				.expect("same name at every scope: set");
 		}
-
 		for scope in scopes {
-			let held = AnsibleVariable::list_at(&mut conn, scope)
+			let held: Vec<_> = AnsibleVariable::list_at(&mut conn, scope)
 				.await
-				.expect("list");
-			assert_eq!(held.len(), 1, "{scope:?}");
-			assert_eq!(held[0].scope(), scope, "the row reads back at its scope");
+				.expect("same name at every scope: list")
+				.into_iter()
+				.filter(|row| row.name == "log_level")
+				.collect();
+			assert_eq!(held.len(), 1, "same name at every scope: {scope:?}");
+			assert_eq!(
+				held[0].scope(),
+				scope,
+				"same name at every scope: the row reads back at its scope"
+			);
 		}
-
 		let under = AnsibleVariable::list_under_group(&mut conn, group)
 			.await
-			.expect("list under group");
-		assert_eq!(under.len(), 3, "the group page sees all three");
+			.expect("same name at every scope: list under group");
+		assert_eq!(
+			under.iter().filter(|row| row.name == "log_level").count(),
+			3,
+			"same name at every scope: the group page sees all three"
+		);
 
 		// Dropping a machine takes its variables with it, so a name cannot
-		// outlive the box it configured.
+		// outlive the box it configured. It comes last: the rows above that
+		// name the machine need it to exist.
 		conn.batch_execute(&format!("DELETE FROM machines WHERE id = '{machine}'"))
 			.await
 			.expect("delete the machine");
-		let left = AnsibleVariable::list_all(&mut conn).await.expect("list");
+		let left: Vec<_> = AnsibleVariable::list_all(&mut conn)
+			.await
+			.expect("list")
+			.into_iter()
+			.filter(|row| row.name == "log_level")
+			.collect();
 		assert_eq!(left.len(), 2, "only the machine's row goes: {left:?}");
 		for scope in &scopes[..2] {
 			assert!(
@@ -236,7 +244,6 @@ async fn the_same_name_sits_at_every_scope_at_once() {
 	})
 	.await
 }
-
 /// Each scope keys its own Secret, so a name at two of them is two values
 /// rather than one overwriting the other, and every one of those keys is a
 /// name kubernetes will accept.
