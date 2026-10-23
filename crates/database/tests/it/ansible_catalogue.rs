@@ -291,87 +291,104 @@ async fn alert_active(conn: &mut commons_tests::diesel_async::AsyncPgConnection)
 		.is_some_and(|issue| issue.active)
 }
 
-/// A copy that does not read warns straight away, and a good read clears it.
-// spec: SELF
-#[tokio::test(flavor = "multi_thread")]
-async fn a_copy_that_does_not_read_raises_an_alert_until_one_does() {
-	use database::self_alerts::sweep_ansible_catalogue;
-
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let now = Timestamp::now();
-		assert!(
-			sweep_ansible_catalogue(&mut conn, now)
-				.await
-				.unwrap()
-				.is_none()
-		);
-		assert!(!alert_active(&mut conn).await, "nothing has been tried yet");
-
-		CatalogueState::record_problem(&mut conn, Problem::Invalid, "no properties", now)
-			.await
-			.unwrap();
-		sweep_ansible_catalogue(&mut conn, now).await.unwrap();
-		assert!(alert_active(&mut conn).await);
-
-		CatalogueState::record_read(&mut conn, &document(), None, now)
-			.await
-			.unwrap();
-		sweep_ansible_catalogue(&mut conn, now).await.unwrap();
-		assert!(!alert_active(&mut conn).await);
-	})
-	.await
+async fn alert_message(conn: &mut commons_tests::diesel_async::AsyncPgConnection) -> String {
+	database::self_alerts::current(conn, database::self_alerts::ANSIBLE_CATALOGUE_REF)
+		.await
+		.unwrap()
+		.expect("the alert has been raised")
+		.message
 }
 
+/// A copy that does not read warns straight away, and a good read clears it.
 /// An unreachable repository is not a fault until a day has gone by without a
 /// good read, counted from the first try where there never was one.
 // spec: SELF
 #[tokio::test(flavor = "multi_thread")]
-async fn an_unreachable_repository_raises_an_alert_after_a_day() {
+async fn a_copy_that_does_not_read_raises_an_alert_until_one_does() {
 	use database::self_alerts::sweep_ansible_catalogue;
 	use jiff::SignedDuration;
 
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let start = Timestamp::now();
+		let at = |hours: i64| start + SignedDuration::from_hours(hours);
+
+		assert!(
+			sweep_ansible_catalogue(&mut conn, start)
+				.await
+				.unwrap()
+				.is_none(),
+			"no state: nothing is raised"
+		);
+		assert!(
+			!alert_active(&mut conn).await,
+			"no state: nothing has been tried yet"
+		);
+
 		CatalogueState::record_problem(&mut conn, Problem::Unreachable, "timed out", start)
 			.await
 			.unwrap();
+		sweep_ansible_catalogue(&mut conn, at(23)).await.unwrap();
+		assert!(
+			!alert_active(&mut conn).await,
+			"unreachable with no read: within the day"
+		);
+		sweep_ansible_catalogue(&mut conn, at(25)).await.unwrap();
+		assert!(
+			alert_active(&mut conn).await,
+			"unreachable with no read: a day on from the first try"
+		);
+		assert!(
+			alert_message(&mut conn)
+				.await
+				.contains("has not been read since"),
+			"unreachable with no read: raised as not read"
+		);
 
-		sweep_ansible_catalogue(&mut conn, start + SignedDuration::from_hours(23))
+		CatalogueState::record_problem(&mut conn, Problem::Invalid, "no properties", at(26))
 			.await
 			.unwrap();
-		assert!(!alert_active(&mut conn).await, "within the day");
+		sweep_ansible_catalogue(&mut conn, at(26)).await.unwrap();
+		assert!(alert_active(&mut conn).await, "invalid: active");
+		assert!(
+			alert_message(&mut conn)
+				.await
+				.contains("does not read as one"),
+			"invalid: raised as not reading, whatever the time"
+		);
 
-		sweep_ansible_catalogue(&mut conn, start + SignedDuration::from_hours(25))
+		CatalogueState::record_read(&mut conn, &document(), None, at(27))
 			.await
 			.unwrap();
-		assert!(alert_active(&mut conn).await);
+		sweep_ansible_catalogue(&mut conn, at(27)).await.unwrap();
+		assert!(!alert_active(&mut conn).await, "a read clears it");
 
-		CatalogueState::record_read(
-			&mut conn,
-			&document(),
-			None,
-			start + SignedDuration::from_hours(26),
-		)
-		.await
-		.unwrap();
-		sweep_ansible_catalogue(&mut conn, start + SignedDuration::from_hours(26))
+		CatalogueState::record_problem(&mut conn, Problem::Invalid, "no properties", at(28))
 			.await
 			.unwrap();
-		assert!(!alert_active(&mut conn).await);
+		sweep_ansible_catalogue(&mut conn, at(28)).await.unwrap();
+		assert!(
+			alert_active(&mut conn).await,
+			"invalid within a day of a read: warns straight away"
+		);
+
+		CatalogueState::record_read(&mut conn, &document(), None, at(29))
+			.await
+			.unwrap();
+		sweep_ansible_catalogue(&mut conn, at(29)).await.unwrap();
+		assert!(
+			!alert_active(&mut conn).await,
+			"a second read clears it again"
+		);
 
 		// Read once, then unreachable for more than a day since that read.
-		CatalogueState::record_problem(
-			&mut conn,
-			Problem::Unreachable,
-			"timed out",
-			start + SignedDuration::from_hours(60),
-		)
-		.await
-		.unwrap();
-		sweep_ansible_catalogue(&mut conn, start + SignedDuration::from_hours(60))
+		CatalogueState::record_problem(&mut conn, Problem::Unreachable, "timed out", at(60))
 			.await
 			.unwrap();
-		assert!(alert_active(&mut conn).await);
+		sweep_ansible_catalogue(&mut conn, at(60)).await.unwrap();
+		assert!(
+			alert_active(&mut conn).await,
+			"unreachable for more than a day since the last read"
+		);
 	})
 	.await
 }

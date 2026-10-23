@@ -92,7 +92,7 @@ fn preset_is_read_from_the_name_it_serialises_as() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn every_problem_is_stored_and_read_back() {
+async fn every_problem_and_release_reason_is_stored_and_read_back() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		for problem in Problem::ALL {
 			CatalogueState::record_problem(&mut conn, *problem, "detail", Timestamp::now())
@@ -109,13 +109,7 @@ async fn every_problem_is_stored_and_read_back() {
 					.unwrap();
 			assert_eq!(stored, Some(serialised(problem)));
 		}
-	})
-	.await
-}
 
-#[tokio::test(flavor = "multi_thread")]
-async fn every_release_reason_is_stored_and_read_back() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group = Uuid::new_v4();
 		let machine = Uuid::new_v4();
 		conn.batch_execute(&format!(
