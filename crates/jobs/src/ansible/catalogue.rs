@@ -347,6 +347,22 @@ mod tests {
 			*self.commits.lock().unwrap() = (StatusCode::BAD_GATEWAY, json!({}));
 		}
 
+		fn name_the_head_again(&self) {
+			*self.commits.lock().unwrap() = (StatusCode::OK, json!([{ "sha": COMMIT }]));
+		}
+
+		fn name_no_commit(&self) {
+			*self.commits.lock().unwrap() = (StatusCode::OK, json!([]));
+		}
+
+		fn lose_the_file(&self) {
+			*self.file.lock().unwrap() = (StatusCode::NOT_FOUND, String::new());
+		}
+
+		fn fail_the_file(&self) {
+			*self.file.lock().unwrap() = (StatusCode::SERVICE_UNAVAILABLE, String::new());
+		}
+
 		/// Start answering as GitHub would, and say where.
 		async fn start(&self) -> Source {
 			async fn commits(State(stub): State<Stub>) -> (StatusCode, Json<Value>) {
@@ -412,6 +428,15 @@ mod tests {
 			.await
 			.unwrap()
 			.is_some_and(|issue| issue.active)
+	}
+
+	/// Whether a read that fails this way raises the self-alert on that read,
+	/// rather than waiting out the time the catalogue may go unread.
+	fn alerts_at_once(problem: Problem) -> bool {
+		match problem {
+			Problem::Invalid => true,
+			Problem::Unreachable => false,
+		}
 	}
 
 	/// Reading a catalogue keeps it and says so in the log, once.
@@ -482,6 +507,59 @@ mod tests {
 				"an unreachable repository leaves the last copy"
 			);
 			assert!(!alert_active(&mut conn).await, "and is not yet a fault");
+
+			let failures: [(&str, fn(&Stub), Problem, &str); 3] = [
+				(
+					"no commit touches the file",
+					Stub::name_no_commit,
+					Problem::Invalid,
+					"has no",
+				),
+				(
+					"the file is not at the head commit",
+					Stub::lose_the_file,
+					Problem::Invalid,
+					"is not in",
+				),
+				(
+					"the file cannot be served",
+					Stub::fail_the_file,
+					Problem::Unreachable,
+					"503",
+				),
+			];
+			for (row, fail, problem, detail) in failures {
+				stub.name_the_head_again();
+				stub.publish(&catalogue_document().to_string());
+				fail(&stub);
+				refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
+				let state = CatalogueState::get(&mut conn).await.unwrap().unwrap();
+				assert_eq!(state.problem, Some(problem), "{row}");
+				assert!(
+					state.problem_detail.as_deref().unwrap().contains(detail),
+					"{row}: {:?}",
+					state.problem_detail
+				);
+				assert_eq!(
+					state.document,
+					Some(catalogue_document()),
+					"{row}: the last copy is kept"
+				);
+				assert_eq!(state.source_commit.as_deref(), Some(COMMIT), "{row}");
+				assert_eq!(
+					alert_active(&mut conn).await,
+					alerts_at_once(problem),
+					"{row}"
+				);
+			}
+
+			stub.name_the_head_again();
+			stub.publish(&catalogue_document().to_string());
+			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
+			let state = CatalogueState::get(&mut conn).await.unwrap().unwrap();
+			assert_eq!(state.problem, None, "a good read after an unreachable one");
+			assert_eq!(state.problem_detail, None);
+			assert!(!alert_active(&mut conn).await);
 		})
 		.await
 	}

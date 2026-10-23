@@ -220,4 +220,98 @@ mod tests {
 		})
 		.await
 	}
+
+	/// A value whose scope has gone since it began to be held is still forgotten,
+	/// and its entry names the scope by identifier alone, with the rank for an
+	/// environment.
+	// spec: ANSVAR#history
+	#[tokio::test(flavor = "multi_thread")]
+	async fn forgets_a_value_whose_scope_has_gone_naming_it_by_identifier() {
+		fn named_as(scope: VariableScope) -> (RecordKind, Uuid, Option<ServerRank>) {
+			match scope {
+				VariableScope::Group { group_id } => (RecordKind::Group, group_id, None),
+				VariableScope::Environment { group_id, rank } => {
+					(RecordKind::Group, group_id, Some(rank))
+				}
+				VariableScope::Machine { machine_id } => (RecordKind::Machine, machine_id, None),
+			}
+		}
+
+		commons_tests::db::TestDb::run(async |mut conn, _| {
+			let secrets = BackupSecrets::memory();
+			let scopes = [
+				VariableScope::Group {
+					group_id: Uuid::new_v4(),
+				},
+				VariableScope::Environment {
+					group_id: Uuid::new_v4(),
+					rank: ServerRank::Demo,
+				},
+				VariableScope::Machine {
+					machine_id: Uuid::new_v4(),
+				},
+			];
+			let mut entries = Vec::new();
+			for scope in scopes {
+				let entry = Uuid::new_v4();
+				secrets
+					.put_secret_key(
+						&scope.held_secret_name(),
+						&entry.to_string(),
+						&SecretString::from("\"pepper\"".to_owned()),
+					)
+					.await
+					.unwrap();
+				HeldSecretValue::hold(&mut conn, entry, scope, "salt")
+					.await
+					.unwrap();
+				entries.push((scope, entry));
+			}
+			conn.batch_execute(
+				"UPDATE ansible_secret_values_held SET held_until = now() - interval '1 minute'",
+			)
+			.await
+			.unwrap();
+
+			assert_eq!(tick(&mut conn, &secrets).await, entries.len());
+
+			let logged = audit::find(
+				&mut conn,
+				&Filter {
+					action: Some("ansible_secret_value_forgotten".into()),
+					limit: 10,
+					..Default::default()
+				},
+			)
+			.await
+			.unwrap();
+			assert_eq!(logged.len(), entries.len());
+			for (scope, entry) in entries {
+				let (kind, id, rank) = named_as(scope);
+				let logged = logged
+					.iter()
+					.find(|logged| logged.detail["replaced_by"] == entry.to_string())
+					.unwrap_or_else(|| panic!("no entry for {scope:?}"));
+				assert_eq!(logged.status, Status::Done);
+				assert_eq!(
+					logged.records,
+					vec![
+						Record::new(RecordKind::Variable, scope.variable_record_id("salt"), "salt"),
+						Record::new(kind, id, id.to_string()),
+					],
+					"{scope:?}"
+				);
+				assert_eq!(logged.detail["rank"], serde_json::to_value(rank).unwrap());
+
+				let left = secrets
+					.try_read_secret_keys(&scope.held_secret_name())
+					.await
+					.unwrap()
+					.unwrap_or_default();
+				assert!(!left.contains_key(&entry.to_string()), "{scope:?}");
+			}
+			assert!(HeldSecretValue::list_all(&mut conn).await.unwrap().is_empty());
+		})
+		.await
+	}
 }
