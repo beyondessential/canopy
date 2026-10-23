@@ -375,13 +375,19 @@ async fn set_value(
 	secret: bool,
 	restored_from: Option<Uuid>,
 ) -> Result<AnsibleVariable> {
-	check_name(name)?;
-	check_ansible_host(scope, name, &value)?;
-	check_managed(scope, name)?;
-
 	let mut conn = audit.begin().await?;
+	let loaded = Loaded::get(&mut conn).await?;
+	let problems = variable_problems(
+		ScopeKind::from(scope),
+		name,
+		&value,
+		secret,
+		loaded.as_ref().map(|loaded| &loaded.catalogue),
+	);
+	if !problems.is_empty() {
+		return Err(AppError::BadRequest(problems.join("; ")));
+	}
 	check_scope(&mut conn, scope).await?;
-	check_catalogue(&mut conn, scope, name, &value, secret).await?;
 	let (variable, scope_record, rank) = AnsibleVariable::records(&mut conn, scope, name).await?;
 	// Taken before the read, so an import into the group is not let in between
 	// it and the write, nor another change to the name between what this
@@ -916,84 +922,83 @@ const NAME_LIMIT: usize = 253;
 /// The name is the key a secret's value is stored under, so every name is held
 /// to what a key may be: `.` and `..` name a path rather than a key, and a key
 /// is bounded.
-pub(super) fn check_name(name: &str) -> Result<()> {
-	if name.is_empty()
+fn usable_name(name: &str) -> bool {
+	!(name.is_empty()
 		|| name == "."
 		|| name == ".."
 		|| name.len() > NAME_LIMIT
 		|| !name
 			.chars()
-			.all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_'))
-	{
-		return Err(AppError::BadRequest(format!(
-			"{name:?} is not a usable variable name: letters, digits, `-`, `.` and `_`, \
-			 at most {NAME_LIMIT} of them, and not `.` or `..`"
-		)));
-	}
-	Ok(())
+			.all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_')))
 }
 
-/// Hold a variable the catalogue describes to it: its type, the scopes it may be
-/// set at, that a run's own variables are not set, and that it is secret exactly
-/// when the catalogue says so. A name the catalogue does not describe, and any
-/// name while no catalogue has been read, is not held to anything.
-// spec: ANSVAR#catalogue
-async fn check_catalogue(
-	conn: &mut database::diesel_async::AsyncPgConnection,
-	scope: VariableScope,
-	name: &str,
-	value: &Value,
-	secret: bool,
-) -> Result<()> {
-	let Some(loaded) = Loaded::get(conn).await? else {
-		return Ok(());
-	};
-	let catalogue = &loaded.catalogue;
-	let violations = catalogue.violations(ScopeKind::from(scope), name, value);
-	if !violations.is_empty() {
-		return Err(AppError::BadRequest(violations.join("; ")));
-	}
-	if catalogue.variable(name).is_some() && catalogue.is_secret(name) != secret {
-		return Err(AppError::BadRequest(if secret {
-			format!("{name:?} is not secret in the catalogue, so it is set as a plain value")
-		} else {
-			format!("{name:?} is secret in the catalogue, so it is set as a secret")
-		}));
-	}
-	Ok(())
-}
-
+/// What stops a variable being set, which the `set` endpoint and the inventory
+/// import hold alike: a name the secret store cannot key, `ansible_host` and
+/// `managed_by_ansible` set wider than a machine (and `ansible_host` as
+/// anything but a string), and, where a catalogue has been read, what it says of
+/// the variable: its type, the scopes it may be set at, that a run's own
+/// variables are not set, and that it is secret exactly when the catalogue says
+/// so. A name the catalogue does not describe, and any name while no catalogue
+/// has been read, is not held to anything.
+///
 /// `ansible_host` names one machine, so a wider scope would give every machine
 /// in the environment the same address. It is served as the address a run
 /// connects to, which is read as a string, so a value of any other shape would
-/// leave the machine on the address it was overriding.
-fn check_ansible_host(scope: VariableScope, name: &str, value: &Value) -> Result<()> {
-	if name != super::ansible::ANSIBLE_HOST {
-		return Ok(());
-	}
-	if !matches!(scope, VariableScope::Machine { .. }) {
-		return Err(AppError::BadRequest(format!(
-			"{name:?} names one machine, so it is set on a machine rather than on a group or an environment"
-		)));
-	}
-	if !value.is_string() {
-		return Err(AppError::BadRequest(format!(
-			"{name:?} is the address a run connects to, so it is a string"
-		)));
-	}
-	Ok(())
-}
-
-/// `managed_by_ansible` says what a run may do to one machine, and is set by a
-/// switch on the machine, so a wider value would be one no switch shows.
+/// leave the machine on the address it was overriding. `managed_by_ansible` says
+/// what a run may do to one machine, and is set by a switch on the machine, so a
+/// wider value would be one no switch shows.
+// spec: ANSVAR#catalogue
 // spec: INV#managed-machines
-fn check_managed(scope: VariableScope, name: &str) -> Result<()> {
-	if name == super::ansible::MANAGED && !matches!(scope, VariableScope::Machine { .. }) {
-		return Err(AppError::BadRequest(format!(
-			"{name:?} says whether a run acts on one machine, so it is set on a machine rather than on a group or an environment"
-		)));
+pub(super) fn variable_problems(
+	scope: ScopeKind,
+	name: &str,
+	value: &Value,
+	secret: bool,
+	catalogue: Option<&Catalogue>,
+) -> Vec<String> {
+	let mut problems = Vec::new();
+	if !usable_name(name) {
+		problems.push(format!(
+			"{name:?} is not a usable variable name: letters, digits, `-`, `.` and `_`, \
+			 at most {NAME_LIMIT} of them, and not `.` or `..`"
+		));
 	}
-	Ok(())
+
+	let wider = match scope {
+		ScopeKind::Machine => None,
+		ScopeKind::Group => Some("a group"),
+		ScopeKind::Environment => Some("an environment"),
+	};
+	if name == super::ansible::ANSIBLE_HOST {
+		if let Some(wider) = wider {
+			problems.push(format!(
+				"{name:?} names one machine, so it is set on a machine rather than on {wider}"
+			));
+		} else if !value.is_string() {
+			problems.push(format!(
+				"{name:?} is the address a run connects to, so it is a string"
+			));
+		}
+	}
+	if name == super::ansible::MANAGED
+		&& let Some(wider) = wider
+	{
+		problems.push(format!(
+			"{name:?} says whether a run acts on one machine, so it is set on a machine rather than on {wider}"
+		));
+	}
+
+	if let Some(catalogue) = catalogue {
+		problems.extend(catalogue.violations(scope, name, value));
+		if catalogue.variable(name).is_some() && catalogue.is_secret(name) != secret {
+			problems.push(if secret {
+				format!("{name:?} is not secret in the catalogue, so it is set as a plain value")
+			} else {
+				format!("{name:?} is secret in the catalogue, so it is set as a secret")
+			});
+		}
+	}
+	problems
 }
 
 async fn check_scope(

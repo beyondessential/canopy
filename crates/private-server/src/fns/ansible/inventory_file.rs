@@ -760,54 +760,54 @@ mod tests {
 	}
 
 	#[test]
+	fn plain_scalars_are_read_as_pyyaml_reads_them() {
+		#[derive(serde::Deserialize)]
+		struct Row {
+			text: String,
+			value: Value,
+		}
+		let rows: Vec<Row> = serde_json::from_str(include_str!(
+			"../../../../../private-web/src/components/ansible/fixtures/pyyaml-scalars.json"
+		))
+		.unwrap();
+
+		let failures: Vec<String> = rows
+			.iter()
+			.filter_map(|Row { text, value }| {
+				let read = resolve_plain(text);
+				(read != *value).then(|| format!("{text:?} read as {read}, expected {value}"))
+			})
+			.collect();
+		assert!(
+			failures.is_empty(),
+			"{} of {} rows differ:\n{}",
+			failures.len(),
+			rows.len(),
+			failures.join("\n")
+		);
+	}
+
+	#[test]
 	fn a_value_is_what_ansible_reads_it_as() {
 		let file = parse(
 			"all:
   vars:
-    a: yes
-    b: no
-    c: 'yes'
-    d: 0644
-    e: 1_000
-    f: 2.5
-    g: 1e3
-    h: 1:30
-    i: null
-    j: ~
-    k: .inf
-    l: 0x1F
-    m: 12345678901234567890123
-    n: 9007199254740991
-    o: 9007199254740993
+    quoted: 'yes'
+    bare: yes
+    octal: 0644
   hosts:
     h1:
-      list: [1, two, {three: 3}]
+      list: [1, two, {three: 3}, yes, '1']
 ",
 		)
 		.unwrap();
 		let vars = &file.environment;
-		assert_eq!(vars["a"], json!(true));
-		assert_eq!(vars["b"], json!(false));
-		assert_eq!(vars["c"], json!("yes"), "quoted is a string");
-		assert_eq!(vars["d"], json!(420), "a leading zero is octal");
-		assert_eq!(vars["e"], json!(1000));
-		assert_eq!(vars["f"], json!(2.5));
-		assert_eq!(vars["g"], json!("1e3"), "no dot, so it is a string");
-		assert_eq!(vars["h"], json!(90), "sexagesimal");
-		assert_eq!(vars["i"], Value::Null);
-		assert_eq!(vars["j"], Value::Null);
-		assert_eq!(vars["k"], json!(".inf"), "no JSON form, so its text");
-		assert_eq!(vars["l"], json!(31));
-		assert_eq!(vars["m"], json!("12345678901234567890123"));
-		assert_eq!(vars["n"], json!(9007199254740991_i64));
-		assert_eq!(
-			vars["o"],
-			json!("9007199254740993"),
-			"past what the browser holds exactly, so its text"
-		);
+		assert_eq!(vars["quoted"], json!("yes"), "quoted is a string");
+		assert_eq!(vars["bare"], json!(true));
+		assert_eq!(vars["octal"], json!(420));
 		assert_eq!(
 			host(&file, "h1").own["list"],
-			json!([1, "two", { "three": 3 }])
+			json!([1, "two", { "three": 3 }, true, "1"])
 		);
 	}
 

@@ -32,7 +32,7 @@ use super::{
 	ANSIBLE_HOST, Environment, EnvironmentArgs, MANAGED, host_of, hosts, inventory_file, reach,
 	resolve_environment,
 };
-use crate::state::AppState;
+use crate::{fns::ansible_variables::variable_problems, state::AppState};
 
 const ANSIBLE_PORT: &str = "ansible_port";
 const CLONE: &str = "tamanu_clone";
@@ -456,24 +456,7 @@ async fn plan(conn: &mut AsyncPgConnection, args: &ImportArgs) -> Result<Plan> {
 			),
 		};
 
-		let mut problems = Vec::new();
-		if let Err(error) = crate::fns::ansible_variables::check_name(name) {
-			problems.push(message(error));
-		}
-		if name == ANSIBLE_HOST {
-			if scope_kind != ScopeKind::Machine {
-				problems.push(format!(
-					"{name:?} names one machine, so it is set on a machine rather than on an environment"
-				));
-			} else if !value.is_string() {
-				problems.push(format!(
-					"{name:?} is the address a run connects to, so it is a string"
-				));
-			}
-		}
-		if let Some(catalogue) = catalogue {
-			problems.extend(catalogue.violations(scope_kind, name, value));
-		}
+		let problems = variable_problems(scope_kind, name, value, secret, catalogue);
 		(
 			ImportVariable {
 				name: name.to_owned(),

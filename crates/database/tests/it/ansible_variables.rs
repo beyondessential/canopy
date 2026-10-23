@@ -196,28 +196,25 @@ async fn a_secret_carries_no_value_and_a_plain_one_must() {
 async fn each_scope_keys_its_own_secret() {
 	let group = Uuid::new_v4();
 	let machine = Uuid::new_v4();
-	let names = [
-		VariableScope::Group { group_id: group }.secret_name(),
-		VariableScope::Environment {
-			group_id: group,
-			rank: ServerRank::Production,
-		}
-		.secret_name(),
-		VariableScope::Environment {
-			group_id: group,
-			rank: ServerRank::Demo,
-		}
-		.secret_name(),
+	let mut scopes = vec![
+		VariableScope::Group { group_id: group },
 		VariableScope::Machine {
 			machine_id: machine,
-		}
-		.secret_name(),
+		},
 	];
+	scopes.extend(ServerRank::ALL.iter().map(|rank| VariableScope::Environment {
+		group_id: group,
+		rank: *rank,
+	}));
+
+	let names: Vec<String> = scopes
+		.iter()
+		.flat_map(|scope| [scope.secret_name(), scope.held_secret_name()])
+		.collect();
 	let unique: std::collections::BTreeSet<&String> = names.iter().collect();
 	assert_eq!(unique.len(), names.len(), "{names:?}");
 
-	// A DNS label, which is what a kubernetes name is held to. `production` is
-	// the longest rank, so the longest name any scope produces is here.
+	// A DNS label, which is what a kubernetes name is held to.
 	for name in &names {
 		assert!(name.len() <= 63, "{name} is {} characters", name.len());
 		assert!(
