@@ -1458,3 +1458,63 @@ async fn a_busy_environment_does_not_crowd_out_its_groups_removals() {
 	})
 	.await
 }
+
+/// A change whose entry never recorded its value is told from one that
+/// recorded a value of null: the first has nothing to put back, the second puts
+/// back null.
+// spec: ANSVAR#history
+#[tokio::test(flavor = "multi_thread")]
+async fn a_change_without_its_value_is_told_from_one_of_null() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		let environment = json!({ "server_group_id": group, "rank": "dev" });
+		set_var(&private, environment.clone(), "proxy", json!(null), false).await;
+		post(
+			&private,
+			"/api/ansible_variables/remove",
+			named(&environment, "proxy"),
+		)
+		.await;
+		// The same removal as an entry holding no value, as one written before
+		// entries held them.
+		conn.batch_execute(
+			"INSERT INTO audit_entries (recorded_at, retention, actor_kind, actor_id, actor_name, \
+			   action, records, detail, outcome, settled_at) \
+			 SELECT recorded_at + interval '1 millisecond', retention, actor_kind, actor_id, \
+			   actor_name, action, records, detail - 'value', outcome, settled_at \
+			 FROM audit_entries WHERE action = 'inventory_variable_removed'",
+		)
+		.await
+		.unwrap();
+
+		let history = post(
+			&private,
+			"/api/ansible_variables/history",
+			named(&environment, "proxy"),
+		)
+		.await;
+		let [unrecorded, of_null, _set] = history.as_array().unwrap().as_slice() else {
+			panic!("three changes: {history}");
+		};
+		assert_eq!(unrecorded["value_recorded"], false);
+		assert_eq!(unrecorded["undoable"], false);
+		assert_eq!(of_null["value_recorded"], true);
+		assert_eq!(of_null["value"], Value::Null);
+		assert_eq!(of_null["undoable"], true);
+
+		let mut restore = named(&environment, "proxy");
+		restore["entry_id"] = unrecorded["entry_id"].clone();
+		private
+			.post("/api/ansible_variables/restore")
+			.json(&restore)
+			.await
+			.assert_status_bad_request();
+		restore["entry_id"] = of_null["entry_id"].clone();
+		post(&private, "/api/ansible_variables/restore", restore).await;
+		let body = read_served(&private, json!({ "server_group_id": group })).await;
+		assert_eq!(body["vars"]["proxy"], Value::Null);
+		assert!(body["vars"].as_object().unwrap().contains_key("proxy"));
+	})
+	.await
+}

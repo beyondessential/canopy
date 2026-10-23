@@ -4,6 +4,7 @@ import {
 	resetSeededTables,
 	seedAnsibleCatalogue,
 	seedAnsibleVariable,
+	seedAuditEntry,
 	seedMachine,
 	seedMaintenanceWindow,
 	seedServer,
@@ -446,15 +447,33 @@ test.describe("group Ansible", () => {
 		await setVariable(scope, "log_level", "debug");
 		await expect(logLevel).toContainText('"debug"');
 		await expect(scope.getByTestId("removed-variables")).toHaveCount(0);
+		// A removal whose entry holds no value, as one written before entries
+		// held them, names no value and offers nothing to put back.
+		await seedAuditEntry(sql, {
+			action: "inventory_variable_removed",
+			minutesAgo: 60,
+			records: [
+				{
+					kind: "variable",
+					id: `inv-vars-production-${group.id}:proxy`,
+					name: "proxy",
+				},
+				{ kind: "group", id: group.id, name: "kamaka" },
+			],
+			detail: { rank: "production", secret: false },
+		});
 
 		await page.getByRole("button", { name: "History of production", exact: true }).click();
 		const history = page.getByTestId("variable-history");
 		const entries = history.getByTestId("history-entry");
-		await expect(entries).toHaveCount(4);
+		await expect(entries).toHaveCount(5);
 		await expect(entries.nth(0)).toContainText('log_level Set to "debug"');
 		await expect(entries.nth(1)).toContainText('log_level Removed "info"');
 		await expect(entries.nth(2)).toContainText('region Set to "nz"');
 		await expect(entries.nth(3)).toContainText('log_level Set to "info"');
+		await expect(entries.nth(4)).toContainText("proxy Removed");
+		await expect(entries.nth(4)).not.toContainText("null");
+		await expect(entries.nth(4).getByTestId("history-restore")).toHaveCount(0);
 		await expect(history).not.toContainText("timezone");
 
 		await entries.nth(1).getByTestId("history-restore").click();

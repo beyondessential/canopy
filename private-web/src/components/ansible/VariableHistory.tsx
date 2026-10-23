@@ -138,9 +138,14 @@ export default function VariableHistory({
 
 function describe(entry: VariableHistoryEntry): string {
 	if (entry.change === "removed") {
-		return entry.secret ? "Removed, secret" : `Removed ${show(entry.value)}`;
+		if (entry.secret) return "Removed, secret";
+		return entry.value_recorded ? `Removed ${show(entry.value)}` : "Removed";
 	}
-	const set = entry.secret ? "Set, secret" : `Set to ${show(entry.value)}`;
+	const set = entry.secret
+		? "Set, secret"
+		: entry.value_recorded
+			? `Set to ${show(entry.value)}`
+			: "Set";
 	if (entry.replaced_secret) return `${set}, over a secret`;
 	if (entry.replaced !== undefined && entry.replaced !== null)
 		return `${set}, was ${show(entry.replaced)}`;

@@ -161,6 +161,10 @@ pub struct HistoryEntry {
 	/// The plain value it set or removed.
 	#[schema(value_type = Option<serde_json::Value>)]
 	pub value: Option<Value>,
+	/// Whether its entry holds the plain value it set or removed, so a value of
+	/// null is told from one the entry never recorded, as an entry written before
+	/// entries held values does not.
+	pub value_recorded: bool,
 	/// The plain value a set replaced.
 	#[schema(value_type = Option<serde_json::Value>)]
 	pub replaced: Option<Value>,
@@ -555,7 +559,9 @@ async fn history_entry(
 	let secret = flag("secret");
 	let replaced = plain("replaced");
 	let replaced_secret = flag("replaced_secret");
-	let value = plain("value");
+	// A plain value is the entry's own, null included, where the entry holds one.
+	let value = (!secret).then(|| detail.get("value").cloned()).flatten();
+	let value_recorded = value.is_some();
 	let put_away_secret = match change {
 		Change::Set => replaced_secret,
 		Change::Removed => secret,
@@ -565,7 +571,7 @@ async fn history_entry(
 	} else {
 		match change {
 			Change::Set => replaced.is_some(),
-			Change::Removed => value.is_some(),
+			Change::Removed => value_recorded,
 		}
 	};
 	Ok(HistoryEntry {
@@ -575,6 +581,7 @@ async fn history_entry(
 		change,
 		secret,
 		value,
+		value_recorded,
 		replaced,
 		replaced_secret,
 		restored_from: detail
@@ -811,10 +818,16 @@ pub async fn restore(
 				Change::Removed => change.value,
 			};
 			let value = put_away.ok_or_else(|| {
-				AppError::BadRequest(format!(
-					"change {} replaced nothing, so there is nothing to put back",
-					args.entry_id
-				))
+				AppError::BadRequest(match change.change {
+					Change::Set => format!(
+						"change {} replaced nothing, so there is nothing to put back",
+						args.entry_id
+					),
+					Change::Removed => format!(
+						"change {} does not record the value it removed, so there is nothing to put back",
+						args.entry_id
+					),
+				})
 			})?;
 			(value, false)
 		}
