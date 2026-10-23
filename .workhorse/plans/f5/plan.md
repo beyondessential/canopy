@@ -17,7 +17,7 @@ Lenses, inventory and the running findings live in `.workhorse/working-docs/f5/w
 - [x] Lens C analysis: incremental sprawl (findings in the working doc, not yet applied)
 - [x] Settle lens C's design decisions and apply its high tier, running the affected tests (all passing)
 - [x] Lens C medium tier and the stateful endpoint families, settled with the user and applied (all passing, no production line lost)
-- [ ] Settle the findings from that round (alert behaviour after an unreachable read, release_unstarted reason, minor messages)
+- [x] Settle the findings from that round (alert behaviour, release_unstarted reason, minor messages) and apply them
 - [x] Lens D round 1: analysis and apply of the small folds and read-only families (coverage diff shows no production line lost)
 - [ ] Lens D round 2: fresh agents over what remains
 - [x] Apply the Rust findings of lenses A and B and run the affected tests (all passing)
