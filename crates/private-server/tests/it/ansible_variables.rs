@@ -295,7 +295,14 @@ async fn a_secret_is_served_to_a_run_and_shown_to_no_reader() {
 
 		let scenario = "a secret reaching a run";
 		let group = insert_group(&mut conn, "kamaka-served").await;
-		insert_application(&mut conn, group, "kamaka-served-central", "tamanu-central", None).await;
+		insert_application(
+			&mut conn,
+			group,
+			"kamaka-served-central",
+			"tamanu-central",
+			None,
+		)
+		.await;
 		set_var(
 			&private,
 			json!({ "server_group_id": group, "rank": "dev" }),
@@ -378,8 +385,14 @@ async fn a_secret_is_served_to_a_run_and_shown_to_no_reader() {
 		// withhold it.
 		let scenario = "a secret set plain at the environment";
 		let group = insert_group(&mut conn, "kamaka-plain-over").await;
-		insert_application(&mut conn, group, "kamaka-plain-over-central", "tamanu-central", None)
-			.await;
+		insert_application(
+			&mut conn,
+			group,
+			"kamaka-plain-over-central",
+			"tamanu-central",
+			None,
+		)
+		.await;
 		set_var(
 			&private,
 			json!({ "server_group_id": group }),
@@ -472,8 +485,18 @@ async fn a_secret_is_served_to_a_run_and_shown_to_no_reader() {
 		// A secret is listed by name, with the scope it is set at and when it
 		// last changed, and never its value.
 		if let Some(secret) = failures.ok(scenario, listing_of("sync_salt")) {
-			failures.eq(scenario, "the secret's flag", &secret["is_secret"], json!(true));
-			failures.eq(scenario, "the secret's value", &secret["value"], Value::Null);
+			failures.eq(
+				scenario,
+				"the secret's flag",
+				&secret["is_secret"],
+				json!(true),
+			);
+			failures.eq(
+				scenario,
+				"the secret's value",
+				&secret["value"],
+				Value::Null,
+			);
 			failures.eq(scenario, "the secret's rank", &secret["rank"], "dev");
 			failures.eq(
 				scenario,
@@ -483,7 +506,12 @@ async fn a_secret_is_served_to_a_run_and_shown_to_no_reader() {
 			);
 		}
 		if let Some(plain) = failures.ok(scenario, listing_of("timezone")) {
-			failures.eq(scenario, "the group's value", &plain["value"], "Pacific/Fiji");
+			failures.eq(
+				scenario,
+				"the group's value",
+				&plain["value"],
+				"Pacific/Fiji",
+			);
 			failures.eq(scenario, "the group's rank", &plain["rank"], Value::Null);
 		}
 		if let Some(on_machine) = failures.ok(scenario, listing_of("log_level")) {
@@ -497,8 +525,14 @@ async fn a_secret_is_served_to_a_run_and_shown_to_no_reader() {
 
 		let scenario = "a secret removed";
 		let group = insert_group(&mut conn, "kamaka-removed").await;
-		insert_application(&mut conn, group, "kamaka-removed-central", "tamanu-central", None)
-			.await;
+		insert_application(
+			&mut conn,
+			group,
+			"kamaka-removed-central",
+			"tamanu-central",
+			None,
+		)
+		.await;
 		let scope = json!({ "server_group_id": group, "rank": "dev" });
 		set_var(&private, scope.clone(), "sync_salt", json!("pepper"), true).await;
 		let mut args = scope.clone();
@@ -535,8 +569,14 @@ async fn a_secret_is_served_to_a_run_and_shown_to_no_reader() {
 		// hold.
 		let scenario = "a secret turned plain";
 		let group = insert_group(&mut conn, "kamaka-turned-plain").await;
-		insert_application(&mut conn, group, "kamaka-turned-plain-central", "tamanu-central", None)
-			.await;
+		insert_application(
+			&mut conn,
+			group,
+			"kamaka-turned-plain-central",
+			"tamanu-central",
+			None,
+		)
+		.await;
 		let scope = json!({ "server_group_id": group, "rank": "dev" });
 		set_var(&private, scope.clone(), "salt", json!("pepper"), true).await;
 		set_var(&private, scope, "salt", json!("visible"), false).await;
@@ -564,8 +604,14 @@ async fn refuses_an_environment_it_cannot_serve_whole() {
 
 		let scenario = "a secret with no value";
 		let group = insert_group(&mut conn, "kamaka-no-value").await;
-		insert_application(&mut conn, group, "kamaka-no-value-central", "tamanu-central", None)
-			.await;
+		insert_application(
+			&mut conn,
+			group,
+			"kamaka-no-value-central",
+			"tamanu-central",
+			None,
+		)
+		.await;
 		secret_without_value(&mut conn, group, "dev", "sync_salt").await;
 		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
 		let (status, detail) = read_under(&private, lease).await;

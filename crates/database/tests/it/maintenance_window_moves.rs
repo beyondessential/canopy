@@ -184,11 +184,7 @@ async fn take_lease(
 }
 
 /// A machine with an application ranked production on it, and that application.
-async fn production_machine(
-	conn: &mut AsyncPgConnection,
-	group: Uuid,
-	name: &str,
-) -> (Uuid, Uuid) {
+async fn production_machine(conn: &mut AsyncPgConnection, group: Uuid, name: &str) -> (Uuid, Uuid) {
 	let machine = insert_machine(conn, Some(group), name).await;
 	let application =
 		insert_application(conn, Some(group), machine, Some("production"), name).await;
@@ -651,8 +647,7 @@ async fn a_window_a_run_is_served_against_stays_until_the_lease_is_released() {
 				..Amendment::default()
 			},
 		] {
-			let refused =
-				MaintenanceWindow::amend(&mut conn, set.id, amendment, Some("op")).await;
+			let refused = MaintenanceWindow::amend(&mut conn, set.id, amendment, Some("op")).await;
 			assert!(
 				matches!(refused, Err(AppError::Conflict(_))),
 				"the run's set: {refused:?}"
@@ -732,12 +727,7 @@ async fn a_window_a_run_is_served_against_stays_until_the_lease_is_released() {
 				},
 				Grain::machine(s1),
 			),
-			(
-				"a whole group",
-				whole,
-				move_to(production),
-				production,
-			),
+			("a whole group", whole, move_to(production), production),
 		];
 		for (kind, window, amendment, _) in &windows {
 			assert!(
@@ -745,8 +735,7 @@ async fn a_window_a_run_is_served_against_stays_until_the_lease_is_released() {
 				"{kind}: the dialog is told the window cannot move"
 			);
 			let refused =
-				MaintenanceWindow::amend(&mut conn, window.id, amendment.clone(), Some("op"))
-					.await;
+				MaintenanceWindow::amend(&mut conn, window.id, amendment.clone(), Some("op")).await;
 			assert!(
 				matches!(refused, Err(AppError::Conflict(_))),
 				"{kind}: the run is acting on what the window covers: {refused:?}"
@@ -784,20 +773,24 @@ async fn a_window_a_run_is_served_against_stays_until_the_lease_is_released() {
 
 		let mut moved = Vec::new();
 		for (kind, window, amendment, destination) in &windows[..4] {
-			let after = MaintenanceWindow::amend(&mut conn, window.id, amendment.clone(), Some("op"))
-				.await
-				.unwrap_or_else(|err| {
-					panic!("{kind}: moves like any other once the lease is released: {err:?}")
-				});
+			let after =
+				MaintenanceWindow::amend(&mut conn, window.id, amendment.clone(), Some("op"))
+					.await
+					.unwrap_or_else(|err| {
+						panic!("{kind}: moves like any other once the lease is released: {err:?}")
+					});
 			assert_eq!(after.grain(), Some(*destination), "{kind}: it moved");
 			moved.push(after);
 		}
 		release_leaving_windows(&mut conn, demo).await;
-		let after =
-			MaintenanceWindow::amend(&mut conn, whole.id, whole_move.clone(), Some("op"))
-				.await
-				.expect("a whole group: moves once the demo lease is released");
-		assert_eq!(after.grain(), Some(*whole_destination), "a whole group: it moved");
+		let after = MaintenanceWindow::amend(&mut conn, whole.id, whole_move.clone(), Some("op"))
+			.await
+			.expect("a whole group: moves once the demo lease is released");
+		assert_eq!(
+			after.grain(),
+			Some(*whole_destination),
+			"a whole group: it moved"
+		);
 		moved.push(after);
 
 		// Another operator's lease is not served against the holder's windows.

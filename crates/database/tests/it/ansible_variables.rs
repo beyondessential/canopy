@@ -292,9 +292,8 @@ async fn a_variable_holds_its_group_as_an_import_does() {
 		let mut other = AsyncPgConnection::establish(&url)
 			.await
 			.expect("second connection");
-		let try_group = format!(
-			"SELECT id FROM server_groups WHERE id = '{group}' FOR NO KEY UPDATE NOWAIT"
-		);
+		let try_group =
+			format!("SELECT id FROM server_groups WHERE id = '{group}' FOR NO KEY UPDATE NOWAIT");
 
 		for scope in scopes_of_every_kind(group, machine) {
 			conn.batch_execute("BEGIN").await.unwrap();
