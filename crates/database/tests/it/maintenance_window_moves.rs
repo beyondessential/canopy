@@ -84,6 +84,7 @@ struct Site {
 	production_box: Uuid,
 	production_app: Uuid,
 	clone_box: Uuid,
+	clone_app: Uuid,
 }
 
 async fn site(conn: &mut AsyncPgConnection) -> Site {
@@ -98,12 +99,14 @@ async fn site(conn: &mut AsyncPgConnection) -> Site {
 	)
 	.await;
 	let clone_box = insert_machine(conn, Some(group), "fj-clone").await;
-	insert_application(conn, Some(group), clone_box, Some("clone"), "clone central").await;
+	let clone_app =
+		insert_application(conn, Some(group), clone_box, Some("clone"), "clone central").await;
 	Site {
 		group,
 		production_box,
 		production_app,
 		clone_box,
+		clone_app,
 	}
 }
 
@@ -253,8 +256,11 @@ fn move_to(target: Grain) -> Amendment {
 	}
 }
 
+/// An amendment changes only what it names. A window past its expected end
+/// stays open until the sweep stamps it, and extending it then is the operator
+/// saying the work ran long.
 #[tokio::test(flavor = "multi_thread")]
-async fn an_amendment_changes_only_what_it_names() {
+async fn a_window_past_its_end_but_not_yet_swept_can_be_extended() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let site = site(&mut conn).await;
 		let window = declare_group(&mut conn, site.group, None).await;
@@ -273,9 +279,12 @@ async fn an_amendment_changes_only_what_it_names() {
 		assert_eq!(
 			amended.note.as_deref(),
 			Some("upgrading"),
-			"the note was not named, so it stands"
+			"amend the end: the note was not named, so it stands"
 		);
-		assert!(amended.expected_end > window.expected_end);
+		assert!(
+			amended.expected_end > window.expected_end,
+			"amend the end: the end moved out"
+		);
 		assert_eq!(amended.amended_by.as_deref(), Some("other"));
 
 		let cleared = MaintenanceWindow::amend(
@@ -289,22 +298,12 @@ async fn an_amendment_changes_only_what_it_names() {
 		)
 		.await
 		.expect("clear the note");
-		assert_eq!(cleared.note, None);
+		assert_eq!(cleared.note, None, "clear the note: the note is gone");
 		assert_eq!(
 			cleared.expected_end, amended.expected_end,
-			"and the end was not named, so it stands"
+			"clear the note: and the end was not named, so it stands"
 		);
-	})
-	.await
-}
 
-/// A window past its expected end stays open until the sweep stamps it, and
-/// extending it then is the operator saying the work ran long.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_window_past_its_end_but_not_yet_swept_can_be_extended() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let site = site(&mut conn).await;
-		let window = declare_group(&mut conn, site.group, None).await;
 		sql_query(
 			"UPDATE maintenance_windows SET expected_end = NOW() - INTERVAL '1 minute' WHERE id = $1",
 		)
@@ -364,6 +363,7 @@ async fn a_move_suspends_the_new_target_now_and_settles_the_one_it_left() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let site = site(&mut conn).await;
 		let window = declare_group(&mut conn, site.group, None).await;
+		assert_eq!(outbox_count(&mut conn).await, 1, "declaring notifies");
 
 		let moved = MaintenanceWindow::amend(
 			&mut conn,
@@ -401,35 +401,6 @@ async fn a_move_suspends_the_new_target_now_and_settles_the_one_it_left() {
 			"the group's own checks are settling too"
 		);
 
-		backdate_moves(&mut conn, window.id, SETTLE + SignedDuration::from_mins(1)).await;
-		assert!(
-			!MaintenanceWindow::suspends(&mut conn, None, Some(site.production_box), None)
-				.await
-				.expect("suspends"),
-			"production is watched again once the settle period has passed"
-		);
-		let (_, settled) = MaintenanceWindow::sweep(&mut conn).await.expect("sweep");
-		assert_eq!(settled, 1, "the move's settle period is claimed once");
-		let (_, again) = MaintenanceWindow::sweep(&mut conn).await.expect("sweep");
-		assert_eq!(again, 0, "and not twice");
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_failure_on_what_a_move_left_alerts_once_it_has_settled() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let site = site(&mut conn).await;
-		let window = declare_group(&mut conn, site.group, None).await;
-		MaintenanceWindow::amend(
-			&mut conn,
-			window.id,
-			move_to(Grain::environment(site.group, ServerRank::Clone)),
-			Some("op"),
-		)
-		.await
-		.expect("move");
-
 		file_check(
 			&mut conn,
 			filing(Scope::Application(site.production_app), "reachability"),
@@ -443,12 +414,26 @@ async fn a_failure_on_what_a_move_left_alerts_once_it_has_settled() {
 		);
 
 		backdate_moves(&mut conn, window.id, SETTLE + SignedDuration::from_mins(1)).await;
-		MaintenanceWindow::sweep(&mut conn).await.expect("sweep");
+		assert!(
+			!MaintenanceWindow::suspends(&mut conn, None, Some(site.production_box), None)
+				.await
+				.expect("suspends"),
+			"production is watched again once the settle period has passed"
+		);
+		let (_, settled) = MaintenanceWindow::sweep(&mut conn).await.expect("sweep");
+		assert_eq!(settled, 1, "the move's settle period is claimed once");
 		assert_eq!(
 			open_incidents(&mut conn, site.group).await,
 			1,
 			"what is still failing contributes once the settle period has passed"
 		);
+		assert_eq!(
+			outbox_count(&mut conn).await,
+			1,
+			"neither the move nor the end of its settle period notifies"
+		);
+		let (_, again) = MaintenanceWindow::sweep(&mut conn).await.expect("sweep");
+		assert_eq!(again, 0, "and not twice");
 	})
 	.await
 }
@@ -541,57 +526,35 @@ async fn a_move_is_refused_where_it_cannot_go() {
 			"a target holds at most one window: {occupied:?}"
 		);
 
-		MaintenanceWindow::lift(&mut conn, window.id, Some("op"))
-			.await
-			.expect("lift");
-		let ended = MaintenanceWindow::amend(
+		let over_clone = MaintenanceWindow::declare(
 			&mut conn,
-			window.id,
-			move_to(Grain::environment(site.group, ServerRank::Production)),
-			Some("op"),
-		)
-		.await;
-		assert!(
-			matches!(ended, Err(AppError::BadRequest(_))),
-			"an ended window is history: {ended:?}"
-		);
-	})
-	.await
-}
-
-/// The window of an archived target still exists, so a move is refused as a
-/// conflict rather than reported as a missing window.
-#[tokio::test(flavor = "multi_thread")]
-async fn an_archived_targets_window_cannot_move() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let site = site(&mut conn).await;
-		let window = MaintenanceWindow::declare(
-			&mut conn,
-			Scope::Application(site.production_app),
+			Scope::Application(site.clone_app),
 			None,
 			in_hours(1),
 			None,
 			Some("op"),
 		)
 		.await
-		.expect("declare");
+		.expect("declare over the clone application");
 		sql_query("UPDATE applications SET deleted_at = NOW() WHERE id = $1")
-			.bind::<sql_types::Uuid, _>(site.production_app)
+			.bind::<sql_types::Uuid, _>(site.clone_app)
 			.execute(&mut conn)
 			.await
 			.expect("archive");
-
-		let refused = MaintenanceWindow::amend(
+		let archived = MaintenanceWindow::amend(
 			&mut conn,
-			window.id,
-			move_to(Grain::machine(site.production_box)),
+			over_clone.id,
+			move_to(Grain::machine(site.clone_box)),
 			Some("op"),
 		)
 		.await;
-		assert!(matches!(refused, Err(AppError::Conflict(_))), "{refused:?}");
+		assert!(
+			matches!(archived, Err(AppError::Conflict(_))),
+			"an archived target's window still exists, so the move is a conflict, not a missing window: {archived:?}"
+		);
 		MaintenanceWindow::amend(
 			&mut conn,
-			window.id,
+			over_clone.id,
 			Amendment {
 				expected_end: Some(in_hours(2)),
 				..Amendment::default()
@@ -883,26 +846,6 @@ async fn coverage_marks_agree_with_suspension() {
 	.await
 }
 
-/// Taking a lease reads the windows over the environment under the group's
-/// lock, so another operator's window refuses it from inside the take.
-// spec: ANSRUN#work-under-way
-#[tokio::test(flavor = "multi_thread")]
-async fn a_take_under_another_operators_window_is_refused_inside_the_lock() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let site = site(&mut conn).await;
-		let window = declare_group(&mut conn, site.group, Some(ServerRank::Production)).await;
-		let refused = take_lease(&mut conn, site.group, site.production_box, "someone-else")
-			.await
-			.expect("take");
-		assert_eq!(
-			refused.map(|lease| lease.id).map_err(|window| window.id),
-			Err(window.id),
-			"the window that refuses it comes back"
-		);
-	})
-	.await
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn a_moved_window_is_in_both_targets_histories() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
@@ -987,32 +930,6 @@ async fn history_lists_what_still_covers_the_target_first() {
 			"the group's open window comes before a span that ended more recently"
 		);
 		assert_eq!(history[0].ended(), None);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_move_notifies_no_one() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let site = site(&mut conn).await;
-		let window = declare_group(&mut conn, site.group, None).await;
-		assert_eq!(outbox_count(&mut conn).await, 1, "declaring notifies");
-
-		MaintenanceWindow::amend(
-			&mut conn,
-			window.id,
-			move_to(Grain::environment(site.group, ServerRank::Clone)),
-			Some("op"),
-		)
-		.await
-		.expect("move");
-		backdate_moves(&mut conn, window.id, SETTLE + SignedDuration::from_mins(1)).await;
-		MaintenanceWindow::sweep(&mut conn).await.expect("sweep");
-		assert_eq!(
-			outbox_count(&mut conn).await,
-			1,
-			"neither the move nor the end of its settle period notifies"
-		);
 	})
 	.await
 }

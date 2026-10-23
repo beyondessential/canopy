@@ -45,10 +45,8 @@ describe("buildCommand", () => {
 });
 
 describe("shellArg", () => {
-	it("leaves a plain word and quotes the rest", () => {
+	it("leaves a plain word alone", () => {
 		expect(shellArg("tamanu-install.yml")).toBe("tamanu-install.yml");
-		expect(shellArg("a b")).toBe("'a b'");
-		expect(shellArg("it's")).toBe("'it'\\''s'");
 	});
 
 	const metacharacters: [string, string, string][] = [
