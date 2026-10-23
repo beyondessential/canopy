@@ -852,7 +852,8 @@ async fn applying_sets_the_variables_and_notes_and_records_one_entry() {
 /// machine switched to managed beforehand and a variable on the whole group do
 /// not hold it back (an environment variable overriding a group's is named),
 /// but a variable on one of its machines does, and it is refused once its
-/// machines have changed since the preview.
+/// machines have changed since the preview, or where its preview cannot be
+/// applied, setting nothing.
 // spec: ANSIMP
 // spec: ANSIMP#preview
 // spec: ANSIMP#applying
@@ -864,6 +865,27 @@ async fn is_refused_where_variables_are_set_or_the_machines_changed() {
 			"group": "kamaka", "file": FILE,
 			"hosts": [{ "host": "10.20.30.40:223", "machine_id": env.office }],
 		});
+
+		// A preview that cannot be applied, here for a host matched to no machine,
+		// is refused whole by the apply, which sets nothing.
+		let unmatched = json!({ "group": "kamaka", "file": FILE });
+		let cannot = preview(&private, unmatched.clone()).await;
+		assert_eq!(cannot["can_apply"], false, "{cannot}");
+		let mut apply = unmatched;
+		apply["members"] = cannot["members"].clone();
+		let refused = private.post("/api/ansible/import_apply").json(&apply).await;
+		refused.assert_status(axum::http::StatusCode::CONFLICT);
+		assert!(
+			refused.text().contains("the import cannot be applied"),
+			"{}",
+			refused.text()
+		);
+		let written = private
+			.post("/api/ansible_variables/for_group")
+			.json(&json!({ "server_group_id": env.group }))
+			.await;
+		written.assert_status_ok();
+		assert_eq!(written.json::<Value>(), json!([]), "nothing was set");
 
 		// Whether a machine is managed is a switch, not a variable.
 		private

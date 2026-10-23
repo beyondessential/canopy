@@ -9,8 +9,8 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::ansible::{
-	insert_application, insert_application_on_its_own_machine, insert_group,
-	insert_ranked_application, read_served, take_lease,
+	Failures, insert_application, insert_application_on_its_own_machine, insert_group, read_served,
+	take_lease,
 };
 
 async fn set_var(
@@ -42,11 +42,25 @@ async fn secret_without_value(conn: &mut AsyncPgConnection, group: Uuid, rank: &
 	.expect("declare secret");
 }
 
-/// The three scopes merge name-wise, a machine's over its environment's over
-/// its group's.
+/// The host of a served read for a machine.
+fn host_with(body: &Value, machine: Uuid) -> Result<&Value, String> {
+	body["hosts"]
+		.as_array()
+		.and_then(|hosts| hosts.iter().find(|host| host["id"] == machine.to_string()))
+		.ok_or_else(|| format!("no host for machine {machine}: {body}"))
+}
+
+/// The variables an environment serves a run, each scenario in a group of its
+/// own: the three scopes merging name-wise (a machine's over its environment's
+/// over its group's, and a group's value reaching every environment in it),
+/// values served as the JSON they were stored as, and an `ansible_host`
+/// overriding the address Canopy holds.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_machines_value_wins_over_its_environments_and_its_groups() {
+async fn serves_each_environment_the_variables_set_for_it() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
+		let mut failures = Failures::default();
+
+		let scenario = "the scopes merging";
 		let group = insert_group(&mut conn, "kamaka").await;
 		let (_, box_of_central) = insert_application_on_its_own_machine(
 			&mut conn,
@@ -63,6 +77,15 @@ async fn a_machines_value_wins_over_its_environments_and_its_groups() {
 			"kamaka-facility",
 			"tamanu-facility",
 			Some("production"),
+			None,
+		)
+		.await;
+		insert_application_on_its_own_machine(
+			&mut conn,
+			group,
+			"kamaka-demo",
+			"tamanu-central",
+			Some("demo"),
 			None,
 		)
 		.await;
@@ -87,6 +110,14 @@ async fn a_machines_value_wins_over_its_environments_and_its_groups() {
 		.await;
 		set_var(
 			&private,
+			group_scope,
+			"elastic_agent_enabled",
+			json!(false),
+			false,
+		)
+		.await;
+		set_var(
+			&private,
 			environment.clone(),
 			"log_level",
 			json!("debug"),
@@ -101,7 +132,15 @@ async fn a_machines_value_wins_over_its_environments_and_its_groups() {
 			false,
 		)
 		.await;
-		set_var(&private, environment, "replicas", json!(3), false).await;
+		set_var(&private, environment.clone(), "replicas", json!(3), false).await;
+		set_var(
+			&private,
+			environment,
+			"extra_hostnames",
+			json!(["sync.kamaka.example"]),
+			false,
+		)
+		.await;
 
 		let body = read_served(
 			&private,
@@ -111,82 +150,152 @@ async fn a_machines_value_wins_over_its_environments_and_its_groups() {
 
 		// The group's and the environment's are served once, beside the
 		// machines that carry them.
-		assert_eq!(body["vars"]["timezone"], "Pacific/Fiji");
-		assert_eq!(body["vars"]["log_level"], "debug");
-		assert_eq!(body["vars"]["replicas"], json!(3));
-
-		let hosts = body["hosts"].as_array().expect("hosts");
-		let central_host = hosts
-			.iter()
-			.find(|host| host["id"] == box_of_central.to_string())
-			.expect("central's machine");
-		assert_eq!(central_host["vars"]["log_level"], "trace");
-		assert_eq!(central_host["vars"]["timezone"], "Pacific/Fiji");
-		// What the machine sets itself is served apart from what it inherits,
-		// so a value can be traced to where it is set.
-		assert_eq!(central_host["own_vars"]["log_level"], "trace");
-		assert!(central_host["own_vars"].get("timezone").is_none());
-
-		let facility_host = hosts
-			.iter()
-			.find(|host| host["id"] == box_of_facility.to_string())
-			.expect("facility's machine");
-		assert_eq!(facility_host["vars"]["log_level"], "debug");
-	})
-	.await
-}
-
-/// A value is JSON and is served as it was stored, whatever its type.
-#[tokio::test(flavor = "multi_thread")]
-async fn serves_a_value_as_the_json_it_was_stored_as() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		let scope = json!({ "server_group_id": group });
-
-		set_var(
-			&private,
-			scope.clone(),
-			"elastic_agent_enabled",
-			json!(false),
-			false,
-		)
-		.await;
-		set_var(&private, scope.clone(), "ansible_port", json!(2222), false).await;
-		set_var(
-			&private,
-			scope.clone(),
-			"tamanu_version",
-			json!("v2.54.8"),
-			false,
-		)
-		.await;
-		set_var(
-			&private,
-			scope,
-			"extra_hostnames",
-			json!(["sync.kamaka.example"]),
-			false,
-		)
-		.await;
-
-		let body = read_served(&private, json!({ "server_group_id": group })).await;
-		assert_eq!(body["vars"]["elastic_agent_enabled"], json!(false));
-		assert_eq!(body["vars"]["ansible_port"], json!(2222));
-		assert_eq!(body["vars"]["tamanu_version"], "v2.54.8");
-		assert_eq!(
-			body["vars"]["extra_hostnames"],
-			json!(["sync.kamaka.example"])
+		failures.eq(
+			scenario,
+			"the group's timezone",
+			&body["vars"]["timezone"],
+			"Pacific/Fiji",
 		);
+		failures.eq(
+			scenario,
+			"the environment's log level",
+			&body["vars"]["log_level"],
+			"debug",
+		);
+		failures.eq(
+			scenario,
+			"the environment's replicas, a number",
+			&body["vars"]["replicas"],
+			json!(3),
+		);
+		failures.eq(
+			scenario,
+			"a boolean as stored",
+			&body["vars"]["elastic_agent_enabled"],
+			json!(false),
+		);
+		failures.eq(
+			scenario,
+			"an array as stored",
+			&body["vars"]["extra_hostnames"],
+			json!(["sync.kamaka.example"]),
+		);
+		failures.eq(
+			scenario,
+			"the group's timezone on the first host",
+			&body["hosts"][0]["vars"]["timezone"],
+			"Pacific/Fiji",
+		);
+		failures.check(
+			scenario,
+			body["hosts"].as_array().map(Vec::len) == Some(2),
+			format!("the demo box is not in production: {body}"),
+		);
+
+		if let Some(host) = failures.ok(scenario, host_with(&body, box_of_central)) {
+			failures.eq(
+				scenario,
+				"central's log level",
+				&host["vars"]["log_level"],
+				"trace",
+			);
+			failures.eq(
+				scenario,
+				"central's inherited timezone",
+				&host["vars"]["timezone"],
+				"Pacific/Fiji",
+			);
+			// What the machine sets itself is served apart from what it
+			// inherits, so a value can be traced to where it is set.
+			failures.eq(
+				scenario,
+				"central's own log level",
+				&host["own_vars"]["log_level"],
+				"trace",
+			);
+			failures.check(
+				scenario,
+				host["own_vars"].get("timezone").is_none(),
+				format!("central's own variables carry an inherited one: {host}"),
+			);
+		}
+		// A machine's variables reach no other box in the environment.
+		if let Some(host) = failures.ok(scenario, host_with(&body, box_of_facility)) {
+			failures.eq(
+				scenario,
+				"facility's log level, the environment's and not central's",
+				&host["vars"]["log_level"],
+				"debug",
+			);
+		}
+
+		let demo = read_served(
+			&private,
+			json!({ "server_group_id": group, "rank": "demo" }),
+		)
+		.await;
+		failures.eq(
+			scenario,
+			"the group's timezone at demo",
+			&demo["vars"]["timezone"],
+			"Pacific/Fiji",
+		);
+		failures.eq(
+			scenario,
+			"the group's timezone on the demo host",
+			&demo["hosts"][0]["vars"]["timezone"],
+			"Pacific/Fiji",
+		);
+		failures.eq(
+			scenario,
+			"the group's log level on the demo host, not production's",
+			&demo["hosts"][0]["vars"]["log_level"],
+			"info",
+		);
+
+		let scenario = "an ansible_host";
+		let group = insert_group(&mut conn, "kamaka-address").await;
+		let (_, machine) = insert_application_on_its_own_machine(
+			&mut conn,
+			group,
+			"kamaka-address-central",
+			"tamanu-central",
+			None,
+			Some("https://central.kamaka.example/"),
+		)
+		.await;
+		set_var(
+			&private,
+			json!({ "machine_id": machine }),
+			"ansible_host",
+			json!("10.0.0.4"),
+			false,
+		)
+		.await;
+		let body = read_served(&private, json!({ "server_group_id": group })).await;
+		failures.eq(
+			scenario,
+			"the host's address",
+			&body["hosts"][0]["address"],
+			"10.0.0.4",
+		);
+
+		failures.assert_none();
 	})
 	.await
 }
 
+/// A secret is served to a run and marked as one, overlays the way a plain
+/// value does, is listed by name and never by value, and turning it plain or
+/// removing it forgets the value it held. Each scenario has a group of its own.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_secret_reaches_a_run_and_is_marked_as_one() {
+async fn a_secret_is_served_to_a_run_and_shown_to_no_reader() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		let mut failures = Failures::default();
+
+		let scenario = "a secret reaching a run";
+		let group = insert_group(&mut conn, "kamaka-served").await;
+		insert_application(&mut conn, group, "kamaka-served-central", "tamanu-central", None).await;
 		set_var(
 			&private,
 			json!({ "server_group_id": group, "rank": "dev" }),
@@ -195,34 +304,39 @@ async fn a_secret_reaches_a_run_and_is_marked_as_one() {
 			true,
 		)
 		.await;
-
 		let body = read_served(&private, json!({ "server_group_id": group })).await;
-		assert_eq!(body["vars"]["sync_salt"], "pepper");
-		assert_eq!(body["secret_vars"], json!(["sync_salt"]));
-
+		failures.eq(scenario, "the value", &body["vars"]["sync_salt"], "pepper");
+		failures.eq(
+			scenario,
+			"the names marked secret",
+			&body["secret_vars"],
+			json!(["sync_salt"]),
+		);
 		let host = &body["hosts"][0];
-		assert_eq!(host["vars"]["sync_salt"], "pepper");
-		assert_eq!(host["secret_vars"], json!(["sync_salt"]));
-	})
-	.await
-}
+		failures.eq(
+			scenario,
+			"the host's value",
+			&host["vars"]["sync_salt"],
+			"pepper",
+		);
+		failures.eq(
+			scenario,
+			"the host's names marked secret",
+			&host["secret_vars"],
+			json!(["sync_salt"]),
+		);
 
-/// A machine's secret overlays the environment's, and the merge stays marked
-/// secret.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_machines_secret_overlays_the_environments() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
+		let scenario = "a machine's secret over the environment's";
+		let group = insert_group(&mut conn, "kamaka-overlay").await;
 		let (_, machine) = insert_application_on_its_own_machine(
 			&mut conn,
 			group,
-			"kamaka-central",
+			"kamaka-overlay-central",
 			"tamanu-central",
 			None,
 			None,
 		)
 		.await;
-
 		set_var(
 			&private,
 			json!({ "server_group_id": group, "rank": "dev" }),
@@ -239,85 +353,81 @@ async fn a_machines_secret_overlays_the_environments() {
 			true,
 		)
 		.await;
-
 		let body = read_served(&private, json!({ "server_group_id": group })).await;
-		assert_eq!(body["vars"]["api_key"], "shared");
-		assert_eq!(body["hosts"][0]["vars"]["api_key"], "mine");
-		assert_eq!(body["hosts"][0]["secret_vars"], json!(["api_key"]));
-	})
-	.await
-}
-
-/// A run receiving a machine that looks configured and is missing a value is
-/// worse than one that does not run.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_secret_with_no_value_refuses_the_environment() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		secret_without_value(&mut conn, group, "dev", "sync_salt").await;
-
-		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
-		let response = private
-			.post("/api/ansible/for_group")
-			.json(&json!({ "lease_id": lease }))
-			.await;
-		response.assert_status(axum::http::StatusCode::BAD_GATEWAY);
-		assert!(
-			response.json::<Value>()["detail"]
-				.as_str()
-				.expect("detail")
-				.contains("sync_salt"),
+		failures.eq(
+			scenario,
+			"the environment's value",
+			&body["vars"]["api_key"],
+			"shared",
 		);
-	})
-	.await
-}
+		failures.eq(
+			scenario,
+			"the machine's value",
+			&body["hosts"][0]["vars"]["api_key"],
+			"mine",
+		);
+		failures.eq(
+			scenario,
+			"the merge stays marked secret",
+			&body["hosts"][0]["secret_vars"],
+			json!(["api_key"]),
+		);
 
-/// An `ansible_host` variable overrides the address canopy holds.
-#[tokio::test(flavor = "multi_thread")]
-async fn ansible_host_overrides_the_address() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		let (_, machine) = insert_application_on_its_own_machine(
-			&mut conn,
-			group,
-			"kamaka-central",
-			"tamanu-central",
-			None,
-			Some("https://central.kamaka.example/"),
+		// A name a group holds as a secret and an environment sets in the open
+		// is served as the plain value it is, so nothing tells a run to
+		// withhold it.
+		let scenario = "a secret set plain at the environment";
+		let group = insert_group(&mut conn, "kamaka-plain-over").await;
+		insert_application(&mut conn, group, "kamaka-plain-over-central", "tamanu-central", None)
+			.await;
+		set_var(
+			&private,
+			json!({ "server_group_id": group }),
+			"salt",
+			json!("pepper"),
+			true,
 		)
 		.await;
 		set_var(
 			&private,
-			json!({ "machine_id": machine }),
-			"ansible_host",
-			json!("10.0.0.4"),
+			json!({ "server_group_id": group, "rank": "dev" }),
+			"salt",
+			json!("visible"),
 			false,
 		)
 		.await;
-
 		let body = read_served(&private, json!({ "server_group_id": group })).await;
-		assert_eq!(body["hosts"][0]["address"], "10.0.0.4");
-	})
-	.await
-}
+		failures.eq(scenario, "the value", &body["vars"]["salt"], "visible");
+		failures.eq(
+			scenario,
+			"the names marked secret",
+			&body["secret_vars"],
+			json!([]),
+		);
+		failures.eq(
+			scenario,
+			"the host's value",
+			&body["hosts"][0]["vars"]["salt"],
+			"visible",
+		);
+		failures.eq(
+			scenario,
+			"the host's names marked secret",
+			&body["hosts"][0]["secret_vars"],
+			json!([]),
+		);
 
-/// A secret is listed by name, with the scope it is set at and when it last
-/// changed, and never its value.
-#[tokio::test(flavor = "multi_thread")]
-async fn the_group_page_reads_names_without_secret_values() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
+		let scenario = "the group page's listing";
+		let group = insert_group(&mut conn, "kamaka-listed").await;
 		let (_, machine) = insert_application_on_its_own_machine(
 			&mut conn,
 			group,
-			"kamaka-central",
+			"kamaka-listed-central",
 			"tamanu-central",
 			None,
 			None,
 		)
 		.await;
-
 		set_var(
 			&private,
 			json!({ "server_group_id": group }),
@@ -342,48 +452,55 @@ async fn the_group_page_reads_names_without_secret_values() {
 			false,
 		)
 		.await;
-
 		let response = private
 			.post("/api/ansible_variables/for_group")
 			.json(&json!({ "server_group_id": group }))
 			.await;
 		response.assert_status_ok();
 		let listed = response.json::<Vec<Value>>();
-		assert_eq!(listed.len(), 3);
+		failures.check(
+			scenario,
+			listed.len() == 3,
+			format!("three variables listed: {listed:?}"),
+		);
+		let listing_of = |name: &str| -> Result<&Value, String> {
+			listed
+				.iter()
+				.find(|variable| variable["name"] == name)
+				.ok_or_else(|| format!("{name} is listed: {listed:?}"))
+		};
+		// A secret is listed by name, with the scope it is set at and when it
+		// last changed, and never its value.
+		if let Some(secret) = failures.ok(scenario, listing_of("sync_salt")) {
+			failures.eq(scenario, "the secret's flag", &secret["is_secret"], json!(true));
+			failures.eq(scenario, "the secret's value", &secret["value"], Value::Null);
+			failures.eq(scenario, "the secret's rank", &secret["rank"], "dev");
+			failures.eq(
+				scenario,
+				"who set the secret",
+				&secret["set_by"],
+				crate::ansible::ME,
+			);
+		}
+		if let Some(plain) = failures.ok(scenario, listing_of("timezone")) {
+			failures.eq(scenario, "the group's value", &plain["value"], "Pacific/Fiji");
+			failures.eq(scenario, "the group's rank", &plain["rank"], Value::Null);
+		}
+		if let Some(on_machine) = failures.ok(scenario, listing_of("log_level")) {
+			failures.eq(
+				scenario,
+				"the machine's machine",
+				&on_machine["machine_id"],
+				machine.to_string(),
+			);
+		}
 
-		let secret = listed
-			.iter()
-			.find(|variable| variable["name"] == "sync_salt")
-			.expect("the secret");
-		assert_eq!(secret["is_secret"], json!(true));
-		assert_eq!(secret["value"], Value::Null);
-		assert_eq!(secret["rank"], "dev");
-		assert_eq!(secret["set_by"], crate::ansible::ME);
-
-		let plain = listed
-			.iter()
-			.find(|variable| variable["name"] == "timezone")
-			.expect("the group's");
-		assert_eq!(plain["value"], "Pacific/Fiji");
-		assert_eq!(plain["rank"], Value::Null);
-
-		let on_machine = listed
-			.iter()
-			.find(|variable| variable["name"] == "log_level")
-			.expect("the machine's");
-		assert_eq!(on_machine["machine_id"], machine.to_string());
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn removing_forgets_the_value() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		let scenario = "a secret removed";
+		let group = insert_group(&mut conn, "kamaka-removed").await;
+		insert_application(&mut conn, group, "kamaka-removed-central", "tamanu-central", None)
+			.await;
 		let scope = json!({ "server_group_id": group, "rank": "dev" });
 		set_var(&private, scope.clone(), "sync_salt", json!("pepper"), true).await;
-
 		let mut args = scope.clone();
 		args["name"] = json!("sync_salt");
 		private
@@ -392,86 +509,93 @@ async fn removing_forgets_the_value() {
 			.await
 			.assert_status_ok();
 		// Gone, so removing it again finds nothing.
-		private
+		let again = private
 			.post("/api/ansible_variables/remove")
 			.json(&args)
-			.await
-			.assert_status(axum::http::StatusCode::NOT_FOUND);
-
+			.await;
+		failures.check(
+			scenario,
+			again.status_code() == axum::http::StatusCode::NOT_FOUND,
+			format!("removing it again answered {}", again.status_code()),
+		);
 		// And the name is free to come back as a plain variable, carrying no
 		// trace of the value it held.
 		set_var(&private, scope, "sync_salt", json!("visible"), false).await;
 		let body = read_served(&private, json!({ "server_group_id": group })).await;
-		assert_eq!(body["vars"]["sync_salt"], "visible");
-		assert_eq!(body["secret_vars"], json!([]));
-	})
-	.await
-}
+		failures.eq(scenario, "the value", &body["vars"]["sync_salt"], "visible");
+		failures.eq(
+			scenario,
+			"the names marked secret",
+			&body["secret_vars"],
+			json!([]),
+		);
 
-/// A group's value reaches every one of its environments, which is the cascade
-/// a per-environment table would throw away.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_groups_value_reaches_every_environment_in_it() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_ranked_application(
-			&mut conn,
-			group,
-			"kamaka-central",
-			"tamanu-central",
-			Some("production"),
-			None,
-		)
-		.await;
-		insert_ranked_application(
-			&mut conn,
-			group,
-			"kamaka-demo",
-			"tamanu-central",
-			Some("demo"),
-			None,
-		)
-		.await;
-		set_var(
-			&private,
-			json!({ "server_group_id": group }),
-			"timezone",
-			json!("Pacific/Fiji"),
-			false,
-		)
-		.await;
-
-		for rank in ["production", "demo"] {
-			let body =
-				read_served(&private, json!({ "server_group_id": group, "rank": rank })).await;
-			assert_eq!(body["vars"]["timezone"], "Pacific/Fiji", "{rank}");
-			assert_eq!(
-				body["hosts"][0]["vars"]["timezone"], "Pacific/Fiji",
-				"{rank}"
-			);
-		}
-	})
-	.await
-}
-
-/// Turning a secret into a plain variable forgets the stored value, so a name
-/// that comes back as a secret cannot resurrect the one it used to hold.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_secret_turned_plain_forgets_the_value_it_held() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		// Turning a secret into a plain variable forgets the stored value, so a
+		// name that comes back as a secret cannot resurrect the one it used to
+		// hold.
+		let scenario = "a secret turned plain";
+		let group = insert_group(&mut conn, "kamaka-turned-plain").await;
+		insert_application(&mut conn, group, "kamaka-turned-plain-central", "tamanu-central", None)
+			.await;
 		let scope = json!({ "server_group_id": group, "rank": "dev" });
+		set_var(&private, scope.clone(), "salt", json!("pepper"), true).await;
+		set_var(&private, scope, "salt", json!("visible"), false).await;
+		let body = read_served(&private, json!({ "server_group_id": group })).await;
+		failures.eq(scenario, "the value", &body["vars"]["salt"], "visible");
+		failures.eq(
+			scenario,
+			"the names marked secret",
+			&body["secret_vars"],
+			json!([]),
+		);
 
+		failures.assert_none();
+	})
+	.await
+}
+
+/// A run receiving a machine that looks configured and is missing a value, or
+/// two at one address, is worse than one that does not run, so the read is
+/// refused. Each scenario has a group of its own.
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_an_environment_it_cannot_serve_whole() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let mut failures = Failures::default();
+
+		let scenario = "a secret with no value";
+		let group = insert_group(&mut conn, "kamaka-no-value").await;
+		insert_application(&mut conn, group, "kamaka-no-value-central", "tamanu-central", None)
+			.await;
+		secret_without_value(&mut conn, group, "dev", "sync_salt").await;
+		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
+		let (status, detail) = read_under(&private, lease).await;
+		failures.check(
+			scenario,
+			status == axum::http::StatusCode::BAD_GATEWAY,
+			format!("answered {status}: {detail}"),
+		);
+		failures.check(
+			scenario,
+			detail.contains("sync_salt"),
+			format!("the detail names the secret: {detail}"),
+		);
+
+		// The name coming back as a secret after it was turned plain finds
+		// nothing behind it, which refuses the read rather than serving what it
+		// held before.
+		let scenario = "a name turned plain and declared a secret again";
+		let group = insert_group(&mut conn, "kamaka-turned-plain-back").await;
+		insert_application(
+			&mut conn,
+			group,
+			"kamaka-turned-plain-back-central",
+			"tamanu-central",
+			None,
+		)
+		.await;
+		let scope = json!({ "server_group_id": group, "rank": "dev" });
 		set_var(&private, scope.clone(), "salt", json!("pepper"), true).await;
 		set_var(&private, scope.clone(), "salt", json!("visible"), false).await;
-
-		let body = read_served(&private, json!({ "server_group_id": group })).await;
-		assert_eq!(body["vars"]["salt"], "visible");
-		assert_eq!(body["secret_vars"], json!([]));
-
-		// The name coming back as a secret finds nothing behind it, which
-		// refuses the read rather than serving what it held before.
 		let mut args = scope;
 		args["name"] = json!("salt");
 		private
@@ -480,21 +604,87 @@ async fn a_secret_turned_plain_forgets_the_value_it_held() {
 			.await
 			.assert_status_ok();
 		secret_without_value(&mut conn, group, "dev", "salt").await;
-
 		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
-		let response = private
-			.post("/api/ansible/for_group")
-			.json(&json!({ "lease_id": lease }))
-			.await;
-		response.assert_status(axum::http::StatusCode::BAD_GATEWAY);
-		assert!(
-			response.json::<Value>()["detail"]
-				.as_str()
-				.expect("detail")
-				.contains("salt"),
+		let (status, detail) = read_under(&private, lease).await;
+		failures.check(
+			scenario,
+			status == axum::http::StatusCode::BAD_GATEWAY,
+			format!("answered {status}: {detail}"),
 		);
+		failures.check(
+			scenario,
+			detail.contains("salt"),
+			format!("the detail names the secret: {detail}"),
+		);
+
+		let scenario = "two machines at one address";
+		let group = insert_group(&mut conn, "kamaka-shared-address").await;
+		let (_, central) = insert_application_on_its_own_machine(
+			&mut conn,
+			group,
+			"kamaka-shared-address-central",
+			"tamanu-central",
+			None,
+			Some("https://shared.kamaka.example/"),
+		)
+		.await;
+		insert_application_on_its_own_machine(
+			&mut conn,
+			group,
+			"kamaka-shared-address-facility",
+			"tamanu-facility",
+			None,
+			Some("https://shared.kamaka.example/"),
+		)
+		.await;
+		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
+		let (status, detail) = read_under(&private, lease).await;
+		failures.check(
+			scenario,
+			status == axum::http::StatusCode::CONFLICT,
+			format!("answered {status}: {detail}"),
+		);
+		failures.check(
+			scenario,
+			detail.contains("both reached at"),
+			format!("the detail says where: {detail}"),
+		);
+		// Naming one box explicitly is what resolves it.
+		set_var(
+			&private,
+			json!({ "machine_id": central }),
+			"ansible_host",
+			json!("central.kamaka.example"),
+			false,
+		)
+		.await;
+		let (status, detail) = read_under(&private, lease).await;
+		failures.check(
+			scenario,
+			status == axum::http::StatusCode::OK,
+			format!("answered {status} once one box is named: {detail}"),
+		);
+
+		failures.assert_none();
 	})
 	.await
+}
+
+/// What a read under a lease answered, and the detail of a refusal.
+async fn read_under(
+	private: &commons_tests::axum_test::TestServer,
+	lease: Uuid,
+) -> (axum::http::StatusCode, String) {
+	let response = private
+		.post("/api/ansible/for_group")
+		.json(&json!({ "lease_id": lease }))
+		.await;
+	let status = response.status_code();
+	let detail = response.json::<Value>()["detail"]
+		.as_str()
+		.unwrap_or_default()
+		.to_owned();
+	(status, detail)
 }
 
 /// A rank the deployment does not have is a mistake, and answering it at the
@@ -524,90 +714,6 @@ async fn refuses_a_rank_that_is_not_one() {
 			.await;
 		listed.assert_status_ok();
 		assert_eq!(listed.json::<Value>(), json!([]));
-	})
-	.await
-}
-
-/// A name a group holds as a secret and an environment sets in the open is
-/// served as the plain value it is, so nothing tells a run to withhold it.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_secret_set_plain_at_the_environment_is_no_longer_one() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-
-		set_var(
-			&private,
-			json!({ "server_group_id": group }),
-			"salt",
-			json!("pepper"),
-			true,
-		)
-		.await;
-		set_var(
-			&private,
-			json!({ "server_group_id": group, "rank": "dev" }),
-			"salt",
-			json!("visible"),
-			false,
-		)
-		.await;
-
-		let body = read_served(&private, json!({ "server_group_id": group })).await;
-		assert_eq!(body["vars"]["salt"], "visible");
-		assert_eq!(body["secret_vars"], json!([]));
-		assert_eq!(body["hosts"][0]["vars"]["salt"], "visible");
-		assert_eq!(body["hosts"][0]["secret_vars"], json!([]));
-	})
-	.await
-}
-
-/// A machine's variables are its own, and reach no other box in the
-/// environment.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_machines_value_reaches_only_that_machine() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		let (_, central) = insert_application_on_its_own_machine(
-			&mut conn,
-			group,
-			"kamaka-central",
-			"tamanu-central",
-			None,
-			None,
-		)
-		.await;
-		let (_, facility) = insert_application_on_its_own_machine(
-			&mut conn,
-			group,
-			"kamaka-facility",
-			"tamanu-facility",
-			None,
-			None,
-		)
-		.await;
-		set_var(
-			&private,
-			json!({ "machine_id": central }),
-			"tamanu_facility_id",
-			json!("kamaka-central"),
-			false,
-		)
-		.await;
-
-		let body = read_served(&private, json!({ "server_group_id": group })).await;
-		let hosts = body["hosts"].as_array().expect("hosts");
-		let mine = hosts
-			.iter()
-			.find(|host| host["id"] == central.to_string())
-			.expect("central's machine");
-		let theirs = hosts
-			.iter()
-			.find(|host| host["id"] == facility.to_string())
-			.expect("facility's machine");
-		assert_eq!(mine["vars"]["tamanu_facility_id"], "kamaka-central");
-		assert!(theirs["vars"].get("tamanu_facility_id").is_none());
-		assert!(body["vars"].get("tamanu_facility_id").is_none());
 	})
 	.await
 }
@@ -648,62 +754,6 @@ async fn refuses_machine_only_variables_outside_machine_scope() {
 			false,
 		)
 		.await;
-	})
-	.await
-}
-
-/// A run receiving two machines at one address would configure one box twice
-/// and leave the other untouched.
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_an_environment_whose_machines_share_an_address() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		let (_, central) = insert_application_on_its_own_machine(
-			&mut conn,
-			group,
-			"kamaka-central",
-			"tamanu-central",
-			None,
-			Some("https://shared.kamaka.example/"),
-		)
-		.await;
-		insert_application_on_its_own_machine(
-			&mut conn,
-			group,
-			"kamaka-facility",
-			"tamanu-facility",
-			None,
-			Some("https://shared.kamaka.example/"),
-		)
-		.await;
-
-		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
-		let response = private
-			.post("/api/ansible/for_group")
-			.json(&json!({ "lease_id": lease }))
-			.await;
-		response.assert_status(axum::http::StatusCode::CONFLICT);
-		assert!(
-			response.json::<Value>()["detail"]
-				.as_str()
-				.expect("detail")
-				.contains("both reached at"),
-		);
-
-		// Naming one box explicitly is what resolves it.
-		set_var(
-			&private,
-			json!({ "machine_id": central }),
-			"ansible_host",
-			json!("central.kamaka.example"),
-			false,
-		)
-		.await;
-		private
-			.post("/api/ansible/for_group")
-			.json(&json!({ "lease_id": lease }))
-			.await
-			.assert_status_ok();
 	})
 	.await
 }
@@ -1136,6 +1186,27 @@ async fn a_secret_change_is_undone_while_its_value_is_held() {
 			.await
 			.assert_status_ok();
 		let removed = post(&private, "/api/ansible_variables/removed", scope.clone()).await;
+		assert_eq!(removed[0]["undoable"], true);
+
+		// While its value is held, undoing the removal puts the secret back.
+		let mut restore = named(&scope, "salt");
+		restore["entry_id"] = removed[0]["entry_id"].clone();
+		post(&private, "/api/ansible_variables/restore", restore).await;
+		let body = read_served(&private, json!({ "server_group_id": group })).await;
+		assert_eq!(body["vars"]["salt"], "pepper");
+		assert_eq!(body["secret_vars"], json!(["salt"]));
+
+		// A name removed twice is listed once, by its latest removal.
+		let second = post(
+			&private,
+			"/api/ansible_variables/remove",
+			named(&scope, "salt"),
+		)
+		.await;
+		let removed = post(&private, "/api/ansible_variables/removed", scope.clone()).await;
+		assert_eq!(removed.as_array().unwrap().len(), 1, "{removed}");
+		assert_eq!(removed[0]["name"], "salt");
+		assert_eq!(removed[0]["entry_id"], second["entry_id"]);
 		assert_eq!(removed[0]["undoable"], true);
 
 		// Once its week has passed, the value is forgotten and the change can no

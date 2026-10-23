@@ -658,79 +658,437 @@ async fn refuses_a_request_that_names_no_environment() {
 
 // --- leases ---
 
-/// The lease is the interlock: an environment holds one, and a second
-/// operator's run is refused while it holds.
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_a_lease_another_operator_holds() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		conn.batch_execute(&format!(
-			"INSERT INTO ansible_leases (server_group_id, rank, intent, held_by, note, expires_at)
-			 VALUES ('{group}', 'dev', 'configure', 'someone.else@bes.au', 'rolling the certs',
-			         NOW() + INTERVAL '20 minutes')"
-		))
-		.await
-		.expect("seed a lease");
+const IN_TWENTY_MINUTES: &str = "NOW() + INTERVAL '20 minutes'";
+const A_MINUTE_AGO: &str = "NOW() - INTERVAL '1 minute'";
 
-		let response = private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "server_group_id": group }))
-			.await;
-		response.assert_status(axum::http::StatusCode::CONFLICT);
-		let detail = response.json::<Value>()["detail"]
-			.as_str()
-			.expect("detail")
-			.to_owned();
-		assert!(detail.contains("someone.else@bes.au"), "{detail}");
-		assert!(detail.contains("rolling the certs"), "{detail}");
+async fn seed_lease(
+	conn: &mut AsyncPgConnection,
+	group: Uuid,
+	held_by: &str,
+	note: Option<&str>,
+	expires_at: &str,
+) -> Uuid {
+	let id = Uuid::new_v4();
+	let note = note.map_or("NULL".to_string(), |note| format!("'{note}'"));
+	conn.batch_execute(&format!(
+		"INSERT INTO ansible_leases (id, server_group_id, rank, intent, held_by, note, expires_at)
+		 VALUES ('{id}', '{group}', 'dev', 'configure', '{held_by}', {note}, {expires_at})"
+	))
+	.await
+	.expect("seed a lease");
+	id
+}
+
+/// A machine a run acts on that has nothing on it yet, so a lease can assign it
+/// an application type.
+async fn insert_blank_managed_machine(
+	conn: &mut AsyncPgConnection,
+	group: Uuid,
+	name: &str,
+) -> Uuid {
+	let machine = Uuid::new_v4();
+	let device = Uuid::new_v4();
+	conn.batch_execute(&format!(
+		"INSERT INTO devices (id, role, tailscale_node_name)
+		 VALUES ('{device}', 'server', '{name}.tail1234.ts.net');
+		 INSERT INTO machines (id, name, group_id, rank, device_id)
+		 VALUES ('{machine}', '{name}', '{group}', 'dev', '{device}');
+		 INSERT INTO ansible_variables (machine_id, name, value)
+		 VALUES ('{machine}', 'managed_by_ansible', 'true')"
+	))
+	.await
+	.expect("insert a blank managed machine");
+	machine
+}
+
+async fn post(
+	private: &commons_tests::axum_test::TestServer,
+	path: &str,
+	body: Value,
+) -> (axum::http::StatusCode, Value) {
+	let response = private.post(path).json(&body).await;
+	(response.status_code(), response.json())
+}
+
+fn detail_of(answer: &Value) -> String {
+	answer["detail"].as_str().unwrap_or_default().to_owned()
+}
+
+fn same_instant(a: &Value, b: &Value) -> bool {
+	let parse = |value: &Value| value.as_str().and_then(|s| s.parse::<jiff::Timestamp>().ok());
+	matches!((parse(a), parse(b)), (Some(a), Some(b)) if a == b)
+}
+
+/// The group's entries for one action, newest first. A routine action is found
+/// because it is named.
+async fn entries_of(
+	conn: &mut AsyncPgConnection,
+	action: &str,
+	group: Uuid,
+) -> Vec<database::audit::Entry> {
+	database::audit::find(
+		conn,
+		&database::audit::Filter {
+			action: Some(action.into()),
+			acted_on: Some(group.to_string()),
+			limit: 10,
+			..Default::default()
+		},
+	)
+	.await
+	.expect("read the audit log")
+}
+
+/// What an entry about a lease must carry whatever the action: the operator, the
+/// group and the lease it acted on, and the rank and expiry in its detail.
+fn check_lease_entry(
+	failures: &mut Failures,
+	at: &str,
+	entry: &database::audit::Entry,
+	group: (Uuid, &str),
+	lease: &Value,
+) {
+	use database::audit::{Actor, RecordKind};
+
+	failures.check(
+		at,
+		matches!(&entry.actor, Actor::Operator { login, .. } if login == ME),
+		format!("actor was {:?}, not {ME}", entry.actor),
+	);
+	let has = |kind: RecordKind, id: String, name: &str| {
+		entry
+			.records
+			.iter()
+			.any(|record| record.kind == kind && record.id == id && record.name == name)
+	};
+	failures.check(
+		at,
+		has(RecordKind::Group, group.0.to_string(), group.1),
+		format!("does not name the group among {:?}", entry.records),
+	);
+	failures.check(
+		at,
+		has(
+			RecordKind::Lease,
+			lease["id"].as_str().unwrap_or_default().to_owned(),
+			&format!("{} dev", group.1),
+		),
+		format!("does not name the lease among {:?}", entry.records),
+	);
+	failures.eq(at, "rank", &entry.detail["rank"], "dev");
+	failures.check(
+		at,
+		same_instant(&entry.detail["expires_at"], &lease["expires_at"]),
+		format!(
+			"expires_at was {}, not the lease's {}",
+			entry.detail["expires_at"], lease["expires_at"]
+		),
+	);
+}
+
+/// Another operator's live lease holds the environment: taking, reading and
+/// extending are each refused naming the holder and what they said they were
+/// doing, until a take-over is asked for, and that is recorded as a take-over
+/// with the run it was taken for. A lease that has expired holds nothing, so
+/// taking over one is an ordinary take.
+#[tokio::test(flavor = "multi_thread")]
+async fn another_operators_lease_holds_the_environment_until_taken_over() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let mut failures = Failures::default();
+
+		let scenario = "a lease another operator holds";
+		let name = "lease-held";
+		let group = insert_group(&mut conn, name).await;
+		insert_application(&mut conn, group, "lease-held-central", "tamanu-central", None).await;
+		let blank = insert_blank_managed_machine(&mut conn, group, "lease-held-new").await;
+		let held = seed_lease(
+			&mut conn,
+			group,
+			OTHER,
+			Some("rolling the certs"),
+			IN_TWENTY_MINUTES,
+		)
+		.await;
+
+		let refusals = [
+			("take_lease", "/api/ansible/take_lease", json!({ "server_group_id": group })),
+			("for_group", "/api/ansible/for_group", json!({ "lease_id": held })),
+			("extend_lease", "/api/ansible/extend_lease", json!({ "lease_id": held })),
+		];
+		for (step, path, body) in refusals {
+			let at = format!("{scenario}, {step}");
+			let (status, answer) = post(&private, path, body).await;
+			failures.check(
+				&at,
+				status == axum::http::StatusCode::CONFLICT,
+				format!("answered {status}, not 409: {answer}"),
+			);
+			let detail = detail_of(&answer);
+			failures.check(&at, detail.contains(OTHER), format!("does not name the holder: {detail}"));
+			failures.check(
+				&at,
+				detail.contains("rolling the certs"),
+				format!("does not give their note: {detail}"),
+			);
+		}
+
+		let at = format!("{scenario}, take_lease with take_over");
+		let (status, taken) = post(
+			&private,
+			"/api/ansible/take_lease",
+			json!({
+				"server_group_id": group,
+				"take_over": true,
+				"note": "carrying the cert rollout on",
+				"assignments": [{ "machine_id": blank, "application_type": "tamanu-facility" }],
+			}),
+		)
+		.await;
+		failures.check(&at, status.is_success(), format!("answered {status}: {taken}"));
+		failures.eq(&at, "held_by", &taken["held_by"], ME);
+
+		let at = format!("{scenario}, taken-over entry");
+		let entries = entries_of(&mut conn, "inventory_lease_taken_over", group).await;
+		failures.check(&at, entries.len() == 1, format!("{} entries, not 1", entries.len()));
+		if let Some(entry) = entries.first() {
+			check_lease_entry(&mut failures, &at, entry, (group, name), &taken);
+			let detail = &entry.detail;
+			failures.eq(&at, "intent", &detail["intent"], "configure");
+			failures.eq(&at, "note", &detail["note"], "carrying the cert rollout on");
+			failures.eq(&at, "previous_holder", &detail["previous_holder"], OTHER);
+			failures.eq(&at, "playbook", &detail["playbook"], Value::Null);
+			failures.eq(&at, "limit", &detail["limit"], Value::Null);
+			failures.eq(&at, "tags", &detail["tags"], json!([]));
+			failures.eq(&at, "skip_tags", &detail["skip_tags"], json!([]));
+			failures.eq(
+				&at,
+				"assignments",
+				&detail["assignments"],
+				json!([{ "machine": "lease-held-new", "application_type": "tamanu-facility" }]),
+			);
+			failures.check(
+				&at,
+				!entry
+					.records
+					.iter()
+					.any(|record| record.kind == database::audit::RecordKind::Machine),
+				format!("names machines though no limit was set: {:?}", entry.records),
+			);
+		}
+		let at = format!("{scenario}, taken entry");
+		let plain = entries_of(&mut conn, "inventory_lease_taken", group).await;
+		failures.check(
+			&at,
+			plain.is_empty(),
+			format!("a take-over was also recorded as a plain take: {} entries", plain.len()),
+		);
+
+		let scenario = "a lease another operator let expire";
+		let name = "lease-lapsed";
+		let group = insert_group(&mut conn, name).await;
+		insert_application(&mut conn, group, "lease-lapsed-central", "tamanu-central", None).await;
+		seed_lease(&mut conn, group, OTHER, None, A_MINUTE_AGO).await;
+
+		let at = format!("{scenario}, take_lease");
+		let (status, taken) = post(
+			&private,
+			"/api/ansible/take_lease",
+			json!({ "server_group_id": group }),
+		)
+		.await;
+		failures.check(&at, status.is_success(), format!("answered {status}: {taken}"));
+		failures.eq(&at, "held_by", &taken["held_by"], ME);
+		let at = format!("{scenario}, entries");
+		let plain = entries_of(&mut conn, "inventory_lease_taken", group).await;
+		failures.check(&at, plain.len() == 1, format!("{} taken entries, not 1", plain.len()));
+		let over = entries_of(&mut conn, "inventory_lease_taken_over", group).await;
+		failures.check(
+			&at,
+			over.is_empty(),
+			format!("an expired lease was recorded as taken over: {} entries", over.len()),
+		);
+
+		failures.assert_none();
 	})
 	.await
 }
 
-/// A run that dies stops holding the environment once its lease expires.
+/// The holder keeps the environment by extending, and gives it back by
+/// releasing; the group page reads who holds it without taking it. The extension
+/// is recorded with the expiry it moved to.
 #[tokio::test(flavor = "multi_thread")]
-async fn takes_a_lease_over_one_that_has_expired() {
+async fn the_holder_extends_and_releases_a_lease_and_the_page_reports_it() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
+		let mut failures = Failures::default();
+
+		let scenario = "a lease the operator holds";
+		let name = "lease-holder";
+		let group = insert_group(&mut conn, name).await;
+		insert_application(&mut conn, group, "lease-holder-central", "tamanu-central", None).await;
+
+		let before = read_run_state(&private, group).await;
+		failures.eq(scenario, "lease before taking one", &before["lease"], Value::Null);
+		failures.eq(scenario, "window before taking one", &before["window"], Value::Null);
+		failures.eq(scenario, "refuses before taking one", &before["refuses"], false);
+
+		let (status, taken) = post(
+			&private,
+			"/api/ansible/take_lease",
+			json!({ "server_group_id": group }),
+		)
+		.await;
+		failures.check(scenario, status.is_success(), format!("take_lease answered {status}: {taken}"));
+		let lease = taken["id"].as_str().unwrap_or_default().to_owned();
+		let after = read_run_state(&private, group).await;
+		failures.eq(scenario, "holder on the page", &after["lease"]["held_by"], ME);
+
 		conn.batch_execute(&format!(
-			"INSERT INTO ansible_leases (server_group_id, rank, intent, held_by, expires_at)
-			 VALUES ('{group}', 'dev', 'configure', 'someone.else@bes.au',
-			         NOW() - INTERVAL '1 minute')"
+			"UPDATE ansible_leases SET expires_at = NOW() + INTERVAL '1 minute' WHERE id = '{lease}'"
 		))
 		.await
-		.expect("seed an expired lease");
+		.expect("bring the expiry in");
+		let at = format!("{scenario}, extend_lease");
+		let (status, extended) = post(
+			&private,
+			"/api/ansible/extend_lease",
+			json!({ "lease_id": lease }),
+		)
+		.await;
+		failures.check(&at, status.is_success(), format!("answered {status}: {extended}"));
+		let ten_minutes = jiff::Timestamp::now() + jiff::SignedDuration::from_mins(10);
+		failures.check(
+			&at,
+			extended["expires_at"]
+				.as_str()
+				.and_then(|s| s.parse::<jiff::Timestamp>().ok())
+				.is_some_and(|expires| expires > ten_minutes),
+			format!("the expiry was not pushed out: {}", extended["expires_at"]),
+		);
 
-		private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "server_group_id": group }))
+		let at = format!("{scenario}, extended entry");
+		let entries = entries_of(&mut conn, "inventory_lease_extended", group).await;
+		failures.check(&at, entries.len() == 1, format!("{} entries, not 1", entries.len()));
+		if let Some(entry) = entries.first() {
+			check_lease_entry(&mut failures, &at, entry, (group, name), &extended);
+		}
+
+		let at = format!("{scenario}, release_lease");
+		let (status, answer) = post(
+			&private,
+			"/api/ansible/release_lease",
+			json!({ "lease_id": lease }),
+		)
+		.await;
+		failures.check(&at, status.is_success(), format!("answered {status}: {answer}"));
+		let released = read_run_state(&private, group).await;
+		failures.eq(&at, "lease on the page once released", &released["lease"], Value::Null);
+
+		let at = format!("{scenario}, release_lease again");
+		let (status, answer) = post(
+			&private,
+			"/api/ansible/release_lease",
+			json!({ "lease_id": lease }),
+		)
+		.await;
+		failures.check(
+			&at,
+			status == axum::http::StatusCode::NOT_FOUND,
+			format!("answered {status}, not 404: {answer}"),
+		);
+
+		failures.assert_none();
+	})
+	.await
+}
+
+/// An operator whose own lease no longer holds is told why, reading the
+/// environment or extending alike: that it ran out, that it was swept as
+/// expired, that someone took the work over (which they are to talk to before
+/// taking another), that Canopy released it unread, or that it was released.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_lease_that_no_longer_holds_says_why_to_a_read_and_to_an_extension() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let mut failures = Failures::default();
+
+		let rows = [
+			(
+				"expired",
+				"expires_at = NOW() - INTERVAL '1 minute'",
+				"that lease has expired",
+				true,
+			),
+			(
+				"expired and swept",
+				"released_at = NOW(), release_reason = 'expired'",
+				"that lease has expired",
+				true,
+			),
+			(
+				"taken over by another operator",
+				"released_at = NOW(), released_by = 'someone.else@bes.au', release_reason = 'taken_over'",
+				"taken over by someone.else@bes.au",
+				false,
+			),
+			(
+				"released unread",
+				"released_at = NOW(), release_reason = 'unstarted'",
+				"no run read the environment",
+				false,
+			),
+			(
+				"released by the same operator",
+				"released_at = NOW(), released_by = 'admin@localhost', release_reason = 'released'",
+				"has been released",
+				false,
+			),
+		];
+		for (index, (scenario, set, needle, is_expiry)) in rows.into_iter().enumerate() {
+			let name = format!("lease-state-{index}");
+			let group = insert_group(&mut conn, &name).await;
+			insert_application(
+				&mut conn,
+				group,
+				&format!("{name}-central"),
+				"tamanu-central",
+				None,
+			)
+			.await;
+			let lease = take_lease(&private, json!({ "server_group_id": group })).await;
+			conn.batch_execute(&format!(
+				"UPDATE ansible_leases SET {set} WHERE id = '{lease}'"
+			))
 			.await
-			.assert_status_ok();
-	})
-	.await
-}
+			.expect("put the lease in its state");
 
-/// Taking over another operator's lease is deliberate, so it needs asking for.
-#[tokio::test(flavor = "multi_thread")]
-async fn takes_a_lease_over_when_asked_to() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		conn.batch_execute(&format!(
-			"INSERT INTO ansible_leases (server_group_id, rank, intent, held_by, expires_at)
-			 VALUES ('{group}', 'dev', 'configure', 'someone.else@bes.au',
-			         NOW() + INTERVAL '20 minutes')"
-		))
-		.await
-		.expect("seed a lease");
+			for (step, path) in [
+				("for_group", "/api/ansible/for_group"),
+				("extend_lease", "/api/ansible/extend_lease"),
+			] {
+				let at = format!("{scenario}, {step}");
+				let (status, answer) = post(&private, path, json!({ "lease_id": lease })).await;
+				failures.check(
+					&at,
+					status == axum::http::StatusCode::CONFLICT,
+					format!("answered {status}, not 409: {answer}"),
+				);
+				let detail = detail_of(&answer);
+				failures.check(
+					&at,
+					detail.contains(needle),
+					format!("does not say {needle:?}: {detail}"),
+				);
+				failures.check(
+					&at,
+					detail.contains("expired") == is_expiry,
+					format!(
+						"{} calling it expired: {detail}",
+						if is_expiry { "is not" } else { "is" }
+					),
+				);
+			}
+		}
 
-		let response = private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "server_group_id": group, "take_over": true }))
-			.await;
-		response.assert_status_ok();
-		assert_eq!(response.json::<Value>()["held_by"], ME);
+		failures.assert_none();
 	})
 	.await
 }
@@ -764,140 +1122,6 @@ async fn takes_a_lease_while_another_transaction_writes_against_the_group() {
 		response.assert_status_ok();
 
 		conn.batch_execute("ROLLBACK").await.expect("rollback");
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_the_environment_to_someone_who_holds_no_lease() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		let lease = Uuid::new_v4();
-		conn.batch_execute(&format!(
-			"INSERT INTO ansible_leases (id, server_group_id, rank, intent, held_by, expires_at)
-			 VALUES ('{lease}', '{group}', 'dev', 'configure', 'someone.else@bes.au',
-			         NOW() + INTERVAL '20 minutes')"
-		))
-		.await
-		.expect("seed a lease");
-
-		private
-			.post("/api/ansible/for_group")
-			.json(&json!({ "lease_id": lease }))
-			.await
-			.assert_status(axum::http::StatusCode::CONFLICT);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_the_environment_under_an_expired_lease() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
-		conn.batch_execute(&format!(
-			"UPDATE ansible_leases SET expires_at = NOW() - INTERVAL '1 minute'
-			 WHERE id = '{lease}'"
-		))
-		.await
-		.expect("expire the lease");
-
-		let response = private
-			.post("/api/ansible/for_group")
-			.json(&json!({ "lease_id": lease }))
-			.await;
-		response.assert_status(axum::http::StatusCode::CONFLICT);
-		assert!(
-			response.json::<Value>()["detail"]
-				.as_str()
-				.expect("detail")
-				.contains("expired"),
-		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn extending_keeps_the_environment_and_releasing_gives_it_back() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
-
-		conn.batch_execute(&format!(
-			"UPDATE ansible_leases SET expires_at = NOW() + INTERVAL '1 minute'
-			 WHERE id = '{lease}'"
-		))
-		.await
-		.expect("bring the expiry in");
-		let extended = private
-			.post("/api/ansible/extend_lease")
-			.json(&json!({ "lease_id": lease }))
-			.await;
-		extended.assert_status_ok();
-
-		private
-			.post("/api/ansible/release_lease")
-			.json(&json!({ "lease_id": lease }))
-			.await
-			.assert_status_ok();
-		// Released, so it is no longer the environment's open lease.
-		private
-			.post("/api/ansible/release_lease")
-			.json(&json!({ "lease_id": lease }))
-			.await
-			.assert_status(axum::http::StatusCode::NOT_FOUND);
-	})
-	.await
-}
-
-/// An expired lease is over: reviving it would skip every gate taking one
-/// applies, so a run that has lapsed takes a new one.
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_to_extend_a_lease_that_has_expired() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		let lease = take_lease(&private, json!({ "server_group_id": group })).await;
-		conn.batch_execute(&format!(
-			"UPDATE ansible_leases SET expires_at = NOW() - INTERVAL '1 minute'
-			 WHERE id = '{lease}'"
-		))
-		.await
-		.expect("expire the lease");
-
-		let response = private
-			.post("/api/ansible/extend_lease")
-			.json(&json!({ "lease_id": lease }))
-			.await;
-		response.assert_status(axum::http::StatusCode::CONFLICT);
-		assert!(
-			response.json::<Value>()["detail"]
-				.as_str()
-				.expect("detail")
-				.contains("expired"),
-		);
-	})
-	.await
-}
-
-/// The group page reads who holds an environment without taking it.
-#[tokio::test(flavor = "multi_thread")]
-async fn reports_the_lease_holding_an_environment() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-
-		let before = read_run_state(&private, group).await;
-		assert_eq!(before["lease"], Value::Null);
-		assert_eq!(before["window"], Value::Null);
-		assert_eq!(before["refuses"], false);
-
-		take_lease(&private, json!({ "server_group_id": group })).await;
-		let after = read_run_state(&private, group).await;
-		assert_eq!(after["lease"]["held_by"], ME);
 	})
 	.await
 }
@@ -1206,6 +1430,8 @@ async fn a_window_refuses_a_lease_exactly_where_the_page_reports_it() {
 
 // --- planned upgrades ---
 
+/// Plan the upgrade of production to 2.63.0 for a group. The version is shared
+/// by every plan, so it is inserted where it is not already there.
 pub(crate) async fn plan_upgrade(
 	conn: &mut AsyncPgConnection,
 	group: Uuid,
@@ -1215,213 +1441,90 @@ pub(crate) async fn plan_upgrade(
 	let version = Uuid::new_v4();
 	conn.batch_execute(&format!(
 		"INSERT INTO versions (id, major, minor, patch, changelog, status)
-		 VALUES ('{version}', 2, 63, 0, '', 'published');
+		 VALUES ('{version}', 2, 63, 0, '', 'published')
+		 ON CONFLICT ON CONSTRAINT versions_version_number DO NOTHING;
 		 INSERT INTO upgrade_plans (group_id, target_version_id, rank{extra_columns})
-		 VALUES ('{group}', '{version}', 'production'{extra_values})"
+		 VALUES ('{group}',
+		         (SELECT id FROM versions WHERE major = 2 AND minor = 63 AND patch = 0),
+		         'production'{extra_values})"
 	))
 	.await
 	.expect("plan upgrade");
 }
 
+/// An upgrade of production needs a plan on record that has not been
+/// withdrawn, and says so when there is none; a configuration run on
+/// production needs none, and a plan is for where a group's real users are, so
+/// an upgrade at another rank needs none either. Each scenario has a group of
+/// its own.
 #[tokio::test(flavor = "multi_thread")]
-async fn refuses_an_unplanned_upgrade_of_production() {
+async fn an_upgrade_of_production_is_taken_only_where_a_plan_stands() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-unplanned").await;
-		insert_ranked_application(
-			&mut conn,
-			group,
-			"kamaka-central",
-			"tamanu-central",
-			Some("production"),
+		enum Plan {
 			None,
-		)
-		.await;
+			Open,
+			Withdrawn,
+		}
+		let rows = [
+			("an unplanned upgrade of production", "production", "upgrade", Plan::None, Err("no upgrade plan")),
+			("a planned upgrade of production", "production", "upgrade", Plan::Open, Ok("upgrade")),
+			("an upgrade whose plan was withdrawn", "production", "upgrade", Plan::Withdrawn, Err("no upgrade plan")),
+			("an unplanned configuration run on production", "production", "configure", Plan::None, Ok("configure")),
+			("an unplanned upgrade at another rank", "demo", "upgrade", Plan::None, Ok("upgrade")),
+		];
 
-		let response = private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "server_group_id": group, "intent": "upgrade" }))
+		let mut failures = Failures::default();
+		for (index, (scenario, rank, intent, plan, expected)) in rows.into_iter().enumerate() {
+			let name = format!("plan-scenario-{index}");
+			let group = insert_group(&mut conn, &name).await;
+			insert_ranked_application(
+				&mut conn,
+				group,
+				&format!("{name}-central"),
+				"tamanu-central",
+				Some(rank),
+				None,
+			)
 			.await;
-		response.assert_status(axum::http::StatusCode::CONFLICT);
-		assert!(
-			response.json::<Value>()["detail"]
-				.as_str()
-				.expect("detail")
-				.contains("no upgrade plan"),
-		);
-	})
-	.await
-}
+			match plan {
+				Plan::None => {}
+				Plan::Open => plan_upgrade(&mut conn, group, "", "").await,
+				Plan::Withdrawn => {
+					plan_upgrade(&mut conn, group, ", withdrawn_at", ", NOW()").await
+				}
+			}
 
-#[tokio::test(flavor = "multi_thread")]
-async fn takes_a_planned_upgrade_of_production() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-planned").await;
-		insert_ranked_application(
-			&mut conn,
-			group,
-			"kamaka-central",
-			"tamanu-central",
-			Some("production"),
-			None,
-		)
-		.await;
-		plan_upgrade(&mut conn, group, "", "").await;
-
-		let response = private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "server_group_id": group, "intent": "upgrade" }))
-			.await;
-		response.assert_status_ok();
-		assert_eq!(response.json::<Value>()["intent"], "upgrade");
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_an_upgrade_whose_plan_was_withdrawn() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-withdrawn").await;
-		insert_ranked_application(
-			&mut conn,
-			group,
-			"kamaka-central",
-			"tamanu-central",
-			Some("production"),
-			None,
-		)
-		.await;
-		plan_upgrade(&mut conn, group, ", withdrawn_at", ", NOW()").await;
-
-		private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "server_group_id": group, "intent": "upgrade" }))
-			.await
-			.assert_status(axum::http::StatusCode::CONFLICT);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn takes_an_unplanned_configuration_run_on_production() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-configure").await;
-		insert_ranked_application(
-			&mut conn,
-			group,
-			"kamaka-central",
-			"tamanu-central",
-			Some("production"),
-			None,
-		)
-		.await;
-
-		private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "server_group_id": group }))
-			.await
-			.assert_status_ok();
-	})
-	.await
-}
-
-/// A plan is for where a deployment's real users are, so another rank needs
-/// none.
-#[tokio::test(flavor = "multi_thread")]
-async fn takes_an_unplanned_upgrade_at_another_rank() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-demo").await;
-		insert_ranked_application(
-			&mut conn,
-			group,
-			"kamaka-demo-central",
-			"tamanu-central",
-			Some("demo"),
-			None,
-		)
-		.await;
-
-		private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "server_group_id": group, "intent": "upgrade" }))
-			.await
-			.assert_status_ok();
-	})
-	.await
-}
-
-/// An operator whose lease was taken over is walking into work somebody else
-/// has started, which the refusal has to say rather than reading as an expiry,
-/// and one whose lease was released unread is told that, not that it expired.
-#[tokio::test(flavor = "multi_thread")]
-async fn says_why_a_lease_no_longer_holds_rather_than_calling_it_expired() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		let mine = take_lease(&private, json!({ "server_group_id": group })).await;
-		conn.batch_execute(&format!(
-			"UPDATE ansible_leases SET released_at = NOW(), released_by = 'someone.else@bes.au'
-			 WHERE id = '{mine}'"
-		))
-		.await
-		.expect("take the lease over");
-
-		let response = private
-			.post("/api/ansible/for_group")
-			.json(&json!({ "lease_id": mine }))
-			.await;
-		response.assert_status(axum::http::StatusCode::CONFLICT);
-		let detail = response.json::<Value>()["detail"]
-			.as_str()
-			.expect("detail")
-			.to_owned();
-		assert!(
-			detail.contains("taken over by someone.else@bes.au"),
-			"{detail}"
-		);
-
-		let unread = take_lease(&private, json!({ "server_group_id": group })).await;
-		conn.batch_execute(&format!(
-			"UPDATE ansible_leases SET released_at = NOW(), release_reason = 'unstarted'
-			 WHERE id = '{unread}'"
-		))
-		.await
-		.expect("release the lease unread");
-		let response = private
-			.post("/api/ansible/for_group")
-			.json(&json!({ "lease_id": unread }))
-			.await;
-		response.assert_status(axum::http::StatusCode::CONFLICT);
-		let detail = response.json::<Value>()["detail"]
-			.as_str()
-			.expect("detail")
-			.to_owned();
-		assert!(detail.contains("no run read the environment"), "{detail}");
-		assert!(!detail.contains("expired"), "{detail}");
-	})
-	.await
-}
-
-/// Extending is the holder's, so a lease cannot be kept alive by whoever is
-/// waiting for it.
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_to_extend_a_lease_someone_else_holds() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		let lease = Uuid::new_v4();
-		conn.batch_execute(&format!(
-			"INSERT INTO ansible_leases (id, server_group_id, rank, intent, held_by, expires_at)
-			 VALUES ('{lease}', '{group}', 'dev', 'configure', 'someone.else@bes.au',
-			         NOW() + INTERVAL '20 minutes')"
-		))
-		.await
-		.expect("seed a lease");
-
-		private
-			.post("/api/ansible/extend_lease")
-			.json(&json!({ "lease_id": lease }))
-			.await
-			.assert_status(axum::http::StatusCode::CONFLICT);
+			let response = private
+				.post("/api/ansible/take_lease")
+				.json(&json!({ "server_group_id": group, "intent": intent }))
+				.await;
+			let status = response.status_code();
+			let answer: Value = response.json();
+			match expected {
+				Ok(taken) => {
+					failures.check(
+						scenario,
+						status.is_success(),
+						format!("take_lease answered {status}: {answer}"),
+					);
+					failures.eq(scenario, "intent", &answer["intent"], taken);
+				}
+				Err(needle) => {
+					failures.check(
+						scenario,
+						status == axum::http::StatusCode::CONFLICT,
+						format!("take_lease answered {status}, not 409: {answer}"),
+					);
+					let detail = detail_of(&answer);
+					failures.check(
+						scenario,
+						detail.contains(needle),
+						format!("refusal does not say {needle:?}: {detail}"),
+					);
+				}
+			}
+		}
+		failures.assert_none();
 	})
 	.await
 }
