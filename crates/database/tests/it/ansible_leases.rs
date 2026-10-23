@@ -224,7 +224,13 @@ async fn sweeps_an_unread_lease_and_an_expired_one() {
 
 		// A started lease is not unread, and runs out only at its expiry.
 		let started = take(&mut conn, group, &machines, &spec(&none), "a", false).await;
-		AnsibleLease::start(&mut conn, started.id).await.unwrap();
+		let running = AnsibleLease::start(&mut conn, started.id)
+			.await
+			.unwrap()
+			.expect("the first read starts it");
+		MaintenanceWindow::declare_for_run(&mut conn, &running, None, Some("tamanu-install.yml"))
+			.await
+			.unwrap();
 		assert!(
 			!AnsibleLease::release_unstarted(&mut conn, started.id, Some("a"))
 				.await
@@ -258,6 +264,18 @@ async fn sweeps_an_unread_lease_and_an_expired_one() {
 				.await
 				.unwrap();
 		assert_eq!(ran_out.expired.len(), 1);
+		assert!(
+			MaintenanceWindow::bound_to_lease(&mut conn, started.id)
+				.await
+				.unwrap()
+				.is_empty(),
+			"a lease the sweep ends takes the window it declared with it"
+		);
+		assert_eq!(
+			ended_notices(&mut conn).await.len(),
+			1,
+			"the window's ending is notified once"
+		);
 		let read = AnsibleLease::get(&mut conn, started.id).await.unwrap();
 		assert_eq!(read.release_reason, Some(ReleaseReason::Expired));
 		assert_eq!(
