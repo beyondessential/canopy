@@ -75,7 +75,7 @@ A test counts as new only if its function or `test(...)` line is new; tests that
 | #666 | merged | `73c085a8^1..73c085a8` | 170 |
 | #670 | merged | `652be820^..46c077e2` | 3 |
 | #671 | merged | `a64d7ed5^..d7147f9e` | 15 |
-| #672 | open | `af82ff3c^..a476f366` | 2 |
+| #672 | merged (13:44 on the day of the review) | `af82ff3c^..a476f366` | 2 |
 
 By level: 40 Rust unit (inline in `src/`), 90 Rust integration (`tests/it/`), 37 Vitest, 23 Playwright.
 
@@ -91,7 +91,7 @@ By file (added counts):
 Renames in #666 are not new tests: five Rust tests changed their inventory vocabulary, and nine e2e tests moved from `inventory.spec.ts` to `ansible.spec.ts` under the same names.
 Two e2e tests from `inventory.spec.ts` were dropped.
 
-The open PR kept taking commits while the review ran, so re-derive the inventory against the current tip before each lens rather than trusting a saved count.
+The last pull request took a second commit and then merged while the review ran, so re-derive the inventory against the current tip before each lens rather than trusting a saved count. The review itself lands in a new pull request, on top of the four above.
 
 Test names are not copied here; regenerate them from the diff ranges above when running a lens.
 
