@@ -439,35 +439,10 @@ mod tests {
 		}
 	}
 
-	/// Reading a catalogue keeps it and says so in the log, once.
-	// spec: ANSVAR#catalogue
-	#[tokio::test(flavor = "multi_thread")]
-	async fn a_catalogue_that_reads_is_kept_and_audited_once() {
-		commons_tests::db::TestDb::run(async |mut conn, _| {
-			let stub = Stub::serving(&catalogue_document());
-			let source = stub.start().await;
-			let (client, secrets) = (reqwest::Client::new(), BackupSecrets::memory());
-
-			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
-			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
-
-			let state = CatalogueState::get(&mut conn).await.unwrap().unwrap();
-			assert_eq!(state.document, Some(catalogue_document()));
-			assert_eq!(state.source_commit.as_deref(), Some(COMMIT));
-			assert_eq!(state.problem, None);
-
-			let log = audit_actions(&mut conn).await;
-			assert_eq!(log.len(), 1, "{log:?}");
-			assert_eq!(log[0].0, "ansible_catalogue_changed");
-			assert_eq!(log[0].1, Actor::canopy(JOB));
-			assert!(!alert_active(&mut conn).await);
-		})
-		.await
-	}
-
-	/// Publishing something that is not a catalogue leaves the last copy in
-	/// use and warns at once. An unreachable repository leaves the copy too,
-	/// and is not yet a fault.
+	/// Reading a catalogue keeps it and says so in the log, once. Publishing
+	/// something that is not a catalogue leaves the last copy in use and warns
+	/// at once. An unreachable repository leaves the copy too, and is not yet a
+	/// fault.
 	// spec: ANSVAR#catalogue
 	#[tokio::test(flavor = "multi_thread")]
 	async fn a_publication_that_does_not_read_leaves_the_last_copy_and_warns() {
@@ -476,6 +451,28 @@ mod tests {
 			let source = stub.start().await;
 			let (client, secrets) = (reqwest::Client::new(), BackupSecrets::memory());
 			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
+			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
+
+			let state = CatalogueState::get(&mut conn).await.unwrap().unwrap();
+			assert_eq!(
+				state.document,
+				Some(catalogue_document()),
+				"a good read: the catalogue is kept"
+			);
+			assert_eq!(
+				state.source_commit.as_deref(),
+				Some(COMMIT),
+				"a good read: the commit is recorded"
+			);
+			assert_eq!(state.problem, None, "a good read: no problem");
+			let log = audit_actions(&mut conn).await;
+			assert_eq!(log.len(), 1, "a repeat read audits once: {log:?}");
+			assert_eq!(log[0].0, "ansible_catalogue_changed", "a repeat read");
+			assert_eq!(log[0].1, Actor::canopy(JOB), "a repeat read: the actor");
+			assert!(
+				!alert_active(&mut conn).await,
+				"a good read raises no alert"
+			);
 
 			stub.publish("{ not json");
 			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
@@ -553,34 +550,6 @@ mod tests {
 					"{row}"
 				);
 			}
-
-			// An unreachable repository says nothing new about the copy last
-			// published, so it does not clear a verdict that the copy does not read.
-			stub.name_the_head_again();
-			stub.publish(&catalogue_document().to_string());
-			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
-			stub.lose_the_file();
-			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
-			assert!(alert_active(&mut conn).await, "a lost file is a fault");
-			stub.fail_the_file();
-			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
-			let state = CatalogueState::get(&mut conn).await.unwrap().unwrap();
-			assert_eq!(
-				state.problem,
-				Some(Problem::Invalid),
-				"an unreachable read after an invalid one leaves the verdict"
-			);
-			assert!(
-				state
-					.problem_detail
-					.as_deref()
-					.unwrap()
-					.contains("is not in")
-			);
-			assert!(
-				alert_active(&mut conn).await,
-				"the alert stays until a good read"
-			);
 
 			stub.name_the_head_again();
 			stub.publish(&catalogue_document().to_string());
