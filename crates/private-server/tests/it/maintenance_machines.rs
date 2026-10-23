@@ -37,8 +37,11 @@ fn in_hours(hours: i64) -> String {
 	(jiff::Timestamp::now() + jiff::SignedDuration::from_hours(hours)).to_string()
 }
 
+/// A window over several machines is declared, listed and audited, refuses what
+/// it cannot cover, is offered between the environment and its machines, and has
+/// machines added and removed by amending it.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_window_over_machines_is_declared_listed_and_audited() {
+async fn a_window_over_machines_is_declared_offered_and_amended() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		seed(&mut conn).await;
 
@@ -55,16 +58,22 @@ async fn a_window_over_machines_is_declared_listed_and_audited() {
 			.iter()
 			.map(|id| id.as_str().unwrap())
 			.collect();
-		assert_eq!(named, [BOX_A, BOX_B]);
-		assert!(window["machine_id"].is_null());
-		assert!(window["lease_id"].is_null());
+		assert_eq!(named, [BOX_A, BOX_B], "declaring: the machines it names");
+		assert!(
+			window["machine_id"].is_null(),
+			"declaring: a set has no single machine"
+		);
+		assert!(
+			window["lease_id"].is_null(),
+			"declaring: a set has no lease"
+		);
 
 		let open: Vec<Value> = private
 			.post("/api/maintenance/list_open")
 			.json(&json!({}))
 			.await
 			.json();
-		assert_eq!(open.len(), 1);
+		assert_eq!(open.len(), 1, "listing: one open window");
 		assert_eq!(open[0]["target"], "kamaka 2 machines");
 
 		for machine in [BOX_A, BOX_B] {
@@ -81,7 +90,7 @@ async fn a_window_over_machines_is_declared_listed_and_audited() {
 			.json(&json!({ "machine_id": BOX_C }))
 			.await
 			.json();
-		assert!(history.is_empty());
+		assert!(history.is_empty(), "the history of a machine it omits");
 
 		let entries = audit::find(
 			&mut conn,
@@ -92,7 +101,7 @@ async fn a_window_over_machines_is_declared_listed_and_audited() {
 		)
 		.await
 		.unwrap();
-		assert_eq!(entries.len(), 1);
+		assert_eq!(entries.len(), 1, "the declaration's audit entries");
 		for machine in ["kamaka-a", "kamaka-b"] {
 			assert!(
 				entries[0]
@@ -107,7 +116,8 @@ async fn a_window_over_machines_is_declared_listed_and_audited() {
 			!entries[0]
 				.records
 				.iter()
-				.any(|record| record.name == "kamaka-c")
+				.any(|record| record.name == "kamaka-c"),
+			"the entry does not name kamaka-c"
 		);
 
 		private
@@ -127,19 +137,6 @@ async fn a_window_over_machines_is_declared_listed_and_audited() {
 			)
 			.await
 			.assert_status_bad_request();
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn several_machines_are_offered_between_the_environment_and_its_machines() {
-	commons_tests::server::run(async |mut conn, _, private| {
-		seed(&mut conn).await;
-		let set: Value = private
-			.post("/api/maintenance/declare")
-			.json(&json!({ "machine_ids": [BOX_A, BOX_B], "expected_end": in_hours(1) }))
-			.await
-			.json();
 
 		let targets: Value = private
 			.post("/api/maintenance/targets")
@@ -172,13 +169,13 @@ async fn several_machines_are_offered_between_the_environment_and_its_machines()
 		};
 		assert_eq!(
 			window_of("kamaka-a"),
-			set["id"],
+			window["id"],
 			"a machine another window names says so"
 		);
-		assert_eq!(window_of("kamaka-b"), set["id"]);
+		assert_eq!(window_of("kamaka-b"), window["id"]);
 		assert!(window_of("kamaka-c").is_null());
 		assert!(
-			choices[3]["window"]["id"] == set["id"],
+			choices[3]["window"]["id"] == window["id"],
 			"and so does its own entry"
 		);
 		assert!(
@@ -192,7 +189,7 @@ async fn several_machines_are_offered_between_the_environment_and_its_machines()
 			.await
 			.json();
 		assert_eq!(
-			from_machine["amends"]["id"], set["id"],
+			from_machine["amends"]["id"], window["id"],
 			"a machine in a set starts as an amendment of the set"
 		);
 		assert!(
@@ -209,7 +206,10 @@ async fn several_machines_are_offered_between_the_environment_and_its_machines()
 			.json(&json!({ "start": { "machine_ids": [BOX_A, BOX_B] } }))
 			.await
 			.json();
-		assert_eq!(from_set["amends"]["id"], set["id"]);
+		assert_eq!(
+			from_set["amends"]["id"], window["id"],
+			"a set starts as an amendment of itself"
+		);
 		let own = from_set["choices"]
 			.as_array()
 			.unwrap()
@@ -217,7 +217,7 @@ async fn several_machines_are_offered_between_the_environment_and_its_machines()
 			.find(|choice| choice["label"] == "Several machines")
 			.unwrap();
 		assert_eq!(own["target"]["machine_ids"].as_array().unwrap().len(), 2);
-		assert_eq!(own["window"]["id"], set["id"]);
+		assert_eq!(own["window"]["id"], window["id"]);
 
 		let from_clone: Value = private
 			.post("/api/maintenance/targets")
@@ -232,30 +232,21 @@ async fn several_machines_are_offered_between_the_environment_and_its_machines()
 				.any(|choice| choice["label"] == "Several machines"),
 			"an environment of one machine has no several to choose"
 		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn machines_are_added_and_removed_by_amending() {
-	commons_tests::server::run(async |mut conn, _, private| {
-		seed(&mut conn).await;
-		let set: Value = private
-			.post("/api/maintenance/declare")
-			.json(&json!({ "machine_ids": [BOX_A, BOX_B], "expected_end": in_hours(1) }))
-			.await
-			.json();
 
 		let grown: Value = private
 			.post("/api/maintenance/amend")
-			.json(&json!({ "id": set["id"], "target": { "machine_ids": [BOX_A, BOX_B, BOX_C] } }))
+			.json(&json!({ "id": window["id"], "target": { "machine_ids": [BOX_A, BOX_B, BOX_C] } }))
 			.await
 			.json();
-		assert_eq!(grown["machine_ids"].as_array().unwrap().len(), 3);
+		assert_eq!(
+			grown["machine_ids"].as_array().unwrap().len(),
+			3,
+			"amending: the set grown"
+		);
 
 		let single: Value = private
 			.post("/api/maintenance/amend")
-			.json(&json!({ "id": set["id"], "target": { "machine_ids": [BOX_C] } }))
+			.json(&json!({ "id": window["id"], "target": { "machine_ids": [BOX_C] } }))
 			.await
 			.json();
 		assert_eq!(
@@ -277,7 +268,7 @@ async fn machines_are_added_and_removed_by_amending() {
 			.iter()
 			.filter(|entry| entry.action == "maintenance_amended")
 			.collect();
-		assert_eq!(amendments.len(), 2);
+		assert_eq!(amendments.len(), 2, "amending: two amendments audited");
 		let removal = amendments[0];
 		assert!(
 			removal
