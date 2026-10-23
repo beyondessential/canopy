@@ -194,33 +194,278 @@ mod tests {
 		}
 	}
 
-	#[test]
-	fn a_host_a_group_and_all() {
-		let f = Fixture::new();
-		assert_eq!(f.run("example-central").unwrap(), ["example-central"]);
-		assert_eq!(
-			f.run("facility").unwrap(),
-			[
-				"example-facility-a",
-				"example-facility-b",
-				"outreach.site-network.example.internal"
-			]
-		);
-		assert_eq!(f.run("all").unwrap().len(), 4);
-	}
+	const CENTRAL: &str = "example-central";
+	const FACILITY_A: &str = "example-facility-a";
+	const FACILITY_B: &str = "example-facility-b";
+	const OUTREACH: &str = "outreach.site-network.example.internal";
+	const EVERY: &[&str] = &[CENTRAL, FACILITY_A, FACILITY_B, OUTREACH];
+	const FACILITIES: &[&str] = &[FACILITY_A, FACILITY_B, OUTREACH];
+
+	type Row = (
+		&'static str,
+		&'static str,
+		Result<&'static [&'static str], &'static str>,
+	);
 
 	#[test]
-	fn patterns_join_by_colon_or_comma_and_globs_reach_names() {
+	fn a_limit_matches_exactly_the_machines_it_names() {
+		let rows: &[Row] = &[
+			("a host", "example-central", Ok(&[CENTRAL])),
+			("a group", "facility", Ok(FACILITIES)),
+			("a group every host is in", "tamanu", Ok(EVERY)),
+			("all", "all", Ok(EVERY)),
+			("a name nothing has", "nowhere", Ok(&[])),
+			("a host named twice", "central:central", Ok(&[CENTRAL])),
+			(
+				"joined by a comma",
+				"central,example-facility-a",
+				Ok(&[CENTRAL, FACILITY_A]),
+			),
+			(
+				"joined by a colon",
+				"central:example-facility-a",
+				Ok(&[CENTRAL, FACILITY_A]),
+			),
+			(
+				"joined by both",
+				"central,example-facility-a:example-facility-b",
+				Ok(&[CENTRAL, FACILITY_A, FACILITY_B]),
+			),
+			(
+				"a star at the end of a host name",
+				"example-facility-*",
+				Ok(&[FACILITY_A, FACILITY_B]),
+			),
+			(
+				"a question mark for one character",
+				"example-facility-?",
+				Ok(&[FACILITY_A, FACILITY_B]),
+			),
+			(
+				"a question mark is exactly one character",
+				"example-facility-??",
+				Ok(&[]),
+			),
+			("a lone star is every host", "*", Ok(EVERY)),
+			(
+				"a star at the start of a dotted name",
+				"*.internal",
+				Ok(&[OUTREACH]),
+			),
+			(
+				"a star at the end of a dotted name",
+				"outreach.*",
+				Ok(&[OUTREACH]),
+			),
+			("a glob against a group name", "fac*", Ok(FACILITIES)),
+			("a glob in the middle of a group name", "t*u", Ok(EVERY)),
+			("a question mark in a group name", "?acility", Ok(FACILITIES)),
+			("a group named by one glob only", "centr?l", Ok(&[CENTRAL])),
+			("a group is case sensitive", "Facility", Ok(&[])),
+			("a host is case sensitive", "Example-Central", Ok(&[])),
+			("a glob is case sensitive", "EXAMPLE-*", Ok(&[])),
+			("all is case sensitive", "ALL", Ok(&[])),
+			(
+				"whitespace around a token",
+				"  central  ",
+				Ok(&[CENTRAL]),
+			),
+			(
+				"whitespace around a colon",
+				"central : example-facility-a",
+				Ok(&[CENTRAL, FACILITY_A]),
+			),
+			(
+				"whitespace around a comma",
+				"central , example-facility-a",
+				Ok(&[CENTRAL, FACILITY_A]),
+			),
+			(
+				"whitespace before an exclusion",
+				"facility: !example-facility-b",
+				Ok(&[FACILITY_A, OUTREACH]),
+			),
+			(
+				"an empty token between two is skipped",
+				"central::example-facility-a",
+				Ok(&[CENTRAL, FACILITY_A]),
+			),
+			(
+				"a trailing separator is skipped",
+				"central:",
+				Ok(&[CENTRAL]),
+			),
+			(
+				"a leading comma is skipped",
+				",central",
+				Ok(&[CENTRAL]),
+			),
+			(
+				"an exclusion from a group",
+				"facility:!example-facility-b",
+				Ok(&[FACILITY_A, OUTREACH]),
+			),
+			(
+				"an intersection with a group",
+				"tamanu:&central",
+				Ok(&[CENTRAL]),
+			),
+			(
+				"only an exclusion is everything but those",
+				"!central",
+				Ok(FACILITIES),
+			),
+			(
+				"only an intersection is those of everything",
+				"&central",
+				Ok(&[CENTRAL]),
+			),
+			(
+				"excluding a name nothing has",
+				"!nowhere",
+				Ok(EVERY),
+			),
+			("excluding all", "!all", Ok(&[])),
+			(
+				"excluding what was chosen",
+				"central:!central",
+				Ok(&[]),
+			),
+			(
+				"excluding a group from all",
+				"all:!facility",
+				Ok(&[CENTRAL]),
+			),
+			(
+				"excluding by a glob",
+				"facility:!fac*",
+				Ok(&[]),
+			),
+			(
+				"two exclusions",
+				"!central:!example-facility-a",
+				Ok(&[FACILITY_B, OUTREACH]),
+			),
+			(
+				"two intersections",
+				"tamanu:&facility:&example-facility-?",
+				Ok(&[FACILITY_A, FACILITY_B]),
+			),
+			(
+				"an intersection and an exclusion",
+				"tamanu:&facility:!example-facility-?",
+				Ok(&[OUTREACH]),
+			),
+			(
+				"an intersection that shares nothing",
+				"facility:&central",
+				Ok(&[]),
+			),
+			(
+				"an intersection with a glob",
+				"example-facility-*:&facility",
+				Ok(&[FACILITY_A, FACILITY_B]),
+			),
+			(
+				"an intersection with what matched nothing",
+				"nowhere:&central",
+				Ok(&[]),
+			),
+			(
+				"an exclusion with what matched nothing",
+				"nowhere:!central",
+				Ok(&[]),
+			),
+			(
+				"an exclusion written before what it excludes from",
+				"!example-facility-b:facility",
+				Ok(&[FACILITY_A, OUTREACH]),
+			),
+			(
+				"an exclusion written between two plain patterns",
+				"facility:!example-facility-a:tamanu",
+				Ok(&[CENTRAL, FACILITY_B, OUTREACH]),
+			),
+			(
+				"an intersection written before what it intersects",
+				"&central:tamanu",
+				Ok(&[CENTRAL]),
+			),
+			(
+				"whitespace only",
+				"   ",
+				Err("the limit is empty"),
+			),
+			("nothing", "", Err("the limit is empty")),
+			(
+				"separators only",
+				":,:",
+				Err("the limit is empty"),
+			),
+			("an intersection of nothing", "&", Err("names nothing")),
+			("an exclusion of nothing", "!", Err("names nothing")),
+			(
+				"an exclusion of nothing among names",
+				"central:!",
+				Err("names nothing"),
+			),
+			(
+				"a regular expression",
+				"~example-.*",
+				Err("cannot evaluate"),
+			),
+			(
+				"a regular expression after a name",
+				"central:~example-.*",
+				Err("cannot evaluate"),
+			),
+			(
+				"a subscript",
+				"facility[0]",
+				Err("cannot evaluate"),
+			),
+			(
+				"a range subscript",
+				"facility[0:1]",
+				Err("cannot evaluate"),
+			),
+			(
+				"a subscript in an exclusion",
+				"!facility[0]",
+				Err("cannot evaluate"),
+			),
+			(
+				"a subscript in an intersection",
+				"tamanu:&facility[0]",
+				Err("cannot evaluate"),
+			),
+			(
+				"a subscript after a name",
+				"central:facility[0]",
+				Err("cannot evaluate"),
+			),
+		];
+
 		let f = Fixture::new();
-		assert_eq!(
-			f.run("central,example-facility-a").unwrap(),
-			["example-central", "example-facility-a"]
+		let failures: Vec<String> = rows
+			.iter()
+			.filter_map(|(name, pattern, expected)| {
+				let got = f.run(pattern);
+				let wrong = match (&got, expected) {
+					(Ok(names), Ok(expected)) => names != expected,
+					(Err(Unsupported(why)), Err(needle)) => !why.contains(needle),
+					_ => true,
+				};
+				wrong.then(|| format!("{name}: {pattern:?} gave {got:?}, expected {expected:?}"))
+			})
+			.collect();
+		assert!(
+			failures.is_empty(),
+			"{} of {} rows differ:\n{}",
+			failures.len(),
+			rows.len(),
+			failures.join("\n")
 		);
-		assert_eq!(
-			f.run("example-facility-*").unwrap(),
-			["example-facility-a", "example-facility-b"]
-		);
-		assert_eq!(f.run("example-facility-?").unwrap().len(), 2);
 	}
 
 	#[test]
@@ -232,48 +477,6 @@ mod tests {
 		assert!(!matches("*a*b*", "xxbxxaxx"));
 		assert!(matches("a*", "a"));
 		assert!(!matches("a?", "a"));
-	}
-
-	#[test]
-	fn exclusion_and_intersection() {
-		let f = Fixture::new();
-		assert_eq!(
-			f.run("facility:!example-facility-b").unwrap(),
-			[
-				"example-facility-a",
-				"outreach.site-network.example.internal"
-			]
-		);
-		assert_eq!(f.run("tamanu:&central").unwrap(), ["example-central"]);
-		assert_eq!(
-			f.run("!central").unwrap().len(),
-			3,
-			"only exclusions is everything but those"
-		);
-	}
-
-	#[test]
-	fn an_exclusion_holds_wherever_it_is_written() {
-		let f = Fixture::new();
-		assert_eq!(
-			f.run("!example-facility-b:facility").unwrap(),
-			f.run("facility:!example-facility-b").unwrap()
-		);
-		assert!(
-			!f.run("facility:!example-facility-a:tamanu")
-				.unwrap()
-				.contains(&"example-facility-a")
-		);
-	}
-
-	#[test]
-	fn a_pattern_matching_nothing_is_empty_and_one_it_cannot_read_is_refused() {
-		let f = Fixture::new();
-		assert!(f.run("nowhere").unwrap().is_empty());
-		assert!(f.run("~example-.*").is_err());
-		assert!(f.run("facility[0]").is_err());
-		assert!(f.run("").is_err());
-		assert!(f.run("&").is_err());
 	}
 
 	#[test]
