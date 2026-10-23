@@ -14,7 +14,8 @@ Lenses, inventory and the running findings live in `.workhorse/working-docs/f5/w
 - [x] Lens B over the Rust tests: dependency behaviour (3 hits: jsonschema, yaml-rust2)
 - [x] Lens B over the Vitest and Playwright tests (no hits)
 - [x] Lens C analysis: incremental sprawl (findings in the working doc, not yet applied)
-- [ ] Settle lens C's design decisions (variant list, extractions from handlers, shared Rust and TS fixture), then apply the accepted proposals and run the affected tests
+- [x] Settle lens C's design decisions and apply its high tier, running the affected tests (all passing)
+- [ ] Lens C medium tier, after lens D
 - [ ] Lens D: open-ended consolidation against the existing tests around each area, two rounds
 - [x] Apply the Rust findings of lenses A and B and run the affected tests (all passing)
 - [x] Apply the Vitest and Playwright findings, including the vacuous assertions, and run the affected tests

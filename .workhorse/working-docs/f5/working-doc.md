@@ -227,6 +227,29 @@ Lessons for the skill:
 - Lens C generates findings about production code (duplicated rules, a mismatched error check, a length limit); the skill needs a place to hand those off rather than burying them in test edits.
 - Cost is overstated for Playwright here: the stack is worker-scoped and CI runs one worker, so a test costs its seed, table reset and page load. Prefer helper extraction to merging.
 
+### Round 2: lens C high tier applied
+
+Five edit agents split by file ownership, then formatted and run by filter: `database` 55, `commons-types` 113, `jobs` 16, `private-server` 114 (filtered), Vitest 448, typecheck, `just check` with no warnings, and the whole `ansible.spec.ts` plus the maintenance spec (23 e2e).
+
+What landed:
+
+- `all_variants!` in `commons-types` (emits `ALL` and an exhaustive-match guard from one list) on `ServerRank`, `ScopeKind`, `Preset`, `Problem`, `RunIntent`, `ReleaseReason`. Round-trip tests for each, plus one test per CHECK-backed enum that stores every variant through the real API and reads it back. `ScopeKind` and `Preset` have no public parser, so they go round through `Catalogue::parse`; visibility was not widened.
+- One JSON fixture of 105 PyYAML scalar rows read by both the Rust resolver and Vitest, and a `formatScope` then `parseScope` round trip over every row. No disagreement and no round-trip failure was found, so the feared defects did not exist.
+- `variable_problems` shared by `set` and the import, with a 32-row name fixture read by both languages. `set_value` now validates before checking the scope exists, so a catalogue violation against a missing scope is a 400 where it was a 404. The scope wording in messages is now per scope. The import never called the machine-only `managed_by_ansible` rule, but could not reach it; sharing the function makes that structural.
+- The maintenance-window refusal cluster (12 tests, mostly older than F5) became one table of 11 named rows, each probing `run_state` and `take_lease` and asserting they agree, which only a few of the old tests did. Missing claim and `runs::check` rows were added to existing table-shaped tests.
+- Playwright helper extraction in `ansible.spec.ts` (986 to 817 lines, six helpers, no merged tests, one duplicated assertion removed).
+
+Effect on numbers (static count of Rust test functions): the total is unchanged at 2395, but 10 server or database backed tests became 10 pure unit tests (1900 to 1890 and 495 to 505). The count is the wrong measure for lens C; what moved is cost per test and the number of cases each test walks.
+
+Left for the medium tier, after lens D: the placement table over `ScopeKind::ALL`, the lease state matrix, environment membership and resolution tables, import cannot-apply gates, the schema kinds table, catalogue job refusals, window lifecycle tests, and the `check_claims` and `runs::check` extractions (declined: they remove no duplication).
+
+What round 2 showed about the process:
+
+- The mechanism is the work. Without a variant list the drift-proof form cannot exist, so the review has to propose the smallest helper first and the tests second.
+- A shared fixture across two languages is a stronger drift guard than either side's table, and costs one file; it also deletes a comment that had gone false.
+- Applying in parallel needs file ownership stated in each brief; the agents' compile errors in each other's files cleared on their own, but only because each was told to wait and not touch them.
+- Reporting a test count hides the effect. Report cost classes (database or server backed versus pure) and cases walked.
+
 ## Signal to noise
 
 For each lens, once run: how many findings, how many accepted, how many rejected and why, and a verdict on whether the lens belongs in the skill, as a separate pass, or as guidance only.
@@ -235,7 +258,7 @@ For each lens, once run: how many findings, how many accepted, how many rejected
 |---|---|---|---|---|
 | A. Trivial or over-built | Rust 25 (4 delete, 6 rewrite, 15 merge); Vitest 3; Playwright 5 | Rust 24 of 25, 17 fewer tests net | 1 (spec made the assertion necessary) | Provisional: finds few truly trivial tests, mostly folds that blur into D |
 | B. Tests the dependency | Rust 3 (jsonschema, yaml-rust2); Vitest 0; Playwright 0 | 2 of 3 | 1 (spec) | Provisional: rare, only validation and parsing libraries, worth keeping as a short checklist |
-| C. Incremental sprawl | about 40 proposals; roughly 12 high, 14 medium, rest low or leave alone | | | Provisional: mostly adds coverage and drift protection, cuts fewer tests than A; needs code under test and often a helper |
+| C. Incremental sprawl | about 40 proposals; roughly 12 high, 14 medium, rest low or leave alone | high tier (7 items) all applied; medium after D | 1 declined by decision (extractions that remove no duplication) | Provisional: mostly adds coverage and drift protection, cuts fewer tests than A; needs code under test and often a helper |
 | E. Cannot fail | 4 in Playwright, 1 in Vitest | not yet | | New lens from round 1; found by reading assertions, not counting tests |
 | C. Incremental sprawl | | | | |
 | D. Open-ended consolidation | | | | |

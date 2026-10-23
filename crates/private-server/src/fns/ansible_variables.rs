@@ -1129,7 +1129,12 @@ mod tests {
 			};
 			let rows = [
 				("ansible_port", json!(22), false, None),
-				("ansible_port", json!("ssh"), false, Some("\"ansible_port\":")),
+				(
+					"ansible_port",
+					json!("ssh"),
+					false,
+					Some("\"ansible_port\":"),
+				),
 				(
 					"ansible_port",
 					json!(22),
@@ -1166,7 +1171,11 @@ mod tests {
 	#[test]
 	fn no_catalogue_holds_nothing_back_but_the_rules_that_need_none() {
 		for &scope in ScopeKind::ALL {
-			for (name, secret) in [("salt", false), ("canopy_intent", false), ("ansible_port", true)] {
+			for (name, secret) in [
+				("salt", false),
+				("canopy_intent", false),
+				("ansible_port", true),
+			] {
 				assert!(
 					variable_problems(scope, name, &json!("x"), secret, None).is_empty(),
 					"{name} at {scope}"

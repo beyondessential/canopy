@@ -824,11 +824,7 @@ async fn a_window_refuses_a_lease_exactly_where_the_page_reports_it() {
 			),
 			(
 				"a window over one machine of the environment",
-				vec![Declared::new(
-					Over::Machine(facility),
-					OTHER,
-					IN_TWO_HOURS,
-				)],
+				vec![Declared::new(Over::Machine(facility), OTHER, IN_TWO_HOURS)],
 				vec![
 					(
 						"production",
@@ -894,7 +890,10 @@ async fn a_window_refuses_a_lease_exactly_where_the_page_reports_it() {
 				let at = format!("{row}, at {rank}");
 				let environment = json!({ "server_group_id": group, "rank": rank });
 
-				let state = private.post("/api/ansible/run_state").json(&environment).await;
+				let state = private
+					.post("/api/ansible/run_state")
+					.json(&environment)
+					.await;
 				if !state.status_code().is_success() {
 					failures.push(format!("{at}: run_state answered {}", state.text()));
 					continue;
@@ -937,7 +936,8 @@ async fn a_window_refuses_a_lease_exactly_where_the_page_reports_it() {
 							.json(&json!({ "lease_id": lease["id"] }))
 							.await;
 						if !released.status_code().is_success() {
-							failures.push(format!("{at}: release_lease answered {}", released.text()));
+							failures
+								.push(format!("{at}: release_lease answered {}", released.text()));
 						}
 					}
 					Take::Refused(needles) => {
@@ -950,7 +950,9 @@ async fn a_window_refuses_a_lease_exactly_where_the_page_reports_it() {
 						}
 						for needle in needles {
 							if !detail.contains(needle) {
-								failures.push(format!("{at}: refusal does not name {needle}: {detail}"));
+								failures.push(format!(
+									"{at}: refusal does not name {needle}: {detail}"
+								));
 							}
 						}
 					}
