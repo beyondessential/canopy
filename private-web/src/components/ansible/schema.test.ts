@@ -21,11 +21,6 @@ const variable = (over: Partial<CatalogueVariable>): CatalogueVariable => ({
 });
 
 describe("kindOf", () => {
-	it("reads a plain type", () => {
-		expect(kindOf({ type: "integer" })).toBe("integer");
-		expect(kindOf({ type: "array", items: { type: "string" } })).toBe("array");
-	});
-
 	it("reads alternatives agreeing on a type as that type", () => {
 		expect(
 			kindOf({
@@ -39,6 +34,9 @@ describe("kindOf", () => {
 	});
 
 	it("falls back to JSON where it cannot tell", () => {
+		for (const type of ["string", "integer", "number", "boolean", "array", "object"]) {
+			expect(kindOf({ type })).toBe(type);
+		}
 		expect(kindOf({})).toBe("json");
 		expect(kindOf({ type: ["string", "integer"] })).toBe("json");
 		expect(kindOf({ anyOf: [{ type: "string" }, { type: "integer" }] })).toBe(

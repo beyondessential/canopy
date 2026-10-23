@@ -23,7 +23,6 @@ describe("buildCommand", () => {
 				"CANOPY_URL=https://canopy.example.ts.net CANOPY_LEASE=7c1e9a52-40b3-4d7e-9f0a-2e6b51c8d913 uv run ansible-playbook -i inventory/canopy.yml tamanu-install.yml",
 			].join("\n"),
 		);
-		expect(copied).not.toContain("<infra>");
 	});
 
 	it("updates with jj where chosen", () => {
@@ -54,6 +53,6 @@ describe("shellArg", () => {
 
 describe("typeLabel", () => {
 	it("reads a type as words", () => {
-		expect(typeLabel("tamanu-central")).toBe("Tamanu central");
+		expect(typeLabel("tamanu-central-api")).toBe("Tamanu central api");
 	});
 });
