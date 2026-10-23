@@ -1140,9 +1140,19 @@ async fn a_removal_is_listed_at_its_scope_and_can_be_undone() {
 
 		// Removed long enough ago to be off the list of recent removals, a
 		// removal is still in its scope's history.
+		// A month back is a week that is never provisioned ahead, and an entry
+		// is never updated once settled.
 		conn.batch_execute(
-			"UPDATE audit_entries SET recorded_at = recorded_at - interval '30 days'
-			 WHERE action = 'inventory_variable_removed'",
+			"DO $$ DECLARE week_start date := date_trunc('week', now() - interval '30 days')::date; BEGIN \
+			   EXECUTE format('CREATE TABLE audit_entries_aged PARTITION OF audit_entries \
+			     FOR VALUES FROM (%L) TO (%L) PARTITION BY LIST (retention)', week_start, week_start + 7); \
+			   CREATE TABLE audit_entries_aged_standard PARTITION OF audit_entries_aged FOR VALUES IN ('standard'); \
+			   CREATE TABLE audit_entries_aged_year PARTITION OF audit_entries_aged FOR VALUES IN ('year'); \
+			 END $$; \
+			 ALTER TABLE audit_entries DISABLE TRIGGER audit_entries_guard; \
+			 UPDATE audit_entries SET recorded_at = recorded_at - interval '30 days' \
+			 WHERE action = 'inventory_variable_removed'; \
+			 ALTER TABLE audit_entries ENABLE TRIGGER audit_entries_guard",
 		)
 		.await
 		.unwrap();

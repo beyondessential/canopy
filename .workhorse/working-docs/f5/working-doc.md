@@ -103,7 +103,15 @@ Filled in as the walkthrough runs. One subsection per round, per lens.
 
 Run as three read-only agents split by area (database crate, private-server integration, inline unit and job tests), each given the lens definitions above and the diff ranges.
 Result: 25 of 130 flagged (4 delete, 6 rewrite, 15 merge into another test), 105 kept.
-Nothing applied yet; each item needs the user's accept or reject.
+
+Applied by four edit agents split by file, then formatted and run by filter (`database` 34, `jobs` 16, `private-server` 121 tests, all passing).
+Net 17 fewer tests: 16 of F5's 190, and one older sibling folded into a combined test.
+One flagged item was refused on checking: `inventory_file.rs::refuses_what_is_not_an_inventory_naming_where` stays as it was, because the import spec requires a refused file to name where it fails, so the "line" assertion is the only cover of that requirement.
+Items verified before acting: `jsonschema` does reject a bad hostname with formats on; every `host_names` call site gets its tailnet flag from the shared `reach()` helper; `ScanError` always prints a line.
+
+Applying found a defect that the review did not: the `a_scopes_history_holds_its_removed_variables…` test (added to #672 that same day) had never passed.
+It aged audit entries with an `UPDATE`, which the audit guard trigger refuses once an entry is settled, into a week with no partition.
+Folding it into `a_removal_is_listed_at_its_scope_and_can_be_undone` carried the defect along; fixed there by creating that week's partition and lifting the guard for the update.
 
 Lens B (3 findings, all high confidence, two dependencies):
 
@@ -139,14 +147,44 @@ What round 1 showed about the process:
 - Agents did not check `// spec:` annotations on tests. A deletion or merge must carry the annotation to the surviving test, or the spec loses its trace.
 - Three claims were inferred, not checked: `jsonschema` rejecting a bad hostname with format validation on, `ScanError`'s display always including the line, and the `host_names` tailnet flag. Verify before applying the related change.
 
+### Round 1: lenses A and B over the Vitest and Playwright tests (50 tests)
+
+Same method, two read-only agents.
+Vitest: 36 reviewed, 3 flagged, no lens B hits.
+Playwright: 14 reviewed, 5 flagged, none a delete.
+Not yet applied; waiting on the user's call.
+
+Vitest:
+
+- `yamlScope.test.ts` "reads values as an inventory file would": same resolver path as the next test and `pyyaml.test.ts`; fold its two unique inputs (`x y`, `3`) into the PyYAML scalar test (merge)
+- `schema.test.ts` "reads a plain type": only checks a `switch` passthrough that the `problems` tests already depend on; keep as a small table inside the fallback test, which also adds the untested `number` (merge)
+- `pyyaml.test.ts` "leaves anything else as text": its inputs (`Pacific/Auckland`, `v2.64.3`) cannot match a numeric rule, so a bug would still pass; use dotted versions without a `v` such as `2.64.3`, and `1:30:99` (rewrite)
+- Tidying the agent noticed: the three PyYAML scalar tests and the `check(...)` rejection tests are `[input, expected]` rows (`it.each`); one `not.toContain` is redundant after an exact `toBe`; `typeLabel`'s input would not catch a lost `/g` flag; `AnsibleRunDialog.test.ts` imports the whole component, and so MUI, to reach three pure functions
+
+Playwright (a test here is the dearest kind; the rule is that rendered behaviour no cheaper test reaches earns one):
+
+- "offers install and upgrade only where a Tamanu application is held": the `run-install` count of 0 is asserted straight after `goto`, before the page has loaded, so it likely passes whatever the code does (rewrite: wait for `run-any` to be enabled first)
+- "starts work, shows the command, and gives the lease up" and "shows the run started once it has read the environment": trim what `AnsibleRunDialog.test.ts` and the Rust window tests already assert, keeping the clipboard, testids, lease row, poll and Hold form (rewrite, trim)
+- "cannot start a run until a catalogue has been read" and "enters a list an item at a time": optional merges into a sibling with the same seed; the agent recommends leaving them (a merge saves a table reset and a page load, and costs failure isolation)
+- Not flagged as lenses but real defects: "completes names…" has a negative check with no positive control; "edits a scope as text" says an unchanged variable is left alone, but `toHaveCount(2)` would pass if every variable were removed and re-set; "does not give up a lease whose run has started" races the first 2.5 s poll
+
+What this showed:
+
+- A fifth lens is needed: a test that cannot fail (an assertion true whatever the code does, a negative check with no positive control, a count that cannot tell the thing it claims from its opposite).
+  It does not reduce the count; it makes a kept test worth keeping.
+- Lens A on end-to-end tests becomes "how much of this repeats the cheaper layer", which gives trims, not deletions.
+- Verify a verdict against the spec before applying it: one rewrite was wrong because a spec requirement made the assertion necessary.
+- Applying changes finds defects reading does not: the unrun test above only showed itself when its test was run.
+
 ## Signal to noise
 
 For each lens, once run: how many findings, how many accepted, how many rejected and why, and a verdict on whether the lens belongs in the skill, as a separate pass, or as guidance only.
 
 | Lens | Findings | Accepted | Rejected | Verdict |
 |---|---|---|---|---|
-| A. Trivial or over-built | 25 across Rust (4 delete, 6 rewrite, 15 merge) | | | Provisional: finds few truly trivial tests, mostly folds that blur into D |
-| B. Tests the dependency | 3 across Rust (jsonschema, yaml-rust2) | | | Provisional: rare, high confidence |
+| A. Trivial or over-built | Rust 25 (4 delete, 6 rewrite, 15 merge); Vitest 3; Playwright 5 | Rust 24 of 25, 17 fewer tests net | 1 (spec made the assertion necessary) | Provisional: finds few truly trivial tests, mostly folds that blur into D |
+| B. Tests the dependency | Rust 3 (jsonschema, yaml-rust2); Vitest 0; Playwright 0 | 2 of 3 | 1 (spec) | Provisional: rare, only validation and parsing libraries, worth keeping as a short checklist |
+| E. Cannot fail | 4 in Playwright, 1 in Vitest | not yet | | New lens from round 1; found by reading assertions, not counting tests |
 | C. Incremental sprawl | | | | |
 | D. Open-ended consolidation | | | | |
 
@@ -161,6 +199,7 @@ Candidate parts:
 
 ## Open questions
 
+- [ ] Add lens E (a test that cannot fail) to the lenses and to the skill's checklist.
 - [ ] Skill name and whether it is one skill (guidance plus pass plus loop) or a pass and a loop kept apart. Decided to settle at the end, from the walkthrough.
 - [ ] Where it lives: workspace skills go in `.agents/skills/<name>/SKILL.md`; check the Workhorse smart-merge leaves a non-shipped skill alone.
 - [ ] Whether lens C's drift-proof tests need shared helpers per crate (a variant-list macro, say) that do not exist yet.
