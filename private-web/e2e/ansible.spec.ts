@@ -416,6 +416,52 @@ test.describe("group Ansible", () => {
 		await expect(scope.getByTestId("removed-variables")).toHaveCount(0);
 	});
 
+	// A scope's history names each variable changed there, a removal among them
+	// even once the variable is set again and off the list of removals, and
+	// puts it back. Another scope's changes are not in it.
+	// spec: ANSVAR#presentation
+	test("puts back a removed variable from its scope's history", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
+		await seedServer(sql, {
+			name: "kamaka-prod-central",
+			type: "tamanu-central",
+			rank: "production",
+			groupId: group.id,
+			tags: {},
+		});
+
+		await page.goto(`/fleet/groups/${group.id}`);
+		const production = page
+			.getByTestId("group-ansible")
+			.getByTestId("environment-production");
+		const scope = production.getByTestId("scope-environment");
+		await setVariable(production.getByTestId("scope-group"), "timezone", "Pacific/Fiji");
+		await setVariable(scope, "log_level", "info");
+		await setVariable(scope, "region", "nz");
+		const logLevel = scope.getByTestId("var").filter({ hasText: "log_level" });
+		await expect(scope.getByTestId("var").filter({ hasText: "region" })).toHaveCount(1);
+		await scope.getByTestId("remove-log_level").click();
+		await expect(logLevel).toHaveCount(0);
+		await page.keyboard.press("Escape");
+		await setVariable(scope, "log_level", "debug");
+		await expect(logLevel).toContainText('"debug"');
+		await expect(scope.getByTestId("removed-variables")).toHaveCount(0);
+
+		await page.getByRole("button", { name: "History of production", exact: true }).click();
+		const history = page.getByTestId("variable-history");
+		const entries = history.getByTestId("history-entry");
+		await expect(entries).toHaveCount(4);
+		await expect(entries.nth(0)).toContainText('log_level Set to "debug"');
+		await expect(entries.nth(1)).toContainText('log_level Removed "info"');
+		await expect(entries.nth(2)).toContainText('region Set to "nz"');
+		await expect(entries.nth(3)).toContainText('log_level Set to "info"');
+		await expect(history).not.toContainText("timezone");
+
+		await entries.nth(1).getByTestId("history-restore").click();
+		await expect(page.getByTestId("variable-history")).toHaveCount(0);
+		await expect(logLevel).toContainText('"info"');
+	});
+
 	// The name completes from the catalogue, showing each variable's type, and
 	// the value is entered in a form shaped by it. A variable limited to other
 	// scopes is not offered.
