@@ -324,7 +324,10 @@ async fn proposes_secrets_by_the_catalogue_then_by_name_and_hides_their_values()
 		assert_eq!(variable(vars, "tamanu_caddy_tls_dns_iam")["secret"], true);
 		assert_eq!(variable(vars, "plain")["secret"], false);
 		assert_eq!(variable(vars, "plain")["value"], true);
-		assert_eq!(by_name["left_out"], json!(["canopy_intent", "tamanu_clone"]));
+		assert_eq!(
+			by_name["left_out"],
+			json!(["canopy_intent", "tamanu_clone"])
+		);
 		assert!(!names(vars).contains(&"canopy_intent"));
 		assert!(!names(vars).contains(&"tamanu_clone"));
 
