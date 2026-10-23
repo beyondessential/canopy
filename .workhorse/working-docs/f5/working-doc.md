@@ -327,6 +327,18 @@ Process notes:
 - A merged scenario test needs its steps named in its failure messages and its groups kept apart; the agents that did so reported no ordering problems, and none of the merged tests failed.
 - A coverage diff stops being the check once a test module is edited, because inline test code moves; compare production lines only and expect noise from edited production blocks.
 
+### Round 5, findings settled
+
+Decided with the user, applied, and covered by tests and one spec line each:
+
+- A catalogue read that cannot reach the repository no longer replaces a verdict that the published copy does not read; the alert stands until a good read (the self-alerts spec already said "clears on the next good read").
+- An operator giving up a lease no run has read records the sweep's reason, `Unstarted`, and the audit entry says so; a late read after that still says "has been released", and only a sweep-released lease says "no run read the environment in time".
+- A top-level non-scalar key names "the top level", the `matching` comment says the result is in the order of `members`, and the name after an exclusion or intersection mark is trimmed.
+
+Final check of the round: 1509 Rust tests pass, Vitest 499, typecheck and `just check` clean, the three e2e spec files (58) pass. Comparing covered functions by name (not lines, which move when production code is edited) shows no production function lost coverage between the last two runs; against the baseline from before the stateful folds the only functions no longer covered are the 9 test functions that were folded away.
+
+Process note: compare covered functions by name (`FNDA` in the LCOV file) once production code has been edited; a line diff then reports shifted lines as lost.
+
 ## Signal to noise
 
 For each lens, once run: how many findings, how many accepted, how many rejected and why, and a verdict on whether the lens belongs in the skill, as a separate pass, or as guidance only.
