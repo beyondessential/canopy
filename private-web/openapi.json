@@ -5171,6 +5171,10 @@
           },
           "value": {
             "description": "The plain value it set or removed."
+          },
+          "value_recorded": {
+            "description": "Whether its entry holds the plain value it set or removed, so a value of\nnull is told from one the entry never recorded, as an entry written before\nentries held values does not.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -5179,6 +5183,7 @@
           "actor",
           "change",
           "secret",
+          "value_recorded",
           "replaced_secret",
           "undoable"
         ],

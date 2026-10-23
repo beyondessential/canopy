@@ -8729,6 +8729,12 @@ export interface components {
             undoable: boolean;
             /** @description The plain value it set or removed. */
             value?: unknown;
+            /**
+             * @description Whether its entry holds the plain value it set or removed, so a value of
+             *     null is told from one the entry never recorded, as an entry written before
+             *     entries held values does not.
+             */
+            value_recorded: boolean;
         };
         /** @description The window a run declared, and the end to give it. */
         HoldArgs: {
