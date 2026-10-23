@@ -68,23 +68,17 @@ describe("formatScope", () => {
 });
 
 describe("parseScope", () => {
-	it("reads values as an inventory file would", () => {
-		const { entries, problems } = parseScope("a: yes\nb: no\nc: 3\nd: x y\n");
-		expect(problems).toEqual([]);
-		expect(entries.map((e) => [e.name, e.value])).toEqual([
-			["a", true],
-			["b", false],
-			["c", 3],
-			["d", "x y"],
-		]);
-	});
-
 	it("reads a scalar as PyYAML does, at any depth, so it is stored as an import would store it", () => {
-		const { entries } = parseScope("a: 1:30\nb: 0644\nc:\n  d: [1:30, yes, 1e3]\n");
+		const { entries, problems } = parseScope(
+			"a: 1:30\nb: 0644\nc: 3\nd: x y\ne:\n  f: [1:30, yes, 1e3]\n",
+		);
+		expect(problems).toEqual([]);
 		expect(entries.map((e) => [e.name, e.value])).toEqual([
 			["a", 90],
 			["b", 420],
-			["c", { d: [90, true, "1e3"] }],
+			["c", 3],
+			["d", "x y"],
+			["e", { f: [90, true, "1e3"] }],
 		]);
 	});
 

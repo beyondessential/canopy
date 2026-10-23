@@ -34,5 +34,8 @@ describe("resolvePlain", () => {
 	it("leaves anything else as text", () => {
 		expect(resolvePlain("Pacific/Auckland")).toBe("Pacific/Auckland");
 		expect(resolvePlain("v2.64.3")).toBe("v2.64.3");
+		expect(resolvePlain("2.64.3")).toBe("2.64.3");
+		expect(resolvePlain("1:30:99")).toBe("1:30:99");
+		expect(resolvePlain("1:60")).toBe("1:60");
 	});
 });
