@@ -20,11 +20,12 @@ Lenses, inventory and the running findings live in `.workhorse/working-docs/f5/w
 - [x] Settle the findings from that round (alert behaviour, release_unstarted reason, minor messages) and apply them
 - [x] Lens D round 1: analysis and apply of the small folds and read-only families (coverage diff shows no production line lost)
 - [x] Lens D round 2: fresh agents, applied to F5's own tests and the neighbours (all passing, no production function lost)
-- [ ] Lens D round 3: fresh agents over F5's own tests only; stop if nothing is worth acting on
+- [x] Lens D round 3: nothing worth acting on in the card's own tests; the stopping rule is met
 - [x] Apply the Rust findings of lenses A and B and run the affected tests (all passing)
 - [x] Apply the Vitest and Playwright findings, including the vacuous assertions, and run the affected tests
-- [ ] Walk the remaining lenses' findings with the user, apply the accepted ones, run affected tests by filter
-- [ ] Fill in the signal-to-noise table and decide which lenses the skill keeps
+- [x] Walk the lenses' findings with the user, apply the accepted ones, run affected tests by filter
+- [x] Fill in the signal-to-noise table (all five lenses scored in the working doc)
+- [ ] Settle the skill's shape with the user
 - [ ] Write the skill at `.agents/skills/<name>/SKILL.md`: guidance, a review pass, a review loop
 - [ ] Trial the skill on a later card, adjust, then unplan
 

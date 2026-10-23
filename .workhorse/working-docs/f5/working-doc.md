@@ -360,17 +360,27 @@ Where a fold dropped coverage at one layer it was shown to be made at another: t
 
 Evidence: 1485 Rust tests pass (1509 before), Vitest 499, typecheck and `just check` clean, the three e2e spec files pass (53, from 58). Comparing covered functions by name against the previous run, the functions no longer covered are all test functions or closures in test modules, plus one instance of the generic `Actor::canopy` whose body lines are still covered (21 hits against 26).
 
+### Round 7: lens D, third round (F5's own tests only)
+
+Two fresh agents (Rust, web) found nothing worth acting on and listed what they had checked and why it stands, so lens D's stopping rule is met for the card's own tests.
+One aside became a test: nothing swept an expired lease that has a bound window, so `AnsibleLease::sweep`'s call to `end_for_lease` was untested; the sweep test now declares a window first and checks it ends once, and fails if the call is removed.
+Left standing by the reviewers and not acted on: two `inventory_file.rs` comment tests that overlap an `is_host_path` table (a saving of two microsecond tests), the six group-precedence tests (six rules, six YAML bodies), and three Playwright merges priced only by judgment, because there are no per-step timings of the worker-scoped stack.
+
+Totals over the whole review: Rust test functions 2412 to 2304 (integration-style 1915 to 1800, unit 497 to 504); the verified run is 1485 tests, all passing, from 1576 before lens D; Vitest 499 (many rows are `it.each` cases); e2e 53, from the 58 after lens C.
+
 ## Signal to noise
 
 For each lens, once run: how many findings, how many accepted, how many rejected and why, and a verdict on whether the lens belongs in the skill, as a separate pass, or as guidance only.
 
 | Lens | Findings | Accepted | Rejected | Verdict |
 |---|---|---|---|---|
-| A. Trivial or over-built | Rust 25 (4 delete, 6 rewrite, 15 merge); Vitest 3; Playwright 5 | Rust 24 of 25, 17 fewer tests net | 1 (spec made the assertion necessary) | Provisional: finds few truly trivial tests, mostly folds that blur into D |
-| B. Tests the dependency | Rust 3 (jsonschema, yaml-rust2); Vitest 0; Playwright 0 | 2 of 3 | 1 (spec) | Provisional: rare, only validation and parsing libraries, worth keeping as a short checklist |
-| C. Incremental sprawl | about 40 proposals; roughly 12 high, 14 medium, rest low or leave alone | high tier (7 items) all applied; medium after D | 1 declined by decision (extractions that remove no duplication) | Provisional: mostly adds coverage and drift protection, cuts fewer tests than A; needs code under test and often a helper |
-| E. Cannot fail | 4 in Playwright, 1 in Vitest | not yet | | New lens from round 1; found by reading assertions, not counting tests |
-| D. Open-ended consolidation | about 14 small folds, 3 read-only families, 6 web changes, plus stateful families deferred | all applied except the deferred ones | 3 rated weak by the agents, not applied | Provisional: biggest count reduction (40 Rust tests), evidence is a coverage diff, overlaps the C medium tier |
+| A. Trivial or over-built | Rust 25, Vitest 3, Playwright 5. Only 2 were truly trivial; the rest were folds into a neighbour that shared the setup | 24 of 25 Rust, all Vitest, 3 of 5 Playwright | 1 (a spec made the assertion necessary), 2 optional merges the reviewer advised against | Guidance at write time ("what bug would fail this that no other test would catch"); the folds it finds are lens D's. Low yield as a separate pass |
+| B. Tests the dependency | 3 (jsonschema twice, yaml-rust2 once), none on the web side | 2 of 3 | 1 (the spec required the assertion) | A checklist line in the write-time guidance and in the review prompt. Rare, high confidence per hit, only for validation and parsing libraries; not worth its own pass |
+| C. Incremental sprawl | About 40 proposals; roughly 12 high, 14 medium, the rest low or leave alone | All 7 high-tier items, the medium tier and the stateful families as decided | 1 declined by decision (extractions that remove no duplication) | Keep as its own pass. Highest durable value: drift protection (variant lists, shared fixtures, exhaustive destructuring), new coverage rows, and it surfaced a real defect (`!~regex` in a limit). Needs the code under test and often a small shared helper |
+| D. Open-ended consolidation | Round 1 about 40 tests; round 2 about 10 of the card's own plus about 15 in older neighbours; round 3 none | Rounds 1 and 2 applied (the weakest 3 of round 1 skipped) | The neighbour slack could have been left; a few folds judged not worth their isolation cost | Keep, as a loop that stops when a round finds nothing in the card's own tests. Biggest count reduction; the check is a coverage diff by function name. Overlaps C's medium tier, so run them as one |
+| E. Cannot fail | 5 (a count taken before the page loaded, a negative check with no positive control, a count that cannot tell the thing from its opposite, a race on the first poll, and one Vitest input that could not match a rule) | All 5 | none | Keep as a lens in the review and as a rule: prove a repaired test by mutating the code under test and watching it fail. Found only by reading assertions |
+
+Defects found while applying changes, none of them by a lens as such: a test added the same day that had never passed (it aged audit entries in a way the guard forbids); a late read of an unread lease called "expired"; a limit exclusion with a regular expression silently matching nothing; an unreachable catalogue read silencing an invalid-catalogue alert; the unread give-up recording a different reason from the sweep. The common cause was running the tests while applying, and writing each new expectation from the code and not from a guess; both should be rules in the skill.
 
 ## Skill shape (to settle from the walkthrough)
 
