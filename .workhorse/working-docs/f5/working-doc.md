@@ -275,6 +275,26 @@ Process notes from this round:
 - The useful unit of a D suggestion is "behaviour, owning layer, what each other layer keeps"; the agents that built the behaviour map first produced the best-defended merges.
 - Every merge among stateful tests needs its ordering and shared state stated (global `list_open`, UNIQUE rows, the open-lease limit); the claims that failed to verify were all of this kind.
 
+### Round 4: lens D, first round applied
+
+Scope decided: the small folds plus the read-only endpoint families; the stateful families (lease states, upgrade plans, variable serve and secrets, runs lifecycle, `maintenance_machines`) are left for the C medium review.
+
+Applied by four edit agents split by file: 8 database and jobs folds (the window hook tests into the lease wiring test, `says_why_a_lease_was_released`, the two alert tests, three constraint tests, the `maintenance_machine_sets` merges, the enum store tests, the jobs catalogue stub tests); the three read-only endpoint families (import previews 8 to 1, environment-resolution refusals 8 to 1, served-hosts reads 8 to 1, each scenario in its own group with failures collected and named); the `ansible_runs` refusal and preview folds and two variable-test folds; the web folds (the machine-window run-holder e2e test deleted, the empty-group text moved to `groups.spec.ts`, the one-environment picker test and the secret tail folded in).
+
+Evidence:
+
+- Coverage: the baseline (1576 Rust tests) and the result (1536) were taken with `just coverage`, and `lcovdiff.py` compared line coverage across 141 source files in `database`, `jobs` and `private-server`. No production line lost coverage; the 15 lines it flagged were in `jobs/src/ansible/catalogue.rs`'s own test module (after the `#[cfg(test)]` line), which moved with the folded test.
+- All 1536 Rust tests pass; Vitest 448; typecheck and `just check` clean; the three e2e spec files (58 tests) pass.
+- Mutation check on the one deleted e2e test: making the SPA ignore the window's declarer fails the remaining holder test ("An operator has declared work here" instead of the declarer's name), so the survivor does carry the SPA branch.
+
+Net: 40 fewer Rust tests (1576 to 1536), about 40 fewer migrated databases per run, and one e2e test deleted and two folded.
+
+What round 4 showed about the process:
+
+- A coverage diff is cheap evidence once the recipe exists and answers the "same coverage" question for Rust directly. It needs two rules: compare only production lines, because inline test modules shift line numbers; and take the baseline before any edit starts, since a build in progress can pick up half-edited tests.
+- The agents' claims about ordering and shared state held up; the folds that failed to be as simple as proposed were flagged by the agents themselves rather than found by running.
+- Reporting the count of tests is a poor headline; "databases migrated per run" tracks cost better, and coverage tracks safety.
+
 ## Signal to noise
 
 For each lens, once run: how many findings, how many accepted, how many rejected and why, and a verdict on whether the lens belongs in the skill, as a separate pass, or as guidance only.
@@ -285,8 +305,7 @@ For each lens, once run: how many findings, how many accepted, how many rejected
 | B. Tests the dependency | Rust 3 (jsonschema, yaml-rust2); Vitest 0; Playwright 0 | 2 of 3 | 1 (spec) | Provisional: rare, only validation and parsing libraries, worth keeping as a short checklist |
 | C. Incremental sprawl | about 40 proposals; roughly 12 high, 14 medium, rest low or leave alone | high tier (7 items) all applied; medium after D | 1 declined by decision (extractions that remove no duplication) | Provisional: mostly adds coverage and drift protection, cuts fewer tests than A; needs code under test and often a helper |
 | E. Cannot fail | 4 in Playwright, 1 in Vitest | not yet | | New lens from round 1; found by reading assertions, not counting tests |
-| C. Incremental sprawl | | | | |
-| D. Open-ended consolidation | | | | |
+| D. Open-ended consolidation | about 14 small folds, 3 read-only families, 6 web changes, plus stateful families deferred | all applied except the deferred ones | 3 rated weak by the agents, not applied | Provisional: biggest count reduction (40 Rust tests), evidence is a coverage diff, overlaps the C medium tier |
 
 ## Skill shape (to settle from the walkthrough)
 

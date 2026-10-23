@@ -8,7 +8,8 @@ Lenses, inventory and the running findings live in `.workhorse/working-docs/f5/w
 - [x] Inventory the tests F5 added across #666, #670, #671, #672
 - [x] Record the lenses, process and inventory in the working doc
 - [x] Settle the open questions that block the walkthrough: coverage is wanted but absent, lens D reads the tests and their neighbours only
-- [ ] Add coverage tooling for the Rust crates and for `private-web` (Vitest), as a way to check a deletion or merge, with a `just` recipe for each
+- [x] Rust coverage tooling: `just coverage` (cargo-llvm-cov, contained RAM Postgres)
+- [ ] Vitest coverage (no provider installed; needs a dev dependency, decide whether to add)
 - [x] Lens A over the Rust tests: trivial or over-built (findings in the working doc, not yet applied)
 - [x] Lens A over the Vitest and Playwright tests (findings in the working doc, not yet applied)
 - [x] Lens B over the Rust tests: dependency behaviour (3 hits: jsonschema, yaml-rust2)
@@ -16,7 +17,8 @@ Lenses, inventory and the running findings live in `.workhorse/working-docs/f5/w
 - [x] Lens C analysis: incremental sprawl (findings in the working doc, not yet applied)
 - [x] Settle lens C's design decisions and apply its high tier, running the affected tests (all passing)
 - [ ] Lens C medium tier, after lens D
-- [ ] Lens D: open-ended consolidation against the existing tests around each area, two rounds
+- [x] Lens D round 1: analysis and apply of the small folds and read-only families (coverage diff shows no production line lost)
+- [ ] Lens D round 2: fresh agents over what remains
 - [x] Apply the Rust findings of lenses A and B and run the affected tests (all passing)
 - [x] Apply the Vitest and Playwright findings, including the vacuous assertions, and run the affected tests
 - [ ] Walk the remaining lenses' findings with the user, apply the accepted ones, run affected tests by filter
