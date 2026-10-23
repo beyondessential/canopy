@@ -57,6 +57,15 @@ watch-private-web:
 test *args:
     scripts/contain.sh scripts/ramdisk-pg.sh cargo nextest run --no-fail-fast {{ args }}
 
+# Rust line coverage over the test suite (RAM-backed and contained; see
+# `test`). Writes LCOV to target/coverage/lcov.info. Args pass to
+# `cargo llvm-cov nextest`, e.g. `just coverage -p database -p private-server`.
+# Coverage says a line ran, not that anything checked it, so use it to find
+# what a deleted or merged test was the only one to reach, not as a target.
+coverage *args:
+    mkdir -p target/coverage
+    scripts/contain.sh scripts/ramdisk-pg.sh cargo llvm-cov nextest --no-fail-fast --lcov --output-path target/coverage/lcov.info {{ args }}
+
 # Run tests for a specific package (RAM-backed; see `test`)
 test-package package:
     scripts/contain.sh scripts/ramdisk-pg.sh cargo nextest run --no-fail-fast -p {{ package }}
