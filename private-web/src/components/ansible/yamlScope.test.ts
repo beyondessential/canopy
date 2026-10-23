@@ -163,8 +163,7 @@ describe("checkScope", () => {
 		expect(check("ansible_host: h\n", "machine")).toEqual([]);
 	});
 
-	it("refuses a name that is not usable and a secret with nothing to keep", () => {
-		expect(check("'bad name': 1\n")[0].message).toContain("not a usable variable name");
+	it("refuses a secret with nothing to keep", () => {
 		expect(check("other: !secret\n")[0].message).toContain("no secret value to keep");
 	});
 

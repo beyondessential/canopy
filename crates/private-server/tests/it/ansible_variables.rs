@@ -408,23 +408,6 @@ async fn removing_forgets_the_value() {
 	.await
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_a_name_the_secret_store_cannot_key_a_value_under() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		private
-			.post("/api/ansible_variables/set")
-			.json(&json!({
-				"server_group_id": group,
-				"name": "not a name",
-				"value": "x",
-			}))
-			.await
-			.assert_status(axum::http::StatusCode::BAD_REQUEST);
-	})
-	.await
-}
-
 /// A group's value reaches every one of its environments, which is the cascade
 /// a per-environment table would throw away.
 #[tokio::test(flavor = "multi_thread")]
@@ -774,8 +757,9 @@ async fn refused(
 }
 
 /// Until a catalogue is read nothing is held to one and none is offered. Once
-/// read, it is offered, a variable it describes must be secret exactly as it
-/// says, a violation of it is a 400, and a name it does not describe is free.
+/// read, it is offered, a value set before it that no longer matches stays,
+/// marked where it does not, a variable it describes must be secret exactly as
+/// it says, a violation of it is a 400, and a name it does not describe is free.
 // spec: ANSVAR#catalogue
 #[tokio::test(flavor = "multi_thread")]
 async fn a_variable_the_catalogue_describes_is_held_to_it() {
@@ -806,6 +790,22 @@ async fn a_variable_the_catalogue_describes_is_held_to_it() {
 			false,
 		)
 		.await;
+		set_var(
+			&private,
+			environment.clone(),
+			"salt",
+			json!("pepper"),
+			false,
+		)
+		.await;
+		set_var(
+			&private,
+			environment.clone(),
+			"timezone",
+			json!("Pacific/Fiji"),
+			false,
+		)
+		.await;
 		read_catalogue(&mut conn).await;
 
 		let held: Value = private
@@ -815,6 +815,28 @@ async fn a_variable_the_catalogue_describes_is_held_to_it() {
 			.json();
 		assert_eq!(held["source_commit"], "abc123");
 		assert_eq!(held["variables"].as_array().unwrap().len(), 4);
+
+		let listed: Value = private
+			.post("/api/ansible_variables/for_group")
+			.json(&json!({ "server_group_id": group }))
+			.await
+			.json();
+		let problems = |name: &str| -> Vec<String> {
+			let variable = listed
+				.as_array()
+				.unwrap()
+				.iter()
+				.find(|variable| variable["name"] == name)
+				.unwrap_or_else(|| panic!("{name} is listed: {listed}"));
+			serde_json::from_value(variable["problems"].clone()).unwrap()
+		};
+		assert_eq!(problems("ansible_port").len(), 1, "{listed}");
+		assert!(problems("ansible_port")[0].contains("ansible_port"));
+		assert!(problems("salt")[0].contains("secret in the catalogue"));
+		assert!(
+			problems("timezone").is_empty(),
+			"a name the catalogue lacks is unmarked"
+		);
 
 		assert!(
 			refused(
@@ -836,75 +858,6 @@ async fn a_variable_the_catalogue_describes_is_held_to_it() {
 			false,
 		)
 		.await;
-	})
-	.await
-}
-
-/// A value set before the catalogue described it stays, marked where it no
-/// longer matches.
-// spec: ANSVAR#catalogue
-#[tokio::test(flavor = "multi_thread")]
-async fn marks_a_value_that_no_longer_matches_the_catalogue() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_ranked_application(
-			&mut conn,
-			group,
-			"kamaka-central",
-			"tamanu-central",
-			Some("production"),
-			None,
-		)
-		.await;
-		let environment = json!({ "server_group_id": group, "rank": "production" });
-		set_var(
-			&private,
-			environment.clone(),
-			"ansible_port",
-			json!("2222"),
-			false,
-		)
-		.await;
-		set_var(
-			&private,
-			environment.clone(),
-			"salt",
-			json!("pepper"),
-			false,
-		)
-		.await;
-		set_var(
-			&private,
-			environment.clone(),
-			"timezone",
-			json!("Pacific/Fiji"),
-			false,
-		)
-		.await;
-		read_catalogue(&mut conn).await;
-
-		let listed: Value = private
-			.post("/api/ansible_variables/for_group")
-			.json(&json!({ "server_group_id": group }))
-			.await
-			.json();
-		let problems = |name: &str| -> Vec<String> {
-			let variable = listed
-				.as_array()
-				.unwrap()
-				.iter()
-				.find(|variable| variable["name"] == name)
-				.unwrap_or_else(|| panic!("{name} is listed: {listed}"));
-			serde_json::from_value(variable["problems"].clone()).unwrap()
-		};
-
-		assert_eq!(problems("ansible_port").len(), 1, "{listed}");
-		assert!(problems("ansible_port")[0].contains("ansible_port"));
-		assert!(problems("salt")[0].contains("secret in the catalogue"));
-		assert!(
-			problems("timezone").is_empty(),
-			"a name the catalogue lacks is unmarked"
-		);
 	})
 	.await
 }

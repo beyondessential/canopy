@@ -336,9 +336,11 @@ async fn refuses_a_read_started_otherwise_than_the_lease_says() {
 /// A playbook the catalogue does not list, one it runs as an upgrade started as
 /// a configure to go around the upgrade plan, one it runs as a configure started
 /// as an upgrade, a tag it does not take, an assignment to a machine the run
-/// does not act on, and a limit that matches nothing, is empty or cannot be
-/// read, are refused.
-// spec: ANSRUN#presentation, ANSRUN#planned-upgrades
+/// does not act on or that has an application on it, a second Tamanu central
+/// assigned to a machine with nothing on it, a limit that matches nothing, is
+/// empty or cannot be read, and a run over an environment where nothing is
+/// managed, are refused.
+// spec: ANSRUN#presentation, ANSRUN#planned-upgrades, ANSRUN#machines-with-nothing-on-them
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_what_could_not_run() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
@@ -402,6 +404,67 @@ async fn refuses_what_could_not_run() {
 			let detail = refused(&private, args.clone()).await;
 			assert!(detail.contains(needle), "{args}: {detail}");
 		}
+
+		let occupied = refused(
+			&private,
+			json!({
+				"group": "kamaka", "playbook": "tamanu-install.yml",
+				"assignments": [{ "machine_id": env.facility_a, "application_type": "tamanu-facility" }],
+			}),
+		)
+		.await;
+		assert!(
+			occupied.contains("already has an application"),
+			"{occupied}"
+		);
+
+		// A machine with nothing on it cannot be made a second central.
+		let blank = Uuid::new_v4();
+		let blank_device = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO devices (id, role, tailscale_node_name)
+			 VALUES ('{blank_device}', 'server', 'kamaka-new.tail1234.ts.net');
+			 INSERT INTO machines (id, name, group_id, rank, device_id)
+			 VALUES ('{blank}', 'kamaka-new', '{}', 'production', '{blank_device}');
+			 INSERT INTO ansible_variables (machine_id, name, value)
+			 VALUES ('{blank}', 'managed_by_ansible', 'true')",
+			env.group
+		))
+		.await
+		.unwrap();
+		let second_central = refused(
+			&private,
+			json!({
+				"group": "kamaka", "playbook": "tamanu-install.yml",
+				"assignments": [{ "machine_id": blank, "application_type": "tamanu-central" }],
+			}),
+		)
+		.await;
+		assert!(
+			second_central.contains("at most one Tamanu central"),
+			"{second_central}"
+		);
+
+		// An environment where nothing is managed would be held shut and acted on
+		// by nothing.
+		let bare = insert_group(&mut conn, "bare").await;
+		insert_application_on_its_own_machine(
+			&mut conn,
+			bare,
+			"bare-central",
+			"tamanu-central",
+			Some("production"),
+			Some("https://bare.example.org"),
+		)
+		.await;
+		let nothing = refused(
+			&private,
+			json!({ "group": "bare", "playbook": "base-install.yml" }),
+		)
+		.await;
+		assert!(nothing.contains("would act on nothing"), "{nothing}");
+		// A lease the plugin takes for itself is left to the plugin to refuse.
+		take_lease(&private, json!({ "group": "bare" })).await;
 
 		// An upgrade of production is gated on a plan first, so with one open the
 		// catalogue's intent is what refuses a configure playbook labelled as one.
@@ -526,68 +589,16 @@ async fn assigns_a_type_to_a_machine_with_nothing_on_it() {
 	.await
 }
 
-/// A machine with something on it, or an environment that holds a central, is
-/// not assigned one.
-// spec: ANSRUN#machines-with-nothing-on-them
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_an_assignment_that_could_not_hold() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let env = environment(&mut conn, &private).await;
-		read_catalogue(&mut conn).await;
-
-		let occupied = refused(
-			&private,
-			json!({
-				"group": "kamaka", "playbook": "tamanu-install.yml",
-				"assignments": [{ "machine_id": env.facility_a, "application_type": "tamanu-facility" }],
-			}),
-		)
-		.await;
-		assert!(
-			occupied.contains("already has an application"),
-			"{occupied}"
-		);
-
-		// A machine with nothing on it cannot be made a second central.
-		let bare = Uuid::new_v4();
-		let device = Uuid::new_v4();
-		use commons_tests::diesel_async::SimpleAsyncConnection;
-		conn.batch_execute(&format!(
-			"INSERT INTO devices (id, role, tailscale_node_name)
-			 VALUES ('{device}', 'server', 'kamaka-new.tail1234.ts.net');
-			 INSERT INTO machines (id, name, group_id, rank, device_id)
-			 VALUES ('{bare}', 'kamaka-new', '{}', 'production', '{device}');
-			 INSERT INTO ansible_variables (machine_id, name, value)
-			 VALUES ('{bare}', 'managed_by_ansible', 'true')",
-			env.group
-		))
-		.await
-		.unwrap();
-		let second_central = refused(
-			&private,
-			json!({
-				"group": "kamaka", "playbook": "tamanu-install.yml",
-				"assignments": [{ "machine_id": bare, "application_type": "tamanu-central" }],
-			}),
-		)
-		.await;
-		assert!(
-			second_central.contains("at most one Tamanu central"),
-			"{second_central}"
-		);
-		let _ = env.central;
-	})
-	.await
-}
-
 /// A limit preview names what the pattern matches, the groups and hosts a limit
-/// can be picked from, and says why a pattern cannot be read. The pattern
-/// language itself is covered by the unit tests of `fns::ansible::limit`.
-// spec: ANSRUN#presentation
+/// can be picked from, and says why a pattern cannot be read. Only a machine a
+/// run configures is offered: the plugin builds an inventory of the machines
+/// that carry `managed_by_ansible`. The pattern language itself is covered by the
+/// unit tests of `fns::ansible::limit`.
+// spec: ANSRUN#presentation, INV#reaching-a-machine
 #[tokio::test(flavor = "multi_thread")]
 async fn previews_the_machines_a_limit_matches() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
-		environment(&mut conn, &private).await;
+		let env = environment(&mut conn, &private).await;
 		let preview = async |limit: &str| -> Value {
 			private
 				.post("/api/ansible/limit_preview")
@@ -617,17 +628,7 @@ async fn previews_the_machines_a_limit_matches() {
 				.unwrap()
 				.contains("cannot evaluate")
 		);
-	})
-	.await
-}
 
-/// Only a machine a run configures is offered and matched: the plugin builds an
-/// inventory of the machines that carry `managed_by_ansible`.
-// spec: INV#reaching-a-machine
-#[tokio::test(flavor = "multi_thread")]
-async fn offers_only_the_machines_a_run_configures() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let env = environment(&mut conn, &private).await;
 		private
 			.post("/api/ansible_variables/set")
 			.json(
@@ -635,19 +636,18 @@ async fn offers_only_the_machines_a_run_configures() {
 			)
 			.await
 			.assert_status_ok();
-
 		let options: Value = private
 			.post("/api/ansible/run_options")
 			.json(&json!({ "group": "kamaka" }))
 			.await
 			.json();
-		let names: Vec<&str> = options["members"]
+		let offered: Vec<&str> = options["members"]
 			.as_array()
 			.unwrap()
 			.iter()
 			.map(|m| m["name"].as_str().unwrap())
 			.collect();
-		assert_eq!(names, ["kamaka-central", "kamaka-facility-a"]);
+		assert_eq!(offered, ["kamaka-central", "kamaka-facility-a"]);
 		assert_eq!(options["has_central"], true);
 	})
 	.await
@@ -797,36 +797,6 @@ async fn names_what_a_run_acts_on_as_the_limit_preview_does() {
 			.find(|host| host["name"] == "kamaka managed")
 			.unwrap();
 		assert_eq!(managed["host_name"], "box", "what the preview called it");
-	})
-	.await
-}
-
-/// A run started for a playbook over an environment where nothing is managed
-/// would hold it shut and act on nothing.
-// spec: ANSRUN#presentation
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_a_run_that_would_act_on_nothing() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "bare").await;
-		insert_application_on_its_own_machine(
-			&mut conn,
-			group,
-			"bare-central",
-			"tamanu-central",
-			Some("production"),
-			Some("https://bare.example.org"),
-		)
-		.await;
-		read_catalogue(&mut conn).await;
-
-		let refusal = refused(
-			&private,
-			json!({ "group": "bare", "playbook": "base-install.yml" }),
-		)
-		.await;
-		assert!(refusal.contains("would act on nothing"), "{refusal}");
-		// A lease the plugin takes for itself is left to the plugin to refuse.
-		take_lease(&private, json!({ "group": "bare" })).await;
 	})
 	.await
 }

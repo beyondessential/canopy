@@ -60,6 +60,7 @@ test.describe("group detail page", () => {
 			page.getByRole("heading", { name: group.name, level: 1 }),
 		).toBeVisible();
 		await expect(page.getByText(/nothing in this group yet/i)).toBeVisible();
+		await expect(page.getByText(/no environment to configure/i)).toBeVisible();
 	});
 });
 
