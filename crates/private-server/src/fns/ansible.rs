@@ -222,6 +222,9 @@ pub struct AnsibleHost {
 pub struct RunState {
 	/// The lease holding the environment, where one holds.
 	pub lease: Option<AnsibleLease>,
+	/// Whether that lease is the caller's own, in which case there is nothing
+	/// to take over.
+	pub lease_is_yours: bool,
 	/// The window holding over the environment or over a machine in it: the
 	/// one refusing a take where one does, and otherwise the caller's own.
 	pub window: Option<MaintenanceWindow>,
@@ -704,6 +707,9 @@ pub async fn run_state(
 	let lease = AnsibleLease::open_for(&mut conn, environment.group.id, environment.rank)
 		.await?
 		.filter(|lease| lease.holds_at(now));
+	let lease_is_yours = lease
+		.as_ref()
+		.is_some_and(|lease| !lease.holds_for_another(Some(login), now));
 
 	let machine_ids = environment.window_machine_ids();
 	let windows = MaintenanceWindow::open_over(
@@ -721,6 +727,7 @@ pub async fn run_state(
 			.or_else(|| windows.iter().find(|window| window.holds_at(now)))
 			.cloned(),
 		lease,
+		lease_is_yours,
 	}))
 }
 

@@ -12491,6 +12491,11 @@ export interface components {
         /** @description The lease and the maintenance window a run on an environment would meet. */
         RunState: {
             lease?: null | components["schemas"]["AnsibleLease"];
+            /**
+             * @description Whether that lease is the caller's own, in which case there is nothing
+             *     to take over.
+             */
+            lease_is_yours: boolean;
             /** @description Whether that window is someone else's, which is what refuses a take. */
             refuses: boolean;
             window?: null | components["schemas"]["MaintenanceWindow"];

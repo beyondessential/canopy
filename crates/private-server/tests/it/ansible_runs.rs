@@ -616,6 +616,10 @@ async fn the_first_read_starts_the_run_and_declares_its_maintenance() {
 			.await
 			.json();
 		assert!(!state["lease"]["started_at"].is_null(), "{state}");
+		assert_eq!(
+			state["lease_is_yours"], true,
+			"the holder is not offered taking over their own lease"
+		);
 		let window = &state["window"];
 		assert_eq!(window["lease_id"], lease.to_string());
 		assert_eq!(window["server_group_id"], env.group.to_string());
@@ -897,6 +901,7 @@ async fn a_window_over_a_machine_no_run_reaches_yet_refuses_the_take() {
 			state["refuses"], true,
 			"the page shows what refuses the take"
 		);
+		assert_eq!(state["lease_is_yours"], false);
 		assert_eq!(state["window"]["declared_by"], "someone.else@bes.au");
 	})
 	.await
