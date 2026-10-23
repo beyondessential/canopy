@@ -386,7 +386,7 @@ async fn set_value(
 		name,
 		&value,
 		secret,
-		loaded.as_ref().map(|loaded| &loaded.catalogue),
+		loaded.as_ref().map(|loaded| &*loaded.catalogue),
 	);
 	if !problems.is_empty() {
 		return Err(AppError::BadRequest(problems.join("; ")));
@@ -1024,6 +1024,181 @@ async fn check_scope(
 		}
 		VariableScope::Machine { machine_id } => {
 			Machine::get_by_id(conn, machine_id).await.map(drop)
+		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use serde_json::json;
+
+	const NAMES: &str =
+		include_str!("../../../../private-web/src/components/ansible/fixtures/variable-names.json");
+
+	fn problems_of(
+		scope: ScopeKind,
+		name: &str,
+		value: &Value,
+		secret: bool,
+		catalogue: Option<&Catalogue>,
+	) -> Vec<String> {
+		variable_problems(scope, name, value, secret, catalogue)
+	}
+
+	/// The needle a variable set only on a machine is refused with at this
+	/// scope, if it is refused there.
+	fn wider_than_a_machine(scope: ScopeKind) -> Option<&'static str> {
+		match scope {
+			ScopeKind::Machine => None,
+			ScopeKind::Group => Some("rather than on a group"),
+			ScopeKind::Environment => Some("rather than on an environment"),
+		}
+	}
+
+	fn assert_refused_with(problems: Vec<String>, needle: Option<&str>, what: &str) {
+		match needle {
+			None => assert!(problems.is_empty(), "{what}: {problems:?}"),
+			Some(needle) => {
+				assert_eq!(problems.len(), 1, "{what}: {problems:?}");
+				assert!(problems[0].contains(needle), "{what}: {problems:?}");
+			}
+		}
+	}
+
+	#[test]
+	fn machine_only_variables_are_refused_wider_than_a_machine() {
+		for &scope in ScopeKind::ALL {
+			let wider = wider_than_a_machine(scope);
+			let host_is_not_a_string = match scope {
+				ScopeKind::Machine => Some("so it is a string"),
+				ScopeKind::Group | ScopeKind::Environment => wider,
+			};
+			let rows = [
+				("managed_by_ansible", json!(true), wider),
+				("ansible_host", json!("10.0.0.4"), wider),
+				("ansible_host", json!(10), host_is_not_a_string),
+				("ansible_host", json!(["10.0.0.4"]), host_is_not_a_string),
+				("ansible_host", json!(null), host_is_not_a_string),
+				("ansible_user", json!("ubuntu"), None),
+				("ansible_port", json!(22), None),
+			];
+			for (name, value, needle) in rows {
+				assert_refused_with(
+					problems_of(scope, name, &value, false, None),
+					needle,
+					&format!("{name} = {value} at {scope}"),
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn a_name_is_held_to_what_the_secret_store_can_key() {
+		let rows: Vec<(String, bool)> = serde_json::from_str(NAMES).expect("names fixture");
+		assert!(rows.len() >= 20);
+		for required in [
+			"",
+			"a",
+			&"a".repeat(NAME_LIMIT),
+			&"a".repeat(NAME_LIMIT + 1),
+			".",
+			"..",
+		] {
+			assert!(
+				rows.iter().any(|(name, _)| name == required),
+				"the fixture lacks {required:?}"
+			);
+		}
+		for &scope in ScopeKind::ALL {
+			for (name, usable) in &rows {
+				let problems = problems_of(scope, name, &json!("x"), false, None);
+				assert_eq!(
+					problems.is_empty(),
+					*usable,
+					"{name:?} at {scope}: {problems:?}"
+				);
+				if !usable {
+					assert!(
+						problems[0].contains("is not a usable variable name"),
+						"{name:?} at {scope}: {problems:?}"
+					);
+				}
+			}
+		}
+	}
+
+	fn catalogue() -> Catalogue {
+		Catalogue::parse(&json!({
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"ansible_port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+				"tamanu_facility_id": { "type": "string", "x-canopy": { "scope": ["machine"] } },
+				"salt": { "type": "string", "x-canopy": { "secret": true } },
+				"canopy_intent": { "type": "string", "x-canopy": { "reserved": true } }
+			}
+		}))
+		.expect("a catalogue")
+	}
+
+	#[test]
+	fn a_variable_the_catalogue_describes_is_held_to_it_and_any_other_is_free() {
+		let catalogue = catalogue();
+		for &scope in ScopeKind::ALL {
+			let only_on_machines = match scope {
+				ScopeKind::Machine => None,
+				ScopeKind::Group | ScopeKind::Environment => Some("can be set only at machine"),
+			};
+			let rows = [
+				("ansible_port", json!(22), false, None),
+				("ansible_port", json!("ssh"), false, Some("\"ansible_port\":")),
+				(
+					"ansible_port",
+					json!(22),
+					true,
+					Some("is not secret in the catalogue"),
+				),
+				("salt", json!("pepper"), true, None),
+				(
+					"salt",
+					json!("pepper"),
+					false,
+					Some("is secret in the catalogue"),
+				),
+				("tamanu_facility_id", json!("a"), false, only_on_machines),
+				(
+					"canopy_intent",
+					json!("x"),
+					false,
+					Some("is set by a run for itself"),
+				),
+				("something_new", json!({ "any": [1] }), false, None),
+				("something_new", json!({ "any": [1] }), true, None),
+			];
+			for (name, value, secret, needle) in rows {
+				assert_refused_with(
+					problems_of(scope, name, &value, secret, Some(&catalogue)),
+					needle,
+					&format!("{name} = {value} (secret: {secret}) at {scope}"),
+				);
+				if needle.is_some() || name != "something_new" {
+					continue;
+				}
+				assert!(problems_of(scope, name, &value, secret, None).is_empty());
+			}
+		}
+	}
+
+	#[test]
+	fn no_catalogue_holds_nothing_back_but_the_rules_that_need_none() {
+		for &scope in ScopeKind::ALL {
+			for (name, secret) in [("salt", false), ("canopy_intent", false), ("ansible_port", true)] {
+				assert!(
+					problems_of(scope, name, &json!("x"), secret, None).is_empty(),
+					"{name} at {scope}"
+				);
+			}
 		}
 	}
 }

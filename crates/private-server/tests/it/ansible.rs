@@ -662,97 +662,6 @@ async fn reports_the_lease_holding_an_environment() {
 	.await
 }
 
-/// The page reads the windows canopy refuses a lease for, which are those over
-/// the environment's machines as well as those over the group.
-#[tokio::test(flavor = "multi_thread")]
-async fn reports_a_window_over_a_machine_in_the_environment() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		let central =
-			insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		declare_machine_window(
-			&mut conn,
-			central,
-			"someone.else@bes.au",
-			"NOW() + INTERVAL '2 hours'",
-		)
-		.await;
-
-		let state = read_run_state(&private, group).await;
-		assert_eq!(state["window"]["declared_by"], "someone.else@bes.au");
-		assert_eq!(state["refuses"], true);
-	})
-	.await
-}
-
-/// A window the reader declared themselves holds the page's answer without
-/// refusing them, since taking the lease under it is the point of declaring it.
-#[tokio::test(flavor = "multi_thread")]
-async fn reads_the_readers_own_window_as_no_refusal() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		declare_group_window(&mut conn, group, ME, "NOW() + INTERVAL '2 hours'").await;
-
-		let state = read_run_state(&private, group).await;
-		assert_eq!(state["window"]["declared_by"], ME);
-		assert_eq!(state["refuses"], false);
-	})
-	.await
-}
-
-/// Someone else's window refuses the take whatever else holds, so the page
-/// reports theirs rather than the reader's own and agrees with the refusal.
-#[tokio::test(flavor = "multi_thread")]
-async fn reports_the_window_that_refuses_over_the_readers_own() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		let central =
-			insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		declare_group_window(&mut conn, group, ME, "NOW() + INTERVAL '2 hours'").await;
-		declare_machine_window(
-			&mut conn,
-			central,
-			"someone.else@bes.au",
-			"NOW() + INTERVAL '2 hours'",
-		)
-		.await;
-
-		let state = read_run_state(&private, group).await;
-		assert_eq!(state["window"]["declared_by"], "someone.else@bes.au");
-		assert_eq!(state["refuses"], true);
-
-		let response = private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "server_group_id": group }))
-			.await;
-		response.assert_status(axum::http::StatusCode::CONFLICT);
-	})
-	.await
-}
-
-/// A window past its expected end holds nothing, the same reading `take_lease`
-/// takes, so the page offers the run rather than reporting work under way.
-#[tokio::test(flavor = "multi_thread")]
-async fn reads_a_window_past_its_end_as_over() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		declare_group_window(
-			&mut conn,
-			group,
-			"someone.else@bes.au",
-			"NOW() - INTERVAL '1 minute'",
-		)
-		.await;
-
-		let state = read_run_state(&private, group).await;
-		assert_eq!(state["window"], Value::Null);
-		assert_eq!(state["refuses"], false);
-	})
-	.await
-}
-
 async fn read_run_state(private: &commons_tests::axum_test::TestServer, group: Uuid) -> Value {
 	let response = private
 		.post("/api/ansible/run_state")
@@ -764,288 +673,298 @@ async fn read_run_state(private: &commons_tests::axum_test::TestServer, group: U
 
 // --- work under way ---
 
-async fn declare_group_window(
-	conn: &mut AsyncPgConnection,
-	group: Uuid,
-	declared_by: &str,
-	expected_end: &str,
-) {
+const OTHER: &str = "someone.else@bes.au";
+const THIRD: &str = "third.party@bes.au";
+const IN_TWO_HOURS: &str = "NOW() + INTERVAL '2 hours'";
+const FIVE_MINUTES_AGO: &str = "NOW() - INTERVAL '5 minutes'";
+
+enum Over {
+	Group,
+	Rank(&'static str),
+	Machine(Uuid),
+}
+
+struct Declared {
+	over: Over,
+	by: &'static str,
+	ends: &'static str,
+	amended_by: Option<&'static str>,
+}
+
+impl Declared {
+	fn new(over: Over, by: &'static str, ends: &'static str) -> Self {
+		Self {
+			over,
+			by,
+			ends,
+			amended_by: None,
+		}
+	}
+
+	fn amended_by(mut self, amended_by: &'static str) -> Self {
+		self.amended_by = Some(amended_by);
+		self
+	}
+}
+
+async fn declare(conn: &mut AsyncPgConnection, group: Uuid, window: &Declared) {
+	let (columns, values) = match window.over {
+		Over::Group => ("server_group_id", format!("'{group}'")),
+		Over::Rank(rank) => ("server_group_id, rank", format!("'{group}', '{rank}'")),
+		Over::Machine(machine) => ("machine_id", format!("'{machine}'")),
+	};
+	let (ends, by) = (window.ends, window.by);
 	conn.batch_execute(&format!(
-		"INSERT INTO maintenance_windows (server_group_id, expected_end, declared_by)
-		 VALUES ('{group}', {expected_end}, '{declared_by}')"
+		"INSERT INTO maintenance_windows ({columns}, expected_end, declared_by)
+		 VALUES ({values}, {ends}, '{by}')"
 	))
 	.await
 	.expect("declare window");
-}
-
-async fn declare_machine_window(
-	conn: &mut AsyncPgConnection,
-	application: Uuid,
-	declared_by: &str,
-	expected_end: &str,
-) {
-	conn.batch_execute(&format!(
-		"INSERT INTO maintenance_windows (machine_id, expected_end, declared_by)
-		 SELECT machine_id, {expected_end}, '{declared_by}'
-		 FROM applications WHERE id = '{application}'"
-	))
-	.await
-	.expect("declare window");
-}
-
-async fn amend_window(conn: &mut AsyncPgConnection, group: Uuid, amended_by: &str) {
-	conn.batch_execute(&format!(
-		"UPDATE maintenance_windows SET amended_by = '{amended_by}', amended_at = NOW()
-		 WHERE server_group_id = '{group}' AND ended_at IS NULL"
-	))
-	.await
-	.expect("amend window");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_a_lease_under_a_window_someone_else_declared() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-busy").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		declare_group_window(
-			&mut conn,
-			group,
-			"someone.else@bes.au",
-			"NOW() + INTERVAL '2 hours'",
-		)
-		.await;
-
-		let response = private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "server_group_id": group }))
-			.await;
-		response.assert_status(axum::http::StatusCode::CONFLICT);
-		let detail = response.json::<Value>()["detail"]
-			.as_str()
-			.expect("detail")
-			.to_owned();
-		assert!(detail.contains("someone.else@bes.au"), "{detail}");
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn takes_a_lease_under_the_readers_own_window() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka-mine").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		declare_group_window(&mut conn, group, ME, "NOW() + INTERVAL '2 hours'").await;
-
-		private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "server_group_id": group }))
-			.await
-			.assert_status_ok();
-	})
-	.await
-}
-
-/// A second operator declaring over an open window amends it rather than
-/// opening one of their own, so the amendment is their declaration of the same
-/// work and the environment is theirs to run on.
-#[tokio::test(flavor = "multi_thread")]
-async fn takes_a_lease_under_a_window_the_reader_amended() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		declare_group_window(
-			&mut conn,
-			group,
-			"someone.else@bes.au",
-			"NOW() + INTERVAL '2 hours'",
-		)
-		.await;
-		amend_window(&mut conn, group, ME).await;
-
-		let state = read_run_state(&private, group).await;
-		assert_eq!(state["window"]["amended_by"], ME);
-		assert_eq!(state["refuses"], false);
-
-		private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "server_group_id": group }))
-			.await
-			.assert_status_ok();
-	})
-	.await
-}
-
-/// The amendment that stands is the one that speaks for the window, so an
-/// operator it does not belong to is refused and told who to wait for.
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_a_lease_under_a_window_someone_else_amended() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		declare_group_window(
-			&mut conn,
-			group,
-			"someone.else@bes.au",
-			"NOW() + INTERVAL '2 hours'",
-		)
-		.await;
-		amend_window(&mut conn, group, "third.party@bes.au").await;
-
-		let state = read_run_state(&private, group).await;
-		assert_eq!(state["refuses"], true);
-
-		let response = private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "server_group_id": group }))
-			.await;
-		response.assert_status(axum::http::StatusCode::CONFLICT);
-		let detail = response.json::<Value>()["detail"]
-			.as_str()
-			.expect("detail")
-			.to_owned();
-		assert!(detail.contains("third.party@bes.au"), "{detail}");
-	})
-	.await
-}
-
-/// A window over one machine refuses the whole environment, a run acting on it
-/// as a whole.
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_a_lease_under_a_window_over_one_machine() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		let facility =
-			insert_application(&mut conn, group, "kamaka-facility", "tamanu-facility", None).await;
-		declare_machine_window(
-			&mut conn,
-			facility,
-			"someone.else@bes.au",
-			"NOW() + INTERVAL '2 hours'",
-		)
-		.await;
-
-		private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "server_group_id": group }))
-			.await
-			.assert_status(axum::http::StatusCode::CONFLICT);
-	})
-	.await
-}
-
-/// A window over a machine none of the environment's applications run on
-/// refuses nothing.
-#[tokio::test(flavor = "multi_thread")]
-async fn ignores_a_window_over_a_machine_at_another_rank() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_ranked_application(
-			&mut conn,
-			group,
-			"kamaka-central",
-			"tamanu-central",
-			Some("production"),
-			None,
-		)
-		.await;
-		let demo = insert_ranked_application(
-			&mut conn,
-			group,
-			"kamaka-demo",
-			"tamanu-central",
-			Some("demo"),
-			None,
-		)
-		.await;
-		declare_machine_window(
-			&mut conn,
-			demo,
-			"someone.else@bes.au",
-			"NOW() + INTERVAL '2 hours'",
-		)
-		.await;
-
-		private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "server_group_id": group, "rank": "production" }))
-			.await
-			.assert_status_ok();
-	})
-	.await
-}
-
-/// A window over another of the group's environments is not over this one, so
-/// it refuses nothing here, while one over this environment does.
-// spec: ANSRUN#work-under-way
-#[tokio::test(flavor = "multi_thread")]
-async fn only_this_environments_window_refuses_a_lease() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_ranked_application(
-			&mut conn,
-			group,
-			"kamaka-central",
-			"tamanu-central",
-			Some("production"),
-			None,
-		)
-		.await;
-		insert_ranked_application(
-			&mut conn,
-			group,
-			"kamaka-demo",
-			"tamanu-central",
-			Some("demo"),
-			None,
-		)
-		.await;
+	if let Some(amended_by) = window.amended_by {
 		conn.batch_execute(&format!(
-			"INSERT INTO maintenance_windows (server_group_id, rank, expected_end, declared_by)
-			 VALUES ('{group}', 'demo', NOW() + INTERVAL '2 hours', 'someone.else@bes.au')"
+			"UPDATE maintenance_windows SET amended_by = '{amended_by}', amended_at = NOW()
+			 WHERE declared_by = '{by}' AND ended_at IS NULL"
 		))
 		.await
-		.expect("declare over the demo");
-
-		private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "server_group_id": group, "rank": "production" }))
-			.await
-			.assert_status_ok();
-		private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "server_group_id": group, "rank": "demo" }))
-			.await
-			.assert_status(axum::http::StatusCode::CONFLICT);
-	})
-	.await
+		.expect("amend window");
+	}
 }
 
+enum Take {
+	Takes,
+	Refused(&'static [&'static str]),
+}
+
+/// The window the page reports for an environment: who declared it, and who
+/// amended it where someone did.
+type Reported = Option<(&'static str, Option<&'static str>)>;
+
+/// A window refuses a lease when it holds over the environment, for anyone but
+/// the operator it belongs to, and the page that reads the refusal says so under
+/// the same reading: over the group, the environment's rank, or any machine at
+/// the rank, whether or not a run can reach that machine yet, and not one over
+/// another of the group's environments or past its end. An amendment that
+/// stands is the one that speaks for the window. Each row seeds its windows over
+/// a fixed group and probes both environments.
+// spec: ANSRUN#work-under-way
 #[tokio::test(flavor = "multi_thread")]
-async fn takes_a_lease_once_a_window_has_passed_its_end() {
+async fn a_window_refuses_a_lease_exactly_where_the_page_reports_it() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-		declare_group_window(
+		insert_ranked_application(
 			&mut conn,
 			group,
-			"someone.else@bes.au",
-			"NOW() - INTERVAL '5 minutes'",
+			"kamaka-central",
+			"tamanu-central",
+			Some("production"),
+			None,
 		)
 		.await;
+		let (_, facility) = insert_application_on_its_own_machine(
+			&mut conn,
+			group,
+			"kamaka-facility",
+			"tamanu-facility",
+			Some("production"),
+			None,
+		)
+		.await;
+		let (_, demo) = insert_application_on_its_own_machine(
+			&mut conn,
+			group,
+			"kamaka-demo",
+			"tamanu-central",
+			Some("demo"),
+			None,
+		)
+		.await;
+		let spare = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (name, id, group_id, rank)
+			 VALUES ('kamaka-spare', '{spare}', '{group}', 'production')"
+		))
+		.await
+		.expect("insert spare machine");
 
-		private
-			.post("/api/ansible/take_lease")
-			.json(&json!({ "server_group_id": group }))
-			.await
-			.assert_status_ok();
+		let rows: Vec<(&str, Vec<Declared>, Vec<(&str, Take, Reported)>)> = vec![
+			(
+				"no window",
+				vec![],
+				vec![
+					("production", Take::Takes, None),
+					("demo", Take::Takes, None),
+				],
+			),
+			(
+				"another operator's window over the group",
+				vec![Declared::new(Over::Group, OTHER, IN_TWO_HOURS)],
+				vec![
+					("production", Take::Refused(&[OTHER]), Some((OTHER, None))),
+					("demo", Take::Refused(&[OTHER]), Some((OTHER, None))),
+				],
+			),
+			(
+				"the reader's own window over the group",
+				vec![Declared::new(Over::Group, ME, IN_TWO_HOURS)],
+				vec![("production", Take::Takes, Some((ME, None)))],
+			),
+			(
+				"another operator's window the reader amended",
+				vec![Declared::new(Over::Group, OTHER, IN_TWO_HOURS).amended_by(ME)],
+				vec![("production", Take::Takes, Some((OTHER, Some(ME))))],
+			),
+			(
+				"a window a third operator amended",
+				vec![Declared::new(Over::Group, OTHER, IN_TWO_HOURS).amended_by(THIRD)],
+				vec![(
+					"production",
+					Take::Refused(&[THIRD]),
+					Some((OTHER, Some(THIRD))),
+				)],
+			),
+			(
+				"a window over one machine of the environment",
+				vec![Declared::new(
+					Over::Machine(facility),
+					OTHER,
+					IN_TWO_HOURS,
+				)],
+				vec![
+					(
+						"production",
+						Take::Refused(&[OTHER, "kamaka-facility"]),
+						Some((OTHER, None)),
+					),
+					("demo", Take::Takes, None),
+				],
+			),
+			(
+				"a window over a machine no run reaches yet",
+				vec![Declared::new(Over::Machine(spare), OTHER, IN_TWO_HOURS)],
+				vec![
+					(
+						"production",
+						Take::Refused(&[OTHER, "kamaka-spare"]),
+						Some((OTHER, None)),
+					),
+					("demo", Take::Takes, None),
+				],
+			),
+			(
+				"a window over a machine at another rank",
+				vec![Declared::new(Over::Machine(demo), OTHER, IN_TWO_HOURS)],
+				vec![
+					("production", Take::Takes, None),
+					("demo", Take::Refused(&[OTHER]), Some((OTHER, None))),
+				],
+			),
+			(
+				"a window over another environment of the group",
+				vec![Declared::new(Over::Rank("demo"), OTHER, IN_TWO_HOURS)],
+				vec![
+					("production", Take::Takes, None),
+					("demo", Take::Refused(&[OTHER]), Some((OTHER, None))),
+				],
+			),
+			(
+				"a window past its end",
+				vec![Declared::new(Over::Group, OTHER, FIVE_MINUTES_AGO)],
+				vec![("production", Take::Takes, None)],
+			),
+			(
+				"the reader's own window over the group and another's over a machine",
+				vec![
+					Declared::new(Over::Group, ME, IN_TWO_HOURS),
+					Declared::new(Over::Machine(facility), OTHER, IN_TWO_HOURS),
+				],
+				vec![("production", Take::Refused(&[OTHER]), Some((OTHER, None)))],
+			),
+		];
+
+		let mut failures: Vec<String> = Vec::new();
+		for (row, windows, probes) in rows {
+			conn.batch_execute("DELETE FROM maintenance_windows")
+				.await
+				.expect("clear windows");
+			for window in &windows {
+				declare(&mut conn, group, window).await;
+			}
+
+			for (rank, take, reported) in probes {
+				let at = format!("{row}, at {rank}");
+				let environment = json!({ "server_group_id": group, "rank": rank });
+
+				let state = private.post("/api/ansible/run_state").json(&environment).await;
+				if !state.status_code().is_success() {
+					failures.push(format!("{at}: run_state answered {}", state.text()));
+					continue;
+				}
+				let state: Value = state.json();
+				let window = &state["window"];
+				let reports_as_expected = match reported {
+					None => window.is_null(),
+					Some((declared_by, amended_by)) => {
+						window["declared_by"] == declared_by
+							&& window["amended_by"] == amended_by.map_or(Value::Null, Value::from)
+					}
+				};
+				if !reports_as_expected {
+					failures.push(format!("{at}: run_state reported the window {window}"));
+				}
+
+				let response = private
+					.post("/api/ansible/take_lease")
+					.json(&environment)
+					.await;
+				let status = response.status_code();
+				let refused = status == axum::http::StatusCode::CONFLICT;
+				if state["refuses"].as_bool() != Some(refused) {
+					failures.push(format!(
+						"{at}: run_state says refuses = {}, but take_lease answered {status}",
+						state["refuses"]
+					));
+				}
+
+				match take {
+					Take::Takes => {
+						if status != axum::http::StatusCode::OK {
+							failures.push(format!("{at}: take_lease answered {status}"));
+							continue;
+						}
+						let lease: Value = response.json();
+						let released = private
+							.post("/api/ansible/release_lease")
+							.json(&json!({ "lease_id": lease["id"] }))
+							.await;
+						if !released.status_code().is_success() {
+							failures.push(format!("{at}: release_lease answered {}", released.text()));
+						}
+					}
+					Take::Refused(needles) => {
+						let detail = response.json::<Value>()["detail"]
+							.as_str()
+							.unwrap_or_default()
+							.to_owned();
+						if !refused {
+							failures.push(format!("{at}: take_lease answered {status}, not 409"));
+						}
+						for needle in needles {
+							if !detail.contains(needle) {
+								failures.push(format!("{at}: refusal does not name {needle}: {detail}"));
+							}
+						}
+					}
+				}
+			}
+		}
+		assert!(failures.is_empty(), "{}", failures.join("\n"));
 	})
 	.await
 }
 
 // --- planned upgrades ---
 
-async fn plan_upgrade(
+pub(crate) async fn plan_upgrade(
 	conn: &mut AsyncPgConnection,
 	group: Uuid,
 	extra_columns: &str,

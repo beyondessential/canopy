@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CatalogueView } from "../../types";
+import names from "./fixtures/variable-names.json";
 import { checkScope, diffScope, formatScope, parseScope } from "./yamlScope";
 
 const catalogue = {
@@ -167,12 +168,16 @@ describe("checkScope", () => {
 		expect(check("other: !secret\n")[0].message).toContain("no secret value to keep");
 	});
 
-	it("refuses the names the server refuses", () => {
-		expect(check(".: 1\n")[0].message).toContain("not a usable variable name");
-		expect(check("..: 1\n")[0].message).toContain("not a usable variable name");
-		expect(check(`${"a".repeat(254)}: 1\n`)[0].message).toContain("not a usable variable name");
-		expect(check(`${"a".repeat(253)}: 1\n`)).toEqual([]);
-	});
+	it.each(names as [string, boolean][])(
+		"holds the name %j to what the server holds it to (usable: %s)",
+		(name, usable) => {
+			const out = check(`${JSON.stringify(name)}: 1\n`);
+			expect(out.filter((p) => p.message.includes("not a usable variable name"))).toHaveLength(
+				usable ? 0 : 1,
+			);
+			if (usable) expect(out).toEqual([]);
+		},
+	);
 
 	it("refuses managed_by_ansible, which the machine's switch sets", () => {
 		expect(check("managed_by_ansible: true\n", "machine")[0].message).toContain(

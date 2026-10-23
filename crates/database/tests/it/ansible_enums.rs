@@ -103,7 +103,7 @@ async fn every_problem_is_stored_and_read_back() {
 			assert_eq!(state.problem, Some(*problem));
 
 			let stored: Option<String> =
-				sql::<Nullable<Text>>("(SELECT problem FROM ansible_catalogue)")
+				sql::<Nullable<Text>>("SELECT problem FROM ansible_catalogue")
 					.get_result(&mut conn)
 					.await
 					.unwrap();
@@ -162,7 +162,7 @@ async fn every_release_reason_is_stored_and_read_back() {
 			assert_eq!(read.release_reason, Some(*reason));
 
 			let stored: Option<String> = sql::<Nullable<Text>>(&format!(
-				"(SELECT release_reason FROM ansible_leases WHERE id = '{}')",
+				"SELECT release_reason FROM ansible_leases WHERE id = '{}'",
 				lease.id
 			))
 			.get_result(&mut conn)
