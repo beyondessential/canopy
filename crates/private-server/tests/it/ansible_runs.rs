@@ -227,7 +227,10 @@ async fn refuses_a_read_started_otherwise_than_the_lease_says() {
 		};
 
 		for (claims, says) in [
-			(json!({ "intent": "upgrade" }), &["configure", "upgrade"][..]),
+			(
+				json!({ "intent": "upgrade" }),
+				&["configure", "upgrade"][..],
+			),
 			(
 				json!({ "playbook": "base-install.yml" }),
 				&["base-install.yml"],
