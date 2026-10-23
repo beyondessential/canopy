@@ -200,47 +200,33 @@ async fn a_limited_run_declares_over_only_what_its_limit_matches() {
 		);
 		let declared = notices(&mut conn, "maintenance_declared").await;
 		assert_eq!(declared[0].target, "fiji 2 machines");
-	})
-	.await
-}
+		reset_leases_and_windows(&mut conn).await;
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_limit_of_one_machine_is_that_machines_window_and_all_of_them_the_environments() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let fleet = fleet(&mut conn).await;
 		let lease_one = lease(&mut conn, fleet.group, "op").await;
-		let one = MaintenanceWindow::declare_for_run(
-			&mut conn,
-			&lease_one,
-			Some(&[fleet.boxes[1]]),
-			None,
-		)
-		.await
-		.expect("declare");
-		assert_eq!(one.declared[0].machine_id, Some(fleet.boxes[1]));
-		MaintenanceWindow::end_for_lease(&mut conn, lease_one.id, Some("op"))
+		let one = MaintenanceWindow::declare_for_run(&mut conn, &lease_one, Some(&[b]), None)
 			.await
-			.expect("end");
+			.expect("declare the one-machine limit");
+		assert_eq!(
+			one.declared[0].machine_id,
+			Some(b),
+			"a limit of one machine is that machine's window"
+		);
 		reset_leases_and_windows(&mut conn).await;
 
 		let lease_all = lease(&mut conn, fleet.group, "op").await;
 		let all =
 			MaintenanceWindow::declare_for_run(&mut conn, &lease_all, Some(&fleet.boxes), None)
 				.await
-				.expect("declare");
+				.expect("declare the all-machines limit");
 		assert_eq!(
 			all.declared[0].grain(),
 			Some(Grain::environment(fleet.group, ServerRank::Production)),
 			"a limit matching every member is the environment"
 		);
 
-		let stray = MaintenanceWindow::declare_for_run(
-			&mut conn,
-			&lease_all,
-			Some(&[Uuid::new_v4()]),
-			None,
-		)
-		.await;
+		let stray =
+			MaintenanceWindow::declare_for_run(&mut conn, &lease_all, Some(&[Uuid::new_v4()]), None)
+				.await;
 		assert!(matches!(stray, Err(AppError::BadRequest(_))), "{stray:?}");
 	})
 	.await

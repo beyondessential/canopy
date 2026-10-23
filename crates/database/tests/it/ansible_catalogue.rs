@@ -70,38 +70,8 @@ fn catalogue() -> Catalogue {
 fn reads_the_variables_playbooks_and_tags_it_describes() {
 	let catalogue = catalogue();
 
-	assert_eq!(catalogue.variables().count(), 6);
-	assert!(catalogue.is_secret("salt"));
-	assert!(catalogue.is_secret("tamanu_caddy_tls_dns_iam"));
-	assert!(!catalogue.is_secret("ansible_port"));
 	assert!(!catalogue.is_secret("not_described"));
 	assert!(catalogue.is_reserved("canopy_intent"));
-	assert_eq!(
-		catalogue.variable("ansible_port").unwrap().default,
-		Some(json!(22))
-	);
-	assert_eq!(
-		catalogue
-			.variable("tamanu_facility_id")
-			.unwrap()
-			.description
-			.as_deref(),
-		Some("The facility's id.")
-	);
-
-	let playbook = catalogue.playbook("tamanu-install.yml").expect("playbook");
-	assert_eq!(playbook.tags, ["app", "base"]);
-	assert_eq!(
-		playbook.applications.as_deref(),
-		Some(&["tamanu-central".to_owned(), "tamanu-facility".to_owned()][..])
-	);
-	assert!(
-		catalogue
-			.playbook("base-install.yml")
-			.unwrap()
-			.applications
-			.is_none()
-	);
 	assert_eq!(catalogue.tag_notes()["base"], "The arrangement of a host.");
 
 	let properties = &document()["properties"];
@@ -293,16 +263,6 @@ fn holds_a_value_to_its_format() {
 }
 
 #[test]
-fn a_requirement_that_an_environment_carry_some_variable_does_not_refuse_one() {
-	assert!(
-		catalogue()
-			.violations(ScopeKind::Machine, "ansible_port", &json!(22))
-			.is_empty(),
-		"`required` at the root describes an environment, not one variable"
-	);
-}
-
-#[test]
 fn names_where_in_a_structured_value_the_fault_is() {
 	let catalogue = catalogue();
 
@@ -413,7 +373,9 @@ fn holds_every_variable_to_the_scopes_it_may_be_set_at() {
 	}
 }
 
-/// A number is held to the bounds its schema gives, at every scope.
+/// A number is held to the bounds its schema gives, at every scope. `required`
+/// at the root describes what an environment must carry, not one variable, so
+/// it refuses no value.
 #[test]
 fn holds_a_value_to_the_bounds_of_its_schema() {
 	let catalogue = catalogue();

@@ -764,46 +764,6 @@ async fn refuses_a_rank_that_is_not_one() {
 	.await
 }
 
-/// Whether a run acts on a machine is set by a switch on the machine, so a
-/// wider value is refused. The rule is `variable_problems`'s, which holds every
-/// restricted variable at every scope; this is the endpoint applying it.
-// spec: INV#managed-machines
-#[tokio::test(flavor = "multi_thread")]
-async fn refuses_machine_only_variables_outside_machine_scope() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let group = insert_group(&mut conn, "kamaka").await;
-		insert_application(&mut conn, group, "kamaka-central", "tamanu-central", None).await;
-
-		let response = private
-			.post("/api/ansible_variables/set")
-			.json(&json!({
-				"server_group_id": group,
-				"name": "managed_by_ansible",
-				"value": true,
-			}))
-			.await;
-		response.assert_status(axum::http::StatusCode::BAD_REQUEST);
-		assert!(
-			response.json::<Value>()["detail"]
-				.as_str()
-				.expect("detail")
-				.contains("set on a machine"),
-		);
-
-		// `ansible_user` is not so restricted: an environment's machines share
-		// the account a run connects as.
-		set_var(
-			&private,
-			json!({ "server_group_id": group }),
-			"ansible_user",
-			json!("ubuntu"),
-			false,
-		)
-		.await;
-	})
-	.await
-}
-
 /// A small catalogue: a typed variable, one limited to machines, a secret, and
 /// one a run sets for itself.
 fn catalogue() -> Value {
@@ -856,7 +816,11 @@ async fn refused(
 /// read, it is offered, a value set before it that no longer matches stays,
 /// marked where it does not, a variable it describes must be secret exactly as
 /// it says, a violation of it is a 400, and a name it does not describe is free.
+/// Whether a run acts on a machine is set by a switch on the machine, so a wider
+/// value is refused; the rule is `variable_problems`'s, and this is the endpoint
+/// applying it.
 // spec: ANSVAR#catalogue
+// spec: INV#managed-machines
 #[tokio::test(flavor = "multi_thread")]
 async fn a_variable_the_catalogue_describes_is_held_to_it() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
