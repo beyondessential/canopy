@@ -119,8 +119,15 @@ Candidate parts:
 
 ## Open questions
 
-- [ ] Skill name and whether it is one skill (guidance plus pass plus loop) or a pass and a loop kept apart.
+- [ ] Skill name and whether it is one skill (guidance plus pass plus loop) or a pass and a loop kept apart. Decided to settle at the end, from the walkthrough.
 - [ ] Where it lives: workspace skills go in `.agents/skills/<name>/SKILL.md`; check the Workhorse smart-merge leaves a non-shipped skill alone.
-- [ ] How to check that "same coverage" holds after a merge or deletion: is there a coverage tool wired for the Rust and web sides, or is it argued per finding?
-- [ ] How wide lens D reads: the area's existing tests only, or the whole crate.
 - [ ] Whether lens C's drift-proof tests need shared helpers per crate (a variant-list macro, say) that do not exist yet.
+
+## Decisions
+
+- Coverage: none is wired up today, and some should be added, for Rust and the web side.
+  Coverage numbers do not tell the whole story (a line can be executed without anything checking it), so a finding still carries its own argument for what is preserved, and coverage is evidence for that argument, not a replacement for it.
+- Lens D reads the tests themselves to start: the card's added tests and the existing tests alongside them in the same files and area.
+  It does not read whole crates.
+  Widen only when a specific finding needs a test elsewhere to justify a deletion.
+- The skill's final shape (one skill or several, pass and loop) is decided at the end, after the lenses have been scored.
