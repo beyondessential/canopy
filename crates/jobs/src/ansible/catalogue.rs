@@ -531,6 +531,7 @@ mod tests {
 			for (row, fail, problem, detail) in failures {
 				stub.name_the_head_again();
 				stub.publish(&catalogue_document().to_string());
+				refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
 				fail(&stub);
 				refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
 				let state = CatalogueState::get(&mut conn).await.unwrap().unwrap();
@@ -552,6 +553,34 @@ mod tests {
 					"{row}"
 				);
 			}
+
+			// An unreachable repository says nothing new about the copy last
+			// published, so it does not clear a verdict that the copy does not read.
+			stub.name_the_head_again();
+			stub.publish(&catalogue_document().to_string());
+			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
+			stub.lose_the_file();
+			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
+			assert!(alert_active(&mut conn).await, "a lost file is a fault");
+			stub.fail_the_file();
+			refresh(&mut conn, &secrets, &client, &source, Timestamp::now()).await;
+			let state = CatalogueState::get(&mut conn).await.unwrap().unwrap();
+			assert_eq!(
+				state.problem,
+				Some(Problem::Invalid),
+				"an unreachable read after an invalid one leaves the verdict"
+			);
+			assert!(
+				state
+					.problem_detail
+					.as_deref()
+					.unwrap()
+					.contains("is not in")
+			);
+			assert!(
+				alert_active(&mut conn).await,
+				"the alert stays until a good read"
+			);
 
 			stub.name_the_head_again();
 			stub.publish(&catalogue_document().to_string());

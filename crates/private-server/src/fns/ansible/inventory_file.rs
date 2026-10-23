@@ -428,7 +428,11 @@ fn key_text(node: &Node, path: &[String]) -> Result<String, ParseError> {
 		},
 		_ => Err(error(format!(
 			"{} has a key that is not a scalar",
-			path.join(".")
+			if path.is_empty() {
+				"the top level".to_owned()
+			} else {
+				path.join(".")
+			}
 		))),
 	}
 }
@@ -1178,6 +1182,11 @@ all:
 				"hosts of a nested group that are a scalar",
 				"all:\n  children:\n    g:\n      hosts: h1\n",
 				&["`hosts` of group \"g\"", "not a mapping"],
+			),
+			(
+				"a top-level key that is a list",
+				"? [a, b]\n: 1\n",
+				&["the top level", "key that is not a scalar"],
 			),
 			(
 				"a key that is a list",

@@ -1111,7 +1111,8 @@ async fn the_holder_extends_and_releases_a_lease_and_the_page_reports_it() {
 /// An operator whose own lease no longer holds is told why, reading the
 /// environment or extending alike: that it ran out, that it was swept as
 /// expired, that someone took the work over (which they are to talk to before
-/// taking another), that Canopy released it unread, or that it was released.
+/// taking another), that Canopy released it unread, or that it was released
+/// (by them, giving it up unread or not).
 #[tokio::test(flavor = "multi_thread")]
 async fn a_lease_that_no_longer_holds_says_why_to_a_read_and_to_an_extension() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
@@ -1145,6 +1146,12 @@ async fn a_lease_that_no_longer_holds_says_why_to_a_read_and_to_an_extension() {
 			(
 				"released by the same operator",
 				"released_at = NOW(), released_by = 'admin@localhost', release_reason = 'released'",
+				"has been released",
+				false,
+			),
+			(
+				"given up unread by the same operator",
+				"released_at = NOW(), released_by = 'admin@localhost', release_reason = 'unstarted'",
 				"has been released",
 				false,
 			),

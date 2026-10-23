@@ -226,9 +226,16 @@ async fn a_lease_records_the_run_it_was_taken_for_and_its_first_read_starts_it()
 		);
 		let released = audited(&mut conn, "inventory_lease_released").await;
 		assert_eq!(released.len(), 2, "the give-up and the release");
-		for entry in &released {
-			assert_eq!(entry.detail["reason"], "released");
-		}
+		let mut reasons: Vec<&str> = released
+			.iter()
+			.map(|entry| entry.detail["reason"].as_str().expect("a reason"))
+			.collect();
+		reasons.sort_unstable();
+		assert_eq!(
+			reasons,
+			["released", "unstarted"],
+			"giving up an unread lease is recorded as unstarted, releasing a read one as released"
+		);
 
 		let lease = take(
 			&private,

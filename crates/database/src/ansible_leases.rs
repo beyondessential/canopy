@@ -533,7 +533,7 @@ impl AnsibleLease {
 		id: Uuid,
 		by: Option<&str>,
 	) -> Result<bool> {
-		Self::release_inner(db, id, by, ReleaseReason::Released, true, Guard::Unread).await
+		Self::release_inner(db, id, by, ReleaseReason::Unstarted, true, Guard::Unread).await
 	}
 
 	async fn release_inner(

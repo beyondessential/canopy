@@ -266,8 +266,8 @@ async fn sweeps_an_unread_lease_and_an_expired_one() {
 			"as of its expiry"
 		);
 
-		// An operator giving up on a lease no run has read releases it as an
-		// operator does, not as Canopy's sweep does.
+		// An operator giving up on a lease no run has read records the same reason
+		// the sweep does, with the operator named.
 		let pending = take(&mut conn, group, &machines, &spec(&none), "b", false).await;
 		assert!(
 			AnsibleLease::release_unstarted(&mut conn, pending.id, Some("b"))
@@ -278,8 +278,8 @@ async fn sweeps_an_unread_lease_and_an_expired_one() {
 		let read = AnsibleLease::get(&mut conn, pending.id).await.unwrap();
 		assert_eq!(
 			read.release_reason,
-			Some(ReleaseReason::Released),
-			"release_unstarted: recorded as the holder releasing, not the sweep's unstarted"
+			Some(ReleaseReason::Unstarted),
+			"release_unstarted: an unread lease released, by the holder rather than the sweep"
 		);
 		assert_eq!(read.released_by.as_deref(), Some("b"));
 		assert!(read.released_at.is_some());

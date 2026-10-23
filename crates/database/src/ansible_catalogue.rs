@@ -564,6 +564,10 @@ impl CatalogueState {
 
 	/// Note that an attempt did not read a catalogue, leaving the held copy as
 	/// it is.
+	///
+	/// An unreachable repository says nothing new about the copy last
+	/// published, so it does not replace a verdict that the copy does not read:
+	/// that stands until a good read.
 	pub async fn record_problem(
 		db: &mut AsyncPgConnection,
 		problem: Problem,
@@ -571,6 +575,19 @@ impl CatalogueState {
 		now: Timestamp,
 	) -> Result<()> {
 		let now: jiff_diesel::Timestamp = now.into();
+		if problem == Problem::Unreachable {
+			let held = diesel::update(
+				ansible_catalogue::table
+					.filter(ansible_catalogue::problem.eq(Problem::Invalid.as_str())),
+			)
+			.set(ansible_catalogue::checked_at.eq(now))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+			if held > 0 {
+				return Ok(());
+			}
+		}
 		diesel::insert_into(ansible_catalogue::table)
 			.values((
 				ansible_catalogue::first_checked_at.eq(now),
