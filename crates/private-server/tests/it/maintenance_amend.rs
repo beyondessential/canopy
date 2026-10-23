@@ -239,6 +239,11 @@ async fn a_window_not_over_the_start_is_refused() {
 			.json(&json!({ "server_group_id": GROUP, "rank": "clone" }))
 			.await
 			.assert_status_bad_request();
+		private
+			.post("/api/maintenance/amend")
+			.json(&json!({ "id": Uuid::new_v4(), "note": "x" }))
+			.await
+			.assert_status_not_found();
 	})
 	.await
 }

@@ -853,7 +853,8 @@ async fn applying_sets_the_variables_and_notes_and_records_one_entry() {
 /// not hold it back (an environment variable overriding a group's is named),
 /// but a variable on one of its machines does, and it is refused once its
 /// machines have changed since the preview, or where its preview cannot be
-/// applied, setting nothing.
+/// applied, setting nothing. What an environment serves changes under a run
+/// that holds it, so nothing is imported into one meanwhile.
 // spec: ANSIMP
 // spec: ANSIMP#preview
 // spec: ANSIMP#applying
@@ -865,6 +866,27 @@ async fn is_refused_where_variables_are_set_or_the_machines_changed() {
 			"group": "kamaka", "file": FILE,
 			"hosts": [{ "host": "10.20.30.40:223", "machine_id": env.office }],
 		});
+
+		// The lease is checked before anything else, so it is released before the
+		// steps that follow, which would otherwise see its message.
+		{
+			let previewed = preview(&private, request.clone()).await;
+			let lease = crate::ansible::take_lease(&private, json!({ "group": "kamaka" })).await;
+			let mut apply = request.clone();
+			apply["members"] = previewed["members"].clone();
+			let held = private.post("/api/ansible/import_apply").json(&apply).await;
+			held.assert_status(axum::http::StatusCode::CONFLICT);
+			assert!(
+				held.text().contains("a run holds this environment"),
+				"while a run holds the environment: {}",
+				held.text()
+			);
+			private
+				.post("/api/ansible/release_lease")
+				.json(&json!({ "lease_id": lease }))
+				.await
+				.assert_status_ok();
+		}
 
 		// A preview that cannot be applied, here for a host matched to no machine,
 		// is refused whole by the apply, which sets nothing.
@@ -939,29 +961,6 @@ async fn is_refused_where_variables_are_set_or_the_machines_changed() {
 			.await;
 		held.assert_status(axum::http::StatusCode::CONFLICT);
 		assert!(held.text().contains("already carries variables"));
-	})
-	.await
-}
-
-/// What an environment serves changes under a run that holds it, so nothing is
-/// imported into one meanwhile.
-// spec: ANSIMP#applying
-#[tokio::test(flavor = "multi_thread")]
-async fn is_refused_while_a_run_holds_the_environment() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let env = environment(&mut conn).await;
-		let request = json!({
-			"group": "kamaka", "file": FILE,
-			"hosts": [{ "host": "10.20.30.40:223", "machine_id": env.office }],
-		});
-		let previewed = preview(&private, request.clone()).await;
-		crate::ansible::take_lease(&private, json!({ "group": "kamaka" })).await;
-
-		let mut apply = request;
-		apply["members"] = previewed["members"].clone();
-		let refused = private.post("/api/ansible/import_apply").json(&apply).await;
-		refused.assert_status(axum::http::StatusCode::CONFLICT);
-		assert!(refused.text().contains("a run holds this environment"));
 	})
 	.await
 }

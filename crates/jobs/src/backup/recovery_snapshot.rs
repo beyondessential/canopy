@@ -849,8 +849,15 @@ mod tests {
 			};
 
 			let entry = in_group(readable);
-			assert_eq!(entry["secret"], readable_scope.secret_name(), "readable scope");
-			assert_eq!(entry["keys"]["salt"], "\"pepper\"", "readable scope: secret value");
+			assert_eq!(
+				entry["secret"],
+				readable_scope.secret_name(),
+				"readable scope"
+			);
+			assert_eq!(
+				entry["keys"]["salt"], "\"pepper\"",
+				"readable scope: secret value"
+			);
 			assert_eq!(
 				entry["values"]["timezone"], "Pacific/Fiji",
 				"readable scope: plain value"
@@ -866,12 +873,19 @@ mod tests {
 				serde_json::json!(["salt"]),
 				"absent Secret: the variable is named"
 			);
-			assert_eq!(entry["keys"], serde_json::json!({}), "absent Secret: no keys");
+			assert_eq!(
+				entry["keys"],
+				serde_json::json!({}),
+				"absent Secret: no keys"
+			);
 			let machine = entries
 				.iter()
 				.find(|e| e["machine_id"] == machine_id.to_string())
 				.expect("an entry for the machine");
-			assert_eq!(machine["keys"]["token"], "\"t\"", "machine Secret: the key it holds");
+			assert_eq!(
+				machine["keys"]["token"], "\"t\"",
+				"machine Secret: the key it holds"
+			);
 			assert_eq!(
 				machine["unreadable"],
 				serde_json::json!(["key"]),
@@ -885,7 +899,10 @@ mod tests {
 				kept.to_string(),
 				"held value: the entry that replaced it"
 			);
-			assert_eq!(entry["held"][0]["value"], "\"pepper\"", "held value: its value");
+			assert_eq!(
+				entry["held"][0]["value"], "\"pepper\"",
+				"held value: its value"
+			);
 			assert_eq!(
 				entry["held"].as_array().unwrap().len(),
 				1,

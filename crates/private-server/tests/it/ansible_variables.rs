@@ -836,6 +836,27 @@ async fn a_variable_the_catalogue_describes_is_held_to_it() {
 		.await;
 		let environment = json!({ "server_group_id": group, "rank": "production" });
 
+		let machine_only = refused(
+			&private,
+			json!({ "server_group_id": group }),
+			"managed_by_ansible",
+			json!(true),
+			false,
+		)
+		.await;
+		assert!(
+			machine_only.contains("set on a machine"),
+			"a machine-only variable is refused at group scope: {machine_only}"
+		);
+		set_var(
+			&private,
+			json!({ "server_group_id": group }),
+			"ansible_user",
+			json!("ubuntu"),
+			false,
+		)
+		.await;
+
 		let none: Value = private
 			.post("/api/ansible_variables/catalogue")
 			.json(&json!({}))
