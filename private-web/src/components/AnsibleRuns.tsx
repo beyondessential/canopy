@@ -89,6 +89,7 @@ export default function AnsibleRuns({
 	const window: MaintenanceWindow | null =
 		state.status === "ok" ? state.data.window : null;
 	const refuses = state.status === "ok" && state.data.refuses;
+	const leaseIsYours = state.status === "ok" && state.data.lease_is_yours;
 	const held = lease !== null || refuses;
 	// A window speaks through its standing amendment where it has one.
 	const holder =
@@ -178,7 +179,10 @@ export default function AnsibleRuns({
 					{(lease !== null || window !== null) && (
 						<Chip size="small" label="Maintenance" color="warning" variant="outlined" />
 					)}
-					{lease !== null && catalogue !== null && playbooks.length > 0 && (
+					{lease !== null &&
+							!leaseIsYours &&
+							catalogue !== null &&
+							playbooks.length > 0 && (
 						<Tooltip title="Take the lease over from them">
 							<span>
 								<GradedAction calls="ansible/take_lease" action="Take over the lease">

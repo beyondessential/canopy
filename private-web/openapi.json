@@ -11453,6 +11453,10 @@
               }
             ]
           },
+          "lease_is_yours": {
+            "description": "Whether that lease is the caller's own, in which case there is nothing\nto take over.",
+            "type": "boolean"
+          },
           "refuses": {
             "description": "Whether that window is someone else's, which is what refuses a take.",
             "type": "boolean"
@@ -11470,6 +11474,7 @@
           }
         },
         "required": [
+          "lease_is_yours",
           "refuses"
         ],
         "type": "object"
