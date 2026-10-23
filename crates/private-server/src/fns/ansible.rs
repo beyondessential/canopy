@@ -643,10 +643,15 @@ pub async fn release_lease(
 	let mut conn = audit.begin().await?;
 	let lease = AnsibleLease::get(&mut conn, args.lease_id).await?;
 	let by = Some(admin.0.login.as_str());
+	let reason = if args.unless_started {
+		ReleaseReason::Unstarted
+	} else {
+		ReleaseReason::Released
+	};
 	let released = if args.unless_started {
 		AnsibleLease::release_unstarted(&mut conn, lease.id, by).await?
 	} else {
-		AnsibleLease::release(&mut conn, lease.id, by, ReleaseReason::Released).await?
+		AnsibleLease::release(&mut conn, lease.id, by, reason).await?
 	};
 	if !released {
 		let now = AnsibleLease::get(&mut conn, lease.id).await?;
@@ -663,7 +668,7 @@ pub async fn release_lease(
 		lease: lease_record,
 		rank: lease.rank,
 		held_by: lease.held_by.clone(),
-		reason: ReleaseReason::Released.to_string(),
+		reason: reason.to_string(),
 	})
 	.await?;
 	tracing::info!(
@@ -1134,7 +1139,7 @@ fn held_by_caller(lease: &AnsibleLease, login: &str) -> Result<()> {
 /// whole answer: an operator whose lease was taken over is walking into work
 /// somebody else has started.
 fn no_longer_held(lease: &AnsibleLease, login: &str) -> String {
-	if lease.release_reason == Some(ReleaseReason::Unstarted) {
+	if lease.release_reason == Some(ReleaseReason::Unstarted) && lease.released_by.is_none() {
 		return "that lease was released because no run read the environment in time; take one again before reading it".into();
 	}
 	match lease.released_by.as_deref() {

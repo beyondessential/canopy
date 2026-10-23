@@ -24,7 +24,7 @@ pub struct Member<'a> {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Unsupported(pub String);
 
-/// The machines `pattern` matches, in the order given.
+/// The machines `pattern` matches, in the order of `members`.
 pub fn matching(pattern: &str, members: &[Member<'_>]) -> Result<Vec<uuid::Uuid>, Unsupported> {
 	let mut chosen: Option<BTreeSet<usize>> = None;
 	let mut intersect: Vec<BTreeSet<usize>> = Vec::new();
@@ -38,8 +38,8 @@ pub fn matching(pattern: &str, members: &[Member<'_>]) -> Result<Vec<uuid::Uuid>
 		}
 		any = true;
 		let (kind, name) = match token.as_bytes()[0] {
-			b'&' => ('&', &token[1..]),
-			b'!' => ('!', &token[1..]),
+			b'&' => ('&', token[1..].trim()),
+			b'!' => ('!', token[1..].trim()),
 			_ => ('+', token),
 		};
 		if name.starts_with('~') || name.contains('[') {
@@ -284,6 +284,21 @@ mod tests {
 				"whitespace before an exclusion",
 				"facility: !example-facility-b",
 				Ok(&[FACILITY_A, OUTREACH]),
+			),
+			(
+				"whitespace after an exclusion mark",
+				"facility:! example-facility-b",
+				Ok(&[FACILITY_A, OUTREACH]),
+			),
+			(
+				"whitespace after an intersection mark",
+				"tamanu:& central",
+				Ok(&[CENTRAL]),
+			),
+			(
+				"an exclusion mark and whitespace only",
+				"central:! ",
+				Err("names nothing"),
 			),
 			(
 				"an empty token between two is skipped",

@@ -594,6 +594,24 @@ async fn a_copy_that_does_not_read_raises_an_alert_until_one_does() {
 			"invalid within a day of a read: warns straight away"
 		);
 
+		// An unreachable repository says nothing new about the copy last
+		// published, so it does not replace the verdict on it.
+		CatalogueState::record_problem(&mut conn, Problem::Unreachable, "timed out", at(28))
+			.await
+			.unwrap();
+		sweep_ansible_catalogue(&mut conn, at(28)).await.unwrap();
+		let state = CatalogueState::get(&mut conn).await.unwrap().unwrap();
+		assert_eq!(
+			state.problem,
+			Some(Problem::Invalid),
+			"unreachable after invalid: the verdict stands"
+		);
+		assert_eq!(state.problem_detail.as_deref(), Some("no properties"));
+		assert!(
+			alert_active(&mut conn).await,
+			"unreachable after invalid: the alert stays until a good read"
+		);
+
 		CatalogueState::record_read(&mut conn, &document(), None, at(29))
 			.await
 			.unwrap();

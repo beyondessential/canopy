@@ -295,6 +295,38 @@ What round 4 showed about the process:
 - The agents' claims about ordering and shared state held up; the folds that failed to be as simple as proposed were flagged by the agents themselves rather than found by running.
 - Reporting the count of tests is a poor headline; "databases migrated per run" tracks cost better, and coverage tracks safety.
 
+### Round 5: C medium tier and the stateful families, settled and applied
+
+Decided together, since they were the same work: fill every untested branch the agents found (as rows in existing tests), fold all six stateful endpoint families, and restructure pure tests only where that adds rows. The `check_claims` and `runs::check` extractions stay declined.
+
+Applied by seven edit agents split by file (database tests, jobs tests, `limit.rs` and `inventory_file.rs`, Vitest schema and `shellArg`, `ansible.rs` lease states and upgrade plans, variables and import and `maintenance_machines`, `ansible_runs` lifecycle). The baseline was the coverage run taken before any edit.
+
+What landed:
+
+- Stateful folds: lease-state refusals 11 to 4 (a table over five lease states checks `for_group` and `extend_lease` for each, covering all four `no_longer_held` arms), upgrade plans 5 to 1, the variable serve and secret family 13 to 3, the `ansible_runs` lifecycle 3 to 1, `maintenance_machines` 4 to 2, hold and amend 2 to 1, run-window cover kinds 4 tests to 1.
+- Gap rows added: the same-operator release message, take-over and extend audit entries (with assignments), `release_unstarted`, `import_apply` refusing a preview that cannot apply, `declare_for_run` on a lease that no longer holds, archived and pending machines in a set, a lifted set refusing amendment, restoring a removed secret while held, `removed` listing a twice-removed name once, held-secret and lock round trips over every scope, the whole catalogue compared as JSON with the upgrade intent and preset parsed, placement of every catalogue variable at every scope, catalogue job failures (empty commits, file 404, file 503) and recovery, held secrets whose scope has gone.
+- Pure tables that added rows: 58 `limit` rows, 23 inventory refusal rows plus a golden struct test and an `is_host_path` table, the schema kinds and constraint tables and a `ScopeKind` matrix (all `satisfies Record<...>`), `shellArg` metacharacters round-tripped through a real shell.
+
+Evidence: 1509 Rust tests pass (1576 before lens D, 1536 before this round), Vitest 499 (more rows in `it.each` tables), typecheck and `just check` clean, the three e2e spec files (58) pass. The coverage diff against the baseline flags only lines in test modules and the block of `limit.rs` that was edited; no production line is reported lost.
+
+A defect found and fixed: a limit exclusion or intersection with a regular expression (`!~name-.*`) was not refused, because the check looked at the whole token and the `~` sat after the prefix; it silently excluded nothing. The check now looks at the name after the prefix, with rows for exclusion, exclusion after a group and intersection.
+
+Findings still to decide, none of them asserted by a test:
+
+- After a bad publish (`Invalid`), a single `Unreachable` read clears the "does not read" alert until the 24-hour staleness window passes. The new jobs rows pass because of this behaviour.
+- `AnsibleLease::release_unstarted` and its handler record `Released`, so `Unstarted` only ever comes from the sweep. Plausibly intended: the operator released it.
+- A non-scalar key at the top level of an inventory gives a message with an empty path; nested keys name theirs.
+- The `matching` doc comment says "in the order given", but the result is in member order.
+- `facility:! central` does not trim after the `!`, so it matches nothing.
+- The SPA refuses `managed_by_ansible` at machine scope in the text editor and the server allows it there; by design, because the machine's switch sets it.
+
+Process notes:
+
+- Several agents editing one test directory work if each is told the files it owns and that compile errors elsewhere are transient and not theirs; none touched another's file.
+- A rows table run through a pure function turns up behaviour nobody wrote down: the table over `limit` found the `!~` defect only because it stated expected sets exactly instead of counting matches.
+- A merged scenario test needs its steps named in its failure messages and its groups kept apart; the agents that did so reported no ordering problems, and none of the merged tests failed.
+- A coverage diff stops being the check once a test module is edited, because inline test code moves; compare production lines only and expect noise from edited production blocks.
+
 ## Signal to noise
 
 For each lens, once run: how many findings, how many accepted, how many rejected and why, and a verdict on whether the lens belongs in the skill, as a separate pass, or as guidance only.
