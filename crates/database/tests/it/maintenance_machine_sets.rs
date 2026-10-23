@@ -11,6 +11,7 @@ use commons_errors::AppError;
 use commons_types::{server::rank::ServerRank, status::CheckResult};
 use database::{
 	issues::{CheckFiling, Scope, file_check},
+	machines::Machine,
 	maintenance_windows::{
 		Amendment, Cover, Grain, MaintenanceWindow, SETTLE, line_of_descent_for,
 	},
@@ -69,6 +70,19 @@ async fn insert_box(
 	.await
 	.expect("insert application");
 	(machine.id, application.id)
+}
+
+/// A machine in `group` that no application has ranked, so it is in no
+/// environment.
+async fn insert_pending(conn: &mut AsyncPgConnection, group: Uuid, name: &str) -> Uuid {
+	let machine: RowId =
+		sql_query("INSERT INTO machines (name, group_id) VALUES ($1, $2) RETURNING id")
+			.bind::<sql_types::Text, _>(name)
+			.bind::<sql_types::Uuid, _>(group)
+			.get_result(conn)
+			.await
+			.expect("insert machine");
+	machine.id
 }
 
 /// A group whose production environment is three boxes, with a clone box.
@@ -326,6 +340,32 @@ async fn a_machine_is_named_by_at_most_one_open_window() {
 		let missing = declare_machines(&mut conn, &[a, Uuid::new_v4()]).await;
 		assert!(matches!(missing, Err(AppError::NotFound(_))), "{missing:?}");
 
+		let (gone, _) = insert_box(&mut conn, fleet.group, "production", "fj-gone").await;
+		Machine::archive(&mut conn, gone).await.expect("archive");
+		let archived = declare_machines(&mut conn, &[a, gone]).await;
+		assert!(
+			matches!(&archived, Err(AppError::BadRequest(message)) if message.contains("in no environment")),
+			"an archived machine serves no environment: {archived:?}"
+		);
+		let pending = insert_pending(&mut conn, fleet.group, "fj-new").await;
+		let unranked = declare_machines(&mut conn, &[a, pending]).await;
+		assert!(
+			matches!(&unranked, Err(AppError::BadRequest(message)) if message.contains("in no environment")),
+			"a pending machine serves no environment: {unranked:?}"
+		);
+		let past = MaintenanceWindow::declare_machines(
+			&mut conn,
+			&[a, b],
+			Timestamp::now() - SignedDuration::from_mins(1),
+			None,
+			Some("op"),
+		)
+		.await;
+		assert!(
+			matches!(past, Err(AppError::BadRequest(_))),
+			"a window ends in the future: {past:?}"
+		);
+
 		let alone = declare_machines(&mut conn, &[a, a])
 			.await
 			.expect("one machine");
@@ -395,6 +435,23 @@ async fn a_machine_is_named_by_at_most_one_open_window() {
 			matches!(moved_into, Err(AppError::Conflict(_))),
 			"nor can an amendment name a machine another window names: {moved_into:?}"
 		);
+
+		MaintenanceWindow::lift(&mut conn, set.id, Some("op"))
+			.await
+			.expect("lift the set");
+		for amendment in [
+			machines(&[b, c]),
+			Amendment {
+				expected_end: Some(in_hours(3)),
+				..Amendment::default()
+			},
+		] {
+			let ended = MaintenanceWindow::amend(&mut conn, set.id, amendment, Some("op")).await;
+			assert!(
+				matches!(ended, Err(AppError::BadRequest(_))),
+				"a set that has been lifted is history: {ended:?}"
+			);
+		}
 	})
 	.await
 }

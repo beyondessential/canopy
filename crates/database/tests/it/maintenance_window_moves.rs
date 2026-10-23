@@ -12,7 +12,9 @@ use commons_types::{server::rank::ServerRank, status::CheckResult};
 use database::{
 	ansible_leases::{AnsibleLease, ReleaseReason, RunIntent, RunSpec},
 	issues::{CheckFiling, Scope, file_check},
-	maintenance_windows::{Amendment, Grain, MaintenanceWindow, SETTLE, line_of_descent},
+	maintenance_windows::{
+		Amendment, Grain, HeldInPlace, MaintenanceWindow, SETTLE, line_of_descent,
+	},
 	statuses::CANOPY_SOURCE,
 };
 use diesel::{QueryableByName, sql_query, sql_types};
@@ -179,6 +181,52 @@ async fn take_lease(
 		false,
 	)
 	.await
+}
+
+/// A machine with an application ranked production on it, and that application.
+async fn production_machine(
+	conn: &mut AsyncPgConnection,
+	group: Uuid,
+	name: &str,
+) -> (Uuid, Uuid) {
+	let machine = insert_machine(conn, Some(group), name).await;
+	let application =
+		insert_application(conn, Some(group), machine, Some("production"), name).await;
+	(machine, application)
+}
+
+/// A lease held by `held_by` on the environment at `rank`, as a run's take would
+/// leave it.
+async fn insert_lease(
+	conn: &mut AsyncPgConnection,
+	group: Uuid,
+	rank: &str,
+	held_by: &str,
+) -> Uuid {
+	let row: RowId = sql_query(
+		"INSERT INTO ansible_leases (server_group_id, rank, intent, held_by, expires_at) \
+		 VALUES ($1, $2, 'configure', $3, NOW() + INTERVAL '1 hour') RETURNING id",
+	)
+	.bind::<sql_types::Uuid, _>(group)
+	.bind::<sql_types::Text, _>(rank)
+	.bind::<sql_types::Text, _>(held_by)
+	.get_result(conn)
+	.await
+	.expect("insert lease");
+	row.id
+}
+
+/// Release a lease without ending the windows its run declared.
+async fn release_leaving_windows(conn: &mut AsyncPgConnection, lease: Uuid) {
+	sql_query("UPDATE ansible_leases SET released_at = NOW() WHERE id = $1")
+		.bind::<sql_types::Uuid, _>(lease)
+		.execute(conn)
+		.await
+		.expect("release");
+}
+
+fn held_by_op(held: Option<HeldInPlace>) -> bool {
+	matches!(held, Some(HeldInPlace::RunLease { held_by }) if held_by.as_deref() == Some("op"))
 }
 
 fn in_hours(hours: i64) -> Timestamp {
@@ -560,78 +608,220 @@ async fn an_archived_targets_window_cannot_move() {
 	.await
 }
 
+/// A window a run is served against stays where it is until the lease is
+/// released, whatever the window covers: an environment, a whole group, a
+/// machine, an application, or a set of machines. The window of an operator
+/// other than the lease's holder is not held, and a group's window is held by a
+/// lease on any of its environments, even where nothing is ranked in it.
+// spec: ANSRUN#work-under-way, MNT#moving-a-window
 #[tokio::test(flavor = "multi_thread")]
 async fn a_window_a_run_is_served_against_stays_until_the_lease_is_released() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let site = site(&mut conn).await;
-		let window = declare_group(&mut conn, site.group, Some(ServerRank::Production)).await;
-		let lease = take_lease(&mut conn, site.group, site.production_box, "op")
+		let group = site.group;
+		let (p1, a1) = (site.production_box, site.production_app);
+		let (p2, a2) = production_machine(&mut conn, group, "fj-two").await;
+		let (p3, _) = production_machine(&mut conn, group, "fj-three").await;
+		let (s1, _) = production_machine(&mut conn, group, "fj-set-one").await;
+		let (s2, _) = production_machine(&mut conn, group, "fj-set-two").await;
+		let production = Grain::environment(group, ServerRank::Production);
+
+		// A set window the run declared, while nothing of the holder's covers it.
+		let first = take_lease(&mut conn, group, p1, "op")
 			.await
 			.expect("take")
-			.expect("the declarer is served against their own window");
-
+			.expect("no window refuses the first lease");
+		let set = MaintenanceWindow::declare_for_run(&mut conn, &first, Some(&[s1, s2]), None)
+			.await
+			.expect("declare for the run")
+			.declared
+			.remove(0);
+		assert!(set.is_machine_set());
 		assert!(
-			window
-				.held_in_place(&mut conn)
-				.await
-				.expect("fixed")
-				.is_some(),
-			"the dialog is told the window cannot move"
+			held_by_op(set.held_in_place(&mut conn).await.expect("held")),
+			"the run's set: the operator interface is told why it cannot move"
 		);
-		let refused = MaintenanceWindow::amend(
+		for amendment in [
+			Amendment {
+				machines: Some(vec![s1]),
+				..Amendment::default()
+			},
+			Amendment {
+				target: Some(Grain::group(group)),
+				..Amendment::default()
+			},
+		] {
+			let refused =
+				MaintenanceWindow::amend(&mut conn, set.id, amendment, Some("op")).await;
+			assert!(
+				matches!(refused, Err(AppError::Conflict(_))),
+				"the run's set: {refused:?}"
+			);
+		}
+		let set = MaintenanceWindow::amend(
 			&mut conn,
-			window.id,
-			move_to(Grain::machine(site.production_box)),
+			set.id,
+			Amendment {
+				note: Some(Some("still going".into())),
+				..Amendment::default()
+			},
 			Some("op"),
 		)
-		.await;
+		.await
+		.expect("the run's set: its note can still change");
+		assert_eq!(set.lease_id, Some(first.id));
+		release_leaving_windows(&mut conn, first.id).await;
 		assert!(
-			matches!(refused, Err(AppError::Conflict(_))),
-			"the run is acting on the environment the window covers: {refused:?}"
+			set.held_in_place(&mut conn).await.expect("held").is_none(),
+			"the run's set: nothing is served once the lease is released"
 		);
+
+		let environment = declare_group(&mut conn, group, Some(ServerRank::Production)).await;
+		let whole = declare_group(&mut conn, group, None).await;
+		let machine = MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Machine(p1),
+			None,
+			in_hours(1),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare over a machine");
+		let application = MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Application(a2),
+			None,
+			in_hours(1),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare over an application");
+
+		let lease = take_lease(&mut conn, group, p1, "op")
+			.await
+			.expect("take")
+			.expect("the declarer is served against their own windows");
+
+		let windows = [
+			(
+				"an environment",
+				environment,
+				move_to(Grain::machine(p3)),
+				Grain::machine(p3),
+			),
+			(
+				"a machine",
+				machine,
+				move_to(Grain::application(a1)),
+				Grain::application(a1),
+			),
+			(
+				"an application",
+				application,
+				move_to(Grain::machine(p2)),
+				Grain::machine(p2),
+			),
+			(
+				"a set of machines",
+				set,
+				Amendment {
+					machines: Some(vec![s1]),
+					..Amendment::default()
+				},
+				Grain::machine(s1),
+			),
+			(
+				"a whole group",
+				whole,
+				move_to(production),
+				production,
+			),
+		];
+		for (kind, window, amendment, _) in &windows {
+			assert!(
+				held_by_op(window.held_in_place(&mut conn).await.expect("held")),
+				"{kind}: the dialog is told the window cannot move"
+			);
+			let refused =
+				MaintenanceWindow::amend(&mut conn, window.id, amendment.clone(), Some("op"))
+					.await;
+			assert!(
+				matches!(refused, Err(AppError::Conflict(_))),
+				"{kind}: the run is acting on what the window covers: {refused:?}"
+			);
+		}
 
 		AnsibleLease::release(&mut conn, lease.id, Some("op"), ReleaseReason::Released)
 			.await
 			.expect("release");
-		MaintenanceWindow::amend(
-			&mut conn,
-			window.id,
-			move_to(Grain::machine(site.production_box)),
-			Some("op"),
-		)
-		.await
-		.expect("moves like any other once the lease is released");
-	})
-	.await
-}
+		for (kind, window, ..) in &windows {
+			assert!(
+				window
+					.held_in_place(&mut conn)
+					.await
+					.expect("held")
+					.is_none(),
+				"{kind}: nothing is served once the lease is released"
+			);
+		}
 
-/// A group's window covers an environment its lease names even where nothing
-/// in the group is still ranked there, so the run still holds it in place.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_lease_on_an_environment_nothing_is_ranked_in_holds_a_group_window() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let site = site(&mut conn).await;
-		let window = declare_group(&mut conn, site.group, None).await;
-		sql_query(
-			"INSERT INTO ansible_leases (server_group_id, rank, intent, held_by, expires_at) \
-			 VALUES ($1, 'demo', 'configure', 'op', NOW() + INTERVAL '1 hour')",
-		)
-		.bind::<sql_types::Uuid, _>(site.group)
-		.execute(&mut conn)
-		.await
-		.expect("lease the demo environment");
-
-		let refused = MaintenanceWindow::amend(
-			&mut conn,
-			window.id,
-			move_to(Grain::machine(site.production_box)),
-			Some("op"),
-		)
-		.await;
+		// The group's window is held by a lease on an environment nothing in the
+		// group is ranked in.
+		let demo = insert_lease(&mut conn, group, "demo", "op").await;
+		let (_, whole, whole_move, whole_destination) = &windows[4];
+		assert!(
+			held_by_op(whole.held_in_place(&mut conn).await.expect("held")),
+			"a whole group: the demo lease holds it in place"
+		);
+		let refused =
+			MaintenanceWindow::amend(&mut conn, whole.id, whole_move.clone(), Some("op")).await;
 		assert!(
 			matches!(refused, Err(AppError::Conflict(_))),
-			"the run on the demo environment holds the group's window: {refused:?}"
+			"a whole group: the run on the demo environment holds the group's window: {refused:?}"
 		);
+
+		let mut moved = Vec::new();
+		for (kind, window, amendment, destination) in &windows[..4] {
+			let after = MaintenanceWindow::amend(&mut conn, window.id, amendment.clone(), Some("op"))
+				.await
+				.unwrap_or_else(|err| {
+					panic!("{kind}: moves like any other once the lease is released: {err:?}")
+				});
+			assert_eq!(after.grain(), Some(*destination), "{kind}: it moved");
+			moved.push(after);
+		}
+		release_leaving_windows(&mut conn, demo).await;
+		let after =
+			MaintenanceWindow::amend(&mut conn, whole.id, whole_move.clone(), Some("op"))
+				.await
+				.expect("a whole group: moves once the demo lease is released");
+		assert_eq!(after.grain(), Some(*whole_destination), "a whole group: it moved");
+		moved.push(after);
+
+		// Another operator's lease is not served against the holder's windows.
+		insert_lease(&mut conn, group, "production", "someone-else").await;
+		for window in &moved {
+			assert!(
+				window
+					.held_in_place(&mut conn)
+					.await
+					.expect("held")
+					.is_none(),
+				"{:?}: another operator's lease is not served against this window",
+				window.grain()
+			);
+		}
+		let back = MaintenanceWindow::amend(
+			&mut conn,
+			moved[1].id,
+			move_to(Grain::machine(p1)),
+			Some("op"),
+		)
+		.await
+		.expect("the lease is not served against this window, so it moves");
+		assert_eq!(back.grain(), Some(Grain::machine(p1)));
 	})
 	.await
 }
@@ -716,33 +906,6 @@ async fn a_take_under_another_operators_window_is_refused_inside_the_lock() {
 			Err(window.id),
 			"the window that refuses it comes back"
 		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn another_operators_lease_does_not_hold_a_window_in_place() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let site = site(&mut conn).await;
-		let window = declare_group(&mut conn, site.group, Some(ServerRank::Production)).await;
-		// Taken before the window, since one taken under it would be refused.
-		sql_query(
-			"INSERT INTO ansible_leases (server_group_id, rank, intent, held_by, expires_at) \
-			 VALUES ($1, 'production', 'configure', 'someone-else', NOW() + INTERVAL '1 hour')",
-		)
-		.bind::<sql_types::Uuid, _>(site.group)
-		.execute(&mut conn)
-		.await
-		.expect("lease");
-
-		MaintenanceWindow::amend(
-			&mut conn,
-			window.id,
-			move_to(Grain::machine(site.production_box)),
-			Some("op"),
-		)
-		.await
-		.expect("the lease is not served against this window");
 	})
 	.await
 }

@@ -3,8 +3,13 @@
 //!
 //! spec: ANSVAR#catalogue
 
-use database::ansible_catalogue::{
-	Catalogue, CatalogueState, Loaded, NotACatalogue, Problem, ScopeKind,
+use std::collections::{BTreeMap, BTreeSet};
+
+use database::{
+	ansible_catalogue::{
+		Catalogue, CatalogueState, Loaded, NotACatalogue, Preset, Problem, ScopeKind,
+	},
+	ansible_leases::RunIntent,
 };
 use jiff::Timestamp;
 use serde_json::{Value, json};
@@ -43,7 +48,14 @@ fn document() -> Value {
 					"applications": ["tamanu-central", "tamanu-facility"],
 					"tags": ["app", "base"]
 				},
-				"base-install.yml": { "intent": "configure", "tags": [] }
+				"base-install.yml": { "intent": "configure", "tags": [] },
+				"tamanu-upgrade.yml": {
+					"description": "Brings Tamanu to a new version.",
+					"intent": "upgrade",
+					"preset": "upgrade",
+					"applications": ["tamanu-central"],
+					"tags": ["upgrade"]
+				}
 			},
 			"tags": { "base": "The arrangement of a host." }
 		}
@@ -91,6 +103,134 @@ fn reads_the_variables_playbooks_and_tags_it_describes() {
 			.is_none()
 	);
 	assert_eq!(catalogue.tag_notes()["base"], "The arrangement of a host.");
+
+	let properties = &document()["properties"];
+	let expected_variables = json!({
+		"ansible_host": {
+			"name": "ansible_host",
+			"description": null,
+			"schema": properties["ansible_host"],
+			"default": null,
+			"secret": false,
+			"scopes": ["machine"],
+			"applications": null,
+			"reserved": false,
+		},
+		"ansible_port": {
+			"name": "ansible_port",
+			"description": null,
+			"schema": properties["ansible_port"],
+			"default": 22,
+			"secret": false,
+			"scopes": null,
+			"applications": null,
+			"reserved": false,
+		},
+		"salt": {
+			"name": "salt",
+			"description": null,
+			"schema": properties["salt"],
+			"default": null,
+			"secret": true,
+			"scopes": null,
+			"applications": null,
+			"reserved": false,
+		},
+		"canopy_intent": {
+			"name": "canopy_intent",
+			"description": null,
+			"schema": properties["canopy_intent"],
+			"default": null,
+			"secret": false,
+			"scopes": null,
+			"applications": null,
+			"reserved": true,
+		},
+		"tamanu_caddy_tls_dns_iam": {
+			"name": "tamanu_caddy_tls_dns_iam",
+			"description": null,
+			"schema": properties["tamanu_caddy_tls_dns_iam"],
+			"default": null,
+			"secret": true,
+			"scopes": null,
+			"applications": ["tamanu-central"],
+			"reserved": false,
+		},
+		"tamanu_facility_id": {
+			"name": "tamanu_facility_id",
+			"description": "The facility's id.",
+			"schema": properties["tamanu_facility_id"],
+			"default": null,
+			"secret": false,
+			"scopes": null,
+			"applications": null,
+			"reserved": false,
+		},
+	});
+	let variables: BTreeMap<&str, Value> = catalogue
+		.variables()
+		.map(|variable| {
+			(
+				variable.name.as_str(),
+				serde_json::to_value(variable).expect("variable serialises"),
+			)
+		})
+		.collect();
+	assert_eq!(
+		serde_json::to_value(&variables).unwrap(),
+		expected_variables,
+		"every variable, whole"
+	);
+
+	let expected_playbooks = json!({
+		"tamanu-install.yml": {
+			"name": "tamanu-install.yml",
+			"description": "Everything a Tamanu server needs.",
+			"intent": "configure",
+			"preset": "install",
+			"applications": ["tamanu-central", "tamanu-facility"],
+			"tags": ["app", "base"],
+		},
+		"base-install.yml": {
+			"name": "base-install.yml",
+			"description": null,
+			"intent": "configure",
+			"preset": null,
+			"applications": null,
+			"tags": [],
+		},
+		"tamanu-upgrade.yml": {
+			"name": "tamanu-upgrade.yml",
+			"description": "Brings Tamanu to a new version.",
+			"intent": "upgrade",
+			"preset": "upgrade",
+			"applications": ["tamanu-central"],
+			"tags": ["upgrade"],
+		},
+	});
+	let playbooks: BTreeMap<&str, Value> = catalogue
+		.playbooks()
+		.iter()
+		.map(|playbook| {
+			(
+				playbook.name.as_str(),
+				serde_json::to_value(playbook).expect("playbook serialises"),
+			)
+		})
+		.collect();
+	assert_eq!(
+		catalogue.playbooks().len(),
+		playbooks.len(),
+		"no playbook is listed twice"
+	);
+	assert_eq!(
+		serde_json::to_value(&playbooks).unwrap(),
+		expected_playbooks,
+		"every playbook, whole, with both intents and both presets read"
+	);
+	let upgrade = catalogue.playbook("tamanu-upgrade.yml").unwrap();
+	assert_eq!(upgrade.intent, RunIntent::Upgrade);
+	assert_eq!(upgrade.preset, Some(Preset::Upgrade));
 }
 
 #[test]
@@ -124,19 +264,6 @@ fn refuses_what_is_not_a_catalogue() {
 		let refused: NotACatalogue = Catalogue::parse(&document).expect_err(what);
 		assert!(!refused.0.is_empty(), "{what} is refused with a reason");
 	}
-}
-
-#[test]
-fn a_variable_the_catalogue_does_not_describe_is_not_held_to_anything() {
-	assert!(
-		catalogue()
-			.violations(
-				ScopeKind::Group,
-				"brand_new_variable",
-				&json!({ "any": [1] })
-			)
-			.is_empty()
-	);
 }
 
 #[test]
@@ -188,32 +315,128 @@ fn names_where_in_a_structured_value_the_fault_is() {
 	assert!(wrong[0].contains("/secret_access_key"), "{wrong:?}");
 }
 
-#[test]
-fn holds_a_variable_to_the_scopes_it_may_be_set_at() {
-	let catalogue = catalogue();
+/// Where a variable may be set.
+enum Placement {
+	Everywhere,
+	Only(&'static [ScopeKind]),
+	Never,
+}
 
-	assert!(
-		catalogue
-			.violations(ScopeKind::Machine, "ansible_host", &json!("a.example.org"))
-			.is_empty()
-	);
-	for scope in [ScopeKind::Group, ScopeKind::Environment] {
-		let refused = catalogue.violations(scope, "ansible_host", &json!("a.example.org"));
-		assert_eq!(refused.len(), 1);
-		assert!(refused[0].contains("only at machine"), "{refused:?}");
+/// A value of the variable's own type, so a refusal is the placement's and not
+/// the value's.
+fn value_for(name: &str) -> Value {
+	match name {
+		"ansible_host" => json!("a.example.org"),
+		"ansible_port" => json!(22),
+		"salt" => json!("pepper"),
+		"canopy_intent" => json!("configure"),
+		"tamanu_caddy_tls_dns_iam" => {
+			json!({ "access_key_id": "AKIA", "secret_access_key": "secret" })
+		}
+		"tamanu_facility_id" => json!("facility-1"),
+		_ => json!({ "any": [1] }),
 	}
 }
 
+/// Every variable the catalogue describes, and one it does not, is held to the
+/// scopes it may be set at, at every scope: none for a reserved variable, the
+/// ones it names, or every one. A name the catalogue does not describe is not
+/// held to anything.
 #[test]
-fn a_reserved_variable_cannot_be_set_anywhere() {
+fn holds_every_variable_to_the_scopes_it_may_be_set_at() {
+	use Placement::{Everywhere, Never, Only};
+
+	const UNDESCRIBED: &str = "brand_new_variable";
 	let catalogue = catalogue();
-	for scope in [ScopeKind::Group, ScopeKind::Environment, ScopeKind::Machine] {
-		assert_eq!(
-			catalogue
-				.violations(scope, "canopy_intent", &json!("configure"))
-				.len(),
-			1
-		);
+	let table = [
+		("ansible_host", Only(&[ScopeKind::Machine])),
+		("ansible_port", Everywhere),
+		("salt", Everywhere),
+		("canopy_intent", Never),
+		("tamanu_caddy_tls_dns_iam", Everywhere),
+		("tamanu_facility_id", Everywhere),
+		(UNDESCRIBED, Everywhere),
+	];
+
+	let rows: BTreeSet<&str> = table
+		.iter()
+		.map(|(name, _)| *name)
+		.filter(|name| *name != UNDESCRIBED)
+		.collect();
+	let described: BTreeSet<&str> = catalogue
+		.variables()
+		.map(|variable| variable.name.as_str())
+		.collect();
+	assert_eq!(
+		rows, described,
+		"a row for every variable the catalogue describes"
+	);
+	assert!(
+		catalogue.variable(UNDESCRIBED).is_none(),
+		"the undescribed name is not described"
+	);
+
+	for (name, placement) in &table {
+		let value = value_for(name);
+		for scope in ScopeKind::ALL {
+			let refused = catalogue.violations(*scope, name, &value);
+			assert_eq!(
+				catalogue.placement_violations(*scope, name),
+				refused,
+				"{name} at {scope}: the placement is what refuses a value of its own type"
+			);
+			match placement {
+				Only(allowed) if !allowed.contains(scope) => {
+					assert_eq!(refused.len(), 1, "{name} at {scope}: {refused:?}");
+					let at = allowed
+						.iter()
+						.map(ToString::to_string)
+						.collect::<Vec<_>>()
+						.join(" or ");
+					assert!(
+						refused[0].contains(&format!("only at {at}")),
+						"{name} at {scope}: {refused:?}"
+					);
+				}
+				Never => {
+					assert_eq!(refused.len(), 1, "{name} at {scope}: {refused:?}");
+					assert!(
+						refused[0].contains("cannot be set"),
+						"{name} at {scope}: {refused:?}"
+					);
+				}
+				Only(_) | Everywhere => {
+					assert!(refused.is_empty(), "{name} at {scope}: {refused:?}");
+				}
+			}
+		}
+	}
+}
+
+/// A number is held to the bounds its schema gives, at every scope.
+#[test]
+fn holds_a_value_to_the_bounds_of_its_schema() {
+	let catalogue = catalogue();
+	for scope in ScopeKind::ALL {
+		for (value, allowed) in [
+			(json!(1), true),
+			(json!(22), true),
+			(json!(65535), true),
+			(json!(0), false),
+			(json!(65536), false),
+			(json!("22"), false),
+		] {
+			let refused = catalogue.violations(*scope, "ansible_port", &value);
+			if allowed {
+				assert!(refused.is_empty(), "{value} at {scope}: {refused:?}");
+			} else {
+				assert_eq!(refused.len(), 1, "{value} at {scope}: {refused:?}");
+				assert!(
+					refused[0].starts_with("\"ansible_port\": "),
+					"{value} at {scope}: {refused:?}"
+				);
+			}
+		}
 	}
 }
 
