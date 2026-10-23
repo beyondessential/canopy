@@ -350,6 +350,16 @@ Consequences for the skill:
 - Put the per-test lenses (A, B, E) in the guidance read before writing tests, so C and D mostly meet what an incremental build leaves behind and not what a first pass missed.
 - Keep this run's numbers as the reference: 190 tests added, about 40 folded in round 1 of lens D, about 10 more of F5's own in round 2, one coverage baseline and a function-level diff to check each apply.
 
+### Round 6: lens D, second round applied
+
+Three fresh agents read the current tests and reported 10 folds in F5's own tests and about 15 in older neighbours (maintenance moves and amend, audit, `maintenance.spec.ts`, the pre-F5 keyset snapshot tests); the user chose to apply F5's own plus the neighbours, then run a third round over F5's own tests only.
+
+Applied by five edit agents split by file: database F5 files, `maintenance_window_moves.rs` and the database `audit.rs`, jobs, private-server tests, `maintenance.spec.ts` with two Vitest nits.
+Two suggestions were left on purpose: the pre-F5 keyset snapshot tests (the reviewer judged them not F5's), and `a_moved_window_is_in_both_targets_histories` with `history_lists_what_still_covers_the_target_first` (a `limit 1` history ordering that could not be confirmed).
+Where a fold dropped coverage at one layer it was shown to be made at another: the endpoint-level 400 and 409 for a refused move are now covered by the database test and by the endpoint tests of the two mappings, and the window identity check in the refused take is now the operator name in the endpoint table.
+
+Evidence: 1485 Rust tests pass (1509 before), Vitest 499, typecheck and `just check` clean, the three e2e spec files pass (53, from 58). Comparing covered functions by name against the previous run, the functions no longer covered are all test functions or closures in test modules, plus one instance of the generic `Actor::canopy` whose body lines are still covered (21 hits against 26).
+
 ## Signal to noise
 
 For each lens, once run: how many findings, how many accepted, how many rejected and why, and a verdict on whether the lens belongs in the skill, as a separate pass, or as guidance only.
