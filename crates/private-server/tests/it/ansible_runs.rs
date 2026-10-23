@@ -111,17 +111,124 @@ async fn refused(private: &TestServer, body: Value) -> String {
 		.to_owned()
 }
 
-/// A lease keeps the playbook, the limit and what it matched, the tags and the
-/// assignments, and the entry that records it names them. A run read under it is
-/// served the lease, so it takes the intent, playbook, limit and tags from
-/// Canopy rather than from how it was started, and its maintenance covers only
-/// the machines the limit matched.
-// spec: ANSRUN#audit, INV#what-a-run-is-served, ANSRUN#work-under-way
+/// A run's first read starts it: the lease is stamped, maintenance is declared
+/// over what the run acts on for the holder, and the entry says a run began.
+/// The reads after it change nothing, and giving up releases the lease only
+/// while no run has read it, so a run that started keeps the lease and the
+/// maintenance it declared. A lease keeps the playbook, the limit and what it
+/// matched, the tags and the assignments, and the entry that records it names
+/// them. A run read under it is served the lease, so it takes the intent,
+/// playbook, limit and tags from Canopy rather than from how it was started,
+/// and its maintenance covers only the machines the limit matched and is noted
+/// with the playbook, or with the intent where there is none.
+// spec: ANSRUN#audit, INV#what-a-run-is-served, ANSRUN#work-under-way, ANSRUN#starting-a-run
 #[tokio::test(flavor = "multi_thread")]
-async fn a_lease_records_the_run_it_was_taken_for() {
+async fn a_lease_records_the_run_it_was_taken_for_and_its_first_read_starts_it() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let env = environment(&mut conn, &private).await;
 		read_catalogue(&mut conn).await;
+
+		let give_up = async |lease: &Uuid| {
+			private
+				.post("/api/ansible/release_lease")
+				.json(&json!({ "lease_id": lease, "unless_started": true }))
+				.await
+		};
+		let read = async |lease: &Uuid| {
+			private
+				.post("/api/ansible/for_group")
+				.json(&json!({ "lease_id": lease }))
+				.await
+		};
+		let open_windows = async |conn: &mut AsyncPgConnection| {
+			database::maintenance_windows::MaintenanceWindow::list_open(conn)
+				.await
+				.unwrap()
+				.into_iter()
+				.filter(|window| window.server_group_id == Some(env.group))
+				.collect::<Vec<_>>()
+		};
+		let audited = async |conn: &mut AsyncPgConnection, action: &str| {
+			database::audit::find(
+				conn,
+				&database::audit::Filter {
+					action: Some(action.into()),
+					limit: 10,
+					..Default::default()
+				},
+			)
+			.await
+			.unwrap()
+		};
+
+		let unread = take_lease(&private, json!({ "group": "kamaka" })).await;
+		give_up(&unread).await.assert_status_ok();
+		assert!(
+			open_windows(&mut conn).await.is_empty(),
+			"giving up an unread lease: nothing was declared"
+		);
+
+		let lease = take_lease(&private, json!({ "group": "kamaka" })).await;
+		read(&lease).await.assert_status_ok();
+
+		let state: Value = private
+			.post("/api/ansible/run_state")
+			.json(&json!({ "group": "kamaka" }))
+			.await
+			.json();
+		assert!(
+			!state["lease"]["started_at"].is_null(),
+			"first read of the bare lease: {state}"
+		);
+		let window = &state["window"];
+		assert_eq!(window["lease_id"], lease.to_string());
+		assert_eq!(window["server_group_id"], env.group.to_string());
+		assert_eq!(window["rank"], "production");
+		assert_eq!(
+			window["note"], "configure",
+			"a lease with no playbook notes its intent"
+		);
+		assert_eq!(window["declared_by"], crate::ansible::ME);
+
+		read(&lease).await.assert_status_ok();
+		assert_eq!(
+			open_windows(&mut conn).await.len(),
+			1,
+			"a second read of the bare lease declares nothing more"
+		);
+
+		let started = audited(&mut conn, "ansible_run_started").await;
+		assert_eq!(started.len(), 1, "the run starts once");
+		assert_eq!(started[0].status, database::audit::Status::Done);
+		assert_eq!(
+			audited(&mut conn, "inventory_read").await.len(),
+			2,
+			"every read is recorded, as routine"
+		);
+
+		give_up(&lease)
+			.await
+			.assert_status(axum::http::StatusCode::CONFLICT);
+		assert_eq!(
+			open_windows(&mut conn).await.len(),
+			1,
+			"giving up a read lease: the run's maintenance stands"
+		);
+
+		private
+			.post("/api/ansible/release_lease")
+			.json(&json!({ "lease_id": lease }))
+			.await
+			.assert_status_ok();
+		assert!(
+			open_windows(&mut conn).await.is_empty(),
+			"releasing the lease ends the window"
+		);
+		let released = audited(&mut conn, "inventory_lease_released").await;
+		assert_eq!(released.len(), 2, "the give-up and the release");
+		for entry in &released {
+			assert_eq!(entry.detail["reason"], "released");
+		}
 
 		let lease = take(
 			&private,
@@ -145,16 +252,12 @@ async fn a_lease_records_the_run_it_was_taken_for() {
 			"pending until a run reads it"
 		);
 
-		let entries = database::audit::find(
-			&mut conn,
-			&database::audit::Filter {
-				action: Some("inventory_lease_taken".into()),
-				limit: 10,
-				..Default::default()
-			},
-		)
-		.await
-		.unwrap();
+		let taken = audited(&mut conn, "inventory_lease_taken").await;
+		assert_eq!(taken.len(), 3, "an entry for every lease taken");
+		let entries: Vec<_> = taken
+			.iter()
+			.filter(|entry| entry.detail["playbook"] == "tamanu-install.yml")
+			.collect();
 		assert_eq!(entries.len(), 1);
 		let detail = &entries[0].detail;
 		assert_eq!(detail["playbook"], "tamanu-install.yml");
@@ -171,10 +274,8 @@ async fn a_lease_records_the_run_it_was_taken_for() {
 			"the machines the limit matched"
 		);
 
-		let response = private
-			.post("/api/ansible/for_group")
-			.json(&json!({ "lease_id": lease["id"] }))
-			.await;
+		let lease_id: Uuid = lease["id"].as_str().unwrap().parse().unwrap();
+		let response = read(&lease_id).await;
 		response.assert_status_ok();
 		let served = &response.json::<Value>()["lease"];
 		assert_eq!(served["id"], lease["id"]);
@@ -188,14 +289,17 @@ async fn a_lease_records_the_run_it_was_taken_for() {
 			"the read started the run: {served}"
 		);
 
-		let windows = database::maintenance_windows::MaintenanceWindow::list_open(&mut conn)
-			.await
-			.unwrap();
+		let windows = open_windows(&mut conn).await;
 		assert_eq!(windows.len(), 1);
 		let mut named = windows[0].machine_ids.clone();
 		named.sort();
 		assert_eq!(named, facilities, "the machines the limit matched");
 		assert!(!named.contains(&env.central));
+		assert_eq!(
+			windows[0].note.as_deref(),
+			Some("tamanu-install.yml"),
+			"a lease with a playbook notes the playbook"
+		);
 	})
 	.await
 }
@@ -653,95 +757,6 @@ async fn previews_the_machines_a_limit_matches() {
 	.await
 }
 
-/// A run's first read starts it: the lease is stamped, maintenance is declared
-/// over what the run acts on for the holder, and the entry says a run began.
-/// The reads after it change nothing.
-// spec: ANSRUN#work-under-way
-#[tokio::test(flavor = "multi_thread")]
-async fn the_first_read_starts_the_run_and_declares_its_maintenance() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		let env = environment(&mut conn, &private).await;
-		let lease = take_lease(&private, json!({ "group": "kamaka" })).await;
-
-		let read = async || {
-			let response = private
-				.post("/api/ansible/for_group")
-				.json(&json!({ "lease_id": lease }))
-				.await;
-			response.assert_status_ok();
-		};
-		read().await;
-
-		let state: Value = private
-			.post("/api/ansible/run_state")
-			.json(&json!({ "group": "kamaka" }))
-			.await
-			.json();
-		assert!(!state["lease"]["started_at"].is_null(), "{state}");
-		let window = &state["window"];
-		assert_eq!(window["lease_id"], lease.to_string());
-		assert_eq!(window["server_group_id"], env.group.to_string());
-		assert_eq!(window["rank"], "production");
-		assert_eq!(window["note"], "configure");
-		assert_eq!(window["declared_by"], crate::ansible::ME);
-
-		read().await;
-		let windows = database::maintenance_windows::MaintenanceWindow::list_open(&mut conn)
-			.await
-			.unwrap();
-		assert_eq!(windows.len(), 1, "a second read declares nothing more");
-
-		let started = database::audit::find(
-			&mut conn,
-			&database::audit::Filter {
-				action: Some("ansible_run_started".into()),
-				limit: 10,
-				..Default::default()
-			},
-		)
-		.await
-		.unwrap();
-		assert_eq!(started.len(), 1, "the run starts once");
-		assert_eq!(started[0].status, database::audit::Status::Done);
-		let reads = database::audit::find(
-			&mut conn,
-			&database::audit::Filter {
-				action: Some("inventory_read".into()),
-				limit: 10,
-				..Default::default()
-			},
-		)
-		.await
-		.unwrap();
-		assert_eq!(reads.len(), 2, "every read is recorded, as routine");
-
-		// Releasing the lease ends the window.
-		private
-			.post("/api/ansible/release_lease")
-			.json(&json!({ "lease_id": lease }))
-			.await
-			.assert_status_ok();
-		assert!(
-			database::maintenance_windows::MaintenanceWindow::list_open(&mut conn)
-				.await
-				.unwrap()
-				.is_empty()
-		);
-		let released = database::audit::find(
-			&mut conn,
-			&database::audit::Filter {
-				action: Some("inventory_lease_released".into()),
-				limit: 10,
-				..Default::default()
-			},
-		)
-		.await
-		.unwrap();
-		assert_eq!(released[0].detail["reason"], "released");
-	})
-	.await
-}
-
 /// A run names the machines it acts on among themselves, as the limit preview
 /// does, so a machine it leaves out cannot change what one it acts on is called.
 // spec: INV#reaching-a-machine
@@ -793,44 +808,6 @@ async fn names_what_a_run_acts_on_as_the_limit_preview_does() {
 			.find(|host| host["name"] == "kamaka managed")
 			.unwrap();
 		assert_eq!(managed["host_name"], "box", "what the preview called it");
-	})
-	.await
-}
-
-/// Giving up on a run releases its lease only while no run has read it, so a run
-/// that started in the meantime keeps the lease and the maintenance it declared.
-// spec: ANSRUN#starting-a-run
-#[tokio::test(flavor = "multi_thread")]
-async fn giving_up_releases_only_a_lease_no_run_has_read() {
-	commons_tests::server::run(async move |mut conn, _public, private| {
-		environment(&mut conn, &private).await;
-		let give_up = async |lease: &Uuid| {
-			private
-				.post("/api/ansible/release_lease")
-				.json(&json!({ "lease_id": lease, "unless_started": true }))
-				.await
-		};
-
-		let unread = take_lease(&private, json!({ "group": "kamaka" })).await;
-		give_up(&unread).await.assert_status_ok();
-
-		let read = take_lease(&private, json!({ "group": "kamaka" })).await;
-		private
-			.post("/api/ansible/for_group")
-			.json(&json!({ "lease_id": read }))
-			.await
-			.assert_status_ok();
-		give_up(&read)
-			.await
-			.assert_status(axum::http::StatusCode::CONFLICT);
-		assert_eq!(
-			database::maintenance_windows::MaintenanceWindow::list_open(&mut conn)
-				.await
-				.unwrap()
-				.len(),
-			1,
-			"the run's maintenance stands"
-		);
 	})
 	.await
 }
