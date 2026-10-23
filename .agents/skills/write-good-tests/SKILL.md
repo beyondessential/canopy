@@ -6,7 +6,6 @@ pill-order:
   implementing: 3
   reviewing: 6
 jockey-hint: "Use while implementing, before tests are written or as they are added. Once the card's tests exist and need review, use Review tests instead; demote after that."
-workhorse-version: 0.3.0
 ---
 
 ## Your task: Write good tests

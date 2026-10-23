@@ -386,7 +386,7 @@ Defects found while applying changes, none of them by a lens as such: a test add
 
 Decided with the user at the end of the walkthrough:
 
-- Two skills, with Workhorse metadata (`name`, `description`, `label`, `pill-order` by card state, `jockey-hint`, `workhorse-version`): `write-good-tests` (write-time guidance, pill under implementing) and `review-tests` (the review pass and the apply-and-verify loop, pill under reviewing and complete).
+- Two skills, with Workhorse metadata (`name`, `description`, `label`, `pill-order` by card state, `jockey-hint`; no `workhorse-version`: the first draft copied 0.3.0 from older skills and the user asked for none): `write-good-tests` (write-time guidance, pill under implementing) and `review-tests` (the review pass and the apply-and-verify loop, pill under reviewing and complete).
 - One reference doc, `.agents/docs/test-quality.md`, cited by both: the write-time rules, the five lenses with their yield, own versus neighbour findings, the evidence rules, the loop and stopping rule, and condensed review and edit brief templates.
 - The coverage check is committed: `scripts/coverage-fn-diff.sh` (bash and awk, like the other scripts) behind `just coverage-diff BASE NEW`, next to `just coverage`.
 - Not done, by choice: no line added to AGENTS.md pointing at the doc (the user chose two skills over a doc plus a pointer).

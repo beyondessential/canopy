@@ -7,7 +7,6 @@ pill-order:
   complete: 2
   implementing: 6
 jockey-hint: "Use when the card's implementation and tests are in place and before the card is finished. Demote once the review has run to its stopping point; skip for a card with only a handful of tests."
-workhorse-version: 0.3.0
 ---
 
 ## Your task: Review tests

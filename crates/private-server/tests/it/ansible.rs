@@ -1477,6 +1477,12 @@ async fn a_window_refuses_a_lease_exactly_where_the_page_reports_it() {
 					continue;
 				}
 				let state: Value = state.json();
+				if state["lease_is_yours"] != false {
+					failures.push(format!(
+						"{at}: run_state offers a lease as the caller's own with none held: {}",
+						state["lease_is_yours"]
+					));
+				}
 				let window = &state["window"];
 				let reports_as_expected = match reported {
 					None => window.is_null(),

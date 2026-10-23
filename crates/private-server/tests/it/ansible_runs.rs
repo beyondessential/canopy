@@ -180,6 +180,10 @@ async fn a_lease_records_the_run_it_was_taken_for_and_its_first_read_starts_it()
 			!state["lease"]["started_at"].is_null(),
 			"first read of the bare lease: {state}"
 		);
+		assert_eq!(
+			state["lease_is_yours"], true,
+			"the holder is not offered taking over their own lease"
+		);
 		let window = &state["window"];
 		assert_eq!(window["lease_id"], lease.to_string());
 		assert_eq!(window["server_group_id"], env.group.to_string());
