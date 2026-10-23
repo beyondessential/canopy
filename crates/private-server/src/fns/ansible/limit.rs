@@ -37,16 +37,16 @@ pub fn matching(pattern: &str, members: &[Member<'_>]) -> Result<Vec<uuid::Uuid>
 			continue;
 		}
 		any = true;
-		if token.starts_with('~') || token.contains('[') {
-			return Err(Unsupported(format!(
-				"{token:?} is a pattern Canopy cannot evaluate; name hosts and groups, or use * and ?"
-			)));
-		}
 		let (kind, name) = match token.as_bytes()[0] {
 			b'&' => ('&', &token[1..]),
 			b'!' => ('!', &token[1..]),
 			_ => ('+', token),
 		};
+		if name.starts_with('~') || name.contains('[') {
+			return Err(Unsupported(format!(
+				"{token:?} is a pattern Canopy cannot evaluate; name hosts and groups, or use * and ?"
+			)));
+		}
 		if name.is_empty() {
 			return Err(Unsupported(format!("{token:?} names nothing")));
 		}
@@ -259,17 +259,17 @@ mod tests {
 			),
 			("a glob against a group name", "fac*", Ok(FACILITIES)),
 			("a glob in the middle of a group name", "t*u", Ok(EVERY)),
-			("a question mark in a group name", "?acility", Ok(FACILITIES)),
+			(
+				"a question mark in a group name",
+				"?acility",
+				Ok(FACILITIES),
+			),
 			("a group named by one glob only", "centr?l", Ok(&[CENTRAL])),
 			("a group is case sensitive", "Facility", Ok(&[])),
 			("a host is case sensitive", "Example-Central", Ok(&[])),
 			("a glob is case sensitive", "EXAMPLE-*", Ok(&[])),
 			("all is case sensitive", "ALL", Ok(&[])),
-			(
-				"whitespace around a token",
-				"  central  ",
-				Ok(&[CENTRAL]),
-			),
+			("whitespace around a token", "  central  ", Ok(&[CENTRAL])),
 			(
 				"whitespace around a colon",
 				"central : example-facility-a",
@@ -295,11 +295,7 @@ mod tests {
 				"central:",
 				Ok(&[CENTRAL]),
 			),
-			(
-				"a leading comma is skipped",
-				",central",
-				Ok(&[CENTRAL]),
-			),
+			("a leading comma is skipped", ",central", Ok(&[CENTRAL])),
 			(
 				"an exclusion from a group",
 				"facility:!example-facility-b",
@@ -320,27 +316,15 @@ mod tests {
 				"&central",
 				Ok(&[CENTRAL]),
 			),
-			(
-				"excluding a name nothing has",
-				"!nowhere",
-				Ok(EVERY),
-			),
+			("excluding a name nothing has", "!nowhere", Ok(EVERY)),
 			("excluding all", "!all", Ok(&[])),
-			(
-				"excluding what was chosen",
-				"central:!central",
-				Ok(&[]),
-			),
+			("excluding what was chosen", "central:!central", Ok(&[])),
 			(
 				"excluding a group from all",
 				"all:!facility",
 				Ok(&[CENTRAL]),
 			),
-			(
-				"excluding by a glob",
-				"facility:!fac*",
-				Ok(&[]),
-			),
+			("excluding by a glob", "facility:!fac*", Ok(&[])),
 			(
 				"two exclusions",
 				"!central:!example-facility-a",
@@ -391,17 +375,9 @@ mod tests {
 				"&central:tamanu",
 				Ok(&[CENTRAL]),
 			),
-			(
-				"whitespace only",
-				"   ",
-				Err("the limit is empty"),
-			),
+			("whitespace only", "   ", Err("the limit is empty")),
 			("nothing", "", Err("the limit is empty")),
-			(
-				"separators only",
-				":,:",
-				Err("the limit is empty"),
-			),
+			("separators only", ":,:", Err("the limit is empty")),
 			("an intersection of nothing", "&", Err("names nothing")),
 			("an exclusion of nothing", "!", Err("names nothing")),
 			(
@@ -420,15 +396,22 @@ mod tests {
 				Err("cannot evaluate"),
 			),
 			(
-				"a subscript",
-				"facility[0]",
+				"a regular expression in an exclusion",
+				"!~example-.*",
 				Err("cannot evaluate"),
 			),
 			(
-				"a range subscript",
-				"facility[0:1]",
+				"a regular expression in an exclusion after a group",
+				"facility:!~example-.*",
 				Err("cannot evaluate"),
 			),
+			(
+				"a regular expression in an intersection",
+				"tamanu:&~example-.*",
+				Err("cannot evaluate"),
+			),
+			("a subscript", "facility[0]", Err("cannot evaluate")),
+			("a range subscript", "facility[0:1]", Err("cannot evaluate")),
 			(
 				"a subscript in an exclusion",
 				"!facility[0]",

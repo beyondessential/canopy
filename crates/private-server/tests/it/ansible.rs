@@ -715,7 +715,11 @@ fn detail_of(answer: &Value) -> String {
 }
 
 fn same_instant(a: &Value, b: &Value) -> bool {
-	let parse = |value: &Value| value.as_str().and_then(|s| s.parse::<jiff::Timestamp>().ok());
+	let parse = |value: &Value| {
+		value
+			.as_str()
+			.and_then(|s| s.parse::<jiff::Timestamp>().ok())
+	};
 	matches!((parse(a), parse(b)), (Some(a), Some(b)) if a == b)
 }
 
@@ -799,7 +803,14 @@ async fn another_operators_lease_holds_the_environment_until_taken_over() {
 		let scenario = "a lease another operator holds";
 		let name = "lease-held";
 		let group = insert_group(&mut conn, name).await;
-		insert_application(&mut conn, group, "lease-held-central", "tamanu-central", None).await;
+		insert_application(
+			&mut conn,
+			group,
+			"lease-held-central",
+			"tamanu-central",
+			None,
+		)
+		.await;
 		let blank = insert_blank_managed_machine(&mut conn, group, "lease-held-new").await;
 		let held = seed_lease(
 			&mut conn,
@@ -811,9 +822,21 @@ async fn another_operators_lease_holds_the_environment_until_taken_over() {
 		.await;
 
 		let refusals = [
-			("take_lease", "/api/ansible/take_lease", json!({ "server_group_id": group })),
-			("for_group", "/api/ansible/for_group", json!({ "lease_id": held })),
-			("extend_lease", "/api/ansible/extend_lease", json!({ "lease_id": held })),
+			(
+				"take_lease",
+				"/api/ansible/take_lease",
+				json!({ "server_group_id": group }),
+			),
+			(
+				"for_group",
+				"/api/ansible/for_group",
+				json!({ "lease_id": held }),
+			),
+			(
+				"extend_lease",
+				"/api/ansible/extend_lease",
+				json!({ "lease_id": held }),
+			),
 		];
 		for (step, path, body) in refusals {
 			let at = format!("{scenario}, {step}");
@@ -824,7 +847,11 @@ async fn another_operators_lease_holds_the_environment_until_taken_over() {
 				format!("answered {status}, not 409: {answer}"),
 			);
 			let detail = detail_of(&answer);
-			failures.check(&at, detail.contains(OTHER), format!("does not name the holder: {detail}"));
+			failures.check(
+				&at,
+				detail.contains(OTHER),
+				format!("does not name the holder: {detail}"),
+			);
 			failures.check(
 				&at,
 				detail.contains("rolling the certs"),
@@ -844,12 +871,20 @@ async fn another_operators_lease_holds_the_environment_until_taken_over() {
 			}),
 		)
 		.await;
-		failures.check(&at, status.is_success(), format!("answered {status}: {taken}"));
+		failures.check(
+			&at,
+			status.is_success(),
+			format!("answered {status}: {taken}"),
+		);
 		failures.eq(&at, "held_by", &taken["held_by"], ME);
 
 		let at = format!("{scenario}, taken-over entry");
 		let entries = entries_of(&mut conn, "inventory_lease_taken_over", group).await;
-		failures.check(&at, entries.len() == 1, format!("{} entries, not 1", entries.len()));
+		failures.check(
+			&at,
+			entries.len() == 1,
+			format!("{} entries, not 1", entries.len()),
+		);
 		if let Some(entry) = entries.first() {
 			check_lease_entry(&mut failures, &at, entry, (group, name), &taken);
 			let detail = &entry.detail;
@@ -872,7 +907,10 @@ async fn another_operators_lease_holds_the_environment_until_taken_over() {
 					.records
 					.iter()
 					.any(|record| record.kind == database::audit::RecordKind::Machine),
-				format!("names machines though no limit was set: {:?}", entry.records),
+				format!(
+					"names machines though no limit was set: {:?}",
+					entry.records
+				),
 			);
 		}
 		let at = format!("{scenario}, taken entry");
@@ -880,13 +918,23 @@ async fn another_operators_lease_holds_the_environment_until_taken_over() {
 		failures.check(
 			&at,
 			plain.is_empty(),
-			format!("a take-over was also recorded as a plain take: {} entries", plain.len()),
+			format!(
+				"a take-over was also recorded as a plain take: {} entries",
+				plain.len()
+			),
 		);
 
 		let scenario = "a lease another operator let expire";
 		let name = "lease-lapsed";
 		let group = insert_group(&mut conn, name).await;
-		insert_application(&mut conn, group, "lease-lapsed-central", "tamanu-central", None).await;
+		insert_application(
+			&mut conn,
+			group,
+			"lease-lapsed-central",
+			"tamanu-central",
+			None,
+		)
+		.await;
 		seed_lease(&mut conn, group, OTHER, None, A_MINUTE_AGO).await;
 
 		let at = format!("{scenario}, take_lease");
@@ -896,16 +944,27 @@ async fn another_operators_lease_holds_the_environment_until_taken_over() {
 			json!({ "server_group_id": group }),
 		)
 		.await;
-		failures.check(&at, status.is_success(), format!("answered {status}: {taken}"));
+		failures.check(
+			&at,
+			status.is_success(),
+			format!("answered {status}: {taken}"),
+		);
 		failures.eq(&at, "held_by", &taken["held_by"], ME);
 		let at = format!("{scenario}, entries");
 		let plain = entries_of(&mut conn, "inventory_lease_taken", group).await;
-		failures.check(&at, plain.len() == 1, format!("{} taken entries, not 1", plain.len()));
+		failures.check(
+			&at,
+			plain.len() == 1,
+			format!("{} taken entries, not 1", plain.len()),
+		);
 		let over = entries_of(&mut conn, "inventory_lease_taken_over", group).await;
 		failures.check(
 			&at,
 			over.is_empty(),
-			format!("an expired lease was recorded as taken over: {} entries", over.len()),
+			format!(
+				"an expired lease was recorded as taken over: {} entries",
+				over.len()
+			),
 		);
 
 		failures.assert_none();
@@ -924,12 +983,34 @@ async fn the_holder_extends_and_releases_a_lease_and_the_page_reports_it() {
 		let scenario = "a lease the operator holds";
 		let name = "lease-holder";
 		let group = insert_group(&mut conn, name).await;
-		insert_application(&mut conn, group, "lease-holder-central", "tamanu-central", None).await;
+		insert_application(
+			&mut conn,
+			group,
+			"lease-holder-central",
+			"tamanu-central",
+			None,
+		)
+		.await;
 
 		let before = read_run_state(&private, group).await;
-		failures.eq(scenario, "lease before taking one", &before["lease"], Value::Null);
-		failures.eq(scenario, "window before taking one", &before["window"], Value::Null);
-		failures.eq(scenario, "refuses before taking one", &before["refuses"], false);
+		failures.eq(
+			scenario,
+			"lease before taking one",
+			&before["lease"],
+			Value::Null,
+		);
+		failures.eq(
+			scenario,
+			"window before taking one",
+			&before["window"],
+			Value::Null,
+		);
+		failures.eq(
+			scenario,
+			"refuses before taking one",
+			&before["refuses"],
+			false,
+		);
 
 		let (status, taken) = post(
 			&private,
@@ -937,10 +1018,19 @@ async fn the_holder_extends_and_releases_a_lease_and_the_page_reports_it() {
 			json!({ "server_group_id": group }),
 		)
 		.await;
-		failures.check(scenario, status.is_success(), format!("take_lease answered {status}: {taken}"));
+		failures.check(
+			scenario,
+			status.is_success(),
+			format!("take_lease answered {status}: {taken}"),
+		);
 		let lease = taken["id"].as_str().unwrap_or_default().to_owned();
 		let after = read_run_state(&private, group).await;
-		failures.eq(scenario, "holder on the page", &after["lease"]["held_by"], ME);
+		failures.eq(
+			scenario,
+			"holder on the page",
+			&after["lease"]["held_by"],
+			ME,
+		);
 
 		conn.batch_execute(&format!(
 			"UPDATE ansible_leases SET expires_at = NOW() + INTERVAL '1 minute' WHERE id = '{lease}'"
@@ -954,7 +1044,11 @@ async fn the_holder_extends_and_releases_a_lease_and_the_page_reports_it() {
 			json!({ "lease_id": lease }),
 		)
 		.await;
-		failures.check(&at, status.is_success(), format!("answered {status}: {extended}"));
+		failures.check(
+			&at,
+			status.is_success(),
+			format!("answered {status}: {extended}"),
+		);
 		let ten_minutes = jiff::Timestamp::now() + jiff::SignedDuration::from_mins(10);
 		failures.check(
 			&at,
@@ -967,7 +1061,11 @@ async fn the_holder_extends_and_releases_a_lease_and_the_page_reports_it() {
 
 		let at = format!("{scenario}, extended entry");
 		let entries = entries_of(&mut conn, "inventory_lease_extended", group).await;
-		failures.check(&at, entries.len() == 1, format!("{} entries, not 1", entries.len()));
+		failures.check(
+			&at,
+			entries.len() == 1,
+			format!("{} entries, not 1", entries.len()),
+		);
 		if let Some(entry) = entries.first() {
 			check_lease_entry(&mut failures, &at, entry, (group, name), &extended);
 		}
@@ -979,9 +1077,18 @@ async fn the_holder_extends_and_releases_a_lease_and_the_page_reports_it() {
 			json!({ "lease_id": lease }),
 		)
 		.await;
-		failures.check(&at, status.is_success(), format!("answered {status}: {answer}"));
+		failures.check(
+			&at,
+			status.is_success(),
+			format!("answered {status}: {answer}"),
+		);
 		let released = read_run_state(&private, group).await;
-		failures.eq(&at, "lease on the page once released", &released["lease"], Value::Null);
+		failures.eq(
+			&at,
+			"lease on the page once released",
+			&released["lease"],
+			Value::Null,
+		);
 
 		let at = format!("{scenario}, release_lease again");
 		let (status, answer) = post(
@@ -1466,11 +1573,41 @@ async fn an_upgrade_of_production_is_taken_only_where_a_plan_stands() {
 			Withdrawn,
 		}
 		let rows = [
-			("an unplanned upgrade of production", "production", "upgrade", Plan::None, Err("no upgrade plan")),
-			("a planned upgrade of production", "production", "upgrade", Plan::Open, Ok("upgrade")),
-			("an upgrade whose plan was withdrawn", "production", "upgrade", Plan::Withdrawn, Err("no upgrade plan")),
-			("an unplanned configuration run on production", "production", "configure", Plan::None, Ok("configure")),
-			("an unplanned upgrade at another rank", "demo", "upgrade", Plan::None, Ok("upgrade")),
+			(
+				"an unplanned upgrade of production",
+				"production",
+				"upgrade",
+				Plan::None,
+				Err("no upgrade plan"),
+			),
+			(
+				"a planned upgrade of production",
+				"production",
+				"upgrade",
+				Plan::Open,
+				Ok("upgrade"),
+			),
+			(
+				"an upgrade whose plan was withdrawn",
+				"production",
+				"upgrade",
+				Plan::Withdrawn,
+				Err("no upgrade plan"),
+			),
+			(
+				"an unplanned configuration run on production",
+				"production",
+				"configure",
+				Plan::None,
+				Ok("configure"),
+			),
+			(
+				"an unplanned upgrade at another rank",
+				"demo",
+				"upgrade",
+				Plan::None,
+				Ok("upgrade"),
+			),
 		];
 
 		let mut failures = Failures::default();

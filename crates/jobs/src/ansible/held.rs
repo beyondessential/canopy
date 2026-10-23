@@ -296,7 +296,11 @@ mod tests {
 				assert_eq!(
 					logged.records,
 					vec![
-						Record::new(RecordKind::Variable, scope.variable_record_id("salt"), "salt"),
+						Record::new(
+							RecordKind::Variable,
+							scope.variable_record_id("salt"),
+							"salt"
+						),
 						Record::new(kind, id, id.to_string()),
 					],
 					"{scope:?}"
@@ -310,7 +314,12 @@ mod tests {
 					.unwrap_or_default();
 				assert!(!left.contains_key(&entry.to_string()), "{scope:?}");
 			}
-			assert!(HeldSecretValue::list_all(&mut conn).await.unwrap().is_empty());
+			assert!(
+				HeldSecretValue::list_all(&mut conn)
+					.await
+					.unwrap()
+					.is_empty()
+			);
 		})
 		.await
 	}

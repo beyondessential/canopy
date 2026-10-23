@@ -235,7 +235,9 @@ async fn a_window_over_machines_is_declared_offered_and_amended() {
 
 		let grown: Value = private
 			.post("/api/maintenance/amend")
-			.json(&json!({ "id": window["id"], "target": { "machine_ids": [BOX_A, BOX_B, BOX_C] } }))
+			.json(
+				&json!({ "id": window["id"], "target": { "machine_ids": [BOX_A, BOX_B, BOX_C] } }),
+			)
 			.await
 			.json();
 		assert_eq!(

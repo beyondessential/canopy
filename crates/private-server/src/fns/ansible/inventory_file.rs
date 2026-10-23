@@ -1117,11 +1117,7 @@ all:
 		let rows: &[(&str, &str, &[&str])] = &[
 			("an empty file", "", &["empty"]),
 			("a sequence", "- a\n- b\n", &["not a mapping of groups"]),
-			(
-				"no all group",
-				"plugin: canopy\n",
-				&["no `all` group"],
-			),
+			("no all group", "plugin: canopy\n", &["no `all` group"]),
 			(
 				"vars that are a list",
 				"all:\n  vars: [1, 2]\n",
@@ -1142,11 +1138,7 @@ all:
 				"all:\n  children:\n    g:\n      hosts:\n        h: [a]\n",
 				&["host \"h\" of group \"g\"", "not a mapping"],
 			),
-			(
-				"invalid yaml",
-				"all:\n  vars: {a: [b\n",
-				&["line"],
-			),
+			("invalid yaml", "all:\n  vars: {a: [b\n", &["line"]),
 			(
 				"all that is a scalar",
 				"all: 3\n",
@@ -1228,8 +1220,12 @@ all:
 						.iter()
 						.filter(|needle| !refused.0.contains(**needle))
 						.collect();
-					(!missing.is_empty())
-						.then(|| format!("{name}: {yaml:?} refused as {:?}, missing {missing:?}", refused.0))
+					(!missing.is_empty()).then(|| {
+						format!(
+							"{name}: {yaml:?} refused as {:?}, missing {missing:?}",
+							refused.0
+						)
+					})
 				}
 			})
 			.collect();
@@ -1269,7 +1265,10 @@ all:
 			),
 			(
 				"a list item",
-				format!("all:\n  vars:\n    keys:\n      - plain\n      - {}", vault(8)),
+				format!(
+					"all:\n  vars:\n    keys:\n      - plain\n      - {}",
+					vault(8)
+				),
 				&["keys", "vault", "all.vars.keys.1"],
 			),
 		];
@@ -1398,21 +1397,13 @@ all:
 			("nothing above", &[], false),
 			("hosts alone", &["hosts"], false),
 			("hosts of all", &["all", "hosts"], true),
-			(
-				"hosts of a group beside all",
-				&["staging", "hosts"],
-				true,
-			),
+			("hosts of a group beside all", &["staging", "hosts"], true),
 			(
 				"hosts of a child of a group beside all",
 				&["staging", "children", "site", "hosts"],
 				true,
 			),
-			(
-				"hosts of a child",
-				&["all", "children", "g", "hosts"],
-				true,
-			),
+			("hosts of a child", &["all", "children", "g", "hosts"], true),
 			(
 				"hosts of a grandchild",
 				&["all", "children", "g", "children", "h", "hosts"],
@@ -1436,7 +1427,11 @@ all:
 				&["all", "children", "children", "hosts"],
 				true,
 			),
-			("children without a group", &["all", "children", "hosts"], false),
+			(
+				"children without a group",
+				&["all", "children", "hosts"],
+				false,
+			),
 			(
 				"hosts beneath hosts",
 				&["all", "hosts", "h", "hosts"],
@@ -1447,11 +1442,7 @@ all:
 				&["all", "children", "g", "hosts", "h", "hosts"],
 				false,
 			),
-			(
-				"a variable named hosts",
-				&["all", "vars", "hosts"],
-				false,
-			),
+			("a variable named hosts", &["all", "vars", "hosts"], false),
 			(
 				"a variable of a variable named hosts",
 				&["all", "vars", "x", "hosts"],
@@ -1481,7 +1472,8 @@ all:
 			.filter_map(|(name, path, expected)| {
 				let path: Vec<String> = path.iter().map(|key| (*key).to_owned()).collect();
 				let got = is_host_path(&path);
-				(got != *expected).then(|| format!("{name}: {path:?} gave {got}, expected {expected}"))
+				(got != *expected)
+					.then(|| format!("{name}: {path:?} gave {got}, expected {expected}"))
 			})
 			.collect();
 		assert!(

@@ -438,12 +438,16 @@ async fn a_lease_that_no_longer_holds_declares_nothing() {
 		);
 
 		let expired = lease(&mut conn, fleet.group, "op").await;
-		sql_query("UPDATE ansible_leases SET expires_at = NOW() - INTERVAL '1 minute' WHERE id = $1")
-			.bind::<sql_types::Uuid, _>(expired.id)
-			.execute(&mut conn)
+		sql_query(
+			"UPDATE ansible_leases SET expires_at = NOW() - INTERVAL '1 minute' WHERE id = $1",
+		)
+		.bind::<sql_types::Uuid, _>(expired.id)
+		.execute(&mut conn)
+		.await
+		.expect("let it run out");
+		let expired = AnsibleLease::get(&mut conn, expired.id)
 			.await
-			.expect("let it run out");
-		let expired = AnsibleLease::get(&mut conn, expired.id).await.expect("lease");
+			.expect("lease");
 		let refused = MaintenanceWindow::declare_for_run(&mut conn, &expired, None, None).await;
 		assert!(
 			matches!(&refused, Err(AppError::BadRequest(message)) if message.contains("no longer holds")),
@@ -548,8 +552,7 @@ async fn giving_a_run_windows_an_end_frees_them_from_the_lease() {
 		);
 		assert!(held.amended_at.is_some());
 
-		let again =
-			MaintenanceWindow::hold(&mut conn, limited.id, in_hours(4), Some("op")).await;
+		let again = MaintenanceWindow::hold(&mut conn, limited.id, in_hours(4), Some("op")).await;
 		assert!(
 			matches!(again, Err(AppError::BadRequest(_))),
 			"hold twice: only a window that lasts a run is held: {again:?}"
