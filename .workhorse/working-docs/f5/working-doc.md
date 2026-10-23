@@ -152,7 +152,9 @@ What round 1 showed about the process:
 Same method, two read-only agents.
 Vitest: 36 reviewed, 3 flagged, no lens B hits.
 Playwright: 14 reviewed, 5 flagged, none a delete.
-Not yet applied; waiting on the user's call.
+Applied: Vitest by one agent (its four files and `just typecheck` pass), Playwright by another, then the six changed e2e tests run by name (all pass).
+Left alone on purpose: the two optional e2e merges (the review itself advised against them), the `it.each` tabling of the PyYAML scalar and `check(...)` tests (lens C), and the whole-component import in `AnsibleRunDialog.test.ts` (a source refactor, not a test change).
+Mutation check on the lens E repair: forcing the Tamanu check true in `AnsibleRuns.tsx` makes the repaired install test fail (expected 0, received 1), so it can fail now.
 
 Vitest:
 
@@ -174,6 +176,7 @@ What this showed:
   It does not reduce the count; it makes a kept test worth keeping.
 - Lens A on end-to-end tests becomes "how much of this repeats the cheaper layer", which gives trims, not deletions.
 - Verify a verdict against the spec before applying it: one rewrite was wrong because a spec requirement made the assertion necessary.
+- A repair to a test that could not fail is not proven by the test passing; mutate the code under test and watch it fail.
 - Applying changes finds defects reading does not: the unrun test above only showed itself when its test was run.
 
 ## Signal to noise
