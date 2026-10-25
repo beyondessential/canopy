@@ -29,13 +29,13 @@ jobs:
         run: |
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
-      - uses: taiki-e/install-action@v2.87.12
+      - uses: taiki-e/install-action@v2.87.27
         with:
           tool: cargo-nextest,just
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: actions/setup-node@v7.0.0
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: lts/*
           cache: npm
@@ -66,7 +66,7 @@ jobs:
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
           rustup component add clippy
-      - uses: taiki-e/install-action@v2.87.12
+      - uses: taiki-e/install-action@v2.87.27
         with:
           tool: just
       - uses: Swatinem/rust-cache@v2
@@ -86,7 +86,7 @@ jobs:
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
           rustup component add rustfmt
-      - uses: taiki-e/install-action@v2.87.12
+      - uses: taiki-e/install-action@v2.87.27
         with:
           tool: just
       - run: just fmt-check
@@ -117,7 +117,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: actions/setup-node@v7.0.0
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: lts/*
           cache: npm
@@ -190,7 +190,7 @@ jobs:
         run: |
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
-      - uses: taiki-e/install-action@v2.87.12
+      - uses: taiki-e/install-action@v2.87.27
         with:
           tool: just
       - uses: Swatinem/rust-cache@v2
@@ -219,7 +219,7 @@ jobs:
         run: |
           rustup toolchain install --profile minimal --no-self-update stable
           rustup default stable
-      - uses: taiki-e/install-action@v2.87.12
+      - uses: taiki-e/install-action@v2.87.27
         with:
           tool: cargo-semver-checks,just
       - uses: Swatinem/rust-cache@v2
@@ -239,7 +239,7 @@ jobs:
         run: |
           rustup toolchain install --profile minimal --no-self-update stable --component clippy,rustfmt
           rustup default stable
-      - uses: taiki-e/install-action@v2.87.12
+      - uses: taiki-e/install-action@v2.87.27
         with:
           tool: just
       - uses: Swatinem/rust-cache@v2
