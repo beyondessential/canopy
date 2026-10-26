@@ -689,8 +689,6 @@ actions! {
 		detail { backup_type: String, purpose: String, run_id: Option<String> }
 	}
 
-	/// A machine's backup type was turned on or off for scheduled backups. Kept
-	/// a year, since a type left off is found long after it was turned off.
 	BackupCapabilitySet = "backup_capability_set", "Turn backup type on or off", retention = Year {
 		records { machine: Record, group: Option<Record> }
 		detail { backup_type: String, enabled: bool }
