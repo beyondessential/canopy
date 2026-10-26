@@ -14,7 +14,10 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
+use commons_servers::{
+	audit::Audit,
+	tailscale_auth::{TailscaleAdmin, TailscaleUser},
+};
 use commons_types::{
 	Uuid,
 	backup::{
@@ -25,6 +28,7 @@ use commons_types::{
 		},
 	},
 };
+use database::audit::{Action, Record, RecordKind};
 use database::backups::BackupCredentialIssuance;
 use database::pg_duration::PgDuration;
 use database::{
@@ -85,7 +89,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(read_only, silent: stats))
 		.routes(routes!(read_only, silent: run_progress))
 		.routes(routes!(read_only, silent: capabilities))
-		.routes(routes!(danger(unprotects), silent: set_capability))
+		.routes(routes!(danger(unprotects), audit(BackupCapabilitySet): set_capability))
 		.routes(routes!(danger(irreversible, invalidates), silent: delete))
 		.routes(routes!(read_only, silent: recovery_status))
 		.routes(routes!(write, silent: recovery_challenge))
@@ -2823,13 +2827,31 @@ pub async fn capabilities(
 	responses((status = 200), (status = 404, body = ProblemDetailsSchema)),
 )]
 pub async fn set_capability(
-	State(state): State<AppState>,
+	audit: Audit,
 	_admin: TailscaleAdmin,
 	Json(args): Json<SetCapabilityArgs>,
 ) -> Result<Json<()>> {
-	let mut conn = state.db.get().await?;
+	let mut conn = audit.begin().await?;
+	let current =
+		MachineBackupCapability::get_for_update(&mut conn, args.machine_id, &args.r#type).await?;
+	if current.enabled == args.enabled {
+		audit.unchanged();
+		return Ok(Json(()));
+	}
 	MachineBackupCapability::set_enabled(&mut conn, args.machine_id, &args.r#type, args.enabled)
 		.await?;
+	let machine = Machine::get_by_id(&mut conn, args.machine_id).await?;
+	let group = match machine.group_id {
+		Some(id) => Some(Record::group(&mut conn, id).await?),
+		None => None,
+	};
+	conn.record(Action::BackupCapabilitySet {
+		machine: Record::new(RecordKind::Machine, machine.id, machine.name),
+		group,
+		backup_type: args.r#type.to_string(),
+		enabled: args.enabled,
+	})
+	.await?;
 	Ok(Json(()))
 }
 

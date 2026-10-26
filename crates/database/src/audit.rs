@@ -689,6 +689,11 @@ actions! {
 		detail { backup_type: String, purpose: String, run_id: Option<String> }
 	}
 
+	BackupCapabilitySet = "backup_capability_set", "Turn backup type on or off", retention = Year {
+		records { machine: Record, group: Option<Record> }
+		detail { backup_type: String, enabled: bool }
+	}
+
 	/// Short-lived read-only credentials were issued for a restore. Settled with
 	/// the access key and expiry it produced, as backup credentials are.
 	RestoreCredentialsIssued = "restore_credentials_issued", "Issue restore credentials", tier = Routine {

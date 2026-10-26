@@ -701,6 +701,23 @@ impl MachineBackupCapability {
 			.map_err(AppError::from)
 	}
 
+	pub async fn get_for_update(
+		db: &mut AsyncPgConnection,
+		machine_id: Uuid,
+		r#type: &BackupType,
+	) -> Result<Self> {
+		use crate::schema::machine_backup_capabilities::dsl;
+
+		dsl::machine_backup_capabilities
+			.select(Self::as_select())
+			.filter(dsl::machine_id.eq(machine_id))
+			.filter(dsl::type_.eq(r#type.as_str()))
+			.for_update()
+			.first(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Operator toggle for a `(server, type)`; durable, not re-seeded by the
 	/// type default.
 	pub async fn set_enabled(
