@@ -535,3 +535,25 @@ async fn turning_a_backup_type_off_is_recorded_with_its_machine_and_group() {
 	})
 	.await
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn setting_a_backup_type_to_its_current_state_records_nothing() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		seed(&mut conn).await;
+		conn.batch_execute(&format!(
+			"INSERT INTO machine_backup_capabilities (machine_id, type, enabled)
+			 VALUES ('{BOX}', 'tamanu-postgres', true);"
+		))
+		.await
+		.unwrap();
+
+		private
+			.post("/api/backups/set_capability")
+			.json(&json!({ "machine_id": BOX, "type": "tamanu-postgres", "enabled": true }))
+			.await
+			.assert_status_ok();
+
+		assert!(log(&mut conn, Filter::default()).await.is_empty());
+	})
+	.await
+}

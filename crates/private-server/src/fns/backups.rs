@@ -2832,6 +2832,12 @@ pub async fn set_capability(
 	Json(args): Json<SetCapabilityArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = audit.begin().await?;
+	let current =
+		MachineBackupCapability::get_for_update(&mut conn, args.machine_id, &args.r#type).await?;
+	if current.enabled == args.enabled {
+		audit.unchanged();
+		return Ok(Json(()));
+	}
 	MachineBackupCapability::set_enabled(&mut conn, args.machine_id, &args.r#type, args.enabled)
 		.await?;
 	let machine = Machine::get_by_id(&mut conn, args.machine_id).await?;
