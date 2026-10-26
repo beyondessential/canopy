@@ -497,3 +497,41 @@ async fn the_tool_leaves_routine_actions_out_unless_asked_for() {
 	})
 	.await
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn turning_a_backup_type_off_is_recorded_with_its_machine_and_group() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		seed(&mut conn).await;
+		conn.batch_execute(&format!(
+			"INSERT INTO machine_backup_capabilities (machine_id, type, enabled)
+			 VALUES ('{BOX}', 'tamanu-postgres', true);"
+		))
+		.await
+		.unwrap();
+
+		private
+			.post("/api/backups/set_capability")
+			.json(&json!({ "machine_id": BOX, "type": "tamanu-postgres", "enabled": false }))
+			.await
+			.assert_status_ok();
+
+		let entries = log(&mut conn, Filter::default()).await;
+		assert_eq!(entries.len(), 1);
+		let entry = &entries[0];
+		assert_eq!(entry.action, "backup_capability_set");
+		assert!(matches!(
+			&entry.actor,
+			Actor::Operator { login, .. } if login == "admin@localhost"
+		));
+		assert_eq!(entry.detail["backup_type"], "tamanu-postgres");
+		assert_eq!(entry.detail["enabled"], false);
+		assert!(entry.records.iter().any(|r| r.id == BOX && r.name == "box"));
+		assert!(
+			entry
+				.records
+				.iter()
+				.any(|r| r.id == GROUP && r.name == "kamaka")
+		);
+	})
+	.await
+}

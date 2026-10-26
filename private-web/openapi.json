@@ -17481,7 +17481,9 @@
         "tags": [
           "backups"
         ],
-        "x-canopy-audit": [],
+        "x-canopy-audit": [
+          "backup_capability_set"
+        ],
         "x-canopy-danger-reasons": [
           "unprotects"
         ],
