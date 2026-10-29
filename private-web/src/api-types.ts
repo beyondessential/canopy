@@ -13216,6 +13216,12 @@ export interface components {
          */
         ServerLastStatusData: {
             /**
+             * Format: int64
+             * @description Mobile devices that synced to this central in the last 30 days. Absent
+             *     for a facility, and until the reporting bestool counts them.
+             */
+            active_mobile_devices?: number | null;
+            /**
              * @description Version of bestool, the agent reporting on the server. Absent when no
              *     source reports one.
              */

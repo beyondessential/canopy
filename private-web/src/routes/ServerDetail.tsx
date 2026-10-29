@@ -654,6 +654,12 @@ function StatusInfoFields({ status }: { status: ServerLastStatusData }) {
 					mono
 				/>
 			)}
+			{status.active_mobile_devices != null && (
+				<InfoItem
+					label="Mobile devices (30d)"
+					value={String(status.active_mobile_devices)}
+				/>
+			)}
 			{status.nodejs && (
 				<InfoItem label="Node.js" value={status.nodejs} mono />
 			)}
