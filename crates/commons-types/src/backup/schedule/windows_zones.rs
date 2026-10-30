@@ -4,9 +4,10 @@
 //! Unicode CLDR, under the Unicode licence). jiff keeps it private, so it is
 //! carried here to read the zone names Windows machines report.
 //!
-//! Zones CLDR names by a backward-compatible alias are given their canonical
-//! name instead, since newer Linux images ship the aliases only in
-//! `tzdata-legacy`.
+//! Zones whose CLDR name is an IANA backward link absent from `zone.tab` are
+//! given their canonical name instead, since Debian ships those only in
+//! `tzdata-legacy`. Links `zone.tab` lists, such as `Atlantic/Reykjavik`, keep
+//! real data in the base package and stay as CLDR names them.
 
 pub(super) static WINDOWS_TO_IANA: &[(&str, &str)] = &[
 	(r"Afghanistan Standard Time", r"Asia/Kabul"),
