@@ -16,7 +16,10 @@ pub(super) static WINDOWS_TO_IANA: &[(&str, &str)] = &[
 	(r"Arab Standard Time", r"Asia/Riyadh"),
 	(r"Arabian Standard Time", r"Asia/Dubai"),
 	(r"Arabic Standard Time", r"Asia/Baghdad"),
-	(r"Argentina Standard Time", r"America/Argentina/Buenos_Aires"),
+	(
+		r"Argentina Standard Time",
+		r"America/Argentina/Buenos_Aires",
+	),
 	(r"Astrakhan Standard Time", r"Europe/Astrakhan"),
 	(r"Atlantic Standard Time", r"America/Halifax"),
 	(r"AUS Central Standard Time", r"Australia/Darwin"),
