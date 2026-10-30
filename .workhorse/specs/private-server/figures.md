@@ -48,6 +48,9 @@ When no source reports the runtime version, it falls back to the runtime named b
 
 The application's configured timezone presents as reported, and can differ from the timezone its machine's operating system is set to without either being wrong.
 
+A central presents how many mobile devices synced to it in the last 30 days, as reported, zero included, since zero says nobody uses mobile there.
+An application whose sources report no such count presents none, which is not the same as zero.
+
 ## Fleet spread
 
 The fleet view presents how each figure is spread across the fleet: for every distinct value, how many report it, ordered by how many, and which they are.

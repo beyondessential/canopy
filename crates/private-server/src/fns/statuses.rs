@@ -721,6 +721,9 @@ pub struct StatusSnapshotData {
 	/// Version the server's reporting schema was built for. Absent until a
 	/// server runs a schema that stamps one (spec: RPT#the-offering-contract).
 	pub reporting_schema: Option<String>,
+	/// Mobile devices that synced to this central in the last 30 days. Absent
+	/// for a facility, and until the reporting bestool counts them.
+	pub active_mobile_devices: Option<i64>,
 	/// Additional unstructured data reported alongside the snapshot, keyed
 	/// by source (`{ [source]: { …fields } }`) so a multi-source snapshot's
 	/// raw payloads stay attributed rather than merged. Sources whose
@@ -871,6 +874,7 @@ pub async fn snapshot(
 		bestool: figures.bestool_version(),
 		timezone: figures.timezone(),
 		reporting_schema: figures.reporting_schema_version(),
+		active_mobile_devices: figures.active_mobile_devices(),
 		extra: by_source_extra,
 		operators,
 		checks,

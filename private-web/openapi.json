@@ -12725,6 +12725,14 @@
       "ServerLastStatusData": {
         "description": "The server's most recently reported status push: version/host info plus\nhealth.",
         "properties": {
+          "active_mobile_devices": {
+            "description": "Mobile devices that synced to this central in the last 30 days. Absent\nfor a facility, and until the reporting bestool counts them.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "bestool": {
             "description": "Version of bestool, the agent reporting on the server. Absent when no\nsource reports one.",
             "type": [
@@ -13638,6 +13646,14 @@
       "StatusSnapshotData": {
         "description": "A single status push from a server, as of a point in time, with derived\nhealth and version information.",
         "properties": {
+          "active_mobile_devices": {
+            "description": "Mobile devices that synced to this central in the last 30 days. Absent\nfor a facility, and until the reporting bestool counts them.",
+            "format": "int64",
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "bestool": {
             "description": "Version of bestool, the agent reporting on the server. Absent when no\nsource reports one.",
             "type": [

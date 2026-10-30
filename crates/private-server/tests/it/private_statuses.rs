@@ -985,6 +985,8 @@ struct SnapshotData {
 	bestool: Option<String>,
 	#[serde(default)]
 	timezone: Option<String>,
+	#[serde(default)]
+	active_mobile_devices: Option<i64>,
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1560,6 +1562,36 @@ async fn fleet_detail_carries_healthcheck_fields() {
 			serde_json::json!({}),
 			"an application with no check state reports no check fields",
 		);
+	})
+	.await
+}
+
+/// A central reporting no mobile devices shows zero, which is itself the answer.
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_reports_active_mobile_devices() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO devices (id, role) VALUES
+			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'server');
+
+			WITH m AS (INSERT INTO machines (name, id, device_id) VALUES ('box', '20000000-0000-0000-0000-000000000011', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			('20000000-0000-0000-0000-000000000011', 'https://mobile.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000011');
+
+			INSERT INTO statuses (server_id, device_id, created_at, healthy, health, extra) VALUES
+			('20000000-0000-0000-0000-000000000011', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', NOW() - INTERVAL '1 hour', true, '[]'::jsonb, '{\"activeMobileDevices\":0}'::jsonb)",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/snapshot")
+			.json(&serde_json::json!({
+				"server_id": "20000000-0000-0000-0000-000000000011"
+			}))
+			.await;
+		r.assert_status_ok();
+		let data: Option<SnapshotData> = r.json();
+		assert_eq!(data.expect("snapshot returned").active_mobile_devices, Some(0));
 	})
 	.await
 }
