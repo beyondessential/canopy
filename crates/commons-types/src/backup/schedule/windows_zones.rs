@@ -3,6 +3,10 @@
 //! `src/tz/system/windows/windows_zones.rs` (MIT OR Unlicense; the data is the
 //! Unicode CLDR, under the Unicode licence). jiff keeps it private, so it is
 //! carried here to read the zone names Windows machines report.
+//!
+//! Zones CLDR names by a backward-compatible alias are given their canonical
+//! name instead, since newer Linux images ship the aliases only in
+//! `tzdata-legacy`.
 
 pub(super) static WINDOWS_TO_IANA: &[(&str, &str)] = &[
 	(r"Afghanistan Standard Time", r"Asia/Kabul"),
@@ -12,7 +16,7 @@ pub(super) static WINDOWS_TO_IANA: &[(&str, &str)] = &[
 	(r"Arab Standard Time", r"Asia/Riyadh"),
 	(r"Arabian Standard Time", r"Asia/Dubai"),
 	(r"Arabic Standard Time", r"Asia/Baghdad"),
-	(r"Argentina Standard Time", r"America/Buenos_Aires"),
+	(r"Argentina Standard Time", r"America/Argentina/Buenos_Aires"),
 	(r"Astrakhan Standard Time", r"Europe/Astrakhan"),
 	(r"Atlantic Standard Time", r"America/Halifax"),
 	(r"AUS Central Standard Time", r"Australia/Darwin"),
@@ -50,15 +54,15 @@ pub(super) static WINDOWS_TO_IANA: &[(&str, &str)] = &[
 	(r"Egypt Standard Time", r"Africa/Cairo"),
 	(r"Ekaterinburg Standard Time", r"Asia/Yekaterinburg"),
 	(r"Fiji Standard Time", r"Pacific/Fiji"),
-	(r"FLE Standard Time", r"Europe/Kiev"),
+	(r"FLE Standard Time", r"Europe/Kyiv"),
 	(r"Georgian Standard Time", r"Asia/Tbilisi"),
 	(r"GMT Standard Time", r"Europe/London"),
-	(r"Greenland Standard Time", r"America/Godthab"),
+	(r"Greenland Standard Time", r"America/Nuuk"),
 	(r"Greenwich Standard Time", r"Atlantic/Reykjavik"),
 	(r"GTB Standard Time", r"Europe/Bucharest"),
 	(r"Haiti Standard Time", r"America/Port-au-Prince"),
 	(r"Hawaiian Standard Time", r"Pacific/Honolulu"),
-	(r"India Standard Time", r"Asia/Calcutta"),
+	(r"India Standard Time", r"Asia/Kolkata"),
 	(r"Iran Standard Time", r"Asia/Tehran"),
 	(r"Israel Standard Time", r"Asia/Jerusalem"),
 	(r"Jordan Standard Time", r"Asia/Amman"),
@@ -76,10 +80,10 @@ pub(super) static WINDOWS_TO_IANA: &[(&str, &str)] = &[
 	(r"Morocco Standard Time", r"Africa/Casablanca"),
 	(r"Mountain Standard Time", r"America/Denver"),
 	(r"Mountain Standard Time (Mexico)", r"America/Mazatlan"),
-	(r"Myanmar Standard Time", r"Asia/Rangoon"),
+	(r"Myanmar Standard Time", r"Asia/Yangon"),
 	(r"N. Central Asia Standard Time", r"Asia/Novosibirsk"),
 	(r"Namibia Standard Time", r"Africa/Windhoek"),
-	(r"Nepal Standard Time", r"Asia/Katmandu"),
+	(r"Nepal Standard Time", r"Asia/Kathmandu"),
 	(r"New Zealand Standard Time", r"Pacific/Auckland"),
 	(r"Newfoundland Standard Time", r"America/St_Johns"),
 	(r"Norfolk Standard Time", r"Pacific/Norfolk"),
@@ -123,7 +127,7 @@ pub(super) static WINDOWS_TO_IANA: &[(&str, &str)] = &[
 	(r"Turkey Standard Time", r"Europe/Istanbul"),
 	(r"Turks And Caicos Standard Time", r"America/Grand_Turk"),
 	(r"Ulaanbaatar Standard Time", r"Asia/Ulaanbaatar"),
-	(r"US Eastern Standard Time", r"America/Indianapolis"),
+	(r"US Eastern Standard Time", r"America/Indiana/Indianapolis"),
 	(r"US Mountain Standard Time", r"America/Phoenix"),
 	(r"UTC", r"Etc/UTC"),
 	(r"UTC+12", r"Etc/GMT-12"),
