@@ -42,6 +42,7 @@ async fn register(
 			content_type: Some("application/sql".into()),
 			digest: Some(digest_of(bytes)),
 			run_id: None,
+			rank: None,
 		},
 	)
 	.await

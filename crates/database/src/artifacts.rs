@@ -8,6 +8,8 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use commons_types::server::rank::ServerRank;
+
 use crate::versions::Version;
 
 /// Which artifacts a read may see.
@@ -17,26 +19,55 @@ pub enum Scope {
 	/// The unscoped artifacts alone: a read carrying no identity, or one whose
 	/// caller has no group of its own.
 	Unscoped,
-	/// The unscoped artifacts plus the named group's.
+	/// The unscoped artifacts plus the named group's, of every environment.
+	/// A caller in a group whose rank is not yet set resolves here, and is
+	/// offered the group's environment-wide artifacts alone.
 	Group(Uuid),
-	/// Every artifact, whatever group it belongs to. Operator views only.
+	/// The unscoped artifacts, the group's environment-wide ones, and the
+	/// ones for this environment. Another environment's are not in scope.
+	Environment(Uuid, ServerRank),
+	/// Every artifact, whatever group or environment it belongs to. Operator
+	/// views only.
 	Fleet,
 }
 
 impl Scope {
-	/// What a caller resolving to this group may see.
-	pub fn for_caller(group: Option<Uuid>) -> Self {
-		match group {
-			Some(group) => Self::Group(group),
-			None => Self::Unscoped,
+	/// What a caller resolving to this group and rank may see.
+	///
+	/// A machine carries its rank, so an application's environment is known
+	/// wherever its group is. One that has not been ranked yet is in none of
+	/// its group's environments, so it is offered what the group holds for all
+	/// of them rather than nothing.
+	// spec: GRP#environments
+	pub fn for_caller(group: Option<Uuid>, rank: Option<ServerRank>) -> Self {
+		match (group, rank) {
+			(Some(group), Some(rank)) => Self::Environment(group, rank),
+			(Some(group), None) => Self::Group(group),
+			(None, _) => Self::Unscoped,
 		}
 	}
 
-	/// Whether an artifact of this group is in scope.
-	fn sees(self, group: Option<Uuid>) -> bool {
+	/// The group whose artifacts this scope may see, where it is one group's.
+	pub fn group(self) -> Option<Uuid> {
+		match self {
+			Self::Unscoped | Self::Fleet => None,
+			Self::Group(group) | Self::Environment(group, _) => Some(group),
+		}
+	}
+
+	/// Whether an artifact of this group and environment is in scope.
+	///
+	/// A rank narrows who an artifact reaches, so one carrying a rank is
+	/// withheld from a caller that has not resolved to that environment,
+	/// the group's own unranked callers included.
+	fn sees(self, group: Option<Uuid>, rank: Option<ServerRank>) -> bool {
 		match self {
 			Self::Unscoped => group.is_none(),
-			Self::Group(caller) => group.is_none() || group == Some(caller),
+			Self::Group(caller) => (group.is_none() || group == Some(caller)) && rank.is_none(),
+			Self::Environment(caller, caller_rank) => {
+				(group.is_none() || group == Some(caller))
+					&& (rank.is_none() || rank == Some(caller_rank))
+			}
 			Self::Fleet => true,
 		}
 	}
@@ -83,6 +114,10 @@ pub struct Artifact {
 	pub digest: Option<Vec<u8>>,
 	/// The run that produced this artifact, where the registration named one.
 	pub run_id: Option<Uuid>,
+	/// The environment within `group_id` this artifact is for. `null` for an
+	/// artifact that is for every environment of its group, which is every
+	/// artifact that names no group.
+	pub rank: Option<ServerRank>,
 	/// When this artifact was last registered.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub updated_at: jiff::Timestamp,
@@ -107,6 +142,7 @@ pub struct NewArtifact {
 	pub content_type: Option<String>,
 	pub digest: Option<Vec<u8>>,
 	pub run_id: Option<Uuid>,
+	pub rank: Option<ServerRank>,
 }
 
 /// Cap on the bytes Canopy will hold for one artifact. A reporting schema is a
@@ -231,7 +267,7 @@ impl Artifact {
 		let mut seen = std::collections::HashSet::new();
 		artifacts
 			.iter()
-			.filter(|a| scope.sees(a.group_id))
+			.filter(|a| scope.sees(a.group_id, a.rank))
 			.filter(|a| seen.insert((a.artifact_type.as_str(), a.platform.as_str())))
 			.map(|a| a.id)
 			.collect()
@@ -256,7 +292,12 @@ impl Artifact {
 		let mut query = artifacts.filter(id.eq(artifact_id)).into_boxed();
 		query = match scope {
 			Scope::Unscoped => query.filter(group_id.is_null()),
-			Scope::Group(caller) => query.filter(group_id.is_null().or(group_id.eq(caller))),
+			Scope::Group(caller) => query
+				.filter(group_id.is_null().or(group_id.eq(caller)))
+				.filter(rank.is_null()),
+			Scope::Environment(caller, caller_rank) => query
+				.filter(group_id.is_null().or(group_id.eq(caller)))
+				.filter(rank.is_null().or(rank.eq(caller_rank))),
 			Scope::Fleet => query,
 		};
 
@@ -310,7 +351,12 @@ impl Artifact {
 
 		query = match scope {
 			Scope::Unscoped => query.filter(group_id.is_null()),
-			Scope::Group(caller) => query.filter(group_id.is_null().or(group_id.eq(caller))),
+			Scope::Group(caller) => query
+				.filter(group_id.is_null().or(group_id.eq(caller)))
+				.filter(rank.is_null()),
+			Scope::Environment(caller, caller_rank) => query
+				.filter(group_id.is_null().or(group_id.eq(caller)))
+				.filter(rank.is_null().or(rank.eq(caller_rank))),
 			Scope::Fleet => query,
 		};
 
@@ -344,25 +390,26 @@ impl Artifact {
 
 	/// Sort artifacts by specificity, with most specific first.
 	/// Priority:
-	/// 1. Group-scoped artifacts over unscoped ones
+	/// 1. Scope: one environment's over its group's, and the group's over unscoped
 	/// 2. Exact version matches (version_id set)
 	/// 3. More specific ranges (range that allows_all of other matching ranges)
 	/// 4. When ranges are incomparable, use pattern specificity: ^ > ~ > .x > others
 	// spec: ART#what-a-version-offers
 	fn sort_by_specificity(artifacts: &mut [Self]) {
 		artifacts.sort_by(|a, b| {
-			// An artifact scoped to the caller's group is more specific than one
-			// belonging to no group. A deduplicating read resolves one scope, so
-			// only one group's artifacts are ever in play here.
-			let a_is_scoped = a.group_id.is_some();
-			let b_is_scoped = b.group_id.is_some();
+			// An artifact for the caller's environment is more specific than one
+			// for its whole group, which is more specific than one belonging to
+			// no group. A deduplicating read resolves one scope, so only one
+			// group's artifacts, and only its own environment's, are in play.
+			let scope_rank = |artifact: &Self| match (artifact.group_id, artifact.rank) {
+				(Some(_), Some(_)) => 0,
+				(Some(_), None) => 1,
+				(None, _) => 2,
+			};
 
-			if a_is_scoped != b_is_scoped {
-				return if a_is_scoped {
-					std::cmp::Ordering::Less
-				} else {
-					std::cmp::Ordering::Greater
-				};
+			let by_scope = scope_rank(a).cmp(&scope_rank(b));
+			if by_scope != std::cmp::Ordering::Equal {
+				return by_scope;
 			}
 
 			// Exact match always wins

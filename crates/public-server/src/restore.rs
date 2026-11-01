@@ -27,6 +27,7 @@ use commons_types::backup::{
 	RunOutcome, redaction_params, resolve_params, semantics,
 };
 use commons_types::server::app_type::{ApplicationType, RedactionManifest};
+use commons_types::server::rank::ServerRank;
 use database::{
 	Db,
 	backups::{BackupRun, NewBackupCredentialIssuance, ServerGroupBackupConfig},
@@ -185,50 +186,106 @@ pub struct WorklistEntry {
 	pub target_version: Option<String>,
 	/// Identifier of that version. Echo it back in the migration-test report.
 	pub target_version_id: Option<Uuid>,
+	/// The environment the entry is for, on a reporting-schema build. The
+	/// schema is registered against it, so a build echoes it back rather than
+	/// working it out from the machine it restored.
+	// spec: RPT#the-build-contract
+	pub rank: Option<ServerRank>,
+}
+
+/// What dispatching one environment's schema builds needs of that environment.
+///
+/// A build restores the environment's own central, since the configuration a
+/// schema follows from is that environment's and no other's.
+// spec: RPT#the-build-contract
+struct SchemaEnvironment {
+	rank: ServerRank,
+	machine_id: Uuid,
+	central_type: commons_types::server::app_type::ApplicationType,
+	versions: Vec<database::versions::Version>,
 }
 
 /// What dispatching a group's schema builds needs of the group itself.
 ///
-/// A build restores the group's canonical central and differs per pair only in
-/// the version it migrates to, so this is the same for every declaration
-/// covering the group.
+/// One entry per environment, since two environments of a group hold different
+/// configuration and a schema built against one is not the other's. The
+/// settlement covers the group's pairs and so is read once for all of them.
 // spec: RPT#the-build-contract
 struct SchemaGroup {
-	machine_id: Uuid,
-	central_type: commons_types::server::app_type::ApplicationType,
-	versions: Vec<database::versions::Version>,
+	environments: Vec<SchemaEnvironment>,
 	settlement: database::reporting_schemas::Settlement,
 }
 
-/// Resolve a group's central and pairs, or `None` where it has no central to
-/// build from.
+/// Resolve each of a group's environments and its pairs, or `None` where the
+/// group has no environment with a central to build from.
 async fn resolve_schema_group(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	group_id: Uuid,
 	ranges: &database::artifacts::RangeChanges,
 ) -> Result<Option<SchemaGroup>> {
 	let members = database::applications::Application::list_live_in_group(conn, group_id).await?;
-	let Some(central) = database::server_groups::ServerGroup::canonical_central(&members) else {
-		return Ok(None);
-	};
-	let central_type = central.r#type.clone();
-	// The restore worklist is anchored on a box: a restore rewrites a machine.
-	// A cluster-hosted central has no box, so there is no machine-anchored
-	// schema group for it.
-	let Some(machine_id) = central.machine_id else {
-		return Ok(None);
-	};
 
-	let versions =
-		database::reporting_schemas::versions_of_members(conn, group_id, &members).await?;
+	let pairs =
+		database::reporting_schemas::pairs_of_live_members(conn, group_id, &members).await?;
+
+	let mut environments: Vec<SchemaEnvironment> = Vec::new();
+	for (rank, version) in pairs {
+		if let Some(held) = environments.iter_mut().find(|e| e.rank == rank) {
+			if !held.versions.iter().any(|v| v.id == version.id) {
+				held.versions.push(version);
+			}
+			continue;
+		}
+
+		// The environment's own central, not the group's: restoring the
+		// group's highest-ranked one for every environment is what built one
+		// schema from the wrong configuration.
+		let in_environment: Vec<database::applications::Application> = members
+			.iter()
+			.filter(|m| m.rank == Some(rank))
+			.cloned()
+			.collect();
+		let Some(central) =
+			database::server_groups::ServerGroup::canonical_central(&in_environment)
+		else {
+			continue;
+		};
+		// The restore worklist is anchored on a box: a restore rewrites a
+		// machine. A cluster-hosted central has no box, so there is no
+		// machine-anchored environment for it.
+		let Some(machine_id) = central.machine_id else {
+			continue;
+		};
+
+		environments.push(SchemaEnvironment {
+			rank,
+			machine_id,
+			central_type: central.r#type.clone(),
+			versions: vec![version],
+		});
+	}
+
+	if environments.is_empty() {
+		return Ok(None);
+	}
+
+	let versions: Vec<database::versions::Version> = {
+		let mut all: Vec<database::versions::Version> = Vec::new();
+		for environment in &environments {
+			for version in &environment.versions {
+				if !all.iter().any(|v| v.id == version.id) {
+					all.push(version.clone());
+				}
+			}
+		}
+		all
+	};
 	let settlement =
 		database::reporting_schemas::Settlement::for_group(conn, group_id, &versions, ranges)
 			.await?;
 
 	Ok(Some(SchemaGroup {
-		machine_id,
-		central_type,
-		versions,
+		environments,
 		settlement,
 	}))
 }
@@ -292,7 +349,7 @@ async fn worklist(
 	// A schema build is keyed on the pair, not the machine, so two declarations
 	// covering one group with schema-building intents would each emit the whole
 	// pair list: a restore and a migrate paid for twice per build.
-	let mut pairs: HashSet<(Uuid, Uuid)> = HashSet::new();
+	let mut pairs: HashSet<(Uuid, ServerRank, Uuid)> = HashSet::new();
 	// Everything a build's dispatch needs of a group: its canonical central,
 	// the versions its pairs cover, and where each pair stands. Resolved once
 	// per group rather than per declaration, and the absence of a central is
@@ -416,38 +473,41 @@ async fn worklist(
 				continue;
 			};
 
-			let latest = snapshots.get(&(group.machine_id, d.r#type.clone()));
+			for environment in &group.environments {
+				let latest = snapshots.get(&(environment.machine_id, d.r#type.clone()));
 
-			for version in &group.versions {
-				if !pairs.insert((d.group_id, version.id)) {
-					continue;
+				for version in &environment.versions {
+					if !pairs.insert((d.group_id, environment.rank, version.id)) {
+						continue;
+					}
+
+					if once && group.settlement.settled(environment.rank, version.id) {
+						continue;
+					}
+
+					#[expect(deprecated, reason = "emitted for consumers on the earlier shape")]
+					out.push(WorklistEntry {
+						replica_id: d.id,
+						group_id: d.group_id,
+						machine_id: environment.machine_id,
+						server_id: environment.machine_id,
+						application_type: Some(environment.central_type.clone()),
+						r#type: d.r#type.clone(),
+						intent: d.intent.clone(),
+						name: d.name.clone(),
+						overdue_after_seconds: d.overdue_after.map(|f| f.0.as_secs()),
+						params: params.clone(),
+						snapshot_id: latest.and_then(|r| r.snapshot_id.clone()),
+						snapshot_at: latest.map(|r| r.reported_at.to_string()),
+						storage: "s3".into(),
+						bucket: cfg.bucket.clone(),
+						prefix: cfg.prefix.clone(),
+						region: region.clone(),
+						target_version: Some(version.as_semver().to_string()),
+						target_version_id: Some(version.id),
+						rank: Some(environment.rank),
+					});
 				}
-
-				if once && group.settlement.settled(version.id) {
-					continue;
-				}
-
-				#[expect(deprecated, reason = "emitted for consumers on the earlier shape")]
-				out.push(WorklistEntry {
-					replica_id: d.id,
-					group_id: d.group_id,
-					machine_id: group.machine_id,
-					server_id: group.machine_id,
-					application_type: Some(group.central_type.clone()),
-					r#type: d.r#type.clone(),
-					intent: d.intent.clone(),
-					name: d.name.clone(),
-					overdue_after_seconds: d.overdue_after.map(|f| f.0.as_secs()),
-					params: params.clone(),
-					snapshot_id: latest.and_then(|r| r.snapshot_id.clone()),
-					snapshot_at: latest.map(|r| r.reported_at.to_string()),
-					storage: "s3".into(),
-					bucket: cfg.bucket.clone(),
-					prefix: cfg.prefix.clone(),
-					region: region.clone(),
-					target_version: Some(version.as_semver().to_string()),
-					target_version_id: Some(version.id),
-				});
 			}
 
 			continue;
@@ -553,6 +613,8 @@ async fn worklist(
 			#[expect(deprecated, reason = "emitted for consumers on the earlier shape")]
 			out.push(WorklistEntry {
 				replica_id: d.id,
+				// Only a reporting-schema build is per environment.
+				rank: None,
 				group_id: d.group_id,
 				machine_id: machine.id,
 				server_id: machine.id,
@@ -1144,20 +1206,40 @@ async fn verification(
 			}
 
 			let version_id = resolve_build_target(&mut conn, &build).await?;
-			// The build is held against the group's central application, which is
-			// the one whose database the schema followed from and the one the
-			// entry named.
+			// The environment is the restored machine's, read here rather than
+			// taken from the report: a build names the schema's environment
+			// when it registers it, and the two disagreeing would file the
+			// build against one environment and the schema against another.
+			// spec: RPT#what-a-build-reports
+			let Some(rank) = database::machines::Machine::get_by_id(&mut conn, machine_id)
+				.await?
+				.rank
+			else {
+				return Err(AppError::BadRequest(
+					"the machine this build restored is in none of its group's environments".into(),
+				));
+			};
+			// The build is held against that environment's central application,
+			// which is the one whose database the schema followed from and the
+			// one the entry named.
 			// spec: RPT#alerting
 			let members =
 				database::applications::Application::list_live_in_group(&mut conn, args.group)
 					.await?;
+			let in_environment: Vec<database::applications::Application> = members
+				.iter()
+				.filter(|m| m.rank == Some(rank))
+				.cloned()
+				.collect();
 			let application_id =
-				database::server_groups::ServerGroup::canonical_central(&members).map(|a| a.id);
+				database::server_groups::ServerGroup::canonical_central(&in_environment)
+					.map(|a| a.id);
 			ReportingSchemaBuild::record(
 				&mut conn,
 				report,
 				NewReportingSchemaBuild {
 					group_id: args.group,
+					rank,
 					version_id,
 					application_id,
 					built: build.built,

@@ -3,6 +3,7 @@
 //! spec: ART
 
 use commons_tests::db::TestDb;
+use commons_types::server::rank::ServerRank;
 use database::{
 	artifacts::{Artifact, NewArtifact, Scope, digest_of, parse_sri, sri},
 	diesel_async::AsyncPgConnection,
@@ -63,10 +64,22 @@ fn unscoped(version_id: Uuid, artifact_type: &str, url: &str) -> NewArtifact {
 		content_type: None,
 		digest: None,
 		run_id: None,
+		rank: None,
 	}
 }
 
 fn held(version_id: Uuid, artifact_type: &str, group: Uuid, bytes: &[u8]) -> NewArtifact {
+	held_in(version_id, artifact_type, group, None, bytes)
+}
+
+/// One the group holds for a single environment, where a rank is given.
+fn held_in(
+	version_id: Uuid,
+	artifact_type: &str,
+	group: Uuid,
+	rank: Option<ServerRank>,
+	bytes: &[u8],
+) -> NewArtifact {
 	NewArtifact {
 		id: None,
 		version_id: Some(version_id),
@@ -79,6 +92,7 @@ fn held(version_id: Uuid, artifact_type: &str, group: Uuid, bytes: &[u8]) -> New
 		content_type: Some("application/sql".to_owned()),
 		digest: Some(digest_of(bytes)),
 		run_id: None,
+		rank,
 	}
 }
 
@@ -425,6 +439,7 @@ fn ranged(artifact_type: &str, pattern: &str, url: &str) -> NewArtifact {
 		content_type: None,
 		digest: None,
 		run_id: None,
+		rank: None,
 	}
 }
 

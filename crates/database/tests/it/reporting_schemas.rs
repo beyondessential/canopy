@@ -3,6 +3,7 @@
 //! spec: RPT
 
 use commons_tests::db::TestDb;
+use commons_types::server::rank::ServerRank;
 use database::{
 	diesel_async::AsyncPgConnection,
 	reporting_schemas::{
@@ -131,6 +132,7 @@ async fn record_build_for_run(
 		conn,
 		report,
 		NewReportingSchemaBuild {
+			rank: ServerRank::Production,
 			group_id: group(),
 			version_id: version,
 			application_id: Some(CENTRAL.parse().unwrap()),
@@ -172,7 +174,7 @@ async fn a_failed_build_settles_the_pair() {
 		declare_builder(&mut conn, true).await;
 
 		assert!(
-			!ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			!ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"an untried pair is on the worklist"
@@ -181,7 +183,7 @@ async fn a_failed_build_settles_the_pair() {
 		record_build(&mut conn, newer, false).await;
 
 		assert!(
-			ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"a failure settles it as firmly as a pass"
@@ -205,17 +207,23 @@ async fn an_operator_ask_reinstates_a_settled_pair() {
 
 		record_build(&mut conn, newer, true).await;
 		assert!(
-			ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap()
 		);
 
-		ReportingSchemaRequest::enqueue(&mut conn, group(), newer, Some("someone@bes.au"))
-			.await
-			.expect("enqueue");
+		ReportingSchemaRequest::enqueue(
+			&mut conn,
+			group(),
+			ServerRank::Production,
+			newer,
+			Some("someone@bes.au"),
+		)
+		.await
+		.expect("enqueue");
 
 		assert!(
-			!ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			!ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"an ask puts the pair back on the worklist"
@@ -233,7 +241,7 @@ async fn an_operator_ask_reinstates_a_settled_pair() {
 		// The build that answers the ask clears it.
 		record_build(&mut conn, newer, true).await;
 		assert!(
-			ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"the ask is answered once the build it asked for lands"
@@ -263,14 +271,20 @@ async fn an_ask_made_while_the_build_ran_stands() {
 		.await
 		.expect("issue the run its credentials");
 
-		ReportingSchemaRequest::enqueue(&mut conn, group(), newer, Some("someone@bes.au"))
-			.await
-			.expect("enqueue");
+		ReportingSchemaRequest::enqueue(
+			&mut conn,
+			group(),
+			ServerRank::Production,
+			newer,
+			Some("someone@bes.au"),
+		)
+		.await
+		.expect("enqueue");
 
 		record_build_for_run(&mut conn, newer, true, Some(RUN.parse().unwrap())).await;
 
 		assert!(
-			!ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			!ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"the ask stands until a build that began after it lands"
@@ -317,6 +331,7 @@ async fn a_failed_restore_leaves_the_pair_unsettled() {
 			&mut conn,
 			report,
 			NewReportingSchemaBuild {
+				rank: ServerRank::Production,
 				group_id: group(),
 				version_id: newer,
 				application_id: Some(CENTRAL.parse().unwrap()),
@@ -329,7 +344,7 @@ async fn a_failed_restore_leaves_the_pair_unsettled() {
 		.expect("record");
 
 		assert!(
-			!ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			!ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"an unhealthy restore is dispatched again rather than settling the pair"
@@ -348,7 +363,7 @@ async fn a_new_artifact_for_the_version_reinstates_the_pair() {
 
 		record_build(&mut conn, newer, true).await;
 		assert!(
-			ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"a built pair settles"
@@ -363,7 +378,7 @@ async fn a_new_artifact_for_the_version_reinstates_the_pair() {
 		.expect("register an artifact for the version");
 
 		assert!(
-			!ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			!ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"the version's artifacts changed, so the pair is built again"
@@ -391,7 +406,7 @@ async fn a_range_artifact_covering_the_version_reinstates_the_pair() {
 		.expect("register a range artifact");
 
 		assert!(
-			!ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			!ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"a range covering the version is one of its artifacts"
@@ -423,7 +438,7 @@ async fn a_group_s_own_schema_does_not_reinstate_the_pair() {
 		.expect("another group registers its schema");
 
 		assert!(
-			ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"a schema is another group's output, not a change to the version"
@@ -452,6 +467,7 @@ async fn a_build_records_what_it_registered() {
 			&mut conn,
 			report,
 			NewReportingSchemaBuild {
+				rank: ServerRank::Production,
 				group_id: group(),
 				version_id: newer,
 				application_id: Some(CENTRAL.parse().unwrap()),
@@ -463,10 +479,15 @@ async fn a_build_records_what_it_registered() {
 		.await
 		.expect("record");
 
-		let build = ReportingSchemaBuild::latest_for_pair(&mut conn, group(), newer)
-			.await
-			.unwrap()
-			.expect("a build");
+		let build = ReportingSchemaBuild::latest_for_pair(
+			&mut conn,
+			group(),
+			ServerRank::Production,
+			newer,
+		)
+		.await
+		.unwrap()
+		.expect("a build");
 		assert_eq!(build.artifact_ids, vec![Some(artifact)]);
 	})
 	.await;
@@ -919,7 +940,7 @@ async fn a_newer_snapshot_does_not_unsettle_a_pair() {
 		.expect("a newer snapshot");
 
 		assert!(
-			ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"the version and the configuration are unchanged, so nothing is owed"
@@ -928,11 +949,17 @@ async fn a_newer_snapshot_does_not_unsettle_a_pair() {
 		// The pair does still come back for the one event that means the schema
 		// is stale, so the answer above is the rule rather than a function that
 		// has stopped moving.
-		ReportingSchemaRequest::enqueue(&mut conn, group(), newer, Some("ops@bes.au"))
-			.await
-			.expect("ask for a build");
+		ReportingSchemaRequest::enqueue(
+			&mut conn,
+			group(),
+			ServerRank::Production,
+			newer,
+			Some("ops@bes.au"),
+		)
+		.await
+		.expect("ask for a build");
 		assert!(
-			!ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			!ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"an operator asking still reinstates it"

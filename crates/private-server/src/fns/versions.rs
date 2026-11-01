@@ -8,6 +8,7 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::artifact_store;
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
+use commons_types::server::rank::ServerRank;
 use commons_types::version::{VersionStatus, VersionStr};
 use database::{
 	artifacts::{
@@ -702,6 +703,8 @@ pub async fn create_artifact(
 			content_type: None,
 			digest,
 			run_id: None,
+			// An artifact for every group is for no one environment.
+			rank: None,
 		},
 	)
 	.await?;
@@ -721,6 +724,9 @@ pub struct UploadArtifactQuery {
 	pub platform: String,
 	/// The group this artifact is for.
 	pub group_id: Uuid,
+	/// The environment within that group it is for, where it is for one.
+	/// Left off, the artifact is for every environment of the group.
+	pub rank: Option<ServerRank>,
 	/// Subresource Integrity digest of the body, e.g. `sha256-LCTbqp…`.
 	/// Canopy checks the bytes against it as they arrive and refuses the
 	/// registration on a mismatch, so a corrupted upload is refused while
@@ -815,6 +821,7 @@ pub async fn upload_artifact(
 		content_type,
 		digest: Some(digest),
 		run_id: None,
+		rank: named.rank,
 	};
 
 	// Under the id the artifact already has where one is registered, so a

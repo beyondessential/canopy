@@ -3,6 +3,7 @@
 //! spec: RPT
 
 use axum::http::StatusCode;
+use commons_types::server::rank::ServerRank;
 use diesel_async::SimpleAsyncConnection;
 
 const GROUP: &str = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
@@ -822,6 +823,7 @@ async fn a_build_report_settles_the_pair_it_names() {
 			let build = database::reporting_schemas::ReportingSchemaBuild::latest_for_pair(
 				&mut conn,
 				GROUP.parse().unwrap(),
+				ServerRank::Production,
 				VERSION.parse().unwrap(),
 			)
 			.await
@@ -863,6 +865,7 @@ async fn a_build_report_may_name_its_version_by_id() {
 				database::reporting_schemas::ReportingSchemaBuild::is_settled(
 					&mut conn,
 					GROUP.parse().unwrap(),
+					ServerRank::Production,
 					VERSION.parse().unwrap(),
 				)
 				.await
@@ -978,6 +981,7 @@ async fn a_report_carrying_both_records_only_the_build() {
 				database::reporting_schemas::ReportingSchemaBuild::is_settled(
 					&mut conn,
 					GROUP.parse().unwrap(),
+					ServerRank::Production,
 					VERSION.parse().unwrap(),
 				)
 				.await
