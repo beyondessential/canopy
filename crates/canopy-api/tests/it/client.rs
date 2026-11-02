@@ -264,19 +264,20 @@ async fn a_call_written_against_the_published_signature_sends_what_it_always_sen
 	// rather than by the deref coercion a `&str` parameter used to allow, and
 	// that conversion is what keeps this call compiling.
 	let group = String::from("a-group");
+	let rank = String::from("production");
 	let version = String::from("2.11.0");
 	let artifact_type = String::from("reporting-schema");
 	let platform = String::from("any");
 
 	client
-		.artifacts_groups(&group, &version, &artifact_type, &platform)
+		.artifacts_groups(&group, &rank, &version, &artifact_type, &platform)
 		.await
 		.expect("a 200 carrying an artifact parses");
 
 	let request = client.transport().last();
 	assert_eq!(
 		request.uri(),
-		"/artifacts/groups/a-group/2.11.0/reporting-schema/any",
+		"/artifacts/groups/a-group/production/2.11.0/reporting-schema/any",
 		"an envelope that names no parameter sends the bare path"
 	);
 	assert!(request.body().is_empty());
@@ -302,14 +303,20 @@ async fn an_envelope_carries_the_bytes_and_the_query_parameter() {
 		.build();
 
 	client
-		.artifacts_groups("a-group", "2.11.0", "reporting-schema", request)
+		.artifacts_groups(
+			"a-group",
+			"production",
+			"2.11.0",
+			"reporting-schema",
+			request,
+		)
 		.await
 		.expect("a 200 carrying an artifact parses");
 
 	let sent = client.transport().last();
 	assert_eq!(
 		sent.uri(),
-		"/artifacts/groups/a-group/2.11.0/reporting-schema/any\
+		"/artifacts/groups/a-group/production/2.11.0/reporting-schema/any\
 		 ?run=3f1e4d5c-0000-4000-8000-00000000002b"
 	);
 	assert_eq!(sent.body().as_ref(), b"schema bytes");

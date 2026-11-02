@@ -52,13 +52,17 @@ async fn an_ask_for_a_version_the_group_does_not_run_is_refused() {
 
 		private
 			.post("/api/reporting_schemas/build")
-			.json(&serde_json::json!({ "group_id": group, "rank": "production", "version_id": ran }))
+			.json(
+				&serde_json::json!({ "group_id": group, "rank": "production", "version_id": ran }),
+			)
 			.await
 			.assert_status_ok();
 
 		private
 			.post("/api/reporting_schemas/build")
-			.json(&serde_json::json!({ "group_id": group, "rank": "production", "version_id": unrun }))
+			.json(
+				&serde_json::json!({ "group_id": group, "rank": "production", "version_id": unrun }),
+			)
 			.await
 			.assert_status_bad_request();
 	})
