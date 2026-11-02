@@ -249,7 +249,7 @@ async fn a_releaser_cannot_register_for_a_group() {
 
 			let response = public
 				.post(&format!(
-					"/artifacts/groups/{GROUP_A}/2.60.0/reporting-schema/any"
+					"/artifacts/groups/{GROUP_A}/production/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.text("https://example.com/x.sql")
@@ -654,7 +654,7 @@ async fn an_admin_device_registers_for_any_group() {
 
 			let scoped = public
 				.post(&format!(
-					"/artifacts/groups/{GROUP_A}/2.60.0/reporting-schema/any"
+					"/artifacts/groups/{GROUP_A}/production/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -704,7 +704,7 @@ async fn a_registration_with_nothing_in_it_is_refused() {
 			}
 
 			let malformed = public
-				.post("/artifacts/groups/not-a-uuid/2.60.0/reporting-schema/any")
+				.post("/artifacts/groups/not-a-uuid/production/2.60.0/reporting-schema/any")
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.text("CREATE VIEW ...")
 				.await;
