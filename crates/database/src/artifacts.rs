@@ -686,8 +686,12 @@ impl Artifact {
 
 		// An artifact is offered where it wins inside a scope that is actually
 		// resolved, so the fleet-wide answer is the union over the unscoped read
-		// and each group present rather than one deduplication across them all:
-		// two groups' artifacts of one type and platform are both served.
+		// and each group and environment present rather than one deduplication
+		// across them all: two groups' artifacts of one type and platform are
+		// both served. An environment present has to be resolved in its own
+		// right, since a group scope sees only what names no environment, and
+		// leaving it out would mark the artifact a group's machines are
+		// actually served as one nothing resolves to.
 		// spec: ART#what-a-version-offers
 		let scopes: Vec<Scope> = match scope {
 			Scope::Fleet => {
@@ -697,8 +701,21 @@ impl Artifact {
 					.collect();
 				groups.sort_unstable();
 				groups.dedup();
+
+				let mut environments: Vec<(Uuid, ServerRank)> = matching_artifacts
+					.iter()
+					.filter_map(|a| Some((a.group_id?, a.rank?)))
+					.collect();
+				environments.sort_unstable();
+				environments.dedup();
+
 				std::iter::once(Scope::Unscoped)
 					.chain(groups.into_iter().map(Scope::Group))
+					.chain(
+						environments
+							.into_iter()
+							.map(|(group, rank)| Scope::Environment(group, rank)),
+					)
 					.collect()
 			}
 			resolved => vec![resolved],

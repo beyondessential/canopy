@@ -80,7 +80,7 @@ Reports are retained indefinitely as an audit trail.
 Canopy offers a Tamanu application's device the schema for the pair of its environment and the version that application reports running, resolved as any group-scoped artifact is (see [ART](../platform/artifacts.md)).
 The device's credential resolves to the machine it is enrolled as and so to that machine's group and rank, so it is offered its own environment's schema and can fetch no other's.
 A facility application is offered the same schema as the central applications of its environment, since a schema follows the environment and the version rather than the application it was built from.
-A machine Canopy holds no rank for is in none of the group's environments, so it is offered no schema until an operator ranks it.
+A machine Canopy holds no rank for is in none of the group's environments, so it is offered no schema that names one. Where an operator has registered a schema for the group as a whole, that is what it is offered (see [ART](../platform/artifacts.md)).
 
 The device compares what its application runs with what it is offered, applies the offered schema where they differ, and reports the result as a check on that application through the status contract (see [STA](statuses.md)), which is graded, presented, and alerted as any source's check is (see [CHK](../monitoring/checks.md)).
 

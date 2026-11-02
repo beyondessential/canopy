@@ -384,12 +384,8 @@ async fn register_for_group(
 	// the environment at all: a schema published for one it does not have is
 	// offered to nobody and sits there reading as a built pair.
 	//
-	// Read from the boxes rather than from what is running on them, since a
-	// machine is in the environment its rank names whether or not anything on
-	// it has reported yet.
 	// spec: GRP#environments, RPT#the-build-contract
-	let boxes = database::machines::Machine::list_for_group(&mut db, group).await?;
-	if !boxes.iter().any(|machine| machine.rank == Some(rank)) {
+	if !database::machines::Machine::group_has_environment(&mut db, group, rank).await? {
 		return Err(AppError::BadRequest(format!(
 			"that group has no {rank} environment to register a schema for"
 		)));

@@ -415,10 +415,10 @@ async fn worklist(
 
 		let region = cfg.region.clone().unwrap_or_else(instance_default_region);
 
-		// A build is dispatched per pair rather than per machine. The
-		// configuration a schema follows from is held centrally, so every pair
-		// of a group restores the same central's snapshot and differs only in
-		// the version it is migrated to.
+		// A build is dispatched per pair rather than per machine, a pair being
+		// one of the group's environments and a version. The configuration a
+		// schema follows from is held centrally and is that environment's own,
+		// so each pair restores its own environment's central.
 		// spec: RPT#the-build-contract
 		if builds_schema {
 			// A build nobody may publish the result of is a restore and a
@@ -1207,9 +1207,10 @@ async fn verification(
 
 			let version_id = resolve_build_target(&mut conn, &build).await?;
 			// The environment is the restored machine's, read here rather than
-			// taken from the report: a build names the schema's environment
-			// when it registers it, and the two disagreeing would file the
-			// build against one environment and the schema against another.
+			// taken from the report. The registration takes it from the
+			// builder's own path, so the two are separate statements of one
+			// fact and are checked against each other below rather than
+			// assumed to agree.
 			// spec: RPT#what-a-build-reports
 			let Some(rank) = database::machines::Machine::get_by_id(&mut conn, machine_id)
 				.await?
@@ -1230,6 +1231,33 @@ async fn verification(
 				BackupRestoreCheck::record_report(&mut conn, report).await?;
 				return Ok(StatusCode::NO_CONTENT);
 			};
+			// A schema registered against an environment other than the one
+			// restored would be applied by machines the build never read,
+			// while the pair it is filed against reads as built. The build
+			// record is what settles that pair, so it is withheld and the
+			// restore recorded alone, leaving the pair to be dispatched again.
+			// spec: RPT#what-a-build-reports
+			let mut elsewhere = Vec::new();
+			for artifact in &build.artifacts {
+				let registered = database::artifacts::Artifact::get_by_id(&mut conn, *artifact)
+					.await?
+					.rank;
+				if registered != Some(rank) {
+					elsewhere.push(*artifact);
+				}
+			}
+			if !elsewhere.is_empty() {
+				tracing::error!(
+					machine = %machine_id,
+					group = %args.group,
+					%rank,
+					artifacts = ?elsewhere,
+					"a build registered its schema against another environment; recording the restore alone"
+				);
+				BackupRestoreCheck::record_report(&mut conn, report).await?;
+				return Ok(StatusCode::NO_CONTENT);
+			}
+
 			// The build is held against that environment's central application,
 			// which is the one whose database the schema followed from and the
 			// one the entry named.

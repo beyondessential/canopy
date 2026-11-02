@@ -825,10 +825,26 @@ pub async fn upload_artifact(
 		rank: named.rank,
 	};
 
+	let mut conn = state.db.get().await?;
+
+	// An environment the group does not have is one no machine is in, so an
+	// artifact registered for it is offered to nobody and sits in the fleet
+	// view reading as published. The builder path refuses the same thing; an
+	// operator naming no environment at all is the deliberate group-wide case
+	// and is left alone.
+	// spec: GRP#environments, ART#registration
+	if let Some(rank) = input.rank
+		&& !database::machines::Machine::group_has_environment(&mut conn, named.group_id, rank)
+			.await?
+	{
+		return Err(AppError::BadRequest(format!(
+			"that group has no {rank} environment to register an artifact for"
+		)));
+	}
+
 	// Under the id the artifact already has where one is registered, so a
 	// replacement lands where the bytes it replaces were.
 	// spec: ART#where-an-artifact-rests
-	let mut conn = state.db.get().await?;
 	let existing = Artifact::id_for_identity(&mut conn, &input).await?;
 	let id = existing.unwrap_or_else(Uuid::new_v4);
 	drop(conn);

@@ -122,7 +122,10 @@ export default function ReportingSchemasSection({
 									spacing={0.5}
 									sx={{ justifyContent: "flex-end", alignItems: "center" }}
 								>
-									{pair.artifact_id && (
+									{/* The endpoint is admin-gated, so a reader who
+									    cannot call it is not shown a control that
+									    answers 403. */}
+									{isAdmin && pair.artifact_id && (
 										<Tooltip title="Download the SQL this environment is offered">
 											<Button
 												size="small"

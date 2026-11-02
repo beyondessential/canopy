@@ -1,5 +1,5 @@
 use commons_errors::{AppError, Result};
-use commons_types::{geo::GeoPoint, server::TagMap, status::ShortStatus};
+use commons_types::{geo::GeoPoint, server::TagMap, server::rank::ServerRank, status::ShortStatus};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::{SignedDuration, Timestamp};
@@ -479,6 +479,32 @@ impl Machine {
 			.load(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// Whether the group has an environment at this rank.
+	///
+	/// A machine is in the environment its rank names whether or not anything
+	/// on it has reported, so the boxes answer this and the applications on
+	/// them do not. One row of work rather than the group's whole fleet, since
+	/// the question is a boolean.
+	// spec: GRP#environments
+	pub async fn group_has_environment(
+		db: &mut AsyncPgConnection,
+		group: Uuid,
+		rank: ServerRank,
+	) -> Result<bool> {
+		use crate::schema::machines::dsl;
+		use diesel::dsl::{exists, select};
+
+		select(exists(
+			dsl::machines
+				.filter(dsl::group_id.eq(group))
+				.filter(dsl::deleted_at.is_null())
+				.filter(dsl::rank.eq(rank)),
+		))
+		.get_result(db)
+		.await
+		.map_err(AppError::from)
 	}
 
 	/// Bulk-fetch names for a set of machine ids, for surfaces embedding a
