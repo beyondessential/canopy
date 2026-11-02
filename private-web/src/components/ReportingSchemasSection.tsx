@@ -5,6 +5,7 @@ import {
 	Chip,
 	LinearProgress,
 	Paper,
+	Stack,
 	Table,
 	TableBody,
 	TableCell,
@@ -13,16 +14,18 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
+import DownloadIcon from "@mui/icons-material/Download";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { GradedAction } from "./GradedAction";
+import ServerRankChip from "./ServerRankChip";
 
 type PairState = "awaiting" | "built" | "failed";
 
-/// Which of the group's versions have a reporting schema, which failed, and
-/// which are still to be built, so whether the group's applications can be
-/// offered the schema for the version they run or are moving to is answered in
-/// one place.
+/// Which of the group's environments have a reporting schema for the version
+/// they run, which failed, and which are still to be built, so whether an
+/// environment's applications can be offered the schema for the version they
+/// run or are moving to is answered in one place.
 // spec: RPT#alerting
 export default function ReportingSchemasSection({
 	groupId,
@@ -68,9 +71,9 @@ export default function ReportingSchemasSection({
 		);
 	}
 
-	const ask = async (versionId: string) => {
+	const ask = async (rank: string, versionId: string) => {
 		try {
-			await build.call({ group_id: groupId, version_id: versionId });
+			await build.call({ group_id: groupId, rank, version_id: versionId });
 			pairs.reload();
 		} catch {
 			/* surfaced via build.error */
@@ -88,6 +91,7 @@ export default function ReportingSchemasSection({
 			<Table size="small">
 				<TableHead>
 					<TableRow>
+						<TableCell>Environment</TableCell>
 						<TableCell>Version</TableCell>
 						<TableCell>Schema</TableCell>
 						<TableCell>On</TableCell>
@@ -96,7 +100,13 @@ export default function ReportingSchemasSection({
 				</TableHead>
 				<TableBody>
 					{pairs.data.map((pair) => (
-						<TableRow key={pair.version_id} data-testid="reporting-schema-row">
+						<TableRow
+							key={`${pair.rank}-${pair.version_id}`}
+							data-testid="reporting-schema-row"
+						>
+							<TableCell>
+								<ServerRankChip rank={pair.rank} />
+							</TableCell>
 							<TableCell sx={{ fontFamily: "monospace" }}>
 								{pair.version}
 							</TableCell>
@@ -107,28 +117,46 @@ export default function ReportingSchemasSection({
 								<Running applications={pair.applications} />
 							</TableCell>
 							<TableCell align="right">
-								{pair.requested ? (
-									<Typography variant="body2" color="text.secondary">
-										Build asked for
-									</Typography>
-								) : (
-									// An awaiting pair is already on the worklist, so asking adds nothing.
-									isAdmin &&
-									pair.state !== "awaiting" && (
-										<GradedAction
-											calls="reporting_schemas/build"
-											action={`Build reporting schema for version ${pair.version}`}
-										>
+								<Stack
+									direction="row"
+									spacing={0.5}
+									sx={{ justifyContent: "flex-end", alignItems: "center" }}
+								>
+									{pair.artifact_id && (
+										<Tooltip title="Download the SQL this environment is offered">
 											<Button
 												size="small"
-												onClick={() => ask(pair.version_id)}
-												disabled={build.pending}
+												startIcon={<DownloadIcon />}
+												href={`/api/versions/download_artifact?artifact_id=${pair.artifact_id}`}
+												download
 											>
-												Build again
+												SQL
 											</Button>
-										</GradedAction>
-									)
-								)}
+										</Tooltip>
+									)}
+									{pair.requested ? (
+										<Typography variant="body2" color="text.secondary">
+											Build asked for
+										</Typography>
+									) : (
+										// An awaiting pair is already on the worklist, so asking adds nothing.
+										isAdmin &&
+										pair.state !== "awaiting" && (
+											<GradedAction
+												calls="reporting_schemas/build"
+												action={`Build reporting schema for ${pair.rank} on version ${pair.version}`}
+											>
+												<Button
+													size="small"
+													onClick={() => ask(pair.rank, pair.version_id)}
+													disabled={build.pending}
+												>
+													Build again
+												</Button>
+											</GradedAction>
+										)
+									)}
+								</Stack>
 							</TableCell>
 						</TableRow>
 					))}
@@ -138,11 +166,12 @@ export default function ReportingSchemasSection({
 	);
 }
 
-/// Which of the group's applications a pair covers.
+/// Which of the environment's applications a pair covers.
 ///
-/// A pair is per version, so one row stands for every application on it. The
-/// count is what an operator sizes the row by; the names are behind it because
-/// a group of any size would otherwise make the table taller than it is wide.
+/// A pair is one environment's version, so one row stands for every
+/// application on it. The count is what an operator sizes the row by; the names
+/// are behind it because a group of any size would otherwise make the table
+/// taller than it is wide.
 function Running({ applications }: { applications: string[] }) {
 	if (applications.length === 0) {
 		return (
@@ -190,8 +219,8 @@ function SectionHeading() {
 				Reporting schemas
 			</Typography>
 			<Typography variant="body2" color="text.secondary">
-				One per version this group runs or is moving to, built from a replica
-				of the group's own data.
+				One per environment and version this group runs or is moving to, built
+				from a replica of that environment's own data.
 			</Typography>
 		</Box>
 	);

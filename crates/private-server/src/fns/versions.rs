@@ -239,6 +239,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 				.routes(routes!(write, silent: upload_artifact))
 				.layer(DefaultBodyLimit::max(MAX_UPLOAD_ARTIFACT_BODY_BYTES)),
 		)
+		.routes(routes!(read_only, silent: download_artifact))
 		.routes(routes!(danger(irreversible), silent: delete_artifact))
 		.routes(routes!(read_only, silent: list_known_issues))
 		.routes(routes!(write, silent: add_known_issue))
@@ -1054,4 +1055,97 @@ pub async fn resolve_known_issue(
 	)
 	.await?;
 	Ok(Json(KnownIssueData::from(row)))
+}
+
+/// Which held artifact to fetch.
+#[derive(Deserialize, IntoParams)]
+pub struct DownloadArtifactQuery {
+	/// Id of the artifact whose bytes to return.
+	pub artifact_id: Uuid,
+}
+
+/// Fetch the bytes of an artifact Canopy holds.
+///
+/// The public path serves these to the machines an artifact is offered to, and
+/// resolves what that is from the caller's own device. An operator holds no
+/// device of the group, so reading one there would mean issuing them a
+/// credential of a machine; this answers the same bytes for an operator
+/// instead, who may already see every group's artifacts.
+///
+/// The digest is verified before the bytes are served, as on the public path,
+/// so an artifact corrupted after it was taken in fails the read rather than
+/// being handed over as the artifact it is not.
+// spec: ART#where-an-artifact-rests
+#[utoipa::path(
+	get,
+	path = "/download_artifact",
+	tag = "versions",
+	security(("tailscale-user" = [])),
+	params(DownloadArtifactQuery),
+	responses(
+		(status = 200, description = "The artifact's bytes.", content_type = "application/octet-stream"),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn download_artifact(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+	Query(named): Query<DownloadArtifactQuery>,
+) -> Result<axum::response::Response> {
+	use axum::response::IntoResponse as _;
+
+	let mut conn = state.db.get().await?;
+	let artifact = Artifact::get_by_id(&mut conn, named.artifact_id).await?;
+
+	let Some(recorded) = artifact.digest.clone() else {
+		return Err(AppError::BadRequest(
+			"that artifact rests at a location of its own; fetch it from there".into(),
+		));
+	};
+
+	let store = state
+		.artifacts
+		.as_ref()
+		.ok_or_else(artifact_store::unconfigured)?;
+	let Some(bytes) = store.get(artifact.id).await? else {
+		return Err(AppError::NotFound("artifact bytes".into()));
+	};
+
+	let bytes =
+		tokio::task::spawn_blocking(move || (digest_of(&bytes) == recorded).then_some(bytes))
+			.await
+			.map_err(|err| AppError::custom(format!("verifying the artifact failed: {err}")))?;
+
+	let Some(bytes) = bytes else {
+		tracing::error!(
+			artifact = %artifact.id,
+			"held artifact does not match its digest; refusing to serve"
+		);
+		return Err(AppError::custom(
+			"the artifact does not match its digest".to_owned(),
+		));
+	};
+
+	let content_type = artifact
+		.content_type
+		.unwrap_or_else(|| "application/octet-stream".to_owned());
+
+	// Served from the same origin as the operator's own pages, so the media
+	// type is never rendered: it downloads under the artifact's id.
+	Ok((
+		[
+			(axum::http::header::CONTENT_TYPE, content_type),
+			(
+				axum::http::header::CONTENT_DISPOSITION,
+				format!("attachment; filename=\"{}\"", artifact.id),
+			),
+			(
+				axum::http::HeaderName::from_static("x-content-type-options"),
+				"nosniff".to_owned(),
+			),
+		],
+		bytes,
+	)
+		.into_response())
 }

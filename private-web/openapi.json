@@ -1793,6 +1793,10 @@
             "format": "uuid",
             "type": "string"
           },
+          "rank": {
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "The environment within that group to build it for."
+          },
           "version_id": {
             "description": "The Tamanu version to build it for.",
             "format": "uuid",
@@ -1801,6 +1805,7 @@
         },
         "required": [
           "group_id",
+          "rank",
           "version_id"
         ],
         "type": "object"
@@ -9029,14 +9034,22 @@
         "type": "object"
       },
       "Pair": {
-        "description": "One pair of group and Tamanu version, and where it stands.",
+        "description": "One pair of a group's environment and a Tamanu version, and where it\nstands.",
         "properties": {
           "applications": {
-            "description": "The group's Tamanu applications reporting this version, by name. Empty\nwhere the pair comes from the open plan rather than from something\nrunning it.",
+            "description": "The environment's Tamanu applications reporting this version, by name.\nEmpty where the pair comes from the open plan rather than from\nsomething running it.",
             "items": {
               "type": "string"
             },
             "type": "array"
+          },
+          "artifact_id": {
+            "description": "The schema this pair's build registered, where it registered one, so an\noperator can read the SQL the environment is offered.",
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "error": {
             "description": "What went wrong, where a build failed.",
@@ -9049,6 +9062,10 @@
             "description": "The group this pair is for.",
             "format": "uuid",
             "type": "string"
+          },
+          "rank": {
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "The environment within that group this pair is for."
           },
           "requested": {
             "description": "Whether an operator has asked for this pair to be built again.",
@@ -9070,6 +9087,7 @@
         },
         "required": [
           "group_id",
+          "rank",
           "version_id",
           "version",
           "state",
@@ -26756,6 +26774,63 @@
         "x-canopy-safety-mode": "danger"
       }
     },
+    "/api/versions/download_artifact": {
+      "get": {
+        "description": "The public path serves these to the machines an artifact is offered to, and\nresolves what that is from the caller's own device. An operator holds no\ndevice of the group, so reading one there would mean issuing them a\ncredential of a machine; this answers the same bytes for an operator\ninstead, who may already see every group's artifacts.\n\nThe digest is verified before the bytes are served, as on the public path,\nso an artifact corrupted after it was taken in fails the read rather than\nbeing handed over as the artifact it is not.",
+        "operationId": "download_artifact",
+        "parameters": [
+          {
+            "description": "Id of the artifact whose bytes to return.",
+            "in": "query",
+            "name": "artifact_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {}
+            },
+            "description": "The artifact's bytes."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ],
+        "summary": "Fetch the bytes of an artifact Canopy holds.",
+        "tags": [
+          "versions"
+        ],
+        "x-canopy-audit": [],
+        "x-canopy-safety-mode": "read-only"
+      }
+    },
     "/api/versions/get_grouped_versions": {
       "post": {
         "description": "Returns every version, including drafts, grouped by major.minor release\nline and ordered newest release line first. Each group includes a\nreadiness flag reflecting whether its latest published patch has any\nunresolved known issues.",
@@ -27147,6 +27222,22 @@
             "schema": {
               "format": "uuid",
               "type": "string"
+            }
+          },
+          {
+            "description": "The environment within that group it is for, where it is for one.\nLeft off, the artifact is for every environment of the group.",
+            "in": "query",
+            "name": "rank",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/ServerRank"
+                }
+              ]
             }
           },
           {

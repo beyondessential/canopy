@@ -375,6 +375,9 @@ pub struct Pair {
 	pub error: Option<String>,
 	/// Whether an operator has asked for this pair to be built again.
 	pub requested: bool,
+	/// The schema this pair's build registered, where it registered one, so an
+	/// operator can read the SQL the environment is offered.
+	pub artifact_id: Option<Uuid>,
 	/// The environment's Tamanu applications reporting this version, by name.
 	/// Empty where the pair comes from the open plan rather than from
 	/// something running it.
@@ -412,7 +415,8 @@ async fn pairs_of_members(
 
 	let mut pairs = Vec::with_capacity(versions.len());
 	for (rank, version, applications) in versions {
-		let (state, error) = match builds.get(&(rank, version.id)) {
+		let build = builds.get(&(rank, version.id));
+		let (state, error) = match build {
 			None => (PairState::Awaiting, None),
 			Some(build) if build.built => (PairState::Built, None),
 			Some(build) => (PairState::Failed, build.error.clone()),
@@ -427,6 +431,11 @@ async fn pairs_of_members(
 			state,
 			error,
 			requested: requests.contains(&(rank, version.id)),
+			// A build registers the schema and nothing else, so the first it
+			// recorded is that schema.
+			artifact_id: build
+				.filter(|build| build.built)
+				.and_then(|build| build.artifact_ids.iter().flatten().copied().next()),
 		});
 	}
 

@@ -248,6 +248,7 @@ export const SAFETY_MODES = {
 	"versions/add_known_issue": "write",
 	"versions/create_artifact": "write",
 	"versions/delete_artifact": "danger",
+	"versions/download_artifact": "read-only",
 	"versions/get_grouped_versions": "read-only",
 	"versions/get_version_artifacts": "read-only",
 	"versions/get_version_detail": "read-only",

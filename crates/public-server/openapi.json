@@ -1976,6 +1976,17 @@
             "description": "Key prefix within the bucket under which the repository lives. Normally\nempty (the repository is at the bucket root).",
             "type": "string"
           },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "The environment the entry is for, on a reporting-schema build. The\nschema is registered against it, so a build echoes it back rather than\nworking it out from the machine it restored."
+              }
+            ]
+          },
           "region": {
             "description": "AWS region of the bucket.",
             "type": "string"
@@ -2173,9 +2184,9 @@
         "x-canopy-audit": []
       }
     },
-    "/artifacts/groups/{group}/{version}/{artifact_type}/{platform}": {
+    "/artifacts/groups/{group}/{rank}/{version}/{artifact_type}/{platform}": {
       "post": {
-        "description": "Requires a device certificate whose restore declaration for the named group\nadvertises that it builds reporting schemas. The bytes travel on this\nconnection and Canopy holds them, so the builder is issued no credential to\nany store. The path names the group the artifact is for, the exact version\nit was built against, and the artifact's type and target platform.\n\nThe version must be one Canopy already holds: a build is dispatched for a\ngroup and version Canopy knows about, so a version that does not exist is\nrefused rather than drafted. A range pattern is refused for the same reason:\na schema follows the migrations one exact version applies.\n\nReturns the created artifact record.",
+        "description": "Requires a device certificate whose restore declaration for the named group\nadvertises that it builds reporting schemas. The bytes travel on this\nconnection and Canopy holds them, so the builder is issued no credential to\nany store. The path names the group and the environment within it the\nartifact is for, the exact version it was built against, and the artifact's\ntype and target platform.\n\nThe environment is a path segment rather than something a registration may\nleave off: a schema follows the configuration of the database it was built\nfrom, so one registered without an environment would be offered to every\nenvironment of the group, which is the one thing this must not do.\n\nThe version must be one Canopy already holds: a build is dispatched for a\ngroup and version Canopy knows about, so a version that does not exist is\nrefused rather than drafted. A range pattern is refused for the same reason:\na schema follows the migrations one exact version applies.\n\nReturns the created artifact record.",
         "operationId": "register_group_artifact",
         "parameters": [
           {
@@ -2185,6 +2196,15 @@
             "required": true,
             "schema": {
               "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Environment within the group the schema was built against: `production`, `clone`, `demo`, `test` or `dev`.",
+            "in": "path",
+            "name": "rank",
+            "required": true,
+            "schema": {
               "type": "string"
             }
           },
@@ -2288,7 +2308,7 @@
             "backup-restore-device": []
           }
         ],
-        "summary": "Register a reporting schema for one group, carrying its bytes.",
+        "summary": "Register a reporting schema for one environment of a group, carrying its\nbytes.",
         "tags": [
           "artifacts"
         ],

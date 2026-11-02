@@ -5456,6 +5456,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/versions/download_artifact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fetch the bytes of an artifact Canopy holds.
+         * @description The public path serves these to the machines an artifact is offered to, and
+         *     resolves what that is from the caller's own device. An operator holds no
+         *     device of the group, so reading one there would mean issuing them a
+         *     credential of a machine; this answers the same bytes for an operator
+         *     instead, who may already see every group's artifacts.
+         *
+         *     The digest is verified before the bytes are served, as on the public path,
+         *     so an artifact corrupted after it was taken in fails the read rather than
+         *     being handed over as the artifact it is not.
+         */
+        get: operations["download_artifact"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/versions/get_grouped_versions": {
         parameters: {
             query?: never;
@@ -6716,6 +6744,8 @@ export interface components {
              * @description The group whose schema to build.
              */
             group_id: string;
+            /** @description The environment within that group to build it for. */
+            rank: components["schemas"]["ServerRank"];
             /**
              * Format: uuid
              * @description The Tamanu version to build it for.
@@ -10979,14 +11009,23 @@ export interface components {
              */
             offset: number;
         };
-        /** @description One pair of group and Tamanu version, and where it stands. */
+        /**
+         * @description One pair of a group's environment and a Tamanu version, and where it
+         *     stands.
+         */
         Pair: {
             /**
-             * @description The group's Tamanu applications reporting this version, by name. Empty
-             *     where the pair comes from the open plan rather than from something
-             *     running it.
+             * @description The environment's Tamanu applications reporting this version, by name.
+             *     Empty where the pair comes from the open plan rather than from
+             *     something running it.
              */
             applications: string[];
+            /**
+             * Format: uuid
+             * @description The schema this pair's build registered, where it registered one, so an
+             *     operator can read the SQL the environment is offered.
+             */
+            artifact_id?: string | null;
             /** @description What went wrong, where a build failed. */
             error?: string | null;
             /**
@@ -10994,6 +11033,8 @@ export interface components {
              * @description The group this pair is for.
              */
             group_id: string;
+            /** @description The environment within that group this pair is for. */
+            rank: components["schemas"]["ServerRank"];
             /** @description Whether an operator has asked for this pair to be built again. */
             requested: boolean;
             /** @description Whether the pair has a schema, failed to build one, or is awaiting one. */
@@ -22208,6 +22249,45 @@ export interface operations {
             };
         };
     };
+    download_artifact: {
+        parameters: {
+            query: {
+                /** @description Id of the artifact whose bytes to return. */
+                artifact_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The artifact's bytes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     get_grouped_versions: {
         parameters: {
             query?: never;
@@ -22449,6 +22529,11 @@ export interface operations {
                 platform: string;
                 /** @description The group this artifact is for. */
                 group_id: string;
+                /**
+                 * @description The environment within that group it is for, where it is for one.
+                 *     Left off, the artifact is for every environment of the group.
+                 */
+                rank?: null | components["schemas"]["ServerRank"];
                 /**
                  * @description Subresource Integrity digest of the body, e.g. `sha256-LCTbqp…`.
                  *     Canopy checks the bytes against it as they arrive and refuses the

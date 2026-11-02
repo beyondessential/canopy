@@ -445,7 +445,7 @@ fn builder_configured(field: &syn::Field) -> bool {
 const GRANDFATHERED: &[(&str, &str)] = &[
 	(
 		"post",
-		"/artifacts/groups/{group}/{version}/{artifact_type}/{platform}",
+		"/artifacts/groups/{group}/{rank}/{version}/{artifact_type}/{platform}",
 	),
 	("post", "/artifacts/{version}/{artifact_type}/{platform}"),
 	("post", "/versions/{version}"),
@@ -1481,7 +1481,7 @@ version = \"not-a-real-key\"
 	/// plus whatever the test is about.
 	fn spec_with(extra: Value) -> Value {
 		let mut paths = json!({
-			"/artifacts/groups/{group}/{version}/{artifact_type}/{platform}": {
+			"/artifacts/groups/{group}/{rank}/{version}/{artifact_type}/{platform}": {
 				"post": {
 					"operationId": "register_group_artifact",
 					"requestBody": {"content": {"application/octet-stream": {"schema": {}}}},

@@ -526,6 +526,7 @@ impl Artifact {
 			.filter(version_id.is_not_distinct_from(input.version_id))
 			.filter(version_range_pattern.is_not_distinct_from(&input.version_range_pattern))
 			.filter(group_id.is_not_distinct_from(input.group_id))
+			.filter(rank.is_not_distinct_from(input.rank))
 			.select(id)
 			.first(db)
 			.await
@@ -565,6 +566,7 @@ impl Artifact {
 				version_id,
 				version_range_pattern,
 				group_id,
+				rank,
 			))
 			.do_update()
 			.set((
@@ -652,6 +654,20 @@ impl Artifact {
 			)),
 			Err(e) => Err(AppError::from(e)),
 		}
+	}
+
+	/// One artifact by id, whatever version or group it belongs to. For the
+	/// operator paths, which see every artifact; a path serving a machine
+	/// reads through `of_version` so the scope is part of the read.
+	pub async fn get_by_id(db: &mut AsyncPgConnection, artifact_id: Uuid) -> Result<Self> {
+		use crate::schema::artifacts::dsl::*;
+
+		artifacts
+			.filter(id.eq(artifact_id))
+			.select(Self::as_select())
+			.first(db)
+			.await
+			.map_err(AppError::from)
 	}
 
 	pub async fn delete(db: &mut AsyncPgConnection, artifact_id: Uuid) -> Result<()> {
