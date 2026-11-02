@@ -22,7 +22,7 @@ async fn seed(conn: &mut database::diesel_async::AsyncPgConnection, consumer: uu
 		 INSERT INTO server_groups (id, name) VALUES
 		 ('{GROUP}', 'kamaka'), ('{OTHER_GROUP}', 'drifting');
 
-		 INSERT INTO machines (id, name, group_id) VALUES ('{MACHINE}', 'box', '{GROUP}');
+		 INSERT INTO machines (id, name, group_id, rank) VALUES ('{MACHINE}', 'box', '{GROUP}', 'production');
 
 		 INSERT INTO applications (id, type, name, host, machine_id, group_id)
 		 VALUES ('{CENTRAL}', 'tamanu-central', 'central', 'https://c', '{MACHINE}', '{GROUP}');
@@ -190,8 +190,8 @@ async fn a_built_pair_drops_off_the_worklist() {
 				 VALUES ('{device_id}', '{GROUP}', '{MACHINE}', 'tamanu-postgres',
 				         'schema-build', 'snap-1', 'success', true, NOW(), NOW());
 
-				 INSERT INTO reporting_schema_builds (check_id, group_id, version_id, built)
-				 SELECT id, '{GROUP}', '{VERSION}', true FROM backup_restore_checks
+				 INSERT INTO reporting_schema_builds (check_id, group_id, rank, version_id, built)
+				 SELECT id, '{GROUP}', 'production', '{VERSION}', true FROM backup_restore_checks
 				 ORDER BY id DESC LIMIT 1",
 			))
 			.await
