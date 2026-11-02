@@ -538,14 +538,35 @@ async fn versions_and_applications(
 	}
 
 	// A plan is opened against an environment, and each environment of the
-	// group holds its own, so the target is asked for per environment rather
-	// than once for the group's central.
+	// group holds its own. Read in one query rather than one per environment:
+	// this backs both the operator page and the worklist, and the worklist
+	// walks every group on every poll.
 	let mut environments: Vec<ServerRank> = tamanu.iter().filter_map(|a| a.rank).collect();
 	environments.sort();
 	environments.dedup();
 
+	let open = crate::upgrade_plans::UpgradePlan::open_for_group(db, group).await?;
+	let planned = Version::get_by_ids(
+		db,
+		&open
+			.iter()
+			.filter(|plan| environments.contains(&plan.rank))
+			.map(|plan| plan.target_version_id)
+			.collect::<Vec<_>>(),
+	)
+	.await?;
+
 	for rank in environments {
-		let Some(target) = crate::upgrade_plans::planned_target(db, group, rank).await? else {
+		// A target yanked after the plan was recorded has no artefacts to
+		// fetch, so it steers no testing and is no pair.
+		// spec: UPG#what-reads-a-plan
+		let Some(target) = open
+			.iter()
+			.find(|plan| plan.rank == rank)
+			.and_then(|plan| planned.iter().find(|v| v.id == plan.target_version_id))
+			.filter(|v| v.status == VersionStatus::Published)
+			.cloned()
+		else {
 			continue;
 		};
 		// A plan moving an environment to a version something in it already
@@ -558,6 +579,32 @@ async fn versions_and_applications(
 			pairs.push((rank, target, Vec::new()));
 		}
 	}
+
+	// An environment a build cannot be dispatched for is not a pair. A pair is
+	// derived from any ranked Tamanu application, facilities included, but a
+	// build restores the environment's own central and is anchored on a box,
+	// so an environment with neither would show a pair that is never
+	// dispatched, sits awaiting for good, and takes an operator's ask that
+	// nothing clears.
+	// spec: RPT#the-build-contract
+	let restorable: Vec<ServerRank> = {
+		let mut ranks: Vec<ServerRank> = pairs.iter().map(|(rank, _, _)| *rank).collect();
+		ranks.sort();
+		ranks.dedup();
+		ranks
+			.into_iter()
+			.filter(|rank| {
+				let in_environment: Vec<crate::applications::Application> = applications
+					.iter()
+					.filter(|member| member.rank == Some(*rank))
+					.cloned()
+					.collect();
+				crate::server_groups::ServerGroup::canonical_central(&in_environment)
+					.is_some_and(|central| central.machine_id.is_some())
+			})
+			.collect()
+	};
+	pairs.retain(|(rank, _, _)| restorable.contains(rank));
 
 	for (_, _, names) in &mut pairs {
 		names.sort();

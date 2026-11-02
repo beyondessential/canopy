@@ -200,6 +200,23 @@ impl Version {
 			.map_err(AppError::from)
 	}
 
+	/// The release rows for these ids, in one query. An id with no row is
+	/// absent from the result rather than an error.
+	pub async fn get_by_ids(db: &mut AsyncPgConnection, wanted: &[Uuid]) -> Result<Vec<Self>> {
+		use crate::schema::versions::dsl::*;
+
+		if wanted.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		versions
+			.select(Self::as_select())
+			.filter(id.eq_any(wanted))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// The release rows for these exact versions, in one query. A version with
 	/// no row is absent from the result rather than an error.
 	pub async fn get_by_versions(

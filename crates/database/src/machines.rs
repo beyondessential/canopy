@@ -483,24 +483,40 @@ impl Machine {
 
 	/// Whether the group has an environment at this rank.
 	///
-	/// A machine is in the environment its rank names whether or not anything
-	/// on it has reported, so the boxes answer this and the applications on
-	/// them do not. One row of work rather than the group's whole fleet, since
-	/// the question is a boolean.
+	/// An environment is the group's members at one rank, and a member is a box
+	/// or an application: a box is in its environment whether or not anything
+	/// on it has reported, and an application on a cluster has no box and
+	/// carries its rank alone. Either answers yes, so both are asked.
+	///
+	/// One row of work rather than the group's whole fleet, since the question
+	/// is a boolean.
 	// spec: GRP#environments
 	pub async fn group_has_environment(
 		db: &mut AsyncPgConnection,
 		group: Uuid,
 		rank: ServerRank,
 	) -> Result<bool> {
-		use crate::schema::machines::dsl;
+		use crate::schema::{applications, machines};
 		use diesel::dsl::{exists, select};
 
+		let boxed: bool = select(exists(
+			machines::table
+				.filter(machines::group_id.eq(group))
+				.filter(machines::deleted_at.is_null())
+				.filter(machines::rank.eq(rank)),
+		))
+		.get_result(db)
+		.await
+		.map_err(AppError::from)?;
+		if boxed {
+			return Ok(true);
+		}
+
 		select(exists(
-			dsl::machines
-				.filter(dsl::group_id.eq(group))
-				.filter(dsl::deleted_at.is_null())
-				.filter(dsl::rank.eq(rank)),
+			applications::table
+				.filter(applications::group_id.eq(group))
+				.filter(applications::deleted_at.is_null())
+				.filter(applications::rank.eq(rank)),
 		))
 		.get_result(db)
 		.await

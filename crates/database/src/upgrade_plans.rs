@@ -219,6 +219,25 @@ impl UpgradePlan {
 			.map_err(AppError::from)
 	}
 
+	/// Every open plan of a group, by environment.
+	///
+	/// One query for the group rather than one per environment, for callers
+	/// that walk all of them: the worklist and the sweep both do, for every
+	/// group, on every pass.
+	pub async fn open_for_group(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<Vec<Self>> {
+		use crate::schema::upgrade_plans::dsl;
+
+		dsl::upgrade_plans
+			.select(Self::as_select())
+			.filter(dsl::group_id.eq(group_id))
+			.filter(dsl::met_at.is_null())
+			.filter(dsl::superseded_at.is_null())
+			.filter(dsl::withdrawn_at.is_null())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// An open plan by id, refusing one that has been met, superseded, or
 	/// withdrawn.
 	pub async fn get_open(db: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {

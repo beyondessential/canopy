@@ -47,6 +47,31 @@ impl Scope {
 		}
 	}
 
+	/// Narrow a query to the artifacts this scope may see.
+	///
+	/// The SQL form of `sees`. Both read paths apply this rather than spelling
+	/// the predicate out, since the two disagreeing would offer an artifact on
+	/// one and withhold it on the other, and the listing marks as served what
+	/// the public path passes over.
+	// spec: ART#who-is-offered-a-group-scoped-artifact
+	fn narrow<'a, ST>(
+		self,
+		query: crate::schema::artifacts::BoxedQuery<'a, diesel::pg::Pg, ST>,
+	) -> crate::schema::artifacts::BoxedQuery<'a, diesel::pg::Pg, ST> {
+		use crate::schema::artifacts::dsl::{group_id, rank};
+
+		match self {
+			Self::Unscoped => query.filter(group_id.is_null()),
+			Self::Group(caller) => query
+				.filter(group_id.is_null().or(group_id.eq(caller)))
+				.filter(rank.is_null()),
+			Self::Environment(caller, caller_rank) => query
+				.filter(group_id.is_null().or(group_id.eq(caller)))
+				.filter(rank.is_null().or(rank.eq(caller_rank))),
+			Self::Fleet => query,
+		}
+	}
+
 	/// Whether an artifact of this group and environment is in scope.
 	///
 	/// A rank narrows who an artifact reaches, so one carrying a rank is
@@ -281,17 +306,7 @@ impl Artifact {
 	) -> Result<Option<Self>> {
 		use crate::schema::artifacts::dsl::*;
 
-		let mut query = artifacts.filter(id.eq(artifact_id)).into_boxed();
-		query = match scope {
-			Scope::Unscoped => query.filter(group_id.is_null()),
-			Scope::Group(caller) => query
-				.filter(group_id.is_null().or(group_id.eq(caller)))
-				.filter(rank.is_null()),
-			Scope::Environment(caller, caller_rank) => query
-				.filter(group_id.is_null().or(group_id.eq(caller)))
-				.filter(rank.is_null().or(rank.eq(caller_rank))),
-			Scope::Fleet => query,
-		};
+		let query = scope.narrow(artifacts.filter(id.eq(artifact_id)).into_boxed());
 
 		let row: Option<Self> = query
 			.select(Self::as_select())
@@ -332,7 +347,7 @@ impl Artifact {
 		let version = crate::versions::Version::get_by_id(db, target_version_id).await?;
 		let semver = version.as_semver();
 
-		let mut query = table
+		let query = table
 			.select(Self::as_select())
 			.filter(
 				version_id
@@ -341,16 +356,7 @@ impl Artifact {
 			)
 			.into_boxed();
 
-		query = match scope {
-			Scope::Unscoped => query.filter(group_id.is_null()),
-			Scope::Group(caller) => query
-				.filter(group_id.is_null().or(group_id.eq(caller)))
-				.filter(rank.is_null()),
-			Scope::Environment(caller, caller_rank) => query
-				.filter(group_id.is_null().or(group_id.eq(caller)))
-				.filter(rank.is_null().or(rank.eq(caller_rank))),
-			Scope::Fleet => query,
-		};
+		let query = scope.narrow(query);
 
 		let mut artifacts: Vec<Self> = query
 			.order_by(artifact_type.asc())

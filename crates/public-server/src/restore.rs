@@ -1212,10 +1212,9 @@ async fn verification(
 			// fact and are checked against each other below rather than
 			// assumed to agree.
 			// spec: RPT#what-a-build-reports
-			let Some(rank) = database::machines::Machine::get_by_id(&mut conn, machine_id)
-				.await?
-				.rank
-			else {
+			// The machine was read above to check it is the group's, and that
+			// row carries the rank.
+			let Some(rank) = reported.rank else {
 				// The replica's own health is what this endpoint is for, and a
 				// box in none of its group's environments costs the build
 				// record rather than the report carrying it. The pair stays
@@ -1239,9 +1238,14 @@ async fn verification(
 			// spec: RPT#what-a-build-reports
 			let mut elsewhere = Vec::new();
 			for artifact in &build.artifacts {
+				// The ids are the device's word. One naming no artifact is as
+				// much a report that does not describe this environment's
+				// build as one naming another environment's, so it is read the
+				// same way rather than raised as a fault.
 				let registered = database::artifacts::Artifact::get_by_id(&mut conn, *artifact)
-					.await?
-					.rank;
+					.await
+					.ok()
+					.and_then(|found| found.rank);
 				if registered != Some(rank) {
 					elsewhere.push(*artifact);
 				}

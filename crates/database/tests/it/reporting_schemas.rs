@@ -145,9 +145,6 @@ async fn record_build_for_run(
 	.expect("record build");
 }
 
-/// The pairs are every version the group's Tamanu applications report running.
-/// A facility mid-rollout is on a different version from its central, and both
-/// are pairs, because a schema follows the version rather than the application.
 /// The distinct versions of a group's pairs.
 ///
 /// A pair is one environment's, so a version is not a key on its own; these
@@ -168,6 +165,9 @@ async fn versions_for_group(
 	Ok(versions)
 }
 
+/// The pairs are every version the group's Tamanu applications report running.
+/// A facility mid-rollout is on a different version from its central, and both
+/// are pairs, because a schema follows the version rather than the application.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_facility_on_its_own_version_is_a_pair_of_its_own() {
 	TestDb::run(|mut conn, _url| async move {
@@ -1062,6 +1062,55 @@ async fn a_planned_pair_names_no_applications() {
 			planned.applications.is_empty(),
 			"nothing runs it: {:?}",
 			planned.applications
+		);
+	})
+	.await;
+}
+
+/// An environment a build cannot be dispatched for is no pair.
+///
+/// A pair is derived from any ranked Tamanu application, so a facility box
+/// ranked on its own would make an environment out of a group that has no
+/// central there to restore. Such a pair is never dispatched, would sit
+/// awaiting for good, and would take an operator's ask that nothing clears.
+// spec: RPT#the-build-contract
+#[tokio::test(flavor = "multi_thread")]
+async fn an_environment_with_no_central_to_restore_is_no_pair() {
+	TestDb::run(|mut conn, _url| async move {
+		seed(&mut conn).await;
+
+		// A demo box carrying a facility and nothing else: ranked, reporting a
+		// published version, and with no central of its own.
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (id, name, group_id, rank)
+			 VALUES ('ffffffff-ffff-ffff-ffff-ffffffffffff', 'demo box', '{GROUP}', 'demo');
+
+			 INSERT INTO applications (id, type, name, host, machine_id, group_id, rank)
+			 VALUES ('ffffffff-0000-ffff-0000-ffffffffffff', 'tamanu-facility', 'demo facility',
+			         'https://d', 'ffffffff-ffff-ffff-ffff-ffffffffffff', '{GROUP}', 'demo');
+
+			 INSERT INTO application_reported_detail (application_id, source, reported_at, version)
+			 VALUES ('ffffffff-0000-ffff-0000-ffffffffffff', 'tamanu', NOW(), '2.60.0')",
+		))
+		.await
+		.expect("seed a demo facility with no central");
+		declare_builder(&mut conn, true).await;
+
+		let pairs = pairs_for_group(&mut conn, group())
+			.await
+			.expect("the group's pairs");
+
+		assert!(
+			!pairs.is_empty(),
+			"the production environment still has pairs"
+		);
+		assert!(
+			pairs.iter().all(|pair| pair.rank == ServerRank::Production),
+			"only the environment with a central to restore is a pair: {:?}",
+			pairs
+				.iter()
+				.map(|p| (p.rank, &p.version))
+				.collect::<Vec<_>>()
 		);
 	})
 	.await;
