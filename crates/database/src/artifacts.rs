@@ -47,14 +47,6 @@ impl Scope {
 		}
 	}
 
-	/// The group whose artifacts this scope may see, where it is one group's.
-	pub fn group(self) -> Option<Uuid> {
-		match self {
-			Self::Unscoped | Self::Fleet => None,
-			Self::Group(group) | Self::Environment(group, _) => Some(group),
-		}
-	}
-
 	/// Whether an artifact of this group and environment is in scope.
 	///
 	/// A rank narrows who an artifact reaches, so one carrying a rank is

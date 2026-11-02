@@ -1867,8 +1867,11 @@ export async function seedReportingSchemaBuild(
 		groupId: string;
 		/** The machine whose snapshot the schema was built from. */
 		machineId: string;
-		/** The group's central, which the build is held against. */
+		/** The environment's central, which the build is held against. */
 		applicationId?: string | null;
+		/** The environment the schema was built for. A pair is one
+		 * environment's, so a build naming none matches no pair. */
+		rank?: string;
 		versionId: string;
 		snapshotId?: string;
 		built?: boolean;
@@ -1890,11 +1893,12 @@ export async function seedReportingSchemaBuild(
 
 	await sql.query(
 		`INSERT INTO reporting_schema_builds
-		 (check_id, group_id, version_id, application_id, built, error, artifact_ids)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7::uuid[])`,
+		 (check_id, group_id, rank, version_id, application_id, built, error, artifact_ids)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::uuid[])`,
 		[
 			checkId,
 			opts.groupId,
+			opts.rank ?? "production",
 			opts.versionId,
 			opts.applicationId ?? null,
 			built,
