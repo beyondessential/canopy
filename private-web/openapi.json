@@ -26776,7 +26776,7 @@
     },
     "/api/versions/download_artifact": {
       "get": {
-        "description": "The public path serves these to the machines an artifact is offered to, and\nresolves what that is from the caller's own device. An operator holds no\ndevice of the group, so reading one there would mean issuing them a\ncredential of a machine; this answers the same bytes for an operator\ninstead, who may already see every group's artifacts.\n\nThe digest is verified before the bytes are served, as on the public path,\nso an artifact corrupted after it was taken in fails the read rather than\nbeing handed over as the artifact it is not.",
+        "description": "The public path serves these to the machines an artifact is offered to, and\nresolves what that is from the caller's own device. An operator holds no\ndevice of the group, so reading one there would mean issuing them a\ncredential of a machine; this answers the same bytes for an operator\ninstead.\n\nAdmin-gated and held to the one type: what an operator may see of every\ngroup's artifacts is their metadata, and a reading of the whole surface\nwould hand any tailnet user the bytes of every group-scoped artifact there\nis. RPT sanctions reading the SQL a pair published, which is this and\nnothing else.\n\nThe digest is verified before the bytes are served, as on the public path,\nso an artifact corrupted after it was taken in fails the read rather than\nbeing handed over as the artifact it is not.",
         "operationId": "download_artifact",
         "parameters": [
           {
@@ -26820,10 +26820,10 @@
         },
         "security": [
           {
-            "tailscale-user": []
+            "tailscale-admin": []
           }
         ],
-        "summary": "Fetch the bytes of an artifact Canopy holds.",
+        "summary": "Fetch the bytes of a reporting schema Canopy holds.",
         "tags": [
           "versions"
         ],

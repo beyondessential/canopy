@@ -86,7 +86,8 @@ The device compares what its application runs with what it is offered, applies t
 
 ## Alerting
 
-A failed build raises a reporting-schema check on that environment's central Tamanu application, carrying the failure description (see [CHK](../monitoring/checks.md)).
+A failed build raises a reporting-schema check on the group's central Tamanu application, carrying the failure description (see [CHK](../monitoring/checks.md)).
+One check for the group rather than one per environment, since the question it answers is asked of the group, and each pair is an instance of it keyed by the environment and the version so two environments on one version are told apart.
 The check is a warning rather than a failure, and does not escalate: the application is up and its reports return rows, and a schema that cannot be built for the version its group is moving to is for whoever maintains the reports rather than whoever is on call.
 A replica that failed to restore or come up is the restore's own health rather than a build failure, and is dispatched again as any unhealthy restore is.
 The check recovers when the pair is built, and nothing else clears it: an operator asking for the build puts the pair back on the worklist, and the warning stands until a build lands, since asking changes nothing about whether the group's applications can be offered a schema.

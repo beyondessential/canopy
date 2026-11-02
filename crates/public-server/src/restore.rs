@@ -1215,9 +1215,20 @@ async fn verification(
 				.await?
 				.rank
 			else {
-				return Err(AppError::BadRequest(
-					"the machine this build restored is in none of its group's environments".into(),
-				));
+				// The replica's own health is what this endpoint is for, and a
+				// box in none of its group's environments costs the build
+				// record rather than the report carrying it. The pair stays
+				// unsettled and is dispatched again once the box is ranked,
+				// where refusing the report would lose the restore's health
+				// and fail the same way on every retry.
+				// spec: RST#what-a-restore-reports
+				tracing::warn!(
+					machine = %machine_id,
+					group = %args.group,
+					"a schema build reported for an unranked box; recording the restore alone"
+				);
+				BackupRestoreCheck::record_report(&mut conn, report).await?;
+				return Ok(StatusCode::NO_CONTENT);
 			};
 			// The build is held against that environment's central application,
 			// which is the one whose database the schema followed from and the

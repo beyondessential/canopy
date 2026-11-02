@@ -1057,6 +1057,9 @@ pub async fn resolve_known_issue(
 	Ok(Json(KnownIssueData::from(row)))
 }
 
+/// The one held artifact type an operator reads the bytes of.
+const REPORTING_SCHEMA_TYPE: &str = "reporting-schema";
+
 /// Which held artifact to fetch.
 #[derive(Deserialize, IntoParams)]
 pub struct DownloadArtifactQuery {
@@ -1064,23 +1067,29 @@ pub struct DownloadArtifactQuery {
 	pub artifact_id: Uuid,
 }
 
-/// Fetch the bytes of an artifact Canopy holds.
+/// Fetch the bytes of a reporting schema Canopy holds.
 ///
 /// The public path serves these to the machines an artifact is offered to, and
 /// resolves what that is from the caller's own device. An operator holds no
 /// device of the group, so reading one there would mean issuing them a
 /// credential of a machine; this answers the same bytes for an operator
-/// instead, who may already see every group's artifacts.
+/// instead.
+///
+/// Admin-gated and held to the one type: what an operator may see of every
+/// group's artifacts is their metadata, and a reading of the whole surface
+/// would hand any tailnet user the bytes of every group-scoped artifact there
+/// is. RPT sanctions reading the SQL a pair published, which is this and
+/// nothing else.
 ///
 /// The digest is verified before the bytes are served, as on the public path,
 /// so an artifact corrupted after it was taken in fails the read rather than
 /// being handed over as the artifact it is not.
-// spec: ART#where-an-artifact-rests
+// spec: ART#where-an-artifact-rests, RPT#alerting
 #[utoipa::path(
 	get,
 	path = "/download_artifact",
 	tag = "versions",
-	security(("tailscale-user" = [])),
+	security(("tailscale-admin" = [])),
 	params(DownloadArtifactQuery),
 	responses(
 		(status = 200, description = "The artifact's bytes.", content_type = "application/octet-stream"),
@@ -1090,13 +1099,20 @@ pub struct DownloadArtifactQuery {
 )]
 pub async fn download_artifact(
 	State(state): State<AppState>,
-	_user: TailscaleUser,
+	_admin: TailscaleAdmin,
 	Query(named): Query<DownloadArtifactQuery>,
 ) -> Result<axum::response::Response> {
 	use axum::response::IntoResponse as _;
 
 	let mut conn = state.db.get().await?;
 	let artifact = Artifact::get_by_id(&mut conn, named.artifact_id).await?;
+
+	// Held to the one type this is for. Every other held artifact is a file a
+	// machine of its group runs, and handing those out here would be a second
+	// way to read them that answers to none of the rules the first does.
+	if artifact.artifact_type != REPORTING_SCHEMA_TYPE {
+		return Err(AppError::NotFound("reporting schema".into()));
+	}
 
 	let Some(recorded) = artifact.digest.clone() else {
 		return Err(AppError::BadRequest(
@@ -1122,9 +1138,7 @@ pub async fn download_artifact(
 			artifact = %artifact.id,
 			"held artifact does not match its digest; refusing to serve"
 		);
-		return Err(AppError::custom(
-			"the artifact does not match its digest".to_owned(),
-		));
+		return Err(AppError::ArtifactDigestMismatch);
 	};
 
 	let content_type = artifact

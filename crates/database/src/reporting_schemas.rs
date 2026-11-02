@@ -169,9 +169,16 @@ impl ReportingSchemaBuild {
 			.await
 			.map_err(AppError::from)?;
 
+		// The query excludes a build naming no environment, so every row here
+		// has one.
 		Ok(builds
 			.into_iter()
-			.filter_map(|b| b.rank.map(|rank| ((rank, b.version_id), b)))
+			.map(|b| {
+				(
+					(b.rank.expect("filtered to builds naming one"), b.version_id),
+					b,
+				)
+			})
 			.collect())
 	}
 
@@ -442,18 +449,6 @@ async fn pairs_of_members(
 	Ok(pairs)
 }
 
-/// Every published version a group's Tamanu applications report running, plus
-/// the version its open plan moves it to.
-///
-/// A reported version Canopy holds no release row for is not a pair: a build
-/// needs that version's migrations, which reach a builder as its published
-/// artifacts.
-// spec: RPT#pairs
-pub async fn versions_for_group(db: &mut AsyncPgConnection, group: Uuid) -> Result<Vec<Version>> {
-	let members = crate::applications::Application::list_live_in_group(db, group).await?;
-	versions_of_members(db, group, &members).await
-}
-
 /// A group's pairs as environment and version, from members already in hand.
 ///
 /// The dispatch needs the environment each version belongs to, since the
@@ -469,21 +464,6 @@ pub async fn pairs_of_live_members(
 		.into_iter()
 		.map(|(rank, version, _)| (rank, version))
 		.collect())
-}
-
-/// The versions of a group's pairs, from members already in hand.
-pub async fn versions_of_members(
-	db: &mut AsyncPgConnection,
-	group: Uuid,
-	members: &[crate::applications::Application],
-) -> Result<Vec<Version>> {
-	let mut versions: Vec<Version> = Vec::new();
-	for (_, version, _) in versions_and_applications(db, group, members).await? {
-		if !versions.iter().any(|held| held.id == version.id) {
-			versions.push(version);
-		}
-	}
-	Ok(versions)
 }
 
 /// A group's pairs, and which of its Tamanu applications report each one.
@@ -651,17 +631,27 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 			.iter()
 			.filter(|p| p.state != PairState::Awaiting)
 			.map(|pair| {
-				let mut detail = serde_json::json!({ "version": pair.version });
+				let mut detail =
+					serde_json::json!({ "environment": pair.rank, "version": pair.version });
 				if pair.state != PairState::Built {
 					detail["why"] = pair
 						.error
 						.clone()
-						.unwrap_or_else(|| format!("no schema could be built for {}", pair.version))
+						.unwrap_or_else(|| {
+							format!(
+								"no schema could be built for {} on {}",
+								pair.rank, pair.version
+							)
+						})
 						.into();
 				}
 
 				CheckInstance {
-					key: pair.version.clone(),
+					// A pair is one environment's, so two environments on one
+					// version are two instances: keyed by version alone they
+					// would collide and a failure in one would read as the
+					// other's.
+					key: format!("{}/{}", pair.rank, pair.version),
 					label: None,
 					observed: match pair.state {
 						PairState::Built => CheckResult::Passed,
@@ -685,7 +675,9 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 			},
 			instances,
 			&move |graded: &GradedCheck| match graded.degraded().as_slice() {
-				[] => format!("Reporting schemas are built for every version {name} runs"),
+				[] => format!(
+					"Reporting schemas are built for every version {name} runs in each of its environments"
+				),
 				[one] => format!(
 					"No reporting schema for {name} on {}: {}",
 					one.name(),
@@ -696,7 +688,7 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 						.unwrap_or("the build failed")
 				),
 				many => format!(
-					"No reporting schema for {} of {total} versions {name} runs: {}",
+					"No reporting schema for {} of {total} pairs {name} runs: {}",
 					many.len(),
 					many.iter().map(|i| i.name()).collect::<Vec<_>>().join(", ")
 				),

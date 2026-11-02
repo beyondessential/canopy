@@ -365,7 +365,7 @@ async fn register_for_group(
 			.map(ServerRank::to_string)
 			.collect::<Vec<_>>()
 			.join(", ");
-		AppError::BadRequest(format!("{rank:?} is not an environment; one of {known}"))
+		AppError::BadRequest(format!("{rank} is not an environment; one of {known}"))
 	})?;
 
 	let authorised = device.0.role == DeviceRole::Admin
@@ -376,6 +376,23 @@ async fn register_for_group(
 		return Err(AppError::AuthInsufficientPermissions {
 			required: "an enabled declaration building this group's artifacts".into(),
 		});
+	}
+
+	// The environment reaches here as a path segment, and the builder is a
+	// consumer device rather than a machine of the group, so there is no rank
+	// of its own to check it against. What can be checked is that the group has
+	// the environment at all: a schema published for one it does not have is
+	// offered to nobody and sits there reading as a built pair.
+	//
+	// Read from the boxes rather than from what is running on them, since a
+	// machine is in the environment its rank names whether or not anything on
+	// it has reported yet.
+	// spec: GRP#environments, RPT#the-build-contract
+	let boxes = database::machines::Machine::list_for_group(&mut db, group).await?;
+	if !boxes.iter().any(|machine| machine.rank == Some(rank)) {
+		return Err(AppError::BadRequest(format!(
+			"that group has no {rank} environment to register a schema for"
+		)));
 	}
 
 	if body.len() > MAX_HELD_ARTIFACT_BYTES {

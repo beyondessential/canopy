@@ -72,8 +72,11 @@ Canopy passes a group-scoped artifact's bytes only to a caller it is offered to.
 
 Registering an unscoped artifact and registering a group's are separate: they name different things, carry different bodies, and are authorised differently, so each is its own path rather than one path that changes shape on a parameter.
 An unscoped registration names the version or range, the type and the platform, and carries the artifact's location.
-A group-scoped one names the group and the environment within it as well, carries the artifact's bytes, and names an exact version Canopy already holds rather than drafting one.
-The environment is part of the path rather than something a registration may leave off: an artifact derived from one environment's data and published without naming it would be offered to every environment of the group, which is the one thing the scope exists to prevent.
+A group-scoped one names the group as well, carries the artifact's bytes, and names an exact version Canopy already holds rather than drafting one.
+
+A registration a **builder** makes names the environment too, as a path segment rather than as something it may leave off: an artifact derived from one environment's data and published without naming it would be offered to every environment of the group, which is the one thing the scope exists to prevent.
+An **operator** registering for a group names an environment or does not, and one registered without an environment is for every environment of the group.
+That is the group-wide artifact an unranked caller is offered, and only an operator can judge that a file is right for a whole group, so the path they register through is the one that may leave it off.
 The group is named on the registration rather than inferred from the caller.
 
 A releaser device registers unscoped artifacts, and carries no authorisation for any group.

@@ -8,7 +8,7 @@ use database::{
 	diesel_async::AsyncPgConnection,
 	reporting_schemas::{
 		NewReportingSchemaBuild, PairState, ReportingSchemaBuild, ReportingSchemaRequest,
-		pairs_for_group, versions_for_group,
+		pairs_for_group,
 	},
 	restore::NewBackupRestoreCheck,
 };
@@ -148,6 +148,26 @@ async fn record_build_for_run(
 /// The pairs are every version the group's Tamanu applications report running.
 /// A facility mid-rollout is on a different version from its central, and both
 /// are pairs, because a schema follows the version rather than the application.
+/// The distinct versions of a group's pairs.
+///
+/// A pair is one environment's, so a version is not a key on its own; these
+/// tests ask which versions a group has pairs for, which is that set deduped.
+async fn versions_for_group(
+	conn: &mut diesel_async::AsyncPgConnection,
+	group: Uuid,
+) -> Result<Vec<database::versions::Version>, commons_errors::AppError> {
+	let members = database::applications::Application::list_live_in_group(conn, group).await?;
+	let mut versions: Vec<database::versions::Version> = Vec::new();
+	for (_, version) in
+		database::reporting_schemas::pairs_of_live_members(conn, group, &members).await?
+	{
+		if !versions.iter().any(|held| held.id == version.id) {
+			versions.push(version);
+		}
+	}
+	Ok(versions)
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn a_facility_on_its_own_version_is_a_pair_of_its_own() {
 	TestDb::run(|mut conn, _url| async move {
@@ -551,18 +571,18 @@ async fn a_failed_build_warns_on_the_group_central() {
 			issue.message
 		);
 
-		// Each version is an instance keyed by the version, which its detail
-		// also carries for a rule to read; the pair still awaiting its first
-		// build is not one yet.
+		// Each pair is an instance keyed by its environment and version, which
+		// its detail also carries for a rule to read; the pair still awaiting
+		// its first build is not one yet. The environment is in the key
+		// because two of them on one version would otherwise collide.
 		let instances = issue.stored_instances().expect("instances");
 		assert_eq!(
 			instances.0.keys().map(String::as_str).collect::<Vec<_>>(),
-			["2.59.0"]
+			["production/2.59.0"]
 		);
-		assert_eq!(
-			instances.0["2.59.0"].detail.as_ref().unwrap()["version"],
-			"2.59.0"
-		);
+		let detail = instances.0["production/2.59.0"].detail.as_ref().unwrap();
+		assert_eq!(detail["version"], "2.59.0");
+		assert_eq!(detail["environment"], "production");
 	})
 	.await;
 }

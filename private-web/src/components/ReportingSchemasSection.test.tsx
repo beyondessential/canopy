@@ -14,12 +14,14 @@ vi.mock("../hooks/useSafetyMode", () => ({
 
 type Pair = {
 	group_id: string;
+	rank: "production" | "clone" | "demo" | "test" | "dev";
 	version_id: string;
 	version: string;
 	state: "awaiting" | "built" | "failed";
 	error?: string | null;
 	requested: boolean;
 	applications: string[];
+	artifact_id?: string | null;
 };
 
 const GROUP = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
@@ -27,12 +29,14 @@ const GROUP = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 function pair(over: Partial<Pair> = {}): Pair {
 	return {
 		group_id: GROUP,
+		rank: "production",
 		version_id: "11111111-1111-1111-1111-111111111111",
 		version: "2.60.0",
 		state: "awaiting",
 		error: null,
 		requested: false,
 		applications: ["kamaka-central"],
+		artifact_id: null,
 		...over,
 	};
 }
@@ -148,14 +152,18 @@ describe("asking for a build", () => {
 	});
 
 	it("names the pair rather than the group's latest version", async () => {
-		const calls = stubApi([pair({ version_id: "abc", version: "2.59.0", state: "failed" })]);
+		const calls = stubApi([
+			pair({ rank: "demo", version_id: "abc", version: "2.59.0", state: "failed" }),
+		]);
 		render(<ReportingSchemasSection groupId={GROUP} />);
 
 		fireEvent.click(await screen.findByText("Build again"));
 
 		await waitFor(() => {
 			const ask = calls.find((c) => c.url.includes("reporting_schemas/build"));
-			expect(ask?.body).toEqual({ group_id: GROUP, version_id: "abc" });
+			// The environment is part of the pair, so an ask that names only
+			// the version would rebuild whichever environment answered first.
+			expect(ask?.body).toEqual({ group_id: GROUP, rank: "demo", version_id: "abc" });
 		});
 	});
 
@@ -177,6 +185,33 @@ describe("asking for a build", () => {
 		fireEvent.click(await screen.findByText("Build again"));
 
 		expect(await screen.findByText(/insufficient permissions/)).toBeTruthy();
+	});
+});
+
+describe("the environment a pair is for", () => {
+	// Two environments of one group on one version are two pairs, so the row
+	// has to say which is which or an operator reads one as the other.
+	it("names each environment on its own row", async () => {
+		stubApi([
+			pair({ rank: "production", version_id: "1", state: "built" }),
+			pair({ rank: "demo", version_id: "2", state: "failed" }),
+		]);
+		render(<ReportingSchemasSection groupId={GROUP} />);
+
+		expect(await screen.findByText("production")).toBeTruthy();
+		expect(await screen.findByText("demo")).toBeTruthy();
+	});
+
+	it("offers the built schema to read and nothing where none was built", async () => {
+		stubApi([
+			pair({ rank: "production", version_id: "1", state: "built", artifact_id: "art-1" }),
+			pair({ rank: "demo", version_id: "2", state: "failed" }),
+		]);
+		render(<ReportingSchemasSection groupId={GROUP} />);
+
+		const links = await screen.findAllByText("SQL");
+		expect(links).toHaveLength(1);
+		expect(links[0]?.closest("a")?.getAttribute("href")).toContain("artifact_id=art-1");
 	});
 });
 

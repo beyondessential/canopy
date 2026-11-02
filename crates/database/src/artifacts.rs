@@ -543,7 +543,7 @@ impl Artifact {
 	}
 
 	/// Register an artifact, replacing whatever is already registered for the
-	/// same version or range, type, platform, and group.
+	/// same version or range, type, platform, group, and environment.
 	// spec: ART#registration
 	pub async fn register(db: &mut AsyncPgConnection, input: NewArtifact) -> Result<Self> {
 		use crate::schema::artifacts::dsl::*;

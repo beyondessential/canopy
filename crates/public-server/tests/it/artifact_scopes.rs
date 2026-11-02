@@ -23,6 +23,11 @@ async fn seed(conn: &mut database::diesel_async::AsyncPgConnection) {
 		 INSERT INTO server_groups (id, name) VALUES
 		 ('{GROUP_A}', 'kamaka'), ('{GROUP_B}', 'drifting');
 
+		 -- A schema is registered against an environment the group has, so
+		 -- group A carries a ranked box for one to be registered for.
+		 INSERT INTO machines (id, name, group_id, rank)
+		 VALUES (gen_random_uuid(), 'box', '{GROUP_A}', 'production');
+
 		 INSERT INTO artifacts (id, version_id, platform, artifact_type, download_url)
 		 VALUES ('{UNSCOPED}', '{VERSION}', 'any', 'reporting-schema', 'https://example.com/all.sql');
 

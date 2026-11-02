@@ -5464,12 +5464,18 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Fetch the bytes of an artifact Canopy holds.
+         * Fetch the bytes of a reporting schema Canopy holds.
          * @description The public path serves these to the machines an artifact is offered to, and
          *     resolves what that is from the caller's own device. An operator holds no
          *     device of the group, so reading one there would mean issuing them a
          *     credential of a machine; this answers the same bytes for an operator
-         *     instead, who may already see every group's artifacts.
+         *     instead.
+         *
+         *     Admin-gated and held to the one type: what an operator may see of every
+         *     group's artifacts is their metadata, and a reading of the whole surface
+         *     would hand any tailnet user the bytes of every group-scoped artifact there
+         *     is. RPT sanctions reading the SQL a pair published, which is this and
+         *     nothing else.
          *
          *     The digest is verified before the bytes are served, as on the public path,
          *     so an artifact corrupted after it was taken in fails the read rather than
