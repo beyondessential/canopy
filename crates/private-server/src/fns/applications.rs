@@ -211,6 +211,9 @@ pub struct ServerLastStatusData {
 	pub bestool: Option<String>,
 	/// Timezone the server reported, if any.
 	pub timezone: Option<String>,
+	/// Mobile devices that synced to this central in the last 30 days. Absent
+	/// for a facility, and until the reporting bestool counts them.
+	pub active_mobile_devices: Option<i64>,
 	/// The source that pushed this status (e.g. `alertd`).
 	pub source: String,
 	/// Additional endpoint-defined data included with this status push.
@@ -821,6 +824,7 @@ pub async fn get_detail(
 			nodejs,
 			bestool: figures.bestool_version(),
 			timezone: figures.timezone(),
+			active_mobile_devices: figures.active_mobile_devices(),
 			source: st.source.clone(),
 			extra: st.extra.clone(),
 			operators,

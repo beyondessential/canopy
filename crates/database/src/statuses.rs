@@ -1032,6 +1032,10 @@ impl MergedDetail {
 		self.string("timezone")
 	}
 
+	pub fn active_mobile_devices(&self) -> Option<i64> {
+		self.get("activeMobileDevices").and_then(|v| v.as_i64())
+	}
+
 	/// Whether the server runs Munin. Absent when no source has reported the
 	/// flag — which is not the same as reporting that it doesn't.
 	// spec: SVC#munin-link

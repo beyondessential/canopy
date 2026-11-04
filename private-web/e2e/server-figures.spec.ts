@@ -45,6 +45,48 @@ test.describe("reported server figures", () => {
 		await expect(page.getByText("20.11.0", { exact: true })).toBeVisible();
 	});
 
+	test("shows a central's active mobile devices, zero included", async ({
+		page,
+		sql,
+	}) => {
+		const server = await seedServer(sql, {
+			name: "no-tablets",
+			type: "tamanu-central",
+		});
+		await seedStatus(sql, {
+			serverId: server.id,
+			source: "alertd",
+			extra: { ...BESTOOL_EXTRA, activeMobileDevices: 0 },
+		});
+
+		await page.goto(`/fleet/applications/${server.id}`);
+
+		const field = page
+			.getByText("Mobile devices (30d)", { exact: true })
+			.locator("..");
+		await expect(field).toBeVisible();
+		await expect(field.getByText("0", { exact: true })).toBeVisible();
+	});
+
+	test("shows no mobile figure where none is reported", async ({
+		page,
+		sql,
+	}) => {
+		const server = await seedServer(sql, { name: "older-bestool" });
+		await seedStatus(sql, {
+			serverId: server.id,
+			source: "alertd",
+			extra: BESTOOL_EXTRA,
+		});
+
+		await page.goto(`/fleet/applications/${server.id}`);
+
+		await expect(page.getByText("2.10.5", { exact: true })).toBeVisible();
+		await expect(
+			page.getByText("Mobile devices (30d)", { exact: true }),
+		).toHaveCount(0);
+	});
+
 	test("shows no bestool figure for a server no bestool reports on", async ({
 		page,
 		sql,

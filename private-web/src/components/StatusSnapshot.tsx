@@ -154,6 +154,12 @@ function CuratedFields({ snap }: { snap: StatusSnapshotData }) {
 			{snap.reporting_schema && (
 				<Field label="Reporting schema" value={snap.reporting_schema} mono />
 			)}
+			{snap.active_mobile_devices != null && (
+				<Field
+					label="Mobile devices (30d)"
+					value={String(snap.active_mobile_devices)}
+				/>
+			)}
 			{snap.nodejs && <Field label="Node.js" value={snap.nodejs} mono />}
 			{snap.bestool && <Field label="bestool" value={snap.bestool} mono />}
 			{snap.min_chrome_version != null && (
