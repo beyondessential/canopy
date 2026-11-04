@@ -1791,11 +1791,18 @@ fn migration_instance(
 	{
 		(Some(v), _) if v.verdict == crate::migration_tests::Verdict::Failed => (
 			CheckResult::Warning,
-			match &v.failed_migration {
-				Some(migration) => {
+			match (
+				crate::migration_tests::named_migration(v.failed_migration.as_deref()),
+				&v.failed_migration,
+			) {
+				(Some(migration), _) => {
 					format!("migration {migration} failed applying {}", v.target_version)
 				}
-				None => format!(
+				(None, Some(_)) => format!(
+					"migrating {} failed, but the runner did not name the migration",
+					v.target_version
+				),
+				(None, None) => format!(
 					"the restore never got as far as migrating {}",
 					v.target_version
 				),
