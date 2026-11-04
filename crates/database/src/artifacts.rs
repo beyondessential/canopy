@@ -8,6 +8,8 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use commons_types::server::rank::ServerRank;
+
 use crate::versions::Version;
 
 /// Which artifacts a read may see.
@@ -17,26 +19,72 @@ pub enum Scope {
 	/// The unscoped artifacts alone: a read carrying no identity, or one whose
 	/// caller has no group of its own.
 	Unscoped,
-	/// The unscoped artifacts plus the named group's.
+	/// The unscoped artifacts plus the named group's, of every environment.
+	/// A caller in a group whose rank is not yet set resolves here, and is
+	/// offered the group's environment-wide artifacts alone.
 	Group(Uuid),
-	/// Every artifact, whatever group it belongs to. Operator views only.
+	/// The unscoped artifacts, the group's environment-wide ones, and the
+	/// ones for this environment. Another environment's are not in scope.
+	Environment(Uuid, ServerRank),
+	/// Every artifact, whatever group or environment it belongs to. Operator
+	/// views only.
 	Fleet,
 }
 
 impl Scope {
-	/// What a caller resolving to this group may see.
-	pub fn for_caller(group: Option<Uuid>) -> Self {
-		match group {
-			Some(group) => Self::Group(group),
-			None => Self::Unscoped,
+	/// What a caller resolving to this group and rank may see.
+	///
+	/// A machine carries its rank, so an application's environment is known
+	/// wherever its group is. One that has not been ranked yet is in none of
+	/// its group's environments, so it is offered what the group holds for all
+	/// of them rather than nothing.
+	// spec: GRP#environments
+	pub fn for_caller(group: Option<Uuid>, rank: Option<ServerRank>) -> Self {
+		match (group, rank) {
+			(Some(group), Some(rank)) => Self::Environment(group, rank),
+			(Some(group), None) => Self::Group(group),
+			(None, _) => Self::Unscoped,
 		}
 	}
 
-	/// Whether an artifact of this group is in scope.
-	fn sees(self, group: Option<Uuid>) -> bool {
+	/// Narrow a query to the artifacts this scope may see.
+	///
+	/// The SQL form of `sees`. Both read paths apply this rather than spelling
+	/// the predicate out, since the two disagreeing would offer an artifact on
+	/// one and withhold it on the other, and the listing marks as served what
+	/// the public path passes over.
+	// spec: ART#who-is-offered-a-group-scoped-artifact
+	fn narrow<'a, ST>(
+		self,
+		query: crate::schema::artifacts::BoxedQuery<'a, diesel::pg::Pg, ST>,
+	) -> crate::schema::artifacts::BoxedQuery<'a, diesel::pg::Pg, ST> {
+		use crate::schema::artifacts::dsl::{group_id, rank};
+
+		match self {
+			Self::Unscoped => query.filter(group_id.is_null()),
+			Self::Group(caller) => query
+				.filter(group_id.is_null().or(group_id.eq(caller)))
+				.filter(rank.is_null()),
+			Self::Environment(caller, caller_rank) => query
+				.filter(group_id.is_null().or(group_id.eq(caller)))
+				.filter(rank.is_null().or(rank.eq(caller_rank))),
+			Self::Fleet => query,
+		}
+	}
+
+	/// Whether an artifact of this group and environment is in scope.
+	///
+	/// A rank narrows who an artifact reaches, so one carrying a rank is
+	/// withheld from a caller that has not resolved to that environment,
+	/// the group's own unranked callers included.
+	fn sees(self, group: Option<Uuid>, rank: Option<ServerRank>) -> bool {
 		match self {
 			Self::Unscoped => group.is_none(),
-			Self::Group(caller) => group.is_none() || group == Some(caller),
+			Self::Group(caller) => (group.is_none() || group == Some(caller)) && rank.is_none(),
+			Self::Environment(caller, caller_rank) => {
+				(group.is_none() || group == Some(caller))
+					&& (rank.is_none() || rank == Some(caller_rank))
+			}
 			Self::Fleet => true,
 		}
 	}
@@ -83,6 +131,10 @@ pub struct Artifact {
 	pub digest: Option<Vec<u8>>,
 	/// The run that produced this artifact, where the registration named one.
 	pub run_id: Option<Uuid>,
+	/// The environment within `group_id` this artifact is for. `null` for an
+	/// artifact that is for every environment of its group, which is every
+	/// artifact that names no group.
+	pub rank: Option<ServerRank>,
 	/// When this artifact was last registered.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub updated_at: jiff::Timestamp,
@@ -107,6 +159,7 @@ pub struct NewArtifact {
 	pub content_type: Option<String>,
 	pub digest: Option<Vec<u8>>,
 	pub run_id: Option<Uuid>,
+	pub rank: Option<ServerRank>,
 }
 
 /// Cap on the bytes Canopy will hold for one artifact. A reporting schema is a
@@ -231,7 +284,7 @@ impl Artifact {
 		let mut seen = std::collections::HashSet::new();
 		artifacts
 			.iter()
-			.filter(|a| scope.sees(a.group_id))
+			.filter(|a| scope.sees(a.group_id, a.rank))
 			.filter(|a| seen.insert((a.artifact_type.as_str(), a.platform.as_str())))
 			.map(|a| a.id)
 			.collect()
@@ -253,12 +306,7 @@ impl Artifact {
 	) -> Result<Option<Self>> {
 		use crate::schema::artifacts::dsl::*;
 
-		let mut query = artifacts.filter(id.eq(artifact_id)).into_boxed();
-		query = match scope {
-			Scope::Unscoped => query.filter(group_id.is_null()),
-			Scope::Group(caller) => query.filter(group_id.is_null().or(group_id.eq(caller))),
-			Scope::Fleet => query,
-		};
+		let query = scope.narrow(artifacts.filter(id.eq(artifact_id)).into_boxed());
 
 		let row: Option<Self> = query
 			.select(Self::as_select())
@@ -299,7 +347,7 @@ impl Artifact {
 		let version = crate::versions::Version::get_by_id(db, target_version_id).await?;
 		let semver = version.as_semver();
 
-		let mut query = table
+		let query = table
 			.select(Self::as_select())
 			.filter(
 				version_id
@@ -308,11 +356,7 @@ impl Artifact {
 			)
 			.into_boxed();
 
-		query = match scope {
-			Scope::Unscoped => query.filter(group_id.is_null()),
-			Scope::Group(caller) => query.filter(group_id.is_null().or(group_id.eq(caller))),
-			Scope::Fleet => query,
-		};
+		let query = scope.narrow(query);
 
 		let mut artifacts: Vec<Self> = query
 			.order_by(artifact_type.asc())
@@ -344,25 +388,26 @@ impl Artifact {
 
 	/// Sort artifacts by specificity, with most specific first.
 	/// Priority:
-	/// 1. Group-scoped artifacts over unscoped ones
+	/// 1. Scope: one environment's over its group's, and the group's over unscoped
 	/// 2. Exact version matches (version_id set)
 	/// 3. More specific ranges (range that allows_all of other matching ranges)
 	/// 4. When ranges are incomparable, use pattern specificity: ^ > ~ > .x > others
 	// spec: ART#what-a-version-offers
 	fn sort_by_specificity(artifacts: &mut [Self]) {
 		artifacts.sort_by(|a, b| {
-			// An artifact scoped to the caller's group is more specific than one
-			// belonging to no group. A deduplicating read resolves one scope, so
-			// only one group's artifacts are ever in play here.
-			let a_is_scoped = a.group_id.is_some();
-			let b_is_scoped = b.group_id.is_some();
+			// An artifact for the caller's environment is more specific than one
+			// for its whole group, which is more specific than one belonging to
+			// no group. A deduplicating read resolves one scope, so only one
+			// group's artifacts, and only its own environment's, are in play.
+			let scope_rank = |artifact: &Self| match (artifact.group_id, artifact.rank) {
+				(Some(_), Some(_)) => 0,
+				(Some(_), None) => 1,
+				(None, _) => 2,
+			};
 
-			if a_is_scoped != b_is_scoped {
-				return if a_is_scoped {
-					std::cmp::Ordering::Less
-				} else {
-					std::cmp::Ordering::Greater
-				};
+			let by_scope = scope_rank(a).cmp(&scope_rank(b));
+			if by_scope != std::cmp::Ordering::Equal {
+				return by_scope;
 			}
 
 			// Exact match always wins
@@ -479,6 +524,7 @@ impl Artifact {
 			.filter(version_id.is_not_distinct_from(input.version_id))
 			.filter(version_range_pattern.is_not_distinct_from(&input.version_range_pattern))
 			.filter(group_id.is_not_distinct_from(input.group_id))
+			.filter(rank.is_not_distinct_from(input.rank))
 			.select(id)
 			.first(db)
 			.await
@@ -503,7 +549,7 @@ impl Artifact {
 	}
 
 	/// Register an artifact, replacing whatever is already registered for the
-	/// same version or range, type, platform, and group.
+	/// same version or range, type, platform, group, and environment.
 	// spec: ART#registration
 	pub async fn register(db: &mut AsyncPgConnection, input: NewArtifact) -> Result<Self> {
 		use crate::schema::artifacts::dsl::*;
@@ -518,6 +564,7 @@ impl Artifact {
 				version_id,
 				version_range_pattern,
 				group_id,
+				rank,
 			))
 			.do_update()
 			.set((
@@ -607,6 +654,20 @@ impl Artifact {
 		}
 	}
 
+	/// One artifact by id, whatever version or group it belongs to. For the
+	/// operator paths, which see every artifact; a path serving a machine
+	/// reads through `of_version` so the scope is part of the read.
+	pub async fn get_by_id(db: &mut AsyncPgConnection, artifact_id: Uuid) -> Result<Self> {
+		use crate::schema::artifacts::dsl::*;
+
+		artifacts
+			.filter(id.eq(artifact_id))
+			.select(Self::as_select())
+			.first(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn delete(db: &mut AsyncPgConnection, artifact_id: Uuid) -> Result<()> {
 		use crate::schema::artifacts::dsl::*;
 
@@ -631,8 +692,12 @@ impl Artifact {
 
 		// An artifact is offered where it wins inside a scope that is actually
 		// resolved, so the fleet-wide answer is the union over the unscoped read
-		// and each group present rather than one deduplication across them all:
-		// two groups' artifacts of one type and platform are both served.
+		// and each group and environment present rather than one deduplication
+		// across them all: two groups' artifacts of one type and platform are
+		// both served. An environment present has to be resolved in its own
+		// right, since a group scope sees only what names no environment, and
+		// leaving it out would mark the artifact a group's machines are
+		// actually served as one nothing resolves to.
 		// spec: ART#what-a-version-offers
 		let scopes: Vec<Scope> = match scope {
 			Scope::Fleet => {
@@ -642,8 +707,21 @@ impl Artifact {
 					.collect();
 				groups.sort_unstable();
 				groups.dedup();
+
+				let mut environments: Vec<(Uuid, ServerRank)> = matching_artifacts
+					.iter()
+					.filter_map(|a| Some((a.group_id?, a.rank?)))
+					.collect();
+				environments.sort_unstable();
+				environments.dedup();
+
 				std::iter::once(Scope::Unscoped)
 					.chain(groups.into_iter().map(Scope::Group))
+					.chain(
+						environments
+							.into_iter()
+							.map(|(group, rank)| Scope::Environment(group, rank)),
+					)
 					.collect()
 			}
 			resolved => vec![resolved],

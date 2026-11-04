@@ -20,7 +20,7 @@ async fn seed(conn: &mut AsyncPgConnection) -> (Uuid, Uuid, Uuid) {
 		   ('{unrun}', 2, 59, 0, '', 'published');
 
 		 INSERT INTO server_groups (id, name) VALUES ('{group}', 'kamaka');
-		 INSERT INTO machines (name, id, group_id) VALUES ('box', '{machine}', '{group}');
+		 INSERT INTO machines (name, id, group_id, rank) VALUES ('box', '{machine}', '{group}', 'production');
 		 INSERT INTO applications (id, type, name, host, machine_id, group_id) VALUES
 		   ('{central}', 'tamanu-central', 'central', 'https://c', '{machine}', '{group}');
 		 INSERT INTO application_reported_detail (application_id, source, reported_at, version)
@@ -52,13 +52,17 @@ async fn an_ask_for_a_version_the_group_does_not_run_is_refused() {
 
 		private
 			.post("/api/reporting_schemas/build")
-			.json(&serde_json::json!({ "group_id": group, "version_id": ran }))
+			.json(
+				&serde_json::json!({ "group_id": group, "rank": "production", "version_id": ran }),
+			)
 			.await
 			.assert_status_ok();
 
 		private
 			.post("/api/reporting_schemas/build")
-			.json(&serde_json::json!({ "group_id": group, "version_id": unrun }))
+			.json(
+				&serde_json::json!({ "group_id": group, "rank": "production", "version_id": unrun }),
+			)
 			.await
 			.assert_status_bad_request();
 	})

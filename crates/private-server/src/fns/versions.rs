@@ -8,6 +8,7 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::artifact_store;
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
+use commons_types::server::rank::ServerRank;
 use commons_types::version::{VersionStatus, VersionStr};
 use database::{
 	artifacts::{
@@ -238,6 +239,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 				.routes(routes!(write, silent: upload_artifact))
 				.layer(DefaultBodyLimit::max(MAX_UPLOAD_ARTIFACT_BODY_BYTES)),
 		)
+		.routes(routes!(read_only, silent: download_artifact))
 		.routes(routes!(danger(irreversible), silent: delete_artifact))
 		.routes(routes!(read_only, silent: list_known_issues))
 		.routes(routes!(write, silent: add_known_issue))
@@ -702,6 +704,8 @@ pub async fn create_artifact(
 			content_type: None,
 			digest,
 			run_id: None,
+			// An artifact for every group is for no one environment.
+			rank: None,
 		},
 	)
 	.await?;
@@ -721,6 +725,9 @@ pub struct UploadArtifactQuery {
 	pub platform: String,
 	/// The group this artifact is for.
 	pub group_id: Uuid,
+	/// The environment within that group it is for, where it is for one.
+	/// Left off, the artifact is for every environment of the group.
+	pub rank: Option<ServerRank>,
 	/// Subresource Integrity digest of the body, e.g. `sha256-LCTbqp…`.
 	/// Canopy checks the bytes against it as they arrive and refuses the
 	/// registration on a mismatch, so a corrupted upload is refused while
@@ -815,12 +822,29 @@ pub async fn upload_artifact(
 		content_type,
 		digest: Some(digest),
 		run_id: None,
+		rank: named.rank,
 	};
+
+	let mut conn = state.db.get().await?;
+
+	// An environment the group does not have is one no machine is in, so an
+	// artifact registered for it is offered to nobody and sits in the fleet
+	// view reading as published. The builder path refuses the same thing; an
+	// operator naming no environment at all is the deliberate group-wide case
+	// and is left alone.
+	// spec: GRP#environments, ART#registration
+	if let Some(rank) = input.rank
+		&& !database::machines::Machine::group_has_environment(&mut conn, named.group_id, rank)
+			.await?
+	{
+		return Err(AppError::BadRequest(format!(
+			"that group has no {rank} environment to register an artifact for"
+		)));
+	}
 
 	// Under the id the artifact already has where one is registered, so a
 	// replacement lands where the bytes it replaces were.
 	// spec: ART#where-an-artifact-rests
-	let mut conn = state.db.get().await?;
 	let existing = Artifact::id_for_identity(&mut conn, &input).await?;
 	let id = existing.unwrap_or_else(Uuid::new_v4);
 	drop(conn);
@@ -1047,4 +1071,111 @@ pub async fn resolve_known_issue(
 	)
 	.await?;
 	Ok(Json(KnownIssueData::from(row)))
+}
+
+/// The one held artifact type an operator reads the bytes of.
+const REPORTING_SCHEMA_TYPE: &str = "reporting-schema";
+
+/// Which held artifact to fetch.
+#[derive(Deserialize, IntoParams)]
+pub struct DownloadArtifactQuery {
+	/// Id of the artifact whose bytes to return.
+	pub artifact_id: Uuid,
+}
+
+/// Fetch the bytes of a reporting schema Canopy holds.
+///
+/// The public path serves these to the machines an artifact is offered to, and
+/// resolves what that is from the caller's own device. An operator holds no
+/// device of the group, so reading one there would mean issuing them a
+/// credential of a machine; this answers the same bytes for an operator
+/// instead.
+///
+/// Admin-gated and held to the one type: what an operator may see of every
+/// group's artifacts is their metadata, and a reading of the whole surface
+/// would hand any tailnet user the bytes of every group-scoped artifact there
+/// is. RPT sanctions reading the SQL a pair published, which is this and
+/// nothing else.
+///
+/// The digest is verified before the bytes are served, as on the public path,
+/// so an artifact corrupted after it was taken in fails the read rather than
+/// being handed over as the artifact it is not.
+// spec: ART#where-an-artifact-rests, RPT#alerting
+#[utoipa::path(
+	get,
+	path = "/download_artifact",
+	tag = "versions",
+	security(("tailscale-admin" = [])),
+	params(DownloadArtifactQuery),
+	responses(
+		(status = 200, description = "The artifact's bytes.", content_type = "application/octet-stream"),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 404, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn download_artifact(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Query(named): Query<DownloadArtifactQuery>,
+) -> Result<axum::response::Response> {
+	use axum::response::IntoResponse as _;
+
+	let mut conn = state.db.get().await?;
+	let artifact = Artifact::get_by_id(&mut conn, named.artifact_id).await?;
+
+	// Held to the one type this is for. Every other held artifact is a file a
+	// machine of its group runs, and handing those out here would be a second
+	// way to read them that answers to none of the rules the first does.
+	if artifact.artifact_type != REPORTING_SCHEMA_TYPE {
+		return Err(AppError::NotFound("reporting schema".into()));
+	}
+
+	let Some(recorded) = artifact.digest.clone() else {
+		return Err(AppError::BadRequest(
+			"that artifact rests at a location of its own; fetch it from there".into(),
+		));
+	};
+
+	let store = state
+		.artifacts
+		.as_ref()
+		.ok_or_else(artifact_store::unconfigured)?;
+	let Some(bytes) = store.get(artifact.id).await? else {
+		return Err(AppError::NotFound("artifact bytes".into()));
+	};
+
+	let bytes =
+		tokio::task::spawn_blocking(move || (digest_of(&bytes) == recorded).then_some(bytes))
+			.await
+			.map_err(|err| AppError::custom(format!("verifying the artifact failed: {err}")))?;
+
+	let Some(bytes) = bytes else {
+		tracing::error!(
+			artifact = %artifact.id,
+			"held artifact does not match its digest; refusing to serve"
+		);
+		return Err(AppError::ArtifactDigestMismatch);
+	};
+
+	let content_type = artifact
+		.content_type
+		.unwrap_or_else(|| "application/octet-stream".to_owned());
+
+	// Served from the same origin as the operator's own pages, so the media
+	// type is never rendered: it downloads under the artifact's id.
+	Ok((
+		[
+			(axum::http::header::CONTENT_TYPE, content_type),
+			(
+				axum::http::header::CONTENT_DISPOSITION,
+				format!("attachment; filename=\"{}\"", artifact.id),
+			),
+			(
+				axum::http::HeaderName::from_static("x-content-type-options"),
+				"nosniff".to_owned(),
+			),
+		],
+		bytes,
+	)
+		.into_response())
 }

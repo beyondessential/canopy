@@ -783,7 +783,7 @@ pub async fn redaction_gap_for(
 	let published = crate::artifacts::Artifact::get_for_version(
 		db,
 		version.id,
-		crate::artifacts::Scope::for_caller(server.group_id),
+		crate::artifacts::Scope::for_caller(server.group_id, server.rank),
 	)
 	.await?
 	.into_iter()

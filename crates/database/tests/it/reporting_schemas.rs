@@ -3,11 +3,12 @@
 //! spec: RPT
 
 use commons_tests::db::TestDb;
+use commons_types::server::rank::ServerRank;
 use database::{
 	diesel_async::AsyncPgConnection,
 	reporting_schemas::{
 		NewReportingSchemaBuild, PairState, ReportingSchemaBuild, ReportingSchemaRequest,
-		pairs_for_group, versions_for_group,
+		pairs_for_group,
 	},
 	restore::NewBackupRestoreCheck,
 };
@@ -131,6 +132,7 @@ async fn record_build_for_run(
 		conn,
 		report,
 		NewReportingSchemaBuild {
+			rank: ServerRank::Production,
 			group_id: group(),
 			version_id: version,
 			application_id: Some(CENTRAL.parse().unwrap()),
@@ -141,6 +143,26 @@ async fn record_build_for_run(
 	)
 	.await
 	.expect("record build");
+}
+
+/// The distinct versions of a group's pairs.
+///
+/// A pair is one environment's, so a version is not a key on its own; these
+/// tests ask which versions a group has pairs for, which is that set deduped.
+async fn versions_for_group(
+	conn: &mut diesel_async::AsyncPgConnection,
+	group: Uuid,
+) -> Result<Vec<database::versions::Version>, commons_errors::AppError> {
+	let members = database::applications::Application::list_live_in_group(conn, group).await?;
+	let mut versions: Vec<database::versions::Version> = Vec::new();
+	for (_, version) in
+		database::reporting_schemas::pairs_of_live_members(conn, group, &members).await?
+	{
+		if !versions.iter().any(|held| held.id == version.id) {
+			versions.push(version);
+		}
+	}
+	Ok(versions)
 }
 
 /// The pairs are every version the group's Tamanu applications report running.
@@ -172,7 +194,7 @@ async fn a_failed_build_settles_the_pair() {
 		declare_builder(&mut conn, true).await;
 
 		assert!(
-			!ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			!ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"an untried pair is on the worklist"
@@ -181,7 +203,7 @@ async fn a_failed_build_settles_the_pair() {
 		record_build(&mut conn, newer, false).await;
 
 		assert!(
-			ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"a failure settles it as firmly as a pass"
@@ -205,17 +227,23 @@ async fn an_operator_ask_reinstates_a_settled_pair() {
 
 		record_build(&mut conn, newer, true).await;
 		assert!(
-			ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap()
 		);
 
-		ReportingSchemaRequest::enqueue(&mut conn, group(), newer, Some("someone@bes.au"))
-			.await
-			.expect("enqueue");
+		ReportingSchemaRequest::enqueue(
+			&mut conn,
+			group(),
+			ServerRank::Production,
+			newer,
+			Some("someone@bes.au"),
+		)
+		.await
+		.expect("enqueue");
 
 		assert!(
-			!ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			!ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"an ask puts the pair back on the worklist"
@@ -233,7 +261,7 @@ async fn an_operator_ask_reinstates_a_settled_pair() {
 		// The build that answers the ask clears it.
 		record_build(&mut conn, newer, true).await;
 		assert!(
-			ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"the ask is answered once the build it asked for lands"
@@ -263,14 +291,20 @@ async fn an_ask_made_while_the_build_ran_stands() {
 		.await
 		.expect("issue the run its credentials");
 
-		ReportingSchemaRequest::enqueue(&mut conn, group(), newer, Some("someone@bes.au"))
-			.await
-			.expect("enqueue");
+		ReportingSchemaRequest::enqueue(
+			&mut conn,
+			group(),
+			ServerRank::Production,
+			newer,
+			Some("someone@bes.au"),
+		)
+		.await
+		.expect("enqueue");
 
 		record_build_for_run(&mut conn, newer, true, Some(RUN.parse().unwrap())).await;
 
 		assert!(
-			!ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			!ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"the ask stands until a build that began after it lands"
@@ -317,6 +351,7 @@ async fn a_failed_restore_leaves_the_pair_unsettled() {
 			&mut conn,
 			report,
 			NewReportingSchemaBuild {
+				rank: ServerRank::Production,
 				group_id: group(),
 				version_id: newer,
 				application_id: Some(CENTRAL.parse().unwrap()),
@@ -329,7 +364,7 @@ async fn a_failed_restore_leaves_the_pair_unsettled() {
 		.expect("record");
 
 		assert!(
-			!ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			!ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"an unhealthy restore is dispatched again rather than settling the pair"
@@ -348,7 +383,7 @@ async fn a_new_artifact_for_the_version_reinstates_the_pair() {
 
 		record_build(&mut conn, newer, true).await;
 		assert!(
-			ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"a built pair settles"
@@ -363,7 +398,7 @@ async fn a_new_artifact_for_the_version_reinstates_the_pair() {
 		.expect("register an artifact for the version");
 
 		assert!(
-			!ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			!ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"the version's artifacts changed, so the pair is built again"
@@ -391,7 +426,7 @@ async fn a_range_artifact_covering_the_version_reinstates_the_pair() {
 		.expect("register a range artifact");
 
 		assert!(
-			!ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			!ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"a range covering the version is one of its artifacts"
@@ -423,7 +458,7 @@ async fn a_group_s_own_schema_does_not_reinstate_the_pair() {
 		.expect("another group registers its schema");
 
 		assert!(
-			ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"a schema is another group's output, not a change to the version"
@@ -452,6 +487,7 @@ async fn a_build_records_what_it_registered() {
 			&mut conn,
 			report,
 			NewReportingSchemaBuild {
+				rank: ServerRank::Production,
 				group_id: group(),
 				version_id: newer,
 				application_id: Some(CENTRAL.parse().unwrap()),
@@ -463,10 +499,15 @@ async fn a_build_records_what_it_registered() {
 		.await
 		.expect("record");
 
-		let build = ReportingSchemaBuild::latest_for_pair(&mut conn, group(), newer)
-			.await
-			.unwrap()
-			.expect("a build");
+		let build = ReportingSchemaBuild::latest_for_pair(
+			&mut conn,
+			group(),
+			ServerRank::Production,
+			newer,
+		)
+		.await
+		.unwrap()
+		.expect("a build");
 		assert_eq!(build.artifact_ids, vec![Some(artifact)]);
 	})
 	.await;
@@ -530,18 +571,18 @@ async fn a_failed_build_warns_on_the_group_central() {
 			issue.message
 		);
 
-		// Each version is an instance keyed by the version, which its detail
-		// also carries for a rule to read; the pair still awaiting its first
-		// build is not one yet.
+		// Each pair is an instance keyed by its environment and version, which
+		// its detail also carries for a rule to read; the pair still awaiting
+		// its first build is not one yet. The environment is in the key
+		// because two of them on one version would otherwise collide.
 		let instances = issue.stored_instances().expect("instances");
 		assert_eq!(
 			instances.0.keys().map(String::as_str).collect::<Vec<_>>(),
-			["2.59.0"]
+			["production/2.59.0"]
 		);
-		assert_eq!(
-			instances.0["2.59.0"].detail.as_ref().unwrap()["version"],
-			"2.59.0"
-		);
+		let detail = instances.0["production/2.59.0"].detail.as_ref().unwrap();
+		assert_eq!(detail["version"], "2.59.0");
+		assert_eq!(detail["environment"], "production");
 	})
 	.await;
 }
@@ -919,7 +960,7 @@ async fn a_newer_snapshot_does_not_unsettle_a_pair() {
 		.expect("a newer snapshot");
 
 		assert!(
-			ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"the version and the configuration are unchanged, so nothing is owed"
@@ -928,11 +969,17 @@ async fn a_newer_snapshot_does_not_unsettle_a_pair() {
 		// The pair does still come back for the one event that means the schema
 		// is stale, so the answer above is the rule rather than a function that
 		// has stopped moving.
-		ReportingSchemaRequest::enqueue(&mut conn, group(), newer, Some("ops@bes.au"))
-			.await
-			.expect("ask for a build");
+		ReportingSchemaRequest::enqueue(
+			&mut conn,
+			group(),
+			ServerRank::Production,
+			newer,
+			Some("ops@bes.au"),
+		)
+		.await
+		.expect("ask for a build");
 		assert!(
-			!ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+			!ReportingSchemaBuild::is_settled(&mut conn, group(), ServerRank::Production, newer)
 				.await
 				.unwrap(),
 			"an operator asking still reinstates it"
@@ -1015,6 +1062,55 @@ async fn a_planned_pair_names_no_applications() {
 			planned.applications.is_empty(),
 			"nothing runs it: {:?}",
 			planned.applications
+		);
+	})
+	.await;
+}
+
+/// An environment a build cannot be dispatched for is no pair.
+///
+/// A pair is derived from any ranked Tamanu application, so a facility box
+/// ranked on its own would make an environment out of a group that has no
+/// central there to restore. Such a pair is never dispatched, would sit
+/// awaiting for good, and would take an operator's ask that nothing clears.
+// spec: RPT#the-build-contract
+#[tokio::test(flavor = "multi_thread")]
+async fn an_environment_with_no_central_to_restore_is_no_pair() {
+	TestDb::run(|mut conn, _url| async move {
+		seed(&mut conn).await;
+
+		// A demo box carrying a facility and nothing else: ranked, reporting a
+		// published version, and with no central of its own.
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (id, name, group_id, rank)
+			 VALUES ('ffffffff-ffff-ffff-ffff-ffffffffffff', 'demo box', '{GROUP}', 'demo');
+
+			 INSERT INTO applications (id, type, name, host, machine_id, group_id, rank)
+			 VALUES ('ffffffff-0000-ffff-0000-ffffffffffff', 'tamanu-facility', 'demo facility',
+			         'https://d', 'ffffffff-ffff-ffff-ffff-ffffffffffff', '{GROUP}', 'demo');
+
+			 INSERT INTO application_reported_detail (application_id, source, reported_at, version)
+			 VALUES ('ffffffff-0000-ffff-0000-ffffffffffff', 'tamanu', NOW(), '2.60.0')",
+		))
+		.await
+		.expect("seed a demo facility with no central");
+		declare_builder(&mut conn, true).await;
+
+		let pairs = pairs_for_group(&mut conn, group())
+			.await
+			.expect("the group's pairs");
+
+		assert!(
+			!pairs.is_empty(),
+			"the production environment still has pairs"
+		);
+		assert!(
+			pairs.iter().all(|pair| pair.rank == ServerRank::Production),
+			"only the environment with a central to restore is a pair: {:?}",
+			pairs
+				.iter()
+				.map(|p| (p.rank, &p.version))
+				.collect::<Vec<_>>()
 		);
 	})
 	.await;

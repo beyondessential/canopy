@@ -3,6 +3,7 @@
 //! spec: ART
 
 use commons_tests::db::TestDb;
+use commons_types::server::rank::ServerRank;
 use database::{
 	artifacts::{Artifact, NewArtifact, Scope, digest_of, parse_sri, sri},
 	diesel_async::AsyncPgConnection,
@@ -63,10 +64,22 @@ fn unscoped(version_id: Uuid, artifact_type: &str, url: &str) -> NewArtifact {
 		content_type: None,
 		digest: None,
 		run_id: None,
+		rank: None,
 	}
 }
 
 fn held(version_id: Uuid, artifact_type: &str, group: Uuid, bytes: &[u8]) -> NewArtifact {
+	held_in(version_id, artifact_type, group, None, bytes)
+}
+
+/// One the group holds for a single environment, where a rank is given.
+fn held_in(
+	version_id: Uuid,
+	artifact_type: &str,
+	group: Uuid,
+	rank: Option<ServerRank>,
+	bytes: &[u8],
+) -> NewArtifact {
 	NewArtifact {
 		id: None,
 		version_id: Some(version_id),
@@ -79,6 +92,7 @@ fn held(version_id: Uuid, artifact_type: &str, group: Uuid, bytes: &[u8]) -> New
 		content_type: Some("application/sql".to_owned()),
 		digest: Some(digest_of(bytes)),
 		run_id: None,
+		rank,
 	}
 }
 
@@ -425,6 +439,7 @@ fn ranged(artifact_type: &str, pattern: &str, url: &str) -> NewArtifact {
 		content_type: None,
 		digest: None,
 		run_id: None,
+		rank: None,
 	}
 }
 
@@ -769,6 +784,15 @@ const UP: &str =
 const DOWN: &str =
 	include_str!("../../../../migrations/2026-09-06-211612-0000_group_scoped_artifacts/down.sql");
 
+/// The migration above this one in the stack. Reverting one migration means
+/// reverting what was laid on top of it first, and this one keys the artifact
+/// identity the registration upserts on, so leaving it off would leave the
+/// schema unable to take a registration at all.
+const RANK_UP: &str =
+	include_str!("../../../../migrations/2026-11-02-004500-0000_artifact_rank/up.sql");
+const RANK_DOWN: &str =
+	include_str!("../../../../migrations/2026-11-02-004500-0000_artifact_rank/down.sql");
+
 #[derive(diesel::QueryableByName)]
 struct TextRow {
 	#[diesel(sql_type = diesel::sql_types::Text)]
@@ -799,6 +823,9 @@ async fn the_group_scope_migration_reverses() {
 		.await
 		.expect("register");
 
+		conn.batch_execute(RANK_DOWN)
+			.await
+			.expect("revert the rank");
 		conn.batch_execute(DOWN).await.expect("revert");
 
 		let remaining: Vec<TextRow> =
@@ -838,6 +865,9 @@ async fn the_group_scope_migration_reverses() {
 		);
 
 		conn.batch_execute(UP).await.expect("re-apply");
+		conn.batch_execute(RANK_UP)
+			.await
+			.expect("re-apply the rank");
 
 		Artifact::register(
 			&mut conn,
@@ -918,6 +948,174 @@ async fn a_location_is_recorded_trimmed() {
 		.expect("register");
 
 		assert_eq!(artifact.download_url.as_deref(), Some("https://x/y.exe"));
+	})
+	.await;
+}
+
+/// One environment's artifact is that environment's alone.
+///
+/// A group's production, clone and demo hold different configuration, so a
+/// schema built from one of them is wrong for the others. The scope is what
+/// keeps them apart, and the group's own unranked callers see none of them.
+// spec: ART#who-is-offered-a-group-scoped-artifact
+#[tokio::test(flavor = "multi_thread")]
+async fn an_environments_artifact_is_withheld_from_every_other() {
+	TestDb::run(|mut conn, _url| async move {
+		let version = seed_version(&mut conn, 2, 60, 0).await;
+		let theirs = seed_group(&mut conn, "kamaka").await;
+		let other = seed_group(&mut conn, "drifting").await;
+		let row = database::versions::Version::get_by_id(&mut conn, version)
+			.await
+			.expect("the version");
+
+		let production = Artifact::register(
+			&mut conn,
+			held_in(
+				version,
+				"reporting-schema",
+				theirs,
+				Some(ServerRank::Production),
+				b"production",
+			),
+		)
+		.await
+		.expect("register production's");
+		let demo = Artifact::register(
+			&mut conn,
+			held_in(
+				version,
+				"reporting-schema",
+				theirs,
+				Some(ServerRank::Demo),
+				b"demo",
+			),
+		)
+		.await
+		.expect("register demo's");
+
+		// Both stand: the environment is part of the registration's key, so the
+		// second did not replace the first.
+		assert_ne!(production.id, demo.id);
+
+		for (scope, offered, why) in [
+			(
+				Scope::Environment(theirs, ServerRank::Production),
+				Some(production.id),
+				"production reads its own",
+			),
+			(
+				Scope::Environment(theirs, ServerRank::Demo),
+				Some(demo.id),
+				"demo reads its own",
+			),
+			(
+				Scope::Environment(theirs, ServerRank::Clone),
+				None,
+				"an environment with none of its own reads none",
+			),
+			(
+				Scope::Group(theirs),
+				None,
+				"the group's unranked callers read neither",
+			),
+			(
+				Scope::Environment(other, ServerRank::Production),
+				None,
+				"another group reads neither",
+			),
+		] {
+			let read = Artifact::get_for_version(&mut conn, version, scope)
+				.await
+				.expect("read offered")
+				.into_iter()
+				.find(|a| a.artifact_type == "reporting-schema")
+				.map(|a| a.id);
+			assert_eq!(read, offered, "{why}");
+
+			// A read by id answers the same set, so neither path discloses what
+			// the other withholds.
+			let by_id = Artifact::of_version(&mut conn, production.id, &row, scope)
+				.await
+				.expect("read one")
+				.map(|a| a.id);
+			assert_eq!(
+				by_id == Some(production.id),
+				offered == Some(production.id),
+				"{why}, by id"
+			);
+		}
+	})
+	.await;
+}
+
+/// An environment's artifact is preferred over its group's, which is preferred
+/// over one belonging to no group.
+// spec: ART#what-a-version-offers
+#[tokio::test(flavor = "multi_thread")]
+async fn the_narrowest_scope_is_the_one_offered() {
+	TestDb::run(|mut conn, _url| async move {
+		let version = seed_version(&mut conn, 2, 60, 0).await;
+		let theirs = seed_group(&mut conn, "kamaka").await;
+
+		Artifact::register(
+			&mut conn,
+			unscoped(version, "reporting-schema", "https://x/y"),
+		)
+		.await
+		.expect("register unscoped");
+		let group_wide = Artifact::register(
+			&mut conn,
+			held_in(version, "reporting-schema", theirs, None, b"group"),
+		)
+		.await
+		.expect("register the group's");
+		let environment = Artifact::register(
+			&mut conn,
+			held_in(
+				version,
+				"reporting-schema",
+				theirs,
+				Some(ServerRank::Production),
+				b"production",
+			),
+		)
+		.await
+		.expect("register the environment's");
+
+		async fn offered(
+			conn: &mut diesel_async::AsyncPgConnection,
+			version: Uuid,
+			scope: Scope,
+		) -> Vec<Uuid> {
+			Artifact::get_for_version(conn, version, scope)
+				.await
+				.expect("read offered")
+				.into_iter()
+				.filter(|a| a.artifact_type == "reporting-schema")
+				.map(|a| a.id)
+				.collect()
+		}
+
+		assert_eq!(
+			offered(
+				&mut conn,
+				version,
+				Scope::Environment(theirs, ServerRank::Production)
+			)
+			.await,
+			vec![environment.id],
+			"the environment's wins, and only one is offered"
+		);
+		assert_eq!(
+			offered(
+				&mut conn,
+				version,
+				Scope::Environment(theirs, ServerRank::Demo)
+			)
+			.await,
+			vec![group_wide.id],
+			"an environment with none of its own falls back to the group's"
+		);
 	})
 	.await;
 }

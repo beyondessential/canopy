@@ -3,6 +3,7 @@ use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
+use commons_types::server::rank::ServerRank;
 use database::reporting_schemas::{Pair, ReportingSchemaRequest};
 use serde::Deserialize;
 use utoipa::ToSchema;
@@ -58,6 +59,8 @@ pub async fn for_group(
 pub struct BuildPairArgs {
 	/// The group whose schema to build.
 	pub group_id: Uuid,
+	/// The environment within that group to build it for.
+	pub rank: ServerRank,
 	/// The Tamanu version to build it for.
 	pub version_id: Uuid,
 }
@@ -94,13 +97,22 @@ pub async fn build(
 	// An ask against a pair the group does not have is one nothing dispatches
 	// and nothing clears, so it would stand against the group for good.
 	let pairs = database::reporting_schemas::pairs_for_group(&mut conn, args.group_id).await?;
-	if !pairs.iter().any(|pair| pair.version_id == args.version_id) {
+	if !pairs
+		.iter()
+		.any(|pair| pair.rank == args.rank && pair.version_id == args.version_id)
+	{
 		return Err(AppError::BadRequest(
-			"that group has no pair for that version".into(),
+			"that group has no pair for that environment and version".into(),
 		));
 	}
 
-	ReportingSchemaRequest::enqueue(&mut conn, args.group_id, args.version_id, Some(&login))
-		.await?;
+	ReportingSchemaRequest::enqueue(
+		&mut conn,
+		args.group_id,
+		args.rank,
+		args.version_id,
+		Some(login.as_str()),
+	)
+	.await?;
 	Ok(Json(()))
 }

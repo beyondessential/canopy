@@ -1,5 +1,5 @@
 use commons_errors::{AppError, Result};
-use commons_types::{geo::GeoPoint, server::TagMap, status::ShortStatus};
+use commons_types::{geo::GeoPoint, server::TagMap, server::rank::ServerRank, status::ShortStatus};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::{SignedDuration, Timestamp};
@@ -479,6 +479,48 @@ impl Machine {
 			.load(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// Whether the group has an environment at this rank.
+	///
+	/// An environment is the group's members at one rank, and a member is a box
+	/// or an application: a box is in its environment whether or not anything
+	/// on it has reported, and an application on a cluster has no box and
+	/// carries its rank alone. Either answers yes, so both are asked.
+	///
+	/// One row of work rather than the group's whole fleet, since the question
+	/// is a boolean.
+	// spec: GRP#environments
+	pub async fn group_has_environment(
+		db: &mut AsyncPgConnection,
+		group: Uuid,
+		rank: ServerRank,
+	) -> Result<bool> {
+		use crate::schema::{applications, machines};
+		use diesel::dsl::{exists, select};
+
+		let boxed: bool = select(exists(
+			machines::table
+				.filter(machines::group_id.eq(group))
+				.filter(machines::deleted_at.is_null())
+				.filter(machines::rank.eq(rank)),
+		))
+		.get_result(db)
+		.await
+		.map_err(AppError::from)?;
+		if boxed {
+			return Ok(true);
+		}
+
+		select(exists(
+			applications::table
+				.filter(applications::group_id.eq(group))
+				.filter(applications::deleted_at.is_null())
+				.filter(applications::rank.eq(rank)),
+		))
+		.get_result(db)
+		.await
+		.map_err(AppError::from)
 	}
 
 	/// Bulk-fetch names for a set of machine ids, for surfaces embedding a

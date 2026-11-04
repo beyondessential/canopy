@@ -22,6 +22,12 @@ const MACHINE_RANK_UP: &str =
 	include_str!("../../../../migrations/2026-10-06-040849-0000_machine_rank/up.sql");
 const MACHINE_RANK_DOWN: &str =
 	include_str!("../../../../migrations/2026-10-06-040849-0000_machine_rank/down.sql");
+/// Later still, and its rank columns are checked against `rank_canonical`,
+/// which `machine_rank` defines and its revert drops.
+const ARTIFACT_RANK_UP: &str =
+	include_str!("../../../../migrations/2026-11-02-004500-0000_artifact_rank/up.sql");
+const ARTIFACT_RANK_DOWN: &str =
+	include_str!("../../../../migrations/2026-11-02-004500-0000_artifact_rank/down.sql");
 
 #[derive(QueryableByName)]
 struct RowId {
@@ -42,6 +48,9 @@ struct Count {
 }
 
 async fn revert(conn: &mut AsyncPgConnection) {
+	conn.batch_execute(ARTIFACT_RANK_DOWN)
+		.await
+		.expect("revert artifact_rank");
 	conn.batch_execute(MACHINE_RANK_DOWN)
 		.await
 		.expect("revert machine_rank");
@@ -53,6 +62,9 @@ async fn apply(conn: &mut AsyncPgConnection) {
 	conn.batch_execute(MACHINE_RANK_UP)
 		.await
 		.expect("apply machine_rank");
+	conn.batch_execute(ARTIFACT_RANK_UP)
+		.await
+		.expect("apply artifact_rank");
 }
 
 async fn group(conn: &mut AsyncPgConnection) -> Uuid {

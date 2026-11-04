@@ -1,5 +1,6 @@
-//! Reporting-schema builds: which pairs of group and Tamanu version have a
-//! schema, which have been tried, and which an operator has asked for again.
+//! Reporting-schema builds: which pairs of a group's environment and a Tamanu
+//! version have a schema, which have been tried, and which an operator has
+//! asked for again.
 //!
 //! spec: RPT
 
@@ -14,7 +15,7 @@ use crate::{
 	restore::{BackupRestoreCheck, NewBackupRestoreCheck},
 	versions::Version,
 };
-use commons_types::backup::RunOutcome;
+use commons_types::{backup::RunOutcome, server::rank::ServerRank};
 
 /// A build of one pair, hanging off the restore report that carries the
 /// replica's own health.
@@ -30,6 +31,9 @@ pub struct ReportingSchemaBuild {
 	pub version_id: Uuid,
 	/// The central application whose snapshot the replica was restored from.
 	pub application_id: Option<Uuid>,
+	/// The environment within the group the schema was built for. `null` on a
+	/// build recorded before a schema named one, which no pair matches.
+	pub rank: Option<ServerRank>,
 	/// Whether a schema came out of it.
 	pub built: bool,
 	/// What went wrong, where it did not.
@@ -45,6 +49,7 @@ pub struct ReportingSchemaBuild {
 #[derive(Debug, Clone)]
 pub struct NewReportingSchemaBuild {
 	pub group_id: Uuid,
+	pub rank: ServerRank,
 	pub version_id: Uuid,
 	pub application_id: Option<Uuid>,
 	pub built: bool,
@@ -82,6 +87,7 @@ impl ReportingSchemaBuild {
 				crate::schema::reporting_schema_builds::check_id.eq(check_id),
 				crate::schema::reporting_schema_builds::group_id.eq(build.group_id),
 				crate::schema::reporting_schema_builds::version_id.eq(build.version_id),
+				crate::schema::reporting_schema_builds::rank.eq(build.rank),
 				crate::schema::reporting_schema_builds::application_id.eq(build.application_id),
 				crate::schema::reporting_schema_builds::built.eq(build.built),
 				crate::schema::reporting_schema_builds::error.eq(build.error),
@@ -98,7 +104,8 @@ impl ReportingSchemaBuild {
 		// whichever way it went. A build takes half an hour, and an ask entered
 		// while it ran is for whatever changed after it began, so what answers
 		// that one is the next build rather than this.
-		ReportingSchemaRequest::clear(db, build.group_id, build.version_id, began_at).await?;
+		ReportingSchemaRequest::clear(db, build.group_id, build.rank, build.version_id, began_at)
+			.await?;
 
 		Ok(check_id)
 	}
@@ -107,6 +114,7 @@ impl ReportingSchemaBuild {
 	pub async fn latest_for_pair(
 		db: &mut AsyncPgConnection,
 		group: Uuid,
+		rank: ServerRank,
 		version: Uuid,
 	) -> Result<Option<Self>> {
 		use crate::schema::{backup_restore_checks, reporting_schema_builds};
@@ -117,6 +125,7 @@ impl ReportingSchemaBuild {
 					.on(backup_restore_checks::id.eq(reporting_schema_builds::check_id)),
 			)
 			.filter(reporting_schema_builds::group_id.eq(group))
+			.filter(reporting_schema_builds::rank.eq(rank))
 			.filter(reporting_schema_builds::version_id.eq(version))
 			.order_by(backup_restore_checks::reported_at.desc())
 			.select(Self::as_select())
@@ -126,14 +135,17 @@ impl ReportingSchemaBuild {
 			.map_err(AppError::from)
 	}
 
-	/// The most recent build of each of a group's pairs, by version.
+	/// The most recent build of each of a group's pairs, by environment and
+	/// version.
 	///
-	/// One query rather than one per version: this backs both the operator page
-	/// and the sweep, which walk every version a group runs.
-	pub async fn latest_by_version_for_group(
+	/// One query rather than one per pair: this backs both the operator page
+	/// and the sweep, which walk every pair a group has. A build recorded
+	/// before a schema named an environment is left out, since there is no
+	/// environment it can be said to be the build of.
+	pub async fn latest_by_pair_for_group(
 		db: &mut AsyncPgConnection,
 		group: Uuid,
-	) -> Result<std::collections::HashMap<Uuid, Self>> {
+	) -> Result<std::collections::HashMap<(ServerRank, Uuid), Self>> {
 		use crate::schema::{backup_restore_checks, reporting_schema_builds};
 
 		let builds: Vec<Self> = reporting_schema_builds::table
@@ -142,8 +154,13 @@ impl ReportingSchemaBuild {
 					.on(backup_restore_checks::id.eq(reporting_schema_builds::check_id)),
 			)
 			.filter(reporting_schema_builds::group_id.eq(group))
-			.distinct_on(reporting_schema_builds::version_id)
+			.filter(reporting_schema_builds::rank.is_not_null())
+			.distinct_on((
+				reporting_schema_builds::rank,
+				reporting_schema_builds::version_id,
+			))
 			.order_by((
+				reporting_schema_builds::rank,
 				reporting_schema_builds::version_id,
 				backup_restore_checks::reported_at.desc(),
 			))
@@ -152,7 +169,17 @@ impl ReportingSchemaBuild {
 			.await
 			.map_err(AppError::from)?;
 
-		Ok(builds.into_iter().map(|b| (b.version_id, b)).collect())
+		// The query excludes a build naming no environment, so every row here
+		// has one.
+		Ok(builds
+			.into_iter()
+			.map(|b| {
+				(
+					(b.rank.expect("filtered to builds naming one"), b.version_id),
+					b,
+				)
+			})
+			.collect())
 	}
 
 	/// Whether a pair is settled: it has been built or has failed, and either
@@ -162,13 +189,14 @@ impl ReportingSchemaBuild {
 	pub async fn is_settled(
 		db: &mut AsyncPgConnection,
 		group: Uuid,
+		rank: ServerRank,
 		version: Uuid,
 	) -> Result<bool> {
 		let row = Version::get_by_id(db, version).await?;
 		let ranges = crate::artifacts::RangeChanges::load(db).await?;
 		let settlement =
 			Settlement::for_group(db, group, std::slice::from_ref(&row), &ranges).await?;
-		Ok(settlement.settled(version))
+		Ok(settlement.settled(rank, version))
 	}
 }
 
@@ -179,8 +207,8 @@ impl ReportingSchemaBuild {
 /// are made once for the group rather than once per pair.
 // spec: RPT#pairs
 pub struct Settlement {
-	requested: std::collections::HashSet<Uuid>,
-	builds: std::collections::HashMap<Uuid, ReportingSchemaBuild>,
+	requested: std::collections::HashSet<(ServerRank, Uuid)>,
+	builds: std::collections::HashMap<(ServerRank, Uuid), ReportingSchemaBuild>,
 	changed: std::collections::HashMap<Uuid, Timestamp>,
 }
 
@@ -193,18 +221,18 @@ impl Settlement {
 	) -> Result<Self> {
 		Ok(Self {
 			requested: ReportingSchemaRequest::pending_for_group(db, group).await?,
-			builds: ReportingSchemaBuild::latest_by_version_for_group(db, group).await?,
+			builds: ReportingSchemaBuild::latest_by_pair_for_group(db, group).await?,
 			changed: crate::artifacts::Artifact::newest_change_for_versions(db, versions, ranges)
 				.await?,
 		})
 	}
 
-	pub fn settled(&self, version: Uuid) -> bool {
-		if self.requested.contains(&version) {
+	pub fn settled(&self, rank: ServerRank, version: Uuid) -> bool {
+		if self.requested.contains(&(rank, version)) {
 			return false;
 		}
 
-		let Some(build) = self.builds.get(&version) else {
+		let Some(build) = self.builds.get(&(rank, version)) else {
 			return false;
 		};
 
@@ -243,6 +271,7 @@ async fn run_started_at(db: &mut AsyncPgConnection, run: Uuid) -> Result<Option<
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct ReportingSchemaRequest {
 	pub group_id: Uuid,
+	pub rank: ServerRank,
 	pub version_id: Uuid,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub requested_at: Timestamp,
@@ -255,6 +284,7 @@ impl ReportingSchemaRequest {
 	pub async fn enqueue(
 		db: &mut AsyncPgConnection,
 		group: Uuid,
+		rank: ServerRank,
 		version: Uuid,
 		requested_by: Option<&str>,
 	) -> Result<()> {
@@ -263,10 +293,11 @@ impl ReportingSchemaRequest {
 		diesel::insert_into(dsl::reporting_schema_requests)
 			.values((
 				dsl::group_id.eq(group),
+				dsl::rank.eq(rank),
 				dsl::version_id.eq(version),
 				dsl::requested_by.eq(requested_by),
 			))
-			.on_conflict((dsl::group_id, dsl::version_id))
+			.on_conflict((dsl::group_id, dsl::rank, dsl::version_id))
 			.do_update()
 			.set((
 				dsl::requested_at.eq(diesel::dsl::now),
@@ -279,27 +310,28 @@ impl ReportingSchemaRequest {
 		Ok(())
 	}
 
-	/// Which of a group's versions have an ask pending, in one query.
+	/// Which of a group's pairs have an ask pending, in one query.
 	pub async fn pending_for_group(
 		db: &mut AsyncPgConnection,
 		group: Uuid,
-	) -> Result<std::collections::HashSet<Uuid>> {
+	) -> Result<std::collections::HashSet<(ServerRank, Uuid)>> {
 		use crate::schema::reporting_schema_requests::dsl;
 
-		let versions: Vec<Uuid> = dsl::reporting_schema_requests
+		let pairs: Vec<(ServerRank, Uuid)> = dsl::reporting_schema_requests
 			.filter(dsl::group_id.eq(group))
-			.select(dsl::version_id)
+			.select((dsl::rank, dsl::version_id))
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
 
-		Ok(versions.into_iter().collect())
+		Ok(pairs.into_iter().collect())
 	}
 
 	/// Clear a pair's ask, where it was made before `answered_at`.
 	async fn clear(
 		db: &mut AsyncPgConnection,
 		group: Uuid,
+		rank: ServerRank,
 		version: Uuid,
 		answered_at: Timestamp,
 	) -> Result<()> {
@@ -308,6 +340,7 @@ impl ReportingSchemaRequest {
 		diesel::delete(
 			dsl::reporting_schema_requests
 				.filter(dsl::group_id.eq(group))
+				.filter(dsl::rank.eq(rank))
 				.filter(dsl::version_id.eq(version))
 				.filter(dsl::requested_at.lt(jiff_diesel::Timestamp::from(answered_at))),
 		)
@@ -331,11 +364,14 @@ pub enum PairState {
 	Failed,
 }
 
-/// One pair of group and Tamanu version, and where it stands.
+/// One pair of a group's environment and a Tamanu version, and where it
+/// stands.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct Pair {
 	/// The group this pair is for.
 	pub group_id: Uuid,
+	/// The environment within that group this pair is for.
+	pub rank: ServerRank,
 	/// The Tamanu version this pair is for.
 	pub version_id: Uuid,
 	/// That version as semver, for display.
@@ -346,14 +382,18 @@ pub struct Pair {
 	pub error: Option<String>,
 	/// Whether an operator has asked for this pair to be built again.
 	pub requested: bool,
-	/// The group's Tamanu applications reporting this version, by name. Empty
-	/// where the pair comes from the open plan rather than from something
-	/// running it.
+	/// The schema this pair's build registered, where it registered one, so an
+	/// operator can read the SQL the environment is offered.
+	pub artifact_id: Option<Uuid>,
+	/// The environment's Tamanu applications reporting this version, by name.
+	/// Empty where the pair comes from the open plan rather than from
+	/// something running it.
 	pub applications: Vec<String>,
 }
 
-/// The pairs of a group: every published version its Tamanu applications report
-/// running, plus the version its open plan moves it to.
+/// The pairs of a group: for each of its environments, every published version
+/// that environment's Tamanu applications report running, plus the version its
+/// open plan moves it to.
 ///
 /// A group no enabled declaration covers has no pairs. Canopy owes it no
 /// schema, so listing versions against it would offer an operator a build
@@ -377,12 +417,13 @@ async fn pairs_of_members(
 	members: &[crate::applications::Application],
 ) -> Result<Vec<Pair>> {
 	let versions = versions_and_applications(db, group, members).await?;
-	let builds = ReportingSchemaBuild::latest_by_version_for_group(db, group).await?;
+	let builds = ReportingSchemaBuild::latest_by_pair_for_group(db, group).await?;
 	let requests = ReportingSchemaRequest::pending_for_group(db, group).await?;
 
 	let mut pairs = Vec::with_capacity(versions.len());
-	for (version, applications) in versions {
-		let (state, error) = match builds.get(&version.id) {
+	for (rank, version, applications) in versions {
+		let build = builds.get(&(rank, version.id));
+		let (state, error) = match build {
 			None => (PairState::Awaiting, None),
 			Some(build) if build.built => (PairState::Built, None),
 			Some(build) => (PairState::Failed, build.error.clone()),
@@ -390,40 +431,38 @@ async fn pairs_of_members(
 
 		pairs.push(Pair {
 			group_id: group,
+			rank,
 			version_id: version.id,
 			applications,
 			version: version.as_semver().to_string(),
 			state,
 			error,
-			requested: requests.contains(&version.id),
+			requested: requests.contains(&(rank, version.id)),
+			// A build registers the schema and nothing else, so the first it
+			// recorded is that schema.
+			artifact_id: build
+				.filter(|build| build.built)
+				.and_then(|build| build.artifact_ids.iter().flatten().copied().next()),
 		});
 	}
 
 	Ok(pairs)
 }
 
-/// Every published version a group's Tamanu applications report running, plus
-/// the version its open plan moves it to.
+/// A group's pairs as environment and version, from members already in hand.
 ///
-/// A reported version Canopy holds no release row for is not a pair: a build
-/// needs that version's migrations, which reach a builder as its published
-/// artifacts.
-// spec: RPT#pairs
-pub async fn versions_for_group(db: &mut AsyncPgConnection, group: Uuid) -> Result<Vec<Version>> {
-	let members = crate::applications::Application::list_live_in_group(db, group).await?;
-	versions_of_members(db, group, &members).await
-}
-
-/// The versions of a group's pairs, from members already in hand.
-pub async fn versions_of_members(
+/// The dispatch needs the environment each version belongs to, since the
+/// central it restores is that environment's.
+// spec: RPT#the-build-contract
+pub async fn pairs_of_live_members(
 	db: &mut AsyncPgConnection,
 	group: Uuid,
 	members: &[crate::applications::Application],
-) -> Result<Vec<Version>> {
+) -> Result<Vec<(ServerRank, Version)>> {
 	Ok(versions_and_applications(db, group, members)
 		.await?
 		.into_iter()
-		.map(|(version, _)| version)
+		.map(|(rank, version, _)| (rank, version))
 		.collect())
 }
 
@@ -434,12 +473,17 @@ pub async fn versions_of_members(
 /// so a reported `2.60.0-rc1` resolves to the 2.60.0 row and would never match
 /// its own key, and the pair would read as an upgrade plan while a server runs
 /// it.
+///
+/// A pair is one environment's, so two environments of a group on the same
+/// version are two pairs rather than one. Their configuration is what a schema
+/// follows from and it is not the same configuration, so one schema between
+/// them would be the wrong one for whichever it was not built against.
 // spec: RPT#pairs
 async fn versions_and_applications(
 	db: &mut AsyncPgConnection,
 	group: Uuid,
 	applications: &[crate::applications::Application],
-) -> Result<Vec<(Version, Vec<String>)>> {
+) -> Result<Vec<(ServerRank, Version, Vec<String>)>> {
 	use commons_types::version::VersionStatus;
 
 	let tamanu: Vec<&crate::applications::Application> = applications
@@ -455,8 +499,14 @@ async fn versions_and_applications(
 	wanted.dedup_by(|a, b| a.0 == b.0);
 	let released = Version::get_by_versions(db, &wanted).await?;
 
-	let mut pairs: Vec<(Version, Vec<String>)> = Vec::new();
-	for application in tamanu {
+	let mut pairs: Vec<(ServerRank, Version, Vec<String>)> = Vec::new();
+	for application in &tamanu {
+		// A pending application is in none of the group's environments, so
+		// there is no environment to build a schema for it against.
+		// spec: GRP#environments
+		let Some(rank) = application.rank else {
+			continue;
+		};
 		let Some(shown) = reported.get(&application.id) else {
 			continue;
 		};
@@ -476,36 +526,90 @@ async fn versions_and_applications(
 			continue;
 		}
 
-		// A pair is unique per group and version, so two applications on one
-		// version are one pair carrying both names.
-		match pairs.iter_mut().find(|(v, _)| v.id == version.id) {
-			Some((_, names)) => names.push(application.display_name()),
-			None => pairs.push((version.clone(), vec![application.display_name()])),
+		// A pair is unique per environment and version, so two applications of
+		// one environment on one version are one pair carrying both names.
+		match pairs
+			.iter_mut()
+			.find(|(r, v, _)| *r == rank && v.id == version.id)
+		{
+			Some((_, _, names)) => names.push(application.display_name()),
+			None => pairs.push((rank, version.clone(), vec![application.display_name()])),
 		}
 	}
 
-	// A plan is opened against an environment, and the group's central is the
-	// application whose database a schema follows from.
-	let planned = match crate::server_groups::ServerGroup::canonical_central(applications) {
-		Some(central) => match central.rank {
-			Some(rank) => crate::upgrade_plans::planned_target(db, group, rank).await?,
-			None => None,
-		},
-		None => None,
-	};
-	// A plan moving a group to a version something already runs adds no pair.
-	// Dispatch counts a restore and a migrate per entry, so a duplicate here is
-	// paid for rather than merely untidy.
-	if let Some(target) = planned
-		&& !pairs.iter().any(|(v, _)| v.id == target.id)
-	{
-		pairs.push((target, Vec::new()));
+	// A plan is opened against an environment, and each environment of the
+	// group holds its own. Read in one query rather than one per environment:
+	// this backs both the operator page and the worklist, and the worklist
+	// walks every group on every poll.
+	let mut environments: Vec<ServerRank> = tamanu.iter().filter_map(|a| a.rank).collect();
+	environments.sort();
+	environments.dedup();
+
+	let open = crate::upgrade_plans::UpgradePlan::open_for_group(db, group).await?;
+	let planned = Version::get_by_ids(
+		db,
+		&open
+			.iter()
+			.filter(|plan| environments.contains(&plan.rank))
+			.map(|plan| plan.target_version_id)
+			.collect::<Vec<_>>(),
+	)
+	.await?;
+
+	for rank in environments {
+		// A target yanked after the plan was recorded has no artefacts to
+		// fetch, so it steers no testing and is no pair.
+		// spec: UPG#what-reads-a-plan
+		let Some(target) = open
+			.iter()
+			.find(|plan| plan.rank == rank)
+			.and_then(|plan| planned.iter().find(|v| v.id == plan.target_version_id))
+			.filter(|v| v.status == VersionStatus::Published)
+			.cloned()
+		else {
+			continue;
+		};
+		// A plan moving an environment to a version something in it already
+		// runs adds no pair. Dispatch counts a restore and a migrate per entry,
+		// so a duplicate here is paid for rather than merely untidy.
+		if !pairs
+			.iter()
+			.any(|(r, v, _)| *r == rank && v.id == target.id)
+		{
+			pairs.push((rank, target, Vec::new()));
+		}
 	}
 
-	for (_, names) in &mut pairs {
+	// An environment a build cannot be dispatched for is not a pair. A pair is
+	// derived from any ranked Tamanu application, facilities included, but a
+	// build restores the environment's own central and is anchored on a box,
+	// so an environment with neither would show a pair that is never
+	// dispatched, sits awaiting for good, and takes an operator's ask that
+	// nothing clears.
+	// spec: RPT#the-build-contract
+	let restorable: Vec<ServerRank> = {
+		let mut ranks: Vec<ServerRank> = pairs.iter().map(|(rank, _, _)| *rank).collect();
+		ranks.sort();
+		ranks.dedup();
+		ranks
+			.into_iter()
+			.filter(|rank| {
+				let in_environment: Vec<crate::applications::Application> = applications
+					.iter()
+					.filter(|member| member.rank == Some(*rank))
+					.cloned()
+					.collect();
+				crate::server_groups::ServerGroup::canonical_central(&in_environment)
+					.is_some_and(|central| central.machine_id.is_some())
+			})
+			.collect()
+	};
+	pairs.retain(|(rank, _, _)| restorable.contains(rank));
+
+	for (_, _, names) in &mut pairs {
 		names.sort();
 	}
-	pairs.sort_by_key(|(v, _)| (v.major, v.minor, v.patch));
+	pairs.sort_by_key(|(r, v, _)| (*r, v.major, v.minor, v.patch));
 
 	Ok(pairs)
 }
@@ -574,17 +678,27 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 			.iter()
 			.filter(|p| p.state != PairState::Awaiting)
 			.map(|pair| {
-				let mut detail = serde_json::json!({ "version": pair.version });
+				let mut detail =
+					serde_json::json!({ "environment": pair.rank, "version": pair.version });
 				if pair.state != PairState::Built {
 					detail["why"] = pair
 						.error
 						.clone()
-						.unwrap_or_else(|| format!("no schema could be built for {}", pair.version))
+						.unwrap_or_else(|| {
+							format!(
+								"no schema could be built for {} on {}",
+								pair.rank, pair.version
+							)
+						})
 						.into();
 				}
 
 				CheckInstance {
-					key: pair.version.clone(),
+					// A pair is one environment's, so two environments on one
+					// version are two instances: keyed by version alone they
+					// would collide and a failure in one would read as the
+					// other's.
+					key: format!("{}/{}", pair.rank, pair.version),
 					label: None,
 					observed: match pair.state {
 						PairState::Built => CheckResult::Passed,
@@ -608,7 +722,9 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 			},
 			instances,
 			&move |graded: &GradedCheck| match graded.degraded().as_slice() {
-				[] => format!("Reporting schemas are built for every version {name} runs"),
+				[] => format!(
+					"Reporting schemas are built for every version {name} runs in each of its environments"
+				),
 				[one] => format!(
 					"No reporting schema for {name} on {}: {}",
 					one.name(),
@@ -619,7 +735,7 @@ pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
 						.unwrap_or("the build failed")
 				),
 				many => format!(
-					"No reporting schema for {} of {total} versions {name} runs: {}",
+					"No reporting schema for {} of {total} pairs {name} runs: {}",
 					many.len(),
 					many.iter().map(|i| i.name()).collect::<Vec<_>>().join(", ")
 				),

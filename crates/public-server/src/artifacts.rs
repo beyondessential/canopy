@@ -10,6 +10,7 @@ use commons_servers::{
 };
 use commons_types::{
 	device::DeviceRole,
+	server::rank::ServerRank,
 	version::{VersionStatus, VersionStr},
 };
 use database::{
@@ -97,8 +98,14 @@ pub(crate) async fn caller_scope(
 		return Ok(Scope::Unscoped);
 	};
 
+	// A box carries its rank, so a caller's environment comes from the same
+	// row its group does and is never taken from the request.
+	// spec: GRP#environments
 	let machine = Machine::get_by_device_id(conn, device.0.id).await?;
-	Ok(Scope::for_caller(machine.and_then(|m| m.group_id)))
+	Ok(Scope::for_caller(
+		machine.as_ref().and_then(|m| m.group_id),
+		machine.as_ref().and_then(|m| m.rank),
+	))
 }
 
 /// Body budget for a schema upload. Sized above the held-bytes cap so an
@@ -243,6 +250,9 @@ async fn create(
 			content_type: None,
 			digest,
 			run_id: None,
+			// An environment is a group's members at one rank, so an artifact
+			// for every group is for no one environment.
+			rank: None,
 		},
 	)
 	.await?;
@@ -268,13 +278,20 @@ async fn create(
 	Ok(Json(Artifact::offered(row, &base, &version)))
 }
 
-/// Register a reporting schema for one group, carrying its bytes.
+/// Register a reporting schema for one environment of a group, carrying its
+/// bytes.
 ///
 /// Requires a device certificate whose restore declaration for the named group
 /// advertises that it builds reporting schemas. The bytes travel on this
 /// connection and Canopy holds them, so the builder is issued no credential to
-/// any store. The path names the group the artifact is for, the exact version
-/// it was built against, and the artifact's type and target platform.
+/// any store. The path names the group and the environment within it the
+/// artifact is for, the exact version it was built against, and the artifact's
+/// type and target platform.
+///
+/// The environment is a path segment rather than something a registration may
+/// leave off: a schema follows the configuration of the database it was built
+/// from, so one registered without an environment would be offered to every
+/// environment of the group, which is the one thing this must not do.
 ///
 /// The version must be one Canopy already holds: a build is dispatched for a
 /// group and version Canopy knows about, so a version that does not exist is
@@ -284,12 +301,13 @@ async fn create(
 /// Returns the created artifact record.
 #[utoipa::path(
 	post,
-	path = "/groups/{group}/{version}/{artifact_type}/{platform}",
+	path = "/groups/{group}/{rank}/{version}/{artifact_type}/{platform}",
 	operation_id = "register_group_artifact",
 	tag = "artifacts",
 	security(("backup-restore-device" = [])),
 	params(
 		("group" = Uuid, Path, description = "Group the artifact is for."),
+		("rank" = String, Path, description = "Environment within the group the schema was built against: `production`, `clone`, `demo`, `test` or `dev`."),
 		("version" = String, Path, description = "Exact semver (e.g. `2.10.5`) the schema was built against."),
 		("artifact_type" = String, Path, description = "Must be `reporting-schema`: the authorisation is defined with that artifact."),
 		("platform" = String, Path),
@@ -308,7 +326,13 @@ async fn register_for_group(
 	device: AuthDevice,
 	State(state): State<AppState>,
 	audit: Audit,
-	Path((group, version, artifact_type, platform)): Path<(Uuid, String, String, String)>,
+	Path((group, rank, version, artifact_type, platform)): Path<(
+		Uuid,
+		String,
+		String,
+		String,
+		String,
+	)>,
 	Query(named): Query<GroupRegisterQuery>,
 	headers: axum::http::HeaderMap,
 	body: axum::body::Bytes,
@@ -333,6 +357,17 @@ async fn register_for_group(
 		)));
 	}
 
+	// Parsed rather than passed through, so an environment Canopy does not
+	// know is refused here instead of by the column's check constraint.
+	let rank: ServerRank = rank.parse().map_err(|_| {
+		let known = ServerRank::ALL
+			.iter()
+			.map(ServerRank::to_string)
+			.collect::<Vec<_>>()
+			.join(", ");
+		AppError::BadRequest(format!("{rank} is not an environment; one of {known}"))
+	})?;
+
 	let authorised = device.0.role == DeviceRole::Admin
 		|| RestoreReplica::authorizes_schema_artifacts(&mut db, device_id, group).await?;
 	if !authorised {
@@ -341,6 +376,19 @@ async fn register_for_group(
 		return Err(AppError::AuthInsufficientPermissions {
 			required: "an enabled declaration building this group's artifacts".into(),
 		});
+	}
+
+	// The environment reaches here as a path segment, and the builder is a
+	// consumer device rather than a machine of the group, so there is no rank
+	// of its own to check it against. What can be checked is that the group has
+	// the environment at all: a schema published for one it does not have is
+	// offered to nobody and sits there reading as a built pair.
+	//
+	// spec: GRP#environments, RPT#the-build-contract
+	if !database::machines::Machine::group_has_environment(&mut db, group, rank).await? {
+		return Err(AppError::BadRequest(format!(
+			"that group has no {rank} environment to register a schema for"
+		)));
 	}
 
 	if body.len() > MAX_HELD_ARTIFACT_BYTES {
@@ -411,6 +459,7 @@ async fn register_for_group(
 		content_type,
 		digest: Some(digest),
 		run_id: named.run,
+		rank: Some(rank),
 	};
 
 	// Under the id the artifact already has where one is registered, so a rebuild

@@ -23,6 +23,11 @@ async fn seed(conn: &mut database::diesel_async::AsyncPgConnection) {
 		 INSERT INTO server_groups (id, name) VALUES
 		 ('{GROUP_A}', 'kamaka'), ('{GROUP_B}', 'drifting');
 
+		 -- A schema is registered against an environment the group has, so
+		 -- group A carries a ranked box for one to be registered for.
+		 INSERT INTO machines (id, name, group_id, rank)
+		 VALUES (gen_random_uuid(), 'box', '{GROUP_A}', 'production');
+
 		 INSERT INTO artifacts (id, version_id, platform, artifact_type, download_url)
 		 VALUES ('{UNSCOPED}', '{VERSION}', 'any', 'reporting-schema', 'https://example.com/all.sql');
 
@@ -249,7 +254,7 @@ async fn a_releaser_cannot_register_for_a_group() {
 
 			let response = public
 				.post(&format!(
-					"/artifacts/groups/{GROUP_A}/2.60.0/reporting-schema/any"
+					"/artifacts/groups/{GROUP_A}/production/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.text("https://example.com/x.sql")
@@ -654,7 +659,7 @@ async fn an_admin_device_registers_for_any_group() {
 
 			let scoped = public
 				.post(&format!(
-					"/artifacts/groups/{GROUP_A}/2.60.0/reporting-schema/any"
+					"/artifacts/groups/{GROUP_A}/production/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -704,7 +709,7 @@ async fn a_registration_with_nothing_in_it_is_refused() {
 			}
 
 			let malformed = public
-				.post("/artifacts/groups/not-a-uuid/2.60.0/reporting-schema/any")
+				.post("/artifacts/groups/not-a-uuid/production/2.60.0/reporting-schema/any")
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.text("CREATE VIEW ...")
 				.await;

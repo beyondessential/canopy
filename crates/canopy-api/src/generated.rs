@@ -3,11 +3,11 @@
 
 /// Version of the OpenAPI document this source was generated from, which is also
 /// this crate's own version.
-pub const OPENAPI_VERSION: &str = "1.1.2";
+pub const OPENAPI_VERSION: &str = "2.0.0";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "ca376d0595a9d12f524584d52eddbc6310dce4fd273ab572771cd84a0feffd67";
+pub const OPENAPI_BLAKE3: &str = "41b064431236ed28257b700bf5f547b0d27a8b0c7f47606232d7104e99d5d74b";
 
 /// Error types.
 pub mod error {
@@ -4165,6 +4165,17 @@ repository passphrase are obtained separately via
 ///      "description": "Key prefix within the bucket under which the repository lives. Normally\nempty (the repository is at the bucket root).",
 ///      "type": "string"
 ///    },
+///    "rank": {
+///      "oneOf": [
+///        {
+///          "type": "null"
+///        },
+///        {
+///          "description": "The environment the entry is for, on a reporting-schema build. The\nschema is registered against it, so a build echoes it back rather than\nworking it out from the machine it restored.",
+///          "$ref": "#/components/schemas/ServerRank"
+///        }
+///      ]
+///    },
 ///    "region": {
 ///      "description": "AWS region of the bucket.",
 ///      "type": "string"
@@ -4260,6 +4271,8 @@ intent's declared default, or JSON `null` when there is none.*/
     /**Key prefix within the bucket under which the repository lives. Normally
 empty (the repository is at the bucket root).*/
     pub prefix: ::std::string::String,
+    #[serde(default, skip_serializing_if = "::std::option::Option::is_none")]
+    pub rank: ::std::option::Option<ServerRank>,
     ///AWS region of the bucket.
     pub region: ::std::string::String,
     /**Identifier of the declaration this entry was expanded from. Echo it
@@ -4297,7 +4310,7 @@ same way a server being upgraded does. `null` for every other intent.*/
     pub type_: ::std::string::String,
 }
 
-/// Request for `POST /artifacts/groups/{group}/{version}/{artifact_type}/{platform}`.
+/// Request for `POST /artifacts/groups/{group}/{rank}/{version}/{artifact_type}/{platform}`.
 ///
 /// Converts from anything string-like, which is what this method took in place of
 /// `platform` before it carried a request, so a call written against that
@@ -4391,13 +4404,20 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
     pub async fn applications_self(&self) -> crate::Result<SelfResponse> {
         self.call_json(::http::Method::GET, "/applications/self", None::<&()>).await
     }
-    /// Register a reporting schema for one group, carrying its bytes.
+    /// Register a reporting schema for one environment of a group, carrying its
+    /// bytes.
     ///
     /// Requires a device certificate whose restore declaration for the named group
     /// advertises that it builds reporting schemas. The bytes travel on this
     /// connection and Canopy holds them, so the builder is issued no credential to
-    /// any store. The path names the group the artifact is for, the exact version
-    /// it was built against, and the artifact's type and target platform.
+    /// any store. The path names the group and the environment within it the
+    /// artifact is for, the exact version it was built against, and the artifact's
+    /// type and target platform.
+    ///
+    /// The environment is a path segment rather than something a registration may
+    /// leave off: a schema follows the configuration of the database it was built
+    /// from, so one registered without an environment would be offered to every
+    /// environment of the group, which is the one thing this must not do.
     ///
     /// The version must be one Canopy already holds: a build is dispatched for a
     /// group and version Canopy knows about, so a version that does not exist is
@@ -4406,19 +4426,21 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
     ///
     /// Returns the created artifact record.
     ///
-    /// `POST /artifacts/groups/{group}/{version}/{artifact_type}/{platform}`
+    /// `POST /artifacts/groups/{group}/{rank}/{version}/{artifact_type}/{platform}`
     pub async fn artifacts_groups(
         &self,
         group: &str,
+        rank: &str,
         version: &str,
         artifact_type: &str,
         platform: impl ::std::convert::Into<RegisterGroupArtifactRequest>,
     ) -> crate::Result<Artifact> {
         let request: RegisterGroupArtifactRequest = platform.into();
         crate::segments(
-            "/artifacts/groups/{group}/{version}/{artifact_type}/{platform}",
+            "/artifacts/groups/{group}/{rank}/{version}/{artifact_type}/{platform}",
             &[
                 ("group", group),
+                ("rank", rank),
                 ("version", version),
                 ("artifact_type", artifact_type),
                 ("platform", &request.platform),
@@ -4428,8 +4450,8 @@ impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
                 ::http::Method::POST,
                 &crate::query(
                     &format!(
-                        "/artifacts/groups/{}/{}/{}/{}", group, version, artifact_type,
-                        request.platform
+                        "/artifacts/groups/{}/{}/{}/{}/{}", group, rank, version,
+                        artifact_type, request.platform
                     ),
                     &[
                         (

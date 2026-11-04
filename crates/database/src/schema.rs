@@ -177,6 +177,7 @@ diesel::table! {
 		content_type -> Nullable<Text>,
 		digest -> Nullable<Bytea>,
 		run_id -> Nullable<Uuid>,
+		rank -> Nullable<Text>,
 	}
 }
 
@@ -845,12 +846,14 @@ diesel::table! {
 		error -> Nullable<Text>,
 		artifact_ids -> Array<Nullable<Uuid>>,
 		built_at -> Timestamptz,
+		rank -> Nullable<Text>,
 	}
 }
 
 diesel::table! {
-	reporting_schema_requests (group_id, version_id) {
+	reporting_schema_requests (group_id, rank, version_id) {
 		group_id -> Uuid,
+		rank -> Text,
 		version_id -> Uuid,
 		requested_at -> Timestamptz,
 		requested_by -> Nullable<Text>,

@@ -3,6 +3,7 @@
 //! spec: RPT
 
 use axum::http::StatusCode;
+use commons_types::server::rank::ServerRank;
 use diesel_async::SimpleAsyncConnection;
 
 const GROUP: &str = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
@@ -21,7 +22,7 @@ async fn seed(conn: &mut database::diesel_async::AsyncPgConnection, consumer: uu
 		 INSERT INTO server_groups (id, name) VALUES
 		 ('{GROUP}', 'kamaka'), ('{OTHER_GROUP}', 'drifting');
 
-		 INSERT INTO machines (id, name, group_id) VALUES ('{MACHINE}', 'box', '{GROUP}');
+		 INSERT INTO machines (id, name, group_id, rank) VALUES ('{MACHINE}', 'box', '{GROUP}', 'production');
 
 		 INSERT INTO applications (id, type, name, host, machine_id, group_id)
 		 VALUES ('{CENTRAL}', 'tamanu-central', 'central', 'https://c', '{MACHINE}', '{GROUP}');
@@ -189,8 +190,8 @@ async fn a_built_pair_drops_off_the_worklist() {
 				 VALUES ('{device_id}', '{GROUP}', '{MACHINE}', 'tamanu-postgres',
 				         'schema-build', 'snap-1', 'success', true, NOW(), NOW());
 
-				 INSERT INTO reporting_schema_builds (check_id, group_id, version_id, built)
-				 SELECT id, '{GROUP}', '{VERSION}', true FROM backup_restore_checks
+				 INSERT INTO reporting_schema_builds (check_id, group_id, rank, version_id, built)
+				 SELECT id, '{GROUP}', 'production', '{VERSION}', true FROM backup_restore_checks
 				 ORDER BY id DESC LIMIT 1",
 			))
 			.await
@@ -359,7 +360,7 @@ async fn a_builder_publishes_only_for_its_own_group() {
 
 			let ours = public
 				.post(&format!(
-					"/artifacts/groups/{GROUP}/2.60.0/reporting-schema/any"
+					"/artifacts/groups/{GROUP}/production/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -369,7 +370,7 @@ async fn a_builder_publishes_only_for_its_own_group() {
 
 			let theirs = public
 				.post(&format!(
-					"/artifacts/groups/{OTHER_GROUP}/2.60.0/reporting-schema/any"
+					"/artifacts/groups/{OTHER_GROUP}/production/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.text("CREATE VIEW ...")
@@ -378,7 +379,7 @@ async fn a_builder_publishes_only_for_its_own_group() {
 
 			let nowhere = public
 				.post(
-					"/artifacts/groups/99999999-9999-9999-9999-999999999999/2.60.0/reporting-schema/any",
+					"/artifacts/groups/99999999-9999-9999-9999-999999999999/production/2.60.0/reporting-schema/any",
 				)
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.text("CREATE VIEW ...")
@@ -405,7 +406,7 @@ async fn a_schema_registered_against_a_range_is_refused() {
 
 			let ranged = public
 				.post(&format!(
-					"/artifacts/groups/{GROUP}/2.60.x/reporting-schema/any"
+					"/artifacts/groups/{GROUP}/production/2.60.x/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -430,7 +431,7 @@ async fn a_schema_for_an_unknown_version_drafts_none() {
 
 			let refused = public
 				.post(&format!(
-					"/artifacts/groups/{GROUP}/9999.0.0/reporting-schema/any"
+					"/artifacts/groups/{GROUP}/production/9999.0.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -468,7 +469,7 @@ async fn a_disabled_declaration_authorises_nothing() {
 
 			let refused = public
 				.post(&format!(
-					"/artifacts/groups/{GROUP}/2.60.0/reporting-schema/any"
+					"/artifacts/groups/{GROUP}/production/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -502,7 +503,7 @@ async fn restoring_for_a_group_does_not_authorise_publishing_its_schema() {
 
 			let refused = public
 				.post(&format!(
-					"/artifacts/groups/{GROUP}/2.60.0/reporting-schema/any"
+					"/artifacts/groups/{GROUP}/production/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -557,7 +558,7 @@ async fn a_consumer_cannot_advertise_itself_into_publishing() {
 
 			let refused = public
 				.post(&format!(
-					"/artifacts/groups/{GROUP}/2.60.0/reporting-schema/any"
+					"/artifacts/groups/{GROUP}/production/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -657,7 +658,7 @@ async fn a_schema_over_axum_s_default_is_taken_in() {
 			let sql = "-- ".to_owned() + &"x".repeat(3 * 1024 * 1024);
 			let response = public
 				.post(&format!(
-					"/artifacts/groups/{GROUP}/2.60.0/reporting-schema/any"
+					"/artifacts/groups/{GROUP}/production/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -683,7 +684,7 @@ async fn a_builder_cannot_displace_the_group_s_installer() {
 
 			let installer = public
 				.post(&format!(
-					"/artifacts/groups/{GROUP}/2.60.0/installer/windows"
+					"/artifacts/groups/{GROUP}/production/2.60.0/installer/windows"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/octet-stream")
@@ -696,7 +697,7 @@ async fn a_builder_cannot_displace_the_group_s_installer() {
 			// have a group offered every one of them.
 			let other_platform = public
 				.post(&format!(
-					"/artifacts/groups/{GROUP}/2.60.0/reporting-schema/windows"
+					"/artifacts/groups/{GROUP}/production/2.60.0/reporting-schema/windows"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -706,7 +707,7 @@ async fn a_builder_cannot_displace_the_group_s_installer() {
 
 			let schema = public
 				.post(&format!(
-					"/artifacts/groups/{GROUP}/2.60.0/reporting-schema/any"
+					"/artifacts/groups/{GROUP}/production/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -743,7 +744,7 @@ async fn a_run_another_consumer_reported_cannot_be_claimed() {
 
 			let claimed = public
 				.post(&format!(
-					"/artifacts/groups/{GROUP}/2.60.0/reporting-schema/any?run={run}"
+					"/artifacts/groups/{GROUP}/production/2.60.0/reporting-schema/any?run={run}"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -753,7 +754,7 @@ async fn a_run_another_consumer_reported_cannot_be_claimed() {
 
 			let own = public
 				.post(&format!(
-					"/artifacts/groups/{GROUP}/2.60.0/reporting-schema/any?run=99999999-9999-9999-9999-999999999999"
+					"/artifacts/groups/{GROUP}/production/2.60.0/reporting-schema/any?run=99999999-9999-9999-9999-999999999999"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
@@ -822,6 +823,7 @@ async fn a_build_report_settles_the_pair_it_names() {
 			let build = database::reporting_schemas::ReportingSchemaBuild::latest_for_pair(
 				&mut conn,
 				GROUP.parse().unwrap(),
+				ServerRank::Production,
 				VERSION.parse().unwrap(),
 			)
 			.await
@@ -863,6 +865,7 @@ async fn a_build_report_may_name_its_version_by_id() {
 				database::reporting_schemas::ReportingSchemaBuild::is_settled(
 					&mut conn,
 					GROUP.parse().unwrap(),
+					ServerRank::Production,
 					VERSION.parse().unwrap(),
 				)
 				.await
@@ -978,6 +981,7 @@ async fn a_report_carrying_both_records_only_the_build() {
 				database::reporting_schemas::ReportingSchemaBuild::is_settled(
 					&mut conn,
 					GROUP.parse().unwrap(),
+					ServerRank::Production,
 					VERSION.parse().unwrap(),
 				)
 				.await
@@ -1022,7 +1026,7 @@ async fn a_registered_schema_is_offered_back_byte_for_byte() {
 
 			public
 				.post(&format!(
-					"/artifacts/groups/{GROUP}/2.60.0/reporting-schema/any"
+					"/artifacts/groups/{GROUP}/production/2.60.0/reporting-schema/any"
 				))
 				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
 				.add_header("content-type", "application/sql")
