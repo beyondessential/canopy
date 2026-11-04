@@ -256,6 +256,16 @@ pub enum Verdict {
 	Failed,
 }
 
+/// The migration a consumer named as having failed, if it named one.
+///
+/// A runner that cannot tell which migration failed reports a placeholder
+/// (`unknown`) or nothing, and neither says anything a person could act on.
+pub fn named_migration(reported: Option<&str>) -> Option<&str> {
+	reported
+		.map(str::trim)
+		.filter(|name| !name.is_empty() && !name.eq_ignore_ascii_case("unknown"))
+}
+
 /// Longest error kept: a migration runner can hand back a whole failing
 /// statement.
 const MAX_ERROR_CHARS: usize = 2000;
@@ -412,7 +422,7 @@ pub async fn latest_test(
 			(RunOutcome::Success, None) => Verdict::Passed,
 			_ => Verdict::Failed,
 		},
-		failed_migration: row.failed_migration,
+		failed_migration: named_migration(row.failed_migration.as_deref()).map(str::to_owned),
 		error: row.error,
 		snapshot_id: row.snapshot_id,
 		reported_at: row.reported_at,
@@ -878,6 +888,10 @@ pub async fn latest_verdict_by_key(
 /// issue against the candidate version, which is what holds it back from
 /// rollout.
 ///
+/// A failure that names no migration (see [`named_migration`]) raises nothing:
+/// a known issue that cannot say what failed is not something to act on, and
+/// holding a version back on it would be a guess.
+///
 /// The `migration-test` check itself is filed by
 /// [`crate::restore::sweep_restore_checks`], the sole filer of the restore checks: the
 /// verdict recorded here and the overdue bound are two ways the same check can
@@ -890,7 +904,7 @@ async fn file_outcome(
 	target_version_id: Uuid,
 	failed_migration: Option<&str>,
 ) -> Result<()> {
-	let Some(migration) = failed_migration else {
+	let Some(migration) = named_migration(failed_migration) else {
 		return Ok(());
 	};
 	let version = Version::get_by_id(db, target_version_id).await?;
@@ -1005,6 +1019,19 @@ async fn verdict_row(
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn a_placeholder_or_blank_migration_is_not_a_name() {
+		assert_eq!(named_migration(None), None);
+		assert_eq!(named_migration(Some("")), None);
+		assert_eq!(named_migration(Some("  ")), None);
+		assert_eq!(named_migration(Some("unknown")), None);
+		assert_eq!(named_migration(Some(" Unknown ")), None);
+		assert_eq!(
+			named_migration(Some("backfillNoteTypeIds")),
+			Some("backfillNoteTypeIds")
+		);
+	}
 
 	#[test]
 	fn a_long_error_is_capped_on_a_character_boundary() {

@@ -345,6 +345,54 @@ async fn a_failure_warns_on_the_server_and_holds_the_version_back() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_failure_naming_no_migration_files_no_known_issue() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn).await;
+		let (machine, server) = insert_server(&mut conn, group).await;
+		let target = insert_version(&mut conn, 63).await;
+
+		record_test_at(
+			&mut conn,
+			consumer,
+			group,
+			machine,
+			server,
+			&target,
+			"snap-1",
+			RunOutcome::Success,
+			Some("unknown"),
+			1,
+		)
+		.await;
+
+		assert_eq!(
+			verdict(&mut conn, machine, target.id)
+				.await
+				.expect("verdict"),
+			Verdict::Failed,
+			"the failure still stands as a verdict"
+		);
+		let filed = migration_check(&mut conn, server)
+			.await
+			.expect("and still warns on the server");
+		assert_eq!(filed.observed.as_deref(), Some("warning"));
+		assert_eq!(
+			unresolved_issues_for(&mut conn, server).await,
+			0,
+			"but nothing is filed about a migration nobody could name"
+		);
+		assert!(
+			VersionKnownIssue::version_is_ready(&mut conn, 2, 63, 0)
+				.await
+				.expect("readiness"),
+			"so the version is not held back on it"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn tomorrows_snapshot_does_not_file_the_issue_twice() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;

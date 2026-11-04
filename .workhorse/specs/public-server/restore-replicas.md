@@ -344,6 +344,7 @@ Folding the attempt into the verdict would overwrite the answer with the activit
 
 A failed migration test marks its target version as carrying a known issue, which removes that version from those considered ready to roll out, and records the application and the failing migration so whoever picks it up knows whose data provoked it.
 This is the gate an operator-filed known issue uses, so a failure found automatically and one found by hand have the same effect on a rollout.
+A failed migration test that does not say which migration failed raises no known issue, because an issue that cannot say what failed gives no one anything to act on; the failure still stands as the pair's verdict and degrades the migration-test check, which says no migration was named.
 Clearing the issue is an operator action, and a later passing test does not clear it, because whether the resolution is a change to the migration, a change to the data, or an accepted limitation is a judgement.
 
 ## Redaction
