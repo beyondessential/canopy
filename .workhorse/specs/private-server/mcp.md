@@ -5,8 +5,6 @@ id: MCP
 # Fleet query interface
 
 A query interface to the Canopy fleet, exposed for AI agents and other automated clients that operators run.
-It lets such a client discover machines, applications and groups, read their status and health, learn what Tamanu versions exist and which are deployed, see where each of a group's environments plans to move next, inspect backup state and problems, and review vulnerabilities, without granting any ability to change the fleet.
-Its one write is recording a vulnerability triage decision, so an operator can point a model of their own at the triage list.
 
 ## Why it exists
 
@@ -49,9 +47,8 @@ From fifteen days before a token's expiry until that token expires or is revoked
 ## Reads and writes
 
 Most of the surface is reads, as that's the safe set. Writes are deliberately added where it makes sense, with some safeguards:
-
-A write is refused to a caller not allowed it, without effect: on the operator path, a caller who is not an administrator; on the token path, a token without the triage grant.
-Each write is audited as the action it takes, recorded the same way as when it is taken in the operator interface (see [AUD](../platform/audit-log.md)).
+- A write is refused to a caller not allowed it, without effect: on the operator path, a caller who is not an administrator; on the token path, a token without the triage grant.
+- Each write is audited as the action it takes, recorded the same way as when it is taken in the operator interface (see [AUD](../platform/audit-log.md)).
 
 ## Queries
 
