@@ -168,7 +168,7 @@ impl CanopyMcp {
 		Parameters(args): Parameters<RecordVulnerabilityDecisionArgs>,
 	) -> Result<CallToolResult, McpError> {
 		let caller = caller::of(parts)?;
-		if !caller.may_triage() {
+		if !caller.may_triage().await.map_err(mcp_err)? {
 			return Err(McpError::invalid_request(
 				"recording a triage decision needs an administrator, or a token with the triage grant",
 				None,

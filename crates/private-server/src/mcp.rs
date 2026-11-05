@@ -8,9 +8,9 @@ use crate::state::AppState;
 /// Gate the MCP mount on an authenticated tailnet user (any user, not only
 /// admins). Reuses the operator surface's `TailscaleUser` extractor, so the
 /// debug-build dev bypass applies in local dev and tests. The caller's login is
-/// logged so each query is attributable, and the caller, with whether they are
-/// an administrator, is put in the request's extensions for the tool that
-/// writes to read.
+/// logged so each query is attributable, and the caller is put in the request's
+/// extensions for the tool that writes to read, with a check of whether they are
+/// an administrator that only a write runs.
 pub async fn require_tailnet_user(
 	axum::extract::State(state): axum::extract::State<AppState>,
 	req: axum::extract::Request,
@@ -22,12 +22,20 @@ pub async fn require_tailnet_user(
 
 	let (mut parts, body) = req.into_parts();
 	let user = TailscaleUser::from_request_parts(&mut parts, &state).await?;
-	let admin = match TailscaleAdmin::from_request_parts(&mut parts, &state).await {
-		Ok(_) => true,
-		Err(AppError::AuthInsufficientPermissions { .. }) => false,
-		Err(e) => return Err(e),
+	tracing::info!(login = %user.login, "mcp request");
+	let admin = {
+		let (parts, state) = (parts.clone(), state.clone());
+		canopy_mcp::AdminCheck::new(move || {
+			let (mut parts, state) = (parts.clone(), state.clone());
+			async move {
+				match TailscaleAdmin::from_request_parts(&mut parts, &state).await {
+					Ok(_) => Ok(true),
+					Err(AppError::AuthInsufficientPermissions { .. }) => Ok(false),
+					Err(e) => Err(e),
+				}
+			}
+		})
 	};
-	tracing::info!(login = %user.login, admin, "mcp request");
 	parts.extensions.insert(canopy_mcp::Caller::Operator {
 		login: user.login,
 		name: user.name,

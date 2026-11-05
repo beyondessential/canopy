@@ -36,7 +36,7 @@ mod util;
 mod versions;
 mod vulnerabilities;
 
-pub use caller::Caller;
+pub use caller::{AdminCheck, Caller};
 
 use database::diesel_async::AsyncPgConnection;
 use rmcp::{
