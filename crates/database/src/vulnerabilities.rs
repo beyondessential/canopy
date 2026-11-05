@@ -208,9 +208,10 @@ pub fn today() -> Date {
 	Timestamp::now().to_zoned(jiff::tz::TimeZone::UTC).date()
 }
 
-fn parse_timestamp(s: &str) -> Result<Timestamp> {
-	s.parse()
-		.map_err(|e| AppError::Custom(format!("OSV timestamp {s:?}: {e}")))
+/// An OSV timestamp, or `None` for one that does not parse: a malformed time
+/// on one record does not hold up the rest.
+fn parse_timestamp(s: &str) -> Option<Timestamp> {
+	s.parse().ok()
 }
 
 fn strings(array: Vec<Option<String>>) -> Vec<String> {
@@ -291,9 +292,10 @@ impl Advisory {
 		let published = record
 			.published
 			.as_deref()
-			.map(parse_timestamp)
-			.transpose()?
+			.and_then(parse_timestamp)
 			.map(jiff_diesel::Timestamp::from);
+		// As the scan reads it when deciding what to fetch.
+		let modified = parse_timestamp(&record.modified).unwrap_or(Timestamp::UNIX_EPOCH);
 		diesel::sql_query(
 			"INSERT INTO vulnerabilities \
 			 (id, aliases, summary, details, severity, affected, \"references\", published_at, modified_at, fetched_at) \
@@ -311,9 +313,7 @@ impl Advisory {
 		.bind::<sql_types::Jsonb, _>(serde_json::to_value(&record.affected).unwrap_or_default())
 		.bind::<sql_types::Jsonb, _>(serde_json::to_value(&record.references).unwrap_or_default())
 		.bind::<sql_types::Nullable<sql_types::Timestamptz>, _>(published)
-		.bind::<sql_types::Timestamptz, _>(jiff_diesel::Timestamp::from(parse_timestamp(
-			&record.modified,
-		)?))
+		.bind::<sql_types::Timestamptz, _>(jiff_diesel::Timestamp::from(modified))
 		.execute(conn)
 		.await?;
 		Ok(())

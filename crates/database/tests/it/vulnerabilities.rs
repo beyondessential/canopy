@@ -1008,3 +1008,16 @@ async fn a_query_that_no_longer_finds_an_advisory_drops_only_its_own_match() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_advisory_with_malformed_times_is_still_stored() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let mut malformed = record("GHSA-1", "HIGH", vec![]);
+		malformed.modified = "yesterday".into();
+		malformed.published = Some("last week".into());
+		Advisory::upsert(&mut conn, &malformed).await.unwrap();
+		let held = Advisory::get(&mut conn, "GHSA-1").await.unwrap().unwrap();
+		assert_eq!(held.published_at, None);
+	})
+	.await;
+}
