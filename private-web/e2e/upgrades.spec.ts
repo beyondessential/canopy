@@ -80,6 +80,7 @@ test.describe("upgrades dashboard", () => {
 		const plannedRow = page
 			.getByTestId("planned-upgrade-row")
 			.filter({ hasText: "kamaka" });
+		await expect(plannedRow).toContainText("production");
 		await expect(plannedRow).toContainText("2.60.0");
 		await expect(plannedRow).toContainText("2.61.0");
 		await expect(page.getByTestId("planned-upgrade-note")).toContainText(

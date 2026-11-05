@@ -50,6 +50,7 @@ A plan for a group's clone leaves its production's plan where it was.
 
 What an environment runs is what its own central reports, so a site's production reads from its production central and its clone from the clone's (see [APP](../servers/application-types.md), "Versions").
 Wherever an environment is named, it is named by its group with the rank after it, except a group's production, which is named by the group alone.
+In the upgrades tables an environment's rank is also shown as a chip beside its group, production's included, so a production row stands out from its clone and demo.
 A plan names an environment the group has applications at; one cannot be recorded for a rank the group holds nothing at, so a group with nothing ranked records no plans (see [GRP](../servers/groups.md), "Environments").
 
 An open plan's date, time, and note can be amended, and an amendment records who made it and when.
