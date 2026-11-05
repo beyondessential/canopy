@@ -1170,27 +1170,22 @@ impl Reopened {
 		counted: &[Counted],
 		today: Date,
 	) -> Result<Vec<Self>> {
+		// A decision reopens once, so only current decisions not yet reopened are
+		// looked at.
 		let rows: Vec<DecisionRow> = diesel::sql_query(format!(
-			"SELECT DISTINCT ON (vulnerability_id, source) {DECISION_COLUMNS} \
-			 FROM vulnerability_decisions ORDER BY vulnerability_id, source, created_at DESC, id"
+			"SELECT * FROM ( \
+			   SELECT DISTINCT ON (vulnerability_id, source) {DECISION_COLUMNS} \
+			   FROM vulnerability_decisions ORDER BY vulnerability_id, source, created_at DESC, id \
+			 ) d WHERE NOT EXISTS (SELECT 1 FROM vulnerability_reopenings r WHERE r.decision_id = d.id)"
 		))
 		.load(conn)
 		.await?;
 		let standing: Vec<Decision> = rows.into_iter().map(Decision::from).collect();
 
-		let reopened_already: HashSet<Uuid> = {
-			#[derive(QueryableByName)]
-			struct Row {
-				#[diesel(sql_type = sql_types::Uuid)]
-				decision_id: Uuid,
-			}
-			diesel::sql_query("SELECT decision_id FROM vulnerability_reopenings")
-				.load::<Row>(conn)
-				.await?
-				.into_iter()
-				.map(|row| row.decision_id)
-				.collect()
-		};
+		let (tamanu, linux): (Vec<Counted>, Vec<Counted>) = counted
+			.iter()
+			.cloned()
+			.partition(|c| Source::of_ecosystem(&c.ecosystem) == Source::Tamanu);
 
 		let ids: Vec<String> = standing
 			.iter()
@@ -1204,9 +1199,6 @@ impl Reopened {
 
 		let mut reopened = Vec::new();
 		for decision in standing {
-			if reopened_already.contains(&decision.id) {
-				continue;
-			}
 			let review_due = decision.outcome == Outcome::AcceptedRisk
 				&& decision
 					.review_by
@@ -1216,14 +1208,13 @@ impl Reopened {
 			let reason = if review_due {
 				Some(Reopening::ReviewDue)
 			} else {
-				let counted_here: Vec<Counted> = counted
-					.iter()
-					.filter(|c| Source::of_ecosystem(&c.ecosystem) == decision.source)
-					.cloned()
-					.collect();
+				let counted_here = match decision.source {
+					Source::Tamanu => &tamanu,
+					Source::Linux => &linux,
+				};
 				match (&decision.held, advisories.get(&decision.vulnerability_id)) {
 					(Some(held), Some(advisory)) => {
-						held.reopened_by(advisory.severity, &advisory.affected, &counted_here)
+						held.reopened_by(advisory.severity, &advisory.affected, counted_here)
 					}
 					_ => None,
 				}
