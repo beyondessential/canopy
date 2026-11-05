@@ -167,7 +167,7 @@ async function applicationTypeOf(sql: Sql, applicationId: string): Promise<strin
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, machine_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, reporting_schema_builds, reporting_schema_requests, migration_test_requests, upgrade_plans, maintenance_windows, ansible_variables, ansible_leases, ansible_catalogue, version_known_issues, recovery_vault_writes, application_names, application_certificate_names, application_certificates, kubernetes_clusters, compromised_keys, relying_parties, identity_keys RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, machine_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, reporting_schema_builds, reporting_schema_requests, migration_test_requests, upgrade_plans, maintenance_windows, ansible_variables, ansible_leases, ansible_catalogue, version_known_issues, recovery_vault_writes, application_names, application_certificate_names, application_certificates, kubernetes_clusters, compromised_keys, relying_parties, identity_keys, vulnerabilities RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" application with
 	// it; self-alerts attach to that row, so put it back.
@@ -2433,4 +2433,206 @@ export async function seedAnsibleVariable(
 			JSON.stringify(opts.value),
 		],
 	);
+}
+
+// ── Vulnerabilities ─────────────────────────────────────────────────────────
+
+export type VulnerabilitySeverity =
+	| "critical"
+	| "high"
+	| "medium"
+	| "low"
+	| "unrated";
+export type VulnerabilitySource = "tamanu" | "linux";
+export type VulnerabilityOutcome = "not_affected" | "accepted_risk" | "will_fix";
+
+/** One advisory as a source holds it: the cached OSV record, the item for the
+ * source, and the matches that tie it to the package versions it hits.
+ *
+ * The matches are what exposure is worked out from at read time, so an item is
+ * exposed only where the fleet seeded beside it carries one of its packages
+ * (see {@link seedTamanuDependencies} and {@link seedMachinePackages}). */
+export async function seedVulnerability(
+	sql: Sql,
+	opts: {
+		id: string;
+		source: VulnerabilitySource;
+		summary?: string;
+		details?: string;
+		aliases?: string[];
+		severity?: VulnerabilitySeverity;
+		/** The ecosystem the matches are in. Defaults to `npm` for Tamanu and
+		 * `Ubuntu:22.04:LTS` for Linux. */
+		ecosystem?: string;
+		/** The package versions the advisory hits. */
+		matches: Array<{ package: string; version: string }>;
+		/** The package's affected ranges, by its introduced and fixed versions. */
+		fixed?: string;
+		/** Whether anything counts for the item. Defaults to true. */
+		counts?: boolean;
+	},
+): Promise<void> {
+	const ecosystem =
+		opts.ecosystem ?? (opts.source === "tamanu" ? "npm" : "Ubuntu:22.04:LTS");
+	const affected = opts.matches
+		.map((m) => m.package)
+		.filter((name, index, all) => all.indexOf(name) === index)
+		.map((name) => ({
+			package: { ecosystem, name },
+			ranges: [
+				{
+					type: opts.source === "tamanu" ? "SEMVER" : "ECOSYSTEM",
+					events: [
+						{ introduced: "0" },
+						...(opts.fixed ? [{ fixed: opts.fixed }] : []),
+					],
+				},
+			],
+		}));
+	await sql.query(
+		`INSERT INTO vulnerabilities (id, aliases, summary, details, severity, affected, modified_at)
+		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW())`,
+		[
+			opts.id,
+			opts.aliases ?? [],
+			opts.summary ?? `Advisory ${opts.id}`,
+			opts.details ?? "",
+			opts.severity ?? "high",
+			JSON.stringify(affected),
+		],
+	);
+	await sql.query(
+		`INSERT INTO vulnerability_items (vulnerability_id, source, counts)
+		 VALUES ($1, $2, $3)`,
+		[opts.id, opts.source, opts.counts ?? true],
+	);
+	for (const match of opts.matches) {
+		await sql.query(
+			`INSERT INTO vulnerability_matches
+				(vulnerability_id, source, ecosystem, package, package_version)
+			 VALUES ($1, $2, $3, $4, $5)`,
+			[opts.id, opts.source, ecosystem, match.package, match.version],
+		);
+	}
+}
+
+/** The model's suggestion for an item, which leaves it open. */
+export async function seedVulnerabilitySuggestion(
+	sql: Sql,
+	opts: {
+		id: string;
+		source: VulnerabilitySource;
+		outcome: VulnerabilityOutcome;
+		reason: string;
+		model?: string;
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO vulnerability_suggestions (vulnerability_id, source, outcome, reason, model)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		[opts.id, opts.source, opts.outcome, opts.reason, opts.model ?? "e2e-model"],
+	);
+}
+
+/** A decision already taken on an item. */
+export async function seedVulnerabilityDecision(
+	sql: Sql,
+	opts: {
+		id: string;
+		source: VulnerabilitySource;
+		outcome: VulnerabilityOutcome;
+		reason?: string;
+		reviewBy?: string;
+		via?: "ui" | "model" | "mcp";
+		actor?: Record<string, unknown>;
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO vulnerability_decisions
+			(vulnerability_id, source, outcome, reason, review_by, actor, via,
+			 severity_held, affected_held)
+		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7,
+		         (SELECT severity FROM vulnerabilities WHERE id = $1),
+		         (SELECT affected FROM vulnerabilities WHERE id = $1))`,
+		[
+			opts.id,
+			opts.source,
+			opts.outcome,
+			opts.reason ?? (opts.outcome === "will_fix" ? null : "e2e reason"),
+			opts.reviewBy ?? null,
+			JSON.stringify(opts.actor ?? { kind: "operator", login: "seed@example.com" }),
+			opts.via ?? "ui",
+		],
+	);
+}
+
+/** The packages a Tamanu version's lockfile holds, and the record that it was
+ * read. */
+export async function seedTamanuDependencies(
+	sql: Sql,
+	opts: {
+		versionId: string;
+		packages: Array<{
+			name: string;
+			version: string;
+			workspaces?: string[];
+			direct?: boolean;
+		}>;
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO version_lockfiles (version_id) VALUES ($1) ON CONFLICT DO NOTHING`,
+		[opts.versionId],
+	);
+	for (const p of opts.packages) {
+		const workspaces = p.workspaces ?? ["central-server"];
+		await sql.query(
+			`INSERT INTO version_packages (version_id, name, version, workspaces, direct, paths)
+			 VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+			[
+				opts.versionId,
+				p.name,
+				p.version,
+				workspaces,
+				p.direct ?? false,
+				JSON.stringify(Object.fromEntries(workspaces.map((w) => [w, [p.name]]))),
+			],
+		);
+	}
+}
+
+/** A machine's last package report. An `ecosystem` of `null` is a report
+ * Canopy could not place. */
+export async function seedMachinePackages(
+	sql: Sql,
+	opts: {
+		machineId: string;
+		distribution?: string;
+		release?: string;
+		ecosystem?: string | null;
+		packages?: Array<{ name: string; version: string }>;
+		/** Defaults to the number of packages. */
+		packageCount?: number;
+	},
+): Promise<void> {
+	const packages = opts.packages ?? [];
+	await sql.query(
+		`INSERT INTO machine_package_reports
+			(machine_id, distribution, release, ecosystem, digest, package_count)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		[
+			opts.machineId,
+			opts.distribution ?? "ubuntu",
+			opts.release ?? "22.04",
+			opts.ecosystem === undefined ? "Ubuntu:22.04:LTS" : opts.ecosystem,
+			randomUUID(),
+			opts.packageCount ?? packages.length,
+		],
+	);
+	for (const p of packages) {
+		await sql.query(
+			`INSERT INTO machine_packages (machine_id, name, version) VALUES ($1, $2, $3)`,
+			[opts.machineId, p.name, p.version],
+		);
+	}
 }

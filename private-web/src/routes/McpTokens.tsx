@@ -2,12 +2,14 @@ import {
 	Alert,
 	Box,
 	Button,
+	Checkbox,
 	Chip,
 	Dialog,
 	DialogActions,
 	DialogContent,
 	DialogContentText,
 	DialogTitle,
+	FormControlLabel,
 	IconButton,
 	LinearProgress,
 	Paper,
@@ -38,6 +40,7 @@ type TokenRow = {
 	created_by: string;
 	created_at: string;
 	expires_at: string;
+	grants: string[];
 	revoked_at?: string | null;
 	last_used_at?: string | null;
 };
@@ -46,6 +49,7 @@ export default function McpTokens() {
 	usePageTitle("MCP access");
 	const list = useApi("mcp_tokens", "list");
 	const [name, setName] = useState("");
+	const [triage, setTriage] = useState(false);
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [toast, setToast] = useState<string | null>(null);
@@ -61,8 +65,12 @@ export default function McpTokens() {
 		setPending(true);
 		setError(null);
 		try {
-			const res = await callApi("mcp_tokens", "mint", { name: trimmed });
+			const res = await callApi("mcp_tokens", "mint", {
+				name: trimmed,
+				grants: triage ? ["triage"] : [],
+			});
 			setName("");
+			setTriage(false);
 			setMinted({ name: res.token.name, secret: res.secret });
 			list.reload();
 		} catch (err) {
@@ -104,6 +112,17 @@ export default function McpTokens() {
 							onChange={(e) => setName(e.target.value)}
 							disabled={pending}
 						/>
+						<FormControlLabel
+							sx={{ whiteSpace: "nowrap", flexShrink: 0 }}
+							control={
+								<Checkbox
+									checked={triage}
+									onChange={(e) => setTriage(e.target.checked)}
+									disabled={pending}
+								/>
+							}
+							label="Triage grant"
+						/>
 						<GradedAction
 							calls="mcp_tokens/mint"
 							action={`Mint MCP token ${name.trim()}`}
@@ -142,6 +161,7 @@ export default function McpTokens() {
 							<TableRow>
 								<TableCell>Name</TableCell>
 								<TableCell>Minted by</TableCell>
+								<TableCell>Grants</TableCell>
 								<TableCell>Expires</TableCell>
 								<TableCell>Last used</TableCell>
 								<TableCell>Status</TableCell>
@@ -155,6 +175,18 @@ export default function McpTokens() {
 										{token.name}
 									</TableCell>
 									<TableCell>{token.created_by}</TableCell>
+									<TableCell>
+										{token.grants.length === 0
+											? "—"
+											: token.grants.map((grant) => (
+													<Chip
+														key={grant}
+														size="small"
+														variant="outlined"
+														label={grant}
+													/>
+												))}
+									</TableCell>
 									<TableCell>{formatDate(token.expires_at)}</TableCell>
 									<TableCell>
 										{token.last_used_at
