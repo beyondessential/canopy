@@ -43,6 +43,9 @@ const RESCAN_EVERY: Duration = Duration::from_secs(6 * 3600);
 /// a machine's package list that has come to count.
 const WATCH_EVERY: Duration = Duration::from_secs(60);
 
+/// How long after a failed pass to try again.
+const RETRY_AFTER: Duration = Duration::from_secs(10 * 60);
+
 /// What a pass did.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Report {
@@ -217,7 +220,7 @@ pub fn spawn() -> JoinHandle<()> {
 		Lockfiles::new(lockfile::BASE_URL),
 	);
 	task::spawn(async move {
-		let mut last_scan: Option<tokio::time::Instant> = None;
+		let mut next_scan: Option<tokio::time::Instant> = None;
 		let mut last_seen: Option<u64> = None;
 		loop {
 			let Ok(mut conn) = pool.get().await else {
@@ -226,9 +229,11 @@ pub fn spawn() -> JoinHandle<()> {
 				continue;
 			};
 			let seen = scanner.fingerprint(&mut conn).await.ok();
-			let due = match last_scan {
+			let due = match next_scan {
 				None => true,
-				Some(at) => at.elapsed() >= RESCAN_EVERY || (seen.is_some() && seen != last_seen),
+				Some(at) => {
+					tokio::time::Instant::now() >= at || (seen.is_some() && seen != last_seen)
+				}
 			};
 			if due {
 				match scanner.scan(&mut conn).await {
@@ -242,10 +247,16 @@ pub fn spawn() -> JoinHandle<()> {
 							report.reopened
 						);
 						last_seen = scanner.fingerprint(&mut conn).await.ok();
+						next_scan = Some(tokio::time::Instant::now() + RESCAN_EVERY);
 					}
-					Err(e) => error!("vulnerability scan failed: {e}"),
+					Err(e) => {
+						error!("vulnerability scan failed: {e}");
+						// Retried after a while, not on the next look: what made it
+						// due has been seen.
+						last_seen = seen;
+						next_scan = Some(tokio::time::Instant::now() + RETRY_AFTER);
+					}
 				}
-				last_scan = Some(tokio::time::Instant::now());
 			} else {
 				debug!("vulnerability scan: nothing new to scan");
 			}
